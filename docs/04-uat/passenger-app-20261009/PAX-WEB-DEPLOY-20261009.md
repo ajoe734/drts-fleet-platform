@@ -1,6 +1,95 @@
-# PAX-WEB-DEPLOY-20261009 — owner progress／驗證紀錄
+# PAX-WEB-DEPLOY-20261009 — owner 修復與驗證紀錄
 
 Owner: Codex2；指定 reviewer: Codex。2026-10-10。
+
+## 本輪修復（Supervisor 04:52:06Z scope 決議後）
+
+本輪 repository 實作與檢查已完成；同 SHA hosted CI、獨立 review、merge 和
+required acceptance 仍由 candidate lifecycle 收錄。未宣稱 dev 已上線。
+PR：[2507](https://github.com/ajoe734/drts-fleet-platform/pull/2507)，base `dev`，
+branch `codex2/pax-web-deploy-20261009`。最終 candidate 是加入本成果紀錄後的
+PR head；完整 SHA 由 PR、handoff machine truth 和
+`.local/pax-web-deploy-20261009/candidate-ci.json` 追溯，不能用 merge SHA 代替。
+
+- Supervisor 已將兩 cleanup helper 和四 legacy tests 加入原 task scopes。
+  helper 只新增 active `drts-dev-passenger-app-web`、9→10 描述；action、exact
+  inventory、optional scanner、paused targets 和拒絕演算法保留。
+- F2 依 Supervisor 決議：smoke 改驗現有 `/`、`/login`，200 + candidate SHA，
+  拒絕 redirect；`/fares` 由 BOOKING-UI 提供，PAX-QA 合併後補 smoke/matrix。
+- F3：目前 shell 沒有 cookie crypto key 讀取端，移除 optional cookie slot、
+  metadata query 與 API/BFF 掛載；BFF 一律 `--clear-secrets`。支付 token 名稱
+  依 SD §4 使用 `PSP_TOKEN_ENCRYPTION_KEY_NAME`，PAYMENT-CORE 對齊讀取端。
+  輸出改為 `*_mounts_complete`，只記錄 metadata，不宣稱 SMS/PSP 功能可用。
+- 本輪重新唯讀確認 live `DEV_GCP_*`：`drts-dev-devcc-20260825` / `us-central1`。
+  未設定 passenger variable 時沿用正式 exact guard default。未查 secret list/value。
+- 修復 commits：inventory `9edb9699f`、workflow `004642296`；最後 source
+  `915d356c5f8e2c688410e2a83aba39fac5e2868b` 包含執行下列驗證時的完全相同
+  source/formatting。最終候選後續僅新增本成果紀錄。所有 anchors 普通 push，
+  無 rebase/amend/force-push/stash，無 VM runtime/browser/Compose。
+
+| Finding／驗收項                                           | 正式呼叫路徑與修復                                                                                                                    | 舊版 → 修正版證據                                                                                                                                                                                                                                                                    | 命令／版本／退出碼與 evidence                                                                                                                                                                                                                                               | 未驗項／限制                                                                                                                                                                                 |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1：十服務被拒絕；新服務 missing 時舊 helper 反而允許刪除 | paused cleanup `active_services`、retired cleanup `intended_services`，由 workflow 正式呼叫                                           | 舊 `d724fba9` helper + 本輪十服務 fixtures：29 PASS / 12 FAIL / 0 SKIP；`9edb9699f` 同 fixtures 41/41 PASS                                                                                                                                                                           | `pnpm exec vitest run tests/unit/cleanup-paused-partner-booking-service.test.ts tests/unit/cleanup-retired-dev-service.test.ts --reporter=json --outputFile=...`，before exit 1／after exit 0；Node 22.23.2、Vitest 4.1.4；`.local/.../{before,after}-inventory.{json,log}` | gcloud list/delete 為 stub，正式 helper 演算法未 mock；包含合法十服務、scanner optional、每個 missing/new missing、rogue、paused absent、retired absent/none、限定 delete target。未真正刪除 |
+| F1a：broad passenger exclusions／固定九服務               | dev-active-surface、cloud-run-deploy-retry、兩 cleanup tests                                                                          | 前輪57 PASS / 4 FAIL；本輪只禁止 retired passenger-web，承認新 passenger-app-web/ride/十個 wrapper；完整142-case regression PASS                                                                                                                                                     | 下方 final-regression exit 0；source `915d356c5f8e2c688410e2a83aba39fac5e2868b`；`.local/.../final-regression.json`                                                                                                                                                         | 原九服務 runtime matrix 保留，PAX-QA 增補；未宣稱新 UI E2E                                                                                                                                   |
+| F2：`/fares` 尚無正式 route                               | Verify passenger app endpoints、summary、runbook、entry index                                                                         | 舊要求與 shell 不合；依 Supervisor 改 `/ /login`；正式 smoke script 的200+SHA正向及302/404/錯SHA拒絕 PASS                                                                                                                                                                            | final-regression exit 0，同source；curl外部邊界 stub，script未 mock                                                                                                                                                                                                         | 未實測HTTP；`/fares` 留給 BOOKING-UI→QA，沒有拿JSON/redirect冒充頁面                                                                                                                         |
+| F3：未使用cookie key／metadata不代表provider可用          | optional secret mounts、Deploy passenger-app、SD §4 PSP token slot                                                                    | 移除cookie group/query/mount；全有或缺任一項的group、pepper去重 PASS；API正式 deploy wrapper 的 absent/partial/complete消耗 PASS                                                                                                                                                     | 41 passenger executable contracts，包含wrapper→mock gcloud flags；final-regression exit 0，同source                                                                                                                                                                         | 不驗真實key bytes/provider；SMS/PSP外部gate；無 configured=true 的功能可用宣稱                                                                                                               |
+| F4：artifact-provider CI合約固定舊set-secrets參數         | tools/ci/test_dev_artifact_providers.py `test_workflow_wires_outputs_into_existing_api_arguments_only`；Deploy api secret composition | `d724fba9` hosted [38025423411](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38025423411)、[38025423334](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38025423334) 同處FAIL；本輪單案例重現FAIL，再核對core refs+optional concat+最終flags，39/39 PASS | before single-test exit 1／after suite exit 0；Python3；`.local/.../{before,after}-artifact-contract.log`；整體Python100/100 PASS                                                                                                                                           | 只更新既有workflow contract，artifact env/secret suffix與core refs保留；最終候選hosted CI另讀                                                                                                |
+| pax-web-deploy_workflow_and_secret_gating                 | Dockerfile、prepare/build/deploy/health scripts、正式helpers及contracts                                                               | 41 passenger executable + 36 domain-helper + legacy regressions，共142 PASS / 0 FAIL / 0 SKIP；Python100 PASS                                                                                                                                                                        | final-regression/final-python exit0；source同上；candidate CI以PR checks、handoff及`.local/.../candidate-ci.json`追溯                                                                                                                                                       | Docker build/Cloud Run deploy由immutable publish流程執行；未部署。獨立review、merge、acceptance不由owner宣告                                                                                 |
+| pax-web-deploy_domain_mapping_and_runbook                 | domain-mappings-dev、正式map-domain-service.sh、runbook§1–4.2、entry index                                                            | absent→create / correct→skip / retired→refuse PASS；既有helper36/36；DNS `ride CNAME ghs.googlehosted.com.` TTL300、三callbacks已核對                                                                                                                                                | final-regression exit0；actionlint1.7.12 exit0（shellcheck/pyflakes未啟用）；Prettier/classification exit0                                                                                                                                                                  | 無Cloud Run URL/run evidence、live mapping/DNS/TLS/OAuth登入；使用者/operator交付DNS/provider                                                                                                |
+
+### 本輪已讀檢查
+
+下列檢查均結束且讀過結果；evidence 在本 isolated worktree 的
+`.local/pax-web-deploy-20261009/`，不是canonical runtime或外部驗收。
+
+```bash
+pnpm exec vitest run tests/unit/pax-web-deploy-20261009/deployment-contract.test.ts \
+  tests/unit/map-domain-service.test.ts tests/unit/dev-active-surface-contract.test.ts \
+  tests/unit/cloud-run-deploy-retry.test.ts \
+  tests/unit/cleanup-paused-partner-booking-service.test.ts \
+  tests/unit/cleanup-retired-dev-service.test.ts \
+  tests/unit/deploy-dev-google-oidc.test.ts tests/unit/deployment-architecture-guards.test.ts \
+  --reporter=json --outputFile=.local/pax-web-deploy-20261009/final-regression.json
+# exit 0；142 PASS / 0 FAIL / 0 SKIP
+
+python3 -m unittest tools/ci/test_dev_artifact_providers.py \
+  tools/ci/test_dev_cloud_metadata_preflight.py tools/ci/test_workflow_timeouts.py \
+  tools/ci/test_classify_change_scope.py
+# exit 0；100 PASS；final-python.log
+
+pnpm --filter @drts/passenger-app-web typecheck
+pnpm --filter @drts/passenger-app-web lint
+pnpm exec eslint tests/unit/pax-web-deploy-20261009/deployment-contract.test.ts \
+  tests/unit/dev-active-surface-contract.test.ts tests/unit/cloud-run-deploy-retry.test.ts \
+  tests/unit/cleanup-paused-partner-booking-service.test.ts \
+  tests/unit/cleanup-retired-dev-service.test.ts --max-warnings=0
+pnpm classification:check
+# 全部 exit 0；classification validated 6215 files
+
+.local/pax-web-deploy-20261009/actionlint -shellcheck= -pyflakes= \
+  .github/workflows/deploy-dev.yml .github/workflows/domain-mappings-dev.yml
+# exit 0；actionlint1.7.12；actionlint.log
+```
+
+本輪一次 `MODULE_NOT_FOUND` 是舊依賴symlink失效，未算PASS；首次offline
+install需非互動CI設定，以 `CI=true pnpm install --frozen-lockfile --ignore-scripts --offline`
+修復exit0後完整重跑；未改lockfile，未把環境錯誤冒充defect重現。
+
+### 候選交接條件與外部待驗
+
+先核對本機/遠端/PR head相同，讀完該SHA CI結果，再ready PR並以
+`CANDIDATE_SHA=$(git rev-parse HEAD)`、`CANDIDATE_BRANCH=$(git branch --show-current)`
+透過現行release `ai-status.sh handoff ... Codex ...` 鎖候選。
+ready-for-review新啟動的full CI也讀完，不把draft `ci-integ` aggregate當完整
+檢查通過。run/job/results保存在PR、`.local/.../candidate-ci.json`與handoff引用。
+
+新服務上線由publish流程hosted build/deploy，再由operator執行mapping、
+使用者設定DNS/provider console；需source SHA、run/job/artifact、Cloud Run
+URL、HTTP/SHA、DNS/TLS evidence才能聲稱dev上線。舊project歷史結果不算
+本輪驗收。本task未執行部署、讀取secret value、建立帳號、真實SMS/PSP/OAuth
+呼叫，未自行merge/done。
+
+## 前輪 checkpoint 歷史（d724fba9；以下保留當時未解 findings，非目前狀態）
 
 目前是 **checkpoint，尚未完成實作或 handoff**。部署 workflow 與新服務設定
 已寫入，但原 write scopes 未包含兩個正式 inventory helper 和四個既有
