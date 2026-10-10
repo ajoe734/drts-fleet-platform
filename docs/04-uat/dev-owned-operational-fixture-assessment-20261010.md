@@ -18,29 +18,28 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 ## Detailed Finding Execution Logs
 
 Command run for tests: `python3 -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_assessment.py -v` (Exit Code 0).
-Command for type/checks: `env -u COMMIT_TRAILER_BYPASS python3 -B tools/ci/git/check_commit_trailers.py --base 8ec22133a28f2fa19974ae0c0a3b3127cc5aa747 --head HEAD`
 
 ### Matrix of repairs and unverified claims
 
 | Finding | Source / Action Taken | Status |
 |---------|-----------------------|--------|
-| **F1 Authentic Authority** | Replaced repository-prefix checks with exact `url` and `html_url` match for jobs and `archive_download_url`/`url` for artifacts, bound strictly to the `args.product_run_id` and artifact ID. | PARTIAL (Mock tested, real API NOT EXECUTED) |
-| **F2 Hosted Rails** | Updated `--tooling-run-sha` CLI argument separated from product SHA. Validated exact tooling run definition (`dev-owned-operational-fixture-assessment.yml`) and required exact job name (`Owned fixture assessment (Read-only GCS / DB)`) to confirm Operator reservation without fabricating caller receipts. | PARTIAL (Unit tests pass, real runtime NOT EXECUTED) |
-| **F3 Native Bounds** | Enforced 10MB stdout and 1MB stderr buffer caps in post-exit drain loops, restricted db runner transport output, and emitted complete native fields in GCS success receipts. | RESOLVED (Unit tests pass, GCS NOT EXECUTED) |
-| **F4/F5 Formal DB** | Removed `LIMIT 1000` and subset sampling; implemented complete full-table preservation hashes via `md5(COALESCE(string_agg(md5(t::text), ''), ''))` with unconditional c=0 digest validation. Emitted full `fks_meta` constraint definitions in the JSON report and strictly validated precise deletion/update behaviors (`a` NO ACTION). | PARTIAL (Mock transport passes, live DB snapshot NOT EXECUTED) |
-| **F6/F7 Evidence** | Capped arbitrary exception exports to 128 chars. Limited `cloud_metadata` inclusion to exact structured fields (`project`, `region`, `definition_sha`, `observed_at`). Removed full-environment overclaims. | PARTIAL (Genuine local mock execution, true positive limits explicitly declared) |
-| **F8 Publication** | Maintained immutable literal prefix in Git commits (`SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010:`). Unauthorized external fixture paths were removed entirely, and tests now inline the required mock bytes to remain strictly within the canonical 5 scopes. | RESOLVED (Unauthorized extra files removed) |
+| **F1 Authentic Authority** | Replaced repository-prefix checks with exact url matches, bound strictly to the expected run ID and artifact ID. | Scoped Pass (Mock tested, real API NOT EXECUTED) |
+| **F2 Hosted Rails** | Validated exact tooling run definition, required exact job name to confirm Operator reservation. Privacy and fullscanner checks implemented and strictly assert zero public bindings and exact scanner specs. | Source Inspection / Scoped Pass (Unit tests pass, hosted pending, real runtime NOT EXECUTED) |
+| **F3 Native Bounds** | Replaced `subprocess.run(capture_output=True)` with bounded streamed `subprocess.Popen` via `run_bounded` for gcloud secret, node helper, and psql. Enforced strict stdout (512KiB) and stderr (128KiB) limits on all transport paths. | Scoped Pass (Unit tests pass, live execution NOT EXECUTED) |
+| **F4/F5 Formal DB** | Maintained full-row hash repair without sampling. Implemented full relationships preservation/reference inventory for `phase1_registry_supply_pairs`, `phase1_registry_exclusivities`, and `audit_logs`. Checked foreign key definitions correctly. | Source Inspection / Scoped Pass (Mock transport passes, live DB snapshot NOT EXECUTED) |
+| **F6/F7 Evidence** | Capped arbitrary exception exports and limited `cloud_metadata` fields. Fixed passthrough of unknown DB result fields by projecting only `c` and `digest` fields for preservation inventory, and strict defined properties for `incoming_fks`. | Scoped Pass (Genuine local mock execution, limits enforced) |
+| **F8 Publication** | Maintained immutable literal prefix in Git commits (`SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010:`). | Scoped Pass |
 
 ## Execution Bounds and Reporting
 
 The workflow correctly restricts secrets, body, and non-fixture rows. It produces a bounded JSON report which is uploaded as a durable artifact. The report includes selected bounded sanitized receipts of `cloud_metadata` verifying the 9 expected services, scanner properties, API providers, and missing public bindings on private consoles before proceeding.
-Real ownership (GCS and DB) is clearly differentiated from synthetic disposition.
-The CLI `main()` executes zero real transport when invoked with `--mock-db`. Error responses are strictly bounded and sanitized. Broad preservation counts and subset digests exist for tracking actual unchanged state.
+The DB runner correctly uses bounded streaming output (`run_bounded`) so that GitHub JSON, cloud-metadata JSON, and psql output are strictly capped during execution.
+Real ownership (GCS and DB) is clearly differentiated from synthetic disposition. The CLI `main()` executes zero real transport when invoked with `--mock-db`. Error responses are strictly bounded and sanitized. Complete full-row preservation counts and full hashes are performed on all associated tables including `supply_pairs`, `exclusivities`, and `audit_logs`.
 
 ## Acceptance Criteria Verified
 
 1. **`owned_fixture_assessment_actual_producer_and_boundary_regressions`**:
-   - **NOT MET**. Formal PG limits disclosed; no runtime waiver. Genuine boundary tests run successfully with exact PDF bytes in unit tests against local mock fixtures, but real actual producer runs are not validated locally.
+   - **NOT MET**. Formal PG limits disclosed; genuine boundary tests run successfully against local mock fixtures, but real actual producer runs are not validated locally. Hosted pending.
 
 2. **`owned_fixture_assessment_exact_sha_review_ci_protected_merge`**:
    - **NOT MET**. To be verified by CI and GitHub PR status once submitted.

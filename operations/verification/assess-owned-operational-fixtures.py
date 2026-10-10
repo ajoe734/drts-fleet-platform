@@ -448,12 +448,16 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
     ), ddrafts AS (
         SELECT count(*) as c FROM fleet.driver_supply_drafts WHERE preferred_vehicle_submission_id IN ({safe_subs}) OR submission_id IN ({safe_subs})
     ), vdrafts AS (
-        SELECT count(*) as c FROM fleet.vehicle_supply_drafts WHERE current_driver_submission_id IN ({safe_subs}) OR submission_id IN ({safe_subs})
+        SELECT count(*) as c FROM fleet.vehicle_supply_drafts WHERE current_driver_submission_id IN ({safe_subs}) OR submission_id IN ({safe_subs})    ), cpairs AS (
+        SELECT count(*) as c FROM reg.phase1_registry_supply_pairs WHERE vehicle_id IN (SELECT canonical_vehicle_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_vehicle_id IS NOT NULL) OR driver_id IN (SELECT canonical_driver_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_driver_id IS NOT NULL)
+    ), cexcl AS (
+        SELECT count(*) as c FROM reg.phase1_registry_exclusivities WHERE vehicle_id IN (SELECT canonical_vehicle_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_vehicle_id IS NOT NULL)
+    ), audits AS (
+        SELECT count(*) as c FROM admin.audit_logs WHERE resource_id IN ({safe_subs})
     ), fks_meta AS (
         SELECT json_agg(json_build_object('rel', conrelid::regclass, 'confrel', confrelid::regclass, 'name', conname, 'contype', contype, 'confdeltype', confdeltype, 'confupdtype', confupdtype, 'def', pg_get_constraintdef(oid))) as data 
-        FROM pg_constraint WHERE confrelid IN ('fleet.supply_submissions'::regclass, 'fleet.supply_documents'::regclass, 'fleet.supply_review_events'::regclass, 'fleet.vehicle_fleet_affiliations'::regclass, 'reg.vehicle_passenger_disclosure_profiles'::regclass, 'reg.driver_public_registration_credentials'::regclass, 'reg.phase1_registry_drivers'::regclass, 'reg.phase1_registry_vehicles'::regclass, 'reg.phase1_registry_policies'::regclass, 'reg.phase1_registry_contracts'::regclass, 'fleet.driver_supply_drafts'::regclass, 'fleet.vehicle_supply_drafts'::regclass)
-    ), 
-    pres_subs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_submissions), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.supply_submissions ORDER BY 1) t),
+        FROM pg_constraint WHERE confrelid IN ('fleet.supply_submissions'::regclass, 'fleet.supply_documents'::regclass, 'fleet.supply_review_events'::regclass, 'fleet.vehicle_fleet_affiliations'::regclass, 'reg.vehicle_passenger_disclosure_profiles'::regclass, 'reg.driver_public_registration_credentials'::regclass, 'reg.phase1_registry_drivers'::regclass, 'reg.phase1_registry_vehicles'::regclass, 'reg.phase1_registry_policies'::regclass, 'reg.phase1_registry_contracts'::regclass, 'fleet.driver_supply_drafts'::regclass, 'fleet.vehicle_supply_drafts'::regclass, 'reg.phase1_registry_supply_pairs'::regclass, 'reg.phase1_registry_exclusivities'::regclass, 'admin.audit_logs'::regclass)
+    ), pres_subs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_submissions), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.supply_submissions ORDER BY 1) t),
     pres_docs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_documents), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.supply_documents ORDER BY 1) t),
     pres_revs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_review_events), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.supply_review_events ORDER BY 1) t),
     pres_affs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_fleet_affiliations), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.vehicle_fleet_affiliations ORDER BY 1) t),
@@ -464,7 +468,10 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
     pres_cpol AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_policies), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_policies ORDER BY 1) t),
     pres_ccont AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_contracts), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_contracts ORDER BY 1) t),
     pres_ddrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.driver_supply_drafts), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.driver_supply_drafts ORDER BY 1) t),
-    pres_vdrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_supply_drafts), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.vehicle_supply_drafts ORDER BY 1) t)
+    pres_vdrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_supply_drafts), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.vehicle_supply_drafts ORDER BY 1) t),
+    pres_cpairs AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_supply_pairs), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_supply_pairs ORDER BY 1) t),
+    pres_cexcl AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_exclusivities), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_exclusivities ORDER BY 1) t),
+    pres_audits AS (SELECT json_build_object('c', (SELECT count(*) FROM admin.audit_logs), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM admin.audit_logs ORDER BY 1) t)
     SELECT json_build_object(
         'subs', (SELECT data FROM subs),
         'docs', (SELECT data FROM docs),
@@ -478,6 +485,9 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         'ccont', (SELECT c FROM ccont),
         'ddrafts', (SELECT c FROM ddrafts),
         'vdrafts', (SELECT c FROM vdrafts),
+        'cpairs', (SELECT c FROM cpairs),
+        'cexcl', (SELECT c FROM cexcl),
+        'audits', (SELECT c FROM audits),
         'fks_meta', (SELECT data FROM fks_meta),
         'pres_subs', (SELECT data FROM pres_subs),
         'pres_docs', (SELECT data FROM pres_docs),
@@ -491,6 +501,9 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         'pres_ccont', (SELECT data FROM pres_ccont),
         'pres_ddrafts', (SELECT data FROM pres_ddrafts),
         'pres_vdrafts', (SELECT data FROM pres_vdrafts),
+        'pres_cpairs', (SELECT data FROM pres_cpairs),
+        'pres_cexcl', (SELECT data FROM pres_cexcl),
+        'pres_audits', (SELECT data FROM pres_audits),
         'tx_ro', current_setting('transaction_read_only'),
         'tx_iso', current_setting('transaction_isolation')
     );
@@ -515,8 +528,7 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
              return {"status": "error", "error": f"Non-integer count for {k}"}
         if counts.get(k, 0) < 0:
             return {"status": "rejected", "reason": f"Negative reference counts for {k}"}
-            
-    for k in ['pres_subs', 'pres_docs', 'pres_revs', 'pres_affs', 'pres_discs', 'pres_creds', 'pres_cdriv', 'pres_cveh', 'pres_cpol', 'pres_ccont', 'pres_ddrafts', 'pres_vdrafts']:
+    for k in ['pres_subs', 'pres_docs', 'pres_revs', 'pres_affs', 'pres_discs', 'pres_creds', 'pres_cdriv', 'pres_cveh', 'pres_cpol', 'pres_ccont', 'pres_ddrafts', 'pres_vdrafts', 'pres_cpairs', 'pres_cexcl', 'pres_audits']:
         obj = counts.get(k)
         if obj is None or type(obj) is not dict or 'c' not in obj or 'digest' not in obj:
             return {"status": "error", "error": f"Missing or invalid preservation inventory for {k}"}
@@ -668,6 +680,14 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
     if counts.get('vdrafts', 0) > 0:
         return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['vdrafts']} vehicle_supply_drafts exist", "reason": "vehicle_supply_drafts found"}
         
+
+    if counts.get('cpairs', 0) > 0:
+        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['cpairs']} phase1_registry_supply_pairs exist", "reason": "phase1_registry_supply_pairs found"}
+    if counts.get('cexcl', 0) > 0:
+        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['cexcl']} phase1_registry_exclusivities exist", "reason": "phase1_registry_exclusivities found"}
+    if counts.get('audits', 0) > 0:
+        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['audits']} audit_logs exist", "reason": "audit_logs found"}
+        
     return {
         "status": "success", 
         "submissions_found": len(subs),
@@ -677,19 +697,22 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         "disclosure_count": counts.get('discs', 0),
         "credential_count": counts.get('creds', 0),
         "preservation_inventory": {
-            "incoming_fks": fks_meta,
-            "submissions": counts.get('pres_subs'),
-            "documents": counts.get('pres_docs'),
-            "review_events": counts.get('pres_revs'),
-            "affiliations": counts.get('pres_affs'),
-            "disclosures": counts.get('pres_discs'),
-            "credentials": counts.get('pres_creds'),
-            "drivers": counts.get('pres_cdriv'),
-            "vehicles": counts.get('pres_cveh'),
-            "policies": counts.get('pres_cpol'),
-            "contracts": counts.get('pres_ccont'),
-            "driver_drafts": counts.get('pres_ddrafts'),
-            "vehicle_drafts": counts.get('pres_vdrafts')
+            "incoming_fks": [{"name": f.get("name"), "rel": f.get("rel"), "confrel": f.get("confrel"), "contype": f.get("contype"), "confdeltype": f.get("confdeltype"), "confupdtype": f.get("confupdtype")} for f in fks_meta],
+            "submissions": {"c": counts.get('pres_subs', {}).get('c'), "digest": counts.get('pres_subs', {}).get('digest')},
+            "documents": {"c": counts.get('pres_docs', {}).get('c'), "digest": counts.get('pres_docs', {}).get('digest')},
+            "review_events": {"c": counts.get('pres_revs', {}).get('c'), "digest": counts.get('pres_revs', {}).get('digest')},
+            "affiliations": {"c": counts.get('pres_affs', {}).get('c'), "digest": counts.get('pres_affs', {}).get('digest')},
+            "disclosures": {"c": counts.get('pres_discs', {}).get('c'), "digest": counts.get('pres_discs', {}).get('digest')},
+            "credentials": {"c": counts.get('pres_creds', {}).get('c'), "digest": counts.get('pres_creds', {}).get('digest')},
+            "drivers": {"c": counts.get('pres_cdriv', {}).get('c'), "digest": counts.get('pres_cdriv', {}).get('digest')},
+            "vehicles": {"c": counts.get('pres_cveh', {}).get('c'), "digest": counts.get('pres_cveh', {}).get('digest')},
+            "policies": {"c": counts.get('pres_cpol', {}).get('c'), "digest": counts.get('pres_cpol', {}).get('digest')},
+            "contracts": {"c": counts.get('pres_ccont', {}).get('c'), "digest": counts.get('pres_ccont', {}).get('digest')},
+            "driver_drafts": {"c": counts.get('pres_ddrafts', {}).get('c'), "digest": counts.get('pres_ddrafts', {}).get('digest')},
+            "vehicle_drafts": {"c": counts.get('pres_vdrafts', {}).get('c'), "digest": counts.get('pres_vdrafts', {}).get('digest')},
+            "supply_pairs": {"c": counts.get('pres_cpairs', {}).get('c'), "digest": counts.get('pres_cpairs', {}).get('digest')},
+            "exclusivities": {"c": counts.get('pres_cexcl', {}).get('c'), "digest": counts.get('pres_cexcl', {}).get('digest')},
+            "audits": {"c": counts.get('pres_audits', {}).get('c'), "digest": counts.get('pres_audits', {}).get('digest')}
         }
     }
 
@@ -697,8 +720,8 @@ def default_gcs_runner(action: str, bucket: str, key: str) -> Dict[str, Any]:
     if action == "describe":
         cmd = ["gcloud", "storage", "objects", "describe", f"gs://{bucket}/{key}", "--format=json", "--project", PROJECT, "--quiet"]
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
-        except subprocess.TimeoutExpired:
+            res = run_bounded(cmd, timeout_sec=30)
+        except Exception:
             return {"status": "error", "stderr": "describe timeout"}
         if res.returncode == 0:
             try:
@@ -786,16 +809,16 @@ def default_db_runner(query: str, params: List[Any]) -> Dict[str, Any]:
     
     sec_cmd = ["gcloud", "secrets", "versions", "access", "latest", "--secret=drts-dev-db-url", "--project", PROJECT, "--quiet"]
     try:
-        sec_res = subprocess.run(sec_cmd, capture_output=True, text=True, check=False, timeout=10)
-    except subprocess.TimeoutExpired:
+        sec_res = run_bounded(sec_cmd, timeout_sec=10)
+    except Exception:
         return {"error": "secret timeout"}
     if sec_res.returncode != 0:
         return {"error": "Failed to access db credentials secret"}
         
     node_cmd = ["node", str(cred_helper)]
     try:
-        node_res = subprocess.run(node_cmd, input=sec_res.stdout, capture_output=True, text=True, check=False, timeout=10)
-    except subprocess.TimeoutExpired:
+        node_res = run_bounded(node_cmd, input_str=sec_res.stdout, timeout_sec=10)
+    except Exception:
         return {"error": "node timeout"}
     if node_res.returncode != 0:
         return {"error": "Failed to parse db credentials"}
@@ -830,18 +853,18 @@ def default_db_runner(query: str, params: List[Any]) -> Dict[str, Any]:
             ready = False
             for _ in range(15):
                 try:
-                    c = subprocess.run(["psql", "-X", "-q", "-A", "-t", "--no-password", "-c", "SELECT 1"], env=env, capture_output=True, timeout=2)
+                    c = run_bounded(["psql", "-X", "-q", "-A", "-t", "--no-password", "-c", "SELECT 1"], env=env, timeout_sec=2)
                     if c.returncode == 0:
                         ready = True
                         break
-                except subprocess.TimeoutExpired:
+                except Exception:
                     pass
                 time.sleep(1)
             if not ready:
                 proxy_process.terminate()
                 try:
                     proxy_process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
+                except Exception:
                     proxy_process.kill()
                     proxy_process.wait()
                 return {"error": "proxy readiness timeout"}
@@ -853,28 +876,97 @@ def default_db_runner(query: str, params: List[Any]) -> Dict[str, Any]:
             sql_file.write_text(query)
             
             psql_cmd = ["psql", "-X", "-q", "-A", "-t", "--no-password", "--set=ON_ERROR_STOP=1", "--file=" + str(sql_file)]
-            res = subprocess.run(psql_cmd, capture_output=True, text=True, env=env, check=False, timeout=30)
+            res = run_bounded(psql_cmd, env=env, timeout_sec=30)
             if res.returncode != 0:
                 return {"error": f"psql failed"}
-                
-            if len(res.stdout) > 512 * 1024:
-                return {"error": "psql output too large"}
                 
             rows = []
             for line in res.stdout.strip().split("\n"):
                 if line:
                     rows.append(line.split("|"))
             return {"rows": rows}
-        except subprocess.TimeoutExpired:
+        except Exception:
             return {"error": "psql timeout"}
         finally:
             if proxy_process and proxy_process.poll() is None:
                 proxy_process.terminate()
                 try:
                     proxy_process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
+                except Exception:
                     proxy_process.kill()
                     proxy_process.wait()
+
+
+def run_bounded(cmd, input_str=None, timeout_sec=30, max_stdout=512*1024, max_stderr=128*1024, env=None):
+    import time, select, subprocess, os
+    start_time = time.time()
+    try:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE if input_str else None, env=env)
+    except Exception as e:
+        return type('obj', (object,), {'returncode': -1, 'stdout': '', 'stderr': str(e)})()
+        
+    if input_str:
+        os.set_blocking(p.stdin.fileno(), False)
+        try:
+             p.stdin.write(input_str.encode('utf-8'))
+             p.stdin.close()
+        except:
+             pass
+    
+    body = b""
+    stderr_data = b""
+    os.set_blocking(p.stdout.fileno(), False)
+    os.set_blocking(p.stderr.fileno(), False)
+    
+    while True:
+        if time.time() - start_time > timeout_sec:
+            p.kill()
+            p.wait()
+            return type('obj', (object,), {'returncode': -1, 'stdout': '', 'stderr': 'timeout'})()
+            
+        r, _, _ = select.select([p.stdout, p.stderr], [], [], 1.0)
+        
+        if p.stdout in r:
+            chunk = os.read(p.stdout.fileno(), 4096)
+            if chunk:
+                body += chunk
+                if len(body) > max_stdout:
+                    p.kill()
+                    p.wait()
+                    return type('obj', (object,), {'returncode': -1, 'stdout': '', 'stderr': 'stdout too large'})()
+                    
+        if p.stderr in r:
+            chunk = os.read(p.stderr.fileno(), 4096)
+            if chunk:
+                stderr_data += chunk
+                if len(stderr_data) > max_stderr:
+                    p.kill()
+                    p.wait()
+                    return type('obj', (object,), {'returncode': -1, 'stdout': '', 'stderr': 'stderr too large'})()
+                    
+        if p.poll() is not None:
+            while True:
+                r2, _, _ = select.select([p.stdout, p.stderr], [], [], 0.0)
+                progress = False
+                if p.stdout in r2:
+                    chunk = os.read(p.stdout.fileno(), 4096)
+                    if chunk:
+                        body += chunk
+                        if len(body) > max_stdout:
+                            return type('obj', (object,), {'returncode': -1, 'stdout': '', 'stderr': 'stdout too large'})()
+                        progress = True
+                if p.stderr in r2:
+                    chunk = os.read(p.stderr.fileno(), 4096)
+                    if chunk:
+                        stderr_data += chunk
+                        if len(stderr_data) > max_stderr:
+                            return type('obj', (object,), {'returncode': -1, 'stdout': '', 'stderr': 'stderr too large'})()
+                        progress = True
+                if not progress:
+                    break
+            break
+            
+    return type('obj', (object,), {'returncode': p.returncode, 'stdout': body.decode('utf-8', 'replace'), 'stderr': stderr_data.decode('utf-8', 'replace')})()
 
 def main():
     parser = argparse.ArgumentParser()
