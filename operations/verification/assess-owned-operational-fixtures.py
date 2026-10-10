@@ -1028,6 +1028,7 @@ def main():
                 require(len(services) == 9, "Expected exactly 9 services in metadata")
                 require(set(services.keys()) == set(expected_services), "Service names mismatch")
                 
+                validated_services = {}
                 for name, s in services.items():
                     if name == "drts-dev-api":
                         require(s.get("runtime_sha") == args.current_runtime_sha, f"Runtime SHA mismatch for {name}")
@@ -1035,20 +1036,40 @@ def main():
                         prov = s.get("providers", {})
                         require(prov.get("DOCUMENT_ARTIFACT_GCS_BUCKET") == BUCKET, "API artifact bucket mismatch")
                         require(prov.get("DOCUMENT_ARTIFACT_STORAGE_PROVIDER") == "gcs", "API artifact provider mismatch")
+                        validated_services[name] = {
+                            "runtime_sha": s.get("runtime_sha"),
+                            "identity": s.get("identity"),
+                            "providers": {
+                                "DOCUMENT_ARTIFACT_GCS_BUCKET": prov.get("DOCUMENT_ARTIFACT_GCS_BUCKET"),
+                                "DOCUMENT_ARTIFACT_STORAGE_PROVIDER": prov.get("DOCUMENT_ARTIFACT_STORAGE_PROVIDER")
+                            }
+                        }
                     elif name == "drts-dev-scanner":
                         require(s.get("identity") == f"drts-dev-artifact-scanner@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
                         require(s.get("spec_sha256") == "78d699ef021ef42c4346cdaeea539e7df00ff7c53cd8c2c89278c7c52403f4ad", "Scanner spec SHA mismatch")
+                        validated_services[name] = {
+                            "identity": s.get("identity"),
+                            "spec_sha256": s.get("spec_sha256")
+                        }
                     else:
                         require(s.get("identity") == f"drts-dev-runtime@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
                         # Private consoles should have no bindings or no allUsers/allAuthenticatedUsers
                         bindings = s.get("bindings")
                         require(bindings is not None, f"Console {name} bindings missing/bypass")
                         require(isinstance(bindings, list), f"Console {name} bindings malformed")
+                        validated_bindings = []
                         for b in bindings:
                             require(isinstance(b, dict), f"Console {name} binding malformed")
                             members = b.get("members", [])
                             require(isinstance(members, list), f"Console {name} binding members malformed")
                             require("allUsers" not in members and "allAuthenticatedUsers" not in members, f"Console {name} is not private")
+                            role = b.get("role")
+                            if role is not None:
+                                validated_bindings.append({"role": role, "members": members})
+                        validated_services[name] = {
+                            "identity": s.get("identity"),
+                            "bindings": validated_bindings
+                        }
 
                 
                 report["cloud_metadata"] = {
@@ -1056,7 +1077,7 @@ def main():
                     "region": cm.get("region"),
                     "definition_sha": cm.get("definition_sha"),
                     "observed_at": cm.get("observed_at"),
-                    "services": services
+                    "services": validated_services
                 }
                 
                 require(args.current_run_id, "Missing current_run_id")
@@ -1111,6 +1132,7 @@ def main():
             report["gcs_assessment"] = gcs_res
             report["db_assessment"] = {"status": "skipped_due_to_mock"}
             out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": report}, indent=2)
+            require(len(out.encode('utf-8')) <= 512 * 1024, "Report exceeds byte cap")
             print(out)
             sys.exit(1)
         else:
@@ -1120,7 +1142,9 @@ def main():
             
             if gcs_res.get("status") != "success":
                 report["disposition"] = "rejected"
-                print(json.dumps(report, indent=2))
+                out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": report}, indent=2)
+                require(len(out.encode('utf-8')) <= 512 * 1024, "Report exceeds byte cap")
+                print(out)
                 sys.exit(1)
             
             db_res = assess_database(default_db_runner)
@@ -1130,20 +1154,26 @@ def main():
                 if "concrete_blocker" in db_res:
                      report["concrete_blocker"] = db_res["concrete_blocker"]
                 out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": report}, indent=2)
-                require(len(out) < 512 * 1024, "Report exceeds byte cap")
+                require(len(out.encode('utf-8')) <= 512 * 1024, "Report exceeds byte cap")
                 print(out)
                 sys.exit(1)
             else:
                 report["disposition"] = "complete"
                 
             out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": report}, indent=2)
-            require(len(out) < 512 * 1024, "Report exceeds byte cap")
+            require(len(out.encode('utf-8')) <= 512 * 1024, "Report exceeds byte cap")
             print(out)
             sys.exit(0)
     except Exception as e:
-        report["disposition"] = "error"
-        report["error"] = str(e)[:128]
-        out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": report}, indent=2)
+        error_report = {
+            "assessment_only": True,
+            "cleanup_not_performed": True,
+            "available_apply_operation": False,
+            "provenance": AUTHORIZED_PROVENANCE,
+            "disposition": "error",
+            "error": str(e)[:128]
+        }
+        out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": error_report}, indent=2)
         print(out)
         sys.exit(1)
 

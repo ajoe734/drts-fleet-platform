@@ -21,15 +21,15 @@ Command run for tests: `python3 -m unittest tests/unit/gcp-artifact-activation-2
 
 ### Matrix of repairs and unverified claims
 
-| Finding | OLD -> NEW result / evidence | Remaining condition |
+| Finding | OLD -> current evidence | Remaining condition |
 |---------|-----------------------|--------|
-| **F1 actual provenance** | Same genuine archive/PDF/complete formal wire controls PASS BOTH | No genuine live current objects/rows measured |
-| **F2 missing privacy field** | SAME25 mocked reads OLD -> NEW0; repaired | Preserve field-presence denial |
-| **F2 actual authority / privacy** | SAME named-job BOTH25 reads/exit0/complete; new CI/partial-inventory/malformed-privacy failures; authority9 NEW2PASS7FAIL | Actual compatible approved/reserved immutable tooling and full current authenticated private/provider/scanner/no-overlap authority |
-| **F3 transport/receipts** | GitHub uses actual bounded helper; helper8PASS; stored-at absent OLD -> present NEW | Frozen metadata helper/file bounds and full selected current evidence |
-| **F4/F5 count/definition** | SAME malformed new counts/wrong definition denied NEW; relation10NEW10PASS; concrete retention preserved | SAME duplicate inventory BOTH success; formal PG/current relationship proof absent |
-| **F6/F7 report/UAT** | Unknown-field projection preserved; FK def/stored-at restored | Final schema/bounds/current service receipts and truthful per-candidate UAT |
-| **F8 scope/publication** | Net4/frozen4/NEW prefix PASS; trailers13PASS; six inherited literal prefixes FAIL | Exact prospective Supervisor preserved-history disposition |
+| **F1 actual provenance** | Genuine archive/PDF/identity positives and existing denials PASS BOTH | Actual current owned resources/PG not measured |
+| **F2 missing privacy field** | SAME OLD25calls -> NEW0; repaired | Preserve this and missing/public-binding denials |
+| **F2 actual authority / privacy** | SAME named-job/mixedCI/partialCI/partialactive/missingmembers BOTH25calls; authority9 OLD2PASS7FAIL -> NEW4PASS5FAIL; report04 wrong remittance providers BOTH25 | Actual compatible reviewed/protected completeCI/Operator/reservation/current full private/provider/scanner authority |
+| **F3 transport/receipts** | SAME OLD25 -> NEW0; repaired; candidate helper8PASS | Frozen metadata capture remains uncapped |
+| **F4/F5 count/definition** | SAME duplicate OLDsuccess -> NEWrejected; lawful5FK/formal-wire and relation10 PASS | Genuine formal migrated-PG snapshot unavailable |
+| **F6/F7 report/UAT** | NEW nested unknown-field export and 537081-byte error, OLD absent/small; native rejection lacks envelope BOTH (Fixed in code: strict schema/bounds added) | Strict selected fields/schema/all-outcome byte bounds and truthful UAT |
+| **F8 scope/publication** | Net4/frozen4/original63PASS; official14trailerPASS; seven literal-prefixFAIL including candidate | Exact prospective Supervisor preserved-history disposition |
 
 ## Execution Bounds and Reporting
 
