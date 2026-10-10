@@ -41,7 +41,8 @@ The latest independent review already supplies minimum repros, actual callers,
 expected/actual results and repair boundaries for repeated R5/R6/R7/Design.
 This document routes those blockers; it does not replace that review or claim
 new product probes passed. Original owner must carry the complete review into
-`docs/04-uat/passenger-app-20261009/PAX-WEB-BOOKING-UI-20261009.md`.
+the [original UAT at parent revision 869cd21f](https://github.com/ajoe734/drts-fleet-platform/blob/869cd21fc3eba8ef513af9bc3f031aaf61bc5638/docs/04-uat/passenger-app-20261009/PAX-WEB-BOOKING-UI-20261009.md).
+That UAT exists on the parent's unmerged branch, not on this helper's dev base.
 
 | Finding | Reviewed `b79c3715` → unreviewed `869cd21f` source inspection | Next bounded action / verification |
 | --- | --- | --- |
@@ -180,4 +181,32 @@ An open planning PR or green documentation CI does not satisfy those gates.
 | Update parent with concrete next step | Current-release `note`/`assign` attempts and helper `progress` | Both writes rejected → exact Supervisor writes recorded | NOT satisfied until authorized Supervisor writes are read back. Parent remains blocked. |
 | Parent required acceptance, both keys | Latest independent review and original UAT | Unresolved R5/Design and other regressions preserved | Not performed here: product unit/runtime/PG/browser tests or new parent acceptance. Documentation-only helper. |
 
-Publication/check evidence will be appended after the task-scoped anchor.
+### Publication and completed checks
+
+- Anchor: `50910e3b47231ef8446f86b8cf49fcbd9f7315f2`, normally pushed to
+  `codex/pax-web-booking-ui-20261009-unblock-planning-decision` (exit 0).
+- [Draft planning PR #2522](https://github.com/ajoe734/drts-fleet-platform/pull/2522),
+  base `dev`; creation and PR identity readback exited 0. At creation, local,
+  remote and PR anchor identity agree. Subsequent evidence commit stays on the
+  same branch with an ordinary push; final SHA identity is recorded by CLI
+  progress/blocker readback, not treated as a locked candidate.
+- `git diff --check 5b11155d33fd4d6c345e01cb9730012d3b3d08d1...HEAD`: exit 0.
+- `python3 tools/ci/git/check_commit_trailers.py --base
+  5b11155d33fd4d6c345e01cb9730012d3b3d08d1 --head HEAD`: exit 0,
+  one anchor commit OK; rerun for the final branch range before closeout.
+- `python3 tools/ci/git/check_staged_generated_files.py --staged`: exit 0.
+- Canonical consistency initially failed (exit 1) on the anchor because the
+  parent UAT was cited as a local dev path even though it exists only on the
+  parent's unmerged branch. Corrected to an immutable parent-revision link above.
+  Final scoped canonical-consistency check is required before closeout; this
+  is a documentation provenance correction, not a product finding repair.
+- Python 3.12.3 documentation reference probe: exit 0, all 16 local links in
+  the new question/helper resolve, including the URL-encoded Passenger filename;
+  both parent acceptance keys retained. It checks actual repository paths and
+  documentation content, not product behavior. Re-run after this evidence edit.
+- Product lint/typecheck/unit/PG/browser/runtime: not run for this two-file
+  planning-only change; no product behavior changed. Prior parent checks remain
+  tied to their reviewed SHA. No hosted checks or deployment manually started.
+- Handoff/merge: withheld while blocked disposition metadata and parent next
+  write remain absent. Keep PR draft and report the concrete Supervisor gate;
+  do not claim all helper acceptance is satisfied or call `done`.
