@@ -36,6 +36,23 @@ export function resolveRouteAuthPolicy(
   const routePath = normalizeRoutePath(url);
   const upperMethod = method.toUpperCase();
 
+  if (
+    (upperMethod === "POST" &&
+      [
+        "passenger-app/auth/otp/request",
+        "passenger-app/auth/otp/verify",
+      ].includes(routePath)) ||
+    (upperMethod === "GET" && routePath === "passenger-app/auth/providers")
+  ) {
+    return {
+      routeKey: "passenger-app:otp",
+      requiredScopes: [],
+      allowedRealms: ["passenger"],
+      description:
+        "OpenRoute BFF login; link/contact-phone require a live passenger session bound to the challenge",
+    };
+  }
+
   if (routePath === "passenger-app" || routePath.startsWith("passenger-app/")) {
     if (routePath.startsWith("passenger-app/platform/")) {
       return {

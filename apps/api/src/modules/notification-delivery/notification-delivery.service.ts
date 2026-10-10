@@ -6,6 +6,7 @@ import {
   type EnqueueMail,
   type MailOutbox,
   type MailTransport,
+  type PlatformMail,
   type ProviderAcknowledgement,
   type StoredDelivery,
 } from "./notification-delivery.types";
@@ -44,6 +45,43 @@ export class NotificationDeliveryService {
 
   availability(): "available" | "unavailable" {
     return this.transport ? "available" : "unavailable";
+  }
+
+  /** Short-lived platform secrets are sent immediately, never retained in the outbox.
+   * Caller retries need a new OTP challenge; tenant enqueue/dispatch remain unchanged.
+   * Provider replies/errors may echo the secret, so only a bounded status escapes.
+   */
+  async sendPlatformMail(
+    request: PlatformMail,
+  ): Promise<{ status: "sent" | "unavailable" | "failed" }> {
+    if (!this.transport) return { status: "unavailable" };
+    try {
+      this.validateContent(request);
+      const deliveryId = randomUUID();
+      const acknowledgement = await this.transport.send({
+        tenantId: null,
+        idempotencyKey: deliveryId,
+        deliveryId,
+        messageId: `<${deliveryId}@notification.drts.invalid>`,
+        recipientEmail: request.recipientEmail,
+        fromEmail: request.fromEmail,
+        subject: request.subject,
+        body: request.body,
+      });
+      return {
+        status:
+          acknowledgement?.provider === this.transport.provider &&
+          typeof acknowledgement.response === "string" &&
+          acknowledgement.response.trim().length > 0 &&
+          Number.isFinite(Date.parse(acknowledgement.acceptedAt)) &&
+          (acknowledgement.providerMessageId === null ||
+            typeof acknowledgement.providerMessageId === "string")
+            ? "sent"
+            : "failed",
+      };
+    } catch {
+      return { status: "failed" };
+    }
   }
 
   async enqueue(request: EnqueueMail): Promise<DeliveryReceipt> {
@@ -263,6 +301,10 @@ export class NotificationDeliveryService {
         throw new Error("notification_invalid_identity");
       }
     }
+    this.validateContent(input);
+  }
+
+  private validateContent(input: PlatformMail) {
     for (const address of [input.fromEmail, input.recipientEmail]) {
       if (
         typeof address !== "string" ||

@@ -10,7 +10,11 @@ export type EnqueueMail = {
   body: string;
 };
 
-export type TransportMessage = EnqueueMail & {
+/** Platform messages deliberately carry null rather than a fabricated tenant. */
+export type PlatformMail = Omit<EnqueueMail, "tenantId" | "idempotencyKey">;
+
+export type TransportMessage = Omit<EnqueueMail, "tenantId"> & {
+  tenantId: string | null;
   deliveryId: string;
   messageId: string;
 };
