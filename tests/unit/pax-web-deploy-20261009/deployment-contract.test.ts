@@ -192,7 +192,7 @@ describe("passenger dev workflow executable contracts", () => {
   it("deduplicates the shared OTP pepper when all groups are configured", () => {
     const result = resolveSecrets(Object.values(groups).flat());
     expect(result.status, result.stderr).toBe(0);
-    expect(result.outputs.api.match(/PASSENGER_OTP_PEPPER=/g)).toHaveLength(1);
+    expect(result.outputs.api?.match(/PASSENGER_OTP_PEPPER=/g)).toHaveLength(1);
     expect(result.outputs.web).toBeUndefined();
     expect(result.outputs.api).not.toContain("COOKIE_SECRET");
     expect(result.commands.join("\n")).not.toContain("cookie-secret");
