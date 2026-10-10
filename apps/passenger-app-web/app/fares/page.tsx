@@ -10,6 +10,7 @@ import {
   P5,
 } from "../../components/p5-ui";
 import type { FaresResponse } from "@drts/contracts";
+import { bookingTranslations as t } from "../../lib/booking/translations";
 
 // P5_A03: 公開費率頁
 export default function FaresPage() {
@@ -46,10 +47,10 @@ export default function FaresPage() {
 
   return (
     <P5Phone url="ride.smarttransport.tw/fares">
-      <P5Header status="計費說明" order="公開資訊" />
+      <P5Header status={t.fares.headerTitle} order={t.fares.headerOrder} />
       {fares ? (
         <P5Card
-          title="現行計費表"
+          title={t.fares.cardTitle}
           tag={
             <span
               style={{
@@ -62,27 +63,27 @@ export default function FaresPage() {
                 borderRadius: 999,
               }}
             >
-              已生效
+              {t.fares.activeTag}
             </span>
           }
         >
           <div style={{ fontSize: 11, color: P5.mut, marginBottom: 6 }}>
-            版本 {fares.currentVersion.version} · 生效日{" "}
+            {t.fares.versionInfoPrefix}{fares.currentVersion.version}{t.fares.versionInfoDate}
             {fares.currentVersion.effectiveAt
               .substring(0, 10)
               .replace(/-/g, "/")}{" "}
-            · 依臺北市政府公告計程車運價
+            {t.fares.versionInfoSuffix}
           </div>
           {R(
-            `起程運價（${fares.currentVersion.baseDistanceMeters / 1000} 公里）`,
+            `${t.fares.baseDistanceLabel}${fares.currentVersion.baseDistanceMeters / 1000}${t.fares.baseDistanceSuffix}`,
             `NT$ ${fares.currentVersion.baseFare}`,
           )}
           {R(
-            `續程運價（每 ${fares.currentVersion.distanceIncrementMeters} 公尺）`,
+            `${t.fares.distanceRateLabel}${fares.currentVersion.distanceIncrementMeters}${t.fares.distanceRateSuffix}`,
             `NT$ ${fares.currentVersion.distanceRate}`,
           )}
           {R(
-            `延滯計時（每 ${fares.currentVersion.delayIncrementSeconds} 秒）`,
+            `${t.fares.delayRateLabel}${fares.currentVersion.delayIncrementSeconds}${t.fares.delayRateSuffix}`,
             `NT$ ${fares.currentVersion.delayRate}`,
           )}
           <div
@@ -94,8 +95,9 @@ export default function FaresPage() {
             }}
           >
             <span style={{ color: P5.mut }}>
-              夜間加成（{fares.currentVersion.nightSurchargeWindowStart}–
-              {fares.currentVersion.nightSurchargeWindowEnd}）
+              {t.fares.nightSurchargeLabel}{fares.currentVersion.nightSurchargeWindowStart}
+              {t.fares.nightSurchargeMiddle}
+              {fares.currentVersion.nightSurchargeWindowEnd}{t.fares.nightSurchargeSuffix}
             </span>
             <b style={{ fontFamily: P5.mono }}>
               +{fares.currentVersion.nightSurcharge}
@@ -103,18 +105,18 @@ export default function FaresPage() {
           </div>
         </P5Card>
       ) : error ? (
-        <P5Card title="載入失敗">
+        <P5Card title={t.fares.loadingFailed}>
           <div style={{ fontSize: 12, color: P5.danger }}>{error}</div>
         </P5Card>
       ) : (
-        <P5Card title="載入中...">
+        <P5Card title={t.fares.loading}>
           <div style={{ fontSize: 12, color: P5.mut }}>Loading...</div>
         </P5Card>
       )}
 
-      <P5Card title="車資變更規則">
+      <P5Card title={t.fares.rulesCardTitle}>
         <div style={{ fontSize: 12, color: P5.mut, lineHeight: 1.65 }}>
-          若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。固定報價行程以確認時之應付金額為準。
+          {t.fares.rulesDesc}
         </div>
       </P5Card>
       <div
@@ -125,7 +127,7 @@ export default function FaresPage() {
           textAlign: "center",
         }}
       >
-        本頁依主管機關備查之現行版本公告
+        {t.fares.footerText}
       </div>
       <P5Notice />
     </P5Phone>

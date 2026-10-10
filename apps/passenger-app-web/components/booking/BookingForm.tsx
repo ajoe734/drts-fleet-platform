@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { P5Phone, P5Header, P5Card, P5Btn, P5Notice, P5 } from "../p5-ui";
 import { AddressMapPicker, type AddressPayload } from "@drts/ui-web";
 import { createMockGeoProvider } from "../../lib/booking/mock-geo-provider";
+import { bookingTranslations as t } from "../../lib/booking/translations";
 
 interface BookingFormProps {
   onQuoteReady: (data: {
@@ -29,7 +30,7 @@ export function BookingForm({
   );
 
   useEffect(() => {
-    // Default to 15 mins from now
+    // Default to 15 mins from now - blocked by R5 config requirement from BFF
     const d = new Date();
     d.setMinutes(d.getMinutes() + 15);
     // Format to YYYY-MM-DDTHH:mm
@@ -69,10 +70,12 @@ export function BookingForm({
               fontWeight: "bold",
             }}
           >
-            返回
+            {t.form.back}
           </div>
           <div style={{ flex: 1, textAlign: "center", fontWeight: "bold" }}>
-            {pickerMode === "origin" ? "選擇上車地點" : "選擇下車地點"}
+            {pickerMode === "origin"
+              ? t.form.selectOriginTitle
+              : t.form.selectDestinationTitle}
           </div>
           <div style={{ width: 40 }} />
         </div>
@@ -127,7 +130,7 @@ export function BookingForm({
               }}
             >
               <div style={{ fontSize: 12, color: P5.mut, marginBottom: 4 }}>
-                上車地點
+                {t.form.originLabel}
               </div>
               <div
                 style={{
@@ -138,7 +141,7 @@ export function BookingForm({
               >
                 {origin
                   ? origin.addressName || origin.address
-                  : "請選擇上車地點"}
+                  : t.form.selectOriginPlaceholder}
               </div>
             </div>
 
@@ -152,7 +155,7 @@ export function BookingForm({
               }}
             >
               <div style={{ fontSize: 12, color: P5.mut, marginBottom: 4 }}>
-                下車地點
+                {t.form.destinationLabel}
               </div>
               <div
                 style={{
@@ -163,7 +166,7 @@ export function BookingForm({
               >
                 {destination
                   ? destination.addressName || destination.address
-                  : "請選擇下車地點"}
+                  : t.form.selectDestinationPlaceholder}
               </div>
             </div>
 
@@ -175,7 +178,7 @@ export function BookingForm({
               }}
             >
               <div style={{ fontSize: 12, color: P5.mut, marginBottom: 4 }}>
-                預約時間
+                {t.form.scheduledAtLabel}
               </div>
               <input
                 type="datetime-local"
@@ -209,8 +212,8 @@ export function BookingForm({
             }
           }}
         >
-          <P5Btn kind="primary" icon="check">
-            試算車資
+          <P5Btn kind="primary" icon="check" disabled={!isFormValid}>
+            {t.form.quoteButton}
           </P5Btn>
         </div>
       </div>
