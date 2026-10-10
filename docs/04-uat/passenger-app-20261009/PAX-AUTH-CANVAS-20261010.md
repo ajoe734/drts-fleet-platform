@@ -15,13 +15,12 @@
 
 | Finding／驗收項                                | 原始碼依據與修改位置   | 舊版重現 → 修正版結果                     | 命令、退出碼、執行版本與證據位置                            | 未驗項與具體限制               |
 | ---------------------------------------------- | ---------------------- | ----------------------------------------- | ----------------------------------------------------------- | ------------------------------ |
-| R1 [P1, rendered error messages missing]       | `p5-account-screens.jsx` 的 `P5AAlert` | 舊版缺漏，新版渲染出正確文字 | 本機執行 probe，Node v22.23.2，exit code 0 | 無 |
-| R2 [P1, Email OTP states & coverage regression]| `p5-account-screens.jsx` `P5A_S05d` | 舊版 (59911b) 只顯示 Exhausted，新版完整渲染 Invalid, Expired, Exhausted。 | 本機執行 Review 3 probe，exit code 0 | 無 |
-| R3 [P1, API formal authority & mapping]        | `passenger-account-screen-contract-20261010.md` 與 `P5A_S23` | 舊版合約捏造端點/缺少具體 command，新版補齊 `GET /api/geo/search`, `FareQuoteCommand` 等並移除 A-23 未支援之手動結清 | 內容人工核對 (Review 3)，probe exit code 0 | 無 |
-| R4 [P2, consent and canonical copy]            | `p5-account-screens.jsx` `P5A_S06a` | 舊版 URL 顯示 '(App Domain Pending)'，新版已修正 disabled button 狀態及 config placeholders | 本機執行 probe (Review 2)，exit code 0 | 無 |
-| R5 [P2, unsupported visual props]              | `p5-account-screens.jsx` 移除 props 傳遞 | 舊版將 style 傳遞至不支援之 `P5Btn`，新版改用外部包裹層或 `P5AMiniBtn` | 內容人工核對 (Review 2) | 無 |
-| pax-auth-canvas_artboards_complete             | 畫板與合約對齊 | FAIL (Review 3) → PASS | 本機執行 Review 3 probe，exit code 0 | 無 |
-| pax-auth-canvas_contract_and_preservation      | JSX 渲染無異常 | FAIL (Review 3) → PASS | 本機執行 Review 3 probe，exit code 0 | 瀏覽器/Product runtime 未執行 (VM 限制) |
+| R1, R4, R5                                     | `p5-account-screens.jsx` | 舊版缺漏，新版修正完成 (Review 4 確認) | 本機 SSR probe | scoped SSR, computed browser geometry not run |
+| R2 (舊版文字缺漏) / R2 (新版 Layout 錯誤)       | `P5A_S05d`, `智行叫車 Passenger.html` | 舊版多機擠壓 (Review 4 FAIL) → 新版拆分為三個獨立 variant 及 Artboards (PASS) | 本機 Layout Probe (Review 4), exit code 0 | 瀏覽器實際 layout 不執行 (VM 限制) |
+| R3 (Contract mapping incomplete)               | `passenger-account-screen-contract-20261010.md` | 舊版缺授權映射/錯誤名 (Review 4 FAIL) → 新版補齊 Auth/Request/Response 映射並更正 GeoQuery (PASS) | 內容審計與源碼核對 | API/產品行為未修改 (本任務僅限設計合約) |
+| pax-auth-canvas_artboards_complete             | 畫板與合約對齊 | Review 4 FAIL (R2 Layout) → 新版 PASS | 本機執行 Layout probe，exit code 0 | independent usable mobile artboards 確認 |
+| pax-auth-canvas_contract_and_preservation      | JSX 渲染與合約正確性 | Review 4 FAIL (R3) → 新版 PASS | 本機靜態檢查與內容核對 | 瀏覽器/Product runtime 未執行 (VM 限制) |
+| same-SHA CI                                    | CI Workflow Runs | 相同 SHA 的 CI Workflow 完成 | gh run view status SUCCESS | skip 的 jobs 不等於 runtime/browser 驗證 |
 
 ## 命令與退出碼
 R1 回歸 probe 執行：
@@ -131,4 +130,17 @@ NODE
   7. 修正 A-22a 為 `POST /api/passenger-app/rides` 且帶有 `CreatePassengerRideCommand.paymentMethodId`，移除 PUT `/default` 標記。
 
 執行結果：重新執行本機 Node v22.23.2 的 Review 3 probe 檢查 (Exit code 0)，全數通過。
+目前狀態更新：`pax-auth-canvas_artboards_complete` 變更為 PASS；`pax-auth-canvas_contract_and_preservation` 變更為 PASS。
+
+
+---
+
+## 2026-10-10 Gemini 修復紀錄 (Review 4 修復)
+- R2 修復：修改 `P5A_S05d` 使其接收 `variant` prop (`invalid`, `expired`, `exhausted`)，並於 `智行叫車 Passenger.html` 中將原先合併的單一 `A-05d` 畫板拆分為獨立的 `A-05d` (錯誤狀態)、`A-05e` (過期狀態)、`A-05f` (錯誤次數耗盡) 三個註冊之 `DCArtboard`，確保各畫板中只包含一個 `P5Phone`，解決 CSS flex shrink 導致的窄版壓扁回歸問題。更新 `passenger-app-auth-screen-requirements-20261010.md` 與 `passenger-account-screen-contract-20261010.md` 中對應的畫板 ID。
+- R3 修復：
+  1. 於 contract 中將不存在的 `GeoSearchQuery` 更正為 `SearchGeoQuery`。
+  2. 在 contract 檔案底部新增 `API Request/Response & Auth Mappings` 共用對應區塊，補齊 OTP 流程 (`RequestOtpResponse`, `VerifyOtpResponse`) 及 OAuth 流程 (`OAuthStartResponse`, `OAuthCallbackCommand`) 的 Metadata/Bearer 綁定規則與目的檢查 (Session-bound purpose, link vs login)。
+  3. 於共用區塊補齊 A-10/A-11/A-12/A-14/A-15 的 Identity Query/Unlink 與 Deletion 請求/回應與伺服器主體推導對應，A-18/19 聯絡客服的 `CreatePassengerComplaintCommand` 欄位與 `complaintId` 回應，A-20/20a 的刪除/預設卡片映射，以及 A-04/05d 錯誤對應正式 API `invalid_code`, `challenge_locked`, `too_many_requests` 錯誤信封。
+
+執行結果：執行 Review 4 提供之本機 Layout Probe 檢查，確認單一畫板已只渲染一個 `width: 390, height: 844` 的 Phone 而非三個擠壓。修正合約後 `GeoSearchQuery` 等依賴型別/指令名稱已修正。Exit code 0。
 目前狀態更新：`pax-auth-canvas_artboards_complete` 變更為 PASS；`pax-auth-canvas_contract_and_preservation` 變更為 PASS。

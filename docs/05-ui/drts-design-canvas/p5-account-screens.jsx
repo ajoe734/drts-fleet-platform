@@ -164,40 +164,51 @@ const P5A_S05c = () => (
   </P5APhone>
 );
 
-const P5A_S05d = () => (
-  <div style={{ display: 'flex', gap: 20, overflowX: 'auto', paddingBottom: 16 }}>
-    <P5APhone>
-      <P5Header status="輸入驗證碼" order="" />
-      <div style={{ padding: '24px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <P5AAlert kind="danger">驗證碼錯誤，剩餘 3 次機會</P5AAlert>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {[1,2,3,4,5,6].map(i => <div key={i} style={{ flex: 1, height: 50, background: P5.surface, border: '1px solid '+P5.dangerBd, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontFamily: P5.mono, color: P5.danger }}>8</div>)}
+const P5A_S05d = ({ variant = 'invalid' }) => {
+  if (variant === 'invalid') {
+    return (
+      <P5APhone>
+        <P5Header status="輸入驗證碼" order="" />
+        <div style={{ padding: '24px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <P5AAlert kind="danger">驗證碼錯誤，剩餘 3 次機會</P5AAlert>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {[1,2,3,4,5,6].map(i => <div key={i} style={{ flex: 1, height: 50, background: P5.surface, border: '1px solid '+P5.dangerBd, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontFamily: P5.mono, color: P5.danger }}>8</div>)}
+          </div>
+          <div style={{ fontSize: 13, color: P5.mut, textAlign: 'center' }}>重新發送 (45s)</div>
+          <P5Btn kind="primary">驗證</P5Btn>
         </div>
-        <div style={{ fontSize: 13, color: P5.mut, textAlign: 'center' }}>重新發送 (45s)</div>
-        <P5Btn kind="primary">驗證</P5Btn>
-      </div>
-    </P5APhone>
-    <P5APhone>
-      <P5Header status="輸入驗證碼" order="" />
-      <div style={{ padding: '24px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <P5AAlert kind="warn">驗證碼已過期，請重新發送</P5AAlert>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {[1,2,3,4,5,6].map(i => <div key={i} style={{ flex: 1, height: 50, background: P5.surface, border: '1px solid '+P5.warnBd, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontFamily: P5.mono, color: P5.warn }}>-</div>)}
+      </P5APhone>
+    );
+  }
+  if (variant === 'expired') {
+    return (
+      <P5APhone>
+        <P5Header status="輸入驗證碼" order="" />
+        <div style={{ padding: '24px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <P5AAlert kind="warn">驗證碼已過期，請重新發送</P5AAlert>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {[1,2,3,4,5,6].map(i => <div key={i} style={{ flex: 1, height: 50, background: P5.surface, border: '1px solid '+P5.warnBd, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontFamily: P5.mono, color: P5.warn }}>-</div>)}
+          </div>
+          <P5Btn kind="primary">重新發送驗證碼</P5Btn>
         </div>
-        <P5Btn kind="primary">重新發送驗證碼</P5Btn>
-      </div>
-    </P5APhone>
-    <P5APhone>
-      <P5Header status="輸入驗證碼" order="" />
-      <div style={{ padding: '24px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <P5AAlert kind="danger">驗證碼嘗試次數達上限，請稍後再試</P5AAlert>
-        <div style={{ marginTop: 16 }}>
-          <P5Btn kind="secondary">返回</P5Btn>
+      </P5APhone>
+    );
+  }
+  if (variant === 'exhausted') {
+    return (
+      <P5APhone>
+        <P5Header status="輸入驗證碼" order="" />
+        <div style={{ padding: '24px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <P5AAlert kind="danger">驗證碼嘗試次數達上限，請稍後再試</P5AAlert>
+          <div style={{ marginTop: 16 }}>
+            <P5Btn kind="secondary">返回</P5Btn>
+          </div>
         </div>
-      </div>
-    </P5APhone>
-  </div>
-);
+      </P5APhone>
+    );
+  }
+  return null;
+};
 
 const P5A_S06 = () => (
   <P5APhone>

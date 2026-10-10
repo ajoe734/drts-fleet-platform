@@ -16,7 +16,9 @@
 | A-05a | 手機驗證碼 (次數耗盡) | Design Complete | `POST /api/passenger-app/auth/otp/verify` (Attempts exhausted) | PAX-WEB-AUTH-UI-20261009 |
 | A-05b | Email 登入 (輸入信箱) | Design Complete | `POST /api/passenger-app/auth/otp/request` (`RequestOtpCommand`, purpose `login`/`link`) | PAX-WEB-AUTH-UI-20261009 |
 | A-05c | Email 驗證碼 (輸入驗證碼/重送) | Design Complete | `POST /api/passenger-app/auth/otp/verify` (`VerifyOtpCommand` -> `VerifyOtpResponse` `logged_in`/`linked`) + `RequestOtpCommand` retry | PAX-WEB-AUTH-UI-20261009 |
-| A-05d | Email 驗證碼 (錯誤/過期/耗盡) | Design Complete | `POST /api/passenger-app/auth/otp/verify` (Invalid code / Expired / Attempts exhausted) | PAX-WEB-AUTH-UI-20261009 |
+| A-05d | Email 驗證碼 (錯誤狀態) | Design Complete | `POST /api/passenger-app/auth/otp/verify` (Invalid code) | PAX-WEB-AUTH-UI-20261009 |
+| A-05e | Email 驗證碼 (過期狀態) | Design Complete | `POST /api/passenger-app/auth/otp/verify` (Expired) | PAX-WEB-AUTH-UI-20261009 |
+| A-05f | Email 驗證碼 (錯誤次數耗盡) | Design Complete | `POST /api/passenger-app/auth/otp/verify` (Attempts exhausted) | PAX-WEB-AUTH-UI-20261009 |
 | A-06 | 首次登入 (同意條款) | Design Complete | `PATCH /api/passenger-app/me` (`UpdatePassengerMeCommand` `termsVersion`/`privacyVersion` -> `PassengerMeResponse`) | PAX-WEB-AUTH-UI-20261009 |
 | A-06a | 首次登入 (未勾選狀態) | Design Complete | Local Validation | PAX-WEB-AUTH-UI-20261009 |
 | A-07 | 第三方登入 (導向中) | Design Complete | `POST /api/passenger-app/auth/oauth/{provider}/start` (`OAuthStartCommand`) | PAX-WEB-AUTH-UI-20261009 |
@@ -34,8 +36,8 @@
 | A-15 | 刪除帳號完成 | Design Complete | `DELETE /api/passenger-app/me` (Success) | PAX-WEB-AUTH-UI-20261009 |
 | A-16 | 行程紀錄 | Design Complete | `GET /api/passenger-app/rides` | PAX-WEB-RIDE-UI-20261009 |
 | A-17 | 行程紀錄 (空狀態) | Design Complete | `GET /api/passenger-app/rides` | PAX-WEB-RIDE-UI-20261009 |
-| A-18 | 聯絡客服與遺失物表單 | Design Complete | `POST /api/passenger-app/rides/:id/complaints` (Fields: category, description, contact consent) | PAX-WEB-RIDE-UI-20261009 |
-| A-19 | 聯絡客服送出成功 | Design Complete | `POST /api/passenger-app/rides/:id/complaints` (Success) | PAX-WEB-RIDE-UI-20261009 |
+| A-18 | 聯絡客服與遺失物表單 | Design Complete | `POST /api/passenger-app/rides/:id/complaints` (`CreatePassengerComplaintCommand`: category, content, optional lostItemDescription, contactConsent) | PAX-WEB-RIDE-UI-20261009 |
+| A-19 | 聯絡客服送出成功 | Design Complete | `POST /api/passenger-app/rides/:id/complaints` (Success -> `complaintId`) | PAX-WEB-RIDE-UI-20261009 |
 | A-20 | 付款卡片管理 | Design Complete | `GET /api/passenger-app/payment-methods`, `PUT /api/passenger-app/payment-methods/:id/default` (`SetDefaultPaymentMethodCommand`) | PAX-WEB-PAYMENT-UI-20261009 |
 | A-20a | 付款卡片刪除確認 | Design Complete | `DELETE /api/passenger-app/payment-methods/:id` | PAX-WEB-PAYMENT-UI-20261009 |
 | A-21 | 新增付款卡片 | Design Complete | `POST /api/passenger-app/payment-methods` (`BindPaymentMethodCommand` -> `PaymentMethodResponse` status `completed`/`action_required`/`pending`) | PAX-WEB-PAYMENT-UI-20261009 |
@@ -44,11 +46,35 @@
 | A-22a | 叫車選擇付款方式 (有卡片) | Design Complete | Local booking selection -> `POST /api/passenger-app/rides` (`CreatePassengerRideCommand.paymentMethodId`) | PAX-WEB-PAYMENT-UI-20261009 |
 | A-23 | 扣款失敗阻擋 | Design Complete | `POST /api/passenger-app/rides` (Blocked: settlement pending via CS, self-service remediation unavailable; pending command. CS: 02-2944-0985) | PAX-WEB-PAYMENT-UI-20261009 |
 | B-01 | 地址搜尋與選點 | Design Complete | Local UI State | PAX-WEB-BOOKING-UI-20261009 |
-| B-02 | 地址搜尋 (載入中) | Design Complete | `GET /api/geo/search` (`GeoSearchQuery`/`GeoSearchResponse`) *Note: BFF/passenger-access boundary unresolved* | PAX-WEB-BOOKING-UI-20261009 |
-| B-03 | 地址搜尋 (候選清單) | Design Complete | `GET /api/geo/search` (`GeoSearchQuery`/`GeoSearchResponse`) *Note: BFF/passenger-access boundary unresolved* | PAX-WEB-BOOKING-UI-20261009 |
-| B-04 | 地址搜尋 (無結果) | Design Complete | `GET /api/geo/search` (`GeoSearchQuery`/`GeoSearchResponse`) *Note: BFF/passenger-access boundary unresolved* | PAX-WEB-BOOKING-UI-20261009 |
+| B-02 | 地址搜尋 (載入中) | Design Complete | `GET /api/geo/search` (`SearchGeoQuery`/`GeoSearchResponse`) *Note: BFF/passenger-access boundary unresolved* | PAX-WEB-BOOKING-UI-20261009 |
+| B-03 | 地址搜尋 (候選清單) | Design Complete | `GET /api/geo/search` (`SearchGeoQuery`/`GeoSearchResponse`) *Note: BFF/passenger-access boundary unresolved* | PAX-WEB-BOOKING-UI-20261009 |
+| B-04 | 地址搜尋 (無結果) | Design Complete | `GET /api/geo/search` (`SearchGeoQuery`/`GeoSearchResponse`) *Note: BFF/passenger-access boundary unresolved* | PAX-WEB-BOOKING-UI-20261009 |
 | B-05 | 地址選點 (超出服務範圍) | Design Complete | `POST /api/passenger-app/quotes` (`FareQuoteResponse.serviceAreaResult` `not_serviceable`) | PAX-WEB-BOOKING-UI-20261009 |
 | B-06 | 預約時間選擇 (最短前置) | Design Complete | Local UI State Validation | PAX-WEB-BOOKING-UI-20261009 |
 | B-07 | 費率試算 (載入中) | Design Complete | `POST /api/passenger-app/quotes` (`FareQuoteCommand` -> `FareQuoteResponse`) | PAX-WEB-BOOKING-UI-20261009 |
 | B-08 | 費率試算 (過期重算) | Design Complete | `POST /api/passenger-app/rides` (Quote expired) | PAX-WEB-BOOKING-UI-20261009 |
 | B-09 | 重新試算與確認叫車 | Design Complete | `B-09` -> `E-19b` (fee confirmation) -> `POST /api/passenger-app/rides` (`CreatePassengerRideCommand` with `fareSnapshotId`, `paymentMethodId`, `passengerConfirmedAt`) | PAX-WEB-BOOKING-UI-20261009 |
+
+
+## API Request/Response & Auth Mappings
+
+- **OTP Flow (A-03, A-04, A-05, A-05b-f)**:
+  - Request: `RequestOtpCommand` -> `RequestOtpResponse` (contains `challenge` and `transactionId`).
+  - Verify: `VerifyOtpCommand` (requires `transactionId`, `code`) -> `VerifyOtpResponse` (contains `logged_in` or `linked`).
+  - Errors: Canonical envelopes mapped to `invalid_code`, `challenge_locked`, `too_many_requests`. (Expired code follows real `invalid_code` handling).
+  - Auth: `login` vs `link` purpose verified via session-bound purpose; `link` requires existing authenticated Bearer. Metadata rules apply per SD §2 and §3 lines 41-44.
+- **OAuth Flow (A-07, A-08)**:
+  - Start: `OAuthStartCommand` -> `OAuthStartResponse` (contains `authUrl`, `state`, `transactionId`).
+  - Callback: `OAuthCallbackCommand` (requires `code`, `state`) -> `OAuthCallbackResponse` (`logged_in` or `linked`).
+  - Auth: `link` requires existing authenticated Bearer. Bound proof checked.
+- **Identity & Account Management (A-10, A-11, A-12, A-14, A-15)**:
+  - `A-10`: `GET /api/passenger-app/me` (requires Bearer). Includes personal-data update / contact-verification transition.
+  - `A-11`: `GET /api/passenger-app/me/identities` (requires Bearer).
+  - `A-12`: `DELETE /api/passenger-app/me/identities/{id}` (Identity Unlink Request -> Unlink Response).
+  - `A-14/15`: `DELETE /api/passenger-app/me` (Request deletion, server-derived subject -> Deletion Response).
+- **Complaints (A-18, A-19)**:
+  - Request: `CreatePassengerComplaintCommand` (category: `service`/`fare`/`lost_item`/`other`, `content`, optional `lostItemDescription`, `contactConsent`).
+  - Response: returns `complaintId`.
+- **Payment Methods (A-20, A-20a)**:
+  - `A-20`: `PUT /api/passenger-app/payment-methods/:id/default` (`SetDefaultPaymentMethodCommand` -> Set Default Response mapping).
+  - `A-20a`: `DELETE /api/passenger-app/payment-methods/:id` -> Remove Response mapping.
