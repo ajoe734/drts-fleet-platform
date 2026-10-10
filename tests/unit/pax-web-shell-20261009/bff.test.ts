@@ -202,6 +202,13 @@ describe("Passenger BFF Route", () => {
   ])(
     "R20: rejects unauthorized POST %s before any metadata or API fetch",
     async (fullPath) => {
+      // A permissive historical handler must reach a successful HTTP boundary,
+      // not fail because the fetch stub returns undefined.
+      global.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes("metadata.google.internal"))
+          return new Response("trusted-identity");
+        return apiWireResponse({ success: true });
+      });
       const req = new NextRequest(
         `https://ride.smarttransport.tw/api/passenger-app/${fullPath}`,
         {
