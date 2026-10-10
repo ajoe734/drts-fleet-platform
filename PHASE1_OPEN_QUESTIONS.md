@@ -35,7 +35,7 @@ completion additionally requires the approved canvas.
 The dispatched helper cannot write parent notes or disposition metadata:
 both current-release CLI attempts were rejected by the worker guard.
 Supervisor must record `resolved_parent_status: blocked`,
-`resolved_parent_waiting_for: Supervisor`, and the explicit next step below
+`resolved_parent_waiting_for: Claude` (governance coordination lane), and the explicit next step below
 before helper handoff/merge, and update the parent's next step without resuming
 it. This prevents a planning-only merge from making the parent runnable.
 See the [source evidence, proposed contract, screen requirements, exact state

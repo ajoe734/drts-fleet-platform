@@ -146,6 +146,7 @@ Helper `start` and `progress` exited 0. Required writes attempted:
 | --- | --- |
 | `note PAX-WEB-BOOKING-UI-20261009 <route>` | Exit 1: `Dispatched worker cannot mutate a different task`. Parent next step was not updated by this helper. |
 | `TASK_METADATA_JSON=<blocked disposition> ... assign <helper> Codex Codex2` | Exit 1: `Dispatched workers must use their assigned task lifecycle commands`. Metadata was not persisted. |
+| `blocker <helper> <evidence> Supervisor` | Exit 1: `Unknown agent: Supervisor`; this CLI accepts an agent lane as the waiting target. Use `Claude` for governance coordination, with Supervisor still responsible for authorized state writes. |
 
 No guard removal, role impersonation or direct state-file editing was used.
 The required action is recorded in helper `progress`. Supervisor must perform
@@ -153,7 +154,7 @@ these writes through its authorized current-release CLI context before handoff:
 
 | Target | Required canonical write |
 | --- | --- |
-| Helper, preserving Codex/Codex2 | `resolved_parent_status: blocked`; `resolved_parent_waiting_for: Supervisor`; `resolved_parent_next`: the next step below. Do not fabricate `resolved_parent_at` (lifecycle records it). |
+| Helper, preserving Codex/Codex2 | `resolved_parent_status: blocked`; `resolved_parent_waiting_for: Claude`; `resolved_parent_next`: the next step below. Do not fabricate `resolved_parent_at` (lifecycle records it). |
 | Parent, preserving Gemini/Codex2 and both acceptance keys | Set `next` to the same concrete route; retain blocked status and route coordination to Supervisor. Do not resume from this planning-only helper. |
 
 **Parent next step:** Supervisor coordinates formal typed reservation settings
@@ -198,8 +199,9 @@ An open planning PR or green documentation CI does not satisfy those gates.
 - Canonical consistency initially failed (exit 1) on the anchor because the
   parent UAT was cited as a local dev path even though it exists only on the
   parent's unmerged branch. Corrected to an immutable parent-revision link above.
-  Final scoped canonical-consistency check is required before closeout; this
-  is a documentation provenance correction, not a product finding repair.
+  The corrected scoped check passed (exit 0); repeat checks for the final branch
+  range before closeout. This is a documentation provenance correction, not a
+  product finding repair.
 - Python 3.12.3 documentation reference probe: exit 0, all 16 local links in
   the new question/helper resolve, including the URL-encoded Passenger filename;
   both parent acceptance keys retained. It checks actual repository paths and
