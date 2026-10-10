@@ -7,6 +7,10 @@ import {
   type OidcVerifyOverrides,
 } from "../../auth/oidc-id-token-verifier";
 import type { OAuthProvider } from "./oauth-transaction.port";
+import {
+  FACEBOOK_AUTHORIZATION_ENDPOINT,
+  FACEBOOK_GRAPH_ORIGIN,
+} from "./facebook-oauth";
 
 export interface OAuthProviderConfig {
   provider: OAuthProvider;
@@ -59,12 +63,27 @@ function configured(
         hsSecret: secret,
       },
     };
-  return null; // facebook: table/flow reserved, OAuth2 (not OIDC) exchange not implemented yet.
+  if (provider === "facebook")
+    return {
+      provider,
+      clientId: id,
+      clientSecret: secret,
+      authorizationEndpoint: FACEBOOK_AUTHORIZATION_ENDPOINT,
+      tokenEndpoint: `${FACEBOOK_GRAPH_ORIGIN}/oauth/access_token`,
+      verifyOverrides: {}, // Facebook uses Graph verification, not an ID token.
+    };
+  return null;
 }
 
 export function resolveOAuthProviderConfig(
   provider: OAuthProvider,
 ): OAuthProviderConfig | null {
+  if (provider === "facebook")
+    return configured(
+      provider,
+      process.env.FACEBOOK_APP_ID,
+      process.env.FACEBOOK_APP_SECRET,
+    );
   if (provider === "google")
     return configured(
       provider,
@@ -83,8 +102,7 @@ export function resolveOAuthProviderConfig(
 export function listConfiguredAuthProviders(): AuthProvider[] {
   const providers: AuthProvider[] = [];
   if (resolveOAuthProviderConfig("google")) providers.push("google");
-  // Facebook's OAuth2 (not OIDC) exchange is not implemented by this task,
-  // regardless of env config, so it is never reported as available here.
+  if (resolveOAuthProviderConfig("facebook")) providers.push("facebook");
   if (resolveOAuthProviderConfig("line")) providers.push("line");
   return providers;
 }

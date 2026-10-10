@@ -26,7 +26,10 @@ import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { resolveRouteAuthPolicy } from "./auth.policy";
 import { JwtAuthService } from "./jwt-auth.service";
 import { PassengerAccountService } from "../../modules/passenger-app/account/passenger-account.service";
-import { verifyGoogleAssertionOrInternalKey } from "./internal-key.middleware";
+import {
+  isFacebookDataDeletionRequest,
+  verifyGoogleAssertionOrInternalKey,
+} from "./internal-key.middleware";
 import { StepUpProofService } from "./step-up-proof.service";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { SecurityEventsService } from "../../modules/security-events/security-events.service";
@@ -345,6 +348,18 @@ export class BootstrapAuthGuard implements CanActivate {
   ): Promise<boolean> {
     // Clear any earlier identity; only the verified session below may populate it.
     delete request.identity;
+    if (
+      open &&
+      isFacebookDataDeletionRequest(
+        request.method ?? "GET",
+        request.originalUrl ?? request.url ?? "",
+      )
+    ) {
+      // Meta has no BFF credential. These exact OpenRoutes authenticate their
+      // signed_request or receipt HMAC in the controller, independently of any
+      // passenger Bearer. Bootstrap identity headers were already rejected.
+      return true;
+    }
     const token = extractBearerToken(headers);
     if (token && this.passengerAccountService) {
       const identity =

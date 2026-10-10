@@ -70,6 +70,22 @@ export function resolveRouteAuthPolicy(
   }
 
   if (routePath === "passenger-app" || routePath.startsWith("passenger-app/")) {
+    if (
+      (upperMethod === "POST" &&
+        routePath === "passenger-app/auth/facebook/data-deletion") ||
+      (upperMethod === "GET" &&
+        /^passenger-app\/auth\/facebook\/data-deletion\/status\/[^/]+$/.test(
+          routePath,
+        ))
+    ) {
+      return {
+        routeKey: "passenger-app:facebook:data-deletion",
+        requiredScopes: [],
+        allowedRealms: [],
+        description:
+          "Meta signed_request deletion webhook and signed anonymous completion receipt",
+      };
+    }
     if (routePath.startsWith("passenger-app/platform/")) {
       return {
         routeKey: "passenger-app:platform",
