@@ -180,10 +180,27 @@ def fetch_and_validate_provenance(args) -> None:
     
     with tempfile.TemporaryDirectory() as td:
         zip_path = os.path.join(td, "artifact.zip")
-        # Fetch using gh api
-        res = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/artifacts/{args.artifact_id}/zip"], stdout=open(zip_path, "wb"), timeout=30)
-        if res.returncode != 0:
-            raise RuntimeError("Failed to fetch artifact from GitHub API")
+        # Fetch using gh api with streaming size bound
+        import time
+        start_t = time.time()
+        with subprocess.Popen(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/artifacts/{args.artifact_id}/zip"], stdout=subprocess.PIPE) as p:
+            downloaded = 0
+            with open(zip_path, "wb") as f:
+                while True:
+                    if time.time() - start_t > 30:
+                        p.kill()
+                        raise RuntimeError("Artifact download timeout")
+                    chunk = p.stdout.read(4096)
+                    if not chunk:
+                        break
+                    downloaded += len(chunk)
+                    if downloaded > 5850:
+                        p.kill()
+                        raise RuntimeError("Artifact too large")
+                    f.write(chunk)
+            p.wait()
+            if p.returncode != 0:
+                raise RuntimeError("Failed to fetch artifact from GitHub API")
         
         # enforce size bound on disk
         require(os.path.getsize(zip_path) == 5850, "Downloaded artifact size mismatch")
@@ -354,6 +371,26 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         SELECT count(*) as c FROM reg.phase1_registry_contracts WHERE source_submission_id IN ({safe_subs})
     ), fks AS (
         SELECT count(*) as c FROM pg_constraint WHERE confrelid IN ('fleet.supply_submissions'::regclass, 'fleet.supply_documents'::regclass)
+    ), pres_subs AS (
+        SELECT count(*) as c FROM fleet.supply_submissions
+    ), pres_docs AS (
+        SELECT count(*) as c FROM fleet.supply_documents
+    ), pres_revs AS (
+        SELECT count(*) as c FROM fleet.supply_review_events
+    ), pres_affs AS (
+        SELECT count(*) as c FROM fleet.vehicle_fleet_affiliations
+    ), pres_discs AS (
+        SELECT count(*) as c FROM reg.vehicle_passenger_disclosure_profiles
+    ), pres_creds AS (
+        SELECT count(*) as c FROM reg.driver_public_registration_credentials
+    ), pres_cdriv AS (
+        SELECT count(*) as c FROM reg.phase1_registry_drivers
+    ), pres_cveh AS (
+        SELECT count(*) as c FROM reg.phase1_registry_vehicles
+    ), pres_cpol AS (
+        SELECT count(*) as c FROM reg.phase1_registry_policies
+    ), pres_ccont AS (
+        SELECT count(*) as c FROM reg.phase1_registry_contracts
     )
     SELECT json_build_object(
         'subs', (SELECT data FROM subs),
@@ -367,6 +404,16 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         'cpol', (SELECT c FROM cpol),
         'ccont', (SELECT c FROM ccont),
         'fks', (SELECT c FROM fks),
+        'pres_subs', (SELECT c FROM pres_subs),
+        'pres_docs', (SELECT c FROM pres_docs),
+        'pres_revs', (SELECT c FROM pres_revs),
+        'pres_affs', (SELECT c FROM pres_affs),
+        'pres_discs', (SELECT c FROM pres_discs),
+        'pres_creds', (SELECT c FROM pres_creds),
+        'pres_cdriv', (SELECT c FROM pres_cdriv),
+        'pres_cveh', (SELECT c FROM pres_cveh),
+        'pres_cpol', (SELECT c FROM pres_cpol),
+        'pres_ccont', (SELECT c FROM pres_ccont),
         'tx_ro', current_setting('transaction_read_only'),
         'tx_iso', current_setting('transaction_isolation')
     );
@@ -384,7 +431,8 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
     if counts.get('tx_ro') != 'on' or counts.get('tx_iso') != 'repeatable read':
         return {"status": "rejected", "reason": "Transaction mode not verified"}
         
-    for k in ['revs', 'affs', 'discs', 'creds', 'cdriv', 'cveh', 'cpol', 'ccont', 'fks']:
+    for k in ['revs', 'affs', 'discs', 'creds', 'cdriv', 'cveh', 'cpol', 'ccont', 'fks',
+              'pres_subs', 'pres_docs', 'pres_revs', 'pres_affs', 'pres_discs', 'pres_creds', 'pres_cdriv', 'pres_cveh', 'pres_cpol', 'pres_ccont']:
         if counts.get(k) is None:
             return {"status": "error", "error": f"Missing count for {k}"}
         if counts.get(k, 0) < 0:
@@ -497,6 +545,18 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         "affiliations_count": counts.get('affs', 0),
         "disclosure_count": counts.get('discs', 0),
         "credential_count": counts.get('creds', 0),
+        "preservation_inventory": {
+            "submissions": counts.get('pres_subs'),
+            "documents": counts.get('pres_docs'),
+            "review_events": counts.get('pres_revs'),
+            "affiliations": counts.get('pres_affs'),
+            "disclosures": counts.get('pres_discs'),
+            "credentials": counts.get('pres_creds'),
+            "drivers": counts.get('pres_cdriv'),
+            "vehicles": counts.get('pres_cveh'),
+            "policies": counts.get('pres_cpol'),
+            "contracts": counts.get('pres_ccont')
+        }
     }
 
 def default_gcs_runner(action: str, bucket: str, key: str) -> Dict[str, Any]:
@@ -538,7 +598,7 @@ def default_gcs_runner(action: str, bucket: str, key: str) -> Dict[str, Any]:
                     r, _, _ = select.select([p.stdout, p.stderr], [], [], 1.0)
                     
                     if p.stdout in r:
-                        chunk = p.stdout.read(4096)
+                        chunk = os.read(p.stdout.fileno(), 4096)
                         if chunk:
                             body += chunk
                             if len(body) > 10 * 1024 * 1024:
@@ -547,7 +607,7 @@ def default_gcs_runner(action: str, bucket: str, key: str) -> Dict[str, Any]:
                                 return {"status": "error", "stderr": "File too large"}
                                 
                     if p.stderr in r:
-                        chunk = p.stderr.read(4096)
+                        chunk = os.read(p.stderr.fileno(), 4096)
                         if chunk:
                             stderr_data += chunk
                             if len(stderr_data) > 1 * 1024 * 1024:
@@ -561,12 +621,12 @@ def default_gcs_runner(action: str, bucket: str, key: str) -> Dict[str, Any]:
                             r2, _, _ = select.select([p.stdout, p.stderr], [], [], 0.0)
                             progress = False
                             if p.stdout in r2:
-                                chunk = p.stdout.read(4096)
+                                chunk = os.read(p.stdout.fileno(), 4096)
                                 if chunk:
                                     body += chunk
                                     progress = True
                             if p.stderr in r2:
-                                chunk = p.stderr.read(4096)
+                                chunk = os.read(p.stderr.fileno(), 4096)
                                 if chunk:
                                     stderr_data += chunk
                                     progress = True
