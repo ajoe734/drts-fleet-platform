@@ -1273,6 +1273,8 @@ export function RatingCard({
             score: selectedScore,
             tags: selectedTags.length > 0 ? selectedTags : undefined,
             comment: comment || undefined,
+            contactRequested:
+              selectedScore <= 3 ? Boolean(contactRequested) : false,
           }
         : {
             rideId: token,
@@ -1280,7 +1282,7 @@ export function RatingCard({
             tags: selectedTags,
             comments: comment,
             contactRequested:
-              selectedScore <= 2 ? Boolean(contactRequested) : false,
+              selectedScore <= 3 ? Boolean(contactRequested) : false,
           };
 
     requestPassengerRideAction<{ score: number }>(
@@ -1325,7 +1327,7 @@ export function RatingCard({
             marginTop: 4,
           }}
         >
-          {selectedScore} {t.Star}
+          {selectedScore} {t.Star} · {t.StarLabels[selectedScore - 1]}
         </div>
       </div>
       <div
@@ -1337,7 +1339,11 @@ export function RatingCard({
           marginTop: 8,
         }}
       >
-        {fixture.ratingSummary.chips?.map((chip) => {
+        {fixture.ratingSummary.chips?.filter(chip => {
+          const positive = ["車內整潔","駕駛親切","路線順暢","準時到達"];
+          if (selectedScore >= 4) return positive.includes(chip);
+          return !positive.includes(chip);
+        }).map((chip) => {
           const selected = selectedTags.includes(chip);
           return (
             <button
