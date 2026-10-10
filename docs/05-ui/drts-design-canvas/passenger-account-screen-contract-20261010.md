@@ -59,22 +59,22 @@
 ## API Request/Response & Auth Mappings
 
 - **OTP Flow (A-03, A-04, A-05, A-05b-f)**:
-  - Request: `RequestOtpCommand` -> `RequestOtpResponse` (contains `challenge` and `transactionId`).
-  - Verify: `VerifyOtpCommand` (requires `transactionId`, `code`) -> `VerifyOtpResponse` (contains `logged_in` or `linked`).
+  - Request: `RequestOtpCommand` -> `RequestOtpResponse` (contains `success`, `challenge`, and `message`).
+  - Verify: `VerifyOtpCommand` (requires `target`, `provider`, `code`, `challenge`) -> `VerifyOtpResponse` (`logged_in`, `linked`, or `verified_contact_phone`).
   - Errors: Canonical envelopes mapped to `invalid_code`, `challenge_locked`, `too_many_requests`. (Expired code follows real `invalid_code` handling).
-  - Auth: `login` vs `link` purpose verified via session-bound purpose; `link` requires existing authenticated Bearer. Metadata rules apply per SD §2 and §3 lines 41-44.
+  - Auth: `login` requires Metadata; `link` and `verify_contact_phone` require existing authenticated Bearer on both request and verify. BFF handles tokens in HttpOnly/Secure/SameSite=Lax cookies per SD §1-3.
 - **OAuth Flow (A-07, A-08)**:
   - Start: `OAuthStartCommand` -> `OAuthStartResponse` (contains `authUrl`, `state`, `transactionId`).
-  - Callback: `OAuthCallbackCommand` (requires `code`, `state`) -> `OAuthCallbackResponse` (`logged_in` or `linked`).
-  - Auth: `link` requires existing authenticated Bearer. Bound proof checked.
+  - Callback: `OAuthCallbackCommand` (requires `provider`, `code`, `state`, `transactionId`) -> `OAuthCallbackResponse` (`logged_in` or `linked`). BFF retains `transactionId` and `state` in the callback binding plus provider/path match.
+  - Auth: `link` requires existing authenticated Bearer. Bound proof checked. BFF handles tokens in HttpOnly/Secure/SameSite=Lax cookies per SD §1-3.
 - **Identity & Account Management (A-10, A-11, A-12, A-14, A-15)**:
-  - `A-10`: `GET /api/passenger-app/me` (requires Bearer). Includes personal-data update / contact-verification transition.
-  - `A-11`: `GET /api/passenger-app/me/identities` (requires Bearer).
-  - `A-12`: `DELETE /api/passenger-app/me/identities/{id}` (Identity Unlink Request -> Unlink Response).
-  - `A-14/15`: `DELETE /api/passenger-app/me` (Request deletion, server-derived subject -> Deletion Response).
+  - `A-10`: `GET /api/passenger-app/me` (`GetPassengerMeQuery` -> `PassengerMeResponse`) and `PATCH /api/passenger-app/me` (`UpdatePassengerMeCommand` -> `PassengerMeResponse`) (requires Bearer). Includes personal-data update / contact-verification transition.
+  - `A-11`: `GET /api/passenger-app/me/identities` (`GetPassengerIdentitiesQuery` -> `PassengerIdentitiesResponse`) (requires Bearer).
+  - `A-12`: `DELETE /api/passenger-app/me/identities/{id}` (`UnlinkPassengerIdentityCommand` -> `UnlinkPassengerIdentityResponse`, `identityId` from unlink path).
+  - `A-14/15`: `DELETE /api/passenger-app/me` (`DeletePassengerAccountCommand` -> `DeletePassengerAccountResponse`, deletion subject is server-derived, not untrusted body).
 - **Complaints (A-18, A-19)**:
-  - Request: `CreatePassengerComplaintCommand` (category: `service`/`fare`/`lost_item`/`other`, `content`, optional `lostItemDescription`, `contactConsent`).
-  - Response: returns `complaintId`.
+  - Request: `POST /api/passenger-app/rides/:id/complaints` (`CreatePassengerComplaintCommand`, path mapping: `rideId`, body: `category`, `content`, optional `lostItemDescription`, `contactConsent`).
+  - Response: `CreatePassengerComplaintResponse` (returns `complaintId`).
 - **Payment Methods (A-20, A-20a)**:
-  - `A-20`: `PUT /api/passenger-app/payment-methods/:id/default` (`SetDefaultPaymentMethodCommand` -> Set Default Response mapping).
-  - `A-20a`: `DELETE /api/passenger-app/payment-methods/:id` -> Remove Response mapping.
+  - `A-20`: `GET /api/passenger-app/payment-methods` (`GetPaymentMethodsQuery` -> `PaymentMethodsResponse`), `PUT /api/passenger-app/payment-methods/:id/default` (`SetDefaultPaymentMethodCommand` -> `SetDefaultPaymentMethodResponse`).
+  - `A-20a`: `DELETE /api/passenger-app/payment-methods/:id` (`RemovePaymentMethodCommand` -> `RemovePaymentMethodResponse`).

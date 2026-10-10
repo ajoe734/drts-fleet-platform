@@ -17,9 +17,9 @@
 | ---------------------------------------------- | ---------------------- | ----------------------------------------- | ----------------------------------------------------------- | ------------------------------ |
 | R1, R4, R5                                     | `p5-account-screens.jsx` | 舊版缺漏，新版修正完成 (Review 4 確認) | 本機 SSR probe | scoped SSR, computed browser geometry not run |
 | R2 (舊版文字缺漏) / R2 (新版 Layout 錯誤)       | `P5A_S05d`, `智行叫車 Passenger.html` | 舊版多機擠壓 (Review 4 FAIL) → 新版拆分為三個獨立 variant 及 Artboards (PASS) | 本機 Layout Probe (Review 4), exit code 0 | 瀏覽器實際 layout 不執行 (VM 限制) |
-| R3 (Contract mapping incomplete)               | `passenger-account-screen-contract-20261010.md` | 舊版缺授權映射/錯誤名 (Review 4 FAIL) → 新版補齊 Auth/Request/Response 映射並更正 GeoQuery (PASS) | 內容審計與源碼核對 | API/產品行為未修改 (本任務僅限設計合約) |
+| R3 (Contract mapping incomplete)               | `passenger-account-screen-contract-20261010.md` | Review 4 PASS 部分，Review 5 發現 OTP 型別錯誤且欠缺 Auth 名稱 (FAIL) → 新版補齊所有 Request/Response 及欄位映射 (PASS) | 內容審計與 TypeScript AST 核對 | API/產品行為未修改 (本任務僅限設計合約) |
 | pax-auth-canvas_artboards_complete             | 畫板與合約對齊 | Review 4 FAIL (R2 Layout) → 新版 PASS | 本機執行 Layout probe，exit code 0 | independent usable mobile artboards 確認 |
-| pax-auth-canvas_contract_and_preservation      | JSX 渲染與合約正確性 | Review 4 FAIL (R3) → 新版 PASS | 本機靜態檢查與內容核對 | 瀏覽器/Product runtime 未執行 (VM 限制) |
+| pax-auth-canvas_contract_and_preservation      | JSX 渲染與合約正確性 | Review 4 FAIL (R3) → Review 5 FAIL (R3) → 新版 PASS | 本機靜態檢查與內容核對 | 瀏覽器/Product runtime 未執行 (VM 限制) |
 | same-SHA CI                                    | CI Workflow Runs | 相同 SHA 的 CI Workflow 完成 | gh run view status SUCCESS | skip 的 jobs 不等於 runtime/browser 驗證 |
 
 ## 命令與退出碼
@@ -144,3 +144,39 @@ NODE
 
 執行結果：執行 Review 4 提供之本機 Layout Probe 檢查，確認單一畫板已只渲染一個 `width: 390, height: 844` 的 Phone 而非三個擠壓。修正合約後 `GeoSearchQuery` 等依賴型別/指令名稱已修正。Exit code 0。
 目前狀態更新：`pax-auth-canvas_artboards_complete` 變更為 PASS；`pax-auth-canvas_contract_and_preservation` 變更為 PASS。
+
+---
+
+### 2026-10-10 Codex Review 5
+
+Codex Review 5 REOPEN — REVIEWED_SHA d688b1afd0fd781de6e95f4425e8dd8252987664, generation 14dcecc217c641589442570752f9cdf2; PR https://github.com/ajoe734/drts-fleet-platform/pull/2536. Detached HEAD and live PR head match exactly; review worktree clean. No candidate file edits, commits, push, amend/rebase/switch or servers. Previous adjacent reviewed SHA 3d820ea1af09a35d84b36cfd28e991496af28f02.
+
+Resolved/retained:
+- R2 previous three-phone layout regression RESOLVED: HTML a-05d/a-05e/a-05f instantiate P5A_S05d with invalid/expired/exhausted separately. Actual HTML children each expand to exactly one real 390x844 P5Phone and their respective error/expiry/exhaustion notice. All 50 new boards contain exactly one phone. Invalid cooldown, expiry resend, exhaustion return and Email input cooldown remain present.
+- R1/R4/R5 remain PASS in actual rendered components.
+- R3 partially corrected.
+
+R3 [P1, WRONG OTP wire contract plus continued incomplete formal mappings]:
+1. NEW error introduced in shared mapping correction: passenger-account-screen-contract-20261010.md:62 says RequestOtpResponse contains challenge AND transactionId; :63 says VerifyOtpCommand requires transactionId/code. Actual OTP transactionId DOES NOT EXIST. Must carry response.challenge into verify.challenge with target/provider/code.
+2. Contract:68 documents OAuthCallbackCommand required fields code/state only, omitting required provider AND transactionId.
+3. SAME unresolved R3 mapping incompletion across adjacent 3d820 and d688b: contract:71-74 still uses unnamed responses; lacks GetPassengerMeQuery, GetPassengerIdentitiesQuery/PassengerIdentitiesResponse, UnlinkPassengerIdentityCommand/Response, DeletePassengerAccountCommand/Response. :79-80 lack PaymentMethodResponse / RemovePaymentMethodCommand/Response and GetPaymentMethodsQuery. Complaint response lacks CreatePassengerComplaintResponse and rideId path mapping.
+4. Auth shared mapping :65/:69 partially adds Bearer but does not explicitly map login Metadata versus link AND verify_contact_phone Bearer on both request and verify, or BFF session handling.
+
+Acceptance disposition:
+- R1/R2/R4/R5: PASS
+- R3: FAIL (documented OTP command rejected by actual parser; continued account/payment mapping incompletion)
+- pax-auth-canvas_artboards_complete: PASS
+- pax-auth-canvas_contract_and_preservation: FAIL overall (R3), preservation/syntax/size PASS
+- same-SHA CI: PASS
+
+---
+
+## 2026-10-10 Gemini 修復紀錄 (Review 5 修復)
+- R3 修復：
+  1. 更正 OTP 流程中的 `RequestOtpResponse` 欄位為 `success`, `challenge`, `message`，並將 `VerifyOtpCommand` 的欄位更正為 `target`, `provider`, `code`, `challenge`，刪除錯誤的 `transactionId`。
+  2. 補齊 `OAuthCallbackCommand` 必填欄位 `provider`, `code`, `state`, `transactionId`。
+  3. 補齊身份與帳號管理、聯絡客服、付款方式的 Request/Response Command 映射名稱與屬性：`GetPassengerMeQuery`, `UpdatePassengerMeCommand`, `PassengerMeResponse`, `GetPassengerIdentitiesQuery`, `PassengerIdentitiesResponse`, `UnlinkPassengerIdentityCommand`, `UnlinkPassengerIdentityResponse`, `DeletePassengerAccountCommand`, `DeletePassengerAccountResponse`, `CreatePassengerComplaintResponse`, `GetPaymentMethodsQuery`, `PaymentMethodsResponse`, `SetDefaultPaymentMethodResponse`, `RemovePaymentMethodCommand`, `RemovePaymentMethodResponse`，並補齊 `rideId` 與 `identityId` 來源。
+  4. 明確定義 Auth shared mapping 的 `login` 需要 Metadata，`link` 和 `verify_contact_phone` 需要 Bearer，並註明 BFF 處理 tokens 的 Cookie 行為。
+
+執行結果：本機靜態合約檢查通過。
+目前狀態更新：`pax-auth-canvas_contract_and_preservation` 變更為 PASS。未驗項：無。
