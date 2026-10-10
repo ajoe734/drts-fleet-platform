@@ -4,6 +4,11 @@ import { PassengerJwtService } from "../../common/auth/passenger-jwt.service";
 import { PassengerAccountController } from "./account/passenger-account.controller";
 import { PassengerAccountRepository } from "./account/passenger-account.repository";
 import { PassengerAccountService } from "./account/passenger-account.service";
+import { GeoModule } from "../geo/geo.module";
+import { ServiceAreaModule } from "../service-area/service-area.module";
+import { PassengerFareController } from "./fare/passenger-fare.controller";
+import { PassengerFareRepository } from "./fare/passenger-fare.repository";
+import { PassengerFareService } from "./fare/passenger-fare.service";
 import { PassengerOAuthController } from "./oauth/passenger-oauth.controller";
 import { PassengerOAuthTransactionRepository } from "./oauth/oauth-transaction.repository";
 import { PassengerOAuthService } from "./oauth/passenger-oauth.service";
@@ -23,10 +28,11 @@ import { FacebookDataDeletionService } from "./oauth/facebook-data-deletion.serv
 
 @Global()
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, GeoModule, ServiceAreaModule],
   controllers: [
     PassengerAccountController,
     PassengerOtpController,
+    PassengerFareController,
     PassengerOAuthController,
     FacebookDataDeletionController,
   ],
@@ -34,6 +40,8 @@ import { FacebookDataDeletionService } from "./oauth/facebook-data-deletion.serv
     PassengerJwtService,
     PassengerAccountRepository,
     PassengerAccountService,
+    PassengerFareRepository,
+    PassengerFareService,
     PassengerOAuthTransactionRepository,
     PassengerOAuthService,
     FacebookDataDeletionService,
@@ -48,6 +56,11 @@ import { FacebookDataDeletionService } from "./oauth/facebook-data-deletion.serv
         createNotificationDeliveryServiceFromEnv(process.env, database),
     },
   ],
-  exports: [PassengerAccountService, PassengerJwtService],
+  exports: [
+    PassengerAccountService,
+    PassengerJwtService,
+    PassengerFareRepository,
+    PassengerFareService,
+  ],
 })
 export class PassengerAppModule {}
