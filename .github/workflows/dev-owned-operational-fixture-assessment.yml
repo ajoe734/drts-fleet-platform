@@ -20,10 +20,20 @@ on:
       - "docs/04-uat/dev-owned-operational-fixture-assessment-20261010.md"
   workflow_dispatch:
     inputs:
+      source_ref:
+        description: 'Immutable product commit SHA (must match source SHA 4a166f3ed2a7000061acc737ee475ae3c47dca56)'
+        required: true
+        default: '4a166f3ed2a7000061acc737ee475ae3c47dca56'
+        type: string
       product_run_id:
         description: "Authoritative product run ID"
         required: true
         default: "37906298090"
+        type: string
+      workflow_def_sha:
+        description: 'Authoritative deploy workflow definition SHA'
+        required: true
+        default: '9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c'
         type: string
       artifact_id:
         description: "Authoritative operational browser evidence artifact ID"
@@ -41,6 +51,8 @@ concurrency:
 env:
   DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825"
   DEV_GCP_REGION: "us-central1"
+  EXPECTED_PROJECT_ID: "drts-dev-devcc-20260825"
+  EXPECTED_REGION: "us-central1"
 
 jobs:
   unit-tests:
@@ -78,6 +90,43 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.source_ref }}
+          fetch-depth: 0
+
+      - name: Fresh Cloud metadata and overlap reservation check
+        env:
+          INPUT_WORKFLOW_DEF_SHA: ${{ github.event.inputs.workflow_def_sha }}
+          INPUT_SOURCE_REF: ${{ github.event.inputs.source_ref }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 operations/verification/read-dev-cloud-metadata.py \
+            --expected-runtime-sha "$INPUT_SOURCE_REF" \
+            --definition-sha "$INPUT_WORKFLOW_DEF_SHA" \
+            --output .local-cloud-metadata.json
+            
+          # Paginated cross-workflow reservation check
+          PAGE=1
+          HAS_NEXT=true
+          ACTIVE_JOBS=""
+          while [ "$HAS_NEXT" = "true" ]; do
+            RES=$(gh api "/repos/${{ github.repository }}/actions/runs?status=in_progress&per_page=100&page=$PAGE")
+            MATCHES=$(echo "$RES" | jq -r '.workflow_runs[] | select(.name | test("Deploy|Restore|Provision")) | .id')
+            if [ -n "$MATCHES" ]; then
+              ACTIVE_JOBS="$ACTIVE_JOBS $MATCHES"
+            fi
+            COUNT=$(echo "$RES" | jq '.workflow_runs | length')
+            if [ "$COUNT" -lt 100 ]; then
+              HAS_NEXT=false
+            else
+              PAGE=$((PAGE+1))
+            fi
+          done
+          
+          if [ -n "$ACTIVE_JOBS" ]; then
+            echo "Overlap detected: $ACTIVE_JOBS"
+            exit 1
+          fi
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -99,23 +148,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client
 
-      - name: Fresh Cloud metadata and overlap reservation check
-        run: |
-          python3 operations/verification/read-dev-cloud-metadata.py > .local-cloud-metadata.json
-
-      - name: Verify no active conflicting workflows
+      - name: Execute read-only assessment
         env:
+          INPUT_PRODUCT_RUN_ID: ${{ github.event.inputs.product_run_id }}
+          INPUT_ARTIFACT_ID: ${{ github.event.inputs.artifact_id }}
+          INPUT_SOURCE_REF: ${{ github.event.inputs.source_ref }}
+          INPUT_WORKFLOW_DEF_SHA: ${{ github.event.inputs.workflow_def_sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ACTIVE=$(gh run list --status in_progress --json name,databaseId --jq '.[] | select(.name | contains("Deploy") or contains("Restore") or contains("Provision")) | .databaseId')
-          if [ -n "$ACTIVE" ]; then
-            echo "Overlap detected: $ACTIVE"
-            exit 1
-          fi
-
-      - name: Execute read-only assessment
-        run: |
           python3 operations/verification/assess-owned-operational-fixtures.py \
-            --product-run-id "${{ github.event.inputs.product_run_id }}" \
-            --artifact-id "${{ github.event.inputs.artifact_id }}"
-
+            --product-run-id "$INPUT_PRODUCT_RUN_ID" \
+            --artifact-id "$INPUT_ARTIFACT_ID" \
+            --source-sha "$INPUT_SOURCE_REF" \
+            --workflow-def-sha "$INPUT_WORKFLOW_DEF_SHA"

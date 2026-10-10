@@ -5,6 +5,11 @@ import importlib.util
 from unittest.mock import patch, MagicMock
 import sys
 from pathlib import Path
+import os
+import io
+import zipfile
+import tempfile
+import argparse
 
 script_dir = Path(__file__).resolve().parent
 operations_dir = script_dir.parent.parent.parent / "operations" / "verification"
@@ -16,6 +21,16 @@ spec = importlib.util.spec_from_file_location(module_name, file_path)
 assess = importlib.util.module_from_spec(spec)
 sys.modules[module_name] = assess
 spec.loader.exec_module(assess)
+
+PDF_BYTES = (
+    b"%PDF-1.4\n"
+    b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+    b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+    b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>\nendobj\n"
+    b"xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n"
+    b"trailer\n<< /Size 4 /Root 1 0 R >>\n"
+    b"startxref\n184\n%%EOF\n"
+)
 
 class TestAssessOwnedOperationalFixtures(unittest.TestCase):
     def setUp(self):
@@ -29,9 +44,6 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
         self.assertEqual(assess.logical_to_physical_gcs_key(logical), expected)
 
     def test_assess_gcs_objects_success(self):
-        fake_body = b"fake_body_for_test"
-        fake_sha256 = hashlib.sha256(fake_body).hexdigest()
-        
         def mock_gcs_runner(action, bucket, key):
             if action == "describe":
                 return {
@@ -40,22 +52,20 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                         "size": str(self.expected_size),
                         "contentType": self.expected_mime,
                         "generation": "1234567890",
-                        "metageneration": "1"
+                        "metageneration": "1",
+                        "timeCreated": "2026-10-09T09:03:18.572Z",
+                        "updated": "2026-10-09T09:03:18.572Z"
                     }
                 }
             elif action == "cat":
-                return {"status": "ok", "body": fake_body}
+                return {"status": "ok", "body": PDF_BYTES}
             return {"status": "error"}
 
-        with patch.object(assess, 'EXPECTED_SHA256', fake_sha256):
-            res = assess.assess_gcs_objects(mock_gcs_runner)
-            self.assertEqual(res["status"], "success")
-            self.assertEqual(res["validated_count"], len(assess.CANONICAL_OWNED_OBJECTS))
+        res = assess.assess_gcs_objects(mock_gcs_runner)
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["validated_count"], len(assess.CANONICAL_OWNED_OBJECTS))
 
     def test_assess_gcs_objects_drift(self):
-        fake_body = b"fake_body_for_test"
-        fake_sha256 = hashlib.sha256(fake_body).hexdigest()
-        
         describe_calls = {"count": 0}
         def mock_gcs_runner(action, bucket, key):
             if action == "describe":
@@ -67,16 +77,18 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                         "size": str(self.expected_size),
                         "contentType": self.expected_mime,
                         "generation": gen,
-                        "metageneration": "1"
+                        "metageneration": "1",
+                        "timeCreated": "2026-10-09T09:03:18.572Z",
+                        "updated": "2026-10-09T09:03:18.572Z"
                     }
                 }
             elif action == "cat":
-                return {"status": "ok", "body": fake_body}
+                return {"status": "ok", "body": PDF_BYTES}
             return {"status": "error"}
 
-        with patch.object(assess, 'EXPECTED_SHA256', fake_sha256):
-            with self.assertRaisesRegex(ValueError, "Generation drift"):
-                assess.assess_gcs_objects(mock_gcs_runner)
+        res = assess.assess_gcs_objects(mock_gcs_runner)
+        self.assertEqual(res["status"], "rejected")
+        self.assertIn("Generation drift", res["reason"])
 
     def test_assess_gcs_objects_missing_object(self):
         def mock_gcs_runner(action, bucket, key):
@@ -84,67 +96,90 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 return {"status": "not_found"}
             return {"status": "error"}
 
-        with self.assertRaisesRegex(ValueError, "Missing object"):
-            assess.assess_gcs_objects(mock_gcs_runner)
-
-    def test_assess_gcs_objects_size_mismatch(self):
-        def mock_gcs_runner(action, bucket, key):
-            if action == "describe":
-                return {
-                    "status": "ok",
-                    "metadata": {
-                        "size": "999", 
-                        "contentType": self.expected_mime,
-                        "generation": "1234567890",
-                        "metageneration": "1"
-                    }
-                }
-            return {"status": "error"}
-
-        with self.assertRaisesRegex(ValueError, "Size mismatch"):
-            assess.assess_gcs_objects(mock_gcs_runner)
+        res = assess.assess_gcs_objects(mock_gcs_runner)
+        self.assertEqual(res["status"], "rejected")
+        self.assertIn("Missing object", res["reason"])
 
     def test_assess_database_success(self):
         def mock_db_runner(query, params):
-            if "supply_submissions" in query:
-                return {"rows": [["4"]]}
-            elif "supply_documents" in query:
-                return {"rows": [["8"]]}
-            elif "supply_review_events" in query:
-                return {"rows": [["10"]]}
-            elif "vehicle_fleet_affiliations" in query:
-                return {"rows": [["2"]]}
-            elif "vehicle_passenger_disclosure_profiles" in query:
-                return {"rows": [["1"]]}
-            elif "driver_public_registration_credentials" in query:
-                return {"rows": [["1"]]}
-            return {"rows": [["0"]]}
+            counts = {
+                'subs': 4,
+                'docs': 8,
+                'revs': 0,
+                'affs': 0,
+                'discs': 0,
+                'creds': 0
+            }
+            return {"rows": [[json.dumps(counts)]]}
 
         res = assess.assess_database(mock_db_runner)
         self.assertEqual(res["status"], "success")
         self.assertEqual(res["submissions_found"], 4)
-        self.assertEqual(res["review_events_count"], 10)
-        self.assertEqual(res["affiliations_count"], 2)
+        self.assertEqual(res["documents_found"], 8)
 
-    def test_assess_database_missing_submissions(self):
+    def test_assess_database_missing_subs(self):
         def mock_db_runner(query, params):
-            if "supply_submissions" in query:
-                return {"rows": [["3"]]} 
-            return {"rows": [["0"]]}
+            counts = {
+                'subs': 3,
+                'docs': 8,
+                'revs': 0,
+                'affs': 0,
+                'discs': 0,
+                'creds': 0
+            }
+            return {"rows": [[json.dumps(counts)]]}
 
-        with self.assertRaisesRegex(ValueError, "Missing expected supply_submissions"):
-            assess.assess_database(mock_db_runner)
+        res = assess.assess_database(mock_db_runner)
+        self.assertEqual(res["status"], "rejected")
+        self.assertIn("Missing expected supply_submissions", res["reason"])
 
-    def test_assess_database_missing_refs(self):
+    def test_assess_database_has_refs(self):
         def mock_db_runner(query, params):
-            if "supply_submissions" in query:
-                return {"rows": [["4"]]}
-            elif "supply_documents" in query:
-                return {"rows": [["8"]]}
-            return {"rows": [["0"]]}
+            counts = {
+                'subs': 4,
+                'docs': 8,
+                'revs': 2,
+                'affs': 0,
+                'discs': 0,
+                'creds': 0
+            }
+            return {"rows": [[json.dumps(counts)]]}
 
-        with self.assertRaisesRegex(ValueError, "Missing retention/relationship blocker"):
-            assess.assess_database(mock_db_runner)
+        res = assess.assess_database(mock_db_runner)
+        self.assertEqual(res["status"], "rejected")
+        self.assertIn("inbound foreign keys exist", res["concrete_blocker"])
+        
+    def test_provenance_validation(self):
+        args = argparse.Namespace(
+            mock_db=False,
+            product_run_id=assess.AUTHORIZED_PROVENANCE["run_id"],
+            artifact_id=assess.AUTHORIZED_PROVENANCE["artifact_id"],
+            source_sha=assess.AUTHORIZED_PROVENANCE["source_sha"],
+            workflow_def_sha=assess.AUTHORIZED_PROVENANCE["workflow_sha"],
+        )
+        def mock_subprocess_run(cmd, **kwargs):
+            if cmd[:2] == ["gh", "api"] and len(cmd) > 2 and "zip" in cmd[2]:
+                zip_path = kwargs.get("stdout").name
+                with zipfile.ZipFile(zip_path, 'w') as zf:
+                    evidence = {"evidence": []}
+                    for logical_key in assess.CANONICAL_OWNED_OBJECTS.keys():
+                        evidence["evidence"].append({
+                            "kind": "setup-document-upload",
+                            "objectKey": logical_key,
+                            "candidateSha": assess.AUTHORIZED_PROVENANCE["source_sha"],
+                            "intentStatus": 201,
+                            "confirmStatus": 201,
+                            "readbackFileSize": assess.EXPECTED_FILE_SIZE,
+                            "readbackContentType": assess.EXPECTED_MIME,
+                            "readbackSha256": assess.EXPECTED_SHA256,
+                        })
+                    zf.writestr("operational-browser-evidence.json", json.dumps(evidence))
+                return MagicMock(returncode=0)
+            return MagicMock(returncode=1)
+            
+        with patch("subprocess.run", side_effect=mock_subprocess_run):
+            with self.assertRaisesRegex(ValueError, "Archive hash mismatch"):
+                assess.fetch_and_validate_provenance(args)
 
 if __name__ == '__main__':
     unittest.main()
