@@ -1273,8 +1273,6 @@ export function RatingCard({
             score: selectedScore,
             tags: selectedTags.length > 0 ? selectedTags : undefined,
             comment: comment || undefined,
-            contactRequested:
-              selectedScore <= 2 ? Boolean(contactRequested) : false,
           }
         : {
             rideId: token,
@@ -2147,22 +2145,20 @@ function RideContent({
 
   if (fixture.screenId === ("CANCELLED_TODO" as any)) {
     return (
-      <div
-        style={{
-          padding: 16,
-          margin: 16,
-          background: passengerChrome.warning.bg,
-          border: `1px solid ${passengerChrome.warning.border}`,
-          borderRadius: 8,
-          textAlign: "center",
-          color: passengerChrome.warning.fg,
-        }}
-      >
-        <div style={{ fontWeight: 800 }}>Screen Requirements Note</div>
-        <div style={{ fontSize: 13, marginTop: 8 }}>
-          Cancelled terminal screen is missing from the design canvas.
+      <>
+        <MapCard fixture={fixture} />
+        {fixture.assignment && <VehicleCard fixture={fixture} />}
+        {fixture.routeFareText && <FareCard fixture={fixture} />}
+        <div
+          style={{
+            padding: 16,
+            textAlign: "center",
+            color: passengerChrome.muted,
+          }}
+        >
+          {t.Cancel} {t.DesignPending}
         </div>
-      </div>
+      </>
     );
   }
 

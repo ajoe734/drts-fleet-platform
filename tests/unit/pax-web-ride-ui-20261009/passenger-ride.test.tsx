@@ -179,6 +179,23 @@ describe("Passenger Ride UI Acceptance", () => {
       contactRequested: true,
     });
     unmount();
+
+    // Test Complaint Form category and consent
+    fetchCalls = [];
+    fetchResponse = { complaintId: "complaint-uuid" };
+    render(<ComplaintForm token="order-uuid" authMode="id" />);
+    fireEvent.click(screen.getByText("客訴與遺失物表單"));
+
+    const input = screen.getByPlaceholderText(/請描述/);
+    fireEvent.change(input, { target: { value: "rude driver" } });
+    fireEvent.click(screen.getByText("確認送出"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/表單已送出/)).toBeTruthy();
+    });
+
+    expect(fetchCalls[0].body.category).toBe("service");
+    expect(fetchCalls[0].body.contactConsent).toBe(false);
   });
 
   it("CertificateCard renders HTML iframe and PDF download links correctly", async () => {
@@ -214,7 +231,11 @@ describe("Passenger Ride UI Acceptance", () => {
       assignment: {
         driver: { displayName: "Driver", fleetName: "Fleet" },
         vehicle: { plateNo: "A-1", model: "Car", color: "W" },
-        eta: { minutes: 5, calculatedAt: staleTime, locationFreshness: "fresh" },
+        eta: {
+          minutes: 5,
+          calculatedAt: staleTime,
+          locationFreshness: "fresh",
+        },
         location: { lat: 0, lng: 0 },
       },
       actions: {},
@@ -249,11 +270,19 @@ describe("Passenger Ride UI Acceptance", () => {
       ...view,
       assignment: {
         ...view.assignment,
-        eta: { ...view.assignment!.eta, calculatedAt: new Date(now).toISOString() }
-      }
+        eta: {
+          ...view.assignment!.eta,
+          calculatedAt: new Date(now).toISOString(),
+        },
+      },
     };
     await act(async () => {
-      es.emit("assignment_disclosure_ready", { eventType: "assignment_disclosure_ready", eventVersion: 2, assignmentVersion: 1, data: newView });
+      es.emit("assignment_disclosure_ready", {
+        eventType: "assignment_disclosure_ready",
+        eventVersion: 2,
+        assignmentVersion: 1,
+        data: newView,
+      });
     });
 
     // Advance timers so useEffect triggers setNow
@@ -263,7 +292,7 @@ describe("Passenger Ride UI Acceptance", () => {
 
     // Verify it says it is fresh
     expect(screen.queryByText(/司機位置更新稍有延遲/)).toBeNull();
-    
+
     vi.useRealTimers();
   });
 });
