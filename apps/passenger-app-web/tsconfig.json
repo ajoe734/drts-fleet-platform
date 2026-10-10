@@ -9,7 +9,8 @@
         "../../packages/control-plane-auth/src/index.ts"
       ],
       "@drts/ui-tokens": ["../../packages/ui-tokens/src/index.ts"],
-      "@drts/ui-web": ["../../packages/ui-web/src/index.tsx"]
+      "@drts/ui-web": ["../../packages/ui-web/src/index.tsx"],
+      "@drts/passenger-client": ["../../packages/passenger-client/src/index.ts"]
     },
     "jsx": "react-jsx"
   },
