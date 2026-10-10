@@ -80,3 +80,4 @@ Candidate HEAD subject "fix(passenger): ..." and empty body lacks required Task-
 | R8 P2 主題設定 | `lib/ride/passenger-presentation.ts` | 舊版用預設 Canvas 顏色；新版採用正確的 P5 canonical (`#16212C`, `#5A6A7B`, `#E3E8EE`) | 檢視原始碼 | 無自動化視覺快照比對 |
 | R9 P1 測試覆蓋 | `tests/unit/pax-web-ride-ui-20261009/` 相關測試 | 舊版缺少某些情況；新版所有 21 個單元測試全數通過 | `pnpm vitest run tests/unit/pax-web-ride-ui-20261009/`, Exit 0 |  |
 | R10 P1 | commit SHA `7a92e5e05ca9` | 舊版缺 trailers 且未推；新版加入 Task-ID/LLM-Agent/Reviewer | `git log -1`, HEAD 包含正確 git trailers | 待後續 push 與手動驗證 CI |
+| CI Failure | `vitest.config.ts` | 舊版缺乏 `@drts/ui-web` alias 導致測試模組解析失敗；新版補齊 alias | `pnpm exec vitest run tests/unit/pax-web-ride-ui-20261009/ tests/unit/pax-web-shell-20261009/bff.test.ts` Exit 0, 49 tests passed | |
