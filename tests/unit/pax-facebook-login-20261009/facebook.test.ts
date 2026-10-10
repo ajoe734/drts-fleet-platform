@@ -5,7 +5,6 @@ import { PassengerAccountService } from "../../../apps/api/src/modules/passenger
 import { PassengerOAuthService } from "../../../apps/api/src/modules/passenger-app/oauth/passenger-oauth.service";
 import type { OAuthTransactionRecord } from "../../../apps/api/src/modules/passenger-app/oauth/oauth-transaction.port";
 import { listConfiguredAuthProviders } from "../../../apps/api/src/modules/passenger-app/oauth/oauth-provider.config";
-import { FACEBOOK_GRAPH_ORIGIN } from "../../../apps/api/src/modules/passenger-app/oauth/facebook-oauth";
 import {
   FacebookDataDeletionService,
   verifyFacebookSignedRequest,
