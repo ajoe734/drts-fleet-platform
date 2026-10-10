@@ -66,6 +66,27 @@ git diff --check
 
 ## 部署設定與外部待驗
 
+### 2026-10-10 Supervisor 擴充 scope 後：middleware 修復單元
+
+Supervisor 04:03:16Z 授權修改 middleware／guard，並指定 guard 必須等
+PAX-FARE-QUOTE PR #2499 合併、普通 merge `origin/dev` 後才修改。
+本輪開始時本機／published branch 均為 `0fc9c622b6796e863fa6925a4bc8846f40706775`，
+PR #2503 為 draft，尚無 candidate、review 或退修。04:05Z PR #2499 仍 OPEN。
+原 FB-INGRESS-1 分兩層記錄；只修 middleware，guard finding 保留。
+
+| Finding／驗收項                                  | 原始碼依據與修改位置                                                              | 舊版重現 → 修正版結果                                                                                                                                                                                                                  | 命令、退出碼、版本與證據位置                                                                                                                                                                                                                                                                                                        | 未驗項與具體限制                                                                  |
+| ------------------------------------------------ | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| FB-INGRESS-1 middleware                          | `internal-key.middleware.ts / validateInternalKey, isFacebookDataDeletionRequest` | 上述舊 SHA：新增正式函式 regression 6 fail／3 pass，錯誤 `INTERNAL_KEY_REQUIRED` → middleware 修復版 9／9 pass                                                                                                                         | `pnpm exec vitest run tests/unit/pax-facebook-login-20261009/middleware-ingress.test.ts --reporter=default --reporter=json --outputFile.json=.local/facebook-middleware-before.json` exit 1；修復後 Facebook＋原 middleware suite 87 tests exit 0，`.local/facebook-middleware-after.{json,log}`；新版本為此修復紀錄所在 checkpoint | 不聲稱完整 ingress 可達；guard 尚未修                                             |
+| HMAC／receipt 邊界                               | 同上 matcher＋正式 `FacebookDataDeletionController / delete,status`＋service      | staging／production／development（有設定 key、enforced=true）精確 POST／GET 與 query 可達；偽造 signed_request 在 transaction 前拒絕；合法回呼取得可驗 receipt、偽造 receipt 拒絕；錯 method／child／prefix／其他 passenger 路徑仍拒絕 | 上述新 regression，外部帳號 persistence 用既有 `MemoryPassengerStore` stub；未 mock middleware、controller、HMAC 或 receipt 邏輯                                                                                                                                                                                                    | 未測 HTTP parser、PG、Cloud Run／真實 Meta                                        |
+| FB-INGRESS-1 guard                               | `bootstrap-auth.guard.ts / activatePassenger`                                     | middleware 已可達，但 staging／production guard expected-denial probe 仍拒絕                                                                                                                                                           | 原 `strict-ingress.blocker.test.ts` 改為 middleware admission＋guard expected-denial；2 pass 是拒絕重現，不是 acceptance                                                                                                                                                                                                            | 等 PR #2499 合併，再普通 merge、修改 guard、替換 blocker probes 為 admission 回歸 |
+| pax-facebook_flow_verification_and_data_deletion | 原 acceptance 全部保留                                                            | middleware 部分已修；整項尚未滿足                                                                                                                                                                                                      | 本輪 scoped pass 不取代同 candidate CI／review                                                                                                                                                                                                                                                                                      | guard、同 SHA CI、Codex2 review／merge／acceptance 仍待完成                       |
+
+本輪依賴工具初次 exit 1：dispatch 重建的 node_modules symlink 指向 canonical root，
+其 Vitest symlink 又指向已刪除的另一 worker worktree，0 tests。只移除本 task
+worktree 的 22 個 dependency symlink，offline frozen-lockfile install exit 0；
+`.local/facebook-dependency-links-current.txt` 與 `.local/facebook-install.log` 記錄。
+canonical dependencies 未修改。此工具失敗不計為產品重現。
+
 設定 `FACEBOOK_DATA_DELETION_STATUS_ORIGIN` 為真正可公開到達的 HTTPS **API origin**（不含 path/query/credentials）；缺少／不合法時在 DB 寫入前回 503。
 不能把只有 BFF 的 ride origin 當成已存在 API proxy。ID/secret 仍按 SD 啟用 login；status origin 是 webhook 部署設定，無假預設。
 

@@ -93,8 +93,30 @@ function isRemittanceProofGrantRequest(method: string, path: string): boolean {
   // Durable V0098 rows use raw UUIDs; only the test-memory fallback adds
   // `remit-proof-`. Both still require the downstream signed-grant checks.
   // Do not admit uploads, grant issuance, other artifact kinds or child paths.
-  return method.toUpperCase() === "GET" &&
-    /^\/(?:api\/)?reimbursements\/proof-downloads\/remittance-proof\/(?:remit-proof-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(stripQueryString(path));
+  return (
+    method.toUpperCase() === "GET" &&
+    /^\/(?:api\/)?reimbursements\/proof-downloads\/remittance-proof\/(?:remit-proof-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+      stripQueryString(path),
+    )
+  );
+}
+
+export function isFacebookDataDeletionRequest(
+  method: string,
+  path: string,
+): boolean {
+  // Meta calls the API directly, without a BFF credential. The controller
+  // verifies signed_request before account access and the receipt HMAC before
+  // returning status. Keep this exception limited to the two exact API routes.
+  const requestPath = stripQueryString(path);
+  return (
+    (method.toUpperCase() === "POST" &&
+      requestPath === "/api/passenger-app/auth/facebook/data-deletion") ||
+    (method.toUpperCase() === "GET" &&
+      /^\/api\/passenger-app\/auth\/facebook\/data-deletion\/status\/[0-9a-f]{112}$/.test(
+        requestPath,
+      ))
+  );
 }
 
 function hasBearerAuthorization(request: RequestLike): boolean {
@@ -130,6 +152,7 @@ export async function validateInternalKey(
     isOptionsRequest(requestMethod) ||
     isExplicitPublicRequest(requestMethod, rawPath) ||
     isRemittanceProofGrantRequest(requestMethod, rawPath) ||
+    isFacebookDataDeletionRequest(requestMethod, rawPath) ||
     hasBearerAuthorization(request)
   ) {
     return;

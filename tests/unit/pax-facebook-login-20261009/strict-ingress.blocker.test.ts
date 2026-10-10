@@ -10,10 +10,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Expected-denial probes document an unresolved scope blocker, NOT an
- * acceptance pass. Replace these with admission + signature-rejection tests
- * when Supervisor authorizes the two common-auth source files. */
-describe("unresolved strict Facebook ingress blocker", () => {
+/** Guard-only expected-denial probes remain pending PR #2499 integration.
+ * Middleware admission is fixed; this is NOT full ingress acceptance. */
+describe("unresolved strict Facebook guard blocker (waiting for PR #2499)", () => {
   it.each(["staging", "production"])(
     "Meta cannot reach webhook or status without BFF credentials in %s",
     async (environment) => {
@@ -43,7 +42,9 @@ describe("unresolved strict Facebook ingress blocker", () => {
         ],
       ] as const) {
         const request = { method, originalUrl: path, url: path, headers: {} };
-        await expect(validateInternalKey(request, undefined)).rejects.toThrow();
+        await expect(
+          validateInternalKey(request, undefined),
+        ).resolves.toBeUndefined();
         const context = {
           switchToHttp: () => ({ getRequest: () => request }),
           getHandler: () => FacebookDataDeletionController.prototype[handler],
