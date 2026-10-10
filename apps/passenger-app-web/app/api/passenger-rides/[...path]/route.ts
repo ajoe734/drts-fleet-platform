@@ -8,9 +8,23 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
   "host",
   "content-length",
   "authorization",
+  "cookie",
+  "x-actor-id",
+  "x-drts-internal-key",
+  "x-realm",
+  "x-roles",
+  "x-scopes",
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-proto"
 ]);
 
 function isAllowedPath(method: string, path: string[]) {
+  for (const segment of path) {
+    if (segment === ".." || segment === "." || segment.includes("/") || segment.includes("\\")) {
+      return false;
+    }
+  }
   // Token endpoints allowed:
   // GET /passenger-rides/:token
   // GET /passenger-rides/:token/events

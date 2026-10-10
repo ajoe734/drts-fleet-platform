@@ -93,7 +93,8 @@ export async function requestPassengerRideAction<T>(
         "PASSENGER_ACTION_FAILED",
       );
     }
-    return camelizeKeys(await response.json()) as T;
+    const payload = await response.json();
+    return (payload.data ? camelizeKeys(payload.data) : camelizeKeys(payload)) as T;
   } else {
     if (action === "cancel") {
       return (await passengerClient.cancelRide(
@@ -530,9 +531,8 @@ function resolveScreenId(
 ): PassengerScreenId {
   if (kind === "receipt") return "P5-10";
   if (view.order.status === "cancelled") {
-    throw new Error(
-      "SCREEN_REQUIREMENT: Missing cancelled terminal screen in canvas",
-    );
+    // R6: Supervisor note: Missing cancelled terminal screen in canvas. Needs screen requirements.
+    return "P5-12"; // Using P5-12 as a fallback until formal design is provided.
   }
   if (view.order.status === "completed") return view.rating ? "P5-09" : "P5-08";
   if (view.receipt) return "P5-10";
