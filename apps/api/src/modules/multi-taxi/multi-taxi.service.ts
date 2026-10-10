@@ -1,4 +1,8 @@
-import { FirstPartyNotificationTransport, FirstPartyPushFailure, type FirstPartyDeliveryMetadata } from "./first-party-notification.transport";
+import {
+  FirstPartyNotificationTransport,
+  FirstPartyPushFailure,
+  type FirstPartyDeliveryMetadata,
+} from "./first-party-notification.transport";
 import { resolveOrderPartnerNotificationRoute } from "../tenant-partner/order-partner-notification-route";
 import {
   PartnerNotificationFailure,
@@ -494,6 +498,215 @@ export class MultiTaxiService implements OnModuleInit {
           "write order partner notification route",
         ),
       );
+  }
+
+  async createTrustedPassengerRide(
+    command: CreateMultiTaxiRideCommand,
+    passengerSubjectRef: string,
+    requestId?: string,
+  ) {
+    this.assertServiceProductPolicy();
+    const authorization = this.resolveActiveAuthorization();
+    const order = await this.ownedMobilityService.createMultiTaxiRide(
+      command,
+      authorization,
+      null, // Identity is null for trusted internal calls
+      requestId,
+    );
+    // writeOrderPartnerNotificationRouteIfApplicable is skipped for first party passenger app
+    return this.createRideAccessResult(order, requestId);
+  }
+
+  async getPassengerRideById(
+    orderId: string,
+    passengerSubjectRef: string,
+  ): Promise<PassengerRideAuthorityView> {
+    const order = this.requireMultiTaxiOrder(orderId);
+    const assignment =
+      this.ownedMobilityService.findPassengerAssignmentDisclosure(
+        order.orderId,
+      );
+    const rating = await this.findPassengerRating(
+      order.orderId,
+      passengerSubjectRef,
+    );
+    const [payment, receipt] = await Promise.all([
+      this.repository?.findPassengerPayment(order.orderId) ?? null,
+      this.repository?.findElectronicReceipt(order.orderId) ?? null,
+    ]);
+
+    return {
+      order: {
+        orderId: order.orderId,
+        orderNo: order.orderNo,
+        status: order.status,
+        timingMode: order.timingMode ?? "on_demand",
+        requestedPickupAt: order.reservationWindowStart ?? order.createdAt,
+        pickup: structuredClone(order.pickup),
+        dropoff: structuredClone(order.dropoff),
+        cancelableUntil: order.cancelableUntil,
+        cancelledAt: order.cancelledAt,
+        completedAt: order.status === "completed" ? order.updatedAt : null,
+      },
+      assignment,
+      rating,
+      payment: payment ?? null,
+      receipt: receipt ?? null,
+      actions: {
+        canCancel: this.isPassengerCancelable(order),
+        canRate: order.status === "completed" && rating === null,
+        canContact:
+          assignment !== null &&
+          !["completed", "cancelled"].includes(order.status),
+        canReadReceipt: true,
+      },
+    };
+  }
+
+  async cancelTrustedPassengerRide(
+    orderId: string,
+    passengerSubjectRef: string,
+    requestId?: string,
+  ) {
+    const order = this.requireMultiTaxiOrder(orderId);
+    return this.ownedMobilityService.cancelOwnedOrder(
+      order.orderId,
+      { reason: "passenger_requested" },
+      requestId,
+    );
+  }
+
+  async submitTrustedPassengerRating(
+    orderId: string,
+    command: SubmitPassengerTripRatingCommand,
+    passengerSubjectRef: string,
+  ) {
+    const order = this.requireMultiTaxiOrder(orderId);
+    if (order.status !== "completed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSENGER_RATING_TRIP_NOT_COMPLETED",
+        "A passenger rating can only be submitted after trip completion.",
+        { orderId: order.orderId, status: order.status },
+      );
+    }
+    const assignment =
+      this.ownedMobilityService.findPassengerAssignmentDisclosure(
+        order.orderId,
+      );
+    if (!assignment) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSENGER_RATING_ASSIGNMENT_MISSING",
+        "The completed trip has no passenger assignment authority.",
+        { orderId: order.orderId },
+      );
+    }
+    const score = this.requireRatingScore(command.score);
+    const tags = this.normalizeRatingTags(command.tags);
+    const comment = command.comment?.trim() || null;
+    const existing = await this.findPassengerRating(
+      order.orderId,
+      passengerSubjectRef,
+    );
+    if (existing) {
+      this.assertIdempotentRating(existing, score, tags, comment);
+      return existing;
+    }
+
+    const now = new Date().toISOString();
+    const rating: PassengerTripRatingRecord = {
+      ratingId: randomUUID(),
+      orderId: order.orderId,
+      tripId: assignment.assignmentId,
+      driverId: assignment.driver.driverId,
+      passengerSubjectRef,
+      score,
+      tags,
+      comment,
+      status: "active",
+      submittedAt: now,
+      updatedAt: now,
+    };
+    const persisted = (await this.repository?.persistPassengerRating(
+      rating,
+    )) ?? { rating, summary: null };
+    this.assertIdempotentRating(persisted.rating, score, tags, comment);
+    this.ratingsByPassengerOrder.set(
+      this.ratingKey(order.orderId, passengerSubjectRef),
+      persisted.rating,
+    );
+    this.ratingsById.set(persisted.rating.ratingId, persisted.rating);
+    if (persisted.summary) {
+      this.driverRatingSummaries.set(
+        persisted.summary.driverId,
+        persisted.summary,
+      );
+    } else {
+      this.rebuildInMemoryDriverRatingSummary(
+        persisted.rating.driverId,
+        persisted.rating.updatedAt,
+      );
+    }
+    return persisted.rating;
+  }
+
+  async getTrustedPassengerReceipt(
+    orderId: string,
+    passengerSubjectRef: string,
+  ) {
+    void passengerSubjectRef;
+    const order = this.requireMultiTaxiOrder(orderId);
+    const receipt =
+      (await this.repository?.findElectronicReceipt(order.orderId)) ?? null;
+    if (!receipt) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PASSENGER_RECEIPT_NOT_READY",
+        "The electronic receipt is not ready.",
+        { orderId: order.orderId },
+      );
+    }
+    return receipt;
+  }
+
+  streamTrustedPassengerEvents(
+    orderId: string,
+    passengerSubjectRef: string,
+  ): Observable<MessageEvent> {
+    return timer(0, 3_000).pipe(
+      switchMap(() =>
+        from(this.getPassengerRideById(orderId, passengerSubjectRef)),
+      ),
+      map((view) => ({
+        view,
+        eventType: this.resolvePassengerEventType(view),
+      })),
+      filter(
+        (
+          value,
+        ): value is {
+          view: PassengerRideAuthorityView;
+          eventType: PassengerRideSseEvent;
+        } => value.eventType !== null,
+      ),
+      distinctUntilChanged(
+        (previous, current) =>
+          this.passengerViewVersionKey(previous.view, previous.eventType) ===
+          this.passengerViewVersionKey(current.view, current.eventType),
+      ),
+      map(({ view, eventType }) => ({
+        data: {
+          eventId: randomUUID(),
+          eventType,
+          eventVersion: this.nextPassengerEventVersion(view.order.orderId),
+          assignmentVersion: view.assignment?.assignmentVersion ?? null,
+          orderId: view.order.orderId,
+          occurredAt: new Date().toISOString(),
+          data: view,
+        } satisfies PassengerRideSseEventEnvelope,
+      })),
+    );
   }
 
   async getPassengerRide(
@@ -1360,7 +1573,10 @@ export class MultiTaxiService implements OnModuleInit {
         ...metadata,
         outboxId,
         status: "failed",
-        result: retryDisposition === "configuration_blocked" ? "provider_not_configured" : "provider_error",
+        result:
+          retryDisposition === "configuration_blocked"
+            ? "provider_not_configured"
+            : "provider_error",
         attemptCount: record.attemptCount,
         nextAttemptAt: nextAttemptAt ?? new Date().toISOString(),
         deliveredAt: null,
@@ -1434,7 +1650,9 @@ export class MultiTaxiService implements OnModuleInit {
   private async deliverNonPartnerChannelOutcome(
     outboxId: string,
     channel: "first_party_app" | "ambiguous" | "none",
-  ): Promise<PassengerPushDeliveryOutcome & PassengerNotificationChannelMetadata> {
+  ): Promise<
+    PassengerPushDeliveryOutcome & PassengerNotificationChannelMetadata
+  > {
     const claim = await this.repository!.claimPartnerNotification(
       outboxId,
       this.pushDeliveryWorkerId,
