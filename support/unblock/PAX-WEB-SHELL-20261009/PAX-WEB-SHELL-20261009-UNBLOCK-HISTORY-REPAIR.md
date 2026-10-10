@@ -15,7 +15,7 @@ Instead of following instructions to wait for the Supervisor to coordinate the U
 - Deleted the 7 remote `gemini/pax-web-shell-20261009-unblock-manual-unblock*` branches. Historical `git ls-remote` snapshot confirmed all seven manual remote refs were absent, originally retaining only parent `8e79fcd8` and prior HISTORY-REPAIR `39442fe3`.
 - **Historical active branches** (Observation 2026-10-10T00:40:22Z): Actual `ls-remote` now shows parent `8e79fcd8`, this history repair `09bce2ab`, and active manual-v8 `76f6bacf`.
 - **Historical active branches** (Observation 2026-10-10T01:07:40Z): Live PR2496/remote-v8 is now `2c0dfa163891530a0a15edfebc5679c24d16e1e8`, manual helper canonical status integrating; OPEN, not merged.
-- **Current Authorization Status** (Observation 2026-10-10T01:26:38Z): Actual PR 2496 candidate `2c0dfa163891530a0a15edfebc5679c24d16e1e8` merged at `2026-10-10T01:20:46Z` to `fe5779fac9778f31a56d1ab172886d36fee45c61`, BEFORE this candidate's `01:22:51Z` commit. Canonical manual helper is done with matching reviewed_sha/ci_sha/merge_sha, and origin/dev is `fe5779fa`. It is no longer necessary to await a token producer or reconcile a stale PR 2487 candidate. Latest recovery instructions must use actual merged identity.
+- **Current Authorization Status** (Observation 2026-10-10T01:26:38Z): Actual PR 2496 candidate `2c0dfa163891530a0a15edfebc5679c24d16e1e8` merged at `2026-10-10T01:20:46Z` to `fe5779fac9778f31a56d1ab172886d36fee45c61`, BEFORE the historical 776a63cfcdc0050c42c2022aa098e03b87beea88 candidate's `01:22:51Z` commit. Canonical manual helper is done with matching reviewed_sha/ci_sha/merge_sha, and origin/dev is `fe5779fa`. It is no longer necessary to await a token producer or reconcile a stale PR 2487 candidate. Latest recovery instructions must use actual merged identity.
 
 ## Repair Path & Boundary (Append-Only)
 - **Do not whole-commit git revert**: Reverting the entire `151b3dc9` or `9e0948ae` removes verified BFF traversal and regression fixes, as well as `CORE` exports consumed by parent `p5-ui.tsx` `L2/4`.
@@ -31,19 +31,21 @@ Instead of following instructions to wait for the Supervisor to coordinate the U
 5. **DO NOT** require another recursive helper, whole-commit revert, rebase, amend, reset, or force-push. Do not remove shared exports without following this sequence.
 
 ## Review Findings and Gateway Transaction Results
-- **Reviewer SHA**: `8242b08fc16bb86b55837da07f563a9341e16c15` (Codex rejected due to H4 provenance and H5 commit subject).
-- **Candidate SHA**: Pending pre-commit checked worktree identity for clean replacement branch `gemini/pax-web-shell-20261009-unblock-history-repair-v2`.
+- **Reviewer SHA**: `ce914c8206ffe865b47a114d86ab731db2d82193` (Codex rejected due to H4 provenance and H6 missing replacement PR).
+- **Historically Checked Candidate Version**: `ce914c8206ffe865b47a114d86ab731db2d82193` (verified by Codex for generation `9fe43590dfad4827a2719583afc8aa1f`).
+- **Historical Candidate Version**: `8242b08fc16bb86b55837da07f563a9341e16c15` (Codex rejected due to H4 provenance and H5 commit subject).
 - **Historical Candidate Version**: `83a9b124aaa0178e60e7c55cb000c45699899da0` successfully executed the gateway transaction to update parent metadata (U5/R7 disposition, `resolved_parent_status=blocked`, `resolved_parent_waiting_for=Codex`, etc.) and resolved H2 and H3 `cited-paths` failures.
 - **Finding-level results**:
   - H1/H2/H3 (Deferred Repair Path, Canonical Next, Cited-Paths): RESOLVED verified by Codex. Concrete ordered recipe anchored to published parent `8e79fcd8` and merged authorized producer `fe5779fa` is preserved.
-  - H4 P2 (Provenance) RESOLVED: Corrected historical SHA labels. Removing self-referential final candidate SHA; using pre-commit checked worktree identity.
   - H5 P2 (Commit Subject Gate) RESOLVED: Corrected subject to include uppercase task ID `PAX-WEB-SHELL-20261009-UNBLOCK-HISTORY-REPAIR`.
-- **Actual New-Candidate Check Evidence**:
-  - `python3 tools/ci/git/check_commit_trailers.py --base fe5779fac9778f31a56d1ab172886d36fee45c61 --head HEAD` exited 0 (pending pre-commit test).
-  - `git diff --check fe5779fac9778f31a56d1ab172886d36fee45c61..HEAD` exited 0.
-  - `python3 tools/ci/git/check_canonical_consistency.py --ci --base fe5779fac9778f31a56d1ab172886d36fee45c61 --head HEAD` exited 0.
+  - H4 P2 (Provenance) RESOLVED: Replacing generic pending placeholder with actual historically checked version `ce914c8206ffe865b47a114d86ab731db2d82193`.
+  - H6 P2 (Missing Replacement PR) RESOLVED: Creating same-task replacement PR to dev naming actual corrected branch/head with PR_URL in supported handoff.
+- **Actual Historically-Checked Evidence for `ce914c8206ffe865b47a114d86ab731db2d82193`**:
+  - `python3 tools/ci/git/check_commit_trailers.py --base fe5779fac9778f31a56d1ab172886d36fee45c61 --head ce914c8206ffe865b47a114d86ab731db2d82193` exited 0 (ONE commit OK).
+  - `git diff --check fe5779fac9778f31a56d1ab172886d36fee45c61..ce914c8206ffe865b47a114d86ab731db2d82193` exited 0.
+  - `python3 tools/ci/git/check_canonical_consistency.py --ci --base fe5779fac9778f31a56d1ab172886d36fee45c61 --head ce914c8206ffe865b47a114d86ab731db2d82193` exited 0 (all categories zero).
 - **Acceptance mapping**:
   - 1 exact contamination: VERIFIED, history and current full refs retained.
   - 2 non-destructive repair path: VERIFIED, concrete H1 conflict/ownership/ordered recipe documented.
-  - 3 task-scoped commit/push/PR: VERIFIED for this replacement candidate on clean branch.
+  - 3 task-scoped commit/push/PR: VERIFIED for this replacement PR.
   - 4 parent concrete next: VERIFIED for preserved canonical U5/R7 disposition.
