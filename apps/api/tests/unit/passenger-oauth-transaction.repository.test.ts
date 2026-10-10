@@ -48,16 +48,34 @@ function record(id = randomUUID()): OAuthTransactionRecord {
 }
 
 describe("passenger OAuth transaction repository (PG stub only)", () => {
-  it.each(["not-a-real-transaction", "", "123", "' OR 1=1 --", "00000000-0000-4000-8000-00000000000z"])("rejects malformed transaction %j before production SQL", async (transactionId) => {
-    vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "passenger-client");
-    vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "passenger-secret");
-    const f = clientFixture();
-    const service = new PassengerOAuthService(f.repository, {} as never);
-    await expect(service.callback("google", {
-      provider: "google", code: "c", state: "s", transactionId,
-    }, null)).rejects.toMatchObject({ code: "invalid_grant" });
-    expect(f.calls).toHaveLength(0);
-  });
+  it.each([
+    "not-a-real-transaction",
+    "",
+    "123",
+    "' OR 1=1 --",
+    "00000000-0000-4000-8000-00000000000z",
+  ])(
+    "rejects malformed transaction %j before production SQL",
+    async (transactionId) => {
+      vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "passenger-client");
+      vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "passenger-secret");
+      const f = clientFixture();
+      const service = new PassengerOAuthService(f.repository, {} as never);
+      await expect(
+        service.callback(
+          "google",
+          {
+            provider: "google",
+            code: "c",
+            state: "s",
+            transactionId,
+          },
+          null,
+        ),
+      ).rejects.toMatchObject({ code: "invalid_grant" });
+      expect(f.calls).toHaveLength(0);
+    },
+  );
 
   it("passes a well-formed unknown UUID to production claim SQL and rejects the missing row", async () => {
     vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "passenger-client");
@@ -65,19 +83,32 @@ describe("passenger OAuth transaction repository (PG stub only)", () => {
     const f = clientFixture();
     const service = new PassengerOAuthService(f.repository, {} as never);
     const transactionId = randomUUID();
-    await expect(service.callback("google", {
-      provider: "google", code: "c", state: "s", transactionId,
-    }, null)).rejects.toMatchObject({ code: "invalid_grant" });
+    await expect(
+      service.callback(
+        "google",
+        {
+          provider: "google",
+          code: "c",
+          state: "s",
+          transactionId,
+        },
+        null,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_grant" });
     expect(f.calls).toHaveLength(1);
     expect(f.calls[0]!.values[0]).toBe(transactionId);
-    expect(f.calls[0]!.sql).toContain("WHERE transaction_id = $1 AND consumed_at IS NULL AND expires_at > $2");
+    expect(f.calls[0]!.sql).toContain(
+      "WHERE transaction_id = $1 AND consumed_at IS NULL AND expires_at > $2",
+    );
   });
   it("inserts every transaction column bound by position, never string-interpolated", async () => {
     const f = clientFixture();
     const r = record();
     await f.repository.insert(r);
     expect(f.calls).toHaveLength(1);
-    expect(f.calls[0]!.sql).toContain("INSERT INTO passenger.oauth_transactions");
+    expect(f.calls[0]!.sql).toContain(
+      "INSERT INTO passenger.oauth_transactions",
+    );
     expect(f.calls[0]!.values).toEqual([
       r.transactionId,
       r.provider,
@@ -113,7 +144,9 @@ describe("passenger OAuth transaction repository (PG stub only)", () => {
     const now = new Date().toISOString();
     const claimed = await f.repository.claim(transactionId, now);
     expect(f.calls[0]!.sql).toContain("UPDATE passenger.oauth_transactions");
-    expect(f.calls[0]!.sql).toContain("WHERE transaction_id = $1 AND consumed_at IS NULL AND expires_at > $2");
+    expect(f.calls[0]!.sql).toContain(
+      "WHERE transaction_id = $1 AND consumed_at IS NULL AND expires_at > $2",
+    );
     expect(f.calls[0]!.values).toEqual([transactionId, now]);
     expect(claimed).toMatchObject({
       transactionId,
@@ -125,6 +158,8 @@ describe("passenger OAuth transaction repository (PG stub only)", () => {
 
   it("returns null when the UPDATE matches no row (unknown, already consumed, or expired)", async () => {
     const f = clientFixture(() => []);
-    expect(await f.repository.claim(randomUUID(), new Date().toISOString())).toBeNull();
+    expect(
+      await f.repository.claim(randomUUID(), new Date().toISOString()),
+    ).toBeNull();
   });
 });

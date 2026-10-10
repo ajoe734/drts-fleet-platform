@@ -1,9 +1,105 @@
 # PAX-OIDC-LOGIN-20261009 — owner implementation evidence
 
-Owner: Claude. Reviewer: Codex. Branch: `claude/pax-oidc-login-20261009`, base `dev`.
+Owner: Codex2 (Supervisor reassignment 2026-10-10). Reviewer: Codex.
+Working branch: `codex2/pax-oidc-login-20261009`, base `dev`.
+Original delivery/history: [PR #2501](https://github.com/ajoe734/drts-fleet-platform/pull/2501),
+head branch `claude/pax-oidc-login-20261009`.
 
 The exact final candidate SHA / PR are recorded by canonical `handoff`; nothing
-in this document is a review/CI/merge/PG acceptance claim.
+in this document is a reviewer approval, merge, or passenger PostgreSQL acceptance claim.
+
+## Codex2 continuation: repeated findings and current verification
+
+Reviewed predecessors: `9701679ffcaa12afd90dc01698317e79def43483` (first REOPEN)
+and `595c07133624264b7f49c91183d1b7d167e45f51` (second REOPEN, generation
+`eda81bbc59654d9fbec788f75e9a796f`). Sources are the complete Codex reviewer
+entries in the canonical task slice, retrieved with the current release
+`ai-status.sh show PAX-OIDC-LOGIN-20261009`. Their R1/R3 localization is
+accepted, including the second review's required repair boundaries; the
+historical round-1 dismissals below remain retracted.
+
+The inherited, previously published `c7c1ca7f50b2ca0fd8bc0bd1a473a66b810215af`
+already contains the R1 provider JWKS isolation, R2 clock repair, R3 UUID
+validation, and part of R4. Codex2 merged that history into its assigned
+branch with `91bbdcd4e35e6269c62c47643ad4fde3dba2b377`, then anchored
+the new regression boundaries with `1c34b7254`. No published commit was
+rebased, amended, reset, or force-pushed. Both remote branches will identify
+the same final candidate: GitHub keeps PR #2501's original head branch,
+while canonical handoff records the assigned Codex2 working branch. A normal
+fast-forward push updates the original PR, retaining its reviews and history.
+
+Actual production path: `PassengerOAuthController.callback` →
+`PassengerOAuthService.callback` → `PassengerOAuthTransactionRepository.claim`
+and `exchangeCode` → `resolveOAuthProviderConfig`/`OidcIdTokenVerifier.verify`
+→ `PassengerAccountService.findOrCreateByIdentity`/`issueSession` or
+`linkIdentity`. Existing verifier callers were read at both `.verify` sites
+in `oidc-pkce.service.ts`; they supply no fourth argument. Account linking
+revalidates actor/subject/account/session ownership through `current` and
+`findLiveFamily`; logout revokes the family.
+
+| Finding / acceptance                                                    | Production source / repair boundary                                                                                                               | Old reproduction → current result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Command / exit / evidence                                                                                                                                                                                                                         | Remaining limit                                                                                                                                                                                                                                          |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1, repeated: passenger keys coupled to legacy config                   | `oauth-provider.config.ts:configured` binds Google and LINE JWKS; verifier offline JSON applies only without explicit JWKS override               | Exact `595c07133` production sources reject valid Google RS256 and LINE ES256 under conflicting legacy settings; an attacker EC key placed in legacy JSON incorrectly accepts a forged LINE token. Current positive, forged-signature, and claim rejection cases pass with conflicting `OIDC_JWKS_URI`, `OIDC_JWKS_JSON`, issuer, client ID, and secret.                                                                                                                                                                                                                                 | Old R1 command below exits 1 with 3 failures / 1 pass; `.local/pax-oidc-login-20261009/old-595-r1.log`. Current root regression exits 0.                                                                                                          | No real provider calls/credentials; only HTTP responses stubbed. Legacy tenant/partner resolution preserved.                                                                                                                                             |
+| R2: expired-token fixture computed before fake clock                    | `passenger-oauth.test.ts` claim factories compute expiry after `beforeEach` freezes time                                                          | Original `9701679ff` suite's expired case resolves `logged_in` (expected reproduction failure); current signed-expired Google/LINE cases reject, valid signed tokens still log in. Missing-exp fixtures omit the claim before signing rather than failing inside `jwt.sign`.                                                                                                                                                                                                                                                                                                             | Old R2 command exits 1, 1 failed / 23 filtered; `old-970-r2.log`. Current root regression exits 0.                                                                                                                                                | Historical fixture defect; no production expiry bypass inferred.                                                                                                                                                                                         |
+| R3, repeated: malformed grant reaches UUID SQL                          | `PassengerOAuthService.parseCallbackCommand` validates UUID before `claim`; atomic SQL consumption/expiry predicate unchanged                     | Same new tests against `595c07133` service **and production repository** send 4 malformed strings to SQL. Current 5 malformed cases cause zero pool calls; a well-formed unknown UUID reaches bound claim SQL once and becomes `invalid_grant` (HTTP 401).                                                                                                                                                                                                                                                                                                                               | Old R3 command exits 1, 4 failed / 2 pass / 3 filtered. Current API regression exits 0; `old-595-r3.log`, `api-regression.log`.                                                                                                                   | Pool boundary stub does not emulate PG UUID casts/locks; hosted formal-schema behavior remains PAX-QA scope.                                                                                                                                             |
+| R4: PKCE mismatch, email merge, linking/session, LINE negative coverage | Real OAuth/account/verifier logic; persistence and HTTP boundary stubs only                                                                       | Google and LINE authorization URLs use S256; provider stub compares actual outbound verifier against the **original URL challenge**, accepts the correct verifier and returns 400 on mismatch. Mismatch issues no account/session and consumes the grant. Same-email Google subjects (verified/unverified) and Google/LINE identities stay separate. Binding succeeds for owner; absent/different live account, logout/revocation and existing other owner reject. Both LINE HS256/ES256 reject wrong issuer/audience/nonce/expiry, missing nonce/expiry/subject, and forged signatures. | Root regression exits 0; 70 OAuth cases, plus account and legacy suites; `root-regression.log`. LINE ES256 fixture is EC/P-256, as specified by [LINE's ID-token documentation](https://developers.line.biz/en/docs/line-login/verify-id-token/). | R4 was missing coverage, not evidence that every tested rejection failed in old production. No real OAuth acceptance claimed.                                                                                                                            |
+| `pax-oidc_google_line_flow_and_verification`                            | R1–R3 fixes plus R4 tests, redirect allowlist, state mismatch, provider mismatch, corrected replay, transaction expiry, signed expiry and one-use | Production-service tests pass; a failed state/provider/PKCE attempt cannot be retried with a corrected grant.                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Root regression: 8 files / 246 tests pass, exit 0. API regression: 3 files / 181 tests pass, exit 0. Lint and API typecheck pass, exit 0.                                                                                                         | Same-candidate hosted CI is read before handoff; exact run/job references are recorded in the canonical handoff summary and local CI receipts without changing candidate files. Reviewer approval, integration and PAX-QA PG acceptance remain distinct. |
+| `pax-oidc_linking_and_config_gating`                                    | Provider all-or-nothing config and existing account ownership rules                                                                               | Each Google/LINE ID/secret omission disables start/callback/provider listing without disabling the other provider; no outbound call. Valid bind, conflict, cross-account, logout and no-email-merge cases pass. Legacy suites pass.                                                                                                                                                                                                                                                                                                                                                      | Root includes auth-oidc-pkce (29), tenant-google-bff (24), tenant-google-invitation (7), tenant-oidc-replay-store and passenger-account suites; API includes auth-bootstrap and tenant-partner service plus 9 OAuth repository/boundary cases.    | Reviewer records acceptance through the existing lifecycle; owner does not call `done`.                                                                                                                                                                  |
+
+All tests use Node 22.23.2, Vitest 4.1.4, jsonwebtoken 9.0.3; API compilation
+uses TypeScript 5.9.3. Logs and exact file hashes are machine-specific evidence
+under this worker's `.local/pax-oidc-login-20261009/`; source and tests in the
+candidate are the durable reviewer evidence. The local commands below ran
+before the closeout commit, with those exact task source/test bytes; final
+SHA and same-SHA hosted results are recorded via canonical lifecycle commands.
+
+Reproduction setup uses `git archive <full-old-SHA>` into `old-595` and
+`old-970` below, selecting `apps/api/src`, `packages/contracts/src`,
+`packages/control-plane-auth/src`, `vitest.config.ts`, and the passenger account
+memory store. `old-970` also includes its original OAuth test. `old-595` uses
+the current OAuth/repository test files copied into those same relative paths;
+**production sources are unchanged at the old SHA**. Snapshot dependencies
+link to this worker's module links. No active worktree was reset or switched.
+Using `node node_modules/vitest/vitest.mjs` avoids shared broken pnpm launchers.
+
+```bash
+# R1: old valid-token rejection and forged LINE acceptance
+node node_modules/vitest/vitest.mjs run --root .local/pax-oidc-login-20261009/old-595 tests/unit/pax-oidc-login-20261009/passenger-oauth.test.ts -t 'independently of the legacy configuration|ES256 ID token signed by a different key' --reporter=dot
+# R2: original fixture failure
+node node_modules/vitest/vitest.mjs run --root .local/pax-oidc-login-20261009/old-970 tests/unit/pax-oidc-login-20261009/passenger-oauth.test.ts -t 'expired id token' --reporter=verbose
+# R3: old production service + production repository, pool response stub only
+node node_modules/vitest/vitest.mjs run --root .local/pax-oidc-login-20261009/old-595/apps/api tests/unit/passenger-oauth-transaction.repository.test.ts -t 'before production SQL|well-formed unknown' --reporter=dot
+# Current root regressions
+node node_modules/vitest/vitest.mjs run tests/unit/pax-oidc-login-20261009/passenger-oauth.test.ts tests/unit/auth-oidc-pkce.test.ts tests/unit/tenant-google-bff.test.ts tests/unit/tenant-google-invitation.test.ts tests/unit/tenant-oidc-replay-store.test.ts tests/unit/pax-account-session-20261009 --reporter=dot
+# Current API regressions, cwd apps/api (3 matching files / 181 tests)
+node ../../node_modules/vitest/vitest.mjs run tests/unit/passenger-oauth-transaction.repository.test.ts tests/unit/auth-bootstrap.test.ts tests/unit/tenant-partner.service.test.ts --reporter=dot
+# Compile workspace declarations, then API
+node node_modules/typescript/bin/tsc -p packages/contracts/tsconfig.json
+node node_modules/typescript/bin/tsc -p packages/control-plane-auth/tsconfig.json
+node node_modules/typescript/bin/tsc -p apps/api/tsconfig.json --noEmit
+node node_modules/eslint/bin/eslint.js tests/unit/pax-oidc-login-20261009/passenger-oauth.test.ts apps/api/tests/unit/passenger-oauth-transaction.repository.test.ts apps/api/src/modules/passenger-app/oauth apps/api/src/modules/auth/oidc-id-token-verifier.ts --max-warnings=0
+```
+
+Local setup failures are separate from product results: initial `pnpm exec`
+format/test commands failed before execution when shared module links pointed
+into a reaped sibling worktree; initial typecheck failed because workspace
+declarations had not been built; initial combined root regression had 222
+passing tests but could not import `@drts/tenant-auth`. Worker-only module
+links were repaired to the existing package store and this checkout's own
+workspace packages, then workspace declarations compiled. Shared module
+files were not changed. The repeated relevant checks above completed and
+their outputs were read; these setup failures are not counted as defect
+reproductions or test passes.
+
+No product server, browser/preview server, PostgreSQL server or Compose was
+started on the VM. No external credential was read/created and no real
+OAuth endpoint was called. SQL was re-read against V0111 and V0109: 12 table
+columns, 11 bound INSERT values (initial `consumed_at` is NULL), every row
+mapping, varchar(100) account FK, provider/purpose/link-account checks,
+unique state hash and atomic consumed/expiry guard agree. PostgreSQL
+locking/concurrency/constraints remain for the authorized hosted PAX-QA
+formal-schema repository run; generic CI migration success does not prove
+passenger OAuth concurrency acceptance.
 
 ## Authority and implementation
 
@@ -30,23 +126,24 @@ and the existing tenant/partner OIDC reference implementation
   secret exchanged with the provider), `code_verifier` / `code_challenge` (the
   PKCE pair — the raw verifier is kept because the real token-exchange step
   must send it to Google/LINE for them to validate `sha256(verifier) ==
-  challenge`; hashing it at rest would make a real exchange cryptographically
+challenge`; hashing it at rest would make a real exchange cryptographically
   impossible), `redirect_uri`, `drts_passenger_id` (nullable; set only for
   `purpose='link'`), `created_at`/`expires_at` (10-minute TTL, matching the
   existing tenant/partner OIDC state TTL), `consumed_at` (one-time use).
 - `PassengerOAuthTransactionRepository.claim` is a single atomic
   `UPDATE ... WHERE consumed_at IS NULL AND expires_at > $2 RETURNING *`: the
-  transaction is burned by `transaction_id` alone, *before* `state`/provider
+  transaction is burned by `transaction_id` alone, _before_ `state`/provider
   equality is even checked, so a replay with a corrected `state` after a
   failed attempt still fails (`invalid_grant`), not just the first wrong one.
 - `oidc-id-token-verifier.ts` gained an explicit `overrides?: {issuer, audience,
-  jwksUri, hsSecret}` parameter (4th, optional) on `verify()`. Every existing
+jwksUri, hsSecret}` parameter (4th, optional) on `verify()`. Every existing
   call site (`oidc-pkce.service.ts`, tenant/partner) is unchanged — it never
   passes a 4th argument, so it keeps resolving `TENANT_OIDC_*` / `OIDC_*` env
   vars exactly as before. Passenger Google calls pass
-  `{issuer: GOOGLE_OIDC_ISSUER, audience: <passenger client id>}`; passenger
+  `{issuer: GOOGLE_OIDC_ISSUER, audience: <passenger client id>,
+jwksUri: GOOGLE_OIDC_ENDPOINTS.jwks}`; passenger
   LINE calls pass `{issuer: "https://access.line.me", audience: <channel id>,
-  jwksUri: LINE's certs endpoint, hsSecret: <channel secret>}` — the `hsSecret`
+jwksUri: LINE's certs endpoint, hsSecret: <channel secret>}` — the `hsSecret`
   override is a legitimate, always-available HS256 verification key (LINE
   Login v2.1's default signing mode), unlike the pre-existing
   `environment==='local'||'test'` fallback a few lines above it, which stays a
@@ -70,24 +167,24 @@ and the existing tenant/partner OIDC reference implementation
   permanently bound to whoever started it, never to whatever Bearer happens to
   be presented again at `/callback`. Generates `state`/`nonce`/PKCE pair,
   persists the row, returns `{authUrl, transactionId, expiresAt, state}` —
-  deliberately never the `nonce` or PKCE material, which never need to leave
-  the server.
+  the authorization URL carries `state`, `nonce` and the PKCE challenge to
+  the provider. The raw verifier and client secret stay at the API boundary.
 - `callback`: provider check → body validation → atomic claim by
   `transactionId` → provider/`state_hash` equality → (`purpose:"link"` only)
   caller's Bearer `drtsPassengerId` must equal the row's bound id → real
-  `POST` to the provider's token endpoint with `code`, the *stored*
+  `POST` to the provider's token endpoint with `code`, the _stored_
   `redirect_uri` (must equal what was sent to `/authorize`, standard OAuth2
   requirement), `client_id`/`client_secret`, and the stored raw
   `code_verifier` → verify the returned `id_token` via the generalized
   `OidcIdTokenVerifier` (signature, `iss`, `aud`, `nonce`, `exp` — `exp` is
   enforced by `jsonwebtoken`'s default `jwt.verify` behavior, not bespoke
   code) → `purpose:"login"` calls `findOrCreateByIdentity(provider, sub, …)`
-  + `issueSession`; `purpose:"link"` calls `linkIdentity(identity, provider,
-  sub, …)`. `email`/`name` claims are only ever used as *non-authoritative*
-  attributes on a brand-new account (`verifiedEmail` only when
-  `email_verified===true`) — the lookup/matching key is always
-  `(provider, sub)`, per SD §2 "第三方回傳的 email 不作為合併依據"; this task
-  adds no email-based account matching anywhere.
+  - `issueSession`; `purpose:"link"` calls `linkIdentity(identity, provider,
+sub, …)`. `email`/`name` claims are only ever used as _non-authoritative_
+    attributes on a brand-new account (`verifiedEmail` only when
+    `email_verified===true`) — the lookup/matching key is always
+    `(provider, sub)`, per SD §2 "第三方回傳的 email 不作為合併依據"; this task
+    adds no email-based account matching anywhere.
 - `auth.policy.ts` gained one additive branch (`passenger-app/auth/providers`
   and `passenger-app/auth/oauth/:provider/(start|callback)`) inside the
   existing `passenger-app/*` block, purely for documentation/any future direct
@@ -105,19 +202,19 @@ Production path: `PassengerOAuthTransactionRepository.insert`/`claim` →
 each method is one bound statement); only bound parameters, no interpolated
 identities.
 
-| Column               | Migration (`V0111`)                                      | Production mapping / write                                                                         |
-| --------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `transaction_id`      | `uuid PRIMARY KEY`                                        | `transactionId`; server `randomUUID()`; returned to the client as the only opaque reference         |
-| `provider`            | `varchar(10) CHECK IN ('google','facebook','line')`        | `OAuthProvider`; bound `$2`; `facebook` reserved, no insert path reaches it in this task             |
-| `purpose`             | `varchar(10) CHECK IN ('login','link')`                    | from the validated start command; never re-derived from the callback body                            |
-| `state_hash`          | `varchar(64) CHECK ~ '^[0-9a-f]{64}$'`, unique index        | `sha256(state).hex`; compared by re-hashing the callback's `state`, never decrypted/reversed          |
-| `nonce`               | `varchar(128)`                                             | random 24-byte base64url; embedded in the `/authorize` URL; compared against the verified ID token    |
-| `code_verifier`       | `varchar(128)`                                             | random 32-byte base64url; sent raw to the provider's token endpoint at `/callback`                    |
-| `code_challenge`      | `varchar(128)`                                             | `base64url(sha256(code_verifier))`; sent in the `/authorize` URL                                      |
-| `redirect_uri`        | `varchar(2048)`                                            | validated against `OAUTH_REDIRECT_ALLOWLIST` at `/start`; reused verbatim at `/callback`'s token POST |
-| `drts_passenger_id`   | `varchar(100)` FK `passenger.accounts`, nullable            | set only for `purpose='link'`, from the `/start` caller's verified Bearer; `CHECK` ties it to purpose |
-| `created_at`/`expires_at` | `timestamptz`, `expires_at > created_at` CHECK          | 10-minute TTL from `/start` time                                                                      |
-| `consumed_at`         | `timestamptz`, nullable                                    | set by the one atomic claim `UPDATE`; `NULL` is the only claimable state                              |
+| Column                    | Migration (`V0111`)                                  | Production mapping / write                                                                            |
+| ------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `transaction_id`          | `uuid PRIMARY KEY`                                   | `transactionId`; server `randomUUID()`; returned to the client as the only opaque reference           |
+| `provider`                | `varchar(10) CHECK IN ('google','facebook','line')`  | `OAuthProvider`; bound `$2`; `facebook` reserved, no insert path reaches it in this task              |
+| `purpose`                 | `varchar(10) CHECK IN ('login','link')`              | from the validated start command; never re-derived from the callback body                             |
+| `state_hash`              | `varchar(64) CHECK ~ '^[0-9a-f]{64}$'`, unique index | `sha256(state).hex`; compared by re-hashing the callback's `state`, never decrypted/reversed          |
+| `nonce`                   | `varchar(128)`                                       | random 24-byte base64url; embedded in the `/authorize` URL; compared against the verified ID token    |
+| `code_verifier`           | `varchar(128)`                                       | random 32-byte base64url; sent raw to the provider's token endpoint at `/callback`                    |
+| `code_challenge`          | `varchar(128)`                                       | `base64url(sha256(code_verifier))`; sent in the `/authorize` URL                                      |
+| `redirect_uri`            | `varchar(2048)`                                      | validated against `OAUTH_REDIRECT_ALLOWLIST` at `/start`; reused verbatim at `/callback`'s token POST |
+| `drts_passenger_id`       | `varchar(100)` FK `passenger.accounts`, nullable     | set only for `purpose='link'`, from the `/start` caller's verified Bearer; `CHECK` ties it to purpose |
+| `created_at`/`expires_at` | `timestamptz`, `expires_at > created_at` CHECK       | 10-minute TTL from `/start` time                                                                      |
+| `consumed_at`             | `timestamptz`, nullable                              | set by the one atomic claim `UPDATE`; `NULL` is the only claimable state                              |
 
 Constraints/indexes: provider/purpose CHECKs, `expires_at > created_at`,
 `(purpose='link') = (drts_passenger_id IS NOT NULL)`, unique `state_hash`
@@ -125,13 +222,13 @@ index, `expires_at` index for future cleanup. PG execution/locking/constraint
 enforcement is **unverified locally** (see blocker below) — reviewer and
 hosted CI are the acceptance gate for this table, same as V0109.
 
-## Finding / acceptance evidence
+## Historical first-dispatch evidence (superseded by Codex2 results above)
 
-| Acceptance key / behavior                                                         | Source / change                                                                                                   | Static evidence                                                                                                                                                                                                 | Command / result                                                                                                                                                                                                 | Remaining limits                                                                                                   |
-| ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `pax-oidc_google_line_flow_and_verification` — state/nonce/PKCE/redirect/one-time/expiry negative tests; ID token signature/`iss`/`aud`/`nonce`/`exp` rejection; real Google (RS256) and LINE (HS256 and ES256) ID-token verification; one-time replay burns the transaction | `tests/unit/pax-oidc-login-20261009/passenger-oauth.test.ts` — `describe("OAuth callback: Google/LINE exchange and ID token verification")`, `describe("OAuth start: ...")` | Tests construct real RSA keypairs (`generateKeyPairSync`) and HS256 secrets, sign genuine Google/LINE-shaped ID tokens with `jsonwebtoken`, and mock only the HTTP boundary (`fetch` to the provider's token/JWKS endpoints) — `OidcIdTokenVerifier.verify` runs unmocked, performing real signature/claim verification, mirroring `tenant-partner.controller.test.ts`'s WIF pattern | **Not executed this dispatch** — see blocker below. Written and self-reviewed; not run.                                                                                                                           | Execution pending; see "Checks and unsuccessful setup attempts"                                                     |
-| `pax-oidc_linking_and_config_gating` — login finds-or-creates by `(provider, sub)`; authenticated binding; identity already owned by another account rejected (`conflict`); no email-based merge; disabled provider never activates; existing tenant/partner OIDC tests unaffected | `passenger-oauth.service.ts` (`requirePassengerBearer`, `start`/`callback` purpose branches, `oauth-provider.config.ts`); same test file, `describe("OAuth start: ...")`, `describe("OAuth callback: linking")`, `describe("GET /passenger-app/auth/providers")` | Same test file exercises: unauthenticated `link` start rejected; link transaction bound to starting caller only; a different/absent Bearer at callback rejected; linking a subject already owned by another account rejected as `conflict` with the original owner retained; `GET providers` includes google/line only when both env vars are set, never facebook | **Not executed this dispatch.** `oidc-id-token-verifier.ts`'s 4th-parameter addition is additive-only (no existing call site passes it), so no regression is expected in the existing tenant/partner OIDC suites, but this is **not** a substitute for actually running them. | Execution pending; tenant/partner OIDC regression suite not re-run this dispatch                                   |
-| SQL column reconciliation                                                         | `V0111__passenger_oidc_login.sql`                                                                         | Table above, written by hand against the migration text                                                                                                                                                                   | N/A — static document review                                                                                                                                                                                     | Reviewer must independently re-derive this table from the migration file, per §0.7                                 |
+| Acceptance key / behavior                                                                                                                                                                                                                                                          | Source / change                                                                                                                                                                                                                                                  | Static evidence                                                                                                                                                                                                                                                                                                                                                                      | Command / result                                                                                                                                                                                                                                                              | Remaining limits                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `pax-oidc_google_line_flow_and_verification` — state/nonce/PKCE/redirect/one-time/expiry negative tests; ID token signature/`iss`/`aud`/`nonce`/`exp` rejection; real Google (RS256) and LINE (HS256 and ES256) ID-token verification; one-time replay burns the transaction       | `tests/unit/pax-oidc-login-20261009/passenger-oauth.test.ts` — `describe("OAuth callback: Google/LINE exchange and ID token verification")`, `describe("OAuth start: ...")`                                                                                      | Tests construct real RSA keypairs (`generateKeyPairSync`) and HS256 secrets, sign genuine Google/LINE-shaped ID tokens with `jsonwebtoken`, and mock only the HTTP boundary (`fetch` to the provider's token/JWKS endpoints) — `OidcIdTokenVerifier.verify` runs unmocked, performing real signature/claim verification, mirroring `tenant-partner.controller.test.ts`'s WIF pattern | **Not executed this dispatch** — see blocker below. Written and self-reviewed; not run.                                                                                                                                                                                       | Execution pending; see "Checks and unsuccessful setup attempts"                    |
+| `pax-oidc_linking_and_config_gating` — login finds-or-creates by `(provider, sub)`; authenticated binding; identity already owned by another account rejected (`conflict`); no email-based merge; disabled provider never activates; existing tenant/partner OIDC tests unaffected | `passenger-oauth.service.ts` (`requirePassengerBearer`, `start`/`callback` purpose branches, `oauth-provider.config.ts`); same test file, `describe("OAuth start: ...")`, `describe("OAuth callback: linking")`, `describe("GET /passenger-app/auth/providers")` | Same test file exercises: unauthenticated `link` start rejected; link transaction bound to starting caller only; a different/absent Bearer at callback rejected; linking a subject already owned by another account rejected as `conflict` with the original owner retained; `GET providers` includes google/line only when both env vars are set, never facebook                    | **Not executed this dispatch.** `oidc-id-token-verifier.ts`'s 4th-parameter addition is additive-only (no existing call site passes it), so no regression is expected in the existing tenant/partner OIDC suites, but this is **not** a substitute for actually running them. | Execution pending; tenant/partner OIDC regression suite not re-run this dispatch   |
+| SQL column reconciliation                                                                                                                                                                                                                                                          | `V0111__passenger_oidc_login.sql`                                                                                                                                                                                                                                | Table above, written by hand against the migration text                                                                                                                                                                                                                                                                                                                              | N/A — static document review                                                                                                                                                                                                                                                  | Reviewer must independently re-derive this table from the migration file, per §0.7 |
 
 ## Finding fixed this dispatch (migration version collision)
 
@@ -151,7 +248,7 @@ hosted CI are the acceptance gate for this table, same as V0109.
   embedded the version number). No other write-scope file referenced the old
   filename except this document, updated above.
 
-## Checks and unsuccessful setup attempts
+## Historical checks and unsuccessful setup attempts
 
 **Blocker: this VM's shared `node_modules` is broken repo-wide (not specific
 to this worktree or task), and this session's mutation-approval gate blocks
@@ -217,7 +314,7 @@ the standard repair.**
   that these suites pass.
 - Remaining limitation for whoever next has a session with a healthy
   `orchestrator_approval_broker`: run `pnpm install --offline
-  --frozen-lockfile --ignore-scripts` once at the canonical root (fixes every
+--frozen-lockfile --ignore-scripts` once at the canonical root (fixes every
   worktree, not just this one), then this task's own regression command is
   `pnpm --filter @drts/api typecheck` and
   `pnpm exec vitest run apps/api/tests/unit/passenger-oauth-transaction.repository.test.ts tests/unit/pax-oidc-login-20261009/passenger-oauth.test.ts`,
@@ -256,9 +353,9 @@ fresh CI run):
   `it.each` table for ID-token claim rejection built the "expired id token"
   case's `iat`/`exp` as a plain object literal evaluated once when the
   `it.each` array itself is constructed — at `describe`-collection time,
-  *before* `beforeEach`'s `vi.useFakeTimers()`/`vi.setSystemTime(...)` runs.
+  _before_ `beforeEach`'s `vi.useFakeTimers()`/`vi.setSystemTime(...)` runs.
   Depending on the real wall-clock time at the moment the suite loads, the
-  resulting `exp` (real-now − 400s) could land *after* the pinned fake
+  resulting `exp` (real-now − 400s) could land _after_ the pinned fake
   clock (`2026-10-10T00:00:00Z`), i.e. in the token's future relative to the
   clock `jwt.verify` actually checked against — making the signed token look
   unexpired and the callback resolve with `result:"logged_in"` instead of
@@ -274,7 +371,7 @@ fresh CI run):
   already accepted by the shared, unmodified `OidcIdTokenVerifier` — only the
   comment and the test fixture were wrong). `passenger-oauth.test.ts`: the
   LINE asymmetric keypair is now `generateKeyPairSync("ec", { namedCurve:
-  "prime256v1" })` instead of RSA; `signLineIdTokenRs256` renamed
+"prime256v1" })` instead of RSA; `signLineIdTokenRs256` renamed
   `signLineIdTokenEs256` and signs with `{algorithm:"ES256"}`;
   `jwksResponse(kid, jwk, alg)` now takes an explicit `alg` and spreads the
   JWK's own fields (works for both the Google RSA JWKS — `n`/`e` — and the
@@ -282,7 +379,7 @@ fresh CI run):
   `alg:"RS256"`); the "also verifies a LINE ..." test and its JWKS `fetch`
   stub both switched from RS256 to ES256 accordingly. Verified locally (core
   `node:crypto`, no third-party deps needed) that `createPublicKey({key:
-  {...jwk, kid, alg:"ES256", use:"sig"}, format:"jwk"})` round-trips an
+{...jwk, kid, alg:"ES256", use:"sig"}, format:"jwk"})` round-trips an
   EC/P-256 JWK exactly the way `oidc-id-token-verifier.ts`'s JWKS-matching
   path constructs the verification key.
 - **R3**: no code/doc change needed beyond this note — the SQL reconciliation
@@ -315,12 +412,12 @@ reviewer asked for. No code outside this task's `write_scopes` was touched.
 - **R1 (P1, confirmed and fixed)**: the bug was real. `oauth-provider.config.ts`'s
   Google entry supplied `issuer`/`audience` overrides but no `jwksUri`, so
   `oidc-id-token-verifier.ts`'s key-resolution `uri` fell through to the
-  legacy `process.env.OIDC_JWKS_URI` (tenant/partner env var) *ahead of*
+  legacy `process.env.OIDC_JWKS_URI` (tenant/partner env var) _ahead of_
   Google's own hardcoded endpoint — a `TENANT_OIDC`-unrelated passenger login
   would silently start fetching whatever legacy JWKS URI happened to be set
   for the tenant/partner OIDC flow. Separately, for LINE, the verifier's
   offline-fixture branch (`if (!google && process.env.OIDC_JWKS_JSON) { keys =
-  JSON.parse(...).keys }`) checked `process.env.OIDC_JWKS_JSON` *before* ever
+JSON.parse(...).keys }`) checked `process.env.OIDC_JWKS_JSON` _before_ ever
   consulting `overrides?.jwksUri`, so LINE's own explicit `jwksUri` override
   (already present in `oauth-provider.config.ts`) was silently discarded
   whenever that legacy env var happened to be set for an unrelated
@@ -328,10 +425,10 @@ reviewer asked for. No code outside this task's `write_scopes` was touched.
   keys are coupled to legacy tenant/partner config", exactly as the reviewer's
   probe showed, and actively encode wrong behavior, not merely style.
   - Fix: `oauth-provider.config.ts` now sets `verifyOverrides.jwksUri:
-    GOOGLE_OIDC_ENDPOINTS.jwks` explicitly for Google (previously only LINE
+GOOGLE_OIDC_ENDPOINTS.jwks` explicitly for Google (previously only LINE
     had an explicit `jwksUri`). `oidc-id-token-verifier.ts`'s offline-fixture
     condition is now `if (!google && !overrides?.jwksUri?.trim() &&
-    process.env.OIDC_JWKS_JSON)` — an explicit caller-supplied `jwksUri`
+process.env.OIDC_JWKS_JSON)` — an explicit caller-supplied `jwksUri`
     override now always wins over the legacy offline fixture, for any caller,
     not just passenger OAuth.
   - Additive-only, confirmed by hand: both existing tenant/partner call sites
@@ -355,10 +452,10 @@ reviewer asked for. No code outside this task's `write_scopes` was touched.
   `WHERE transaction_id = $1` against a `uuid PRIMARY KEY` column; a
   non-UUID-shaped value would be a Postgres `22P02` cast error surfaced as an
   unhandled HTTP 500 by `SnakeCaseExceptionFilter`, not the `invalid_grant`
-  400 a malformed OAuth grant should get.
+  HTTP 401 a malformed OAuth grant should get.
   - Fix: `passenger-oauth.service.ts` now validates `transactionId` against a
-    UUID-shape regex (`UUID_PATTERN`, matching the `v4`-only shape
-    `randomUUID()` actually produces) inside `parseCallbackCommand`, *before*
+    UUID-shape regex (`UUID_PATTERN`, permitting UUID versions 1–5,
+    including the version 4 values `randomUUID()` produces) inside `parseCallbackCommand`, _before_
     any transaction-store call — a malformed value now fails validation and
     throws `invalid_grant` without ever reaching `claim`/the database. A
     well-formed but unknown UUID still reaches `claim` and is still rejected
@@ -369,7 +466,7 @@ reviewer asked for. No code outside this task's `write_scopes` was touched.
     before any transaction store lookup" (spies on the in-memory store's
     `claim` and asserts it is never called) and "rejects a well-formed but
     unknown uuid transactionId only after a transaction store lookup" (same
-    spy, asserts `claim` *is* called exactly once) — these are the two
+    spy, asserts `claim` _is_ called exactly once) — these are the two
     regressions the reviewer asked for, distinguished exactly the way the
     reviewer specified (no-DB-call vs. reaches-the-store). The committed
     repository-level test (`apps/api/tests/unit/passenger-oauth-transaction.repository.test.ts`)
@@ -387,7 +484,7 @@ reviewer asked for. No code outside this task's `write_scopes` was touched.
     in the transaction at `/start` time.
   - No-email-merge across providers: "does not merge accounts by matching
     email across different providers/subjects" — logs in via Google and then
-    LINE with the *same* verified email but different `(provider, sub)` pairs
+    LINE with the _same_ verified email but different `(provider, sub)` pairs
     and asserts two distinct `drtsPassengerId`s.
   - Cross-account link rejection beyond the null case: "rejects completing a
     link transaction while authenticated as a different live passenger
@@ -402,11 +499,11 @@ reviewer asked for. No code outside this task's `write_scopes` was touched.
     check (shared with every other passenger-account mutation) rejects it as
     `unauthorized`.
   - LINE signature/claim negative coverage: LINE previously had positive
-    tests only. Added, for *both* LINE algorithms: wrong-nonce rejection and
+    tests only. Added, for _both_ LINE algorithms: wrong-nonce rejection and
     forged-signature rejection (`rejects a LINE HS256 ID token with the wrong
-    nonce`, `rejects a LINE HS256 ID token signed with the wrong channel
-    secret`, `rejects a LINE ES256 ID token with the wrong nonce`, `rejects a
-    LINE ES256 ID token signed by a different key`), mirroring the coverage
+nonce`, `rejects a LINE HS256 ID token signed with the wrong channel
+secret`, `rejects a LINE ES256 ID token with the wrong nonce`, `rejects a
+LINE ES256 ID token signed by a different key`), mirroring the coverage
     Google already had.
   - Request-body-aware `fetch` stub: not changed structurally (still only
     branches on URL), but the new PKCE test above now inspects the captured
@@ -416,7 +513,7 @@ reviewer asked for. No code outside this task's `write_scopes` was touched.
 Both `required_acceptance` keys (`pax-oidc_google_line_flow_and_verification`,
 `pax-oidc_linking_and_config_gating`) remain **pending, not claimed passing**
 — same local blocker as round 1 (below), now confirmed worse: this dispatch's
-`jsonwebtoken`/`@nestjs/*`/`pg`/etc. are *still* unresolvable from this
+`jsonwebtoken`/`@nestjs/*`/`pg`/etc. are _still_ unresolvable from this
 worktree (same dangling symlink into the reaped
 `gemini-pax-account-session-20261009` sibling worktree, confirmed again via
 `node -e "require.resolve('jsonwebtoken')"` failing and `readlink` on
@@ -426,15 +523,15 @@ the same mutation-approval gate blocks the standard `pnpm install` repair.
 Every change above was verified by hand-tracing against the exact
 `jsonwebtoken`/`pg` semantics documented in round 1, and the whole test file
 was parse-checked with the TypeScript compiler API (`ts.createSourceFile`,
-which *does* resolve locally) to confirm it is at least syntactically valid;
+which _does_ resolve locally) to confirm it is at least syntactically valid;
 this is static evidence only, not a test run. Hosted CI on the new candidate
 SHA (triggered by this dispatch's `handoff`) is the actual gate, per §0.7.
 
-## Pending integration / external acceptance
+## Historical pending integration / external acceptance
 
 A new candidate SHA/branch for this round-2 fix is recorded by canonical
 `handoff`, per §0.7 — the "Review response round 2" section above is evidence
-for *that* SHA, not the superseded `595c07133`/`9701679ff`. Hosted CI for the
+for _that_ SHA, not the superseded `595c07133`/`9701679ff`. Hosted CI for the
 new SHA is pending at handoff time; its result must be read before
 `pax-oidc_google_line_flow_and_verification` /
 `pax-oidc_linking_and_config_gating` can be considered verified. PG-level
