@@ -99,6 +99,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client
 
+      - name: Fresh Cloud metadata and overlap reservation check
+        run: |
+          python3 operations/verification/read-dev-cloud-metadata.py > .local-cloud-metadata.json
+
+      - name: Verify no active conflicting workflows
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ACTIVE=$(gh run list --status in_progress --json name,databaseId --jq '.[] | select(.name | contains("Deploy") or contains("Restore") or contains("Provision")) | .databaseId')
+          if [ -n "$ACTIVE" ]; then
+            echo "Overlap detected: $ACTIVE"
+            exit 1
+          fi
+
       - name: Execute read-only assessment
         run: |
-          python3 operations/verification/assess-owned-operational-fixtures.py
+          python3 operations/verification/assess-owned-operational-fixtures.py \
+            --product-run-id "${{ github.event.inputs.product_run_id }}" \
+            --artifact-id "${{ github.event.inputs.artifact_id }}"
+

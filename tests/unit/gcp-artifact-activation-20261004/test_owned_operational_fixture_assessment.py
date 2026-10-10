@@ -10,7 +10,6 @@ script_dir = Path(__file__).resolve().parent
 operations_dir = script_dir.parent.parent.parent / "operations" / "verification"
 sys.path.insert(0, str(operations_dir))
 
-# Load module dynamically because of hyphens in filename
 module_name = "assess_owned_operational_fixtures"
 file_path = operations_dir / "assess-owned-operational-fixtures.py"
 spec = importlib.util.spec_from_file_location(module_name, file_path)
@@ -30,6 +29,9 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
         self.assertEqual(assess.logical_to_physical_gcs_key(logical), expected)
 
     def test_assess_gcs_objects_success(self):
+        fake_body = b"fake_body_for_test"
+        fake_sha256 = hashlib.sha256(fake_body).hexdigest()
+        
         def mock_gcs_runner(action, bucket, key):
             if action == "describe":
                 return {
@@ -42,17 +44,39 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                     }
                 }
             elif action == "cat":
-                return {"status": "ok", "body": b"fake_body"}
+                return {"status": "ok", "body": fake_body}
             return {"status": "error"}
 
-        with patch('hashlib.sha256') as mock_hash:
-            mock_sha = MagicMock()
-            mock_sha.hexdigest.return_value = self.expected_sha256
-            mock_hash.return_value = mock_sha
-            
+        with patch.object(assess, 'EXPECTED_SHA256', fake_sha256):
             res = assess.assess_gcs_objects(mock_gcs_runner)
             self.assertEqual(res["status"], "success")
             self.assertEqual(res["validated_count"], len(assess.CANONICAL_OWNED_OBJECTS))
+
+    def test_assess_gcs_objects_drift(self):
+        fake_body = b"fake_body_for_test"
+        fake_sha256 = hashlib.sha256(fake_body).hexdigest()
+        
+        describe_calls = {"count": 0}
+        def mock_gcs_runner(action, bucket, key):
+            if action == "describe":
+                describe_calls["count"] += 1
+                gen = "1234567890" if describe_calls["count"] <= 8 else "0987654321"
+                return {
+                    "status": "ok",
+                    "metadata": {
+                        "size": str(self.expected_size),
+                        "contentType": self.expected_mime,
+                        "generation": gen,
+                        "metageneration": "1"
+                    }
+                }
+            elif action == "cat":
+                return {"status": "ok", "body": fake_body}
+            return {"status": "error"}
+
+        with patch.object(assess, 'EXPECTED_SHA256', fake_sha256):
+            with self.assertRaisesRegex(ValueError, "Generation drift"):
+                assess.assess_gcs_objects(mock_gcs_runner)
 
     def test_assess_gcs_objects_missing_object(self):
         def mock_gcs_runner(action, bucket, key):
@@ -84,10 +108,16 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
         def mock_db_runner(query, params):
             if "supply_submissions" in query:
                 return {"rows": [["4"]]}
+            elif "supply_documents" in query:
+                return {"rows": [["8"]]}
             elif "supply_review_events" in query:
                 return {"rows": [["10"]]}
             elif "vehicle_fleet_affiliations" in query:
                 return {"rows": [["2"]]}
+            elif "vehicle_passenger_disclosure_profiles" in query:
+                return {"rows": [["1"]]}
+            elif "driver_public_registration_credentials" in query:
+                return {"rows": [["1"]]}
             return {"rows": [["0"]]}
 
         res = assess.assess_database(mock_db_runner)
@@ -103,6 +133,17 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
             return {"rows": [["0"]]}
 
         with self.assertRaisesRegex(ValueError, "Missing expected supply_submissions"):
+            assess.assess_database(mock_db_runner)
+
+    def test_assess_database_missing_refs(self):
+        def mock_db_runner(query, params):
+            if "supply_submissions" in query:
+                return {"rows": [["4"]]}
+            elif "supply_documents" in query:
+                return {"rows": [["8"]]}
+            return {"rows": [["0"]]}
+
+        with self.assertRaisesRegex(ValueError, "Missing retention/relationship blocker"):
             assess.assess_database(mock_db_runner)
 
 if __name__ == '__main__':

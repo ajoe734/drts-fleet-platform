@@ -1,47 +1,37 @@
-#!/usr/bin/env python3
-"""Fail-closed read-only assessment for owned operational fixtures.
-
-This script performs genuine guarded hosted read-only assessment for original
-owned operational fixtures.
-- Every report includes assessment_only=true, cleanup_not_performed=true, and no available apply operation.
-"""
 import argparse
-import hashlib
-import json
-import os
-import re
-import subprocess
 import sys
-import datetime
-import urllib.parse
+import json
+import hashlib
+import subprocess
+import os
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Dict, Any, List, Callable, Tuple
 
 PROJECT = "drts-dev-devcc-20260825"
-REGION = "us-central1"
-BUCKET = f"{PROJECT}-document-artifacts"
-EXPECTED_PRODUCT_RUN_ID = 37906298090
-EXPECTED_FILE_SIZE = 327
-EXPECTED_SHA256 = "4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784"
-EXPECTED_MIME = "application/pdf"
-KEY_PREFIX = "fleet-partner/fleet-demo-001/supply-submissions/"
+BUCKET = "drts-dev-devcc-20260825-fleet-uploads"
 
-def logical_to_physical_gcs_key(logical_key: str, kind: str = "fleet-upload-content") -> str:
-    encoded_subject = urllib.parse.quote(logical_key, safe="")
-    return f"document-artifacts/{kind}/{encoded_subject}"
+EXPECTED_SHA256 = "4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784"
+EXPECTED_FILE_SIZE = 327
+EXPECTED_MIME = "application/pdf"
+
+AUTHORIZED_PROVENANCE = {
+    "run_id": "37906298090",
+    "artifact_id": "11606165993",
+    "zip_sha256": "2fc9ef568f7b37cf709475fd1e1bb470f1b18e55383751254cef179753b539b5",
+    "workflow_sha": "9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c"
+}
+
+def logical_to_physical_gcs_key(logical_key: str) -> str:
+    encoded = logical_key.replace("/", "%2F")
+    return f"document-artifacts/fleet-upload-content/{encoded}"
 
 CANONICAL_OWNED_OBJECTS: Dict[str, Dict[str, str]] = {
-    "fleet-partner/fleet-demo-001/supply-submissions/8b7b0b8a-bc5a-48f3-b576-af201e6ba074/18f06410-510c-4107-ae21-16ab61383b95-harmless-upload.pdf": {
-        "documentId": "43e91900-b03d-4319-8bd1-25d438372f4d",
+    "fleet-partner/fleet-demo-001/supply-submissions/8b7b0b8a-bc5a-48f3-b576-af201e6ba074/09c3be79-e362-4dc2-b7e9-d75471d43a13-harmless-upload.pdf": {
+        "documentId": "473df781-a74e-41a4-afcf-b9c647b0e14a",
         "confirmSubmissionId": "8b7b0b8a-bc5a-48f3-b576-af201e6ba074",
         "document_type": "professional_driver_license",
     },
-    "fleet-partner/fleet-demo-001/supply-submissions/8b7b0b8a-bc5a-48f3-b576-af201e6ba074/8ad02a30-c584-4deb-b2c8-5883f9a5345a-harmless-upload.pdf": {
-        "documentId": "dc3aaed4-7f9c-4e61-a532-c6acd49cdf59",
-        "confirmSubmissionId": "8b7b0b8a-bc5a-48f3-b576-af201e6ba074",
-        "document_type": "taxi_driver_registration",
-    },
-    "fleet-partner/fleet-demo-001/supply-submissions/deeed4cd-ede0-4daf-a70f-4d0e900987b9/f88f9320-7c81-4df9-9abd-d7ced9c0c50a-harmless-upload.pdf": {
+    "fleet-partner/fleet-demo-001/supply-submissions/8b7b0b8a-bc5a-48f3-b576-af201e6ba074/3b27b38d-ec86-4fb9-a92c-fbdb9cd9e7a4-harmless-upload.pdf": {
         "documentId": "f26201ec-7e67-4866-94fc-8a5bfd5ecbca",
         "confirmSubmissionId": "deeed4cd-ede0-4daf-a70f-4d0e900987b9",
         "document_type": "professional_driver_license",
@@ -85,8 +75,9 @@ def require(cond: bool, msg: str):
         raise ValueError(msg)
 
 def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]]) -> Dict[str, Any]:
-    validated = []
-    for logical_key, expected in CANONICAL_OWNED_OBJECTS.items():
+    validated_meta = {}
+    
+    for logical_key in CANONICAL_OWNED_OBJECTS.keys():
         physical_key = logical_to_physical_gcs_key(logical_key)
         desc = runner("describe", BUCKET, physical_key)
         if desc.get("status") == "error":
@@ -100,8 +91,13 @@ def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]]) -> Dic
         require(meta.get("contentType") == EXPECTED_MIME, f"MIME mismatch for {physical_key}")
         require("generation" in meta, f"No generation for {physical_key}")
         require("metageneration" in meta, f"No metageneration for {physical_key}")
-        
-        body_res = runner("cat", BUCKET, physical_key)
+        validated_meta[physical_key] = meta
+
+    validated_reads = []
+    for logical_key in CANONICAL_OWNED_OBJECTS.keys():
+        physical_key = logical_to_physical_gcs_key(logical_key)
+        meta = validated_meta[physical_key]
+        body_res = runner("cat", BUCKET, f"{physical_key}#{meta['generation']}")
         require(body_res.get("status") == "ok", f"Failed to read body for {physical_key}")
         body_bytes = body_res.get("body", b"")
         hasher = hashlib.sha256()
@@ -109,31 +105,52 @@ def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]]) -> Dic
         actual_sha256 = hasher.hexdigest()
         require(actual_sha256 == EXPECTED_SHA256, f"Hash mismatch for {physical_key}")
         
-        validated.append({"key": physical_key, "generation": meta["generation"]})
+        re_desc = runner("describe", BUCKET, physical_key)
+        re_meta = re_desc.get("metadata", {})
+        require(re_meta.get("generation") == meta["generation"], f"Generation drift for {physical_key}")
+        require(re_meta.get("metageneration") == meta["metageneration"], f"Metageneration drift for {physical_key}")
         
-    return {"status": "success", "validated_count": len(validated)}
+        validated_reads.append({
+            "key": physical_key, 
+            "generation": meta["generation"],
+            "metageneration": meta["metageneration"]
+        })
+        
+    return {"status": "success", "validated_count": len(validated_reads), "receipts": validated_reads}
 
 def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Dict[str, Any]:
-    q_sub = """
-        SELECT count(id) FROM supply_submissions
-        WHERE id = ANY(%s)
-    """
+    q_sub = "SELECT count(submission_id) FROM fleet.supply_submissions WHERE submission_id = ANY(%s)"
     res_sub = db_runner(q_sub, [list(CANONICAL_OWNED_SUBMISSIONS)])
     require(int(res_sub["rows"][0][0]) == 4, "Missing expected supply_submissions")
 
-    q_rev = """
-        SELECT count(*) FROM supply_review_events
-        WHERE submission_id = ANY(%s)
-    """
+    q_doc = "SELECT count(document_id) FROM fleet.supply_documents WHERE submission_id = ANY(%s)"
+    res_doc = db_runner(q_doc, [list(CANONICAL_OWNED_SUBMISSIONS)])
+    require(int(res_doc["rows"][0][0]) == 8, "Missing expected supply_documents")
+
+    q_rev = "SELECT count(event_id) FROM fleet.supply_review_events WHERE submission_id = ANY(%s)"
     res_rev = db_runner(q_rev, [list(CANONICAL_OWNED_SUBMISSIONS)])
     
-    q_aff = """
-        SELECT count(*) FROM vehicle_fleet_affiliations
-        WHERE source_submission_id = ANY(%s)
-    """
+    q_aff = "SELECT count(affiliation_id) FROM fleet.vehicle_fleet_affiliations WHERE source_submission_id = ANY(%s)"
     res_aff = db_runner(q_aff, [list(CANONICAL_OWNED_SUBMISSIONS)])
     
-    return {"status": "success", "submissions_found": 4, "review_events_count": int(res_rev["rows"][0][0]), "affiliations_count": int(res_aff["rows"][0][0])}
+    q_disc = "SELECT count(vehicle_id) FROM reg.vehicle_passenger_disclosure_profiles WHERE source_submission_id = ANY(%s)"
+    res_disc = db_runner(q_disc, [list(CANONICAL_OWNED_SUBMISSIONS)])
+
+    q_cred = "SELECT count(driver_id) FROM reg.driver_public_registration_credentials WHERE source_submission_id = ANY(%s)"
+    res_cred = db_runner(q_cred, [list(CANONICAL_OWNED_SUBMISSIONS)])
+
+    count_refs = int(res_rev["rows"][0][0]) + int(res_aff["rows"][0][0]) + int(res_disc["rows"][0][0]) + int(res_cred["rows"][0][0])
+    require(count_refs > 0, "Missing retention/relationship blocker: no inbound foreign keys found")
+
+    return {
+        "status": "success", 
+        "submissions_found": 4,
+        "documents_found": 8,
+        "review_events_count": int(res_rev["rows"][0][0]), 
+        "affiliations_count": int(res_aff["rows"][0][0]),
+        "disclosure_count": int(res_disc["rows"][0][0]),
+        "credential_count": int(res_cred["rows"][0][0]),
+    }
 
 def default_gcs_runner(action: str, bucket: str, key: str) -> Dict[str, Any]:
     if action == "describe":
@@ -158,26 +175,27 @@ def default_db_runner(query: str, params: List[Any]) -> Dict[str, Any]:
     cred_helper = root_dir / "infra" / "gcp" / "dev" / "ops-drill" / "db_credentials.mjs"
     
     sec_cmd = ["gcloud", "secrets", "versions", "access", "latest", "--secret=drts-dev-db-url", "--project", PROJECT, "--quiet"]
-    sec_res = subprocess.run(sec_cmd, capture_output=True, text=True, check=True)
-    
+    sec_res = subprocess.run(sec_cmd, capture_output=True, text=True, check=False)
+    if sec_res.returncode != 0:
+        raise RuntimeError("Failed to access db credentials secret")
+        
     node_cmd = ["node", str(cred_helper)]
-    node_res = subprocess.run(node_cmd, input=sec_res.stdout, capture_output=True, text=True, check=True)
+    node_res = subprocess.run(node_cmd, input=sec_res.stdout, capture_output=True, text=True, check=False)
+    if node_res.returncode != 0:
+        raise RuntimeError("Failed to parse db credentials")
+        
     creds = json.loads(node_res.stdout)
     
     env = os.environ.copy()
     env["PGPASSWORD"] = creds["password"]
-    env["PGHOST"] = "127.0.0.1" # Standard proxied host in dev deployments
+    env["PGHOST"] = "127.0.0.1"
+    env["PGOPTIONS"] = "-c default_transaction_read_only=on -c default_transaction_isolation=repeatable_read -c statement_timeout=10000"
     
     safe_uuids = [f"'{u}'" for u in params[0]]
     uuid_list = ",".join(safe_uuids)
     final_query = query.replace("%s", f"ARRAY[{uuid_list}]::uuid[]")
     
-    full_sql = f"""
-BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
-{final_query};
-COMMIT;
-"""
-    psql_cmd = ["psql", "-U", creds["user"], "-d", creds["database"], "-t", "-A", "-c", full_sql]
+    psql_cmd = ["psql", "-U", creds["user"], "-d", creds["database"], "-t", "-A", "-c", final_query]
     res = subprocess.run(psql_cmd, capture_output=True, text=True, env=env, check=False)
     if res.returncode != 0:
         raise RuntimeError(f"psql failed: {res.stderr}")
@@ -188,23 +206,48 @@ COMMIT;
             rows.append(line.split("|"))
     return {"rows": rows}
 
+def verify_provenance(args) -> None:
+    if args.mock_db:
+        return
+    require(args.product_run_id == AUTHORIZED_PROVENANCE["run_id"], "Unauthorized product_run_id")
+    require(args.artifact_id == AUTHORIZED_PROVENANCE["artifact_id"], "Unauthorized artifact_id")
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mock-db", action="store_true")
+    parser.add_argument("--product-run-id", type=str, default="")
+    parser.add_argument("--artifact-id", type=str, default="")
     args = parser.parse_args()
     
-    report = {"assessment_only": True, "cleanup_not_performed": True, "available_apply_operation": False}
+    report = {
+        "assessment_only": True, 
+        "cleanup_not_performed": True, 
+        "available_apply_operation": False,
+        "provenance": AUTHORIZED_PROVENANCE
+    }
+    
     try:
+        if args.mock_db:
+            report["disposition"] = "synthetic"
+        else:
+            verify_provenance(args)
+            
         gcs_res = assess_gcs_objects(default_gcs_runner)
         report["gcs_assessment"] = gcs_res
         
-        if not args.mock_db:
+        if args.mock_db:
+            report["db_assessment"] = {"status": "skipped_due_to_mock"}
+        else:
             db_res = assess_database(default_db_runner)
             report["db_assessment"] = db_res
-        
+            report["disposition"] = "complete"
+            
         print(json.dumps(report, indent=2))
+        if args.mock_db:
+            sys.exit(1)
         sys.exit(0)
     except Exception as e:
+        report["disposition"] = "error"
         report["error"] = str(e)
         print(json.dumps(report, indent=2))
         sys.exit(1)
