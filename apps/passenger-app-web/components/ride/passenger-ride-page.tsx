@@ -1114,13 +1114,13 @@ function CertificateCard({
         <iframe
           src={certificate.htmlUrl}
           style={{ width: "100%", height: "400px", border: "none", marginBottom: hasRows ? 16 : 0 }}
-          title="Electronic Receipt"
+          title={t.EReceiptIframeTitle}
         />
       ) : null}
       
       {!certificate.htmlUrl && !hasRows ? (
         <div style={{ textAlign: "center", padding: "20px 0", color: passengerChrome.muted, fontSize: 13 }}>
-          無法載入完整電子收據明細
+          {t.CannotLoadReceiptDetails}
         </div>
       ) : null}
 

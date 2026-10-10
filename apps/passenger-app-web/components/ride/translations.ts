@@ -80,4 +80,6 @@ export const t = {
   RatingNotice: "評價內容將匿名提供給車隊以提升服務品質；送出後無法修改。",
   DownloadPdf: "下載 PDF",
   DownloadHtml: "下載 HTML",
+  EReceiptIframeTitle: "Electronic Receipt",
+  CannotLoadReceiptDetails: "無法載入完整電子收據明細",
 };
