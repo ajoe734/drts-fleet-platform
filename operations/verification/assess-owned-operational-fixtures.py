@@ -555,6 +555,9 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         ('fleet.vehicle_supply_drafts', 'fleet.supply_submissions'): ('vehicle_supply_drafts_submission_id_fkey', 'FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE', 'c'),
     }
     
+    if len(fks_meta) != len(expected_fks):
+        return {"status": "rejected", "reason": "Duplicate or missing foreign keys"}
+    
     seen_fks = set()
     for fk in fks_meta:
         if fk.get('contype') != 'f':
@@ -996,8 +999,12 @@ def main():
     
     try:
         if args.cloud_metadata and os.path.exists(args.cloud_metadata):
+            size = os.path.getsize(args.cloud_metadata)
+            require(size <= 512 * 1024, "Cloud metadata file too large")
             with open(args.cloud_metadata, 'r') as f:
-                cm = json.load(f)
+                content = f.read(512 * 1024)
+                require(len(f.read(1)) == 0, "Cloud metadata file exceeds byte cap")
+                cm = json.loads(content)
                 require(cm.get("schema") == "dev-readonly-cloud-metadata-v1", "Metadata schema mismatch")
                 require(cm.get("project") == PROJECT, "Metadata project mismatch")
                 require(cm.get("region") == REGION, "Metadata region mismatch")
@@ -1036,8 +1043,11 @@ def main():
                         # Private consoles should have no bindings or no allUsers/allAuthenticatedUsers
                         bindings = s.get("bindings")
                         require(bindings is not None, f"Console {name} bindings missing/bypass")
+                        require(isinstance(bindings, list), f"Console {name} bindings malformed")
                         for b in bindings:
+                            require(isinstance(b, dict), f"Console {name} binding malformed")
                             members = b.get("members", [])
+                            require(isinstance(members, list), f"Console {name} binding members malformed")
                             require("allUsers" not in members and "allAuthenticatedUsers" not in members, f"Console {name} is not private")
 
                 
@@ -1045,7 +1055,8 @@ def main():
                     "project": cm.get("project"),
                     "region": cm.get("region"),
                     "definition_sha": cm.get("definition_sha"),
-                    "observed_at": cm.get("observed_at")
+                    "observed_at": cm.get("observed_at"),
+                    "services": services
                 }
                 
                 require(args.current_run_id, "Missing current_run_id")
@@ -1099,7 +1110,8 @@ def main():
             gcs_res = {"status": "success", "validated_count": len(CANONICAL_OWNED_OBJECTS), "receipts": []}
             report["gcs_assessment"] = gcs_res
             report["db_assessment"] = {"status": "skipped_due_to_mock"}
-            print(json.dumps(report, indent=2))
+            out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": report}, indent=2)
+            print(out)
             sys.exit(1)
         else:
             fetch_and_validate_provenance(args)
@@ -1117,17 +1129,22 @@ def main():
                 report["disposition"] = "rejected"
                 if "concrete_blocker" in db_res:
                      report["concrete_blocker"] = db_res["concrete_blocker"]
-                print(json.dumps(report, indent=2))
+                out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": report}, indent=2)
+                require(len(out) < 512 * 1024, "Report exceeds byte cap")
+                print(out)
                 sys.exit(1)
             else:
                 report["disposition"] = "complete"
                 
-            print(json.dumps(report, indent=2))
+            out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": report}, indent=2)
+            require(len(out) < 512 * 1024, "Report exceeds byte cap")
+            print(out)
             sys.exit(0)
     except Exception as e:
         report["disposition"] = "error"
         report["error"] = str(e)[:128]
-        print(json.dumps(report, indent=2))
+        out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": report}, indent=2)
+        print(out)
         sys.exit(1)
 
 if __name__ == "__main__":

@@ -21,14 +21,15 @@ Command run for tests: `python3 -m unittest tests/unit/gcp-artifact-activation-2
 
 ### Matrix of repairs and unverified claims
 
-| Finding | Source / Action Taken | Status |
+| Finding | OLD -> NEW result / evidence | Remaining condition |
 |---------|-----------------------|--------|
-| **F1 Authentic Authority** | Replaced repository-prefix checks with exact url matches, bound strictly to the expected run ID and artifact ID. | Scoped Pass (Mock tested, real API NOT EXECUTED) |
-| **F2 Hosted Rails** | Validated exact tooling run definition, required exact job name to confirm Operator reservation. Privacy and fullscanner checks implemented and strictly assert zero public bindings and exact scanner specs. | Source Inspection / Scoped Pass (Unit tests pass, hosted pending, real runtime NOT EXECUTED) |
-| **F3 Native Bounds** | Replaced `subprocess.run(capture_output=True)` with bounded streamed `subprocess.Popen` via `run_bounded` for gcloud secret, node helper, and psql. Enforced strict stdout (512KiB) and stderr (128KiB) limits on all transport paths. | Scoped Pass (Unit tests pass, live execution NOT EXECUTED) |
-| **F4/F5 Formal DB** | Maintained full-row hash repair without sampling. Implemented full relationships preservation/reference inventory for `phase1_registry_supply_pairs`, `phase1_registry_exclusivities`, and `audit_logs`. Checked foreign key definitions correctly. | Source Inspection / Scoped Pass (Mock transport passes, live DB snapshot NOT EXECUTED) |
-| **F6/F7 Evidence** | Capped arbitrary exception exports and limited `cloud_metadata` fields. Fixed passthrough of unknown DB result fields by projecting only `c` and `digest` fields for preservation inventory, and strict defined properties for `incoming_fks`. | Scoped Pass (Genuine local mock execution, limits enforced) |
-| **F8 Publication** | Maintained immutable literal prefix in Git commits (`SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010:`). | Scoped Pass |
+| **F1 actual provenance** | Same genuine archive/PDF/complete formal wire controls PASS BOTH | No genuine live current objects/rows measured |
+| **F2 missing privacy field** | SAME25 mocked reads OLD -> NEW0; repaired | Preserve field-presence denial |
+| **F2 actual authority / privacy** | SAME named-job BOTH25 reads/exit0/complete; new CI/partial-inventory/malformed-privacy failures; authority9 NEW2PASS7FAIL | Actual compatible approved/reserved immutable tooling and full current authenticated private/provider/scanner/no-overlap authority |
+| **F3 transport/receipts** | GitHub uses actual bounded helper; helper8PASS; stored-at absent OLD -> present NEW | Frozen metadata helper/file bounds and full selected current evidence |
+| **F4/F5 count/definition** | SAME malformed new counts/wrong definition denied NEW; relation10NEW10PASS; concrete retention preserved | SAME duplicate inventory BOTH success; formal PG/current relationship proof absent |
+| **F6/F7 report/UAT** | Unknown-field projection preserved; FK def/stored-at restored | Final schema/bounds/current service receipts and truthful per-candidate UAT |
+| **F8 scope/publication** | Net4/frozen4/NEW prefix PASS; trailers13PASS; six inherited literal prefixes FAIL | Exact prospective Supervisor preserved-history disposition |
 
 ## Execution Bounds and Reporting
 
