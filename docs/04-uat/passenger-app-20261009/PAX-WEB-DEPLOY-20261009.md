@@ -2,7 +2,86 @@
 
 Owner: Codex2；指定 reviewer: Codex。2026-10-10。
 
-## 本輪修復（Supervisor 04:52:06Z scope 決議後）
+## 本輪 F7 修復（Supervisor 05:42:55Z scope 決議後）
+
+Supervisor 已核對 SR-LIVE-GLOBAL-UX-20261007 blocked／未在修改、PAX-QA
+尚未開工，並授權 inventory.ts／gates.test.ts。**F1–F7 的本機修復與必要
+checks 已完成**，最終候選的 hosted CI 及獨立 review／merge／acceptance
+由 PR [#2507](https://github.com/ajoe734/drts-fleet-platform/pull/2507) 與既有
+candidate lifecycle 追溯；沒有 dev 部署或 live UI／DNS／provider 驗收宣稱。
+下方前輪 F7 blocked 記錄保留為歷史，不代表現行 scope 或修復狀態。
+
+- 正式原始碼：`inventoryAt(runtimeSha)` 仍從完整 immutable SHA 讀 workflow、
+  role source、全部 page source 與 blob。只追加新 `passenger-app-web` surface。
+  從同 SHA `packages/contracts/src/passenger-app.ts` 讀
+  `PASSENGER_REALM="passenger"`／`FIRST_PARTY_PASSENGER_ACTOR_TYPE="first_party_passenger"`；
+  realm／actor 漂移仍拒絕。沒有修改 JWT、IAM、BFF 或 Session 契約。
+- 既有 harness `roles`／Session `role` 是案例標籤；新標籤使用正式 actor，
+  **不表示乘客 JWT 具有 legacy roles claim**。`PassengerJwtService.verify`
+  仍拒絕 roles/scopes，`global-ux.spec.ts` 的 identity readback 支援 scalar
+  field，但目前 `/api/passenger-app/me` 只回 account。真正的 actor readback、
+  authorized session 與 browser/manual evidence 仍待 QA／hosted 驗證，
+  不製造 fake passenger role 或假登入 fixture。
+- 保留全部 retired／paused exclusions、exact inventory comparison、原有
+  190 screens、14 referral client screens 及 source/blob/commit/design binding。
+  目前 9 web surfaces／194 screens／20,352 UX cases，較原本 20,160 cases
+  追加乘客四頁的 192 cases（8 states × 2 locales × 3 widths），沒有縮分母。
+  四頁是 `/`、`/login`、`/account`、`/ride`，全部 `design=unverified`。
+- Source anchors：`6e80003aab3d5b0bdf38a9664dd715693cb29b0e` 加 surface／拒絕回歸；
+  `d9cd54c1e9edef54aea6cb2e2c872830a4b35a0f` 只為完整 git discovery 案例
+  設定 30 秒上限。最終候選是本紀錄 closeout commit 的 PR head，完整 SHA
+  由 handoff 的 CANDIDATE_SHA／CANDIDATE_BRANCH 記錄，不能用 anchor 或 merge SHA 代替。
+
+| Finding／驗收項                               | 原始碼／修復邊界                                                                    | 舊版重現 → 修正版                                                                                                                                                                     | 命令、版本、退出碼與 evidence                                                                                                                                                                                                                                                | 未驗項／限制                                                                                                                                                                                          |
+| --------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F7／pax-web-deploy_workflow_and_secret_gating | inventory.ts: inventoryAt；gates.test.ts: real commit page discovery 與八個拒絕案例 | `395d12062a0334e5fa48bf03f85813a4e9943431` 舊正式函式 0 PASS / 1 FAIL / 38 SKIP，exit1，拒絕新的 deployment inventory；`d9cd54c1e9edef54aea6cb2e2c872830a4b35a0f` 47/47 UX gates PASS | 本輪 before command 與前輪最小重現相同，outputFile `f7-before.json`；下列 final command exit0、206 PASS / 0 FAIL / 0 SKIP；Node22.23.2／Vitest4.1.4；`.local/pax-web-deploy-20261009/`                                                                                       | 拒絕案例只替換外部 git source response，正式 parser／compare／page discovery 未 mock。合法頁面、missing 新／原surface、rogue／retired／paused／duplicate及realm／actor漂移都有覆蓋。沒有 live UI 驗收 |
+| F7 分母與 source 證據                         | git show 舊正式 inventory module，直接呼叫 before／after inventoryAt                | base `e07c0b95110706f32ff78c85ad6a1e30ec4b1d5d` 8web／190screens／20,160cases；before 對新 source 拒絕；after 9web／194screens／20,352cases，原190個screen ID全部保留                 | `node --experimental-strip-types --input-type=module`，exit0 表示 before-reject／after-accept 及原分母保留均符合預期；`f7-versioned-probe.json` 含完整SHA與新增四頁的blob/source/design                                                                                      | 不代表20,352 browser cases執行過；design仍unverified                                                                                                                                                  |
+| F7 本機完整 discovery 時間上限                | 同一個 real commit page discovery test，30秒；不修改product算法或其他gate時間       | 診斷明確為預設5000ms timeout，exit1；八個拒絕cases與lint先PASS；調整後十檔206cases全部PASS                                                                                            | `f7-page-diagnostic.log`、`f7-after-private.json`；最終`f7-final-regression.{json,log}` exit0。同source `6e80003aa` hosted [38028674585](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38028674585) offline47PASS、typecheck/lintPASS；hosted browser job SKIP | 舊SHA的offline綠燈不是最終candidate CI；沒有靠縮分母避開timeout                                                                                                                                       |
+| pax-web-deploy_workflow_and_secret_gating     | 本輪F7及前輪F1–F6全部受影響合約                                                     | final十檔206PASS／0FAIL／0SKIP；Python100PASS；root typecheck／ESLint／classification全部PASS                                                                                         | 下列命令exit0；source `d9cd54c1e9edef54aea6cb2e2c872830a4b35a0f`；`f7-final-regression.json`、`f7-final-python.log`、`f7-final-typecheck.log`、`f7-final-lint.log`、`f7-classification.log`                                                                                  | Docker/Cloud Run由immutable publish部署；最終CI、review、merge、acceptance由PR/handoff追溯                                                                                                            |
+| pax-web-deploy_domain_mapping_and_runbook     | domain workflow、正式map-domain helper、runbook§1–4.2、entry index；本輪未再改      | final包含36個既有domain helper及新passenger mapping合約PASS；DNS `ride CNAME ghs.googlehosted.com.` TTL300與三callbacks內容核對                                                       | final command exit0；前輪actionlint／文件格式結果保留；本輪Prettier check涵蓋全部task改檔                                                                                                                                                                                    | live mapping/DNS/TLS/default Cloud Run callbacks及provider console尚待operator/user；不以文件內容當live驗收                                                                                           |
+
+本輪所有啟動的本機 checks 已結束並讀過。共享 dependency symlink 在
+dispatch 後失效：首次 ESLint missing `@eslint/js`、root TS2688，均 exit2，
+不是 PASS。僅移除本 worktree 22 個 generated node_modules symlink，保留
+外部 targets，以 `CI=true pnpm install --frozen-lockfile --ignore-scripts --offline`
+建立獨立依賴 exit0，沒有改 source／lockfile。證據：
+`f7-private-dependencies.log`／`f7-install.log`，修復後完整重跑。
+
+```bash
+pnpm exec vitest run tests/unit/pax-web-deploy-20261009/deployment-contract.test.ts \
+  tests/unit/map-domain-service.test.ts tests/unit/dev-active-surface-contract.test.ts \
+  tests/unit/cloud-run-deploy-retry.test.ts \
+  tests/unit/cleanup-paused-partner-booking-service.test.ts \
+  tests/unit/cleanup-retired-dev-service.test.ts \
+  tests/unit/deploy-dev-google-oidc.test.ts tests/unit/deployment-architecture-guards.test.ts \
+  tests/unit/system-remediation/sr-live-map-001/observer-identity.test.ts \
+  tests/unit/system-remediation/sr-live-global-ux-20261007/gates.test.ts \
+  --reporter=default --reporter=json \
+  --outputFile.json=.local/pax-web-deploy-20261009/f7-final-regression.json
+# exit0；206 PASS／0 FAIL／0 SKIP，10 files PASS
+
+python3 -m unittest tools/ci/test_dev_artifact_providers.py \
+  tools/ci/test_dev_cloud_metadata_preflight.py tools/ci/test_workflow_timeouts.py \
+  tools/ci/test_classify_change_scope.py
+# exit0；100 PASS
+pnpm typecheck:root
+pnpm exec eslint tests/e2e/system-remediation/sr-live-global-ux-20261007/inventory.ts \
+  tests/unit/system-remediation/sr-live-global-ux-20261007/gates.test.ts --max-warnings=0
+pnpm classification:check
+# 全部exit0；6215 files validated
+```
+
+本輪重新唯讀查 live variables：`DEV_GCP_PROJECT_ID=drts-dev-devcc-20260825`、
+`DEV_GCP_REGION=us-central1`，沒有 passenger service override，沿用 guarded
+default。沒有查 secret list/value、啟動VM runtime/browser/Compose、dispatch
+deploy/mapping、改DNS或真實SMS/PSP/OAuth呼叫。
+
+交接前核對本機／遠端／PR head一致，讀完同SHA CI，再ready PR並等待新啟動
+的full CI；CI run/job/results記於PR body、`.local/.../candidate-ci.json`及
+handoff摘要。只有 matching candidate CI、獨立review／merge與required
+acceptance均成立，才能由既有lifecycle推導done；owner不呼叫done。
+
+## 前輪修復（Supervisor 04:52:06Z scope 決議後；保留當時狀態）
 
 F1–F6 已修復並驗證；**F7 仍 blocked：需要 Supervisor 擴充 global-UX inventory
 與既有 unit gate 的 write scopes**。尚未 ready PR／handoff／建立 review candidate。
