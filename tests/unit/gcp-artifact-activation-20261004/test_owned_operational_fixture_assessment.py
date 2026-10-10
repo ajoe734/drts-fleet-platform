@@ -369,7 +369,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                     },
                     "drts-dev-scanner": {
                         "identity": f"drts-dev-artifact-scanner@{assess.PROJECT}.iam.gserviceaccount.com",
-                        "spec_sha256": "78d699ef021ef42c4346cdaeea539e7df00ff7c53cd8c2c89278c7c52403f4ad"
+                        "spec_sha256": "78d699ef021ef42c4346cdaeea539e7df00ff7c53cd8c2c89278c7c52403f4ad", "ready_revision": "rev-123", "images": ["gcr.io/image"], "scanner_url": "https://scanner", "default_environment": "drts-dev-devcc-20260825"
                     },
                     **{name: {"identity": f"drts-dev-runtime@{assess.PROJECT}.iam.gserviceaccount.com", "bindings": []} for name in ["drts-channel-partner-portal-web", "drts-dev-bank-console-web", "drts-dev-enterprise-dispatch-web", "drts-dev-fleet-partner-portal-web", "drts-dev-ops-console-web", "drts-dev-platform-admin-web", "drts-dev-tenant-console-web"]}
                 }
@@ -382,16 +382,16 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
             if "/runs/37906298090/jobs" in cmd_str:
                 return MagicMock(returncode=0, stdout=json.dumps({"jobs": [{"name": "Owned fixture assessment (Read-only GCS / DB)"}]}))
             if "/runs/37906298090/approvals" in cmd_str:
-                return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved"}]))
+                return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved", "environment": {"name": "operator"}}]))
             if "/runs/37906298090" in cmd_str:
                 return MagicMock(returncode=0, stdout=json.dumps({"id": 37906298090, "head_branch": "dev", "event": "workflow_dispatch", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml"}))
-            if "check-suites" in cmd_str:
-                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "check_suites": [{"status": "completed", "conclusion": "success"}]}))
+            if "check-runs" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 4, "check_runs": [{"name": "Commit trailers", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "status": "completed", "conclusion": "success"}, {"name": "Runtime mirror guard", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "status": "completed", "conclusion": "success"}, {"name": "Smoke acceptance", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "status": "completed", "conclusion": "success"}, {"name": "ci-integ", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "status": "completed", "conclusion": "success"}]}))
             if "/pulls/123/reviews" in cmd_str:
-                return MagicMock(returncode=0, stdout=json.dumps([{"state": "APPROVED"}]))
+                return MagicMock(returncode=0, stdout=json.dumps([{"user": {"login": "someone"}, "state": "APPROVED", "commit_id": "bb78535193b712f80f2a989cbd03b800ec44c46c"}]))
             if "/pulls" in cmd_str:
-                return MagicMock(returncode=0, stdout=json.dumps([{"number": 123, "merged_at": "2026-10-09T00:00:00Z"}]))
-            if "actions/runs?status=in_progress" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"number": 123, "user": {"login": "author"}, "merged_at": "2026-10-09T00:00:00Z", "merge_commit_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "base": {"ref": "dev"}, "head": {"sha": "bb78535193b712f80f2a989cbd03b800ec44c46c"}}]))
+            if "actions/runs?status=" in cmd_str:
                 return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
             return MagicMock(returncode=0, stdout="{}")
             
@@ -402,7 +402,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 output = mock_print.call_args[0][0]
                 parsed = json.loads(output)
                 # Check that malicious field was stripped
-                api_service = parsed["payload"]["cloud_metadata"]["services"]["drts-dev-api"]
+                import sys; print("OUTPUT IS", output, file=sys.stderr); api_service = parsed["payload"]["cloud_metadata"]["services"]["drts-dev-api"]
                 self.assertNotIn("MALICIOUS_RAW_FIELD", api_service)
 
 if __name__ == '__main__':
