@@ -1,6 +1,6 @@
 import type { PassengerAccount } from "@drts/contracts";
-import { PassengerAuthError } from "./index.js";
-import { AUTH_COPY as C } from "./copy.js";
+import { PassengerAuthError } from "./index";
+import { AUTH_COPY as C } from "./copy";
 
 export interface ConsentPolicy {
   termsVersion: string;
