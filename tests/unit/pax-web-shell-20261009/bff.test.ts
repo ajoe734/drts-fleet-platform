@@ -227,7 +227,7 @@ describe("Passenger BFF Route", () => {
   );
 
   it("R20: forwards public GET fares with trusted metadata identity", async () => {
-    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
     global.fetch = vi
       .fn()
       .mockImplementation(async (url: string, init?: RequestInit) => {
@@ -301,7 +301,7 @@ describe("Passenger BFF Route", () => {
               expiresAt: "2026-10-10T01:05:00Z",
               state: "oauth-state",
             };
-      const calls: Array<{ url: string; init?: RequestInit }> = [];
+      const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
       global.fetch = vi
         .fn()
         .mockImplementation(async (url: string, init?: RequestInit) => {
@@ -454,7 +454,8 @@ describe("Passenger BFF Route", () => {
   });
 
   it("R17: browser client logs in through the actual BFF and hydrates its account without reading tokens", async () => {
-    const upstreamCalls: Array<{ url: string; init?: RequestInit }> = [];
+    const upstreamCalls: Array<{ url: string; init: RequestInit | undefined }> =
+      [];
     global.fetch = vi
       .fn()
       .mockImplementation(async (url: string, init?: RequestInit) => {
@@ -481,7 +482,7 @@ describe("Passenger BFF Route", () => {
             Origin: "https://ride.smarttransport.tw",
             Cookie: browserCookies,
           },
-          body: options?.body,
+          body: options?.body ?? null,
         });
         const path = new URL(url).pathname
           .slice("/api/passenger-app/".length)
