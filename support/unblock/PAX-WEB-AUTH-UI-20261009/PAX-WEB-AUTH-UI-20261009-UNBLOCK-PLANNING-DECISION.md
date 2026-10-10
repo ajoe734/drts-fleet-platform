@@ -97,3 +97,18 @@ The helper's own progress/blocker record carries this request until that happens
 No product runtime, preview, browser server, Docker or live provider was started.
 Planning-only validation uses content/citation/format/commit gates; product tests
 and deployment are not applicable to this helper's one-document diff.
+
+## Completed local validation and coordination boundary
+
+At anchor `c2ad57b2a` against fixed base `5b11155d33fd4d6c345e01cb9730012d3b3d08d1`:
+
+- PASS exit 0: `python3 tools/ci/git/check_canonical_consistency.py --ci --base 5b11155d33fd4d6c345e01cb9730012d3b3d08d1 --head HEAD` (zero findings).
+- PASS exit 0: `python3 tools/ci/git/check_commit_trailers.py --base 5b11155d33fd4d6c345e01cb9730012d3b3d08d1 --head HEAD` (one commit).
+- PASS exit 0: `git diff --check 5b11155d33fd4d6c345e01cb9730012d3b3d08d1...HEAD`.
+- PASS exit 0: `pnpm exec prettier --check` for this artifact and `node tools/ci/check-repo-classification.mjs` (6216 files).
+- BLOCKED exit 1: authorized attempt to update the parent's next step using `AI_NAME=Codex` and the current-release `ai-status.sh note PAX-WEB-AUTH-UI-20261009` was rejected: `Dispatched worker cannot mutate a different task`. No parent change occurred. Dispatch guard was preserved, not removed or bypassed.
+- PENDING: Supervisor applies the requested parent next/status and all three helper disposition metadata fields. Current helper `show` still has those fields unset. Owner will publish a draft PR/checkpoint and write `blocker ... Supervisor`; no candidate handoff until this boundary is resolved.
+
+All locally started checks finished and their output was read. Final exact head,
+ordinary push and draft PR identity are recorded in this helper's machine status
+and PR description; no hosted CI is claimed as passed by this helper.
