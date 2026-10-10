@@ -10,7 +10,7 @@ import type {
   FaresResponse,
 } from "@drts/contracts";
 
-export type VerifyOtpResponse = 
+export type VerifyOtpResponse =
   | { result: "logged_in" }
   | { result: "linked" }
   | { result: "verified_contact_phone" };
@@ -37,3 +37,19 @@ export interface PassengerViewModel {
   refreshSession(): Promise<void>;
   getSessionStatus(): Promise<SessionStatus>;
 }
+
+export type {
+  GetPassengerRidesQuery,
+  PassengerRideListResponse,
+  GetActivePassengerRidesQuery,
+  GetPassengerRideQuery,
+  PassengerRideResponse,
+  CancelPassengerRideCommand,
+  CancelPassengerRideResponse,
+  RatePassengerRideCommand,
+  RatePassengerRideResponse,
+  GetPassengerReceiptQuery,
+  PassengerReceiptResponse,
+  CreatePassengerComplaintCommand,
+  CreatePassengerComplaintResponse,
+} from "@drts/contracts";

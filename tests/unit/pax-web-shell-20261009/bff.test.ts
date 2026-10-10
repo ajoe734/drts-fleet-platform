@@ -81,6 +81,9 @@ describe("Passenger BFF Route", () => {
       { method: "GET", path: ["admin", "users"] },
       { method: "POST", path: ["auth", "otp-extra", "something"] }, // prefix collision
       { method: "GET", path: ["auth", "oauth", "google", "extra"] }, // extra segments
+      { method: "GET", path: ["rides", "123", "unknown_action"] }, // unknown ride action
+      { method: "POST", path: ["rides", "123"] }, // POST rides/:id not allowed
+      { method: "POST", path: ["rides", "123", "cancel", "extra"] }, // extra segment
     ];
 
     for (const { method, path } of maliciousPaths) {
@@ -160,6 +163,60 @@ describe("Passenger BFF Route", () => {
       {
         method: "GET",
         path: ["me"],
+        expectedStatus: 200,
+        mockResponse: new Response("ok", { status: 200 }),
+      },
+      {
+        method: "GET",
+        path: ["rides"],
+        expectedStatus: 200,
+        mockResponse: new Response("ok", { status: 200 }),
+      },
+      {
+        method: "GET",
+        path: ["rides", "active"],
+        expectedStatus: 200,
+        mockResponse: new Response("ok", { status: 200 }),
+      },
+      {
+        method: "GET",
+        path: ["rides", "123"],
+        expectedStatus: 200,
+        mockResponse: new Response("ok", { status: 200 }),
+      },
+      {
+        method: "GET",
+        path: ["rides", "123", "events"],
+        expectedStatus: 200,
+        mockResponse: new Response("ok", { status: 200 }),
+      },
+      {
+        method: "GET",
+        path: ["rides", "123", "receipt"],
+        expectedStatus: 200,
+        mockResponse: new Response("ok", { status: 200 }),
+      },
+      {
+        method: "POST",
+        path: ["rides", "123", "cancel"],
+        expectedStatus: 200,
+        mockResponse: new Response("ok", { status: 200 }),
+      },
+      {
+        method: "POST",
+        path: ["rides", "123", "ratings"],
+        expectedStatus: 200,
+        mockResponse: new Response("ok", { status: 200 }),
+      },
+      {
+        method: "POST",
+        path: ["rides", "123", "contact"],
+        expectedStatus: 200,
+        mockResponse: new Response("ok", { status: 200 }),
+      },
+      {
+        method: "POST",
+        path: ["rides", "123", "complaints"],
         expectedStatus: 200,
         mockResponse: new Response("ok", { status: 200 }),
       },
