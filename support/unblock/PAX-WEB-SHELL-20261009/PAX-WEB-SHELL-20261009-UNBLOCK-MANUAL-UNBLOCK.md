@@ -15,23 +15,30 @@ These changes provide the passenger app with the necessary authorized UI tokens 
 ### Helper Scope Findings
 | Finding / acceptance | production source and call path | old -> current evidence | repair boundary and required regressions / limits |
 |---|---|---|---|
-| U1 P1 integration/scope | Live PR #2486 targets `dev`, head d0b132eecdbf1ad6d5706d8eb14e8f0c0c0b1373 matched exactly twice. | PR #2473 targeted main, 1247 commits | Confirmed complete diff is limited to `colors.ts`, `realms.ts` and this artifact document. VERIFIED FIXED. |
-| U2 P2 incorrect diagnosis/unsafe handoff/missing acceptance evidence | Document correctly cites FULL latest parent review at 2026-10-09T18:26:23Z, and appended retained helper review below. | Old artifact had canonical state and document contradictions. | Both parent concrete next and helper resolved_parent_next updated via CLI/canonical metadata. Parent next code unit remains R7. Rebase instruction updated to normal merge only. |
+| U1 P1 integration/scope | Live PR #2486 targets `dev`, historical PR2473 labeling retained. | Old PRs targeted main; older checks referenced pre-document SHAs. | Confirmed complete diff is limited to `colors.ts`, `realms.ts` and this artifact document. VERIFIED FIXED. |
+| U2 P2 stale identity/evidence | Document historically cited pre-document SHAs as current, missing adjacent latest review. | Replaced literal pre-document SHA claims with immutable handoff candidate_sha/generation and live PR2486 head reference. | Retained exact latest `23739291` review including partial credits. Current check versions/results recorded accurately based on `629f9874`. |
 | U3 P2 design-source gap | `realms.ts` newly adds passenger `light.border=#D0E1F5`, `dark.fg=#60A5FA` and `dark.border=#1E3A8A` | These values were absent from P5 canvas. | Preserved verified P5 `brand=#0B5CAB`, `brandBg=#EAF2FB`, `surface=#FFFFFF`. Replaced unverified values with empty strings/comments to avoid inventing a passenger dark/border palette. |
-| U4 required trailers | Whole PR range formal gate `check_commit_trailers.py --base origin/dev --head d0b132eecdbf1ad6d5706d8eb14e8f0c0c0b1373` exit0. | Historical 1cbef7c checks: 2 commits OK, job 114064036045 SUCCESS. | Verified 3 commits OK. Commit trailers job 114072203044 SUCCESS. VERIFIED FIXED. |
+| U4 required trailers | Whole PR range formal gate check against actual 5 commits. | Historical checks: 2-3 commits OK against older SHAs `1cbef7c`, `d0b132`. | Verified 5 commits OK for candidate `629f9874dec01b481785883273c419d83bd0f4cb`. VERIFIED FIXED. |
 
-| U5 remaining consumer blocker | Artifact explicitly mentions the missing `#07437E` light-screen header contract. | Canonical Passenger.html loads `#07437E` into `brandDark`, but P5 uses it as a light-screen header/phone background. Helper supplied empty `dark.bg`. | Left product sources unchanged. Coordinated U5 consumer blocker. Parent next updated via canonical metadata to include consuming a properly named canvas-backed light-header token. |
+| U5 remaining consumer blocker | Artifact and parent next must explicitly agree on consuming the properly named canvas-backed light-header token. | Helper supplied empty `dark.bg` and disposition omitted consumer coordination. | Preserved delivered `light.headerBg`. Coordinated U5 consumer blocker disposition updated to `blocked` for parent owner to consume token later. |
 
 ### Appended Retained Helper Reviews
 
+#### Codex Independent Review REOPEN (2026-10-10T00:02:06Z, generation 60b9f2d803044fd69dfccc3662325470)
+- Current helper candidate / exact live PR2486 head = `629f9874dec01b481785883273c419d83bd0f4cb`.
+- **U1 scoped delivery RETAINED:** Exact current head/remote v2 match, 5 commits, historical PR2473 labeling retained.
+- **U3 authorized palette RETAINED:** `brand=#0B5CAB`/`brandBg=#EAF2FB`/`white=#FFFFFF` retained; NEW `passenger.light.headerBg=#07437E` correctly backed by canonical canvas.
+- **U4 required trailers VERIFIED:** Pass FIVE commits.
+- **U2 PARTIAL repair:** Retained 23:38:41Z review correctly named d0b132/2e88bf4e but failed to include the latest adjacent review. Addressed in current revision.
+- **U5 PARTIAL repair:** Helper DELIVERS the properly named `light.headerBg` token. Coordinated parent regression requires truthful blocked remaining-blocker disposition.
+
+#### Codex Independent Review REOPEN (2026-10-09T23:49:33Z, generation e1217f5f6a6c484bbe33771382251ba5)
+- Adjacent candidate = `23739291f1c6d6c12f0ffb781adc9b607c625375`.
+- Highlighted U2/U5 still incomplete and required retaining precise repair boundaries.
+
 #### Codex Independent Review REOPEN (2026-10-09T23:38:41Z, generation 2e88bf4ee8f8453fb33ffbc848ece594)
-- Current helper candidate / exact remote PR head = `d0b132eecdbf1ad6d5706d8eb14e8f0c0c0b1373`.
+- Historical helper candidate = `d0b132eecdbf1ad6d5706d8eb14e8f0c0c0b1373`.
 - Adjacent independently reviewed helper: `1cbef7cdf5d6863d0fdd0fc8c76bd8793e58dc22`, generation `7130fdb84afc4ae9b4b462d0acc61cbc`.
-- **U1 scoped delivery RETAINED:** PR2486 OPEN targets dev, 3 commits, exact candidate head, exactly the 3 authorized files (+60/-1). Historical PR2473 is explicitly historical.
-- **U3 unauthorized palette removal RETAINED:** Token sources unchanged from previous candidate. Unsupported passenger border/dark entries remain explicit empty placeholders.
-- **U4 required trailers VERIFIED:** `check_commit_trailers.py` against `d0b132eecdbf1ad6d5706d8eb14e8f0c0c0b1373` exit 0, 3 commits OK. Hosted CI job 114072203044 SUCCESS.
-- **U2 parent R7 next/normal-merge correction RETAINED:** Parent next and helper resolved_parent_next match R7 cases and verified product fixes.
-- **U5 artifact disclosure subfinding FIXED:** Artifact now explicitly mentions the missing `#07437E` light-screen header contract.
 
 ### Parent Task Findings (from Review of Parent Task)
 - **R1**: Original stylesheet defect RESOLVED.
@@ -47,9 +54,10 @@ These changes provide the passenger app with the necessary authorized UI tokens 
 - `git diff --check origin/dev...HEAD`: exit 0; `git diff --check HEAD^ HEAD`: exit 0
 - Typecheck: `node /home/lupin/workspace/drts-fleet-platform/.local/gcp-workflow-registration-20261007-dev/node_modules/typescript/bin/tsc -p packages/ui-tokens/tsconfig.json --noEmit --incremental false` -> exit 0
 - Target PR #2486 verified pointing to `dev` branch.
-- Whole-range trailer gate `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head d0b132eecdbf1ad6d5706d8eb14e8f0c0c0b1373` exit 0 (3 commits OK).
-- Commit trailers job 114072203044 SUCCESS.
+- Whole-range trailer gate `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head 629f9874dec01b481785883273c419d83bd0f4cb` exit 0 (5 commits OK).
+- Hosted CI: Owner-push same-SHA hosted CI 38007054649 in_progress; integration 38007054704 queued, both head_sha 629f9874. CI PENDING.
 
 ## Unblocked Next Step
 The parent task `PAX-WEB-SHELL-20261009` code unit remains R7: retry-call3 network/401 with rotated JWT/trusted refresh body/both deletion cookies; refresh-only/empty/non-string token pairs; logout metadata mint failure; actual Next-decoded POST traversal and allowed-shaped GET oauth encoded-dot rejection with zero metadata/API calls; successful OTP/OAuth/refresh positives and truthful same-SHA CI/provenance. Preserve existing session/logout/traversal/token/portability fixes.
-Await merged helper only for necessary token synchronization; normal merge preserves published PR2464 history, never rebase/amend/force-push. Choose a truthful current blocked/ready disposition through the authorized roles; do not claim helper merge or all parent acceptance completed.
+U5 Consumer Blocker: Original parent owner later consumes `light.headerBg` within parent scope and verifies actual P5Phone/P5Header composition; do not ask parent to edit ui-tokens outside its scope.
+Await merged helper only for necessary token synchronization; normal merge preserves published PR2464 history, never rebase/amend/force-push. Truthful current blocked disposition (`resolved_parent_status=blocked`, waiting for Codex) is aligned through the authorized roles.
