@@ -5,6 +5,13 @@
 > See Section 10 for the corrected safe path and actual resolution.
 
 
+## 0.7 Acceptance Evidence Itemized
+
+- **R1 (Reverted invalid #2529 approach)**: PR #2529 used an exact copy of an old tree, destructively reverting `dev` changes in 4 operational cleanup files (`.github/workflows/dev-owned-operational-fixture-cleanup.yml`, `docs/04-uat/dev-owned-operational-fixture-cleanup-20261009.md`, `operations/verification/cleanup-owned-operational-fixtures.py`, `tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py`) and a voice test (`tests/unit/audit-voice-application-wiring-20261003/trusted-turn-composition.test.ts`). This helper candidate abandons that destructive approach; there is now 0 diff in these files compared to `dev`.
+- **H1 (Commit Compliance)**: The prior helper candidate (`fdc24d7150ea96f59681fc6c23fa5b49f825707d`, Codex2 review 2026-10-10T13:39:39Z) failed `check_commit_trailers.py` with exit code 1 due to 3 offending commits. The current helper candidate consists of 1 commit and passes `check_commit_trailers.py` with exit 0.
+- **H2 (Helper Scope Constraint)**: The old helper incorrectly modified 30 files (+5449/-55) and opened PR #2539. PR #2539 is now closed. This new helper correctly limits its scope to a single support artifact without touching the product codebase.
+- **H3 (Traceability)**: This document now fully documents the review source (Codex2 review 2026-10-10T13:45:49Z, candidate generation `1c95c0924d1c47bf8f816c41dcbc6c7a`), adjacent SHAs (`fdc24d` to `3f9e9a`), published identity (`LLM-Agent: Gemini2`), and clearly details the ongoing parent routing contamination.
+
 ## 1. Contamination identified
 
 The parent task's candidate branch `gemini/pax-web-ride-ui-20261009`
@@ -41,6 +48,15 @@ the `Reviewer:` trailer is entirely absent.
 Because `gemini/pax-web-ride-ui-20261009` is already published with an open
 PR and CI history, `docs/ops/branch-strategy.md` §11.4 forbids amending,
 rebasing, or force-pushing that commit to add the missing trailer.
+
+### Latest Contamination Details (H3)
+
+In the subsequent iteration (Codex2 review 2026-10-10T13:39:39Z, candidate generation `40a6f5e1b11d4c08978fb6f0370b0d18`, candidate SHA `fdc24d7150ea96f59681fc6c23fa5b49f825707d`), the formal checker continued to fail with exit code 1 because the `ours` merge approach retained the polluted ancestry. The specific failing commits are:
+- `46df5aad681eba8b1cd4b694459bcce55c4a8c57` (Missing `Reviewer` trailer)
+- `bfc9701f7a849c13dcd6bce23fa36d329ac36c3b` (Subject does not comply with conventional commits)
+- `42bc39e0cedcca690147d80b81369d29d3cb84a8` (Subject and all trailers non-compliant)
+
+Because an `ours` merge does not erase the history of the second parent, these commits remain in the graph and violate the commit trailer checks.
 
 ## 2. Non-destructive repair applied (DEPRECATED - DO NOT USE)
 
@@ -317,9 +333,15 @@ To properly reconstruct history without force-pushing and without destroying `de
 3. Commit these changes with properly formatted commit messages, including the missing `Reviewer` trailer.
 4. Open a new PR. Do not force-push the original published branch.
 
-### Actual Resolution
-As noted in §9, the Supervisor directly restored the parent task to `in_progress` and instructed the parent owner (Gemini) to rebuild a clean `v3` branch applying the correct net-diff approach.
-- Gemini created the `gemini/pax-web-ride-ui-20261009-v3` branch and opened PR #2535.
-- The parent task is actively addressing reviewer comments on that valid PR.
-- PR #2529 and PR #2526 are closed/abandoned and must not be merged.
-This helper task only documents this correction; no further product modifications or history linking are required.
+### Current Status & Pending Parent Resolution (H4)
+
+The parent task is NOT fully unblocked and is NOT safely resting on the clean PR #2535. The parent task's active worktree (`.artifacts/worktrees/auto/gemini-pax-web-ride-ui-20261009`, snapshot `94307fe0287658dea4074db6c1ddeba399d2a462`) is still contaminated because it merged the polluted PR 2513 lineage (parents `a4054262...` and `38c3fecd...`). 
+
+Running the formal checker against the parent's current snapshot (`check_commit_trailers.py --head 94307fe0287658dea4074db6c1ddeba399d2a462`) fails with 5 non-compliant commits:
+- `46df5aad681eba8b1cd4b694459bcce55c4a8c57` (Missing Reviewer)
+- `bfc9701f7a849c13dcd6bce23fa36d329ac36c3b` (Invalid subject)
+- `42bc39e0cedcca690147d80b81369d29d3cb84a8` (Invalid subject and trailers)
+- `f0d75acc1e4a5e6535c6e99be7c1f35d067a375c` (Non-compliant)
+- `a4054262d2f619779ad5c7ace781d072e02a963b` (Invalid subject and trailers)
+
+**Next Action (Pending):** The parent task owner and Supervisor must align on the concrete safe next step. The parent owner must preserve their unpublished work, but must port their valid UI changes onto a completely clean `dev` branch using the net-diff approach. They must NOT merge the polluted `ours` ancestry, and they must not force-push the active worktree. This history repair helper has fulfilled its scope by documenting the exact contamination and safe path; resolving the parent's worktree state is now deferred to the parent's lifecycle and Supervisor coordination.
