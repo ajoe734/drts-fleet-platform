@@ -13,10 +13,10 @@ Fetched dev: `5b11155d33fd4d6c345e01cb9730012d3b3d08d1`.
 Parent/old-owner merge base with dev:
 `e07c0b95110706f32ff78c85ad6a1e30ec4b1d5d`.
 
-| Branch / delivery | Local = fetched remote = live remote = PR head | State |
-| --- | --- | --- |
-| codex2/pax-web-auth-ui-20261009, [PR #2514](https://github.com/ajoe734/drts-fleet-platform/pull/2514) | `c1f92a346b3993ea60e8f66f61b1e06049a87edc` | Open draft; owner checkpoint, no locked candidate |
-| gemini2/pax-web-auth-ui-20261009, [PR #2509](https://github.com/ajoe734/drts-fleet-platform/pull/2509) | `cd783f924c47734fbf6d2e31b4d734e1c8b6536e` | Open historical former-owner delivery; preserve, do not integrate as the repaired head |
+| Branch / delivery                                                                                      | Local = fetched remote = live remote = PR head | State                                                                                  |
+| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------- | -------------------------------------------------------------------------------------- |
+| codex2/pax-web-auth-ui-20261009, [PR #2514](https://github.com/ajoe734/drts-fleet-platform/pull/2514)  | `c1f92a346b3993ea60e8f66f61b1e06049a87edc`     | Open draft; owner checkpoint, no locked candidate                                      |
+| gemini2/pax-web-auth-ui-20261009, [PR #2509](https://github.com/ajoe734/drts-fleet-platform/pull/2509) | `cd783f924c47734fbf6d2e31b4d734e1c8b6536e`     | Open historical former-owner delivery; preserve, do not integrate as the repaired head |
 
 The former head is an ancestor of the current head. There are five former-owner
 commits and seven subsequent Codex2 anchors, all passing the formal trailer
@@ -24,14 +24,14 @@ check. There is no local/remote divergence, missing published commit or reason
 to rebase, reset, amend or force push. Dev's two newer commits concern promotion
 smoke migration and deployment; they do not change the visual sources.
 
-| Finding | Exact introduction / repair evidence | Current result |
-| --- | --- | --- |
-| H1 shared-source scope contamination | `6a61936f67b216347921bbe8b43fa9bb705fecf0` changes shared p5-ui and passenger-client client/types. `bb1f4ac00ea134f9418b82b82b21fe94d245e8ca` still changes p5-ui. `5bee61245f16e3ae94b312b7c25512898b60343c` restores p5-ui; `35dc3959cb53a8feee5f302832dbb9dcb2cec3ae` restores client/types and i18n baseline. | These shared files have zero difference between current parent head and fetched dev. Auth changes use scoped modules. |
-| H2 committed patch generators | bb1f4ac00 adds scratch/patch_account.js, patch_btn.js, patch_callback.js, patch_login.js, patch_route.js and patch_test.js; 5bee61245 deletes all six. | Absent from current parent tree and final diff; historical commits remain reachable. |
-| H3 unrelated MAP-QA evidence overwrite | 5bee61245 changes the MAP-QA-002 FLEETS-CLOSEOUT-004 proof's generatedAt from 2026-08-14 to 2026-10-10 and branchSha from gemini2/iam-rel-001 to the auth branch, plus formatting. 35dc3959c restores that sidecar. | Exact proof at current parent head equals dev; no cross-task evidence change remains. |
-| H4 missing isolated parent checkout | Neither parent branch is registered by `git worktree list --porcelain`; both expected former worker directories are absent. Published refs and PRs remain intact. | Checkout absence is recoverable from the published current-owner head; it is not source loss. No other worktree or canonical checkout was changed here. |
-| H5 dependency checkout contamination | Original parent UAT records root node_modules and 21 app/package symlinks resolving into canonical/Gemini worktrees with mixed private Next/API-client types. It records worktree-only unlink plus frozen offline installation and successful rechecks. | Historical owner evidence only: the former checkout and local logs are gone. This helper does not claim a fresh dependency/typecheck reproduction. Isolate dependencies when restoring the checkout. |
-| H6 history-helper routing does not prove history damage | Actual release `blocked_task_triage_kind` selects history_repair before planning_decision if any history marker occurs anywhere in next. Exact parent contains worktree and push in its successful delivery evidence. Replacing only next with the F7-only blocker produces planning_decision. | Formal read-only policy probe: exact record history_repair; counterfactual planning_decision. Classifier code was neither edited nor copied. |
+| Finding                                                 | Exact introduction / repair evidence                                                                                                                                                                                                                                                                              | Current result                                                                                                                                                                                       |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| H1 shared-source scope contamination                    | `6a61936f67b216347921bbe8b43fa9bb705fecf0` changes shared p5-ui and passenger-client client/types. `bb1f4ac00ea134f9418b82b82b21fe94d245e8ca` still changes p5-ui. `5bee61245f16e3ae94b312b7c25512898b60343c` restores p5-ui; `35dc3959cb53a8feee5f302832dbb9dcb2cec3ae` restores client/types and i18n baseline. | These shared files have zero difference between current parent head and fetched dev. Auth changes use scoped modules.                                                                                |
+| H2 committed patch generators                           | bb1f4ac00 adds scratch/patch_account.js, patch_btn.js, patch_callback.js, patch_login.js, patch_route.js and patch_test.js; 5bee61245 deletes all six.                                                                                                                                                            | Absent from current parent tree and final diff; historical commits remain reachable.                                                                                                                 |
+| H3 unrelated MAP-QA evidence overwrite                  | 5bee61245 changes the MAP-QA-002 FLEETS-CLOSEOUT-004 proof's generatedAt from 2026-08-14 to 2026-10-10 and branchSha from gemini2/iam-rel-001 to the auth branch, plus formatting. 35dc3959c restores that sidecar.                                                                                               | Exact proof at current parent head equals dev; no cross-task evidence change remains.                                                                                                                |
+| H4 missing isolated parent checkout                     | Neither parent branch is registered by `git worktree list --porcelain`; both expected former worker directories are absent. Published refs and PRs remain intact.                                                                                                                                                 | Checkout absence is recoverable from the published current-owner head; it is not source loss. No other worktree or canonical checkout was changed here.                                              |
+| H5 dependency checkout contamination                    | Original parent UAT records root node_modules and 21 app/package symlinks resolving into canonical/Gemini worktrees with mixed private Next/API-client types. It records worktree-only unlink plus frozen offline installation and successful rechecks.                                                           | Historical owner evidence only: the former checkout and local logs are gone. This helper does not claim a fresh dependency/typecheck reproduction. Isolate dependencies when restoring the checkout. |
+| H6 history-helper routing does not prove history damage | Actual release `blocked_task_triage_kind` selects history_repair before planning_decision if any history marker occurs anywhere in next. Exact parent contains worktree and push in its successful delivery evidence. Replacing only next with the F7-only blocker produces planning_decision.                    | Formal read-only policy probe: exact record history_repair; counterfactual planning_decision. Classifier code was neither edited nor copied.                                                         |
 
 The current parent diff contains exactly 22 paths, all admitted by its live
 write_scopes, including the coordinated BFF and existing shell regression test.
@@ -87,6 +87,7 @@ product checks, and does not claim either named parent acceptance key passed.
    This is a documented command, not executed by this helper. If refs diverge
    or the path is occupied, preserve both sides and report evidence instead of
    forcing checkout. Keep this helper in its assigned cwd.
+
 4. Use dependencies installed inside that restored worktree. Inspect all root,
    app and package node_modules symlink targets before checks; avoid resolution
    into another task. Do not delete canonical dependencies or user data.
@@ -133,13 +134,40 @@ to Codex with its PR. Review/CI/merge remain separate lifecycle gates.
 Machine evidence is under `.local/pax-auth-history-repair/` in this assigned
 worktree. Python 3.12.3; Git object/PR probes; no product runtime is needed.
 
-| Finding / acceptance | Formal source / bounded change | Commands and result | Unverified / limit |
-| --- | --- | --- | --- |
-| Identify exact contamination | H1–H6 above; original UAT and Git commit/tree/PR objects | Read-only `python3 .local/pax-auth-history-repair/audit.py`, exit 0; audit.json and audit.log. Verifies both branches' four-way SHA equality, ancestry, 22 allowed paths, restored shared files and removed scripts. | First probe incorrectly expected p5-ui still dirty at former final head; assertion failed. Corrected after exact diff showed its earlier restoration at 5bee61245; rerun passed. Not a product test failure. |
-| Non-destructive repair path | Published additive repairs and continuation above | `git merge-base --is-ancestor` former/current: exit 0. Exact restored MAP proof diff: exit 0. Parent trailer checker: 12 commits OK, exit 0. | Worktree restoration and dependencies documented, not performed; parent remains blocked on F7. |
-| Triage reason | Actual release chair policy | Exact parent history_repair; changing only next yields planning_decision, exit 0. | Diagnostic probe only; no classifier behavior change. |
-| Scoped commit/push/PR | Only this helper artifact; task trailers and normal publication | Anchor/final SHA, ordinary push and PR identity recorded by release progress after comparison. Content/reference and full helper-range checks recorded below. | No parent commit or PR modification; helper review/CI/merge pending. |
-| Update parent concrete next step | Gateway attempts and explicit disposition above | Both state writes rejected, exit 1; parent-note.log / helper-metadata.log. Helper's own lifecycle message carries the exact coordination request. | Supervisor must apply parent next and helper disposition before handoff; this acceptance remains blocked. |
+| Finding / acceptance             | Formal source / bounded change                                  | Commands and result                                                                                                                                                                                                  | Unverified / limit                                                                                                                                                                                           |
+| -------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Identify exact contamination     | H1–H6 above; original UAT and Git commit/tree/PR objects        | Read-only `python3 .local/pax-auth-history-repair/audit.py`, exit 0; audit.json and audit.log. Verifies both branches' four-way SHA equality, ancestry, 22 allowed paths, restored shared files and removed scripts. | First probe incorrectly expected p5-ui still dirty at former final head; assertion failed. Corrected after exact diff showed its earlier restoration at 5bee61245; rerun passed. Not a product test failure. |
+| Non-destructive repair path      | Published additive repairs and continuation above               | `git merge-base --is-ancestor` former/current: exit 0. Exact restored MAP proof diff: exit 0. Parent trailer checker: 12 commits OK, exit 0.                                                                         | Worktree restoration and dependencies documented, not performed; parent remains blocked on F7.                                                                                                               |
+| Triage reason                    | Actual release chair policy                                     | Exact parent history_repair; changing only next yields planning_decision, exit 0.                                                                                                                                    | Diagnostic probe only; no classifier behavior change.                                                                                                                                                        |
+| Scoped commit/push/PR            | Only this helper artifact; task trailers and normal publication | Anchor/final SHA, ordinary push and PR identity recorded by release progress after comparison. Content/reference and full helper-range checks recorded below.                                                        | No parent commit or PR modification; helper review/CI/merge pending.                                                                                                                                         |
+| Update parent concrete next step | Gateway attempts and explicit disposition above                 | Both state writes rejected, exit 1; parent-note.log / helper-metadata.log. Helper's own lifecycle message carries the exact coordination request.                                                                    | Supervisor must apply parent next and helper disposition before handoff; this acceptance remains blocked.                                                                                                    |
 
 No VM product, preview, browser/E2E or DB server, Docker Compose, deployment,
 external OAuth/SMS/PSP request or new hosted workflow dispatch was started.
+
+## Publication and scoped checks
+
+Anchor `3d90fc82dd0bd29d2df44d61f81edd33e383ee03` was committed and normally
+pushed on the assigned branch. [Helper PR #2518](https://github.com/ajoe734/drts-fleet-platform/pull/2518)
+targets dev and remains draft pending the explicit Supervisor disposition.
+The final documentation head is recorded by the release lifecycle message after
+local, live remote and PR head equality is checked; it is not a review candidate.
+
+Checks completed at the anchor:
+
+- `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`:
+  exit 0, zero findings in all four categories; canonical.log.
+- `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`:
+  exit 0, one helper commit OK. The parent range independently passes all 12 commits.
+- `node tools/ci/check-repo-classification.mjs`: exit 0, 6216 files classified.
+- `git diff --check`: exit 0.
+- Initial `pnpm exec prettier --check` on this document returned exit 1 for
+  formatting. `prettier --write` and the corrected check both returned exit 0.
+  No missing-dependency or product-test failure is being reported as a pass.
+
+The final ledger update is checked again before its additive commit/push. Its
+formatting/content/trailer/classification results and exact published identity
+are recorded in the helper lifecycle message after results are read. Automatic
+PR CI is separate from these local checks; only observed completed results may
+be claimed. No helper handoff, review, merge or done is claimed while parent
+coordination remains unwritten.
