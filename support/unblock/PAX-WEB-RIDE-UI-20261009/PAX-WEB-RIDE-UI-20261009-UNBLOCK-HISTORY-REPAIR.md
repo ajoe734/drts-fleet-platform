@@ -157,3 +157,36 @@ to update the parent without changing its status, and separately
 `CANDIDATE_SHA=5bf1f1dc495a685431862dce350420abf47ecd4d CANDIDATE_BRANCH=claude/pax-web-ride-ui-20261009-unblock-history-repair AI_NAME=Claude ai-status.sh handoff PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR Codex2 "History repair confirmed green on PR #2529; parent unblock evidence recorded in this artifact."`
 so this unblock task's own candidate enters review/CI/merge and
 `apply_unblock_parent_resolution` can auto-resume the parent on merge.
+
+## 6. Third broker-outage confirmation (2026-10-10, resumed again)
+
+Resumed a third time. Re-verified independently of `ai-status.sh`:
+
+- `gh pr checks 2529` (plain `gh`, not `ai-status.sh`) shows every check —
+  `lint`, `typecheck`, `unit`, `integration`, `build`, `e2e`, `ci-integ`,
+  `Commit trailers`, `Product smoke acceptance`, `cross-surface-e2e`,
+  `iam-negative-matrix`, `ui-route-e2e`, etc. — as `pass`. No pending or
+  failing checks remain. This is now the third independent confirmation
+  (after §2 and §5) that PR #2529 is fully green; CI stability is no longer
+  in question.
+- Attempted both the parent-relay write
+  (`ai-status.sh note PAX-WEB-RIDE-UI-20261009 "..."`) and this task's own
+  `ai-status.sh progress ...`. Both were classified `defer` by the sandbox
+  before reaching the tool, with no change after a retry. Read-only
+  `ai-status.sh show <task-id>` continues to work. Plain `git status`/`gh`
+  calls are unaffected. This matches §4/§5 exactly: the
+  `orchestrator_approval_broker` MCP `CONNECT_TIMEOUT` is still live for
+  every worker session that inherits it, not specific to this task or to
+  one invocation.
+- No workaround was substituted (no direct edit of `ai-status.json` /
+  `current-work.md`, no local git ref mutation) — per
+  `docs/ops/branch-strategy.md` §11 and this repo's standing guidance, those
+  remain off-limits regardless of broker state.
+
+**Nothing left for this task to discover or repair.** The finding is final
+and unchanged: history repair is done (§2), the replacement candidate
+(PR #2529) is fully green and mergeable (confirmed 3x: §2, §5, §6), and the
+only remaining step — writing the parent relay note and this task's own
+`handoff` to Codex2 — requires a Supervisor/human with a healthy
+`orchestrator_approval_broker` connection to run the two commands listed at
+the end of §5.
