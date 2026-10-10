@@ -67,6 +67,12 @@ OWNED_SUBMISSION_COUNT = 4
 KIND_FLEET_UPLOAD_CONTENT = "fleet-upload-content"
 DOCUMENT_ARTIFACTS_PREFIX = "document-artifacts"
 
+class _AuthoritativeArchiveProof:
+    """Opaque token to prevent caller forgery of authority_established."""
+    pass
+
+_VALID_PROOF = _AuthoritativeArchiveProof()
+
 
 def logical_to_physical_gcs_key(
     logical_key: str, kind: str = KIND_FLEET_UPLOAD_CONTENT
@@ -710,7 +716,7 @@ def load_and_validate_authoritative_artifact(
         "run_bounds": {"start": job_started_str, "end": job_completed_str},
         "cleanup_not_performed": True,
         "preserve_failed_8d_03a_and_user_data": True,
-        "authority_established": True,
+        "authority_established": _VALID_PROOF,
     }
 
     validate_provenance(
@@ -738,6 +744,7 @@ def build_cleanup_plan(
     # Derive physical GCS keys using the immutable GcsDocumentArtifactStoreAdapter contract
     # Physical: document-artifacts/fleet-upload-content/<encodeURIComponent(logicalKey)>
     run_bounds = inventory_data.get("run_bounds")
+    auth_valid = inventory_data.get("authority_established") is _VALID_PROOF
     gcs_targets = []
     for doc in validated_docs:
         logical_key = doc["object_key"]
@@ -752,7 +759,7 @@ def build_cleanup_plan(
             "expected_content_type": doc["content_type"],
             "documentId": doc["documentId"],
             "confirmSubmissionId": doc["confirmSubmissionId"],
-            "authority_established": inventory_data.get("authority_established", False),
+            "authority_established": _VALID_PROOF if auth_valid else False,
         }
         if run_bounds:
             target_dict["run_bounds"] = run_bounds
@@ -912,7 +919,7 @@ def build_cleanup_plan(
         "db_targets": db_targets,
         "preservation_plan": preservation_plan,
         "db_blocker": DB_CONCRETE_BLOCKER,
-        "authority_established": inventory_data.get("authority_established", False),
+        "authority_established": _VALID_PROOF if auth_valid else False,
     }
 
 
@@ -1070,7 +1077,7 @@ def inspect_and_validate_gcs_target(
     simulation_mode: bool = False,
 ) -> Dict[str, Any]:
     """Validate live object identity before delete (bucket, key, generation, metageneration, MIME, size, timestamps, hash)."""
-    require(expected_item.get("authority_established") is True, "explicitunverified/blocked: truly established archive/runtime authority required")
+    require(expected_item.get("authority_established") is _VALID_PROOF, "explicitunverified/blocked: truly established archive/runtime authority required")
     logical_key = expected_item.get("logical_key")
     require(
         logical_key is not None and logical_key.startswith(KEY_PREFIX) and logical_key in CANONICAL_OWNED_OBJECTS,
@@ -1282,7 +1289,7 @@ def execute_gcs_cleanup(
     if mode == "apply":
         raise ValueError("Mutation is explicitly disabled: unsupported apply mode is rejected at entrypoint")
 
-    if not plan.get("authority_established"):
+    if plan.get("authority_established") is not _VALID_PROOF:
         return {
             "status": "blocked",
             "mode": mode,
@@ -1293,10 +1300,9 @@ def execute_gcs_cleanup(
     runner = gcs_runner or default_gcs_runner
     targets = plan["gcs_targets"]
 
-    # PHASE 1: PREFLIGHT ALL TARGETS BEFORE ANY MUTATION
-    validated_targets = []
+    # PHASE 1: PREFLIGHT ALL TARGETS BEFORE ANY MUTATION OR I/O
     for item in targets:
-        require(item.get("authority_established") is True, "explicitunverified/blocked: truly established archive/runtime authority required")
+        require(item.get("authority_established") is _VALID_PROOF, "explicitunverified/blocked: truly established archive/runtime authority required")
         bucket = item["bucket"]
         require(bucket == BUCKET, f"Target specifies foreign bucket: {bucket} (expected {BUCKET})")
         logical_key = item.get("logical_key")
@@ -1315,6 +1321,11 @@ def execute_gcs_cleanup(
         require(item.get("expected_sha256") == EXPECTED_SHA256, f"expected_sha256 mismatch for {logical_key}")
         require(item.get("expected_content_type") == EXPECTED_MIME, f"expected_content_type mismatch for {logical_key}")
         
+    # PHASE 2: I/O AND TARGET VALIDATION
+    validated_targets = []
+    for item in targets:
+        bucket = item["bucket"]
+        key = item["key"]
         desc = runner("describe", bucket, key)
         val = inspect_and_validate_gcs_target(
             desc, item, prior_receipts=prior_receipts, runner=runner, simulation_mode=simulation_mode

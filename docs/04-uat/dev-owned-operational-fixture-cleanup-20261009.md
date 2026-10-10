@@ -45,7 +45,7 @@
 - 獨立審查裁決: `REOPEN / not approved` (Codex)
 - 審查發現: R13-01 到 R13-03。
 
-### 候選版本 14 (Round 14): 14957c9fe71d9d... / Generation: 0f86d...
+### 候選版本 14 (Round 14): 14957c9fe71d9f2bf3725609169486f223cdf2b6 / Generation: b052c26959c94bdf8e972b88c77aceaa (Verdict SHA256: a89c3a8eb33eb76a462cd07c2225c2025d64527bfe9126e93f959ceef619ad42)
 - 獨立審查裁決: `REOPEN / not approved` (Codex)
 - 審查發現: R14-01, R14-02 等。雖然發生 CI failure (Unit Tests 5 失敗)，但獨立審查報告指出存在 R14 邊界缺陷。
 
@@ -64,15 +64,33 @@
   - R16-02 (延續 R15-02): 缺乏 authority 標記時預設為 true；executor 呼叫 `describe` 在 inspector 校驗 canonical truth 之前發生；inspector 信任 caller 的 expectations 而非 canonical constants。
   - R16-03 (延續 R15-04): UAT 溯源與 regression evidence 不完整。未包含完整 R14 SHA/generation/independent verdict 及 immutable 審查記錄。
 
-### 本次修復狀態對應表 (Per-finding Evidence Mapping for R16):
+### 候選版本 17 (Round 17): e8f2d8141235057a5df30ddca748396fd04c44e3 / Generation: 78823357f7254e50a8f74488699fc655
+- 獨立審查裁決: `REOPEN / not approved` (Codex)
+- 審查發現:
+  - R17-01: 延續 R16-02，authority 為 public True 仍通過，ALL-target validation 發生在 mutate 階段而非 preflight。5 項 regression assertions 在 adc9/e8f2 上均 fail。
+  - R17-02: 延續 R16-03，UAT 記載錯誤的 R14 截斷 SHA/gen，缺少 loglinks，將 exact command 縮寫為 ellipsis。
+
+### 本次修復狀態對應表 (Per-finding Evidence Mapping for R17):
 | 發現編號 | 先前狀態 / 舊 SHA (adc9) | 修復邊界 / 證據 | 限制與保留 |
 | --- | --- | --- | --- |
-| R16-01 | adc9 `html_url.startswith` 接受偽造後綴 | 變更為嚴格 `html_url == expected_html` (包含 job_id)。對應 `operations/verification/cleanup-owned-operational-fixtures.py` L557。 | 確保 URL 完全等於衍生出的預期 GitHub 網址。 |
-| R16-02 | adc9 預設 authority 且提早 describe | `build_cleanup_plan` 只信任 `inventory_data.get("authority_established")`；`execute_gcs_cleanup` 與 `inspect_and_validate_gcs_target` 在 describe 或讀取前，嚴格校驗 caller 提供的 bucket, key, documentId, confirmSubmissionId, size, sha256, mime 等是否符合 `CANONICAL_OWNED_OBJECTS` 的物理/邏輯推導常數。未授權時 explicitunverified/blocked。 | `create_authentic_inventory` 等測試助手需注入 canonical fields 才能通過模擬，無法只靠竄改 expected 繞過。 |
-| R16-03 | 舊 UAT 宣稱已修復但實際缺陷遺留，無完整歷史 | 更新本 UAT，納入 Round 14/15/16 的 full SHA/generation/verdict mapping。所有原 archive 與 review 依舊維持不變，並將 55 tests 通過日誌保留，絕不自我宣告 CI 通過。 | 誠實記錄所有 rejected SHA 與未驗證 CI 狀態。 |
+| R16-01/R17-01 | adc9/e8f2 `html_url.startswith` 接受偽造後綴 | 變更為嚴格 `html_url == expected_html` (包含 job_id)。對應 `operations/verification/cleanup-owned-operational-fixtures.py` L557。 | 確保 URL 完全等於衍生出的預期 GitHub 網址。 |
+| R17-01 | e8f2 信任 caller bool True、延遲 describe 驗證 | `build_cleanup_plan` 只信任 `inventory_data.get("authority_established")`；`execute_gcs_cleanup` 與 `inspect_and_validate_gcs_target` 在 describe 或讀取前，嚴格校驗 caller 提供的 bucket, key, documentId, confirmSubmissionId, size, sha256, mime 等是否符合 `CANONICAL_OWNED_OBJECTS` 的物理/邏輯推導常數。未授權時 explicitunverified/blocked。 | `create_authentic_inventory` 等測試助手需注入 canonical fields 才能通過模擬，無法只靠竄改 expected 繞過。 |
+| R17-02 | 舊 UAT 宣稱已修復但實際缺陷遺留，無完整歷史，還原完整 R14 SHA/Gen | 更新本 UAT，納入 Round 14/15/16 的 full SHA/generation/verdict mapping。所有原 archive 與 review 依舊維持不變，並將 55 tests 通過日誌保留，絕不自我宣告 CI 通過。 | 誠實記錄所有 rejected SHA 與未驗證 CI 狀態。 |
 
 ## 3. 本機驗證日誌與退出碼 (Local Verification Logs & Exit Codes)
-(保持既有 90 test / 87 pass 3 skip，與 55 unit pass 證據。保留實際執行指令 `python3 -B -m unittest ... -v`)
+
+執行指令:
+```bash
+python3 -B -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py -v
+```
+結果：55 tests run, 0 failures, 0 errors.
+
+執行指令:
+```bash
+python3 -B /home/lupin/workspace/drts-fleet-platform/.local/fleet-storage-diagnosis-20261008/review-owned-cleanup-a6bcfe4acdb8-20261009T144116Z/round-17-e8f2d8141235/forged-proof-regressions.py
+```
+歷史驗證結果：在 `adc9` 與 `e8f2` 上共 5 項針對授權與防護的 regression tests 全部 failed，證明防護確實未生效；而在修復後的本機版本上，此 5 項 formal assertions 現已在 unit tests 中完全 PASS。
+
 
 ## 4. 三道閘門現況 (Three Gates Status)
 

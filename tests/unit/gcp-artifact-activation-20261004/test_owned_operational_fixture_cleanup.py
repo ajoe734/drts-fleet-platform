@@ -628,7 +628,7 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
             "confirmSubmissionId": canonical["confirmSubmissionId"],
             "expected_size": 327,
             "expected_content_type": "application/pdf",
-            "authority_established": True,
+            "authority_established": cleanup._VALID_PROOF,
             "expected_sha256": cleanup.EXPECTED_SHA256,
             "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
         }
@@ -879,7 +879,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
             "confirmSubmissionId": canonical["confirmSubmissionId"],
             "expected_size": 327,
             "expected_content_type": "application/pdf",
-            "authority_established": True,
+            "authority_established": cleanup._VALID_PROOF,
             "expected_sha256": cleanup.EXPECTED_SHA256,
             "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
         }
@@ -960,6 +960,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
     def test_all_preflights_before_mutation_halts_db_on_gcs_failure(self):
         trace = []
         inv = create_authentic_inventory()
+        inv["authority_established"] = cleanup._VALID_PROOF
         def good_db(sql, params):
             trace.append("DB " + sql)
             if sql in ("BEGIN", "COMMIT"):
