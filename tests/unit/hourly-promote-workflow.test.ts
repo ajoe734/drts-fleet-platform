@@ -31,7 +31,9 @@ describe("hourly publish promotion safety", () => {
     expect(gate).toContain('git commit-tree "$tree" -p "$main_sha"');
     expect(gate).toContain('promote_branch="promote/$ver"');
     expect(gate).toContain("immutable publish branches are never rewritten");
-    expect(gate).toContain('echo "promote_sha=$promote_sha" >> "$GITHUB_OUTPUT"');
+    expect(gate).toContain(
+      'echo "promote_sha=$promote_sha" >> "$GITHUB_OUTPUT"',
+    );
     expect(source).toContain("steps.reconcile.outputs.skip != 'true'");
   });
 
@@ -53,7 +55,9 @@ describe("hourly publish promotion safety", () => {
     ]) {
       expect(gate).toContain(file);
     }
-    expect(gate).toContain('path="tools/development-orchestrator/dashboard/$f"');
+    expect(gate).toContain(
+      'path="tools/development-orchestrator/dashboard/$f"',
+    );
     expect(gate).toContain('git update-index --cacheinfo "100644,$blob,$path"');
   });
 
@@ -70,10 +74,14 @@ describe("hourly publish promotion safety", () => {
 
     expect(openPromotePr).toContain('--head "$promote_branch"');
     expect(openPromotePr).not.toContain('--head "$src"');
-    expect(publishChecks).toContain('sha="${{ steps.reconcile.outputs.promote_sha }}"');
+    expect(publishChecks).toContain(
+      'sha="${{ steps.reconcile.outputs.promote_sha }}"',
+    );
     expect(publishChecks).not.toContain('sha="${{ steps.pick.outputs.sha }}"');
     // A PAT is what lets the promote branch carry dev's workflow edits.
-    expect(source).toContain("token: ${{ secrets.PUBLISH_TOKEN || secrets.GITHUB_TOKEN }}");
+    expect(source).toContain(
+      "token: ${{ secrets.PUBLISH_TOKEN || secrets.GITHUB_TOKEN }}",
+    );
   });
 
   it("waits on what branch protection reads, not on who published the check", () => {
@@ -92,7 +100,9 @@ describe("hourly publish promotion safety", () => {
     expect(wait).toContain("map(select(.name == $n)) | last // empty");
     expect(wait).not.toContain(".detailsUrl");
     expect(wait).not.toContain("check_ids");
-    expect(wait).toContain('required=("Commit trailers" "Runtime mirror guard" "Smoke acceptance")');
+    expect(wait).toContain(
+      'required=("Commit trailers" "Runtime mirror guard" "Smoke acceptance")',
+    );
     expect(wait).toContain('if [ "$status" != "COMPLETED" ]');
     expect(wait).toContain('elif [ "$conclusion" != "SUCCESS" ]');
   });
@@ -109,11 +119,17 @@ describe("hourly publish promotion safety", () => {
     );
 
     expect(gate).toContain('snapshot_date=$(git log -1 --format=%cI "$sha")');
-    expect(gate).toContain('GIT_AUTHOR_DATE="$snapshot_date" GIT_COMMITTER_DATE="$snapshot_date"');
+    expect(gate).toContain(
+      'GIT_AUTHOR_DATE="$snapshot_date" GIT_COMMITTER_DATE="$snapshot_date"',
+    );
     // …and having made it reproducible, do not pay ten minutes to re-derive
     // checks that already passed on this very SHA.
-    expect(publishChecks).toContain("are already green on ${sha:0:12}; reusing them.");
-    expect(publishChecks).toContain('repos/$GITHUB_REPOSITORY/commits/$sha/check-runs');
+    expect(publishChecks).toContain(
+      "are already green on ${sha:0:12}; reusing them.",
+    );
+    expect(publishChecks).toContain(
+      "repos/$GITHUB_REPOSITORY/commits/$sha/check-runs",
+    );
   });
 
   it("requires the latest exact-SHA dev deployment to be successful", () => {
