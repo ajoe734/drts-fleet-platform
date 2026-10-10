@@ -365,7 +365,8 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                         "images": {"api": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/api@sha256:1234567890abcdef"},
                         "runtime_sha": "testsha",
                         "identity": f"drts-dev-runtime@{assess.PROJECT}.iam.gserviceaccount.com",
-                        "scanner_url": "https://drts-dev-scanner-xyz.a.run.app", "bindings": [],
+                        "scanner_url": "https://drts-dev-scanner-xyz.a.run.app", 
+                        "bindings": [{"role": "roles/run.invoker", "members": ["allUsers"]}],
                         "providers": {
                             "DOCUMENT_ARTIFACT_GCS_BUCKET": assess.BUCKET,
                             "DOCUMENT_ARTIFACT_STORAGE_PROVIDER": "gcs",
@@ -380,7 +381,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                         "ready_revision": "drts-dev-scanner-12345-abc",
                         "images": {"scanner": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/scanner@sha256:1234567890abcdef"},
                         "identity": f"drts-dev-artifact-scanner@{assess.PROJECT}.iam.gserviceaccount.com",
-                        "bindings": [],
+                        "bindings": [{"role": "roles/run.invoker", "members": [f"serviceAccount:drts-dev-runtime@{assess.PROJECT}.iam.gserviceaccount.com", f"serviceAccount:github-actions-deployer@{assess.PROJECT}.iam.gserviceaccount.com"]}],
                         "actual_url": "https://drts-dev-scanner-xyz.a.run.app",
                         "spec_sha256": "78d699ef021ef42c4346cdaeea539e7df00ff7c53cd8c2c89278c7c52403f4ad",
                         "default_environment": {

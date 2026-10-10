@@ -459,17 +459,18 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
     if counts.get('tx_ro') != 'on' or counts.get('tx_iso') != 'repeatable read':
         return {"status": "rejected", "reason": "Transaction mode not verified"}
         
-    for k in ['revs', 'affs', 'discs', 'creds']:
+    for k in ['revs', 'affs', 'discs', 'creds', 'cdriv', 'cveh', 'cpol', 'ccont', 'ddrafts', 'vdrafts', 'cpairs', 'cexcl', 'audits']:
         if k not in counts:
             return {"status": "error", "error": f"Missing count for {k}"}
-    for k in ['revs', 'affs', 'discs', 'creds', 'cdriv', 'cveh', 'cpol', 'ccont', 'ddrafts', 'vdrafts', 'cpairs', 'cexcl', 'audits']:
-        if type(counts.get(k, 0)) is not int:
+        if type(counts[k]) is not int:
              return {"status": "error", "error": f"Non-integer count for {k}"}
-        if counts.get(k, 0) < 0:
+        if counts[k] < 0:
             return {"status": "rejected", "reason": f"Negative reference counts for {k}"}
+            
     for k in ['pres_subs', 'pres_docs', 'pres_revs', 'pres_affs', 'pres_discs', 'pres_creds', 'pres_cdriv', 'pres_cveh', 'pres_cpol', 'pres_ccont', 'pres_ddrafts', 'pres_vdrafts', 'pres_cpairs', 'pres_cexcl', 'pres_audits']:
-        default_c = 4 if k == 'pres_subs' else (8 if k == 'pres_docs' else 0)
-        obj = counts.get(k, {"c": default_c, "digest": "0"*32})
+        if k not in counts:
+            return {"status": "error", "error": f"Missing preservation object for {k}"}
+        obj = counts[k]
         if type(obj) is not dict or 'c' not in obj or 'digest' not in obj:
             return {"status": "error", "error": f"Missing or invalid preservation inventory for {k}"}
         if type(obj['c']) is not int or obj['c'] < 0:
@@ -677,7 +678,7 @@ def default_gcs_runner(action: str, bucket: str, key: str) -> Dict[str, Any]:
     if action == "describe":
         cmd = ["gcloud", "storage", "objects", "describe", f"gs://{bucket}/{key}", "--format=json", "--project", PROJECT, "--quiet"]
         try:
-            res = run_bounded(cmd)
+            res = run_bounded(cmd, max_stdout=512*1024)
         except Exception:
             return {"status": "error", "stderr": "describe timeout"}
         if res.returncode == 0:
@@ -692,19 +693,15 @@ def default_gcs_runner(action: str, bucket: str, key: str) -> Dict[str, Any]:
     elif action == "cat":
         cmd = ["gcloud", "storage", "cat", f"gs://{bucket}/{key}", "--project", PROJECT, "--quiet"]
         try:
-            with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
-                try:
-                    out, err = p.communicate(timeout=30)
-                except subprocess.TimeoutExpired:
-                    p.kill()
+            res = run_bounded(cmd, timeout_sec=30, max_stdout=10*1024*1024, max_stderr=128*1024, binary_out=True)
+            if res.returncode == 0:
+                return {"status": "ok", "body": res.stdout}
+            else:
+                if "timeout" in res.stderr:
                     return {"status": "error", "stderr": "cat timeout"}
-                body = out
-                if len(body) > 10 * 1024 * 1024:
+                elif "stdout too large" in res.stderr:
                     return {"status": "error", "stderr": "File too large"}
-                if p.returncode == 0:
-                    return {"status": "ok", "body": body}
-                else:
-                    return {"status": "error", "stderr": "gcloud cat failed"}
+                return {"status": "error", "stderr": "gcloud cat failed"}
         except Exception as e:
             return {"status": "error", "stderr": "cat execution error"}
 
@@ -1007,12 +1004,14 @@ def run_bounded(cmd, input_str=None, timeout_sec=30, max_stdout=1024*1024*5, max
         
     try:
         while True:
-            if time.time() - start_time > timeout_sec:
+            elapsed = time.time() - start_time
+            if elapsed > timeout_sec:
                 p.kill()
                 p.wait()
                 return type('obj', (object,), {'returncode': -1, 'stdout': b'' if binary_out else '', 'stderr': 'timeout'})()
                 
-            r, _, _ = select.select([p.stdout, p.stderr], [], [], 1.0)
+            rem_time = max(0, timeout_sec - elapsed)
+            r, _, _ = select.select([p.stdout, p.stderr], [], [], min(1.0, rem_time))
             
             if p.stdout in r:
                 chunk = os.read(p.stdout.fileno(), 4096)
@@ -1058,6 +1057,8 @@ def run_bounded(cmd, input_str=None, timeout_sec=30, max_stdout=1024*1024*5, max
                             progress = True
                     if not progress:
                         break
+                if time.time() - start_time > timeout_sec:
+                    return type('obj', (object,), {'returncode': -1, 'stdout': b'' if binary_out else '', 'stderr': 'timeout'})()
                 break
     finally:
         if out_f:
@@ -1274,6 +1275,11 @@ def main():
                     elif name == "drts-dev-scanner":
                         require(s.get("identity") == f"drts-dev-artifact-scanner@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
                         require(s.get("spec_sha256") == "78d699ef021ef42c4346cdaeea539e7df00ff7c53cd8c2c89278c7c52403f4ad", "Scanner spec SHA mismatch")
+                        
+                        expected_members = [f"serviceAccount:drts-dev-runtime@{PROJECT}.iam.gserviceaccount.com", f"serviceAccount:github-actions-deployer@{PROJECT}.iam.gserviceaccount.com"]
+                        require(len(validated_bindings) == 1, "Scanner must have exactly one binding")
+                        require(validated_bindings[0]["role"] == "roles/run.invoker", "Scanner binding must be run.invoker")
+                        require(set(validated_bindings[0]["members"]) == set(expected_members), "Scanner invokers mismatch")
                         
                         env = s.get("default_environment")
                         require(isinstance(env, dict), "Scanner environment mismatch")
