@@ -267,7 +267,14 @@ export class PassengerOAuthService {
       claims.sub,
       verifiedAttributes,
     );
-    const session = await this.accounts.issueSession(account.drtsPassengerId);
+    const session = await this.accounts.issueSession(
+      account.drtsPassengerId,
+      "",
+      {
+        provider,
+        subject: claims.sub,
+      },
+    );
     return {
       result: "logged_in",
       drtsPassengerId: account.drtsPassengerId,

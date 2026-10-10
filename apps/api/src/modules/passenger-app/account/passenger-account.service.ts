@@ -377,10 +377,29 @@ export class PassengerAccountService {
   async issueSession(
     drtsPassengerId: string,
     deviceUa = "",
+    verifiedIdentity?: Pick<PassengerLoginIdentity, "provider" | "subject">,
   ): Promise<RefreshSessionResponse> {
+    // Internal proof-verifying callers may bind issuance to the identity they resolved.
+    if (verifiedIdentity)
+      identityKey(verifiedIdentity.provider, verifiedIdentity.subject);
     return this.store.transaction(async (tx) => {
+      // Match login/link/deletion lock order; retain both locks through insertion.
+      if (verifiedIdentity)
+        await tx.lockIdentity(
+          verifiedIdentity.provider,
+          verifiedIdentity.subject,
+        );
       const a = await tx.lockAccount(drtsPassengerId);
       if (!a || a.status !== "active") unauthorized();
+      if (verifiedIdentity) {
+        // Unlink/delete can commit while waiting for the account lock. Re-read
+        // afterward, also rejecting a subject recreated on a different account.
+        const current = await tx.findIdentity(
+          verifiedIdentity.provider,
+          verifiedIdentity.subject,
+        );
+        if (current?.drtsPassengerId !== drtsPassengerId) unauthorized();
+      }
       return this.issue(tx, drtsPassengerId, deviceUa.slice(0, 512));
     });
   }
