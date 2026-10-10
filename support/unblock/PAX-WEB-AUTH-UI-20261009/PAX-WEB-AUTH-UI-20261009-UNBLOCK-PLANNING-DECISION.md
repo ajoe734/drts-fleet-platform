@@ -75,7 +75,7 @@ Requested helper metadata (Supervisor applies; not yet applied by this owner):
 ```json
 {
   "resolved_parent_status": "blocked",
-  "resolved_parent_waiting_for": "Supervisor",
+  "resolved_parent_waiting_for": "Codex",
   "resolved_parent_next": "F7 remains open. Coordinate canonical Passenger login/OTP/OAuth callback/consent/profile/contact/identity/logout/delete screens per support/unblock/PAX-WEB-AUTH-UI-20261009/PAX-WEB-AUTH-UI-20261009-UNBLOCK-PLANNING-DECISION.md; record actual source paths, artboard IDs and version. Preserve draft PR #2514 and its repair evidence. After the visual source is delivered and Supervisor verifies the resume gate, Codex2 matches the implementation to it, updates the original UAT and revalidates both pax-web-auth_login_methods_ui and pax-web-auth_account_management_ui with new same-SHA review/CI. Legal-content configuration and hosted/external acceptance remain pending. Status changes alone do not resolve F7."
 }
 ```
@@ -107,8 +107,10 @@ At anchor `c2ad57b2a` against fixed base `5b11155d33fd4d6c345e01cb9730012d3b3d08
 - PASS exit 0: `git diff --check 5b11155d33fd4d6c345e01cb9730012d3b3d08d1...HEAD`.
 - PASS exit 0: `pnpm exec prettier --check` for this artifact and `node tools/ci/check-repo-classification.mjs` (6216 files).
 - BLOCKED exit 1: authorized attempt to update the parent's next step using `AI_NAME=Codex` and the current-release `ai-status.sh note PAX-WEB-AUTH-UI-20261009` was rejected: `Dispatched worker cannot mutate a different task`. No parent change occurred. Dispatch guard was preserved, not removed or bypassed.
-- PENDING: Supervisor applies the requested parent next/status and all three helper disposition metadata fields. Current helper `show` still has those fields unset. Owner will publish a draft PR/checkpoint and write `blocker ... Supervisor`; no candidate handoff until this boundary is resolved.
+- PENDING: Supervisor applies the requested parent next/status and all three helper disposition metadata fields. Current helper `show` still has those fields unset. Owner will publish a draft PR/checkpoint and write `blocker ... Codex2` for reviewer coordination with Supervisor; no candidate handoff until this boundary is resolved.
 
 All locally started checks finished and their output was read. Final exact head,
 ordinary push and draft PR identity are recorded in this helper's machine status
 and PR description; no hosted CI is claimed as passed by this helper.
+
+Routing correction: current-release `ensure_agent` accepts worker lanes, not the Supervisor role. A `blocker` attempt naming Supervisor exited 1 (`Unknown agent: Supervisor`) and changed no machine truth. Preserve parent waiting lane Codex in the requested helper metadata; Codex2 coordinates the Supervisor gateway action for this helper. Supervisor remains the responsible operator for metadata, parent routing and design-source assignment.
