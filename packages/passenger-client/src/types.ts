@@ -7,8 +7,8 @@ import type {
   VerifyOtpCommand,
   VerifyOtpResponse,
   AuthProvidersResponse,
-  PassengerMeResponse
-} from "@drts/contracts/passenger-app";
+  PassengerMeResponse,
+} from "@drts/contracts";
 
 export type {
   PassengerAccount,
@@ -19,7 +19,7 @@ export type {
   VerifyOtpCommand,
   VerifyOtpResponse,
   AuthProvidersResponse,
-  PassengerMeResponse
+  PassengerMeResponse,
 };
 
 export interface SessionStatus {
@@ -32,4 +32,3 @@ export interface PassengerViewModel {
   refreshSession(): Promise<void>;
   getSessionStatus(): Promise<SessionStatus>;
 }
-
