@@ -23,8 +23,9 @@ PR head；完整 SHA 由 PR、handoff machine truth 和
 - 本輪重新唯讀確認 live `DEV_GCP_*`：`drts-dev-devcc-20260825` / `us-central1`。
   未設定 passenger variable 時沿用正式 exact guard default。未查 secret list/value。
 - 修復 commits：inventory `9edb9699f`、workflow `004642296`；最後 source
-  `915d356c5f8e2c688410e2a83aba39fac5e2868b` 包含執行下列驗證時的完全相同
-  source/formatting。最終候選後續僅新增本成果紀錄。所有 anchors 普通 push，
+  首次整體 regression source `915d356c5f8e2c688410e2a83aba39fac5e2868b` 包含執行下列驗證時的完全相同
+  source/formatting。F5 後最新 source 為 `00824068ccece322b968e2f82b8090744ea39b3c`；
+  其後候選僅新增本成果紀錄。所有 anchors 普通 push，
   無 rebase/amend/force-push/stash，無 VM runtime/browser/Compose。
 
 | Finding／驗收項                                           | 正式呼叫路徑與修復                                                                                                                    | 舊版 → 修正版證據                                                                                                                                                                                                                                                                    | 命令／版本／退出碼與 evidence                                                                                                                                                                                                                                               | 未驗項／限制                                                                                                                                                                                 |
@@ -36,6 +37,24 @@ PR head；完整 SHA 由 PR、handoff machine truth 和
 | F4：artifact-provider CI合約固定舊set-secrets參數         | tools/ci/test_dev_artifact_providers.py `test_workflow_wires_outputs_into_existing_api_arguments_only`；Deploy api secret composition | `d724fba9` hosted [38025423411](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38025423411)、[38025423334](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38025423334) 同處FAIL；本輪單案例重現FAIL，再核對core refs+optional concat+最終flags，39/39 PASS | before single-test exit 1／after suite exit 0；Python3；`.local/.../{before,after}-artifact-contract.log`；整體Python100/100 PASS                                                                                                                                           | 只更新既有workflow contract，artifact env/secret suffix與core refs保留；最終候選hosted CI另讀                                                                                                |
 | pax-web-deploy_workflow_and_secret_gating                 | Dockerfile、prepare/build/deploy/health scripts、正式helpers及contracts                                                               | 41 passenger executable + 36 domain-helper + legacy regressions，共142 PASS / 0 FAIL / 0 SKIP；Python100 PASS                                                                                                                                                                        | final-regression/final-python exit0；source同上；candidate CI以PR checks、handoff及`.local/.../candidate-ci.json`追溯                                                                                                                                                       | Docker build/Cloud Run deploy由immutable publish流程執行；未部署。獨立review、merge、acceptance不由owner宣告                                                                                 |
 | pax-web-deploy_domain_mapping_and_runbook                 | domain-mappings-dev、正式map-domain-service.sh、runbook§1–4.2、entry index                                                            | absent→create / correct→skip / retired→refuse PASS；既有helper36/36；DNS `ride CNAME ghs.googlehosted.com.` TTL300、三callbacks已核對                                                                                                                                                | final-regression exit0；actionlint1.7.12 exit0（shellcheck/pyflakes未啟用）；Prettier/classification exit0                                                                                                                                                                  | 無Cloud Run URL/run evidence、live mapping/DNS/TLS/OAuth登入；使用者/operator交付DNS/provider                                                                                                |
+
+### F5：同 SHA hosted CI 的 root typecheck 退回與修復
+
+`5c685e92c73ce9d7420af4f8d565248d8caf0cfa` 的 hosted
+[CI 38026168064](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38026168064)
+在 root typecheck 失敗，未轉正式／未 handoff。失敗來源為新增測試的
+`result.outputs.api.match(...)`；`Object.fromEntries` 型別在 strict root
+tsconfig 下可能 undefined。隨後缺 `unit-test-results.json` 是前置檢查失敗
+的結果，不能把未執行的 unit/PG gates 視為 PASS。
+
+| Finding／驗收項                               | 正式原始碼與修復                                                                                                                    | 舊版 → 修正版                                                                                                                                     | 命令／版本／evidence                                                                                                                                                                                                               | 未驗項                                                                                             |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| F5／pax-web-deploy_workflow_and_secret_gating | deployment-contract.test.ts 的 shared pepper dedup assertion；改 `api?.match(...)`，仍要求一個 match，undefined 仍會 fail assertion | 本機原 SHA 同錯誤 exit2；source `00824068ccece322b968e2f82b8090744ea39b3c` root typecheck exit0；142回歸 PASS，0 FAIL/SKIP；ESLint/Prettier exit0 | `pnpm typecheck:root`；`.local/.../{before,after}-root-typecheck.log`；Node22.23.2 / TypeScript5.9.3；`.local/.../final-regression-root-fix.json`、root-fix-lint.log、root-fix-prettier.log；hosted failed log/candidate JSON 已讀 | 新候選同 SHA hosted CI 仍需讀完；未改 product/workflow 行為，App typecheck 不能代替 root typecheck |
+
+F5 後重跑下列八檔完整 regression 命令，outputFile 改為
+`.local/pax-web-deploy-20261009/final-regression-root-fix.json`，exit0、142 PASS。
+另 `pnpm typecheck:root` exit0，測試 ESLint／Prettier exit0，所有啟動檢查
+已結束並讀過。Python100與App lint/typecheck所依據檔案無變更，沿用先前結果。
 
 ### 本輪已讀檢查
 
