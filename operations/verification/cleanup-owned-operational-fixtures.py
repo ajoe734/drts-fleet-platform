@@ -56,8 +56,8 @@ EXPECTED_SHA256 = (
 EXPECTED_MIME = "application/pdf"
 KEY_PREFIX = "fleet-partner/fleet-demo-001/supply-submissions/"
 EXPECTED_FLEET_PARTNER_ID = "fleet-demo-001"
-EXPECTED_RUN_BOUNDS_START = "2026-10-09T08:00:00Z"
-EXPECTED_RUN_BOUNDS_END = "2026-10-09T10:05:00Z"
+EXPECTED_RUN_BOUNDS_START = "2026-10-09T09:01:12Z"
+EXPECTED_RUN_BOUNDS_END = "2026-10-09T09:04:01Z"
 
 OWNED_OBJECT_COUNT = 8
 OWNED_SUBMISSION_COUNT = 4
@@ -503,10 +503,26 @@ def load_and_validate_authoritative_artifact(
     api_url = acceptance_job.get("url", "")
     require(api_url == "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/113747921500", f"Acceptance job foreign API URL: {api_url}")
 
-    # Check terminal status for all jobs
+    # Check terminal status and identity for all jobs
+    seen_job_ids = set()
     for job in jobs_list:
+        job_id = job.get("id")
+        require(job_id is not None, "Job missing id")
+        require(job_id not in seen_job_ids, f"Duplicate job id: {job_id}")
+        seen_job_ids.add(job_id)
+        
         require(job.get("status") == "completed", f"Required job {job.get('name')} is not completed")
         require(job.get("conclusion") == "success", f"Required job {job.get('name')} was not successful")
+        require(job.get("run_id") == expected_run_id, f"Job {job_id} run_id mismatch: {job.get('run_id')}")
+        require(job.get("head_sha") == expected_workflow_def_sha, f"Job {job_id} head_sha mismatch")
+        
+        html_url = job.get("html_url", "")
+        expected_html_prefix = f"https://github.com/ajoe734/drts-fleet-platform/actions/runs/{expected_run_id}/job/"
+        require(html_url.startswith(expected_html_prefix), f"Job {job_id} foreign html_url: {html_url}")
+        
+        api_url = job.get("url", "")
+        expected_api_prefix = f"https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/{job_id}"
+        require(api_url == expected_api_prefix, f"Job {job_id} foreign API URL: {api_url}")
 
     # 2. Locate and parse report.json and operational-browser-evidence.json directly from the hashed ZIP
     report_data = None
@@ -1096,12 +1112,8 @@ def inspect_and_validate_gcs_target(
         
     require(tc or up or sa, f"Missing timestamp for gs://{bucket}/{key}")
     
-    run_bounds = expected_item.get("run_bounds")
-    require(run_bounds is not None, "Missing trusted run_bounds in target; cannot verify timestamp limits.")
-    
-    run_start_str = run_bounds.get("start")
-    run_end_str = run_bounds.get("end")
-    require(run_start_str and run_end_str, "Invalid or missing start/end in run_bounds.")
+    run_start_str = EXPECTED_RUN_BOUNDS_START
+    run_end_str = EXPECTED_RUN_BOUNDS_END
     
     run_start = parse_time(run_start_str)
     run_end = parse_time(run_end_str)

@@ -254,8 +254,16 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
         }
         jobs = []
         for i in range(8):
+            job_id = 113747921501 + i
             jobs.append({
-                "name": f"other job {i}", "status": "completed", "conclusion": "success"
+                "id": job_id,
+                "name": f"other job {i}",
+                "status": "completed",
+                "conclusion": "success",
+                "run_id": cleanup.EXPECTED_PRODUCT_RUN_ID,
+                "head_sha": cleanup.EXPECTED_WORKFLOW_DEF_SHA,
+                "html_url": f"https://github.com/ajoe734/drts-fleet-platform/actions/runs/{cleanup.EXPECTED_PRODUCT_RUN_ID}/job/{job_id}",
+                "url": f"https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/{job_id}"
             })
         jobs.append({
             "id": 113747921500,
@@ -533,7 +541,7 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
-            "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
+            "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
         }
         desc = {"status": "not_found", "returncode": 1, "stderr": "No such object"}
         with self.assertRaises(ValueError) as ctx:
@@ -568,7 +576,7 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
 
     def test_exported_pipeline_with_untrusted_inventory_blocks(self):
         inv = create_authentic_inventory()
-        inv["run_bounds"] = {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"}
+        inv["run_bounds"] = {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:05:00Z"}
         with self.assertRaises(ValueError):
             cleanup.build_cleanup_plan(inv, mode="dry-run")
 
@@ -579,7 +587,7 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
-            "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
+            "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
         }
         desc = {
             "status": "ok",
@@ -604,7 +612,7 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
-            "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
+            "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
         }
         desc = {
             "status": "ok",
@@ -630,7 +638,7 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
-            "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
+            "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
         }
         desc = {
             "status": "ok",
@@ -795,7 +803,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
-            "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
+            "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
         }
         desc = {
             "status": "ok",
@@ -820,7 +828,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
-            "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
+            "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
         }
         desc = {
             "status": "ok",
@@ -845,7 +853,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
-            "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
+            "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
         }
         desc = {
             "status": "ok",
@@ -871,7 +879,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
-            "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
+            "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
         }
         desc = {"status": "not_found", "returncode": 1, "stderr": "Not found"}
         foreign_receipt = [{"key": target["key"], "bucket": "wrong-bucket", "status": "deleted", "generation": "123", "verified_absent": True}]
