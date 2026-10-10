@@ -23,15 +23,20 @@ import {
   PassengerOtpService,
 } from "./otp/passenger-otp.service";
 import { SMS_PORT, UnconfiguredSmsPort } from "./otp/sms.port";
+import { PassengerBookingController } from "./booking/passenger-booking.controller";
+import { PassengerBookingService } from "./booking/passenger-booking.service";
+import { PassengerBookingRepository } from "./booking/passenger-booking.repository";
+import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
 
 @Global()
 @Module({
-  imports: [DatabaseModule, GeoModule, ServiceAreaModule],
+  imports: [DatabaseModule, GeoModule, ServiceAreaModule, MultiTaxiModule],
   controllers: [
     PassengerAccountController,
     PassengerOtpController,
     PassengerFareController,
     PassengerOAuthController,
+    PassengerBookingController,
   ],
   providers: [
     PassengerJwtService,
@@ -43,6 +48,8 @@ import { SMS_PORT, UnconfiguredSmsPort } from "./otp/sms.port";
     PassengerOAuthService,
     PassengerOtpRepository,
     PassengerOtpService,
+    PassengerBookingRepository,
+    PassengerBookingService,
     { provide: SMS_PORT, useClass: UnconfiguredSmsPort },
     { provide: OTP_OPTIONS, useFactory: () => otpOptionsFromEnv(process.env) },
     {
@@ -57,6 +64,7 @@ import { SMS_PORT, UnconfiguredSmsPort } from "./otp/sms.port";
     PassengerJwtService,
     PassengerFareRepository,
     PassengerFareService,
+    PassengerBookingService,
   ],
 })
 export class PassengerAppModule {}

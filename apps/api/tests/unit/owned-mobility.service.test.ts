@@ -3995,7 +3995,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       };
-      const partnerBooking = service.createMultiTaxiRide(
+      const partnerBooking = await service.createMultiTaxiRide(
         {
           pickup: { address: "台北車站" },
           dropoff: { address: "松山機場" },

@@ -1125,7 +1125,7 @@ export class OwnedMobilityService
     identity: BootstrapRequestIdentity | null | undefined,
     requestId: string | undefined,
     callContext: MultiTaxiCallContext | undefined,
-  ): OwnedOrderRecord {
+  ): MaybePromise<OwnedOrderRecord> {
     const serviceProduct =
       this.serviceProductService?.getRuntimeServiceProductByType(
         "taxi_reservation",
@@ -1235,8 +1235,7 @@ export class OwnedMobilityService
       },
       requestId,
     );
-    this.orders = [order, ...this.orders];
-    const traceLog = this.appendTrace(
+    const traceLog = this.buildTraceLog(
       order.orderId,
       "multi_taxi.order.ready_for_dispatch",
       {
@@ -1247,32 +1246,46 @@ export class OwnedMobilityService
         operatingAuthorizationId: order.operatingAuthorizationId,
       },
     );
-    this.persistChanges(
-      { orders: [order], dispatchTraceLogs: [traceLog] },
-      "create_multi_taxi_ride",
-    );
-    this.recordAudit(
-      {
-        actorId: identity?.actorId ?? null,
-        actorType: callContext ? "ops_user" : "system",
-        tenantId: null,
-        moduleName: "order",
-        actionName: "create_multi_taxi_direct_order",
-        resourceType: "order",
-        resourceId: order.orderId,
-        newValuesSummary: {
-          runtimeProfileCode: order.runtimeProfileCode,
-          timingMode: order.timingMode,
-          operatingAuthorizationId: order.operatingAuthorizationId,
+
+    const completeCreation = () => {
+      this.orders = [order, ...this.orders];
+      this.dispatchTraceLogs = [traceLog, ...this.dispatchTraceLogs];
+      this.recordAudit(
+        {
+          actorId: identity?.actorId ?? null,
+          actorType: callContext ? "ops_user" : "system",
+          tenantId: null,
+          moduleName: "order",
+          actionName: "create_multi_taxi_direct_order",
+          resourceType: "order",
+          resourceId: order.orderId,
+          newValuesSummary: {
+            runtimeProfileCode: order.runtimeProfileCode,
+            timingMode: order.timingMode,
+            operatingAuthorizationId: order.operatingAuthorizationId,
+          },
         },
-      },
-      requestId,
-    );
-    this.opsDispatchEventsService?.publishOrderCreated(
-      this.cloneOrder(order),
-      requestId,
-    );
-    return this.cloneOrder(order);
+        requestId,
+      );
+      this.opsDispatchEventsService?.publishOrderCreated(
+        this.cloneOrder(order),
+        requestId,
+      );
+      return this.cloneOrder(order);
+    };
+
+    if (this.ownedMobilityRepository) {
+      return this.persistChangesRequired(
+        { orders: [order], dispatchTraceLogs: [traceLog] },
+        "create_multi_taxi_ride",
+      ).then(completeCreation);
+    } else {
+      this.persistChanges(
+        { orders: [order], dispatchTraceLogs: [traceLog] },
+        "create_multi_taxi_ride",
+      );
+      return completeCreation();
+    }
   }
 
   /**
@@ -5486,6 +5499,7 @@ export class OwnedMobilityService
     orderId: string,
     command: CancelOwnedOrderCommand,
     requestId?: string,
+    options?: { systemBypassCancelableCheck?: boolean },
   ) {
     const now = new Date().toISOString();
     const prepare = (bundle: {
@@ -5497,7 +5511,20 @@ export class OwnedMobilityService
       dispatchJobs: DispatchJobRecord[];
     }) => {
       const order = this.cloneOrder(bundle.order);
-      this.assertOrderCancelable(order);
+      if (order.status === "cancelled" || order.status === "completed") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "ORDER_NOT_CANCELABLE",
+          "The order can no longer be cancelled.",
+          {
+            orderId: order.orderId,
+            status: order.status,
+          },
+        );
+      }
+      if (!options?.systemBypassCancelableCheck) {
+        this.assertOrderCancelable(order);
+      }
       const assignment = bundle.assignment ? { ...bundle.assignment } : null;
       const task = bundle.task ? this.cloneTask(bundle.task) : null;
       // The persisted branch prepares from assignment/task rows locked in the
