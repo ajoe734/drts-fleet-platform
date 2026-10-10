@@ -4,6 +4,9 @@ import { PassengerJwtService } from "../../common/auth/passenger-jwt.service";
 import { PassengerAccountController } from "./account/passenger-account.controller";
 import { PassengerAccountRepository } from "./account/passenger-account.repository";
 import { PassengerAccountService } from "./account/passenger-account.service";
+import { PassengerOAuthController } from "./oauth/passenger-oauth.controller";
+import { PassengerOAuthTransactionRepository } from "./oauth/oauth-transaction.repository";
+import { PassengerOAuthService } from "./oauth/passenger-oauth.service";
 import { DatabaseService } from "../../common/db/database.service";
 import { createNotificationDeliveryServiceFromEnv } from "../notification-delivery/notification-delivery.factory";
 import { PassengerOtpController } from "./otp/passenger-otp.controller";
@@ -19,11 +22,17 @@ import { SMS_PORT, UnconfiguredSmsPort } from "./otp/sms.port";
 @Global()
 @Module({
   imports: [DatabaseModule],
-  controllers: [PassengerAccountController, PassengerOtpController],
+  controllers: [
+    PassengerAccountController,
+    PassengerOtpController,
+    PassengerOAuthController,
+  ],
   providers: [
     PassengerJwtService,
     PassengerAccountRepository,
     PassengerAccountService,
+    PassengerOAuthTransactionRepository,
+    PassengerOAuthService,
     PassengerOtpRepository,
     PassengerOtpService,
     { provide: SMS_PORT, useClass: UnconfiguredSmsPort },
