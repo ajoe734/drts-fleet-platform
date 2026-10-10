@@ -10,7 +10,7 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 
 1. **`owned_fixture_assessment_actual_producer_and_boundary_regressions`**:
    - The script `assess-owned-operational-fixtures.py` checks exactly 8 native GCS objects and 4 database submissions using bounded generation-bound requests and read-only repeatable-read DB transactions.
-   - External boundaries are cleanly mocked in `test_assess_owned_operational_fixtures.py` (GCS `describe`/`cat` and PostgreSQL query simulation).
+   - External boundaries are cleanly mocked in `tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_assessment.py` (GCS `describe`/`cat` and PostgreSQL query simulation).
    - Zero local runtime/external mutation calls exist.
    - All tests run cleanly.
 
@@ -23,7 +23,7 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 
 ## Test Execution Details
 
-- `python3 -m unittest operations/verification/test_assess_owned_operational_fixtures.py -v`
+- `python3 -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_assessment.py -v`
   - Total tests run: 6
   - Exit code: 0
   - Status: OK

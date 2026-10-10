@@ -6,7 +6,7 @@ on:
     paths:
       - ".github/workflows/dev-owned-operational-fixture-assessment.yml"
       - "operations/verification/assess-owned-operational-fixtures.py"
-      - "operations/verification/test_assess_owned_operational_fixtures.py"
+      - "tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_assessment.py"
       - "docs/04-uat/dev-owned-operational-fixture-assessment-20261010.md"
   push:
     branches:
@@ -16,7 +16,7 @@ on:
     paths:
       - ".github/workflows/dev-owned-operational-fixture-assessment.yml"
       - "operations/verification/assess-owned-operational-fixtures.py"
-      - "operations/verification/test_assess_owned_operational_fixtures.py"
+      - "tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_assessment.py"
       - "docs/04-uat/dev-owned-operational-fixture-assessment-20261010.md"
   workflow_dispatch:
     inputs:
@@ -61,11 +61,11 @@ jobs:
         run: |
           python3 -m py_compile \
             operations/verification/assess-owned-operational-fixtures.py \
-            operations/verification/test_assess_owned_operational_fixtures.py
+            tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_assessment.py
 
       - name: Execute unit test suite
         run: |
-          python3 -m unittest operations/verification/test_assess_owned_operational_fixtures.py -v
+          python3 -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_assessment.py -v
 
   assess-fixtures:
     name: Owned fixture assessment (Read-only GCS / DB)

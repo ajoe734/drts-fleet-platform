@@ -7,11 +7,12 @@ import sys
 from pathlib import Path
 
 script_dir = Path(__file__).resolve().parent
-sys.path.insert(0, str(script_dir))
+operations_dir = script_dir.parent.parent.parent / "operations" / "verification"
+sys.path.insert(0, str(operations_dir))
 
 # Load module dynamically because of hyphens in filename
 module_name = "assess_owned_operational_fixtures"
-file_path = script_dir / "assess-owned-operational-fixtures.py"
+file_path = operations_dir / "assess-owned-operational-fixtures.py"
 spec = importlib.util.spec_from_file_location(module_name, file_path)
 assess = importlib.util.module_from_spec(spec)
 sys.modules[module_name] = assess
