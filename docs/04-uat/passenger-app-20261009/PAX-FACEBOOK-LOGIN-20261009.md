@@ -264,3 +264,30 @@ commit 順序、唯一 Facebook 刪除、保留 Email/Google 新登入及 Google
 完整回歸。scope 更新前不修改越界檔案，不另造 OAuth 的 session/JWT 邏輯。
 
 本輪未啟動 VM 產品服務、PG、HTTP/browser server、Docker 或部署，未呼叫真實 Meta。
+
+本次 regression anchor `9442adbed162b5871bd2cd3c715180ed208f95ac` 已普通 push，
+local／remote／PR #2503 head 核對一致，worktree clean。後續 evidence commit
+只附加以下 check 結果，沒有改產品碼或回歸內容。
+
+```bash
+pnpm exec eslint tests/unit/pax-facebook-login-20261009/facebook.test.ts --max-warnings=0
+# exit 0；.local/facebook-session-race-20261010/lint.log
+pnpm exec prettier --check tests/unit/pax-facebook-login-20261009/facebook.test.ts docs/04-uat/passenger-app-20261009/PAX-FACEBOOK-LOGIN-20261009.md
+git diff --check
+# 各 exit 0
+pnpm typecheck:root
+# exit 2；.local/facebook-session-race-20261010/root-typecheck.log
+```
+
+root typecheck 未通過，完整輸出已讀：`fleet-partner-list-envelope.test.ts` 與
+`sr-admin-verify-001/fleet-lists.test.ts` 的 ApiClient private `requestEnvelope`
+同時來自本 worktree 與 `auto/gemini-pax-booking-history-20261009`，導致
+TS2345／never intersection。現有 node_modules 連至 canonical dependencies；
+未修改共享 dependencies 或越界修其他 task。輸出沒有 Facebook 測試診斷，
+但不能將此工具解析問題說成 typecheck pass；修復時需隔離 dependencies 後重驗。
+本輪所有已啟動的檢查已結束，沒有背景本機工作。
+
+scope 協調仍待 Supervisor：本輪 task slice 的 write_scopes 未包含 account
+service。依協作規範 §0.7，先由 Supervisor 核對並更新原 task scope，再由
+原 owner 實修；保留 in_progress 與此可重跑回歸，不將品質退修當成 quota
+問題，不 handoff 未修的候選、不要求使用者再次授權。
