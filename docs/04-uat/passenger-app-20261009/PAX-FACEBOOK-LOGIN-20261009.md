@@ -330,3 +330,66 @@ pnpm exec vitest run tests/unit/pax-facebook-login-20261009/facebook.test.ts -t 
 `38024487484` metadata：head 同 `60b9ccf8721a6a2d24fd648ae80d15fed2dfa015`，
 仍 in_progress，未宣稱 CI 通過；該 run 非新候選 acceptance，且本 worker 未啟動。
 無 VM runtime、PG、HTTP/browser server、Docker、deployment 或真實 Meta 呼叫。
+
+## 2026-10-10 04:46 UTC：身分重新建立回歸與精確 scope 協調
+
+本輪續讀完整原 review 與正式 SD、account/OAuth/deletion/SQL 路徑；保留
+`c98fee7702e738e4fec2ea43279705cf84f0dbb4`／generation
+`383dbe9b67be465db0ab3eb4721cc249` 的 FB-SESSION-RACE-1，沒有新候選或 handoff。
+fetch 後既有 local／remote／PR #2503 head 是
+`4d2a69cc247c8cdbfbb9fb128417dce6ef64a104`，PR OPEN、未合併。
+
+新增正式 callback 回歸：舊 callback 完成 lookup 後暫停於 issuance；簽名刪除
+commit 並撤銷舊 session；新的 Facebook callback 將相同 provider/subject 建立
+在另一個新帳號且能合法登入；恢復舊 callback 時，它仍取得原 Email 帳號的
+live access。新登入的成功與新 ownership 均在失敗 assertion 前驗證。
+這是同一 finding 的 ownership 邊界，說明修復不能只檢查身分存在。
+新增案例僅用 `mockImplementationOnce` 控制舊 callback 的順序並呼叫原始
+`issueSession`；新 callback、Graph proof/state、account/session/JWT、signed
+deletion/receipt 都使用正式邏輯。Graph transport、既有 MemoryPassengerStore
+仍是 stub，未冒充 PG concurrency。
+
+測試 checkpoint：`aa7ab968726c40093b8b64c0824e6d300f27010a`。產品碼與
+退修 candidate 完全相同，`git diff --exit-code c98fee7702e738e4fec2ea43279705cf84f0dbb4 HEAD -- apps/api/src`
+exit 0。測試 SHA256：
+`08599ef90d2d68306745d6d05046dd0eb41297d12eb4867f176c288aeffca920`。
+
+| Finding／驗收項                                  | 本輪正式依據與結果                                                                                                                       | 命令／版本／證據                                                                                                                                 | 剩餘限制                                                                                                                               |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| FB-SESSION-RACE-1：刪除後身分由另一帳號重新建立  | `callback` → `findOrCreateByIdentity` → `issueSession`；**FAIL exit 1**，舊 callback 的 access authentication 仍回原帳號；修正版尚未建立 | 上述 checkpoint，新增 `facebook.test.ts` case；`race.{json,log}` 與隔離後 `race-isolated.{json,log}` 均 1 fail／66 filtered-out                  | 身分 ownership 與 session 寫入須同 transaction；account service scope 仍未授權；本輪非完整回歸                                         |
+| 新測試的靜態檢查與依賴解析                       | eslint exit 0；初次 root typecheck exit 2，依賴隔離後 **exit 0**                                                                         | `lint.log`、`root-typecheck.log`、`root-typecheck-isolated.log`、`dependency-links.txt`、`install.log`；Node 22.23.2／pnpm 10.33.0／Vitest 4.1.4 | 初次 typecheck 解析到 gemini2-pax-web-auth-ui worktree 的 ApiClient private property，不是產品重現；不以 typecheck pass 代替 race 修復 |
+| pax-facebook_flow_verification_and_data_deletion | **仍未滿足**：原 race 未修；其餘前輪 finding／證據保留                                                                                   | 本節與原 reviewer artifact；active release progress 已落盤精確 scope request                                                                     | 新 candidate 同 SHA review／CI／merge／acceptance、PG／真實 Meta／HTTP parser／公開 Cloud Run 待驗                                     |
+
+```bash
+pnpm exec vitest run tests/unit/pax-facebook-login-20261009/facebook.test.ts -t 'after deletion and recreation' --reporter=default --reporter=json --outputFile.json=.local/facebook-session-recreation-20261010/race-isolated.json
+# exit 1：1 fail／66 filtered-out；隔離前 race.json 同結果
+pnpm exec eslint tests/unit/pax-facebook-login-20261009/facebook.test.ts --max-warnings=0
+# exit 0
+pnpm install --offline --frozen-lockfile --ignore-scripts
+# exit 0，13.8 秒；僅移除本 worktree 22 個 node_modules symlink，保留所有 target
+pnpm typecheck:root
+# 初次 exit 2；依賴隔離後 exit 0。未改 source／lockfile／canonical dependencies
+```
+
+機器證據保存在 canonical root 的
+`.local/facebook-session-recreation-20261010-aa7ab9687/`；同份 logs 也在本
+worker `.local/facebook-session-recreation-20261010/`。所有本輪已啟動本機
+checks 都已結束並讀取結果；本節後續 closeout 僅附加證據。
+
+已讀 live task slices，供 Supervisor 依 §0.7 做衝突協調：
+
+- `PAX-ACCOUNT-SESSION-20261009`：blocked，只等 PAX-QA hosted PG；程式已合併，不需重派 owner。
+- `PAX-PAYMENT-CORE-20261009`：todo，owner Codex，scope 含 `account/`；其待做付款檢查位於 `deleteAccount`。
+- 本 Facebook task：in_progress；04:45 UTC slice 仍未包含 account service。
+- 本 task 的 `passenger-account.service.ts` 與 fetch 後 `origin/dev e07c0b95110706f32ff78c85ad6a1e30ec4b1d5d` 一致，diff exit 0；此輪未 merge 新 trunk。
+
+請 Supervisor 在原 write_scopes 加入
+`apps/api/src/modules/passenger-app/account/passenger-account.service.ts`，
+協調範圍僅 `issueSession`：optional verified provider/subject binding、
+identity → account 鎖定、重新核對 identity 的 account ownership、原 `issue`
+的 session insertion 全在同一 transaction。OAuth callback 傳入該 binding；
+保留 OTP 既有兩參數契約，與 payment 的 `deleteAccount` slice 分離。
+不改 repository/schema、不加另一 transaction 的 TOCTOU precheck，亦不另造
+OAuth session/JWT 實作。原 owner 不代替 Supervisor 改 scope 或越界修改。
+待協調後沿原 finding 完成修復與既列必要回歸；本輪只有測試／證據 checkpoint，
+不 handoff 未修的候選、不降驗收要求，無 VM runtime 或部署。
