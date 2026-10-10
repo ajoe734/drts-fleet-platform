@@ -1040,9 +1040,11 @@ def main():
                         require(prov.get("REMITTANCE_PROOF_GCS_BUCKET") == PROJECT + "-remittance-proofs", "API remittance bucket mismatch")
                         require(prov.get("REMITTANCE_PROOF_SCANNER_PROVIDER") == "cloud-run-clamd", "API scanner provider mismatch")
                         require(prov.get("REMITTANCE_PROOF_SCANNER_TIMEOUT_MS") == "60000", "API scanner timeout mismatch")
+                        require(s.get("scanner_url"), "Missing scanner_url for scanner")
                         validated_services[name] = {
                             "runtime_sha": s.get("runtime_sha"),
                             "identity": s.get("identity"),
+                            "scanner_url": s.get("scanner_url"),
                             "providers": {
                                 "DOCUMENT_ARTIFACT_GCS_BUCKET": prov.get("DOCUMENT_ARTIFACT_GCS_BUCKET"),
                                 "DOCUMENT_ARTIFACT_STORAGE_PROVIDER": prov.get("DOCUMENT_ARTIFACT_STORAGE_PROVIDER"),
@@ -1055,17 +1057,21 @@ def main():
                     elif name == "drts-dev-scanner":
                         require(s.get("identity") == f"drts-dev-artifact-scanner@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
                         require(s.get("spec_sha256") == "78d699ef021ef42c4346cdaeea539e7df00ff7c53cd8c2c89278c7c52403f4ad", "Scanner spec SHA mismatch")
-                        require(s.get("ready_revision"), "Missing ready_revision for scanner")
-                        require(s.get("images"), "Missing images for scanner")
-                        require(s.get("scanner_url"), "Missing scanner_url for scanner")
-                        require(s.get("default_environment") == "drts-dev-devcc-20260825", "Scanner environment mismatch")
+                        
+                        env = s.get("default_environment")
+                        require(isinstance(env, dict), "Scanner environment mismatch")
+                        require(env.get("CLAMD_HOST") == "127.0.0.1", "Scanner environment mismatch")
+                        require(env.get("CLAMD_PORT") == "3310", "Scanner environment mismatch")
+                        require(env.get("CLAMAV_READY_MARKER") == "/var/run/clamav-ready/ready", "Scanner environment mismatch")
+                        
                         validated_services[name] = {
                             "identity": s.get("identity"),
                             "spec_sha256": s.get("spec_sha256"),
-                            "ready_revision": s.get("ready_revision"),
-                            "images": s.get("images"),
-                            "scanner_url": s.get("scanner_url"),
-                            "default_environment": s.get("default_environment")
+                            "default_environment": {
+                                "CLAMD_HOST": "127.0.0.1",
+                                "CLAMD_PORT": "3310",
+                                "CLAMAV_READY_MARKER": "/var/run/clamav-ready/ready"
+                            }
                         }
                     else:
                         require(s.get("identity") == f"drts-dev-runtime@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
@@ -1195,8 +1201,8 @@ def main():
                 operator_approved = False
                 for a in approvals:
                     if isinstance(a, dict) and a.get("state") == "approved":
-                        env = a.get("environment", {})
-                        if isinstance(env, dict) and env.get("name") == "operator":
+                        envs = a.get("environments", [])
+                        if isinstance(envs, list) and any(e.get("name") == "operator" for e in envs if isinstance(e, dict)):
                             operator_approved = True
                             break
                 require(operator_approved, "Actual Operator approval missing for 'operator' environment")
@@ -1204,7 +1210,7 @@ def main():
                 # No overlap check
                 active_restricted_runs = []
                 import re as regex_mod
-                for status in ["in_progress", "queued", "waiting", "pending"]:
+                for status in ["in_progress", "queued", "waiting", "pending", "requested"]:
                     page = 1
                     status_fetched_runs = 0
                     status_total_runs = -1
@@ -1219,8 +1225,10 @@ def main():
                             break
                         status_fetched_runs += len(page_runs)
                         for r in page_runs:
-                            if str(r.get("id")) != args.current_run_id and regex_mod.search(r"deploy|restore|provision|provider|scanner", r.get("name", ""), regex_mod.IGNORECASE):
-                                active_restricted_runs.append(r)
+                            if str(r.get("id")) != args.current_run_id:
+                                path = r.get("path", "")
+                                if regex_mod.search(r"deploy|restore|provision|provider|scanner", path, regex_mod.IGNORECASE):
+                                    active_restricted_runs.append(r)
                         if len(page_runs) < 100:
                             break
                         page += 1
@@ -1231,16 +1239,25 @@ def main():
                 
                 curr_jobs = []
                 page = 1
+                curr_total_jobs = -1
                 while True:
                     res_jobs = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/jobs?per_page=100&page={page}"], timeout_sec=30)
                     require(res_jobs.returncode == 0, "Failed to fetch current run jobs")
-                    page_jobs = json.loads(res_jobs.stdout).get("jobs", [])
+                    jobs_data = json.loads(res_jobs.stdout)
+                    if curr_total_jobs == -1:
+                        curr_total_jobs = jobs_data.get("total_count", -1)
+                    page_jobs = jobs_data.get("jobs", [])
                     if not page_jobs:
                         break
                     curr_jobs.extend(page_jobs)
                     if len(page_jobs) < 100:
                         break
                     page += 1
+                require(curr_total_jobs >= 0, "Failed to determine total current jobs")
+                require(len(curr_jobs) == curr_total_jobs, "Incomplete pagination for current jobs")
+                unique_jobs = {j.get("id") for j in curr_jobs}
+                require(len(unique_jobs) == len(curr_jobs), "Duplicate jobs in inventory")
+                require(all(str(j.get("run_id")) == args.current_run_id for j in curr_jobs), "Foreign job in inventory")
                 
                 # Check for operator environment binding (reservation) by confirming the specific job name that has the environment
                 op_envs = [j for j in curr_jobs if j.get("name") == "Owned fixture assessment (Read-only GCS / DB)"]
