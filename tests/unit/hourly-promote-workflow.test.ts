@@ -134,6 +134,30 @@ describe("hourly publish promotion safety", () => {
     expect(source).toContain("steps.deployed.outputs.skip != 'true'");
   });
 
+  it("migrates the smoke database before unit tests and preserves every check", () => {
+    const source = workflow();
+    const publishChecks = source.slice(
+      source.indexOf("- name: Publish required checks on promote SHA"),
+      source.indexOf("- name: Wait for required PR checks to register"),
+    );
+    const smoke = publishChecks.match(
+      /run_check\s*\\\s*"Smoke acceptance"[\s\S]*?bash -lc '([^']+)'/,
+    );
+
+    expect(smoke).not.toBeNull();
+    expect(smoke![0]).toContain(
+      "env DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/drts_fleet_platform",
+    );
+    // All commands inherit the same DATABASE_URL; && stops tests if migration fails.
+    expect(smoke![1].split(" && ")).toEqual([
+      "pnpm install --frozen-lockfile",
+      "pnpm run lint",
+      "pnpm run typecheck",
+      "pnpm db:migrate",
+      "pnpm run test:unit",
+    ]);
+  });
+
   it("starts and cleans up PostGIS for the inline smoke acceptance", () => {
     const source = workflow();
     const publishChecks = source.slice(
