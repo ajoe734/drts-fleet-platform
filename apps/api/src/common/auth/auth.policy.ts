@@ -45,6 +45,23 @@ export function resolveRouteAuthPolicy(
         description: "Passenger platform administration",
       };
     }
+    if (
+      routePath === "passenger-app/auth/providers" ||
+      /^passenger-app\/auth\/oauth\/[^/]+\/(start|callback)$/.test(routePath)
+    ) {
+      // Pre-login traffic carries a BFF metadata identity, not a passenger
+      // Bearer; the guard's activatePassenger() open-route branch (not this
+      // table) is what actually admits these two requests. A `purpose: "link"`
+      // call additionally requires a live passenger Bearer, enforced inside
+      // PassengerOAuthService, not by this route-level realm/scope gate.
+      return {
+        routeKey: `passenger-app:oauth:${routePath}`,
+        requiredScopes: [],
+        allowedRealms: ["passenger"],
+        description:
+          "Passenger OAuth/OIDC login provider discovery, start, and callback",
+      };
+    }
     return {
       routeKey: "passenger-app:self",
       requiredScopes: [],
