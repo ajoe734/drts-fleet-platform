@@ -974,10 +974,69 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
             return {"status": "ok", "metadata": {"bucket": cleanup.BUCKET, "name": key, "generation": "123", "metageneration": "1", "size": 327, "contentType": "text/plain", "sha256": cleanup.EXPECTED_SHA256, "timeCreated": "2026-10-09T09:03:18.572Z"}}
 
         with self.assertRaises(ValueError) as ctx:
-            cleanup.run_cleanup_pipeline(inv, mode="dry-run", gcs_runner=bad_first_gcs, db_runner=good_db)
+            cleanup.run_cleanup_pipeline(inv, mode="dry-run", gcs_runner=bad_first_gcs, db_runner=good_db, simulation_mode=True)
         self.assertIn("content-type mismatch", str(ctx.exception))
         self.assertEqual(sum(x.startswith("DB DELETE") for x in trace), 0)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestR18Regressions(unittest.TestCase):
+    def setUp(self):
+        self.inv = create_authentic_inventory()
+    
+    def test_live_route_blocks_even_with_valid_proof(self):
+        inv_valid = copy.deepcopy(self.inv)
+        inv_valid["authority_established"] = cleanup._VALID_PROOF
+        plan = cleanup.build_cleanup_plan(inv_valid, mode="dry-run")
+        mock_gcs = MagicMock()
+        def good_db(sql, params):
+            return {"status": "ok", "rows_affected": 8 if "supply_documents" in sql else 4}
+        
+        # simulation_mode = False (which is default for CLI without --offline)
+        res = cleanup.run_cleanup_pipeline(inv_valid, mode="dry-run", gcs_runner=mock_gcs, db_runner=good_db, simulation_mode=False)
+        
+        self.assertEqual(res["status"], "dry_run_blocked")
+        mock_gcs.assert_not_called()
+        
+        gcs_res = cleanup.execute_gcs_cleanup(plan, gcs_runner=mock_gcs, simulation_mode=False)
+        self.assertEqual(gcs_res["status"], "blocked")
+        mock_gcs.assert_not_called()
+        
+    def test_public_true_blocks(self):
+        inv_true = copy.deepcopy(self.inv)
+        inv_true["authority_established"] = True
+        plan = cleanup.build_cleanup_plan(inv_true, mode="dry-run")
+        
+        # Even in simulation_mode=True, True is not _VALID_PROOF
+        gcs_res = cleanup.execute_gcs_cleanup(plan, simulation_mode=True)
+        self.assertEqual(gcs_res["status"], "blocked")
+
+    def test_missing_marker_blocks(self):
+        inv_missing = copy.deepcopy(self.inv)
+        if "authority_established" in inv_missing:
+            del inv_missing["authority_established"]
+        plan = cleanup.build_cleanup_plan(inv_missing, mode="dry-run")
+        
+        gcs_res = cleanup.execute_gcs_cleanup(plan, simulation_mode=True)
+        self.assertEqual(gcs_res["status"], "blocked")
+
+    def test_legitimate_synthetic_route(self):
+        inv_valid = copy.deepcopy(self.inv)
+        inv_valid["authority_established"] = cleanup._VALID_PROOF
+        plan = cleanup.build_cleanup_plan(inv_valid, mode="dry-run")
+        def mock_gcs(action, bucket, key, generation=None):
+            if action == "describe":
+                return {"status": "ok", "metadata": {"bucket": cleanup.BUCKET, "name": key, "generation": "123", "metageneration": "1", "size": 327, "contentType": cleanup.EXPECTED_MIME, "sha256": cleanup.EXPECTED_SHA256, "timeCreated": "2026-10-09T09:03:18.572Z"}}
+            elif action == "read":
+                return {"status": "ok", "body": b"A" * 327}
+            return {"status": "error"}
+        
+        mock_gcs_mock = MagicMock(side_effect=mock_gcs)
+        try:
+            cleanup.execute_gcs_cleanup(plan, gcs_runner=mock_gcs_mock, simulation_mode=True)
+        except Exception:
+            pass # We just want to see it was called
+        
+        self.assertTrue(mock_gcs_mock.called)

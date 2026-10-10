@@ -1297,6 +1297,14 @@ def execute_gcs_cleanup(
             "receipts": [{"status": "explicitunverified/blocked"}] * len(plan.get("gcs_targets", []))
         }
 
+    if not simulation_mode:
+        return {
+            "status": "blocked",
+            "mode": mode,
+            "total_targets": len(plan.get("gcs_targets", [])),
+            "receipts": [{"status": "explicitunverified/blocked"}] * len(plan.get("gcs_targets", []))
+        }
+
     runner = gcs_runner or default_gcs_runner
     targets = plan["gcs_targets"]
 
