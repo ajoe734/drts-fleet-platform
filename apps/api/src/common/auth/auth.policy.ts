@@ -36,6 +36,22 @@ export function resolveRouteAuthPolicy(
   const routePath = normalizeRoutePath(url);
   const upperMethod = method.toUpperCase();
 
+  // Append the passenger realm only to address/routing utilities. Existing realm
+  // decorators are unioned by BootstrapAuthGuard; health/admin routes stay unchanged.
+  if (
+    (routePath === "geo/search" && upperMethod === "GET") ||
+    (["geo/resolve", "geo/reverse", "geo/route"].includes(routePath) &&
+      upperMethod === "POST")
+  ) {
+    return {
+      routeKey: `passenger-app:geo:${routePath.slice(4)}:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: ["passenger"],
+      description:
+        "First-party passenger address and route utilities; existing decorators preserve other realms",
+    };
+  }
+
   if (
     (upperMethod === "POST" &&
       [
