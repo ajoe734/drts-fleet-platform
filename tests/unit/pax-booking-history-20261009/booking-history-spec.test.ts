@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassengerBookingService } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.service";
 import { randomUUID } from "crypto";
+import { NOW, QUOTE_ID } from "./production-booking-fixture";
 
 describe("Passenger Booking History API - Spec requirements", () => {
   let service: PassengerBookingService;
@@ -10,6 +11,8 @@ describe("Passenger Booking History API - Spec requirements", () => {
   let accountMock: any;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
     repoMock = {
       createBookingHistory: vi.fn(),
       listBookingHistories: vi.fn(),
@@ -30,7 +33,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
       transaction: vi.fn((cb) => cb({ lockAccount: vi.fn() })),
     };
 
-    process.env.REQUIRE_SMS_VERIFICATION = "false";
+    vi.stubEnv("REQUIRE_SMS_VERIFICATION", "false");
 
     service = new PassengerBookingService(
       repoMock,
@@ -38,6 +41,11 @@ describe("Passenger Booking History API - Spec requirements", () => {
       fareMock,
       accountMock,
     );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
   it("pax-booking_trusted_create_and_ownership: ignores forged body passenger data, respects quote owner", async () => {
@@ -60,7 +68,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
       expiresAt: expiresAtStr,
       origin: { lat: 25.04, lng: 121.51 },
       destination: { lat: 25.06, lng: 121.55 },
-      passengerSubjectRef: "drts_passenger:pax-1", // owner matches
+      drtsPassengerId: "pax-1",
     });
 
     const orderId = randomUUID();
@@ -76,7 +84,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
       origin: { lat: 25.04, lng: 121.51, address: "Origin Address" },
       destination: { lat: 25.06, lng: 121.55, address: "Dest Address" },
       paymentMethodId: "pm-1",
-      fareSnapshotId: "fs-1",
+      fareSnapshotId: QUOTE_ID,
       passengerConfirmedAt: new Date().toISOString(),
       // Forged body data
       passenger: {
@@ -99,11 +107,12 @@ describe("Passenger Booking History API - Spec requirements", () => {
       }),
       "pax-1",
       "req-1",
+      expect.any(Function),
     );
   });
 
   it("pax-booking_trusted_create_and_ownership: falls back to contactPhone if SMS verification is disabled", async () => {
-    process.env.REQUIRE_SMS_VERIFICATION = "false";
+    vi.stubEnv("REQUIRE_SMS_VERIFICATION", "false");
     accountMock.transaction = vi.fn(async (cb) => {
       return cb({
         lockAccount: vi.fn().mockResolvedValue({
@@ -124,7 +133,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
       expiresAt: expiresAtStr,
       origin: { lat: 25.04, lng: 121.51 },
       destination: { lat: 25.06, lng: 121.55 },
-      passengerSubjectRef: "drts_passenger:pax-1",
+      drtsPassengerId: "pax-1",
     });
 
     const orderId = randomUUID();
@@ -140,7 +149,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
       origin: { lat: 25.04, lng: 121.51, address: "Origin Address" },
       destination: { lat: 25.06, lng: 121.55, address: "Dest Address" },
       paymentMethodId: "pm-1",
-      fareSnapshotId: "fs-1",
+      fareSnapshotId: QUOTE_ID,
       passengerConfirmedAt: new Date().toISOString(),
     };
 
@@ -155,6 +164,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
       }),
       "pax-1",
       "req-1",
+      expect.any(Function),
     );
   });
 
@@ -179,7 +189,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
       origin: { lat: 25.04, lng: 121.51, address: "Origin Address" },
       destination: { lat: 25.06, lng: 121.55, address: "Dest Address" },
       paymentMethodId: "pm-1",
-      fareSnapshotId: "fs-1",
+      fareSnapshotId: QUOTE_ID,
       passengerConfirmedAt: new Date().toISOString(),
     };
 
@@ -192,6 +202,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
     expect(err.response.error.message).toMatch(
       /Quote not found or does not belong to the passenger/,
     );
+    expect(multiTaxiMock.createTrustedPassengerRide).not.toHaveBeenCalled();
   });
 
   it("pax-booking_history_and_ride_actions: prevents cross-account viewing, paginates properly", async () => {
@@ -247,24 +258,26 @@ describe("Passenger Booking History API - Spec requirements", () => {
     expect(res2.rides.length).toBe(1);
     expect(res2.rides[0]?.order.orderId).toBe(id3);
 
-    // Check getActiveRides traversing multiple pages
+    // Check getActiveRides traversing multiple pages, with real UUID shapes.
+    const completedIds = Array.from({ length: 50 }, () => randomUUID());
+    const activeId = randomUUID();
     repoMock.listBookingHistories.mockImplementation(
       async (_paxId: any, limit: any, cursorCreatedAt: any) => {
         if (!cursorCreatedAt) {
-          return Array.from({ length: 50 }).map((_, i) => ({
-            orderId: `completed-${i}`,
+          return completedIds.map((orderId) => ({
+            orderId,
             createdAt: "2026-10-10T05:00:00Z",
           }));
         }
         if (cursorCreatedAt === "2026-10-10T05:00:00Z") {
-          return [{ orderId: "active-1", createdAt: "2026-10-10T04:00:00Z" }];
+          return [{ orderId: activeId, createdAt: "2026-10-10T04:00:00Z" }];
         }
         return [];
       },
     );
     multiTaxiMock.getPassengerRideById.mockImplementation(
       async (orderId: string) => {
-        if (orderId.startsWith("completed-"))
+        if (completedIds.includes(orderId))
           return { order: { orderId, status: "completed" } };
         return { order: { orderId, status: "on_trip" } };
       },
@@ -272,7 +285,6 @@ describe("Passenger Booking History API - Spec requirements", () => {
 
     const activeRes = await service.getActiveRides("pax-1");
     expect(activeRes.rides.length).toBe(1);
-    expect(activeRes.rides[0]?.order.orderId).toBe("active-1");
+    expect(activeRes.rides[0]?.order.orderId).toBe(activeId);
   });
 });
-// Retrigger CI

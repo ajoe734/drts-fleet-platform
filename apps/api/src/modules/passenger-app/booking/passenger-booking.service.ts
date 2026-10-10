@@ -86,7 +86,10 @@ export class PassengerBookingService {
       );
     }
 
-    if (typeof req.passengerConfirmedAt !== "string" || !req.passengerConfirmedAt) {
+    if (
+      typeof req.passengerConfirmedAt !== "string" ||
+      !req.passengerConfirmedAt
+    ) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "PASSENGER_NOT_CONFIRMED",
@@ -330,8 +333,16 @@ export class PassengerBookingService {
   }
 
   async getRide(passengerId: string, orderId: string) {
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId)) {
-      throw new ApiRequestError(HttpStatus.NOT_FOUND, "PASSENGER_RIDE_NOT_FOUND", "Ride not found");
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        orderId,
+      )
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PASSENGER_RIDE_NOT_FOUND",
+        "Ride not found",
+      );
     }
     const ownerId = await this.repository.getBookingHistoryOwner(orderId);
     if (ownerId !== passengerId) {

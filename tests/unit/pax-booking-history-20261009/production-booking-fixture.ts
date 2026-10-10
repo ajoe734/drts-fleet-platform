@@ -199,15 +199,16 @@ export function createProductionBookingFixture(
     expiresAt: new Date(NOW + 600000).toISOString(),
   };
   const fare = { findOwnedSnapshot: async () => snapshot };
+  const accountRepository = {
+    transaction: async (cb: (tx: unknown) => unknown) =>
+      cb({ lockAccount: async () => account }),
+  };
   const bookingRepository = new PassengerBookingRepository(database);
   const service = new PassengerBookingService(
     bookingRepository,
     multi,
     fare as never,
-    {
-      transaction: async (cb: (tx: unknown) => unknown) =>
-        cb({ lockAccount: async () => account }),
-    } as never,
+    accountRepository as never,
   );
   return {
     state,
@@ -219,6 +220,7 @@ export function createProductionBookingFixture(
     owned,
     multi,
     account,
+    accountRepository,
     snapshot,
     bookingRepository,
     service,

@@ -20,7 +20,10 @@ import type {
 } from "../../../common/auth/auth.types";
 import { MultiTaxiService } from "../../multi-taxi/multi-taxi.service";
 import { from, map, Observable, mergeMap } from "rxjs";
-import { ApiRequestError, toApiSuccessEnvelope } from "../../../common/api-envelope";
+import {
+  ApiRequestError,
+  toApiSuccessEnvelope,
+} from "../../../common/api-envelope";
 import type {
   CreatePassengerRideCommand,
   RatePassengerRideCommand,
@@ -50,7 +53,10 @@ export class PassengerBookingController {
     const paxIdentity = identity as PassengerRequestIdentity;
     const passengerId = paxIdentity.drtsPassengerId;
 
-    return toApiSuccessEnvelope(await this.service.createRide(passengerId, body, idempotencyKey), idempotencyKey);
+    return toApiSuccessEnvelope(
+      await this.service.createRide(passengerId, body, idempotencyKey),
+      idempotencyKey,
+    );
   }
 
   @Get()
@@ -60,8 +66,15 @@ export class PassengerBookingController {
     @Query("cursor") cursor?: string,
     @Query("status") status?: "active" | "completed" | "cancelled",
   ) {
-    if (status !== undefined && !["active", "completed", "cancelled"].includes(status)) {
-      throw new ApiRequestError(HttpStatus.BAD_REQUEST, "INVALID_STATUS", "Invalid status");
+    if (
+      status !== undefined &&
+      !["active", "completed", "cancelled"].includes(status)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_STATUS",
+        "Invalid status",
+      );
     }
 
     if (identity.realm !== "passenger")
@@ -72,7 +85,13 @@ export class PassengerBookingController {
       );
 
     const parsedLimit = parseInt(limit, 10);
-    if (typeof limit !== "string" || isNaN(parsedLimit) || parsedLimit <= 0 || parsedLimit > 100 || !/^\d+$/.test(limit)) {
+    if (
+      typeof limit !== "string" ||
+      isNaN(parsedLimit) ||
+      parsedLimit <= 0 ||
+      parsedLimit > 100 ||
+      !/^\d+$/.test(limit)
+    ) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "INVALID_PAGINATION",
@@ -81,7 +100,9 @@ export class PassengerBookingController {
     }
 
     const passengerId = (identity as PassengerRequestIdentity).drtsPassengerId;
-    return toApiSuccessEnvelope(await this.service.getRideList(passengerId, parsedLimit, cursor, status));
+    return toApiSuccessEnvelope(
+      await this.service.getRideList(passengerId, parsedLimit, cursor, status),
+    );
   }
 
   @Get("active")
@@ -92,9 +113,11 @@ export class PassengerBookingController {
         "UNAUTHORIZED",
         "Not a passenger",
       );
-    return toApiSuccessEnvelope(await this.service.getActiveRides(
-      (identity as PassengerRequestIdentity).drtsPassengerId,
-    ));
+    return toApiSuccessEnvelope(
+      await this.service.getActiveRides(
+        (identity as PassengerRequestIdentity).drtsPassengerId,
+      ),
+    );
   }
 
   @Get(":id")
