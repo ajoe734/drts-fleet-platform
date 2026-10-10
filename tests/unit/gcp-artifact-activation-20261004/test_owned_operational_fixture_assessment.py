@@ -128,7 +128,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'ccont': 0,
                 'ddrafts': 0,
                 'vdrafts': 0,
-                'fks_meta': [{"rel": "a", "confrel": "b", "name": "c", "contype": "f", "confdeltype": "a"}],
+                'fks_meta': [{"rel": "fleet.supply_documents", "confrel": "fleet.supply_submissions", "name": "c1", "contype": "f", "confdeltype": "c"}, {"rel": "fleet.supply_review_events", "confrel": "fleet.supply_submissions", "name": "c2", "contype": "f", "confdeltype": "a"}, {"rel": "fleet.vehicle_fleet_affiliations", "confrel": "fleet.supply_submissions", "name": "c3", "contype": "f", "confdeltype": "a"}, {"rel": "fleet.driver_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c4", "contype": "f", "confdeltype": "c"}, {"rel": "fleet.vehicle_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c5", "contype": "f", "confdeltype": "c"}],
                 'pres_subs': {"c": 4, "digest": "12345678901234567890123456789012"},
                 'pres_docs': {"c": 8, "digest": "12345678901234567890123456789012"},
                 'pres_revs': {"c": 0, "digest": "12345678901234567890123456789012"},
@@ -166,7 +166,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'ccont': 0,
                 'ddrafts': 0,
                 'vdrafts': 0,
-                'fks_meta': [{"rel": "a", "confrel": "b", "name": "c", "contype": "f", "confdeltype": "a"}],
+                'fks_meta': [{"rel": "fleet.supply_documents", "confrel": "fleet.supply_submissions", "name": "c1", "contype": "f", "confdeltype": "c"}, {"rel": "fleet.supply_review_events", "confrel": "fleet.supply_submissions", "name": "c2", "contype": "f", "confdeltype": "a"}, {"rel": "fleet.vehicle_fleet_affiliations", "confrel": "fleet.supply_submissions", "name": "c3", "contype": "f", "confdeltype": "a"}, {"rel": "fleet.driver_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c4", "contype": "f", "confdeltype": "c"}, {"rel": "fleet.vehicle_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c5", "contype": "f", "confdeltype": "c"}],
                 'pres_subs': {"c": 4, "digest": "12345678901234567890123456789012"},
                 'pres_docs': {"c": 8, "digest": "12345678901234567890123456789012"},
                 'pres_revs': {"c": 0, "digest": "12345678901234567890123456789012"},
@@ -203,7 +203,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'ccont': 0,
                 'ddrafts': 0,
                 'vdrafts': 0,
-                'fks_meta': [{"rel": "a", "confrel": "b", "name": "c", "contype": "f", "confdeltype": "a"}],
+                'fks_meta': [{"rel": "fleet.supply_documents", "confrel": "fleet.supply_submissions", "name": "c1", "contype": "f", "confdeltype": "c"}, {"rel": "fleet.supply_review_events", "confrel": "fleet.supply_submissions", "name": "c2", "contype": "f", "confdeltype": "a"}, {"rel": "fleet.vehicle_fleet_affiliations", "confrel": "fleet.supply_submissions", "name": "c3", "contype": "f", "confdeltype": "a"}, {"rel": "fleet.driver_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c4", "contype": "f", "confdeltype": "c"}, {"rel": "fleet.vehicle_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c5", "contype": "f", "confdeltype": "c"}],
                 'pres_subs': {"c": 4, "digest": "12345678901234567890123456789012"},
                 'pres_docs': {"c": 8, "digest": "12345678901234567890123456789012"},
                 'pres_revs': {"c": 0, "digest": "12345678901234567890123456789012"},
@@ -281,10 +281,15 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 os.lseek(fd, 0, os.SEEK_SET)
                 f = open(path, "rb")
                 m.stdout = f
+                fd2, path2 = tempfile.mkstemp()
+                os.write(fd2, b"")
+                os.lseek(fd2, 0, os.SEEK_SET)
+                f2 = open(path2, "rb")
+                m.stderr = f2
                 # keep track of fd to avoid closing issues
                 m.poll = lambda: 0
                 m.__enter__ = lambda self: self
-                m.__exit__ = lambda self, a, b, c: f.close()
+                m.__exit__ = lambda self, a, b, c: (f.close(), f2.close())
                 return m
             return MagicMock(returncode=1)
 

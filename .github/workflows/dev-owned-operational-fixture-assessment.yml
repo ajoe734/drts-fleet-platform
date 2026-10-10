@@ -196,7 +196,8 @@ jobs:
             --workflow-def-sha "$INPUT_WORKFLOW_DEF_SHA" \
             --cloud-metadata .local-cloud-metadata.json \
             --current-run-id "${{ github.run_id }}" \
-            --current-runtime-sha "$INPUT_CURRENT_RUNTIME_SHA" > assessment-report.json
+            --current-runtime-sha "$INPUT_CURRENT_RUNTIME_SHA" \
+            --tooling-run-sha "${{ github.sha }}" > assessment-report.json
 
       - name: Upload assessment report
         if: always()

@@ -144,8 +144,9 @@ def fetch_and_validate_provenance(args) -> None:
     for job in jobs:
         actual_jobs.append(job.get("id"))
         require(str(job.get("run_id")) == args.product_run_id, "Job run_id mismatch")
-        require(job.get("url", "").startswith(f"https://api.github.com/repos/ajoe734/drts-fleet-platform/"), "Job url mismatch")
-        require(job.get("html_url", "").startswith(f"https://github.com/ajoe734/drts-fleet-platform/"), "Job html_url mismatch")
+        require(job.get("run_url", "") == f"https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}", "Job run_url mismatch")
+        require(job.get("url", "") == f"https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/{job.get('id')}", "Job url mismatch")
+        require(job.get("html_url", "") == f"https://github.com/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}/job/{job.get('id')}", "Job html_url mismatch")
         require(job.get("head_sha") == AUTHORIZED_PROVENANCE["workflow_sha"], "Job head_sha mismatch")
         require(job.get("status") == "completed", f"Job {job.get('id')} not completed")
         require(job.get("conclusion") in ("success", "skipped"), f"Job {job.get('id')} not successful")
@@ -186,8 +187,8 @@ def fetch_and_validate_provenance(args) -> None:
     require(len(matched_arts) == 1, "Expected exactly one artifact matching ID")
     matched_art = matched_arts[0]
     
-    require(matched_art.get("url", "").startswith(f"https://api.github.com/repos/ajoe734/drts-fleet-platform/"), "Artifact url mismatch")
-    require(matched_art.get("archive_download_url", "").startswith(f"https://api.github.com/repos/ajoe734/drts-fleet-platform/"), "Artifact archive_download_url mismatch")
+    require(matched_art.get("url", "") == f"https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/artifacts/{matched_art.get('id')}", "Artifact url mismatch")
+    require(matched_art.get("archive_download_url", "") == f"https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/artifacts/{matched_art.get('id')}/zip", "Artifact archive_download_url mismatch")
     require(matched_art is not None, "Artifact not associated with authoritative run")
     require(matched_art.get("name") == f"operational-browser-evidence-{AUTHORIZED_PROVENANCE['source_sha']}", "Artifact name mismatch")
     require(not matched_art.get("expired"), "Artifact expired")
@@ -209,8 +210,10 @@ def fetch_and_validate_provenance(args) -> None:
             start_time = time.time()
             with subprocess.Popen(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/artifacts/{args.artifact_id}/zip"], stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
                 os.set_blocking(p.stdout.fileno(), False)
+                os.set_blocking(p.stderr.fileno(), False)
                 with open(zip_path, "wb") as f:
                     downloaded = 0
+                    stderr_downloaded = 0
                     while True:
                         if time.time() - start_time > 30:
                             p.kill()
@@ -218,7 +221,7 @@ def fetch_and_validate_provenance(args) -> None:
                             raise RuntimeError("Artifact download timeout")
                         
                         import select
-                        r, _, _ = select.select([p.stdout], [], [], 1.0)
+                        r, _, _ = select.select([p.stdout, p.stderr], [], [], 1.0)
                         if p.stdout in r:
                             chunk = os.read(p.stdout.fileno(), 4096)
                             if chunk:
@@ -228,11 +231,20 @@ def fetch_and_validate_provenance(args) -> None:
                                     p.wait()
                                     raise RuntimeError("Artifact too large")
                                 f.write(chunk)
+                        if p.stderr in r:
+                            chunk = os.read(p.stderr.fileno(), 4096)
+                            if chunk:
+                                stderr_downloaded += len(chunk)
+                                if stderr_downloaded > 1 * 1024 * 1024:
+                                    p.kill()
+                                    p.wait()
+                                    raise RuntimeError("Artifact stderr too large")
                         
                         if p.poll() is not None:
                             # Drain remaining
                             while True:
-                                r2, _, _ = select.select([p.stdout], [], [], 0.0)
+                                r2, _, _ = select.select([p.stdout, p.stderr], [], [], 0.0)
+                                progress = False
                                 if p.stdout in r2:
                                     chunk = os.read(p.stdout.fileno(), 4096)
                                     if chunk:
@@ -240,9 +252,15 @@ def fetch_and_validate_provenance(args) -> None:
                                         if downloaded > 10 * 1024 * 1024:
                                             raise RuntimeError("Artifact too large")
                                         f.write(chunk)
-                                    else:
-                                        break
-                                else:
+                                        progress = True
+                                if p.stderr in r2:
+                                    chunk = os.read(p.stderr.fileno(), 4096)
+                                    if chunk:
+                                        stderr_downloaded += len(chunk)
+                                        if stderr_downloaded > 1 * 1024 * 1024:
+                                            raise RuntimeError("Artifact stderr too large")
+                                        progress = True
+                                if not progress:
                                     break
                             break
                             
@@ -426,18 +444,18 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         SELECT json_agg(json_build_object('rel', conrelid::regclass, 'confrel', confrelid::regclass, 'name', conname, 'contype', contype, 'confdeltype', confdeltype, 'confupdtype', confupdtype)) as data 
         FROM pg_constraint WHERE confrelid IN ('fleet.supply_submissions'::regclass, 'fleet.supply_documents'::regclass, 'fleet.supply_review_events'::regclass, 'fleet.vehicle_fleet_affiliations'::regclass, 'reg.vehicle_passenger_disclosure_profiles'::regclass, 'reg.driver_public_registration_credentials'::regclass, 'reg.phase1_registry_drivers'::regclass, 'reg.phase1_registry_vehicles'::regclass, 'reg.phase1_registry_policies'::regclass, 'reg.phase1_registry_contracts'::regclass, 'fleet.driver_supply_drafts'::regclass, 'fleet.vehicle_supply_drafts'::regclass)
     ), 
-    pres_subs AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM fleet.supply_submissions ORDER BY 1) t),
-    pres_docs AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM fleet.supply_documents ORDER BY 1) t),
-    pres_revs AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM fleet.supply_review_events ORDER BY 1) t),
-    pres_affs AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM fleet.vehicle_fleet_affiliations ORDER BY 1) t),
-    pres_discs AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM reg.vehicle_passenger_disclosure_profiles ORDER BY 1) t),
-    pres_creds AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM reg.driver_public_registration_credentials ORDER BY 1) t),
-    pres_cdriv AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM reg.phase1_registry_drivers ORDER BY 1) t),
-    pres_cveh AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM reg.phase1_registry_vehicles ORDER BY 1) t),
-    pres_cpol AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM reg.phase1_registry_policies ORDER BY 1) t),
-    pres_ccont AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM reg.phase1_registry_contracts ORDER BY 1) t),
-    pres_ddrafts AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM fleet.driver_supply_drafts ORDER BY 1) t),
-    pres_vdrafts AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM fleet.vehicle_supply_drafts ORDER BY 1) t)
+    pres_subs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_submissions), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM fleet.supply_submissions ORDER BY 1 LIMIT 1000) t),
+    pres_docs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_documents), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM fleet.supply_documents ORDER BY 1 LIMIT 1000) t),
+    pres_revs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_review_events), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM fleet.supply_review_events ORDER BY 1 LIMIT 1000) t),
+    pres_affs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_fleet_affiliations), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM fleet.vehicle_fleet_affiliations ORDER BY 1 LIMIT 1000) t),
+    pres_discs AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.vehicle_passenger_disclosure_profiles), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM reg.vehicle_passenger_disclosure_profiles ORDER BY 1 LIMIT 1000) t),
+    pres_creds AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.driver_public_registration_credentials), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM reg.driver_public_registration_credentials ORDER BY 1 LIMIT 1000) t),
+    pres_cdriv AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_drivers), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM reg.phase1_registry_drivers ORDER BY 1 LIMIT 1000) t),
+    pres_cveh AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_vehicles), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM reg.phase1_registry_vehicles ORDER BY 1 LIMIT 1000) t),
+    pres_cpol AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_policies), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM reg.phase1_registry_policies ORDER BY 1 LIMIT 1000) t),
+    pres_ccont AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_contracts), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM reg.phase1_registry_contracts ORDER BY 1 LIMIT 1000) t),
+    pres_ddrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.driver_supply_drafts), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM fleet.driver_supply_drafts ORDER BY 1 LIMIT 1000) t),
+    pres_vdrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_supply_drafts), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM fleet.vehicle_supply_drafts ORDER BY 1 LIMIT 1000) t)
     SELECT json_build_object(
         'subs', (SELECT data FROM subs),
         'docs', (SELECT data FROM docs),
@@ -495,18 +513,42 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
             return {"status": "error", "error": f"Missing or invalid preservation inventory for {k}"}
         if type(obj['c']) is not int or obj['c'] < 0:
             return {"status": "error", "error": f"Invalid preservation count for {k}"}
-        if obj['c'] > 0 and (not obj['digest'] or len(obj['digest']) != 32):
+        if obj['c'] > 0 and (not obj['digest'] or len(obj['digest']) != 32 or not all(c in '0123456789abcdef' for c in obj['digest'])):
             return {"status": "error", "error": f"Invalid preservation digest for {k}"}
+            
+    if counts['pres_subs']['c'] < 4:
+        return {"status": "rejected", "reason": "Preservation subs count less than expected 4"}
+    if counts['pres_docs']['c'] < 8:
+        return {"status": "rejected", "reason": "Preservation docs count less than expected 8"}
             
     fks_meta = counts.get('fks_meta', [])
     if not fks_meta or len(fks_meta) == 0:
         return {"status": "rejected", "reason": "No incoming foreign keys detected"}
     
+    expected_fks = {
+        ('fleet.supply_documents', 'fleet.supply_submissions'): 'c',
+        ('fleet.supply_review_events', 'fleet.supply_submissions'): 'a',
+        ('fleet.vehicle_fleet_affiliations', 'fleet.supply_submissions'): 'a',
+        ('fleet.driver_supply_drafts', 'fleet.supply_submissions'): 'c',
+        ('fleet.vehicle_supply_drafts', 'fleet.supply_submissions'): 'c',
+    }
+    
+    seen_fks = set()
     for fk in fks_meta:
         if fk.get('contype') != 'f':
             return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has invalid contype"}
-        if fk.get('confdeltype') not in ('a', 'r'):
-            return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} allows cascade/setnull deletes"}
+        rel = fk.get('rel')
+        confrel = fk.get('confrel')
+        deltype = fk.get('confdeltype')
+        if (rel, confrel) in expected_fks:
+            if deltype != expected_fks[(rel, confrel)]:
+                return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has wrong confdeltype"}
+            seen_fks.add((rel, confrel))
+        else:
+            return {"status": "rejected", "reason": f"Unexpected foreign key {fk.get('name')} from {rel} to {confrel}"}
+            
+    if seen_fks != set(expected_fks.keys()):
+        return {"status": "rejected", "reason": "Missing expected foreign key relationships"}
         
     subs = counts.get('subs', [])
     docs = counts.get('docs', [])
@@ -536,6 +578,12 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         # Ensure we actually check if it has a canonical driver ID, it should be in the canonical tables!
         if s.get("canonical_driver_id") and counts.get('cdriv') == 0:
              return {"status": "rejected", "reason": "Has canonical_driver_id but no cdriv rows"}
+        if s.get("canonical_vehicle_id") and counts.get('cveh') == 0:
+             return {"status": "rejected", "reason": "Has canonical_vehicle_id but no cveh rows"}
+        if s.get("canonical_policy_id") and counts.get('cpol') == 0:
+             return {"status": "rejected", "reason": "Has canonical_policy_id but no cpol rows"}
+        if s.get("canonical_contract_id") and counts.get('ccont') == 0:
+             return {"status": "rejected", "reason": "Has canonical_contract_id but no ccont rows"}
         
         import datetime
         try:
@@ -818,6 +866,7 @@ def main():
     parser.add_argument("--cloud-metadata", type=str, default="")
     parser.add_argument("--current-run-id", type=str, default="")
     parser.add_argument("--current-runtime-sha", type=str, default="")
+    parser.add_argument("--tooling-run-sha", type=str, default="")
     args = parser.parse_args()
     
     report = {
@@ -873,7 +922,12 @@ def main():
                             require("allUsers" not in members and "allAuthenticatedUsers" not in members, f"Console {name} is not private")
 
                 
-                report["cloud_metadata"] = cm
+                report["cloud_metadata"] = {
+                    "project": cm.get("project"),
+                    "region": cm.get("region"),
+                    "definition_sha": cm.get("definition_sha"),
+                    "observed_at": cm.get("observed_at")
+                }
                 
                 require(args.current_run_id, "Missing current_run_id")
                 res_run = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}"], capture_output=True, text=True, check=False, timeout=30)
@@ -882,7 +936,7 @@ def main():
                 require(curr_run_data.get("head_branch") == "dev", "Current run not on protected dev branch")
                 require(curr_run_data.get("event") == "workflow_dispatch", "Current run not authorized trigger")
                 require(str(curr_run_data.get("id")) == args.current_run_id, "Current run ID mismatch")
-                require(curr_run_data.get("head_sha") == args.current_runtime_sha, "Current run SHA mismatch")
+                require(curr_run_data.get("head_sha") == args.tooling_run_sha, "Current run SHA mismatch")
                 
                 curr_jobs = []
                 page = 1
@@ -897,9 +951,9 @@ def main():
                         break
                     page += 1
                 
-                # Check for operator environment binding (reservation)
-                op_envs = [j for j in curr_jobs if "operator" in j.get("environment", "").lower() or j.get("environment") == "operator" or j.get("name") == "Deploy outcome" or "operator" in j.get("name", "").lower()]
-                require(len(op_envs) > 0, "No Operator reservation found in current jobs")
+                # Check for operator environment binding (reservation) by confirming the specific job name that has the environment
+                op_envs = [j for j in curr_jobs if j.get("name") == "Owned fixture assessment (Read-only GCS / DB)"]
+                require(len(op_envs) > 0, "No Owned fixture assessment job found in current jobs")
                 require(curr_run_data.get("path") == ".github/workflows/dev-owned-operational-fixture-assessment.yml", "Current run path mismatch")
 
                     
@@ -938,7 +992,7 @@ def main():
             sys.exit(0)
     except Exception as e:
         report["disposition"] = "error"
-        report["error"] = str(e)
+        report["error"] = str(e)[:128]
         print(json.dumps(report, indent=2))
         sys.exit(1)
 
