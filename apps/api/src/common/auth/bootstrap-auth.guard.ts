@@ -20,6 +20,7 @@ import {
 import type {
   AuthenticatedRequestLike,
   BootstrapRequestIdentity,
+  RequestIdentity,
 } from "./auth.types";
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { resolveRouteAuthPolicy } from "./auth.policy";
@@ -494,6 +495,29 @@ export class BootstrapAuthGuard implements CanActivate {
           })
           .then(async (payload) => {
             if (!payload) {
+              // Passenger JWTs have a separate issuer/audience and must also
+              // prove a live account/session. Only explicitly allowed shared
+              // utilities may use this fallback; legacy IAM stays unchanged.
+              if (policy?.allowedRealms.includes("passenger")) {
+                const passengerIdentity =
+                  await this.passengerAccountService?.authenticateAccessToken(
+                    token,
+                  );
+                if (passengerIdentity) {
+                  this.assertRealmAllowed(
+                    passengerIdentity,
+                    policy.allowedRealms,
+                    request,
+                  );
+                  this.assertScopesAllowed(
+                    passengerIdentity,
+                    policy.requiredScopes,
+                    request,
+                  );
+                  request.identity = passengerIdentity;
+                  return true;
+                }
+              }
               const workloadIdentity = policy
                 ? await this.tryGoogleWorkloadIdentityFallback(
                     token,
@@ -871,7 +895,7 @@ export class BootstrapAuthGuard implements CanActivate {
   }
 
   private assertRealmAllowed(
-    identity: BootstrapRequestIdentity,
+    identity: RequestIdentity,
     allowedRealms: string[],
     request: AuthenticatedRequestLike,
   ) {
@@ -897,7 +921,7 @@ export class BootstrapAuthGuard implements CanActivate {
   }
 
   private assertScopesAllowed(
-    identity: BootstrapRequestIdentity,
+    identity: RequestIdentity,
     requiredScopes: string[],
     request: AuthenticatedRequestLike,
   ) {
