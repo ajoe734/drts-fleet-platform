@@ -236,11 +236,81 @@ infrastructure was started. No real Google/LINE/SMS/PSP network calls or
 provider secrets were used or required — the test's only external-boundary
 mock is `fetch` to the provider's token/JWKS endpoints, as documented above.
 
+## Review response (Codex, candidate `9701679ff`, CI run 38014157650)
+
+Reviewer confirmed CI failure on the locked candidate: hosted CI run
+[38014157650](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38014157650)
+is COMPLETED/FAILURE for this exact SHA; `passenger-oauth.test.ts`'s
+"expired id token" case (R2) rejected the finding with `result=logged_in`
+instead of throwing; LINE's real signing algorithm for asymmetric ID tokens
+is ES256, not RS256 (R4; [LINE docs](https://developers.line.biz/en/docs/line-login/verify-id-token/)
+say HS256 for web login, ES256 for native/SDK/LIFF). R1 (re-confirmed via a
+read-only production verifier+config probe) and R3 (typo: V0111 has 12
+transaction columns, insert binds 11 — `consumed_at` is set by the atomic
+claim, not the insert) required no code change.
+
+Fixed this dispatch (same write scope, no new acceptance claimed without a
+fresh CI run):
+
+- **R2 root cause**: `tests/unit/pax-oidc-login-20261009/passenger-oauth.test.ts`'s
+  `it.each` table for ID-token claim rejection built the "expired id token"
+  case's `iat`/`exp` as a plain object literal evaluated once when the
+  `it.each` array itself is constructed — at `describe`-collection time,
+  *before* `beforeEach`'s `vi.useFakeTimers()`/`vi.setSystemTime(...)` runs.
+  Depending on the real wall-clock time at the moment the suite loads, the
+  resulting `exp` (real-now − 400s) could land *after* the pinned fake
+  clock (`2026-10-10T00:00:00Z`), i.e. in the token's future relative to the
+  clock `jwt.verify` actually checked against — making the signed token look
+  unexpired and the callback resolve with `result:"logged_in"` instead of
+  rejecting. Fixed by changing that table entry (and the other four, for a
+  consistent shape) to a factory function (`() => ({...})`) called inside the
+  test body, after the fake clock is installed, so `Date.now()` there always
+  reads the mocked, deterministic time. No production code was at fault;
+  `OidcIdTokenVerifier.verify`'s `exp` enforcement (via `jsonwebtoken`'s
+  default `jwt.verify` behavior) was already correct.
+- **R4**: `oauth-provider.config.ts`'s LINE comment claimed the asymmetric
+  alternative to HS256-channel-secret was RS256; corrected to ES256 per
+  LINE's own docs (both the web/HS256 and native-SDK/ES256 cases were
+  already accepted by the shared, unmodified `OidcIdTokenVerifier` — only the
+  comment and the test fixture were wrong). `passenger-oauth.test.ts`: the
+  LINE asymmetric keypair is now `generateKeyPairSync("ec", { namedCurve:
+  "prime256v1" })` instead of RSA; `signLineIdTokenRs256` renamed
+  `signLineIdTokenEs256` and signs with `{algorithm:"ES256"}`;
+  `jwksResponse(kid, jwk, alg)` now takes an explicit `alg` and spreads the
+  JWK's own fields (works for both the Google RSA JWKS — `n`/`e` — and the
+  LINE EC JWKS — `crv`/`x`/`y` — instead of hardcoding RSA field names and
+  `alg:"RS256"`); the "also verifies a LINE ..." test and its JWKS `fetch`
+  stub both switched from RS256 to ES256 accordingly. Verified locally (core
+  `node:crypto`, no third-party deps needed) that `createPublicKey({key:
+  {...jwk, kid, alg:"ES256", use:"sig"}, format:"jwk"})` round-trips an
+  EC/P-256 JWK exactly the way `oidc-id-token-verifier.ts`'s JWKS-matching
+  path constructs the verification key.
+- **R3**: no code/doc change needed beyond this note — the SQL reconciliation
+  table above already lists 11 production-insert-bound columns plus
+  `consumed_at` (set only by the atomic `claim` `UPDATE`, never by `insert`)
+  against V0111's 12 columns; reviewer's typo ("13") did not point at an
+  actual discrepancy.
+
+Local `tsc`/`vitest` for this task's own files are still **not run this
+dispatch** — the shared `node_modules` breakage documented above
+(`apps/api/node_modules/jsonwebtoken` and effectively every third-party
+import still resolve through a dangling symlink into the reaped
+`gemini-pax-account-session-20261009` worktree) and this session's own
+`orchestrator_approval_broker` `CONNECT_TIMEOUT` (blocking `pnpm install`,
+`rm`, `ln`, and even plain read-only commands piped through a subshell) are
+both still present, confirmed again this dispatch. The fix above is
+therefore static evidence only (hand-traced against `jsonwebtoken`'s
+documented `jwt.verify`/`jwt.sign` behavior and a core-`node:crypto`-only
+JWK round-trip probe); hosted CI on the next candidate SHA is the actual
+gate for both the previously-failing test and the whole suite, per §0.7.
+
 ## Pending integration / external acceptance
 
-Candidate pushed this dispatch (SHA/branch recorded by canonical `handoff`,
-per §0.7). Hosted CI for that exact SHA is pending at handoff time; its
-result must be read before `pax-oidc_google_line_flow_and_verification` /
+A new candidate SHA/branch for this fix is recorded by canonical `handoff`,
+per §0.7 — this document's "Review response" section above is evidence for
+*that* SHA, not the superseded `9701679ff`. Hosted CI for the new SHA is
+pending at handoff time; its result must be read before
+`pax-oidc_google_line_flow_and_verification` /
 `pax-oidc_linking_and_config_gating` can be considered verified. PG-level
 constraint/locking behavior for `passenger.oauth_transactions` is unverified
 locally (same as `V0109`) and is reviewer's/hosted CI's gate, not re-stated

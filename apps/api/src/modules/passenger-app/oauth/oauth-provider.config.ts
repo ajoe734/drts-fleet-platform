@@ -47,8 +47,9 @@ function configured(
         issuer: LINE_OIDC_ISSUER,
         audience: id,
         jwksUri: LINE_OIDC_ENDPOINTS.jwks,
-        // LINE Login v2.1 ID tokens default to HS256-with-channel-secret; a
-        // channel can also be switched to RS256, verified via LINE's JWKS.
+        // LINE ID tokens are HS256-with-channel-secret for web login; native/
+        // SDK/LIFF login signs with ES256 instead, verified via LINE's JWKS
+        // (https://developers.line.biz/en/docs/line-login/verify-id-token/).
         hsSecret: secret,
       },
     };

@@ -28,11 +28,12 @@ const googleJwk = googlePublicKey.export({ format: "jwk" }) as {
 const GOOGLE_KID = "google-test-key";
 
 const { publicKey: linePublicKey, privateKey: linePrivateKey } =
-  generateKeyPairSync("rsa", { modulusLength: 2048 });
+  generateKeyPairSync("ec", { namedCurve: "prime256v1" });
 const lineJwk = linePublicKey.export({ format: "jwk" }) as {
   kty: string;
-  n: string;
-  e: string;
+  crv: string;
+  x: string;
+  y: string;
 };
 const LINE_KID = "line-test-key";
 
@@ -66,7 +67,7 @@ function signLineIdTokenHs256(overrides: Record<string, unknown> = {}): string {
     { algorithm: "HS256" },
   );
 }
-function signLineIdTokenRs256(overrides: Record<string, unknown> = {}): string {
+function signLineIdTokenEs256(overrides: Record<string, unknown> = {}): string {
   const now = Math.floor(Date.now() / 1000);
   return jwt.sign(
     {
@@ -78,7 +79,7 @@ function signLineIdTokenRs256(overrides: Record<string, unknown> = {}): string {
       ...overrides,
     },
     linePrivateKey,
-    { algorithm: "RS256", keyid: LINE_KID },
+    { algorithm: "ES256", keyid: LINE_KID },
   );
 }
 
@@ -86,10 +87,14 @@ let googleIdTokenToReturn: string | null = null;
 let lineIdTokenToReturn: string | null = null;
 let tokenExchangeStatus = 200;
 
-function jwksResponse(kid: string, jwk: { kty: string; n: string; e: string }) {
+function jwksResponse(
+  kid: string,
+  jwk: Record<string, string>,
+  alg: "RS256" | "ES256",
+) {
   return new Response(
     JSON.stringify({
-      keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e, alg: "RS256", use: "sig" }],
+      keys: [{ ...jwk, kid, alg, use: "sig" }],
     }),
     { status: 200, headers: { "cache-control": "max-age=300" } },
   );
@@ -127,7 +132,7 @@ beforeEach(() => {
         );
       }
       if (url === GOOGLE_OIDC_ENDPOINTS.jwks)
-        return jwksResponse(GOOGLE_KID, googleJwk);
+        return jwksResponse(GOOGLE_KID, googleJwk, "RS256");
       if (url === LINE_OIDC_ENDPOINTS.token) {
         if (tokenExchangeStatus !== 200)
           return new Response("error", { status: tokenExchangeStatus });
@@ -136,7 +141,8 @@ beforeEach(() => {
           { status: 200 },
         );
       }
-      if (url === LINE_OIDC_ENDPOINTS.jwks) return jwksResponse(LINE_KID, lineJwk);
+      if (url === LINE_OIDC_ENDPOINTS.jwks)
+        return jwksResponse(LINE_KID, lineJwk, "ES256");
       throw new Error(`unexpected fetch ${url}`);
     }),
   );
@@ -358,19 +364,19 @@ describe("OAuth callback: Google/LINE exchange and ID token verification", () =>
     expect(result).toMatchObject({ result: "logged_in" });
   });
 
-  it("also verifies a LINE RS256 (LINE JWKS) ID token", async () => {
+  it("also verifies a LINE ES256 (LINE JWKS, native/SDK/LIFF login) ID token", async () => {
     const f = fixture();
     const start = await f.oauth.start("line", {
       provider: "line",
       redirectUri: LINE_CALLBACK,
       purpose: "login",
     }, null);
-    lineIdTokenToReturn = signLineIdTokenRs256({
+    lineIdTokenToReturn = signLineIdTokenEs256({
       nonce: f.oauthStore.rows.get(start.transactionId)!.nonce,
     });
     const result = await f.oauth.callback("line", {
       provider: "line",
-      code: "line-code-rs256",
+      code: "line-code-es256",
       state: start.state,
       transactionId: start.transactionId,
     }, null);
@@ -418,12 +424,22 @@ describe("OAuth callback: Google/LINE exchange and ID token verification", () =>
   });
 
   it.each([
-    ["wrong issuer", { iss: "https://attacker.example" }],
-    ["wrong audience", { aud: "someone-elses-client-id" }],
-    ["wrong nonce", { nonce: "not-the-real-nonce" }],
-    ["expired id token", { iat: Math.floor(Date.now() / 1000) - 1000, exp: Math.floor(Date.now() / 1000) - 400 }],
-    ["missing sub", { sub: undefined }],
-  ])("rejects an ID token with %s as invalid_grant", async (_label, claims) => {
+    ["wrong issuer", () => ({ iss: "https://attacker.example" })],
+    ["wrong audience", () => ({ aud: "someone-elses-client-id" })],
+    ["wrong nonce", () => ({ nonce: "not-the-real-nonce" })],
+    // Computed inside the factory, not the array literal: the array is
+    // evaluated once at describe-collection time, before beforeEach installs
+    // the fake clock, so a value baked in here would be "expired" relative
+    // to the real wall clock but not necessarily relative to the mocked one.
+    [
+      "expired id token",
+      () => ({
+        iat: Math.floor(Date.now() / 1000) - 1000,
+        exp: Math.floor(Date.now() / 1000) - 400,
+      }),
+    ],
+    ["missing sub", () => ({ sub: undefined })],
+  ])("rejects an ID token with %s as invalid_grant", async (_label, makeClaims) => {
     const f = fixture();
     const start = await f.oauth.start("google", {
       provider: "google",
@@ -431,7 +447,7 @@ describe("OAuth callback: Google/LINE exchange and ID token verification", () =>
       purpose: "login",
     }, null);
     const nonce = f.oauthStore.rows.get(start.transactionId)!.nonce;
-    googleIdTokenToReturn = signGoogleIdToken({ nonce, ...claims });
+    googleIdTokenToReturn = signGoogleIdToken({ nonce, ...makeClaims() });
     await expect(
       f.oauth.callback("google", {
         provider: "google",
