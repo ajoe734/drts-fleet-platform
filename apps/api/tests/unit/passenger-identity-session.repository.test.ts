@@ -38,6 +38,7 @@ function fixture(
               contact_phone_verified: false,
               contact_consent: false,
               created_at: new Date(),
+              deleted_at: null,
             },
           ],
         };
