@@ -10,7 +10,7 @@ import type {
   FaresResponse,
 } from "@drts/contracts";
 
-export type VerifyOtpResponse =
+export type VerifyOtpResponse = 
   | { result: "logged_in" }
   | { result: "linked" }
   | { result: "verified_contact_phone" };
