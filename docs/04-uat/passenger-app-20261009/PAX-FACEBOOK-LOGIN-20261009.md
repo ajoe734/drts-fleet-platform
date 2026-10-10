@@ -87,6 +87,31 @@ worktree 的 22 個 dependency symlink，offline frozen-lockfile install exit 0�
 `.local/facebook-dependency-links-current.txt` 與 `.local/facebook-install.log` 記錄。
 canonical dependencies 未修改。此工具失敗不計為產品重現。
 
+修復 checkpoint `8479accc8964b680fd19ae174a3d9a37d1833d73` 已普通 push，
+PR #2503 head 核對一致。本輪必要本機 checks 已全部結束並讀取結果：
+
+```bash
+pnpm exec vitest run tests/unit/pax-facebook-login-20261009 tests/unit/pax-oidc-login-20261009 tests/unit/pax-account-session-20261009 tests/unit/pax-otp-20261009 tests/unit/internal-key.middleware.test.ts tests/unit/bootstrap-auth-guard-strict-env.test.ts tests/unit/system-remediation/sr-proof-001/proof-download-auth.test.ts --reporter=default --reporter=json --outputFile.json=.local/facebook-regression-current.json
+# exit 0: 16 files / 372 tests；含 2 個 guard expected-denial probes（未修）
+pnpm --filter @drts/api exec vitest run tests/unit/facebook-data-deletion.repository.test.ts tests/unit/passenger-oauth-transaction.repository.test.ts tests/unit/passenger-auth-provider-routing.test.ts --reporter=default --reporter=json --outputFile.json=../../.local/facebook-api-current.json
+# exit 0: 3 files / 19 tests；正式 repository 執行，PG transport stub
+pnpm --filter @drts/contracts build
+pnpm --filter @drts/control-plane-auth build
+pnpm --filter @drts/api typecheck
+pnpm typecheck:root
+# 各命令 exit 0
+pnpm exec eslint apps/api/src/common/auth/internal-key.middleware.ts apps/api/src/modules/passenger-app/oauth/facebook*.ts apps/api/src/modules/passenger-app/oauth/oauth-provider.config.ts apps/api/src/modules/passenger-app/oauth/passenger-oauth.service.ts apps/api/src/modules/passenger-app/passenger-app.module.ts apps/api/src/common/auth/auth.policy.ts apps/api/tests/unit/facebook-data-deletion.repository.test.ts tests/unit/pax-facebook-login-20261009 --max-warnings=0
+# exit 0
+git diff --check
+# exit 0
+```
+
+依賴與執行版本：Node 22.23.2、pnpm 10.33.0、Vitest 4.1.4。
+04:08Z PR #2499 仍 OPEN／mergeCommit=null，不提前改 guard、不鎖 candidate。
+draft checkpoint 的 hosted CI 尚有 smoke/e2e pending；ci-integ 的 product jobs 為
+SKIPPED，不能當作 required acceptance pass。guard 修復後的新 SHA 仍須重新讀 CI、
+普通 push 並 handoff 給 Codex2。
+
 設定 `FACEBOOK_DATA_DELETION_STATUS_ORIGIN` 為真正可公開到達的 HTTPS **API origin**（不含 path/query/credentials）；缺少／不合法時在 DB 寫入前回 503。
 不能把只有 BFF 的 ride origin 當成已存在 API proxy。ID/secret 仍按 SD 啟用 login；status origin 是 webhook 部署設定，無假預設。
 
