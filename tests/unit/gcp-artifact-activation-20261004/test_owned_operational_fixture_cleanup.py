@@ -101,6 +101,9 @@ for _key, _meta in cleanup.CANONICAL_OWNED_OBJECTS.items():
             "objectKey": _key,
             "fileSize": cleanup.EXPECTED_FILE_SIZE,
             "sha256": cleanup.EXPECTED_SHA256,
+            "intentStatus": 201,
+            "confirmStatus": 201,
+            "readbackFileSize": cleanup.EXPECTED_FILE_SIZE,
             "confirmSubmissionId": _meta["confirmSubmissionId"],
             "confirmFleetPartnerId": cleanup.EXPECTED_FLEET_PARTNER_ID,
             "confirmDocumentType": _meta["document_type"],
@@ -141,6 +144,7 @@ def create_authentic_inventory() -> Dict[str, Any]:
         "workflow_definition_sha": cleanup.EXPECTED_WORKFLOW_DEF_SHA,
         "artifact_id": cleanup.EXPECTED_ARTIFACT_ID,
         "artifact_digest": cleanup.EXPECTED_ARTIFACT_DIGEST,
+        "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
         "storage_documents": docs,
         "mutation_records": [
             {
@@ -238,9 +242,10 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
             "head_sha": cleanup.EXPECTED_WORKFLOW_DEF_SHA,
             "status": "completed",
             "conclusion": "success",
+            "run_started_at": "2026-10-09T08:00:00Z",
             "repository": {"full_name": "ajoe734/drts-fleet-platform"}
         }
-        self.jobs_meta = {"jobs": [{"name": "acceptance tests", "status": "completed", "conclusion": "success"}]}
+        self.jobs_meta = {"jobs": [{"name": "acceptance tests", "status": "completed", "conclusion": "success", "run_id": cleanup.EXPECTED_PRODUCT_RUN_ID, "completed_at": "2026-10-09T10:05:00Z"}]}
         
         # Create a real zip containing report.json and operational-browser-evidence.json
         buf = io.BytesIO()
@@ -430,6 +435,7 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
+            "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
         }
         desc = {"status": "not_found", "returncode": 1, "stderr": "No such object"}
         with self.assertRaises(ValueError) as ctx:
@@ -443,6 +449,7 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
+            "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
         }
         desc = {
             "status": "ok",
@@ -467,6 +474,7 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
+            "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
         }
         desc = {
             "status": "ok",
@@ -492,6 +500,7 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
+            "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
         }
         desc = {
             "status": "ok",
@@ -516,13 +525,50 @@ class TestDbCleanupGuardsAndPreflight(unittest.TestCase):
         self.plan_apply = cleanup.build_cleanup_plan(create_authentic_inventory(), mode="apply")
 
     def test_dry_run_never_executes_delete(self):
-        mock_db = MagicMock(return_value={"status": "ok", "rows_affected": 0, "count": 0})
+        # A typed positive returns a valid integer count > 0 (e.g., 4 or 8)
+        def typed_positive_db(sql, params):
+            if "fleet.supply_review_events" in sql:
+                return {"status": "ok", "rows_affected": 0, "count": 0}
+            return {"status": "ok", "rows_affected": 0, "count": 8 if "supply_documents" in sql else 4}
+            
+        mock_db = MagicMock(side_effect=typed_positive_db)
         res = cleanup.execute_db_cleanup(self.plan_dry, db_runner=mock_db)
         self.assertEqual(res["status"], "dry_run_inspected")
         # Verify mock_db was only called with SELECT statements, NEVER DELETE
         for call_args in mock_db.call_args_list:
             sql = call_args[0][0]
             self.assertTrue(sql.startswith("SELECT"), f"Unexpected non-SELECT SQL in dry-run: {sql}")
+
+    def test_db_dry_run_inspection_missing_count_blocks(self):
+        def missing_count_db(sql, params):
+            if "fleet.supply_review_events" in sql:
+                return {"status": "ok", "rows_affected": 0, "count": 0}
+            return {"status": "ok", "rows_affected": 0} # no count
+            
+        mock_db = MagicMock(side_effect=missing_count_db)
+        res = cleanup.execute_db_cleanup(self.plan_dry, db_runner=mock_db)
+        self.assertEqual(res["status"], "blocked")
+        self.assertIn("missing or invalid nonnegative integer", res["concrete_blocker"])
+
+    def test_db_dry_run_inspection_negative_count_blocks(self):
+        def negative_count_db(sql, params):
+            if "fleet.supply_review_events" in sql:
+                return {"status": "ok", "rows_affected": 0, "count": 0}
+            return {"status": "ok", "rows_affected": 0, "count": -1}
+            
+        mock_db = MagicMock(side_effect=negative_count_db)
+        res = cleanup.execute_db_cleanup(self.plan_dry, db_runner=mock_db)
+        self.assertEqual(res["status"], "blocked")
+        self.assertIn("missing or invalid nonnegative integer", res["concrete_blocker"])
+
+    def test_db_dry_run_inspection_zero_count_blocks(self):
+        def zero_count_db(sql, params):
+            return {"status": "ok", "rows_affected": 0, "count": 0}
+            
+        mock_db = MagicMock(side_effect=zero_count_db)
+        res = cleanup.execute_db_cleanup(self.plan_dry, db_runner=mock_db)
+        self.assertEqual(res["status"], "blocked")
+        self.assertIn("Zero count returned", res["concrete_blocker"])
 
 
     def test_apply_mode_pipeline_halts_before_gcs_mutation_when_db_blocked(self):
@@ -619,6 +665,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
+            "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
         }
         desc = {
             "status": "ok",
@@ -643,6 +690,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
+            "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
         }
         desc = {
             "status": "ok",
@@ -667,6 +715,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
+            "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
         }
         desc = {
             "status": "ok",
@@ -692,6 +741,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
+            "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
         }
         desc = {"status": "not_found", "returncode": 1, "stderr": "Not found"}
         foreign_receipt = [{"key": target["key"], "bucket": "wrong-bucket", "status": "deleted", "generation": "123", "verified_absent": True}]

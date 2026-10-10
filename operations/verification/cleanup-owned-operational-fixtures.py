@@ -1,32 +1,26 @@
 #!/usr/bin/env python3
-"""Fail-closed cleanup planner and executor for owned operational fixtures.
+"""Fail-closed cleanup planner and read-only simulator for owned operational fixtures.
 
-This script plans and executes generation-bound GCS deletion for the exact
-eight 327-byte PDF objects created during authorized product run 37906298090,
-generates narrow guarded database deletion statements for owned submission
-and document records, and strictly preserves business audit/cancellation
-records, seeded demo entities, and historical failed fixtures (8d / 03a).
+This script plans generation-bound GCS deletion for the exact eight 327-byte 
+PDF objects created during authorized product run 37906298090, and inspects
+database boundaries for owned submission and document records. It strictly
+preserves business audit/cancellation records, seeded demo entities, and
+historical failed fixtures (8d / 03a).
 
 Safety & Governance Constraints:
-- Default mode is 'dry-run'.
+- Default and ONLY supported execution mode is read-only simulation / 'dry-run'.
+- Mutation entrypoints are unconditionally DISABLED. The required database execution 
+  contract is unavailable without violating safety, and thus apply mode is blocked.
 - Fixed project: drts-dev-devcc-20260825, region: us-central1.
 - Fixed bucket: drts-dev-devcc-20260825-document-artifacts.
 - Strict provenance binding: run 37906298090, source 4a166f3ed2a7000061acc737ee475ae3c47dca56,
   workflow definition 9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c, artifact 11606165993.
-- Authoritative artifact retrieval & verification: binds artifact metadata, digest,
+- Authoritative artifact retrieval & verification: binds explicit artifact metadata, digest,
   operational report statistics (16 passed / 0 failed / 0 skipped), and evidence records.
-- Physical key mapping: derives physical GCS object keys under
-  'document-artifacts/fleet-upload-content/<encoded-subject>' per the immutable
-  GcsDocumentArtifactStoreAdapter contract, while preserving exact logical ownership keys.
-- GCS describe errors distinguish proven 404 from 403 / network / timeout errors (fail-closed).
-- GCS deletion requires exact generation match, metageneration, MIME, size, timestamps,
-  and content hash integrity validation before deletion, plus subsequent proven 404 absent read.
-- Non-mutating preflights occur before any mutation; all required GCS and DB preflights
-  must pass before any GCS or DB mutation is attempted.
-- Database mutations require narrow guarded transaction (BEGIN / COMMIT / ROLLBACK);
-  never deletes fleet.supply_review_events audit records. Protected referencing records
-  block deletion of parent submissions.
+- Physical key mapping: derives physical GCS object keys per the immutable
+  GcsDocumentArtifactStoreAdapter contract.
 - Zero socket or network calls on VM (stdlib only; external boundary mocked in unit tests).
+  Without a genuine artifact or Operator environment, this provides simulated local planning.
 """
 from __future__ import annotations
 
@@ -486,6 +480,9 @@ def load_and_validate_authoritative_artifact(
     require(acceptance_job is not None, "Missing successful acceptance job in jobs.json")
     require(acceptance_job.get("status") == "completed", "Acceptance job is not completed")
     require(acceptance_job.get("conclusion") == "success", "Acceptance job was not successful")
+    require(acceptance_job.get("run_id") == expected_run_id, f"Acceptance job run_id mismatch: expected {expected_run_id}")
+    if acceptance_job.get("head_sha"):
+        require(acceptance_job.get("head_sha") == expected_workflow_def_sha, f"Acceptance job head_sha mismatch: expected {expected_workflow_def_sha}")
     
     # 2. Locate and parse report.json and operational-browser-evidence.json directly from the hashed ZIP
     report_data = None
@@ -500,7 +497,7 @@ def load_and_validate_authoritative_artifact(
     require(report_data is not None, f"report.json not found inside zip {zip_path}")
     require(evidence_data is not None, f"operational-browser-evidence.json not found inside zip {zip_path}")
 
-    # 3. Validate report stats
+    # 3. Validate report stats and bindings
     stats = report_data.get("stats", {})
     require(
         isinstance(stats, dict),
@@ -510,6 +507,11 @@ def load_and_validate_authoritative_artifact(
     require(stats.get("unexpected") == 0, f"Unexpected failures in report: {stats.get('unexpected')}")
     require(stats.get("skipped") == 0, f"Skipped tests in report: {stats.get('skipped')}")
     require(stats.get("flaky") == 0, f"Flaky tests in report: {stats.get('flaky')}")
+    
+    report_config = report_data.get("config", {}).get("metadata", {})
+    require(report_config.get("ci", {}).get("commitHash") == expected_workflow_def_sha, "report.json config.metadata.ci.commitHash mismatch")
+    require(report_config.get("gitCommit", {}).get("hash") == expected_source_sha, "report.json config.metadata.gitCommit.hash mismatch")
+    require(str(expected_run_id) in report_config.get("ci", {}).get("buildHref", ""), "report.json config.metadata.ci.buildHref missing run_id")
 
     # 4. Validate evidence and extract storage documents + mutations
 
@@ -517,6 +519,17 @@ def load_and_validate_authoritative_artifact(
         evidence_data.get("candidateSha") == expected_source_sha,
         f"Evidence candidateSha mismatch: {evidence_data.get('candidateSha')}",
     )
+
+    run_start_str = run_meta.get("run_started_at") or run_meta.get("created_at")
+    require(run_start_str is not None, "run.json missing run_started_at or created_at")
+    job_completed_str = acceptance_job.get("completed_at") or run_meta.get("updated_at")
+    require(job_completed_str is not None, "acceptance job missing completed_at")
+
+    try:
+        r_start = datetime.datetime.fromisoformat(run_start_str.replace("Z", "+00:00"))
+        r_end = datetime.datetime.fromisoformat(job_completed_str.replace("Z", "+00:00"))
+    except ValueError as e:
+        require(False, f"Malformed run bounds: {e}")
 
     raw_evidence = evidence_data.get("evidence", [])
     storage_docs: List[Dict[str, Any]] = []
@@ -529,6 +542,10 @@ def load_and_validate_authoritative_artifact(
             and entry.get("objectKey", "").startswith(KEY_PREFIX)
         ):
             # Authoritative evidence MUST contain authentic ownership fields; no default synthesis
+            require(entry.get("candidateSha") == expected_source_sha, "Evidence candidateSha mismatch")
+            require(entry.get("intentStatus") == 201, "Evidence intentStatus mismatch or missing")
+            require(entry.get("confirmStatus") == 201, "Evidence confirmStatus mismatch or missing")
+            require(entry.get("readbackFileSize") == EXPECTED_FILE_SIZE, "Evidence readbackFileSize mismatch")
             require(
                 entry.get("confirmSubmissionId") is not None,
                 f"Missing confirmSubmissionId in evidence entry for {entry.get('objectKey')}",
@@ -546,11 +563,13 @@ def load_and_validate_authoritative_artifact(
                 f"Invalid or missing readbackContentType: {entry.get('readbackContentType')}",
             )
             # Timestamp validity: must not be stale (must be from 2026 run)
-            rec_at = entry.get("recordedAt")
-            require(
-                rec_at is not None and isinstance(rec_at, str) and "2026-" in rec_at,
-                f"Invalid or stale evidence recordedAt timestamp: {rec_at}",
-            )
+            rec_at_str = entry.get("recordedAt")
+            require(rec_at_str is not None and isinstance(rec_at_str, str), "Missing or invalid recordedAt timestamp")
+            try:
+                rec_at = datetime.datetime.fromisoformat(rec_at_str.replace("Z", "+00:00"))
+                require(r_start <= rec_at <= r_end, f"Evidence timestamp {rec_at_str} out of bounds")
+            except ValueError as e:
+                require(False, f"Invalid evidence timestamp: {e}")
             # Must be clean successful status: putStatus 200/201, clean scan, downloadStatus 200, valid readback SHA
             put_status = entry.get("putStatus")
             require(
@@ -583,9 +602,6 @@ def load_and_validate_authoritative_artifact(
         f"Expected exactly {OWNED_OBJECT_COUNT} storage documents in evidence, got {len(storage_docs)}",
     )
 
-    run_start_str = run_meta.get("run_started_at") or run_meta.get("created_at") or "2026-10-09T00:00:00Z"
-    job_completed_str = acceptance_job.get("completed_at") or run_meta.get("updated_at") or "2026-10-09T23:59:59Z"
-    
     inventory_data = {
         "source_sha": expected_source_sha,
         "run_id": expected_run_id,
@@ -1047,12 +1063,14 @@ def inspect_and_validate_gcs_target(
     primary_time = tc or up or sa
     
     run_bounds = expected_item.get("run_bounds")
-    if run_bounds:
-        run_start = parse_time(run_bounds["start"])
-        run_end = parse_time(run_bounds["end"])
-    else:
-        run_start = datetime.datetime.fromisoformat("2026-10-09T08:30:00+00:00")
-        run_end = datetime.datetime.fromisoformat("2026-10-09T09:10:00+00:00")
+    require(run_bounds is not None, "Missing trusted run_bounds in target; cannot verify timestamp limits.")
+    
+    run_start_str = run_bounds.get("start")
+    run_end_str = run_bounds.get("end")
+    require(run_start_str and run_end_str, "Invalid or missing start/end in run_bounds.")
+    
+    run_start = parse_time(run_start_str)
+    run_end = parse_time(run_end_str)
 
     require(run_start <= primary_time <= run_end, f"Stale, future, or out-of-run timestamp for gs://{bucket}/{key}: {primary_time}")
 
@@ -1101,7 +1119,7 @@ def inspect_and_validate_gcs_target(
                 elif simulation_mode and "sha256" in body_res:
                     # In simulation mode only, fallback to trust if body_bytes not provided but size matched
                     if read_size == expected_size:
-                        live_hash = body_res["sha256"]
+                        is_synthetic = True
                         live_hash = body_res["sha256"]
                 else:
                     raise ValueError(f"read_body runner failed to return body_bytes for {bucket}/{key}")
@@ -1278,6 +1296,25 @@ def execute_db_cleanup(
                 "plan_prepared": True,
                 "receipts": preflight_receipts,
             }
+            
+        if "count" not in res or not isinstance(res["count"], int) or res["count"] < 0:
+            return {
+                "status": "blocked",
+                "mode": "dry-run",
+                "concrete_blocker": f"DB dry-run inspection failed on {table}: missing or invalid nonnegative integer 'count'",
+                "plan_prepared": True,
+                "receipts": preflight_receipts,
+            }
+            
+        if res["count"] == 0:
+            return {
+                "status": "blocked",
+                "mode": "dry-run",
+                "concrete_blocker": f"Zero count returned, execution contract unavailable. {plan.get('db_blocker', '')}",
+                "plan_prepared": True,
+                "receipts": preflight_receipts,
+            }
+
         preflight_receipts.append(
             {
                 "table": table,
