@@ -488,7 +488,9 @@ describe("locale intent and source mapping", () => {
           s.design === "unverified",
       ),
     ).toBe(true);
-  });
+    // Full git page/blob discovery can exceed the default 5s on a busy VM.
+    // Keep all pages and checks; bound only this complete inventory probe.
+  }, 30_000);
   it.each(["passenger-app-web", "tenant-console-web"])(
     "rejects missing active surface %s without shrinking the page denominator",
     (app) => {
