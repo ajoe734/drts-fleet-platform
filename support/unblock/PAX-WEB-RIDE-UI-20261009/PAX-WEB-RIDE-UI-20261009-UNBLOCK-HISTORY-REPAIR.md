@@ -82,9 +82,14 @@ the denied local git ref operations:
      -> `check_commit_trailers: 1 commit(s) OK.`
 6. Opened PR [#2529](https://github.com/ajoe734/drts-fleet-platform/pull/2529)
    from `gemini/pax-web-ride-ui-20261009-v2` into `dev`; hosted CI was
-   triggered and is running the same required checks as #2526 (see PR for
-   live status — `candidate` passed immediately; the full matrix was still
-   in progress when this artifact was written).
+   triggered and ran the same required checks as #2526.
+
+   **Update 2026-10-10T~11:45Z**: confirmed via `gh pr view 2529` that every
+   check in the status rollup is `SUCCESS` (lint, typecheck, unit,
+   integration, build, e2e, ci-integ, Commit trailers, etc. — the earlier
+   pending `unit` run completed green), `mergeStateStatus` is `CLEAN`, and
+   `mergeable` is `MERGEABLE`. PR #2529 is fully unblocked and ready for its
+   owner to merge.
 
 The original branch `gemini/pax-web-ride-ui-20261009` and PR #2526 are left
 untouched (not force-pushed, not deleted) so the original, contaminated
@@ -93,8 +98,8 @@ once #2529 is accepted, rather than merged.
 
 ## 3. Next steps for Gemini (parent task owner)
 
-1. Fetch `gemini/pax-web-ride-ui-20261009-v2` and confirm CI is fully green
-   on PR #2529 (https://github.com/ajoe734/drts-fleet-platform/pull/2529).
+1. CI on PR #2529 is confirmed fully green as of 2026-10-10T~11:45Z — no
+   further waiting needed.
 2. Hand off `PAX-WEB-RIDE-UI-20261009` again with:
    - `CANDIDATE_SHA=1ad9f340583c137322f5ec5f246d06622fb0e8df`
    - `CANDIDATE_BRANCH=gemini/pax-web-ride-ui-20261009-v2`
@@ -104,3 +109,18 @@ once #2529 is accepted, rather than merged.
 4. No source changes were made — the squashed commit's tree is identical to
    the validated candidate tip `96102377ac86e71887e63f82df695183796834ab`.
    Only the commit graph and the one bad trailer were repaired.
+
+## 4. Handoff blocked by approval broker outage (2026-10-10)
+
+This unblock task's own state transition (recording this finding and
+handing the unblocked next step back to the parent via `ai-status.sh`)
+could not be written this session: every `ai-status.sh` invocation —
+including read-only `show`/`list`/`--help` — was classified `defer` by the
+sandbox, consistent with the `orchestrator_approval_broker` MCP server
+reporting `CONNECT_TIMEOUT` for this session (plain `git`/`gh` calls were
+unaffected). This is a session-wide broker outage, not a decision about
+this task. A Supervisor/human with a healthy broker connection should either
+retry `ai-status.sh progress`/`handoff` for
+`PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR` once the broker recovers,
+or read this artifact directly to confirm PR #2529 is green and relay the
+`CANDIDATE_SHA`/`CANDIDATE_BRANCH`/`PR_URL` above to the parent task.
