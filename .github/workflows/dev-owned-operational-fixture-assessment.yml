@@ -42,8 +42,7 @@ on:
         type: string
       current_runtime_sha:
         description: 'Expected current runtime SHA'
-        required: true
-        default: '4a166f3ed2a7000061acc737ee475ae3c47dca56'
+        required: false
         type: string
 
 concurrency:
@@ -54,8 +53,8 @@ permissions:
   contents: read
 
 env:
-  DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825"
-  DEV_GCP_REGION: "us-central1"
+  DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+  DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
   EXPECTED_PROJECT_ID: "drts-dev-devcc-20260825"
   EXPECTED_REGION: "us-central1"
 
@@ -111,6 +110,17 @@ jobs:
             exit 1
           fi
 
+      - name: Verify live DEV_GCP variables
+        run: |
+          if [ "${{ env.DEV_GCP_PROJECT_ID }}" != "${{ env.EXPECTED_PROJECT_ID }}" ]; then
+            echo "::error::Live GCP project ID mismatch"
+            exit 1
+          fi
+          if [ "${{ env.DEV_GCP_REGION }}" != "${{ env.EXPECTED_REGION }}" ]; then
+            echo "::error::Live GCP region mismatch"
+            exit 1
+          fi
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
@@ -123,8 +133,8 @@ jobs:
 
       - name: Fresh Cloud metadata
         env:
-          INPUT_WORKFLOW_DEF_SHA: ${{ github.event.inputs.workflow_def_sha }}
-          INPUT_CURRENT_RUNTIME_SHA: ${{ github.event.inputs.current_runtime_sha }}
+          INPUT_WORKFLOW_DEF_SHA: ${{ github.event.inputs.workflow_def_sha || '9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c' }}
+          INPUT_CURRENT_RUNTIME_SHA: ${{ github.event.inputs.current_runtime_sha || github.sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python3 operations/verification/read-dev-cloud-metadata.py \
@@ -183,7 +193,8 @@ jobs:
             --artifact-id "$INPUT_ARTIFACT_ID" \
             --source-sha "$INPUT_SOURCE_REF" \
             --workflow-def-sha "$INPUT_WORKFLOW_DEF_SHA" \
-            --cloud-metadata .local-cloud-metadata.json > assessment-report.json
+            --cloud-metadata .local-cloud-metadata.json \
+            --current-run-id "${{ github.run_id }}" > assessment-report.json
 
       - name: Upload assessment report
         if: always()
