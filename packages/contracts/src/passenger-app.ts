@@ -262,6 +262,7 @@ export interface GetPassengerReceiptQuery {
 
 export interface PassengerReceiptResponse {
   receiptUrl: string;
+  pdfUrl?: string;
 }
 
 export interface RefundPassengerRideCommand {

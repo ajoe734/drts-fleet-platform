@@ -413,12 +413,18 @@ export function mapPassengerCertificate(
   const record = receipt.record;
   if (!record) {
     if ("receiptUrl" in receipt && typeof receipt.receiptUrl === "string") {
-      return {
+      const result: PassengerCertificatePresentation = {
         state: "available",
         receiptNo: receipt.receiptNo || "",
         rows: [],
         htmlUrl: receipt.receiptUrl,
       };
+      if ("pdfUrl" in receipt && typeof receipt.pdfUrl === "string") {
+        result.pdfUrl = receipt.pdfUrl;
+      } else {
+        result.pdfUrl = receipt.receiptUrl.replace(/\.html$/, ".pdf");
+      }
+      return result;
     }
     return { state: "pending" };
   }
@@ -443,6 +449,11 @@ export function mapPassengerCertificate(
   const fleetName = readText(record, "fleetName");
   const driverName = readText(record, "driverName");
 
+  const fareBaseMinor = readNonNegativeNumber(record, "fareBaseMinor");
+  const fareDistanceMinor = readNonNegativeNumber(record, "fareDistanceMinor");
+  const fareTimeMinor = readNonNegativeNumber(record, "fareTimeMinor");
+  const fareNightMinor = readNonNegativeNumber(record, "fareNightMinor");
+
   if (
     !plateNo ||
     !pickupAt ||
@@ -456,7 +467,11 @@ export function mapPassengerCertificate(
     !driverRegistrationNo ||
     !paymentMethod ||
     !fleetName ||
-    !driverName
+    !driverName ||
+    fareBaseMinor === null ||
+    fareDistanceMinor === null ||
+    fareTimeMinor === null ||
+    fareNightMinor === null
   ) {
     return {
       state: "error",
@@ -500,30 +515,18 @@ export function mapPassengerCertificate(
     { label: "支付方式", value: paymentMethod },
   ];
 
-  const fareBaseMinor = readNonNegativeNumber(record, "fareBaseMinor");
-  if (fareBaseMinor !== null) {
-    rows.push({ label: "起程", value: formatMoney(fareBaseMinor), mono: true });
-  }
-  const fareDistanceMinor = readNonNegativeNumber(record, "fareDistanceMinor");
-  if (fareDistanceMinor !== null) {
-    rows.push({
-      label: "續程",
-      value: formatMoney(fareDistanceMinor),
-      mono: true,
-    });
-  }
-  const fareTimeMinor = readNonNegativeNumber(record, "fareTimeMinor");
-  if (fareTimeMinor !== null) {
-    rows.push({ label: "延滯", value: formatMoney(fareTimeMinor), mono: true });
-  }
-  const fareNightMinor = readNonNegativeNumber(record, "fareNightMinor");
-  if (fareNightMinor !== null) {
-    rows.push({
-      label: "夜間明細",
-      value: formatMoney(fareNightMinor),
-      mono: true,
-    });
-  }
+  rows.push({ label: "起程", value: formatMoney(fareBaseMinor), mono: true });
+  rows.push({
+    label: "續程",
+    value: formatMoney(fareDistanceMinor),
+    mono: true,
+  });
+  rows.push({ label: "延滯", value: formatMoney(fareTimeMinor), mono: true });
+  rows.push({
+    label: "夜間加成",
+    value: formatMoney(fareNightMinor),
+    mono: true,
+  });
 
   const result: PassengerCertificatePresentation = {
     state: "available",
