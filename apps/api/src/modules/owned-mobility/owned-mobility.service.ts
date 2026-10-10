@@ -248,6 +248,12 @@ type CallRecordingStateChangeEvent = {
 
 type MaybePromise<T> = T | Promise<T>;
 
+/** Commit account ownership and access before exposing a new order. */
+export type MultiTaxiCreationCommit = (
+  order: OwnedOrderRecord,
+  persistOrder: (executor: OwnedMobilityQueryExecutor) => Promise<void>,
+) => Promise<void>;
+
 type DispatchAssignmentBundle = {
   order: OwnedOrderRecord;
   dispatchJob: DispatchJobRecord;
@@ -531,6 +537,10 @@ export class OwnedMobilityService
 
   setMinLeadTimeMinutes(minutes: number) {
     this.minLeadTimeMinutes = Math.max(0, minutes);
+  }
+
+  getReservationWindowMinutes(): number {
+    return 30;
   }
 
   constructor(
@@ -1048,6 +1058,7 @@ export class OwnedMobilityService
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
     callContext?: MultiTaxiCallContext,
+    commitCreation?: MultiTaxiCreationCommit,
   ): MaybePromise<OwnedOrderRecord> {
     this.assertNoCanonicalMultiTaxiContextOverrides(command);
     this.assertAddress(command.pickup?.address, "pickup.address");
@@ -1104,6 +1115,7 @@ export class OwnedMobilityService
           identity,
           requestId,
           callContext,
+          commitCreation,
         ),
       );
     }
@@ -1115,6 +1127,7 @@ export class OwnedMobilityService
       identity,
       requestId,
       callContext,
+      commitCreation,
     );
   }
 
@@ -1125,7 +1138,8 @@ export class OwnedMobilityService
     identity: BootstrapRequestIdentity | null | undefined,
     requestId: string | undefined,
     callContext: MultiTaxiCallContext | undefined,
-  ): OwnedOrderRecord {
+    commitCreation?: MultiTaxiCreationCommit,
+  ): MaybePromise<OwnedOrderRecord> {
     const serviceProduct =
       this.serviceProductService?.getRuntimeServiceProductByType(
         "taxi_reservation",
@@ -1141,7 +1155,10 @@ export class OwnedMobilityService
     const now = new Date().toISOString();
     const scheduled = command.timingMode === "scheduled";
     const reservationWindowEnd = scheduled
-      ? new Date(Date.parse(requestedPickupAt) + 30 * 60 * 1000).toISOString()
+      ? new Date(
+          Date.parse(requestedPickupAt) +
+            this.getReservationWindowMinutes() * 60 * 1000,
+        ).toISOString()
       : null;
     const order: OwnedOrderRecord = {
       orderId: randomUUID(),
@@ -1235,8 +1252,7 @@ export class OwnedMobilityService
       },
       requestId,
     );
-    this.orders = [order, ...this.orders];
-    const traceLog = this.appendTrace(
+    const traceLog = this.buildTraceLog(
       order.orderId,
       "multi_taxi.order.ready_for_dispatch",
       {
@@ -1247,32 +1263,62 @@ export class OwnedMobilityService
         operatingAuthorizationId: order.operatingAuthorizationId,
       },
     );
-    this.persistChanges(
-      { orders: [order], dispatchTraceLogs: [traceLog] },
-      "create_multi_taxi_ride",
-    );
-    this.recordAudit(
-      {
-        actorId: identity?.actorId ?? null,
-        actorType: callContext ? "ops_user" : "system",
-        tenantId: null,
-        moduleName: "order",
-        actionName: "create_multi_taxi_direct_order",
-        resourceType: "order",
-        resourceId: order.orderId,
-        newValuesSummary: {
-          runtimeProfileCode: order.runtimeProfileCode,
-          timingMode: order.timingMode,
-          operatingAuthorizationId: order.operatingAuthorizationId,
+
+    const completeCreation = () => {
+      this.orders = [order, ...this.orders];
+      this.dispatchTraceLogs = [traceLog, ...this.dispatchTraceLogs];
+      this.recordAudit(
+        {
+          actorId: identity?.actorId ?? null,
+          actorType: callContext ? "ops_user" : "system",
+          tenantId: null,
+          moduleName: "order",
+          actionName: "create_multi_taxi_direct_order",
+          resourceType: "order",
+          resourceId: order.orderId,
+          newValuesSummary: {
+            runtimeProfileCode: order.runtimeProfileCode,
+            timingMode: order.timingMode,
+            operatingAuthorizationId: order.operatingAuthorizationId,
+          },
         },
-      },
-      requestId,
-    );
-    this.opsDispatchEventsService?.publishOrderCreated(
-      this.cloneOrder(order),
-      requestId,
-    );
-    return this.cloneOrder(order);
+        requestId,
+      );
+      this.opsDispatchEventsService?.publishOrderCreated(
+        this.cloneOrder(order),
+        requestId,
+      );
+      return this.cloneOrder(order);
+    };
+
+    if (commitCreation) {
+      const repository = this.ownedMobilityRepository;
+      if (!repository?.isEnabled()) {
+        throw new ApiRequestError(
+          503,
+          "PASSENGER_BOOKING_STORAGE_UNAVAILABLE",
+          "Account bookings require durable storage.",
+        );
+      }
+      return commitCreation(this.cloneOrder(order), (executor) =>
+        repository.persistOrderWorkflow(executor, {
+          orders: [order],
+          dispatchTraceLogs: [traceLog],
+        }),
+      ).then(completeCreation);
+    }
+    if (this.ownedMobilityRepository) {
+      return this.persistChangesRequired(
+        { orders: [order], dispatchTraceLogs: [traceLog] },
+        "create_multi_taxi_ride",
+      ).then(completeCreation);
+    } else {
+      this.persistChanges(
+        { orders: [order], dispatchTraceLogs: [traceLog] },
+        "create_multi_taxi_ride",
+      );
+      return completeCreation();
+    }
   }
 
   /**
@@ -1925,47 +1971,49 @@ export class OwnedMobilityService
         (options?.writeReferralNotificationRoute &&
           this.partnerUserIdentityLinkRepository))
     ) {
-      return this.ownedMobilityRepository
-        .withTransaction(async (tx) => {
-          await applyPassengerDisclosure();
-          const approvalRequest = await applyGovernance(
-            this.tenantPartnerService?.isPersistenceEnabled() ? tx : null,
-          );
-          await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
-            orders: [this.cloneOrder(order)],
-            dispatchTraceLogs: [bookingTraceLog, holdTraceLog],
-          });
-          await writeReferralRoute(tx);
-          if (command.passengerDisclosureAcknowledgement) {
-            await this.acknowledgePassengerDisclosure(
-              tenantId,
-              bookingId,
-              command.passengerDisclosureAcknowledgement,
-              identity,
-              requestId,
-              {
-                order,
-                tx,
-                refreshDisclosure: false,
-              },
+      return (
+        this.ownedMobilityRepository
+          .withTransaction(async (tx) => {
+            await applyPassengerDisclosure();
+            const approvalRequest = await applyGovernance(
+              this.tenantPartnerService?.isPersistenceEnabled() ? tx : null,
             );
-          }
-          return approvalRequest;
-        })
-        .catch((error) => {
-          // The DB transaction rolls back persisted rows, but the in-memory
-          // governance state (quota ledger / approval requests) is mutated
-          // eagerly during reservation. Restore the pre-booking snapshot so a
-          // rejected booking (e.g. APPROVAL_NO_RESOLVABLE_APPROVERS or a quota
-          // hard block) leaves no residue in the in-memory read models.
-          this.restoreTenantGovernanceSnapshot(governanceSnapshot);
-          throw error;
-        })
-        // Publish into the in-memory order feed and dispatch events only after
-        // commit: readers must not race the frozen route/sequence setup.
-        .then((approvalRequest) =>
-          finalizeCreation(previousApprovalState, approvalRequest, false),
-        );
+            await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+              orders: [this.cloneOrder(order)],
+              dispatchTraceLogs: [bookingTraceLog, holdTraceLog],
+            });
+            await writeReferralRoute(tx);
+            if (command.passengerDisclosureAcknowledgement) {
+              await this.acknowledgePassengerDisclosure(
+                tenantId,
+                bookingId,
+                command.passengerDisclosureAcknowledgement,
+                identity,
+                requestId,
+                {
+                  order,
+                  tx,
+                  refreshDisclosure: false,
+                },
+              );
+            }
+            return approvalRequest;
+          })
+          .catch((error) => {
+            // The DB transaction rolls back persisted rows, but the in-memory
+            // governance state (quota ledger / approval requests) is mutated
+            // eagerly during reservation. Restore the pre-booking snapshot so a
+            // rejected booking (e.g. APPROVAL_NO_RESOLVABLE_APPROVERS or a quota
+            // hard block) leaves no residue in the in-memory read models.
+            this.restoreTenantGovernanceSnapshot(governanceSnapshot);
+            throw error;
+          })
+          // Publish into the in-memory order feed and dispatch events only after
+          // commit: readers must not race the frozen route/sequence setup.
+          .then((approvalRequest) =>
+            finalizeCreation(previousApprovalState, approvalRequest, false),
+          )
+      );
     }
 
     return this.withRollback(
@@ -5486,6 +5534,7 @@ export class OwnedMobilityService
     orderId: string,
     command: CancelOwnedOrderCommand,
     requestId?: string,
+    options?: { systemBypassCancelableCheck?: boolean },
   ) {
     const now = new Date().toISOString();
     const prepare = (bundle: {
@@ -5497,7 +5546,20 @@ export class OwnedMobilityService
       dispatchJobs: DispatchJobRecord[];
     }) => {
       const order = this.cloneOrder(bundle.order);
-      this.assertOrderCancelable(order);
+      if (order.status === "cancelled" || order.status === "completed") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "ORDER_NOT_CANCELABLE",
+          "The order can no longer be cancelled.",
+          {
+            orderId: order.orderId,
+            status: order.status,
+          },
+        );
+      }
+      if (!options?.systemBypassCancelableCheck) {
+        this.assertOrderCancelable(order);
+      }
       const assignment = bundle.assignment ? { ...bundle.assignment } : null;
       const task = bundle.task ? this.cloneTask(bundle.task) : null;
       // The persisted branch prepares from assignment/task rows locked in the
