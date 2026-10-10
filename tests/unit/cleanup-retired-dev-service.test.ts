@@ -29,10 +29,9 @@ const intendedServices = [
   "drts-dev-referral-embed-web",
   "drts-dev-enterprise-dispatch-web",
   "drts-channel-partner-portal-web",
+  "drts-dev-passenger-app-web",
 ] as const;
-const optionalServices = [
-  "drts-dev-scanner",
-] as const;
+const optionalServices = ["drts-dev-scanner"] as const;
 const retiredService = "drts-passenger-web";
 
 function runCleanup(action: string, inventory: readonly string[] = []) {
@@ -153,18 +152,21 @@ describe("retired Cloud Run service cleanup", () => {
   it.each([
     ["with no optional services", intendedServices],
     ["with the scanner", [...intendedServices, ...optionalServices]],
-  ])("deletes exactly drts-passenger-web only for the exact allowed inventory %s", (_label, inventory) => {
-    const result = runCleanup("delete-drts-passenger-web", [
-      retiredService,
-      ...[...inventory].reverse(),
-    ]);
+  ])(
+    "deletes exactly drts-passenger-web only for the exact allowed inventory %s",
+    (_label, inventory) => {
+      const result = runCleanup("delete-drts-passenger-web", [
+        retiredService,
+        ...[...inventory].reverse(),
+      ]);
 
-    expect(result.status).toBe(0);
-    expect(result.commands).toEqual([
-      "run services list --platform=managed --region us-central1 --project nodal-alloy-503700-s3 --format=value(metadata.name)",
-      "run services delete drts-passenger-web --platform=managed --region us-central1 --project nodal-alloy-503700-s3 --quiet",
-    ]);
-  });
+      expect(result.status).toBe(0);
+      expect(result.commands).toEqual([
+        "run services list --platform=managed --region us-central1 --project nodal-alloy-503700-s3 --format=value(metadata.name)",
+        "run services delete drts-passenger-web --platform=managed --region us-central1 --project nodal-alloy-503700-s3 --quiet",
+      ]);
+    },
+  );
 
   it.each(intendedServices)(
     "fails closed when intended service %s is missing",
@@ -195,17 +197,20 @@ describe("retired Cloud Run service cleanup", () => {
     expect(result.commands).toHaveLength(1);
   });
 
-  it("fails closed when any other extra service is present", () => {
-    const result = runCleanup("delete-drts-passenger-web", [
-      ...intendedServices,
-      retiredService,
-      "drts-dev-unexpected-web",
-    ]);
+  it.each(["drts-dev-unexpected-web", "drts-dev-passenger-app-rogue"])(
+    "fails closed when extra service %s is present",
+    (unexpectedService) => {
+      const result = runCleanup("delete-drts-passenger-web", [
+        ...intendedServices,
+        retiredService,
+        unexpectedService,
+      ]);
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("drts-dev-unexpected-web");
-    expect(result.commands).toHaveLength(1);
-  });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(unexpectedService);
+      expect(result.commands).toHaveLength(1);
+    },
+  );
 
   it("fails closed when drts-passenger-web is absent", () => {
     const result = runCleanup("delete-drts-passenger-web", intendedServices);
