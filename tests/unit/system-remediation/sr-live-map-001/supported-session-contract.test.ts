@@ -300,7 +300,16 @@ it.each([
     // The real verifier persists principal, membership and role bindings.
     expect(
       await identities.findPrincipalById("unit-map-observer"),
-    ).toMatchObject({ principalId: "unit-map-observer", status: "active" });
+    ).toMatchObject({
+      principalId: "unit-map-observer",
+      sourceRef: "google_workload_identity:unit-map-observer",
+      issuer: "https://accounts.google.com",
+      subject: "unit-c114-google-subject",
+      principalType: "service",
+      email,
+      emailVerified: true,
+      status: "active",
+    });
     // A later case can reuse the adapter's cached JWKS. Persisted principal
     // evidence above proves verification ran regardless of cache hits.
     expect(fetch.mock.calls.length).toBeLessThanOrEqual(1);

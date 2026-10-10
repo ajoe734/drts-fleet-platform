@@ -39,6 +39,39 @@ export function isStrictAuthEnvironment(): boolean {
   return environment === "production" || environment === "staging";
 }
 
+/**
+ * Truthful marker recorded on a workforce identity's `amr` when the dev MFA
+ * waiver (below) let a privileged action through without a real MFA signal.
+ * Deliberately NOT a member of `STRICT_TRUSTED_AMR` / `NON_STRICT_TRUSTED_AMR`:
+ * `hasTrustedMfa` must keep returning false for it, so the only way it can
+ * ever satisfy the step-up gate is through the explicit, audited waiver check
+ * in `StepUpProofService.createProof`, not by silently passing as MFA.
+ */
+export const DEV_MFA_WAIVED_AMR = "dev_mfa_waived";
+
+/**
+ * Product decision (2026-10-05): dev deployments of the platform-admin /
+ * ops-console workforce entry do not require a second verification factor.
+ * This must never be satisfied by fabricating `verified_iap_workforce` /
+ * `aal2` on an identity that never produced that evidence (see
+ * `resolveBootstrapTokenAssurance` in `auth.controller.ts`) -- it is instead
+ * an explicit, named waiver that `StepUpProofService` consults directly and
+ * that every use must record as a security event.
+ *
+ * Staging and production reject this flag outright regardless of its value
+ * (also enforced at startup by `buildAuthStartupConfigReport` in
+ * `auth-startup-config.ts`, mirroring `ALLOW_INSECURE_DEV_AUTH`), so this
+ * function can only ever return true in a non-strict (dev/test) environment.
+ */
+export function isDevWorkforceMfaWaiverEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  if (isStrictAuthEnvironment()) {
+    return false;
+  }
+  return (env.DRTS_DEV_MFA_WAIVED ?? "").trim().toLowerCase() === "true";
+}
+
 export interface TrustedMfaAssertion {
   amr?: string[] | null;
   acr?: string | null;

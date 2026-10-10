@@ -535,7 +535,7 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           nonce: "test_nonce_12345",
         },
         secret,
-        { algorithm: "HS256" },
+        { algorithm: "HS256", expiresIn: "5m" },
       );
 
       globalThis.fetch = (async (url: string | URL | Request) => {
@@ -623,7 +623,7 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           nonce: "test_nonce_12345",
         },
         secret,
-        { algorithm: "HS256" },
+        { algorithm: "HS256", expiresIn: "5m" },
       );
 
       globalThis.fetch = (async (url: string | URL | Request) => {

@@ -2164,10 +2164,29 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
         `UPDATE ops.phase1_dispatch_assignments SET record = jsonb_set(record, '{acceptanceDeadline}', to_jsonb('2000-01-01T00:00:00Z'::text)) WHERE assignment_id = $1`,
         [assignment.assignmentId],
       );
+      // PostgreSQL does not promise UNION ALL row order without ORDER BY; a
+      // physical reorder of otherwise-identical rows must not register as a
+      // snapshot mutation. Each branch is tagged with a stable source
+      // discriminator plus its own primary key so the final ordering is
+      // deterministic regardless of storage order, without discarding,
+      // collapsing, or reshaping any row's `record` payload.
       const readState = async () =>
         (
           await database.query(
-            `SELECT record FROM ops.phase1_owned_orders WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_jobs WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_driver_tasks WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_assignments WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_attempts WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_trace_logs WHERE order_id = $1`,
+            `SELECT record FROM (
+              SELECT record, 0 AS source_order, order_id AS sort_key FROM ops.phase1_owned_orders WHERE order_id = $1
+              UNION ALL
+              SELECT record, 1, dispatch_job_id FROM ops.phase1_dispatch_jobs WHERE order_id = $1
+              UNION ALL
+              SELECT record, 2, task_id FROM ops.phase1_driver_tasks WHERE order_id = $1
+              UNION ALL
+              SELECT record, 3, assignment_id FROM ops.phase1_dispatch_assignments WHERE order_id = $1
+              UNION ALL
+              SELECT record, 4, attempt_id FROM ops.phase1_dispatch_attempts WHERE order_id = $1
+              UNION ALL
+              SELECT record, 5, trace_id FROM ops.phase1_dispatch_trace_logs WHERE order_id = $1
+            ) AS snapshot
+            ORDER BY source_order, sort_key`,
             [order.orderId],
           )
         ).rows;

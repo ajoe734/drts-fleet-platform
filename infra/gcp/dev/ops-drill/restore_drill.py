@@ -15,7 +15,6 @@ import subprocess
 import sys
 import tempfile
 import time
-from urllib.parse import unquote, urlsplit
 
 PROJECT = "drts-dev-devcc-20260825"
 REGION = "us-central1"
@@ -30,6 +29,10 @@ TABLES = {
 
 
 class DrillError(Exception):
+    pass
+
+
+class CommandTimeout(DrillError):
     pass
 
 
@@ -56,10 +59,12 @@ def iso(value):
     return value.isoformat().replace("+00:00", "Z")
 
 
-def command(args, *, env=None, timeout=90):
+def command(args, *, env=None, timeout=90, input_text=None):
     try:
-        result = subprocess.run(args, env=env, capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired):
+        result = subprocess.run(args, env=env, input=input_text, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise CommandTimeout("child_command_timeout") from None
+    except OSError:
         raise DrillError("child_unavailable_or_timeout") from None
     require(result.returncode == 0, "child_command_failed")
     return result.stdout.strip()
@@ -186,21 +191,26 @@ def compare(source, clone, point):
 class Readback:
     def __init__(self, folder):
         # No URL, password, user or database name ever enters argv, logs or evidence.
-        secret = gc("secrets", "versions", "access", "latest", "--secret=drts-dev-db-url")
-        # Secret Manager's access output is raw bytes, regardless of --format.
-        parsed = urlsplit(secret)
-        require(parsed.scheme in ("postgres", "postgresql") and parsed.username and parsed.password and parsed.path.strip("/"), "invalid_db_secret")
+        # Unlike gc(), do NOT append --format=json: that returns a resource
+        # envelope with base64 payload.data, not the raw UTF-8 secret value.
+        secret = command(["gcloud", "secrets", "versions", "access", "latest",
+                          "--secret=drts-dev-db-url", "--project=" + PROJECT, "--quiet"])
+        try:
+            parsed = obj(command(["node", str(Path(__file__).with_name("db_credentials.mjs"))],
+                                 input_text=secret, timeout=10))
+            user, password, db = (parsed[key] for key in ("user", "password", "database"))
+            require(all(isinstance(value, str) and value for value in (user, password, db)), "invalid_db_secret")
+        except (DrillError, ValueError, KeyError, TypeError):
+            raise DrillError("invalid_db_secret") from None
         self.env = {k: v for k, v in os.environ.items() if not k.startswith("PG")}
-        password = unquote(parsed.password)
-        user = unquote(parsed.username)
-        db = unquote(parsed.path.lstrip("/"))
         require(not any(c in password + user + db for c in "\n\r\0"), "invalid_db_secret")
         # Withhold credentials completely rather than echoing them in a mask command.
-        # The real secret never leaves this private process or mode-0600 pgpass.
+        # Credentials only cross private pipes and mode-0600 pgpass.
         escape = lambda s: s.replace("\\", "\\\\").replace(":", "\\:")
         pgpass = Path(folder) / "pgpass"
-        pgpass.write_text(f"127.0.0.1:*:{escape(db)}:{escape(user)}:{escape(password)}\n")
-        pgpass.chmod(0o600)
+        with os.fdopen(os.open(pgpass, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(f"127.0.0.1:*:{escape(db)}:{escape(user)}:{escape(password)}\n")
         self.env.update(PGHOST="127.0.0.1", PGUSER=user, PGDATABASE=db,
                         PGPASSFILE=str(pgpass), PGSSLMODE="disable", PGCONNECT_TIMEOUT="5",
                         PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=30000 -c lock_timeout=3000")

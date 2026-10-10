@@ -19,6 +19,16 @@ on:
         description: "Branch or commit SHA to run against"
         required: false
         default: "dev"
+      readonly_dev_metadata:
+        description: "Also collect fixed-inventory read-only dev cloud metadata; full CI remains mandatory"
+        required: false
+        default: false
+        type: boolean
+      expected_runtime_sha:
+        description: "For read-only metadata: full expected currently deployed API SHA"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -39,6 +49,54 @@ env:
 # hang is capped in minutes rather than hours.
 
 jobs:
+  readonly-dev-metadata:
+    if: github.event_name == 'workflow_dispatch' && inputs.readonly_dev_metadata == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
+      EXPECTED_RUNTIME_SHA: ${{ inputs.expected_runtime_sha }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+    steps:
+      - name: Validate immutable definition and target before authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_DEFINITION_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
+          [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify actual checkout before authentication
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_DEFINITION_SHA"
+      - name: Authenticate existing deploy identity for read-only metadata
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Collect fixed-inventory control-plane metadata only
+        run: >-
+          python3 operations/verification/read-dev-cloud-metadata.py
+          --expected-runtime-sha "$EXPECTED_RUNTIME_SHA"
+          --definition-sha "$EXPECTED_DEFINITION_SHA"
+          --output .artifacts/dev-readonly-metadata/snapshot.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dev-readonly-metadata-${{ github.run_id }}
+          path: .artifacts/dev-readonly-metadata/snapshot.json
+          if-no-files-found: error
+          retention-days: 30
+
   # Owner checkpoints are intentionally cheap. A review candidate is the first
   # immutable SHA that may start the full integration gate.
   candidate:
@@ -84,6 +142,7 @@ jobs:
           python3 -m unittest tools/ci/test_workflow_timeouts.py
           python3 -m unittest tools/ci/test_dependency_security.py
           python3 -m unittest tools/ci/test_dev_artifact_providers.py
+          python3 -m unittest tools/ci/test_dev_cloud_metadata_preflight.py
           python3 -m unittest tools/ci/test_tenant_binding_acceptance_workflow.py
           python3 -m unittest tools/ci/test_academy_acceptance_workflow.py
           python3 -m unittest tools/ci/test_leave_acceptance_workflow.py
@@ -97,6 +156,8 @@ jobs:
           python3 -m unittest tests/unit/system-remediation/sr-live-ops-001/test_drill.py -v
       - name: Verify live mail Python unit tests
         run: python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p 'test_*.py' -v
+      - name: Verify live invoice mail Python unit tests
+        run: python3 -m unittest discover -s tests/unit/system-remediation/sr-live-invoice-mail-20261007 -p 'test_*.py' -v
       - name: Verify every test file is on a path CI runs
         run: python3 tools/ci/check_test_coverage.py
       - id: filter
@@ -235,6 +296,14 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       PARTNER_NOTIFY_UI_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      # This job runs as a non-strict (CI/"test") auth environment. The
+      # platform/ops workforce step-up MFA gate denies by default
+      # (ENTRY-IAP-WORKFORCE-AUTH-20261005); the bootstrap dev fixture no
+      # longer fabricates verified_iap_workforce/aal2, so integration tests
+      # exercising platform_admin/ops_user privileged actions need this
+      # explicit, audited dev waiver. isDevWorkforceMfaWaiverEnabled rejects
+      # it outright in staging/production regardless of this value.
+      DRTS_DEV_MFA_WAIVED: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -343,6 +412,17 @@ jobs:
       CONTROLLED_DOWNLOAD_SIGNING_SECRET: ci-e2e-controlled-download-secret
       PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT: ci-e2e-alpha-ingress-key
       PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT: ci-e2e-beta-ingress-key
+      # This job's hermetic E2E sub-run (tests/e2e/E2E-004/018 via
+      # run-iam-negative-matrix.sh) drives real platform_admin/ops_user
+      # bootstrap identities through privileged platform-admin routes. Since
+      # ENTRY-IAP-WORKFORCE-AUTH-20261005 removed the fabricated
+      # verified_iap_workforce/aal2 stamping on those bootstrap identities,
+      # the step-up gate needs the explicit, audited dev waiver to clear
+      # (mirrors the "API unit tests" step in ci.yml). The tests/security/*
+      # cases in this same step do not reference MFA/step-up state, so this
+      # is safe at job level. isDevWorkforceMfaWaiverEnabled rejects the flag
+      # outright in staging/production regardless of this value.
+      DRTS_DEV_MFA_WAIVED: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -487,8 +567,18 @@ jobs:
       JWT_ISSUER: drts-local
       JWT_AUDIENCE: drts-api
       CONTROLLED_DOWNLOAD_SIGNING_SECRET: ci-e2e-controlled-download-secret
+      DOCUMENT_ARTIFACT_STORAGE_PROVIDER: memory
       PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT: ci-e2e-alpha-ingress-key
       PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT: ci-e2e-beta-ingress-key
+      # Several scenarios here (E2E-004/008/011/015/016) drive real
+      # platform_admin/ops_user bootstrap identities through privileged
+      # platform-admin routes. ENTRY-IAP-WORKFORCE-AUTH-20261005 removed the
+      # fabricated verified_iap_workforce/aal2 stamping on those bootstrap
+      # identities, so the step-up gate needs the explicit, audited dev
+      # waiver to clear (mirrors the "API unit tests" step in ci.yml).
+      # isDevWorkforceMfaWaiverEnabled rejects the flag outright in
+      # staging/production regardless of this value.
+      DRTS_DEV_MFA_WAIVED: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

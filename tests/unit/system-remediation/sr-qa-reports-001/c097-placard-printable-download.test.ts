@@ -6,9 +6,7 @@ type StreamableFileLike = {
 };
 
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
-import {
-  createControlledDownloadMetadata,
-} from "../../../../apps/api/src/common/controlled-download";
+import { createControlledDownloadMetadata } from "../../../../apps/api/src/common/controlled-download";
 import { ControlledDownloadController } from "../../../../apps/api/src/modules/controlled-download/controlled-download.controller";
 import { InMemoryDocumentArtifactStore } from "../../../../apps/api/src/common/document-artifacts";
 
@@ -27,7 +25,7 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
       .digest("hex");
 
     // 1. 將真實列印檔置入 DocumentArtifactStore (kind: placard)
-    store.put({
+    await store.put({
       kind: "placard",
       subjectId: placardVersionId,
       mimeType: "application/pdf",
@@ -43,14 +41,18 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
     });
 
     expect(downloadMetadata.downloadUrl).toContain("/downloads/placard/");
-    expect(downloadMetadata.downloadUrl).toContain(`manifest_hash=${manifestHash}`);
+    expect(downloadMetadata.downloadUrl).toContain(
+      `manifest_hash=${manifestHash}`,
+    );
     expect(downloadMetadata.downloadUrl).toContain("sig=");
 
-    const url = new URL(`https://api.drts.local${downloadMetadata.downloadUrl}`);
+    const url = new URL(
+      `https://api.drts.local${downloadMetadata.downloadUrl}`,
+    );
     const params = url.searchParams;
 
     // 3. 透過 ControlledDownloadController 進行真實解析下載
-    const response = controller.resolve(
+    const response = await controller.resolve(
       "placard",
       placardVersionId,
       params.get("signed_at") ?? undefined,
@@ -68,7 +70,9 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
       ? stream
       : await new Promise<Buffer>((resolve, reject) => {
           const chunks: Buffer[] = [];
-          (stream as any).on("data", (chunk: any) => chunks.push(Buffer.from(chunk)));
+          (stream as any).on("data", (chunk: any) =>
+            chunks.push(Buffer.from(chunk)),
+          );
           (stream as any).on("end", () => resolve(Buffer.concat(chunks)));
           (stream as any).on("error", reject);
         });
@@ -83,7 +87,7 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
     const content = Buffer.from("%PDF-1.7 placard content", "utf-8");
     const manifestHash = createHash("sha256").update(content).digest("hex");
 
-    store.put({
+    await store.put({
       kind: "placard",
       subjectId: placardVersionId,
       mimeType: "application/pdf",
@@ -100,11 +104,13 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
       ttlMinutes: 15, // 於 2026-08-25T08:15:00.000Z 到期
     });
 
-    const url = new URL(`https://api.drts.local${downloadMetadata.downloadUrl}`);
+    const url = new URL(
+      `https://api.drts.local${downloadMetadata.downloadUrl}`,
+    );
     const params = url.searchParams;
 
     try {
-      controller.resolve(
+      await controller.resolve(
         "placard",
         placardVersionId,
         params.get("signed_at") ?? undefined,
@@ -142,7 +148,7 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
 
     // 1. 竄改 subjectId 嘗試平行越權
     try {
-      controller.resolve(
+      await controller.resolve(
         "placard",
         "placard-v-other-tenant", // 竄改主體
         params.get("signed_at") ?? undefined,
@@ -156,12 +162,14 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
     } catch (err: any) {
       expect(err).toBeInstanceOf(ApiRequestError);
       expect(err.status).toBe(403);
-      expect(err.response?.error?.code).toBe("CONTROLLED_DOWNLOAD_SIGNATURE_INVALID");
+      expect(err.response?.error?.code).toBe(
+        "CONTROLLED_DOWNLOAD_SIGNATURE_INVALID",
+      );
     }
 
     // 2. 竄改簽章字串
     try {
-      controller.resolve(
+      await controller.resolve(
         "placard",
         placardVersionId,
         params.get("signed_at") ?? undefined,
@@ -175,7 +183,9 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
     } catch (err: any) {
       expect(err).toBeInstanceOf(ApiRequestError);
       expect(err.status).toBe(403);
-      expect(err.response?.error?.code).toBe("CONTROLLED_DOWNLOAD_SIGNATURE_INVALID");
+      expect(err.response?.error?.code).toBe(
+        "CONTROLLED_DOWNLOAD_SIGNATURE_INVALID",
+      );
     }
   });
 
@@ -185,7 +195,9 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
 
     const placardVersionId = "placard-v-content-mismatch";
     const originalContent = Buffer.from("%PDF-1.7 version 1", "utf-8");
-    const originalHash = createHash("sha256").update(originalContent).digest("hex");
+    const originalHash = createHash("sha256")
+      .update(originalContent)
+      .digest("hex");
 
     // 簽發基於 originalHash 之下載連結
     const metadata = createControlledDownloadMetadata({
@@ -197,7 +209,7 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
 
     // 隨後 Store 儲存的是被更換之新檔案（不同 hash）
     const newContent = Buffer.from("%PDF-1.7 modified version 2", "utf-8");
-    store.put({
+    await store.put({
       kind: "placard",
       subjectId: placardVersionId,
       mimeType: "application/pdf",
@@ -208,7 +220,7 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
     const params = url.searchParams;
 
     try {
-      controller.resolve(
+      await controller.resolve(
         "placard",
         placardVersionId,
         params.get("signed_at") ?? undefined,
@@ -222,7 +234,9 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
     } catch (err: any) {
       expect(err).toBeInstanceOf(ApiRequestError);
       expect(err.status).toBe(409);
-      expect(err.response?.error?.code).toBe("CONTROLLED_DOWNLOAD_CONTENT_MISMATCH");
+      expect(err.response?.error?.code).toBe(
+        "CONTROLLED_DOWNLOAD_CONTENT_MISMATCH",
+      );
     }
   });
 
@@ -231,7 +245,9 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
     const controller = new ControlledDownloadController(emptyStore);
 
     const placardVersionId = "placard-v-unmaterialised";
-    const manifestHash = createHash("sha256").update("unmaterialised").digest("hex");
+    const manifestHash = createHash("sha256")
+      .update("unmaterialised")
+      .digest("hex");
 
     // 簽發有效連結，但 store 內無任何檔案
     const metadata = createControlledDownloadMetadata({
@@ -245,7 +261,7 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
     const params = url.searchParams;
 
     try {
-      controller.resolve(
+      await controller.resolve(
         "placard",
         placardVersionId,
         params.get("signed_at") ?? undefined,
@@ -260,7 +276,9 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
       expect(err).toBeInstanceOf(ApiRequestError);
       expect(err.status).toBe(501);
       expect(err.response?.error?.code).toBe("ARTIFACT_NOT_MATERIALISED");
-      expect(err.response?.error?.message).toContain("No file is produced for \"placard\"");
+      expect(err.response?.error?.message).toContain(
+        'No file is produced for "placard"',
+      );
     }
   });
 
@@ -268,7 +286,7 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
     const controller = new ControlledDownloadController();
 
     try {
-      controller.resolve(
+      await controller.resolve(
         "placard",
         "placard-001",
         undefined, // missing signed_at
@@ -282,7 +300,9 @@ describe("C097: 可列印車內牌貼下載、簽章驗證與版本一致性驗�
     } catch (err: any) {
       expect(err).toBeInstanceOf(ApiRequestError);
       expect(err.status).toBe(400);
-      expect(err.response?.error?.code).toBe("CONTROLLED_DOWNLOAD_LINK_INCOMPLETE");
+      expect(err.response?.error?.code).toBe(
+        "CONTROLLED_DOWNLOAD_LINK_INCOMPLETE",
+      );
       expect(err.response?.error?.details?.missing).toEqual([
         "signed_at",
         "expires_at",

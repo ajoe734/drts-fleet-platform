@@ -265,8 +265,9 @@ describe("Cloud Run deploy quota retry", () => {
       return devWorkflow.slice(start, end);
     };
 
+    expect(devWorkflow).toContain("BANK_SESSION_SECRET=");
     expect(deploymentBlock("bank-console-web")).toContain(
-      "BANK_SESSION_SECRET=",
+      "${{ steps.api_secrets.outputs.bank_console }}",
     );
     expect(devWorkflow.match(/BANK_SESSION_SECRET=/g)).toHaveLength(1);
     expect(devWorkflow).not.toContain("DRTS_PARTNER_SESSION_SECRET=");

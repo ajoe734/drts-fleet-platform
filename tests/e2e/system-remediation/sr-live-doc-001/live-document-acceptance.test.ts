@@ -1,10 +1,16 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import type { AddressInfo } from "node:net";
 import { generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { fetchAndValidateReport } from "./report-validator";
 
 import {
   buildArtifactText,
@@ -28,6 +34,25 @@ import {
   runIndependentBankVerifier,
   sha256Hex,
 } from "./live-document-runner";
+
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+
+async function extractPdfText(pdfBuffer: Buffer): Promise<string> {
+  const task = getDocument({
+    data: new Uint8Array(pdfBuffer),
+    useSystemFonts: false,
+    disableFontFace: true,
+  });
+  const pdf = await task.promise;
+  const text: string[] = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    const strings = content.items.map((item: any) => item.str);
+    text.push(strings.join(" "));
+  }
+  return text.join("\n");
+}
 
 const VERIFIER_SCRIPT_PATH = join(
   __dirname,
@@ -68,84 +93,108 @@ interface StatementServerOptions {
 function startBankStatementServer(
   options: StatementServerOptions = {},
 ): Promise<{ baseUrl: string; close: () => Promise<void> }> {
-  const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    const cookieHeader = req.headers.cookie ?? "";
-    const cookies = Object.fromEntries(
-      cookieHeader
-        .split(";")
-        .map((part) => part.trim())
-        .filter(Boolean)
-        .map((part) => {
-          const idx = part.indexOf("=");
-          return [part.slice(0, idx), part.slice(idx + 1)];
-        }),
-    );
+  const server: Server = createServer(
+    (req: IncomingMessage, res: ServerResponse) => {
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
+      const cookieHeader = req.headers.cookie ?? "";
+      const cookies = Object.fromEntries(
+        cookieHeader
+          .split(";")
+          .map((part) => part.trim())
+          .filter(Boolean)
+          .map((part) => {
+            const idx = part.indexOf("=");
+            return [part.slice(0, idx), part.slice(idx + 1)];
+          }),
+      );
 
-    const respondJson = (status: number, body: unknown) => {
-      res.writeHead(status, { "content-type": "application/json" });
-      res.end(JSON.stringify(body));
-    };
+      const respondJson = (status: number, body: unknown) => {
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(JSON.stringify(body));
+      };
 
-    if (url.pathname !== "/bank/statement") {
-      respondJson(404, { ok: false, error: { code: "NOT_FOUND", message: "no route" } });
-      return;
-    }
+      if (url.pathname !== "/bank/statement") {
+        respondJson(404, {
+          ok: false,
+          error: { code: "NOT_FOUND", message: "no route" },
+        });
+        return;
+      }
 
-    const requestedBank = url.searchParams.get("bank");
-    const roleParam = url.searchParams.get("role");
-    const session = resolveServerSessionRole(cookies[BANK_CONSOLE_SESSION_COOKIE], roleParam);
+      const requestedBank = url.searchParams.get("bank");
+      const roleParam = url.searchParams.get("role");
+      const session = resolveServerSessionRole(
+        cookies[BANK_CONSOLE_SESSION_COOKIE],
+        roleParam,
+      );
 
-    if (session.bankCode && requestedBank && session.bankCode !== requestedBank) {
-      respondJson(403, {
-        ok: false,
-        error: { code: "FORBIDDEN", message: "Tenant scope mismatch: authenticated session does not match requested bank tenant." },
+      if (
+        session.bankCode &&
+        requestedBank &&
+        session.bankCode !== requestedBank
+      ) {
+        respondJson(403, {
+          ok: false,
+          error: {
+            code: "FORBIDDEN",
+            message:
+              "Tenant scope mismatch: authenticated session does not match requested bank tenant.",
+          },
+        });
+        return;
+      }
+
+      const targetBank = session.bankCode || requestedBank;
+      if (!targetBank || !(targetBank in BANK_TENANTS)) {
+        respondJson(400, {
+          ok: false,
+          error: {
+            code: "BAD_REQUEST",
+            message: "Missing or invalid bank tenant parameter.",
+          },
+        });
+        return;
+      }
+
+      if (!session.isAuthorizedForExport) {
+        respondJson(403, {
+          ok: false,
+          error: {
+            code: "FORBIDDEN",
+            message: session.isForged
+              ? "Invalid or forged session signature."
+              : session.isTampered
+                ? "Role parameter tampering detected."
+                : `Role ${session.role} is not authorized to export statements or download settlement artifacts.`,
+          },
+        });
+        return;
+      }
+
+      const payload = [
+        "================================================================================",
+        "DRTS SETTLEMENT STATEMENT (NON-FIXTURE ARTIFACT)",
+        "================================================================================",
+        "Statement ID  : settlement-statement-acceptance-harness-2026-08",
+        "Period        : 2026-08",
+        `Issuer Tenant : ${BANK_TENANTS[targetBank]}`,
+        "Status        : DUE",
+      ].join("\n");
+
+      const artifactText = buildArtifactText(payload, {
+        authDomain: "drts.settlement.issuer",
+        ...(options.signingConfig
+          ? { signingConfig: options.signingConfig }
+          : {}),
       });
-      return;
-    }
 
-    const targetBank = session.bankCode || requestedBank;
-    if (!targetBank || !(targetBank in BANK_TENANTS)) {
-      respondJson(400, { ok: false, error: { code: "BAD_REQUEST", message: "Missing or invalid bank tenant parameter." } });
-      return;
-    }
-
-    if (!session.isAuthorizedForExport) {
-      respondJson(403, {
-        ok: false,
-        error: {
-          code: "FORBIDDEN",
-          message: session.isForged
-            ? "Invalid or forged session signature."
-            : session.isTampered
-              ? "Role parameter tampering detected."
-              : `Role ${session.role} is not authorized to export statements or download settlement artifacts.`,
-        },
+      res.writeHead(200, {
+        "content-type": "text/plain; charset=utf-8",
+        "content-disposition": 'attachment; filename="statement.txt"',
       });
-      return;
-    }
-
-    const payload = [
-      "================================================================================",
-      "DRTS SETTLEMENT STATEMENT (NON-FIXTURE ARTIFACT)",
-      "================================================================================",
-      "Statement ID  : settlement-statement-acceptance-harness-2026-08",
-      "Period        : 2026-08",
-      `Issuer Tenant : ${BANK_TENANTS[targetBank]}`,
-      "Status        : DUE",
-    ].join("\n");
-
-    const artifactText = buildArtifactText(payload, {
-      authDomain: "drts.settlement.issuer",
-      ...(options.signingConfig ? { signingConfig: options.signingConfig } : {}),
-    });
-
-    res.writeHead(200, {
-      "content-type": "text/plain; charset=utf-8",
-      "content-disposition": 'attachment; filename="statement.txt"',
-    });
-    res.end(artifactText);
-  });
+      res.end(artifactText);
+    },
+  );
 
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
@@ -162,36 +211,50 @@ function startBankStatementServer(
 function startControlledDownloadServer(
   controller: ControlledDownloadController,
 ): Promise<{ baseUrl: string; close: () => Promise<void> }> {
-  const server: Server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    const parts = url.pathname.split("/").filter(Boolean);
-    const [kind, subjectId] = parts.slice(-2);
-    const q = url.searchParams;
+  const server: Server = createServer(
+    async (req: IncomingMessage, res: ServerResponse) => {
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
+      const parts = url.pathname.split("/").filter(Boolean);
+      const [kind, subjectId] = parts.slice(-2);
+      const q = url.searchParams;
 
-    try {
-      const file = controller.resolve(
-        kind ?? "",
-        subjectId ?? "",
-        q.get("signed_at") ?? undefined,
-        q.get("expires_at") ?? undefined,
-        q.get("key_id") ?? undefined,
-        q.get("manifest_hash") ?? undefined,
-        q.get("sig") ?? undefined,
-        q.get("sig_v") ?? undefined,
-      ) as { getStream(): NodeJS.ReadableStream; getHeaders(): { type?: string } };
+      try {
+        const file = (await controller.resolve(
+          kind ?? "",
+          subjectId ?? "",
+          q.get("signed_at") ?? undefined,
+          q.get("expires_at") ?? undefined,
+          q.get("key_id") ?? undefined,
+          q.get("manifest_hash") ?? undefined,
+          q.get("sig") ?? undefined,
+          q.get("sig_v") ?? undefined,
+        )) as {
+          getStream(): NodeJS.ReadableStream;
+          getHeaders(): { type?: string };
+        };
 
-      res.writeHead(200, { "content-type": file.getHeaders().type ?? "application/octet-stream" });
-      for await (const chunk of file.getStream()) {
-        res.write(chunk);
+        res.writeHead(200, {
+          "content-type": file.getHeaders().type ?? "application/octet-stream",
+        });
+        for await (const chunk of file.getStream()) {
+          res.write(chunk);
+        }
+        res.end();
+      } catch (error) {
+        const status =
+          (error as { getStatus?: () => number }).getStatus?.() ?? 500;
+        const response = (
+          error as { getResponse?: () => unknown }
+        ).getResponse?.();
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify(
+            response ?? { ok: false, error: { message: String(error) } },
+          ),
+        );
       }
-      res.end();
-    } catch (error) {
-      const status = (error as { getStatus?: () => number }).getStatus?.() ?? 500;
-      const response = (error as { getResponse?: () => unknown }).getResponse?.();
-      res.writeHead(status, { "content-type": "application/json" });
-      res.end(JSON.stringify(response ?? { ok: false, error: { message: String(error) } }));
-    }
-  });
+    },
+  );
 
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
@@ -204,9 +267,9 @@ function startControlledDownloadServer(
   });
 }
 
-function generateTestRsaKeyPair() {
-  return generateKeyPairSync("rsa", {
-    modulusLength: 2048,
+function generateTestEcdsaKeyPair() {
+  return generateKeyPairSync("ec", {
+    namedCurve: "P-256",
     publicKeyEncoding: { type: "spki", format: "pem" },
     privateKeyEncoding: { type: "pkcs8", format: "pem" },
   });
@@ -227,8 +290,12 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
     return server;
   }
 
-  async function withControlledDownloadServer(store: InMemoryDocumentArtifactStore) {
-    const server = await startControlledDownloadServer(new ControlledDownloadController(store));
+  async function withControlledDownloadServer(
+    store: InMemoryDocumentArtifactStore,
+  ) {
+    const server = await startControlledDownloadServer(
+      new ControlledDownloadController(store),
+    );
     openServers.push(server);
     return server;
   }
@@ -236,15 +303,21 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
   describe("Runner validation (test doubles only -- no external network, matches SR-LIVE-DOC-001's VM scope)", () => {
     describe("Bank artifact track: authenticated remote download -> independent SR-BANK-003 verifier", () => {
       it("SIGNED + correct authorized public key clears the live signing gate", async () => {
-        const keyPair = generateTestRsaKeyPair();
+        const keyPair = generateTestEcdsaKeyPair();
         const { baseUrl } = await withBankServer({
-          signingConfig: { privateKeyPem: keyPair.privateKey, keyId: "acceptance-harness-key" },
+          signingConfig: {
+            privateKeyPem: keyPair.privateKey,
+            keyId: "acceptance-harness-key",
+          },
         });
         const cookie = signSessionRole("bank_finance", "acme");
 
-        const outcome = await downloadArtifact(`${baseUrl}/bank/statement?bank=acme&role=bank_finance`, {
-          headers: { cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${cookie}` },
-        });
+        const outcome = await downloadArtifact(
+          `${baseUrl}/bank/statement?bank=acme&role=bank_finance`,
+          {
+            headers: { cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${cookie}` },
+          },
+        );
 
         expect(outcome.status).toBe(200);
         expect(outcome.bytes).not.toBeNull();
@@ -263,9 +336,12 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         const { baseUrl } = await withBankServer();
         const cookie = signSessionRole("bank_finance", "acme");
 
-        const outcome = await downloadArtifact(`${baseUrl}/bank/statement?bank=acme&role=bank_finance`, {
-          headers: { cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${cookie}` },
-        });
+        const outcome = await downloadArtifact(
+          `${baseUrl}/bank/statement?bank=acme&role=bank_finance`,
+          {
+            headers: { cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${cookie}` },
+          },
+        );
 
         expect(outcome.status).toBe(200);
         const verifierOutcome = runIndependentBankVerifier({
@@ -279,16 +355,22 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
       });
 
       it("rejects verification against the wrong authorized public key", async () => {
-        const keyPair = generateTestRsaKeyPair();
-        const wrongKeyPair = generateTestRsaKeyPair();
+        const keyPair = generateTestEcdsaKeyPair();
+        const wrongKeyPair = generateTestEcdsaKeyPair();
         const { baseUrl } = await withBankServer({
-          signingConfig: { privateKeyPem: keyPair.privateKey, keyId: "acceptance-harness-key" },
+          signingConfig: {
+            privateKeyPem: keyPair.privateKey,
+            keyId: "acceptance-harness-key",
+          },
         });
         const cookie = signSessionRole("bank_finance", "acme");
 
-        const outcome = await downloadArtifact(`${baseUrl}/bank/statement?bank=acme&role=bank_finance`, {
-          headers: { cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${cookie}` },
-        });
+        const outcome = await downloadArtifact(
+          `${baseUrl}/bank/statement?bank=acme&role=bank_finance`,
+          {
+            headers: { cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${cookie}` },
+          },
+        );
 
         const verifierOutcome = runIndependentBankVerifier({
           verifierScriptPath: VERIFIER_SCRIPT_PATH,
@@ -302,21 +384,29 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
       });
 
       it("rejects a downloaded artifact whose bytes were altered after download (1-byte tamper)", async () => {
-        const keyPair = generateTestRsaKeyPair();
+        const keyPair = generateTestEcdsaKeyPair();
         const { baseUrl } = await withBankServer({
-          signingConfig: { privateKeyPem: keyPair.privateKey, keyId: "acceptance-harness-key" },
+          signingConfig: {
+            privateKeyPem: keyPair.privateKey,
+            keyId: "acceptance-harness-key",
+          },
         });
         const cookie = signSessionRole("bank_finance", "acme");
 
-        const outcome = await downloadArtifact(`${baseUrl}/bank/statement?bank=acme&role=bank_finance`, {
-          headers: { cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${cookie}` },
-        });
+        const outcome = await downloadArtifact(
+          `${baseUrl}/bank/statement?bank=acme&role=bank_finance`,
+          {
+            headers: { cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${cookie}` },
+          },
+        );
 
         const originalHex = sha256Hex(outcome.bytes!);
         // Substitute one ASCII character for another (rather than XOR-flipping
         // a raw byte) so the tampered text stays valid UTF-8 -- the verifier
         // must reject this as a hash mismatch, not crash on malformed input.
-        const tamperedText = outcome.bytes!.toString("utf-8").replace("DUE", "PAID");
+        const tamperedText = outcome
+          .bytes!.toString("utf-8")
+          .replace("DUE", "PAID");
         const tampered = Buffer.from(tamperedText, "utf-8");
         expect(sha256Hex(tampered)).not.toBe(originalHex);
 
@@ -335,9 +425,12 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         const { baseUrl } = await withBankServer();
         const cookie = signSessionRole("bank_finance", "acme");
 
-        const outcome = await downloadArtifact(`${baseUrl}/bank/statement?bank=contoso&role=bank_finance`, {
-          headers: { cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${cookie}` },
-        });
+        const outcome = await downloadArtifact(
+          `${baseUrl}/bank/statement?bank=contoso&role=bank_finance`,
+          {
+            headers: { cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${cookie}` },
+          },
+        );
 
         expect(outcome.status).toBe(403);
         expect(outcome.bytes).toBeNull();
@@ -348,9 +441,12 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         const { baseUrl } = await withBankServer();
         const cookie = signSessionRole("bank_ops_viewer", "acme");
 
-        const outcome = await downloadArtifact(`${baseUrl}/bank/statement?bank=acme&role=bank_ops_viewer`, {
-          headers: { cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${cookie}` },
-        });
+        const outcome = await downloadArtifact(
+          `${baseUrl}/bank/statement?bank=acme&role=bank_ops_viewer`,
+          {
+            headers: { cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${cookie}` },
+          },
+        );
 
         expect(outcome.status).toBe(403);
         expect(outcome.bytes).toBeNull();
@@ -358,16 +454,23 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
 
       it("rejects a request with no session cookie at all", async () => {
         const { baseUrl } = await withBankServer();
-        const outcome = await downloadArtifact(`${baseUrl}/bank/statement?bank=acme&role=bank_finance`);
+        const outcome = await downloadArtifact(
+          `${baseUrl}/bank/statement?bank=acme&role=bank_finance`,
+        );
         expect(outcome.status).toBe(403);
         expect(outcome.bytes).toBeNull();
       });
 
       it("rejects a forged/unsigned session cookie", async () => {
         const { baseUrl } = await withBankServer();
-        const outcome = await downloadArtifact(`${baseUrl}/bank/statement?bank=acme&role=bank_finance`, {
-          headers: { cookie: `${BANK_CONSOLE_SESSION_COOKIE}=bank_finance:acme.${"0".repeat(64)}` },
-        });
+        const outcome = await downloadArtifact(
+          `${baseUrl}/bank/statement?bank=acme&role=bank_finance`,
+          {
+            headers: {
+              cookie: `${BANK_CONSOLE_SESSION_COOKIE}=bank_finance:acme.${"0".repeat(64)}`,
+            },
+          },
+        );
         expect(outcome.status).toBe(403);
         expect(outcome.bytes).toBeNull();
       });
@@ -394,15 +497,19 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         });
         const { baseUrl } = await withControlledDownloadServer(store);
 
-        const outcome = await downloadArtifact(`${baseUrl}${invoice.artifactUrl}`);
+        const outcome = await downloadArtifact(
+          `${baseUrl}${invoice.artifactUrl}`,
+        );
 
         expect(outcome.status).toBe(200);
-        expect(sha256Hex(outcome.bytes!)).toBe(invoice.artifactDownloadMetadata.manifestHash);
+        expect(sha256Hex(outcome.bytes!)).toBe(
+          invoice.artifactDownloadMetadata.manifestHash,
+        );
       });
 
       it("rejects an expired controlled-download link (410 GONE)", async () => {
         const store = new InMemoryDocumentArtifactStore();
-        const record = store.put({
+        const record = await store.put({
           kind: "tenant-invoice",
           subjectId: "invoice-expiry-check",
           mimeType: "application/pdf",
@@ -416,7 +523,9 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         });
         const { baseUrl } = await withControlledDownloadServer(store);
 
-        const outcome = await downloadArtifact(`${baseUrl}${staleMetadata.downloadUrl}`);
+        const outcome = await downloadArtifact(
+          `${baseUrl}${staleMetadata.downloadUrl}`,
+        );
 
         expect(outcome.status).toBe(410);
         expect(outcome.bytes).toBeNull();
@@ -425,7 +534,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
 
       it("rejects a link whose named artifact no longer matches the stored bytes (409 CONFLICT)", async () => {
         const store = new InMemoryDocumentArtifactStore();
-        const original = store.put({
+        const original = await store.put({
           kind: "tenant-invoice",
           subjectId: "invoice-mismatch-check",
           mimeType: "application/pdf",
@@ -437,7 +546,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
           manifestHash: original.sha256,
         });
         // The producer regenerates the artifact under the same subject id.
-        store.put({
+        await store.put({
           kind: "tenant-invoice",
           subjectId: "invoice-mismatch-check",
           mimeType: "application/pdf",
@@ -453,13 +562,13 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
 
       it("rejects reusing a valid link's query for a different subject id (signature scoped to one subject)", async () => {
         const store = new InMemoryDocumentArtifactStore();
-        const recordA = store.put({
+        const recordA = await store.put({
           kind: "tenant-invoice",
           subjectId: "invoice-tenant-a",
           mimeType: "application/pdf",
           bytes: Buffer.from("%PDF-1.4 tenant A invoice"),
         });
-        store.put({
+        await store.put({
           kind: "tenant-invoice",
           subjectId: "invoice-tenant-b",
           mimeType: "application/pdf",
@@ -472,7 +581,10 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         });
         const { baseUrl } = await withControlledDownloadServer(store);
 
-        const forgedUrl = linkA.downloadUrl.replace("invoice-tenant-a", "invoice-tenant-b");
+        const forgedUrl = linkA.downloadUrl.replace(
+          "invoice-tenant-a",
+          "invoice-tenant-b",
+        );
         const outcome = await downloadArtifact(`${baseUrl}${forgedUrl}`);
 
         expect(outcome.status).toBe(403);
@@ -490,7 +602,9 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
 
         const response = await fetch(`${baseUrl}${link.downloadUrl}`);
         expect(response.status).toBe(501);
-        const body = (await response.json()) as { error?: { code?: string; details?: { servedInstead?: string } } };
+        const body = (await response.json()) as {
+          error?: { code?: string; details?: { servedInstead?: string } };
+        };
         expect(body.error?.code).toBe("ARTIFACT_NOT_MATERIALISED");
       });
 
@@ -542,24 +656,97 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
 
   describe("Live storage/signing acceptance (real deployed target -- only runs when explicitly dispatched with live env)", () => {
     const liveTargetOrigin = process.env.SR_LIVE_DOC_LIVE_TARGET_ORIGIN;
+    const apiOrigin = process.env.SR_LIVE_DOC_LIVE_API_ORIGIN;
+    const tenantConsoleOrigin =
+      process.env.SR_LIVE_DOC_LIVE_TENANT_CONSOLE_ORIGIN;
+    const platformAdminOrigin =
+      process.env.SR_LIVE_DOC_LIVE_PLATFORM_ADMIN_ORIGIN;
 
     it.runIf(Boolean(liveTargetOrigin))(
-      "downloads a real controlled artifact from the live target and requires SIGNED status from the independent verifier",
+      "checks for missing evidence sessions and requires non-zero exit if any are missing without injecting identity",
+      () => {
+        const missing: string[] = [];
+        const checkCookie = (val: string | undefined) => val && val.trim().length > 0 && val.includes(".");
+        if (!checkCookie(process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE))
+          missing.push("SR_LIVE_DOC_LIVE_SESSION_COOKIE");
+        if (!checkCookie(process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE_BANK_OPS_VIEWER))
+          missing.push("SR_LIVE_DOC_LIVE_SESSION_COOKIE_BANK_OPS_VIEWER");
+        if (!checkCookie(process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE_TENANT))
+          missing.push("SR_LIVE_DOC_LIVE_SESSION_COOKIE_TENANT");
+        if (!checkCookie(process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT))
+          missing.push("SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT");
+
+        if (!process.env.SR_LIVE_DOC_LIVE_API_ORIGIN)
+          missing.push("SR_LIVE_DOC_LIVE_API_ORIGIN");
+        if (!process.env.SR_LIVE_DOC_LIVE_TENANT_CONSOLE_ORIGIN)
+          missing.push("SR_LIVE_DOC_LIVE_TENANT_CONSOLE_ORIGIN");
+        if (!process.env.SR_LIVE_DOC_LIVE_PLATFORM_ADMIN_ORIGIN)
+          missing.push("SR_LIVE_DOC_LIVE_PLATFORM_ADMIN_ORIGIN");
+        if (!process.env.SR_LIVE_DOC_LIVE_EXPIRED_INVOICE_PATH)
+          missing.push("SR_LIVE_DOC_LIVE_EXPIRED_INVOICE_PATH");
+        if (!process.env.SR_LIVE_DOC_LIVE_PLACARD_PATH)
+          missing.push("SR_LIVE_DOC_LIVE_PLACARD_PATH");
+        if (!process.env.SR_LIVE_DOC_LIVE_REPORT_PATH)
+          missing.push("SR_LIVE_DOC_LIVE_REPORT_PATH");
+
+        if (missing.length > 0) {
+          if (process.env.SR_LIVE_DOC_RUNNER_EVIDENCE) {
+            writeFileSync(
+              process.env.SR_LIVE_DOC_RUNNER_EVIDENCE,
+              JSON.stringify(
+                {
+                  status: "failed",
+                  missing,
+                  runtimeSha: resolveRuntimeShaBinding().runtimeSha,
+                  workflowSha: resolveRuntimeShaBinding().workflowSha,
+                },
+                null,
+                2,
+              ) + "\n",
+            );
+          }
+          console.error(
+            "Missing required session cookies/inputs (must not inject identity):",
+            missing.join(", "),
+          );
+          throw new Error(
+            "Missing required live sessions/inputs: " + missing.join(", "),
+          );
+        }
+      },
+    );
+
+    it.runIf(Boolean(liveTargetOrigin))(
+      "downloads a real bank statement and requires SIGNED status and candidate SHA match",
       async () => {
         const bank = process.env.SR_LIVE_DOC_LIVE_BANK_CODE;
         const roleCookie = process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE;
         const publicKeyPath = process.env.SR_LIVE_DOC_LIVE_PUBLIC_KEY_PATH;
         const statementPath = process.env.SR_LIVE_DOC_LIVE_STATEMENT_PATH;
-        expect(bank, "SR_LIVE_DOC_LIVE_BANK_CODE is required for live acceptance").toBeTruthy();
-        expect(roleCookie, "SR_LIVE_DOC_LIVE_SESSION_COOKIE is required for live acceptance").toBeTruthy();
-        expect(publicKeyPath, "SR_LIVE_DOC_LIVE_PUBLIC_KEY_PATH is required for live acceptance").toBeTruthy();
-        expect(statementPath, "SR_LIVE_DOC_LIVE_STATEMENT_PATH is required for live acceptance").toBeTruthy();
 
-        const outcome = await downloadArtifact(`${liveTargetOrigin}${statementPath}?bank=${bank}`, {
-          headers: { cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${roleCookie}` },
-        });
+        expect(bank, "SR_LIVE_DOC_LIVE_BANK_CODE is required").toBeTruthy();
+        expect(
+          statementPath,
+          "SR_LIVE_DOC_LIVE_STATEMENT_PATH is required",
+        ).toBeTruthy();
+
+        const { getGoogleIdToken } = await import("./live-document-runner");
+        const idToken = await getGoogleIdToken(liveTargetOrigin!);
+        const headers: Record<string, string> = {
+          cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${roleCookie}`,
+        };
+        if (idToken) headers["authorization"] = `Bearer ${idToken}`;
+
+        const outcome = await downloadArtifact(
+          `${liveTargetOrigin}${statementPath}?bank=${bank}`,
+          { headers },
+        );
         expect(outcome.status).toBe(200);
         expect(outcome.bytes).not.toBeNull();
+        expect(
+          outcome.candidateSha,
+          "x-drts-candidate-sha header should match deployed SHA",
+        ).toBe(process.env.CANDIDATE_SHA);
 
         const { readFileSync } = await import("node:fs");
         const verifierOutcome = runIndependentBankVerifier({
@@ -569,6 +756,339 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         });
 
         expect(liveSigningGatePassed(verifierOutcome)).toBe(true);
+      },
+    );
+
+    it.runIf(Boolean(liveTargetOrigin))(
+      "rejects bank_ops_viewer from accessing bank statements with business denial and rejects forged sessions",
+      async () => {
+        const bank = process.env.SR_LIVE_DOC_LIVE_BANK_CODE;
+        const roleCookie =
+          process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE_BANK_OPS_VIEWER;
+        const statementPath = process.env.SR_LIVE_DOC_LIVE_STATEMENT_PATH;
+
+        const { getGoogleIdToken } = await import("./live-document-runner");
+        const idToken = await getGoogleIdToken(liveTargetOrigin!);
+        const headers: Record<string, string> = {
+          cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${roleCookie}`,
+        };
+        if (idToken) headers["authorization"] = `Bearer ${idToken}`;
+
+        const outcome = await downloadArtifact(
+          `${liveTargetOrigin}${statementPath}?bank=${bank}`,
+          { headers },
+        );
+
+        expect(outcome.status).toBe(403);
+        expect(outcome.errorCode).toBe("FORBIDDEN");
+        expect(outcome.errorMessage).toContain("is not authorized to export statements");
+        expect(outcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+
+        // Positive evidence of genuine authenticated session:
+        // A genuine session will reject a conflicting ?role parameter as tampering.
+        // An unauthenticated session will silently ignore the parameter and fall back to viewer.
+        const positiveEvidenceOutcome = await downloadArtifact(
+          `${liveTargetOrigin}${statementPath}?bank=${bank}&role=bank_finance`,
+          { headers },
+        );
+        expect(positiveEvidenceOutcome.status).toBe(403);
+        expect(positiveEvidenceOutcome.errorCode).toBe("FORBIDDEN");
+        expect(positiveEvidenceOutcome.errorMessage).toContain("Role parameter tampering detected");
+        expect(positiveEvidenceOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+
+        // R6 verification: verify that a forged session is distinguished
+        const forgedHeaders: Record<string, string> = {
+          cookie: `${BANK_CONSOLE_SESSION_COOKIE}=bank_finance:acme.${"0".repeat(64)}`,
+        };
+        if (idToken) forgedHeaders["authorization"] = `Bearer ${idToken}`;
+
+        const forgedOutcome = await downloadArtifact(
+          `${liveTargetOrigin}${statementPath}?bank=${bank}`,
+          { headers: forgedHeaders },
+        );
+        expect(forgedOutcome.status).toBe(403);
+        expect(forgedOutcome.errorCode).toBe("FORBIDDEN");
+        expect(forgedOutcome.errorMessage).toContain("Invalid or forged session signature");
+        expect(forgedOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+
+        // Blank/whitespace session rejection
+        const blankHeaders: Record<string, string> = {
+          cookie: `${BANK_CONSOLE_SESSION_COOKIE}=   `,
+        };
+        if (idToken) blankHeaders["authorization"] = `Bearer ${idToken}`;
+        const blankOutcome = await downloadArtifact(
+          `${liveTargetOrigin}${statementPath}?bank=${bank}`,
+          { headers: blankHeaders },
+        );
+        expect(blankOutcome.status).toBe(403);
+        expect(blankOutcome.errorCode).toBe("FORBIDDEN");
+        expect(blankOutcome.errorMessage).toContain("is not authorized to export statements");
+        expect(blankOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+      },
+    );
+
+    it.runIf(Boolean(apiOrigin))(
+      "tenant invoice download/reissue via authorized metadata",
+      async () => {
+        const expiredPath = process.env.SR_LIVE_DOC_LIVE_EXPIRED_INVOICE_PATH;
+        const tenantCookie = process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE_TENANT;
+        const crossTenantCookie =
+          process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT;
+
+        expect(
+          expiredPath,
+          "SR_LIVE_DOC_LIVE_EXPIRED_INVOICE_PATH required",
+        ).toBeTruthy();
+        expect(tenantCookie).toBeTruthy();
+        expect(crossTenantCookie).toBeTruthy();
+
+        const { getGoogleIdToken, sha256Hex } =
+          await import("./live-document-runner");
+
+        const apiIdToken = await getGoogleIdToken(apiOrigin!);
+        const apiHeaders: Record<string, string> = {};
+        if (apiIdToken) apiHeaders["authorization"] = `Bearer ${apiIdToken}`;
+
+        // 1. Expired link rejects with 410
+        const expiredOutcome = await downloadArtifact(
+          `${apiOrigin}${expiredPath}`,
+          { headers: apiHeaders },
+        );
+        expect(expiredOutcome.status).toBe(410);
+        expect(expiredOutcome.errorCode).toBe("CONTROLLED_DOWNLOAD_EXPIRED");
+        expect(expiredOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+
+        // R4 fix: extract the invoice id from the expired path to bind reissue
+        const match = expiredPath!.match(new RegExp("tenant-invoice/([^/?]+)"));
+        expect(match, "Could not extract invoiceId from expiredPath").toBeTruthy();
+        const targetInvoiceId = match![1];
+
+        // Validate expiry error retained manifest info
+        const expiredErrorData = expiredOutcome.errorData;
+        expect(expiredErrorData).toBeTruthy();
+        expect(expiredErrorData.subjectId).toBe(targetInvoiceId);
+
+        // Ensure manifest_hash in the expired path matches the fresh hash (original hash preservation)
+        const expiredUrlObj = new URL(expiredPath!, "http://localhost");
+        const originalHash = expiredUrlObj.searchParams.get("manifest_hash");
+        expect(originalHash).toBeTruthy();
+
+        // 2. Fetch fresh metadata from BFF using authorized tenant cookie + WIF token
+        const tenantIdToken = await getGoogleIdToken(tenantConsoleOrigin!);
+        const tenantHeaders: Record<string, string> = { cookie: `drts_tenant_session=${tenantCookie}` };
+        if (tenantIdToken) tenantHeaders["authorization"] = `Bearer ${tenantIdToken}`;
+
+        const bffRes = await fetch(
+          `${tenantConsoleOrigin}/control-plane-proxy/tenant/invoices`,
+          { headers: tenantHeaders },
+        );
+        expect(bffRes.status).toBe(200);
+        expect(bffRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
+        const bffJson = await bffRes.json();
+        const invoices = bffJson.data.items;
+        expect(invoices.length).toBeGreaterThan(0);
+
+        const targetInvoice = invoices.find((inv: any) => inv.invoiceId === targetInvoiceId);
+        expect(targetInvoice, `Invoice ${targetInvoiceId} not found in list`).toBeTruthy();
+        const invoiceId = targetInvoice.invoiceId;
+
+        const detailRes = await fetch(
+          `${tenantConsoleOrigin}/control-plane-proxy/tenant/invoices/${invoiceId}`,
+          { headers: tenantHeaders },
+        );
+        expect(detailRes.status).toBe(200);
+        expect(detailRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
+        const { data: detail } = await detailRes.json();
+
+        expect(detail.invoiceId).toBe(targetInvoiceId);
+        expect(detail.artifactDownloadMetadata.subjectId).toBe(targetInvoiceId);
+
+        const freshUrl = detail.artifactUrl;
+        const manifestHash = detail.artifactDownloadMetadata.manifestHash;
+        expect(freshUrl).toBeTruthy();
+        expect(manifestHash).toBeTruthy();
+        expect(manifestHash, "Original manifest hash must be preserved upon renewal").toBe(originalHash);
+
+        // 3. Successful download of expected bytes
+        let downloadUrl = freshUrl;
+        let downloadHeaders = apiHeaders;
+        if (!freshUrl.startsWith("http")) {
+            // Append /api to relative routes if missing, and resolve against apiOrigin
+            downloadUrl = freshUrl.startsWith("/api") ? `${apiOrigin}${freshUrl}` : `${apiOrigin}/api${freshUrl.startsWith("/") ? "" : "/"}${freshUrl}`;
+        } else {
+            const urlObj = new URL(freshUrl);
+            if (urlObj.origin === tenantConsoleOrigin) {
+                downloadHeaders = tenantHeaders;
+            } else if (urlObj.origin === apiOrigin) {
+                downloadHeaders = apiHeaders;
+            }
+        }
+
+        const freshOutcome = await downloadArtifact(downloadUrl, {
+          headers: downloadHeaders,
+        });
+        expect(freshOutcome.status).toBe(200);
+        expect(freshOutcome.bytes).not.toBeNull();
+        expect(freshOutcome.bytes!.length).toBeGreaterThan(0);
+        expect(sha256Hex(freshOutcome.bytes!)).toBe(manifestHash);
+
+        // R4 real PDF/amount verification using extractPdfText helper
+        const pdfText = await extractPdfText(freshOutcome.bytes!);
+        // Verify amount exists in the uncompressed PDF text based on authoritative amount
+        const amountMinor = detail.amount.amountMinor;
+        const currency = detail.amount.currency;
+        const amountFormatted = `${currency} ${(amountMinor / 100).toFixed(2)}`;
+        expect(pdfText).toContain(amountFormatted);
+        expect(pdfText).toContain(targetInvoiceId);
+        expect(pdfText).toContain(detail.tenantId);
+
+        expect(freshOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+
+        // 4. Role negative: cross-tenant attempt on the same invoice detail BFF endpoint
+        const crossTenantHeaders: Record<string, string> = {
+          cookie: `drts_tenant_session=${crossTenantCookie}`,
+        };
+        if (tenantIdToken) crossTenantHeaders["authorization"] = `Bearer ${tenantIdToken}`;
+
+        // Cross-tenant list must verify SHA
+        const crossListRes = await fetch(
+          `${tenantConsoleOrigin}/control-plane-proxy/tenant/invoices`,
+          { headers: crossTenantHeaders },
+        );
+        expect(crossListRes.status).toBe(200);
+        expect(crossListRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
+
+        const crossRes = await fetch(
+          `${tenantConsoleOrigin}/control-plane-proxy/tenant/invoices/${invoiceId}`,
+          { headers: crossTenantHeaders },
+        );
+        // R6 fix: actual returns 404 NOT_FOUND when tenant does not own invoice
+        expect(crossRes.status).toBe(404);
+        const crossData = await crossRes.json();
+        expect(crossData.error).toBeTruthy();
+        expect(crossData.error.code).toBe("NOT_FOUND");
+        expect(crossRes.headers.get("x-drts-candidate-sha")).toBe(
+          process.env.CANDIDATE_SHA,
+        );
+      },
+    );
+
+        it.runIf(Boolean(apiOrigin) && Boolean(platformAdminOrigin))(
+      "placard and report download via authorized metadata",
+      async () => {
+        const placardPath = process.env.SR_LIVE_DOC_LIVE_PLACARD_PATH;
+        const reportPath = process.env.SR_LIVE_DOC_LIVE_REPORT_PATH;
+
+        expect(placardPath, "SR_LIVE_DOC_LIVE_PLACARD_PATH required").toBeTruthy();
+        expect(reportPath, "SR_LIVE_DOC_LIVE_REPORT_PATH required").toBeTruthy();
+
+        const { getGoogleIdToken, sha256Hex } = await import("./live-document-runner");
+
+        const apiIdToken = await getGoogleIdToken(apiOrigin!);
+        const apiHeaders: Record<string, string> = {};
+        if (apiIdToken) apiHeaders["authorization"] = `Bearer ${apiIdToken}`;
+
+        const platformAdminOriginStrict = platformAdminOrigin!;
+        const platformIdToken = await getGoogleIdToken(platformAdminOriginStrict);
+        const platformHeaders: Record<string, string> = {};
+        if (platformIdToken) platformHeaders["authorization"] = `Bearer ${platformIdToken}`;
+
+        // R7: Real control plane IAP strict mode validation requires positive evidence.
+        // We use the supported ingress which enforces IAP authority.
+        const metadataRes = await fetch(`${platformAdminOriginStrict}/control-plane-proxy/platform-admin/placards`, { headers: platformHeaders });
+
+        if (metadataRes.status === 401 || metadataRes.status === 403) {
+          throw new Error(`IAP authority missing for runner on platform admin ingress (status ${metadataRes.status})`);
+        }
+
+        expect(metadataRes.status).toBe(200);
+        expect(metadataRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
+        const { data: placards } = await metadataRes.json();
+
+        // Report
+        await fetchAndValidateReport(reportPath!, platformAdminOriginStrict, platformHeaders, process.env.CANDIDATE_SHA, fetch);
+
+        // R5: Prove actual expiry of the given placard path
+        const resolveUrlAndHeaders = (url: string) => {
+            let downloadUrl = url;
+            let downloadHeaders = apiHeaders;
+            if (!url.startsWith("http")) {
+                downloadUrl = url.startsWith("/api") ? `${apiOrigin}${url}` : `${apiOrigin}/api${url.startsWith("/") ? "" : "/"}${url}`;
+            } else {
+                const urlObj = new URL(url);
+                if (urlObj.origin === platformAdminOriginStrict) {
+                    downloadHeaders = platformHeaders;
+                }
+            }
+            return { downloadUrl, downloadHeaders };
+        };
+
+        const { downloadUrl: expiredDownloadUrl, downloadHeaders: expiredHeaders } = resolveUrlAndHeaders(placardPath!);
+        const expiredPlacardOutcome = await downloadArtifact(expiredDownloadUrl, { headers: expiredHeaders });
+        expect(expiredPlacardOutcome.status).toBe(410);
+        expect(expiredPlacardOutcome.errorCode).toBe("CONTROLLED_DOWNLOAD_EXPIRED");
+        expect(expiredPlacardOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+
+        const match = placardPath!.match(new RegExp("placard/([^/?]+)"));
+        expect(match, "Could not extract placardVersionId from placardPath").toBeTruthy();
+        const targetPlacardId = match![1];
+
+        // Parse manifest_hash from the expired URL to verify materialized hash remains unchanged
+        const oldHashMatch = placardPath!.match(new RegExp("manifest_hash=([^&]+)"));
+        const oldManifestHash = oldHashMatch ? decodeURIComponent(oldHashMatch[1]!) : null;
+
+        // Find explicit authoritative placard version from metadata
+        const placard = placards.items.find((p: any) => p.placardVersionId === targetPlacardId && p.downloadMetadata);
+        expect(placard, `No placard found matching requested id ${targetPlacardId}`).toBeTruthy();
+
+        const freshUrl = placard.downloadMetadata.downloadUrl;
+        const manifestHash = placard.downloadMetadata.manifestHash;
+
+        if (oldManifestHash) {
+          expect(manifestHash, "Materialized hash should be unchanged after refresh").toBe(oldManifestHash);
+        }
+
+        const { downloadUrl: finalDownloadUrl, downloadHeaders: finalHeaders } = resolveUrlAndHeaders(freshUrl);
+        const placardOutcome = await downloadArtifact(finalDownloadUrl, { headers: finalHeaders });
+        expect(placardOutcome.status).toBe(200);
+        expect(placardOutcome.bytes).not.toBeNull();
+        expect(placardOutcome.bytes!.length).toBeGreaterThan(0);
+        expect(sha256Hex(placardOutcome.bytes!)).toBe(manifestHash);
+        expect(placardOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+
+        // Verify version/public info with printable content using real PDF parser
+        const placardText = await extractPdfText(placardOutcome.bytes!);
+        expect(placardText).toContain(placard.versionCode);
+        expect(placardText).toContain(placard.publicInfoVersionId);
+        expect(placardText).toContain(placard.subjectId);
+
+        // R5: Exercise same-version re-download (refresh)
+        const refreshRes = await fetch(
+          `${platformAdminOriginStrict}/control-plane-proxy/platform-admin/placards?versionCode=${placard.versionCode}`,
+          { headers: platformHeaders },
+        );
+        expect(refreshRes.status).toBe(200);
+        expect(refreshRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
+        const { data: refreshedPlacards } = await refreshRes.json();
+
+        const refreshedPlacard = refreshedPlacards.items.find((p: any) => p.placardVersionId === placard.placardVersionId);
+        expect(refreshedPlacard).toBeTruthy();
+
+        const refreshedUrl = refreshedPlacard.downloadMetadata.downloadUrl;
+        const refreshedHash = refreshedPlacard.downloadMetadata.manifestHash;
+        expect(refreshedHash).toBe(manifestHash);
+
+        const { downloadUrl: refreshDownloadUrl, downloadHeaders: refreshHeaders } = resolveUrlAndHeaders(refreshedUrl);
+        const refreshOutcome = await downloadArtifact(refreshDownloadUrl, { headers: refreshHeaders });
+        expect(refreshOutcome.status).toBe(200);
+        expect(refreshOutcome.bytes).not.toBeNull();
+        expect(sha256Hex(refreshOutcome.bytes!)).toBe(refreshedHash);
+        expect(refreshOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+
+        const refreshedText = await extractPdfText(refreshOutcome.bytes!);
+        expect(refreshedText).toContain(refreshedPlacard.versionCode);
+        expect(refreshedText).toContain(refreshedPlacard.publicInfoVersionId);
+        expect(refreshedText).toContain(refreshedPlacard.subjectId);
       },
     );
   });

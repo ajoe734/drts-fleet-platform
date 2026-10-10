@@ -21,9 +21,31 @@ import type {
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
+import { detectAuthEnvironment } from "../../config/auth-startup-config";
 
 type JsonRecordRow = {
   record: unknown;
+};
+
+/**
+ * Controls whether an upsert may overwrite an existing role binding's
+ * validFrom.
+ *
+ * Default (false): validFrom is set-once, like createdAt. This protects
+ * idempotent authentication provisioning (Google workload identity re-auth,
+ * IAP auto-provisioning) where two callers can race to create the same
+ * previously-unseen role binding; the second writer must not stomp the
+ * first writer's already-persisted validFrom/updatedAt and bump the
+ * workforce token version, which would invalidate the first writer's
+ * still-valid session (SR-AUTH-SESSION-SUPERSEDE-20261003 R3).
+ *
+ * true: the caller has read the current binding and is making an
+ * intentional grant change (e.g. an administrator changing roleCode), and
+ * the new validFrom it supplies must persist, even if validFrom is the
+ * only field that changed (SR-AUTH-SESSION-SUPERSEDE-20261003 R4).
+ */
+export type RoleBindingMutationOptions = {
+  allowValidFromMutation?: boolean;
 };
 
 type PersistedSessionRow = {
@@ -75,6 +97,18 @@ export interface ConsumeWorkloadIdentityAssertionInput {
 
 const LEGACY_TENANT_USER_ISSUER = "legacy_tenant_email";
 
+export interface TenantOidcProof {
+  issuer: string;
+  subject: string;
+  email: string;
+  tenantId?: string | null;
+}
+
+export type OidcBoundTenantUser = TenantUserRoleRecord & {
+  oidcIssuer?: string;
+  subjectId?: string;
+};
+
 export function hashIdentitySecret(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
 }
@@ -82,6 +116,7 @@ export function hashIdentitySecret(secret: string): string {
 @Injectable()
 export class IdentityRepository implements OnModuleInit {
   private readonly logger = new Logger(IdentityRepository.name);
+  private readonly fallbackTenantUsers = new Map<string, OidcBoundTenantUser>();
 
   private readonly fallbackPrincipals = new Map<
     string,
@@ -229,15 +264,27 @@ export class IdentityRepository implements OnModuleInit {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      const principal = await this.upsertPrincipal(client, principalDraft);
-      const membership = await this.upsertMembership(client, {
-        ...membershipDraft,
-        principalId: principal.principalId,
-      });
-      await this.upsertRoleBinding(client, {
-        ...roleBindingDraft,
-        membershipId: membership.membershipId,
-      });
+      const principal = await this.upsertPrincipal(
+        client,
+        principalDraft,
+        true,
+      );
+      const membership = await this.upsertMembership(
+        client,
+        {
+          ...membershipDraft,
+          principalId: principal.principalId,
+        },
+        true,
+      );
+      await this.upsertRoleBinding(
+        client,
+        {
+          ...roleBindingDraft,
+          membershipId: membership.membershipId,
+        },
+        true,
+      );
       await client.query("COMMIT");
       return { principal, membership };
     } catch (error) {
@@ -252,7 +299,12 @@ export class IdentityRepository implements OnModuleInit {
     principal: CanonicalIdentityPrincipalRecord;
     membership: CanonicalIdentityMembershipRecord;
   } | null> {
-    if (process.env.DRTS_E2E_PROVISIONING !== "true") {
+    const environment = detectAuthEnvironment(process.env);
+    if (
+      process.env.DRTS_E2E_PROVISIONING !== "true" ||
+      environment === "production" ||
+      environment === "staging"
+    ) {
       return null;
     }
     const existingPrincipal = await this.findPrincipalById("live-map-observer");
@@ -279,7 +331,8 @@ export class IdentityRepository implements OnModuleInit {
     };
 
     const membershipDraft: CanonicalIdentityMembershipRecord = {
-      membershipId: existingMembership?.membershipId ?? `membership_ops_${randomUUID()}`,
+      membershipId:
+        existingMembership?.membershipId ?? `membership_ops_${randomUUID()}`,
       sourceRef: "live_map_observer:membership:ops",
       principalId: principalDraft.principalId,
       realm: "ops",
@@ -316,15 +369,27 @@ export class IdentityRepository implements OnModuleInit {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      const principal = await this.upsertPrincipal(client, principalDraft);
-      const membership = await this.upsertMembership(client, {
-        ...membershipDraft,
-        principalId: principal.principalId,
-      });
-      await this.upsertRoleBinding(client, {
-        ...roleBindingDraft,
-        membershipId: membership.membershipId,
-      });
+      const principal = await this.upsertPrincipal(
+        client,
+        principalDraft,
+        true,
+      );
+      const membership = await this.upsertMembership(
+        client,
+        {
+          ...membershipDraft,
+          principalId: principal.principalId,
+        },
+        true,
+      );
+      await this.upsertRoleBinding(
+        client,
+        {
+          ...roleBindingDraft,
+          membershipId: membership.membershipId,
+        },
+        true,
+      );
       await client.query("COMMIT");
       return { principal, membership };
     } catch (error) {
@@ -338,6 +403,7 @@ export class IdentityRepository implements OnModuleInit {
   async syncLegacyTenantUserRole(
     userRole: TenantUserRoleRecord,
   ): Promise<CanonicalTenantUserIdentitySnapshot> {
+    const oidcUser = userRole as OidcBoundTenantUser;
     const normalizedEmail = userRole.email.trim().toLowerCase();
     const principalStatus = this.mapLegacyTenantStatus(userRole.status);
     const membershipStatus = this.mapLegacyTenantStatus(userRole.status);
@@ -351,14 +417,14 @@ export class IdentityRepository implements OnModuleInit {
     const principalDraft: CanonicalIdentityPrincipalRecord = {
       principalId: `principal_${randomUUID()}`,
       sourceRef: `${sourcePrefix}:principal`,
-      issuer: LEGACY_TENANT_USER_ISSUER,
-      subject: this.buildLegacyTenantSubject(
-        userRole.tenantId,
-        normalizedEmail,
-      ),
+      issuer: oidcUser.oidcIssuer || LEGACY_TENANT_USER_ISSUER,
+      subject:
+        oidcUser.oidcIssuer && oidcUser.subjectId
+          ? oidcUser.subjectId
+          : this.buildLegacyTenantSubject(userRole.tenantId, normalizedEmail),
       principalType: "human",
       email: normalizedEmail,
-      emailVerified: false,
+      emailVerified: Boolean(oidcUser.oidcIssuer && oidcUser.subjectId),
       displayName: userRole.displayName,
       status: principalStatus,
       createdAt: userRole.invitedAt,
@@ -415,6 +481,7 @@ export class IdentityRepository implements OnModuleInit {
     };
 
     if (!this.isEnabled()) {
+      this.fallbackTenantUsers.set(userRole.userId, { ...userRole });
       const principal = this.upsertFallbackPrincipal(principalDraft);
       const membership = this.upsertFallbackMembership({
         ...membershipDraft,
@@ -454,16 +521,28 @@ export class IdentityRepository implements OnModuleInit {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      const principal = await this.upsertPrincipal(client, principalDraft);
-      const membership = await this.upsertMembership(client, {
-        ...membershipDraft,
-        principalId: principal.principalId,
-        invitationId: null,
-      });
-      const roleBinding = await this.upsertRoleBinding(client, {
-        ...roleBindingDraft,
-        membershipId: membership.membershipId,
-      });
+      const principal = await this.upsertPrincipal(
+        client,
+        principalDraft,
+        true,
+      );
+      const membership = await this.upsertMembership(
+        client,
+        {
+          ...membershipDraft,
+          principalId: principal.principalId,
+          invitationId: null,
+        },
+        true,
+      );
+      const roleBinding = await this.upsertRoleBinding(
+        client,
+        {
+          ...roleBindingDraft,
+          membershipId: membership.membershipId,
+        },
+        true,
+      );
       const existingInvitationResult = await client.query<JsonRecordRow>(
         `SELECT record FROM iam.identity_invitations WHERE membership_id = $1 ORDER BY updated_at DESC LIMIT 1`,
         [membership.membershipId],
@@ -485,10 +564,14 @@ export class IdentityRepository implements OnModuleInit {
               })
             : null;
       const persistedMembership = persistedInvitation
-        ? await this.upsertMembership(client, {
-            ...membership,
-            invitationId: persistedInvitation.invitationId,
-          })
+        ? await this.upsertMembership(
+            client,
+            {
+              ...membership,
+              invitationId: persistedInvitation.invitationId,
+            },
+            true,
+          )
         : membership;
       await client.query("COMMIT");
       return {
@@ -625,6 +708,263 @@ export class IdentityRepository implements OnModuleInit {
     }
   }
 
+  async findTenantUserForAuthentication(
+    tenantId: string,
+    userId: string,
+  ): Promise<OidcBoundTenantUser | null> {
+    if (!this.isEnabled()) {
+      const user = this.fallbackTenantUsers.get(userId);
+      return user?.tenantId === tenantId ? { ...user } : null;
+    }
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_tenant_user_roles WHERE tenant_id = $1 AND user_id = $2`,
+      [tenantId, userId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<OidcBoundTenantUser>(
+          result.rows[0].record,
+          "admin.phase1_tenant_user_roles",
+        )
+      : null;
+  }
+
+  async findTenantUserByOidcSubject(
+    proof: Pick<TenantOidcProof, "issuer" | "subject" | "tenantId">,
+  ): Promise<OidcBoundTenantUser | null> {
+    if (!this.isEnabled()) {
+      const matches = [...this.fallbackTenantUsers.values()].filter(
+        (user) =>
+          user.oidcIssuer === proof.issuer &&
+          user.subjectId === proof.subject &&
+          (!proof.tenantId || user.tenantId === proof.tenantId),
+      );
+      return matches.length === 1 ? { ...matches[0]! } : null;
+    }
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_tenant_user_roles
+        WHERE record->>'oidcIssuer' = $1 AND record->>'subjectId' = $2
+          AND ($3::text IS NULL OR tenant_id = $3) LIMIT 2`,
+      [proof.issuer, proof.subject, proof.tenantId || null],
+    );
+    return result.rows.length === 1
+      ? this.parseRecord<OidcBoundTenantUser>(
+          result.rows[0]!.record,
+          "admin.phase1_tenant_user_roles",
+        )
+      : null;
+  }
+
+  /** One transaction owns invitation consumption, identity binding and activation.
+   * A failed check never burns the proof. The (issuer, subject) principal unique
+   * constraint also prevents two invitations from binding the same identity. */
+  async acceptTenantOidcInvitation(
+    tokenHash: string,
+    proof: TenantOidcProof,
+  ): Promise<{
+    user: OidcBoundTenantUser;
+    invitation: CanonicalIdentityInvitationRecord;
+  } | null> {
+    const now = new Date().toISOString();
+    const validInvitation = (
+      invitation: CanonicalIdentityInvitationRecord | undefined,
+    ) =>
+      invitation &&
+      invitation.realm === "tenant" &&
+      !invitation.acceptedAt &&
+      !invitation.revokedAt &&
+      Date.parse(invitation.expiresAt) > Date.parse(now) &&
+      invitation.email.toLowerCase() === proof.email.toLowerCase() &&
+      (!proof.tenantId || proof.tenantId === invitation.tenantId);
+    const validUser = (
+      user: OidcBoundTenantUser | undefined,
+      invitation: CanonicalIdentityInvitationRecord,
+    ) =>
+      user &&
+      user.status === "invited" &&
+      !user.oidcIssuer &&
+      !user.subjectId &&
+      user.tenantId === invitation.tenantId &&
+      user.email.toLowerCase() === proof.email.toLowerCase() &&
+      user.roleCode === invitation.roleCode;
+    const activateUser = (user: OidcBoundTenantUser): OidcBoundTenantUser => ({
+      ...user,
+      status: "active",
+      oidcIssuer: proof.issuer,
+      subjectId: proof.subject,
+      updatedAt: now,
+    });
+    if (!proof.issuer || !proof.subject || !proof.email) return null;
+    if (!this.isEnabled()) {
+      // No await before all checks and writes: the offline repository preserves
+      // the same one-shot semantics for concurrent unit-test consumers.
+      const invitation = [...this.fallbackInvitations.values()].find(
+        (entry) => entry.tokenHash === tokenHash,
+      );
+      if (!invitation || !validInvitation(invitation)) return null;
+      const membership = this.fallbackMemberships.get(invitation.membershipId);
+      const principal =
+        membership && this.fallbackPrincipals.get(membership.principalId);
+      const user = [...this.fallbackTenantUsers.values()].find(
+        (entry) =>
+          membership?.sourceRef ===
+          `tenant_user_role:${entry.userId}:membership`,
+      );
+      if (
+        !membership ||
+        membership.status !== "invited" ||
+        membership.realm !== "tenant" ||
+        membership.scopeRef !== invitation.scopeRef ||
+        membership.tenantId !== invitation.tenantId ||
+        !principal ||
+        principal.status !== "invited" ||
+        principal.issuer !== LEGACY_TENANT_USER_ISSUER ||
+        !user ||
+        principal.sourceRef !== `tenant_user_role:${user.userId}:principal` ||
+        !validUser(user, invitation) ||
+        [...this.fallbackPrincipals.values()].some(
+          (entry) =>
+            entry.issuer === proof.issuer && entry.subject === proof.subject,
+        )
+      )
+        return null;
+      const activated = activateUser(user);
+      this.upsertFallbackPrincipal({
+        ...principal,
+        issuer: proof.issuer,
+        subject: proof.subject,
+        status: "active",
+        emailVerified: true,
+        updatedAt: now,
+      });
+      this.upsertFallbackMembership({
+        ...membership,
+        status: "active",
+        updatedAt: now,
+      });
+      const accepted = this.upsertFallbackInvitation({
+        ...invitation,
+        acceptedAt: now,
+        updatedAt: now,
+      });
+      this.fallbackTenantUsers.set(user.userId, activated);
+      return { user: { ...activated }, invitation: accepted };
+    }
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const invitationRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_invitations WHERE token_hash = $1
+          AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > $2::timestamptz FOR UPDATE`,
+        [tokenHash, now],
+      );
+      const invitation =
+        invitationRows.rows[0] &&
+        this.parseRecord<CanonicalIdentityInvitationRecord>(
+          invitationRows.rows[0].record,
+          "iam.identity_invitations",
+        );
+      if (!invitation || !validInvitation(invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const membershipRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_memberships WHERE membership_id = $1 FOR UPDATE`,
+        [invitation.membershipId],
+      );
+      const membership =
+        membershipRows.rows[0] &&
+        this.parseRecord<CanonicalIdentityMembershipRecord>(
+          membershipRows.rows[0].record,
+          "iam.identity_memberships",
+        );
+      if (
+        !membership ||
+        membership.status !== "invited" ||
+        membership.realm !== "tenant" ||
+        membership.scopeRef !== invitation.scopeRef ||
+        membership.tenantId !== invitation.tenantId
+      ) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const principalRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_principals WHERE principal_id = $1 FOR UPDATE`,
+        [membership.principalId],
+      );
+      const principal =
+        principalRows.rows[0] &&
+        this.parseRecord<CanonicalIdentityPrincipalRecord>(
+          principalRows.rows[0].record,
+          "iam.identity_principals",
+        );
+      const userId = /^tenant_user_role:(.+):membership$/.exec(
+        membership.sourceRef ?? "",
+      )?.[1];
+      if (
+        !principal ||
+        principal.status !== "invited" ||
+        principal.issuer !== LEGACY_TENANT_USER_ISSUER ||
+        !userId
+      ) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const userRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM admin.phase1_tenant_user_roles WHERE user_id = $1 FOR UPDATE`,
+        [userId],
+      );
+      const user =
+        userRows.rows[0] &&
+        this.parseRecord<OidcBoundTenantUser>(
+          userRows.rows[0].record,
+          "admin.phase1_tenant_user_roles",
+        );
+      if (
+        !user ||
+        principal.sourceRef !== `tenant_user_role:${user.userId}:principal` ||
+        !validUser(user, invitation)
+      ) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const activated = activateUser(user);
+      await this.upsertPrincipal(
+        client,
+        {
+          ...principal,
+          issuer: proof.issuer,
+          subject: proof.subject,
+          status: "active",
+          emailVerified: true,
+          updatedAt: now,
+        },
+        true,
+      );
+      await this.upsertMembership(
+        client,
+        { ...membership, status: "active", updatedAt: now },
+        true,
+      );
+      const accepted = await this.upsertInvitation(client, {
+        ...invitation,
+        acceptedAt: now,
+        updatedAt: now,
+      });
+      await client.query(
+        `UPDATE admin.phase1_tenant_user_roles SET status = 'active', updated_at = $2::timestamptz, record = $3::jsonb WHERE user_id = $1`,
+        [user.userId, now, JSON.stringify(activated)],
+      );
+      await client.query("COMMIT");
+      return { user: activated, invitation: accepted };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      if ((error as { code?: string }).code === "23505") return null;
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   /** Atomically consumes a valid proof so concurrent acceptance cannot activate twice. */
   async consumeInvitationToken(
     tokenHash: string,
@@ -741,17 +1081,25 @@ export class IdentityRepository implements OnModuleInit {
         await client.query("ROLLBACK");
         return null;
       }
-      const activatedPrincipal = await this.upsertPrincipal(client, {
-        ...principal,
-        status: "active",
-        emailVerified: true,
-        updatedAt: activatedAt,
-      });
-      const activatedMembership = await this.upsertMembership(client, {
-        ...membership,
-        status: "active",
-        updatedAt: activatedAt,
-      });
+      const activatedPrincipal = await this.upsertPrincipal(
+        client,
+        {
+          ...principal,
+          status: "active",
+          emailVerified: true,
+          updatedAt: activatedAt,
+        },
+        true,
+      );
+      const activatedMembership = await this.upsertMembership(
+        client,
+        {
+          ...membership,
+          status: "active",
+          updatedAt: activatedAt,
+        },
+        true,
+      );
       await client.query("COMMIT");
       return {
         principal: activatedPrincipal,
@@ -811,7 +1159,7 @@ export class IdentityRepository implements OnModuleInit {
 
     const client = await this.databaseService!.connect();
     try {
-      return await this.upsertPrincipal(client, principal);
+      return await this.upsertPrincipal(client, principal, false);
     } finally {
       client.release();
     }
@@ -826,7 +1174,7 @@ export class IdentityRepository implements OnModuleInit {
 
     const client = await this.databaseService!.connect();
     try {
-      return await this.upsertMembership(client, membership);
+      return await this.upsertMembership(client, membership, false);
     } finally {
       client.release();
     }
@@ -834,14 +1182,15 @@ export class IdentityRepository implements OnModuleInit {
 
   async ensureRoleBindingRecord(
     roleBinding: CanonicalIdentityRoleBindingRecord,
+    options: RoleBindingMutationOptions = {},
   ): Promise<CanonicalIdentityRoleBindingRecord> {
     if (!this.isEnabled()) {
-      return this.upsertFallbackRoleBinding(roleBinding);
+      return this.upsertFallbackRoleBinding(roleBinding, options);
     }
 
     const client = await this.databaseService!.connect();
     try {
-      return await this.upsertRoleBinding(client, roleBinding);
+      return await this.upsertRoleBinding(client, roleBinding, false, options);
     } finally {
       client.release();
     }
@@ -1177,6 +1526,7 @@ export class IdentityRepository implements OnModuleInit {
     principal: CanonicalIdentityPrincipalRecord,
     membership: CanonicalIdentityMembershipRecord,
     roleBindings: CanonicalIdentityRoleBindingRecord[],
+    options: RoleBindingMutationOptions = {},
   ): Promise<{
     principal: CanonicalIdentityPrincipalRecord;
     membership: CanonicalIdentityMembershipRecord;
@@ -1189,10 +1539,13 @@ export class IdentityRepository implements OnModuleInit {
         principalId: p.principalId,
       });
       const rbs = roleBindings.map((b) =>
-        this.upsertFallbackRoleBinding({
-          ...b,
-          membershipId: m.membershipId,
-        }),
+        this.upsertFallbackRoleBinding(
+          {
+            ...b,
+            membershipId: m.membershipId,
+          },
+          options,
+        ),
       );
       return { principal: p, membership: m, roleBindings: rbs };
     }
@@ -1200,17 +1553,26 @@ export class IdentityRepository implements OnModuleInit {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      const p = await this.upsertPrincipal(client, principal);
-      const m = await this.upsertMembership(client, {
-        ...membership,
-        principalId: p.principalId,
-      });
+      const p = await this.upsertPrincipal(client, principal, true);
+      const m = await this.upsertMembership(
+        client,
+        {
+          ...membership,
+          principalId: p.principalId,
+        },
+        true,
+      );
       const rbs: CanonicalIdentityRoleBindingRecord[] = [];
       for (const binding of roleBindings) {
-        const rb = await this.upsertRoleBinding(client, {
-          ...binding,
-          membershipId: m.membershipId,
-        });
+        const rb = await this.upsertRoleBinding(
+          client,
+          {
+            ...binding,
+            membershipId: m.membershipId,
+          },
+          true,
+          options,
+        );
         rbs.push(rb);
       }
       await client.query("COMMIT");
@@ -2518,12 +2880,108 @@ export class IdentityRepository implements OnModuleInit {
     );
   }
 
+  // identity_principals/identity_memberships each carry more than one
+  // UNIQUE constraint (the primary key plus source_ref, plus a composite
+  // context key for memberships) on top of the ON CONFLICT arbiter
+  // (source_ref). Postgres's speculative-insertion retry only covers the
+  // named arbiter: two genuinely concurrent first-time inserts for the
+  // SAME not-yet-existing row (identical principal_id/source_ref -- two
+  // parallel automation runs authenticating for the first time) can both
+  // pass the arbiter's conflict check and then have the LOSING insert
+  // raise a hard, unhandled 23505 on the non-arbiter constraint instead of
+  // being absorbed by DO UPDATE.
+  private isUniqueViolation(error: unknown): boolean {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      (error as { code?: unknown }).code === "23505"
+    );
+  }
+
+  // Shared recovery for the 23505 race described above, used by
+  // upsertPrincipal/upsertMembership/upsertRoleBinding
+  // (SR-AUTH-SESSION-SUPERSEDE-20261003 R9-TX/R10).
+  //
+  // R9-TX: every caller of these three helpers that already issued BEGIN
+  // (ensureDefaultPlatformAccount, ensureLiveMapObserverAccount,
+  // syncLegacyTenantUserRole, the invitation-activation path and
+  // upsertWorkforceIdentity) leaves its *entire* transaction aborted
+  // (25P02) once a statement raises 23505 -- a plain follow-up SELECT on
+  // the same client fails too, so the bundle is lost instead of recovered.
+  // A SAVEPOINT taken immediately before the attempt, rolled back on
+  // catch, clears that aborted state before anything else runs on this
+  // connection. The three standalone ensure*Record callers never issue
+  // BEGIN (each statement is its own implicit autocommit transaction), so
+  // SAVEPOINT would itself fail there with "no transaction is in
+  // progress" -- insideTransaction lets each call site say which regime
+  // it is in.
+  //
+  // R10: retrying the *exact same* statement, rather than falling back to
+  // a bare `SELECT ... WHERE source_ref = $1`, is what tells a compatible
+  // race apart from a genuine conflict. If the 23505 came from a
+  // concurrent first-time insert for this same source_ref, the row now
+  // exists after the retry's ON CONFLICT DO UPDATE runs, and the existing
+  // changed/stale WHERE guard decides -- atomically -- whether this
+  // caller's content should still apply. If the 23505 instead came from
+  // this write's new values colliding with a *different*, already-
+  // persisted row (e.g. reassigning a principal's subject to one another
+  // principal already owns), the retry hits the identical conflict again
+  // and throws uncaught here: that is a real, non-transient error and
+  // must propagate so the caller's write is rejected, not silently
+  // discarded in favor of stale data.
+  private async runUpsertWithConflictRecovery<R>(
+    client: PoolClient,
+    savepointName: string,
+    insideTransaction: boolean,
+    attempt: () => Promise<{ rows: R[] }>,
+  ): Promise<{ rows: R[] }> {
+    if (insideTransaction) {
+      await client.query(`SAVEPOINT ${savepointName}`);
+    }
+    try {
+      return await attempt();
+    } catch (error) {
+      if (!this.isUniqueViolation(error)) {
+        throw error;
+      }
+      if (insideTransaction) {
+        await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+      }
+      return await attempt();
+    }
+  }
+
+  // The three upserts below decide "did a tracked field actually change"
+  // via the ON CONFLICT ... WHERE clause instead of a separate SELECT +
+  // JS comparison. A no-op "ensure" (session re-issuance) must leave
+  // updated_at untouched -- it feeds JwtAuthService.validateDurableState's
+  // workforce version fingerprint, and bumping it on every re-issuance
+  // would silently revoke every other still-valid session for the same
+  // principal. Doing the comparison in application code from a prior
+  // SELECT is racy: a concurrent genuine mutation (e.g. principal
+  // suspension) landing between that read and this write can be
+  // overwritten by a stale "unchanged" decision, resurrecting a token that
+  // should have been invalidated. The WHERE clause instead compares
+  // EXCLUDED against the row Postgres has already locked for this same
+  // INSERT ... ON CONFLICT statement, so the decision and the write happen
+  // atomically with no gap for another transaction to land in between.
+  // When nothing tracked changed, Postgres skips the DO UPDATE entirely
+  // (RETURNING yields no row), so the row -- and its embedded JSON -- is
+  // left byte-for-byte as it was; the caller falls back to a plain SELECT
+  // purely to obtain a return value, not to decide anything.
+
   private async upsertPrincipal(
     client: PoolClient,
     record: CanonicalIdentityPrincipalRecord,
+    insideTransaction: boolean,
   ) {
-    const result = await client.query<JsonRecordRow>(
-      `
+    const result = await this.runUpsertWithConflictRecovery<JsonRecordRow>(
+      client,
+      "upsert_principal_sp",
+      insideTransaction,
+      () =>
+        client.query<JsonRecordRow>(
+          `
         INSERT INTO iam.identity_principals (
           principal_id,
           source_ref,
@@ -2550,29 +3008,62 @@ export class IdentityRepository implements OnModuleInit {
           account_status = EXCLUDED.account_status,
           updated_at = EXCLUDED.updated_at,
           record = jsonb_set(
-            EXCLUDED.record,
-            '{principalId}',
-            to_jsonb(iam.identity_principals.principal_id)
+            jsonb_set(
+              EXCLUDED.record,
+              '{principalId}',
+              to_jsonb(iam.identity_principals.principal_id)
+            ),
+            '{createdAt}',
+            to_jsonb(iam.identity_principals.created_at)
           )
+        WHERE
+          (
+            iam.identity_principals.issuer IS DISTINCT FROM EXCLUDED.issuer
+            OR iam.identity_principals.subject IS DISTINCT FROM EXCLUDED.subject
+            OR iam.identity_principals.principal_type IS DISTINCT FROM EXCLUDED.principal_type
+            OR iam.identity_principals.email_normalized IS DISTINCT FROM EXCLUDED.email_normalized
+            OR iam.identity_principals.email_verified IS DISTINCT FROM EXCLUDED.email_verified
+            OR iam.identity_principals.display_name IS DISTINCT FROM EXCLUDED.display_name
+            OR iam.identity_principals.account_status IS DISTINCT FROM EXCLUDED.account_status
+          )
+          -- A content-differing but stale-timestamped ensure (e.g. a
+          -- delayed reauth whose updated_at is derived from an assertion's
+          -- iat, not arrival time) must never overwrite a state that a
+          -- genuinely newer write already committed: that would both revert
+          -- the newer change and roll the durable version backward,
+          -- reviving tokens the newer change was meant to invalidate. See
+          -- SR-AUTH-SESSION-SUPERSEDE-20261003 R2/R6.
+          AND EXCLUDED.updated_at >= iam.identity_principals.updated_at
         RETURNING record
       `,
-      [
-        record.principalId,
-        record.sourceRef,
-        record.issuer,
-        record.subject,
-        record.principalType,
-        record.email,
-        record.emailVerified,
-        record.displayName,
-        record.status,
-        record.createdAt,
-        record.updatedAt,
-        JSON.stringify(record),
-      ],
+          [
+            record.principalId,
+            record.sourceRef,
+            record.issuer,
+            record.subject,
+            record.principalType,
+            record.email,
+            record.emailVerified,
+            record.displayName,
+            record.status,
+            record.createdAt,
+            record.updatedAt,
+            JSON.stringify(record),
+          ],
+        ),
+    );
+    if (result.rows[0]?.record) {
+      return this.parseRecord<CanonicalIdentityPrincipalRecord>(
+        result.rows[0].record,
+        "iam.identity_principals",
+      );
+    }
+    const current = await client.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_principals WHERE source_ref = $1 LIMIT 1`,
+      [record.sourceRef],
     );
     return this.parseRecord<CanonicalIdentityPrincipalRecord>(
-      result.rows[0]?.record,
+      current.rows[0]?.record,
       "iam.identity_principals",
     );
   }
@@ -2580,9 +3071,15 @@ export class IdentityRepository implements OnModuleInit {
   private async upsertMembership(
     client: PoolClient,
     record: CanonicalIdentityMembershipRecord,
+    insideTransaction: boolean,
   ) {
-    const result = await client.query<JsonRecordRow>(
-      `
+    const result = await this.runUpsertWithConflictRecovery<JsonRecordRow>(
+      client,
+      "upsert_membership_sp",
+      insideTransaction,
+      () =>
+        client.query<JsonRecordRow>(
+          `
         INSERT INTO iam.identity_memberships (
           membership_id,
           source_ref,
@@ -2611,30 +3108,60 @@ export class IdentityRepository implements OnModuleInit {
           invitation_id = EXCLUDED.invitation_id,
           updated_at = EXCLUDED.updated_at,
           record = jsonb_set(
-            EXCLUDED.record,
-            '{membershipId}',
-            to_jsonb(iam.identity_memberships.membership_id)
+            jsonb_set(
+              EXCLUDED.record,
+              '{membershipId}',
+              to_jsonb(iam.identity_memberships.membership_id)
+            ),
+            '{createdAt}',
+            to_jsonb(iam.identity_memberships.created_at)
           )
+        WHERE
+          (
+            iam.identity_memberships.principal_id IS DISTINCT FROM EXCLUDED.principal_id
+            OR iam.identity_memberships.realm IS DISTINCT FROM EXCLUDED.realm
+            OR iam.identity_memberships.scope_ref IS DISTINCT FROM EXCLUDED.scope_ref
+            OR iam.identity_memberships.tenant_id IS DISTINCT FROM EXCLUDED.tenant_id
+            OR iam.identity_memberships.partner_id IS DISTINCT FROM EXCLUDED.partner_id
+            OR iam.identity_memberships.membership_status IS DISTINCT FROM EXCLUDED.membership_status
+            OR iam.identity_memberships.invited_by_principal_id IS DISTINCT FROM EXCLUDED.invited_by_principal_id
+            OR iam.identity_memberships.invitation_id IS DISTINCT FROM EXCLUDED.invitation_id
+          )
+          -- See upsertPrincipal: a stale-timestamped content-differing
+          -- ensure must never regress a genuinely newer committed state or
+          -- its updated_at. SR-AUTH-SESSION-SUPERSEDE-20261003 R2/R6.
+          AND EXCLUDED.updated_at >= iam.identity_memberships.updated_at
         RETURNING record
       `,
-      [
-        record.membershipId,
-        record.sourceRef,
-        record.principalId,
-        record.realm,
-        record.scopeRef,
-        record.tenantId,
-        record.partnerId,
-        record.status,
-        record.invitedByPrincipalId,
-        record.invitationId,
-        record.createdAt,
-        record.updatedAt,
-        JSON.stringify(record),
-      ],
+          [
+            record.membershipId,
+            record.sourceRef,
+            record.principalId,
+            record.realm,
+            record.scopeRef,
+            record.tenantId,
+            record.partnerId,
+            record.status,
+            record.invitedByPrincipalId,
+            record.invitationId,
+            record.createdAt,
+            record.updatedAt,
+            JSON.stringify(record),
+          ],
+        ),
+    );
+    if (result.rows[0]?.record) {
+      return this.parseRecord<CanonicalIdentityMembershipRecord>(
+        result.rows[0].record,
+        "iam.identity_memberships",
+      );
+    }
+    const current = await client.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_memberships WHERE source_ref = $1 LIMIT 1`,
+      [record.sourceRef],
     );
     return this.parseRecord<CanonicalIdentityMembershipRecord>(
-      result.rows[0]?.record,
+      current.rows[0]?.record,
       "iam.identity_memberships",
     );
   }
@@ -2642,9 +3169,27 @@ export class IdentityRepository implements OnModuleInit {
   private async upsertRoleBinding(
     client: PoolClient,
     record: CanonicalIdentityRoleBindingRecord,
+    insideTransaction: boolean,
+    options: RoleBindingMutationOptions = {},
   ) {
-    const result = await client.query<JsonRecordRow>(
-      `
+    const allowValidFromMutation = options.allowValidFromMutation ?? false;
+    // valid_from is set-once, like created_at, unless allowValidFromMutation
+    // is set: see the RoleBindingMutationOptions doc comment and
+    // SR-AUTH-SESSION-SUPERSEDE-20261003 R3/R4.
+    const recordExpr = allowValidFromMutation
+      ? "EXCLUDED.record"
+      : `jsonb_set(
+                EXCLUDED.record,
+                '{validFrom}',
+                to_jsonb(iam.identity_role_bindings.valid_from)
+              )`;
+    const result = await this.runUpsertWithConflictRecovery<JsonRecordRow>(
+      client,
+      "upsert_role_binding_sp",
+      insideTransaction,
+      () =>
+        client.query<JsonRecordRow>(
+          `
         INSERT INTO iam.identity_role_bindings (
           role_binding_id,
           source_ref,
@@ -2665,32 +3210,60 @@ export class IdentityRepository implements OnModuleInit {
           role_code = EXCLUDED.role_code,
           granted_by_principal_id = EXCLUDED.granted_by_principal_id,
           approval_id = EXCLUDED.approval_id,
-          valid_from = EXCLUDED.valid_from,
           valid_to = EXCLUDED.valid_to,
+          ${allowValidFromMutation ? "valid_from = EXCLUDED.valid_from," : ""}
           updated_at = EXCLUDED.updated_at,
           record = jsonb_set(
-            EXCLUDED.record,
-            '{roleBindingId}',
-            to_jsonb(iam.identity_role_bindings.role_binding_id)
+            jsonb_set(
+              ${recordExpr},
+              '{roleBindingId}',
+              to_jsonb(iam.identity_role_bindings.role_binding_id)
+            ),
+            '{createdAt}',
+            to_jsonb(iam.identity_role_bindings.created_at)
           )
+        WHERE
+          (
+            iam.identity_role_bindings.membership_id IS DISTINCT FROM EXCLUDED.membership_id
+            OR iam.identity_role_bindings.role_code IS DISTINCT FROM EXCLUDED.role_code
+            OR iam.identity_role_bindings.granted_by_principal_id IS DISTINCT FROM EXCLUDED.granted_by_principal_id
+            OR iam.identity_role_bindings.approval_id IS DISTINCT FROM EXCLUDED.approval_id
+            OR iam.identity_role_bindings.valid_to IS DISTINCT FROM EXCLUDED.valid_to
+            ${allowValidFromMutation ? "OR iam.identity_role_bindings.valid_from IS DISTINCT FROM EXCLUDED.valid_from" : ""}
+          )
+          -- See upsertPrincipal: a stale-timestamped content-differing
+          -- ensure must never regress a genuinely newer committed state or
+          -- its updated_at. SR-AUTH-SESSION-SUPERSEDE-20261003 R2/R6.
+          AND EXCLUDED.updated_at >= iam.identity_role_bindings.updated_at
         RETURNING record
       `,
-      [
-        record.roleBindingId,
-        record.sourceRef,
-        record.membershipId,
-        record.roleCode,
-        record.grantedByPrincipalId,
-        record.approvalId,
-        record.validFrom,
-        record.validTo,
-        record.createdAt,
-        record.updatedAt,
-        JSON.stringify(record),
-      ],
+          [
+            record.roleBindingId,
+            record.sourceRef,
+            record.membershipId,
+            record.roleCode,
+            record.grantedByPrincipalId,
+            record.approvalId,
+            record.validFrom,
+            record.validTo,
+            record.createdAt,
+            record.updatedAt,
+            JSON.stringify(record),
+          ],
+        ),
+    );
+    if (result.rows[0]?.record) {
+      return this.parseRecord<CanonicalIdentityRoleBindingRecord>(
+        result.rows[0].record,
+        "iam.identity_role_bindings",
+      );
+    }
+    const current = await client.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_role_bindings WHERE source_ref = $1 LIMIT 1`,
+      [record.sourceRef],
     );
     return this.parseRecord<CanonicalIdentityRoleBindingRecord>(
-      result.rows[0]?.record,
+      current.rows[0]?.record,
       "iam.identity_role_bindings",
     );
   }
@@ -2778,20 +3351,43 @@ export class IdentityRepository implements OnModuleInit {
         record.principalId)
       : record.principalId;
     const existing = this.fallbackPrincipals.get(existingPrincipalId) ?? null;
-    const persisted = existing
-      ? {
-          ...existing,
-          sourceRef: record.sourceRef,
-          issuer: record.issuer,
-          subject: record.subject,
-          principalType: record.principalType,
-          email: record.email,
-          emailVerified: record.emailVerified,
-          displayName: record.displayName,
-          status: record.status,
-          updatedAt: record.updatedAt,
-        }
-      : { ...record };
+    // Mirrors upsertPrincipal: a no-op "ensure" (e.g. re-issuing a session
+    // for an already-known principal) must not advance updatedAt, or it
+    // silently invalidates every other active session via
+    // computeWorkforceTokenVersion.
+    const unchanged =
+      existing !== null &&
+      existing.issuer === record.issuer &&
+      existing.subject === record.subject &&
+      existing.principalType === record.principalType &&
+      existing.email === record.email &&
+      existing.emailVerified === record.emailVerified &&
+      existing.displayName === record.displayName &&
+      existing.status === record.status;
+    // A content-differing but stale-timestamped ensure (e.g. a delayed
+    // reauth whose updatedAt is derived from an assertion's iat, not
+    // arrival time) must never overwrite a state a genuinely newer write
+    // already committed: mirrors upsertPrincipal's monotonic WHERE guard.
+    // See SR-AUTH-SESSION-SUPERSEDE-20261003 R2/R6.
+    const stale = existing !== null && record.updatedAt < existing.updatedAt;
+    const applyIncoming = existing === null || (!unchanged && !stale);
+    const persisted =
+      existing === null
+        ? { ...record }
+        : applyIncoming
+          ? {
+              ...existing,
+              sourceRef: record.sourceRef,
+              issuer: record.issuer,
+              subject: record.subject,
+              principalType: record.principalType,
+              email: record.email,
+              emailVerified: record.emailVerified,
+              displayName: record.displayName,
+              status: record.status,
+              updatedAt: record.updatedAt,
+            }
+          : { ...existing };
     this.fallbackPrincipals.set(persisted.principalId, persisted);
     if (record.sourceRef) {
       this.fallbackPrincipalSourceRefs.set(
@@ -2808,21 +3404,40 @@ export class IdentityRepository implements OnModuleInit {
         record.membershipId)
       : record.membershipId;
     const existing = this.fallbackMemberships.get(existingMembershipId) ?? null;
-    const persisted = existing
-      ? {
-          ...existing,
-          sourceRef: record.sourceRef,
-          principalId: record.principalId,
-          realm: record.realm,
-          scopeRef: record.scopeRef,
-          tenantId: record.tenantId,
-          partnerId: record.partnerId,
-          status: record.status,
-          invitedByPrincipalId: record.invitedByPrincipalId,
-          invitationId: record.invitationId,
-          updatedAt: record.updatedAt,
-        }
-      : { ...record };
+    // Mirrors upsertFallbackPrincipal: see upsertPrincipal for why a no-op
+    // "ensure" must not advance updatedAt.
+    const unchanged =
+      existing !== null &&
+      existing.principalId === record.principalId &&
+      existing.realm === record.realm &&
+      existing.scopeRef === record.scopeRef &&
+      existing.tenantId === record.tenantId &&
+      existing.partnerId === record.partnerId &&
+      existing.status === record.status &&
+      existing.invitedByPrincipalId === record.invitedByPrincipalId &&
+      existing.invitationId === record.invitationId;
+    // See upsertFallbackPrincipal: a stale-timestamped content-differing
+    // ensure must never regress a genuinely newer committed state.
+    const stale = existing !== null && record.updatedAt < existing.updatedAt;
+    const applyIncoming = existing === null || (!unchanged && !stale);
+    const persisted =
+      existing === null
+        ? { ...record }
+        : applyIncoming
+          ? {
+              ...existing,
+              sourceRef: record.sourceRef,
+              principalId: record.principalId,
+              realm: record.realm,
+              scopeRef: record.scopeRef,
+              tenantId: record.tenantId,
+              partnerId: record.partnerId,
+              status: record.status,
+              invitedByPrincipalId: record.invitedByPrincipalId,
+              invitationId: record.invitationId,
+              updatedAt: record.updatedAt,
+            }
+          : { ...existing };
     this.fallbackMemberships.set(persisted.membershipId, persisted);
     if (record.sourceRef) {
       this.fallbackMembershipSourceRefs.set(
@@ -2835,26 +3450,51 @@ export class IdentityRepository implements OnModuleInit {
 
   private upsertFallbackRoleBinding(
     record: CanonicalIdentityRoleBindingRecord,
+    options: RoleBindingMutationOptions = {},
   ) {
+    const allowValidFromMutation = options.allowValidFromMutation ?? false;
     const existingRoleBindingId = record.sourceRef
       ? (this.fallbackRoleBindingSourceRefs.get(record.sourceRef) ??
         record.roleBindingId)
       : record.roleBindingId;
     const existing =
       this.fallbackRoleBindings.get(existingRoleBindingId) ?? null;
-    const persisted = existing
-      ? {
-          ...existing,
-          sourceRef: record.sourceRef,
-          membershipId: record.membershipId,
-          roleCode: record.roleCode,
-          grantedByPrincipalId: record.grantedByPrincipalId,
-          approvalId: record.approvalId,
-          validFrom: record.validFrom,
-          validTo: record.validTo,
-          updatedAt: record.updatedAt,
-        }
-      : { ...record };
+    // Mirrors upsertFallbackPrincipal: see upsertPrincipal for why a no-op
+    // "ensure" must not advance updatedAt.
+    //
+    // validFrom is set-once, like createdAt, unless allowValidFromMutation
+    // is set: see the RoleBindingMutationOptions doc comment and
+    // SR-AUTH-SESSION-SUPERSEDE-20261003 R3/R4.
+    const unchanged =
+      existing !== null &&
+      existing.membershipId === record.membershipId &&
+      existing.roleCode === record.roleCode &&
+      existing.grantedByPrincipalId === record.grantedByPrincipalId &&
+      existing.approvalId === record.approvalId &&
+      existing.validTo === record.validTo &&
+      (!allowValidFromMutation || existing.validFrom === record.validFrom);
+    // See upsertFallbackPrincipal: a stale-timestamped content-differing
+    // ensure must never regress a genuinely newer committed state.
+    const stale = existing !== null && record.updatedAt < existing.updatedAt;
+    const applyIncoming = existing === null || (!unchanged && !stale);
+    const persisted =
+      existing === null
+        ? { ...record }
+        : applyIncoming
+          ? {
+              ...existing,
+              sourceRef: record.sourceRef,
+              membershipId: record.membershipId,
+              roleCode: record.roleCode,
+              grantedByPrincipalId: record.grantedByPrincipalId,
+              approvalId: record.approvalId,
+              validTo: record.validTo,
+              validFrom: allowValidFromMutation
+                ? record.validFrom
+                : existing.validFrom,
+              updatedAt: record.updatedAt,
+            }
+          : { ...existing };
     this.fallbackRoleBindings.set(persisted.roleBindingId, persisted);
     if (record.sourceRef) {
       this.fallbackRoleBindingSourceRefs.set(

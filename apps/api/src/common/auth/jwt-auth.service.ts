@@ -489,11 +489,19 @@ export class JwtAuthService {
     );
   }
 
+  /**
+   * No case here returns a workforce assurance claim
+   * (`verified_iap_workforce` / `aal2`) for `platform_admin`/`ops_user`: that
+   * would be a fabricated MFA claim on any caller that doesn't pass explicit
+   * amr/acr (ENTRY-IAP-WORKFORCE-AUTH-20261005). The real IAP path
+   * (`issueToken`'s `rawAssertion` branch) always passes `amr`/`acr`
+   * explicitly from `IAPSubjectAdapter.resolveSubject`'s verified assertion;
+   * the dev bootstrap path passes the explicit, audited
+   * `DEV_MFA_WAIVED_AMR` waiver marker instead when enabled. Neither needs
+   * this fallback to produce a trusted-MFA claim for those two actor types.
+   */
   private resolveDefaultAmr(identity: JwtSignIdentity): string[] {
     switch (identity.actorType) {
-      case "platform_admin":
-      case "ops_user":
-        return ["verified_iap_workforce"];
       case "tenant_admin":
         return ["tenant_bootstrap_fixture"];
       case "partner_api_key":
@@ -507,14 +515,8 @@ export class JwtAuthService {
     }
   }
 
-  private resolveDefaultAcr(identity: JwtSignIdentity): string {
-    switch (identity.actorType) {
-      case "platform_admin":
-      case "ops_user":
-        return "aal2";
-      default:
-        return "aal1";
-    }
+  private resolveDefaultAcr(): string {
+    return "aal1";
   }
 
   private resolvePrincipalType(
@@ -584,9 +586,11 @@ export class JwtAuthService {
       Number.isFinite(payload.tokenVersion) &&
       typeof payload.auth_time === "number" &&
       payload.auth_time > 0 &&
-      payload.amr &&
-      payload.amr.length > 0 &&
-      payload.acr &&
+      // Google authenticates without asserting amr/acr. Empty, well-typed
+      // assurance is valid for a durable session; step-up checks MFA separately.
+      Array.isArray(payload.amr) &&
+      payload.amr.every((method) => typeof method === "string") &&
+      typeof payload.acr === "string" &&
       payload.policyVersion &&
       payload.iss &&
       payload.aud,
@@ -632,7 +636,7 @@ export class JwtAuthService {
       options?.amr ?? identity.amr ?? this.resolveDefaultAmr(identity),
     );
     const acr =
-      options?.acr ?? identity.acr ?? this.resolveDefaultAcr(identity);
+      options?.acr ?? identity.acr ?? this.resolveDefaultAcr();
     const principalId =
       options?.principalId ?? identity.principalId ?? identity.actorId;
     const membershipId = options?.membershipId ?? identity.membershipId ?? null;
@@ -1013,10 +1017,17 @@ export class JwtAuthService {
         return false;
       }
 
-      let user = this.tenantPartnerService.findTenantUser(
-        payload.tenantId,
-        tenantUserId,
-      );
+      let user =
+        typeof this.tenantPartnerService.findTenantUserForAuthentication ===
+        "function"
+          ? await this.tenantPartnerService.findTenantUserForAuthentication(
+              payload.tenantId,
+              tenantUserId,
+            )
+          : this.tenantPartnerService.findTenantUser(
+              payload.tenantId,
+              tenantUserId,
+            );
       if (!user && payload.sub) {
         const bySubject = this.tenantPartnerService.findTenantUserBySubject(payload.sub);
         if (bySubject && bySubject.tenantId === payload.tenantId) {

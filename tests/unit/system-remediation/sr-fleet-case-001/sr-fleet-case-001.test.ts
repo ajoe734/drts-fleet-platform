@@ -1,3 +1,8 @@
+import {
+  fleetStorageFixture,
+  byteStream,
+  fleetIdentity,
+} from "../../helpers/fleet-document-fixture";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 // Mock server-only before any web module import
@@ -207,7 +212,7 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
     getComplaintTimeline: ReturnType<typeof vi.fn>;
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockComplaintService = {
       addComplaintCaseNote: vi.fn().mockImplementation((caseNo, cmd) => {
         return {
@@ -238,9 +243,40 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
       ]),
     };
 
+    const { storage } = fleetStorageFixture();
     caseService = new FleetPartnerCaseService(
       mockComplaintService as unknown as ComplaintService,
+      undefined,
+      undefined,
+      storage,
     );
+    // These timeline fixtures deliberately materialise their historical files
+    // through the production upload/scanner seam; production seed metadata
+    // alone still cannot be downloaded (covered by C125 regressions).
+    for (const caseId of ["cmp_0908", "cmp_closed_001"]) {
+      const { attachments } = await caseService.getCaseDetail(
+        "METRO_FLEET",
+        caseId,
+      );
+      for (const att of attachments.filter((item) => item.state === "done")) {
+        const intent = {
+          family: "case" as const,
+          parentId: caseId,
+          fleetPartnerId: "METRO_FLEET",
+          objectKey: att.objectKey,
+          fileName: att.name,
+          contentType: att.contentType,
+          fileSize: att.fileSize,
+          expiresAt: new Date(Date.now() + 900000).toISOString(),
+        };
+        await storage.createIntent(intent);
+        await storage.upload(
+          intent,
+          byteStream(Buffer.alloc(att.fileSize, 65)),
+          "application/octet-stream",
+        );
+      }
+    }
   });
 
   describe("Capability 1: fleet_case_reply_ops_timeline_remote (車行回覆寫入共享案件歷程與 Ops 閉環)", () => {
@@ -248,7 +284,8 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
       const fleetPartnerId = "METRO_FLEET";
       const caseId = "cmp_0908";
       const actorId = "陳家豪";
-      const content = "已與司機當面對證並完成教育訓練，訓練紀錄與行車記錄器截圖已附上。";
+      const content =
+        "已與司機當面對證並完成教育訓練，訓練紀錄與行車記錄器截圖已附上。";
 
       const receipt = await caseService.submitReply(
         fleetPartnerId,
@@ -269,15 +306,22 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
       expect(receipt.deduplicated).toBe(false);
 
       // Verify case timeline contains the new entry with actorRealm: 'tenant'
-      const timeline = await caseService.getCaseTimeline(fleetPartnerId, caseId);
-      const replyEntry = timeline.find((e) => e.t === "車行回覆" && e.actorRealm === "tenant");
+      const timeline = await caseService.getCaseTimeline(
+        fleetPartnerId,
+        caseId,
+      );
+      const replyEntry = timeline.find(
+        (e) => e.t === "車行回覆" && e.actorRealm === "tenant",
+      );
       expect(replyEntry).toBeDefined();
       expect(replyEntry?.actor).toBe("陳家豪 (METRO_FLEET)");
       expect(replyEntry?.actorRealm).toBe("tenant");
       expect(replyEntry?.body).toBe(content);
       expect(replyEntry?.attachments).toBeDefined();
       expect(replyEntry?.attachments?.length).toBe(1);
-      expect(replyEntry?.attachments?.[0]?.name).toBe("training_ack_20260523.pdf");
+      expect(replyEntry?.attachments?.[0]?.name).toBe(
+        "training_ack_20260523.pdf",
+      );
     });
 
     it("should synchronize reply to Ops complaint timeline via addComplaintCaseNote and preserve Ops owner (assignee)", async () => {
@@ -286,7 +330,10 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
       const content = "已完成車行內部檢討懲處。";
 
       // Check detail before reply: Ops owner is 陳維
-      const detailBefore = await caseService.getCaseDetail(fleetPartnerId, caseId);
+      const detailBefore = await caseService.getCaseDetail(
+        fleetPartnerId,
+        caseId,
+      );
       expect(detailBefore.caseDetail.assignee).toBe("陳維 (ops_compliance)");
 
       await caseService.submitReply(fleetPartnerId, caseId, "陳家豪", {
@@ -294,14 +341,20 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
       });
 
       // Ops timeline service was called with authoritative prefix
-      expect(mockComplaintService.addComplaintCaseNote).toHaveBeenCalledTimes(1);
-      const [calledCaseNo, calledPayload] = mockComplaintService.addComplaintCaseNote.mock.calls[0] as [string, any];
+      expect(mockComplaintService.addComplaintCaseNote).toHaveBeenCalledTimes(
+        1,
+      );
+      const [calledCaseNo, calledPayload] = mockComplaintService
+        .addComplaintCaseNote.mock.calls[0] as [string, any];
       expect(calledCaseNo).toBe("C-20260520-000001");
       expect(calledPayload.note).toContain("[車行回覆 · METRO_FLEET]");
       expect(calledPayload.note).toContain(content);
 
       // Detail after reply: Ops owner is STRICTLY PRESERVED
-      const detailAfter = await caseService.getCaseDetail(fleetPartnerId, caseId);
+      const detailAfter = await caseService.getCaseDetail(
+        fleetPartnerId,
+        caseId,
+      );
       expect(detailAfter.caseDetail.assignee).toBe("陳維 (ops_compliance)");
     });
   });
@@ -320,9 +373,13 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
       );
 
       expect(upload).toBeDefined();
-      expect(upload.uploadUrl).toContain("https://uploads.drts.example/presigned/");
+      expect(upload.uploadUrl).toContain(
+        "/api/fleet-partner/cases/cmp_0908/attachments/content?",
+      );
       expect(upload.attachmentId).toBeDefined();
-      expect(upload.objectKey).toContain("fleet-partner/METRO_FLEET/cases/cmp_0908/");
+      expect(upload.objectKey).toContain(
+        "fleet-partner/METRO_FLEET/cases/cmp_0908/",
+      );
       expect(upload.expiresAt).toBeDefined();
     });
 
@@ -338,6 +395,13 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
         },
       );
 
+      await caseService.uploadAttachmentContent(
+        "METRO_FLEET",
+        "cmp_0908",
+        upload.objectKey,
+        byteStream(Buffer.alloc(204800, 65)),
+        "application/octet-stream",
+      );
       const confirmed = await caseService.confirmAttachmentUpload(
         "METRO_FLEET",
         "cmp_0908",
@@ -355,7 +419,9 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
       expect(confirmed.state).toBe("done");
 
       const detail = await caseService.getCaseDetail("METRO_FLEET", "cmp_0908");
-      const found = detail.attachments.find((a) => a.attachmentId === upload.attachmentId);
+      const found = detail.attachments.find(
+        (a) => a.attachmentId === upload.attachmentId,
+      );
       expect(found).toBeDefined();
       expect(found?.state).toBe("done");
     });
@@ -386,7 +452,9 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
           },
         );
       } catch (err: any) {
-        expect(err.code || err.getResponse?.()?.error?.code).toBe("CASE_CLOSED_NO_REPLY");
+        expect(err.code || err.getResponse?.()?.error?.code).toBe(
+          "CASE_CLOSED_NO_REPLY",
+        );
       }
     });
 
@@ -490,7 +558,9 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
       try {
         await caseService.getCaseDetail("METRO_FLEET", "cmp_9999");
       } catch (err: any) {
-        expect(err.code || err.getResponse?.()?.error?.code).toBe("CASE_NOT_FLEET_SCOPED");
+        expect(err.code || err.getResponse?.()?.error?.code).toBe(
+          "CASE_NOT_FLEET_SCOPED",
+        );
       }
     });
 
@@ -507,27 +577,46 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
       ).rejects.toThrow();
 
       try {
-        await caseService.submitReply("METRO_FLEET", "cmp_0912", "usr-partner", {
-          content: "車行嘗試回覆平台責任案件",
-        });
+        await caseService.submitReply(
+          "METRO_FLEET",
+          "cmp_0912",
+          "usr-partner",
+          {
+            content: "車行嘗試回覆平台責任案件",
+          },
+        );
       } catch (err: any) {
-        expect(err.code || err.getResponse?.()?.error?.code).toBe("CASE_PLATFORM_OWNED");
+        expect(err.code || err.getResponse?.()?.error?.code).toBe(
+          "CASE_PLATFORM_OWNED",
+        );
       }
     });
 
     it("should reject reply on closed case cmp_closed_001 with 409 CASE_CLOSED_NO_REPLY", async () => {
       await expect(
-        caseService.submitReply("METRO_FLEET", "cmp_closed_001", "usr-partner", {
-          content: "案件已結案仍回覆",
-        }),
+        caseService.submitReply(
+          "METRO_FLEET",
+          "cmp_closed_001",
+          "usr-partner",
+          {
+            content: "案件已結案仍回覆",
+          },
+        ),
       ).rejects.toThrow();
 
       try {
-        await caseService.submitReply("METRO_FLEET", "cmp_closed_001", "usr-partner", {
-          content: "案件已結案仍回覆",
-        });
+        await caseService.submitReply(
+          "METRO_FLEET",
+          "cmp_closed_001",
+          "usr-partner",
+          {
+            content: "案件已結案仍回覆",
+          },
+        );
       } catch (err: any) {
-        expect(err.code || err.getResponse?.()?.error?.code).toBe("CASE_CLOSED_NO_REPLY");
+        expect(err.code || err.getResponse?.()?.error?.code).toBe(
+          "CASE_CLOSED_NO_REPLY",
+        );
       }
     });
 
@@ -538,7 +627,10 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
       const idempotencyKey = "idem-unique-key-999";
       const content = "首次回覆說明";
 
-      const timelineBefore = await caseService.getCaseTimeline(fleetPartnerId, caseId);
+      const timelineBefore = await caseService.getCaseTimeline(
+        fleetPartnerId,
+        caseId,
+      );
       const initialCount = timelineBefore.length;
 
       // First submission
@@ -553,7 +645,10 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
       );
       expect(firstReceipt.deduplicated).toBe(false);
 
-      const timelineAfterFirst = await caseService.getCaseTimeline(fleetPartnerId, caseId);
+      const timelineAfterFirst = await caseService.getCaseTimeline(
+        fleetPartnerId,
+        caseId,
+      );
       expect(timelineAfterFirst.length).toBe(initialCount + 1);
 
       // Second submission with exact same idempotencyKey
@@ -571,17 +666,26 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
       expect(secondReceipt.repliedAt).toBe(firstReceipt.repliedAt);
 
       // Timeline entries count MUST NOT increase
-      const timelineAfterSecond = await caseService.getCaseTimeline(fleetPartnerId, caseId);
+      const timelineAfterSecond = await caseService.getCaseTimeline(
+        fleetPartnerId,
+        caseId,
+      );
       expect(timelineAfterSecond.length).toBe(initialCount + 1);
     });
 
     it("should drive SLA display directly by slaBreachedAt truthiness", async () => {
-      const detailOpen = await caseService.getCaseDetail("METRO_FLEET", "cmp_0908");
+      const detailOpen = await caseService.getCaseDetail(
+        "METRO_FLEET",
+        "cmp_0908",
+      );
       expect(detailOpen.caseDetail.slaBreachedAt).toBeTruthy();
       expect(detailOpen.caseDetail.slaTone).toBe("danger");
       expect(detailOpen.caseDetail.slaLabel).toBe("SLA breached");
 
-      const detailPlatform = await caseService.getCaseDetail("METRO_FLEET", "cmp_0912");
+      const detailPlatform = await caseService.getCaseDetail(
+        "METRO_FLEET",
+        "cmp_0912",
+      );
       expect(detailPlatform.caseDetail.slaBreachedAt).toBeNull();
       expect(detailPlatform.caseDetail.slaTone).toBe("success");
       expect(detailPlatform.caseDetail.slaLabel).toBe("on track");
@@ -591,7 +695,7 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
   describe("FleetPartnerController: HTTP Endpoint Integration", () => {
     let controller: FleetPartnerController;
 
-    beforeEach(() => {
+    beforeEach(async () => {
       controller = new FleetPartnerController(
         {} as any,
         {} as any,
@@ -611,7 +715,10 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
     });
 
     it("GET /api/fleet-partner/cases/:caseId should return case detail and attachments", async () => {
-      const res = await controller.getPortalCaseDetail("METRO_FLEET", "cmp_0908");
+      const res = await controller.getPortalCaseDetail(
+        "METRO_FLEET",
+        "cmp_0908",
+      );
       expect(res.data.caseDetail.id).toBe("cmp_0908");
       expect(res.data.attachments.length).toBeGreaterThanOrEqual(1);
     });
@@ -625,6 +732,8 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
           content: "由 controller 呼叫的回覆",
           idempotencyKey: "idem-ctrl-001",
         },
+        undefined,
+        { ...fleetIdentity, partnerId: "METRO_FLEET" },
       );
       expect(res.data.caseId).toBe("cmp_0908");
       expect(res.data.actorId).toBe("陳家豪");
@@ -632,7 +741,13 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
     });
 
     it("GET /api/fleet-partner/cases/:caseId/attachments/:attachmentId/download should serve binary content with headers", async () => {
-      const readUrlRes = await controller.getPortalCaseAttachmentReadUrl("METRO_FLEET", "cmp_0908", "att-001");
+      const readUrlRes = await controller.getPortalCaseAttachmentReadUrl(
+        "METRO_FLEET",
+        "cmp_0908",
+        "att-001",
+        undefined,
+        { ...fleetIdentity, partnerId: "METRO_FLEET" },
+      );
       const { downloadUrl } = readUrlRes.data;
       const params = new URLSearchParams(downloadUrl.split("?")[1]);
       const expiresAtStr = params.get("expiresAt")!;
@@ -656,10 +771,13 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
         expiresAtStr,
         sig,
         mockRes,
+        { ...fleetIdentity, partnerId: "METRO_FLEET" },
       );
 
       expect(headers["Content-Type"]).toBe("application/pdf");
-      expect(headers["Content-Disposition"]).toContain("training_ack_20260523.pdf");
+      expect(headers["Content-Disposition"]).toContain(
+        "training_ack_20260523.pdf",
+      );
       expect(responseBody).toBeInstanceOf(Buffer);
     });
   });

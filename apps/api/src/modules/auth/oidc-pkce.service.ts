@@ -2,12 +2,9 @@ import {
   createCipheriv,
   createDecipheriv,
   createHash,
-  createPublicKey,
-  type KeyObject,
   randomBytes,
 } from "node:crypto";
 import { Injectable, Logger, Optional } from "@nestjs/common";
-import * as jwt from "jsonwebtoken";
 import type {
   IamCallbackSessionExchangeCommand,
   IdentityContext,
@@ -18,6 +15,7 @@ import type {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
+import { hasTrustedMfa } from "../../common/auth/trusted-mfa.policy";
 import type { AuthActorType, AuthRealm } from "../../common/auth/auth.types";
 import { getTenantRoleScopes } from "../../common/auth/auth.constants";
 import { SecurityEventsService } from "../security-events/security-events.service";
@@ -29,6 +27,11 @@ import {
   resolveOrdinaryLoginMfaPolicy,
 } from "../../config/auth-startup-config";
 import { ConsumedOidcStateRepository } from "./consumed-oidc-state.repository";
+import {
+  GOOGLE_OIDC_ENDPOINTS,
+  isGoogleOidcIssuer,
+  OidcIdTokenVerifier,
+} from "./oidc-id-token-verifier";
 
 export interface OidcStateRecord {
   state: string;
@@ -40,6 +43,7 @@ export interface OidcStateRecord {
   redirectUri: string | null;
   tenantId: string | null;
   partnerId: string | null;
+  invitationTokenHash?: string;
   createdAt: number;
   expiresAt: number;
 }
@@ -70,7 +74,7 @@ const DEFAULT_OIDC_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 @Injectable()
 export class OidcPkceService {
   private readonly logger = new Logger(OidcPkceService.name);
-  private jwksCache: { keys: any[]; fetchedAt: number } | null = null;
+  private readonly idTokenVerifier = new OidcIdTokenVerifier();
 
   constructor(
     private readonly jwtAuthService: JwtAuthService,
@@ -235,8 +239,16 @@ export class OidcPkceService {
       redirectUri?: string | null;
       tenantId?: string | null;
       partnerId?: string | null;
+      invitationToken?: string;
     },
   ): OidcLoginUrlResult {
+    if (process.env.OIDC_ENABLED === "false") {
+      throw new ApiRequestError(
+        503,
+        "AUTH_OIDC_UNAVAILABLE",
+        "OIDC login is not configured on this deployment.",
+      );
+    }
     const validatedRedirectUri = this.validateRedirectUri(options?.redirectUri);
     const state = this.base64UrlEncode(randomBytes(24));
     const nonce = this.base64UrlEncode(randomBytes(24));
@@ -257,6 +269,13 @@ export class OidcPkceService {
       redirectUri: validatedRedirectUri,
       tenantId: options?.tenantId?.trim() || null,
       partnerId: options?.partnerId?.trim() || null,
+      ...(realm === "tenant" && options?.invitationToken
+        ? {
+            invitationTokenHash: createHash("sha256")
+              .update(options.invitationToken)
+              .digest("hex"),
+          }
+        : {}),
       createdAt: now,
       expiresAt,
     };
@@ -269,7 +288,9 @@ export class OidcPkceService {
     const clientId = process.env.OIDC_CLIENT_ID ?? "drts-bff-client";
     const authEndpoint =
       process.env.OIDC_AUTHORIZATION_ENDPOINT ??
-      `${issuerUrl}/oauth2/v1/authorize`;
+      (isGoogleOidcIssuer(issuerUrl)
+        ? GOOGLE_OIDC_ENDPOINTS.authorization
+        : `${issuerUrl}/oauth2/v1/authorize`);
 
     const authUrl = new URL(authEndpoint);
     authUrl.searchParams.set("response_type", "code");
@@ -303,18 +324,76 @@ export class OidcPkceService {
       stateToken?: string;
     },
   ): Promise<TenantBootstrapSession> {
-    const { claims } = await this.validateAndExchangeCode(
+    const { claims, stateRecord } = await this.validateAndExchangeCode(
       command,
       "tenant",
       meta,
     );
 
+    return this.issueVerifiedTenantSession(
+      claims,
+      {
+        tenantId: stateRecord.tenantId || command.tenantId?.trim() || null,
+        invitationTokenHash: stateRecord.invitationTokenHash,
+      },
+      meta,
+    );
+  }
+
+  public async exchangeTenantIdTokenSession(
+    command: { idToken: string; tenantId?: string | null },
+    meta?: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<TenantBootstrapSession> {
+    const claims = await this.idTokenVerifier.verify(
+      command.idToken,
+      undefined,
+      true,
+    );
+    return this.issueVerifiedTenantSession(
+      claims as unknown as OidcClaims,
+      { tenantId: command.tenantId },
+      meta,
+    );
+  }
+
+  private async issueVerifiedTenantSession(
+    claims: OidcClaims,
+    options: {
+      tenantId?: string | null | undefined;
+      invitationTokenHash?: string | undefined;
+    },
+    meta?: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<TenantBootstrapSession> {
+    // Shared with ENTRY-IAP: never interpret the flag as an MFA assertion.
+    const waiverConfigured = process.env.DRTS_DEV_MFA_WAIVED === "true";
+    const environment = detectAuthEnvironment();
+    if (
+      waiverConfigured &&
+      (environment === "staging" || environment === "production")
+    ) {
+      throw new ApiRequestError(
+        503,
+        "AUTH_CONFIGURATION_INVALID",
+        "DRTS_DEV_MFA_WAIVED is forbidden in staging and production.",
+      );
+    }
+    if (
+      typeof claims.email !== "string" ||
+      !claims.email.trim() ||
+      typeof claims.sub !== "string" ||
+      !claims.sub.trim()
+    ) {
+      throw new ApiRequestError(
+        403,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "OIDC subject and email are required.",
+      );
+    }
+
     // Enforce email_verified === true for tenant session exchange
     if (claims.email_verified !== true) {
       const fallbackTenant =
-        command.tenantId?.trim() ||
-        claims.tenant_id?.trim() ||
-        this.tenantPartnerService.getDefaultTenantId();
+        options.tenantId?.trim() || claims.tenant_id?.trim() || null;
       this.recordSecurityEvent({
         eventType: "tenant_oidc_session.denied",
         outcome: "denied",
@@ -340,28 +419,31 @@ export class OidcPkceService {
     const subjectId = claims.sub.trim();
     const normalizedEmail = claims.email.trim().toLowerCase();
     const requestedTenantId =
-      command.tenantId?.trim() || claims.tenant_id?.trim();
-
-    // 1. Immutable subject binding resolution ONLY (no email lookup or auto-binding)
-    let existingUser = requestedTenantId
-      ? (this.tenantPartnerService
-          .listTenantUsers(requestedTenantId)
-          .find(
-            (user) =>
-              (user as any).subjectId === subjectId ||
-              (user as any).subject === subjectId,
-          ) ?? null)
-      : null;
-
-    if (!existingUser) {
-      existingUser =
-        this.tenantPartnerService.findTenantUserBySubject(subjectId);
+      options.tenantId?.trim() || claims.tenant_id?.trim();
+    const proof = {
+      issuer: claims.iss,
+      subject: subjectId,
+      email: normalizedEmail,
+      tenantId: requestedTenantId || null,
+    };
+    if (options.invitationTokenHash) {
+      await this.tenantPartnerService.acceptTenantOidcInvitation(
+        options.invitationTokenHash,
+        proof,
+        meta?.requestId,
+      );
+      this.recordSecurityEvent({
+        eventType: "tenant_oidc_invitation.bound",
+        outcome: "success",
+        realm: "tenant",
+        tenantId: requestedTenantId || null,
+        subjectId,
+        meta,
+      });
     }
-
-    const targetTenantId =
-      existingUser?.tenantId ||
-      requestedTenantId ||
-      this.tenantPartnerService.getDefaultTenantId();
+    const existingUser =
+      await this.tenantPartnerService.findTenantUserByOidcIdentity(proof);
+    const targetTenantId = existingUser?.tenantId || requestedTenantId || "";
 
     if (
       existingUser &&
@@ -454,22 +536,40 @@ export class OidcPkceService {
 
     // Extract & enforce MFA claims
     const amr = claims.amr ?? [];
-    const acr = claims.acr ?? "urn:mace:incommon:iap:silver";
+    const acr = claims.acr ?? "";
     const authTime = claims.auth_time ?? Math.floor(Date.now() / 1000);
-    const mfaVerified = amr.some((m) =>
-      ["mfa", "otp", "totp", "hwk", "sms", "swk", "pin"].includes(
-        m.toLowerCase(),
-      ),
-    );
-    // Named, auditable policy switch — see isOrdinaryLoginMfaRequired in
-    // auth-startup-config.ts. v1 product decision (2026-09-15): ordinary
-    // tenant login does not require an MFA-bearing amr claim. This gate is
-    // distinct from, and does not weaken, the tenant_admin/tenant_ops_admin
-    // trusted-MFA requirement enforced separately in auth.controller.ts.
-    const mfaRequired = isOrdinaryLoginMfaRequired();
+    const mfaVerified = hasTrustedMfa({ amr, acr });
+    const mfaRequired =
+      isOrdinaryLoginMfaRequired() ||
+      ["tenant_admin", "tenant_ops_admin"].includes(existingUser.roleCode);
     const mfaPolicy = resolveOrdinaryLoginMfaPolicy();
+    const mfaWaived = mfaRequired && !mfaVerified && waiverConfigured;
+    if (mfaWaived) {
+      if (!this.securityEventsService)
+        throw new ApiRequestError(
+          503,
+          "AUTH_AUDIT_UNAVAILABLE",
+          "Security events are required for a dev MFA waiver.",
+        );
+      await this.recordSecurityEvent({
+        eventType: "tenant_oidc_session.mfa_waived",
+        requirePersistence: true,
+        outcome: "success",
+        realm: "tenant",
+        tenantId: targetTenantId,
+        actorId: existingUser.userId,
+        subjectId,
+        reasonCode: "DEV_MFA_WAIVED",
+        afterSummary: {
+          flag: "DRTS_DEV_MFA_WAIVED",
+          environment,
+          mfaVerified: false,
+        },
+        meta,
+      });
+    }
 
-    if (mfaRequired && !mfaVerified) {
+    if (mfaRequired && !mfaVerified && !mfaWaived) {
       this.recordSecurityEvent({
         eventType: "tenant_oidc_session.denied",
         outcome: "denied",
@@ -492,6 +592,7 @@ export class OidcPkceService {
       actorType: "tenant_admin" as const,
       actorId: existingUser.userId,
       principalId: existingUser.userId,
+      subject: claims.sub,
       realm: "tenant" as const,
       tenantId: targetTenantId,
       roleFamilies: ["tenant" as const],
@@ -524,7 +625,9 @@ export class OidcPkceService {
       (identity as any).acr = acr;
       (identity as any).policyVersion = "v1";
     } else {
-      token = this.jwtAuthService.sign(sessionTokenOptions, { expiresIn: "8h" });
+      token = this.jwtAuthService.sign(sessionTokenOptions, {
+        expiresIn: "8h",
+      });
     }
 
     const session: TenantBootstrapSession = {
@@ -542,7 +645,7 @@ export class OidcPkceService {
       tenantId: targetTenantId,
       actorId: existingUser.userId,
       subjectId: claims.sub,
-      tokenId: token,
+      tokenId: issuedTokenId ?? null,
       afterSummary: {
         sub: claims.sub,
         email: normalizedEmail,
@@ -851,19 +954,6 @@ export class OidcPkceService {
       );
     }
 
-    // Check state reuse & consume globally
-    const isFreshState = await this.consumedStateRepo.consumeState(
-      command.state,
-      stateRecord.expiresAt,
-    );
-    if (!isFreshState) {
-      throw new ApiRequestError(
-        400,
-        "AUTH_SESSION_EXCHANGE_DENIED",
-        "OIDC state parameter has already been used.",
-      );
-    }
-
     // Validate state matching
     if (stateRecord.state !== command.state.trim()) {
       throw new ApiRequestError(
@@ -935,6 +1025,34 @@ export class OidcPkceService {
       }
     }
 
+    if (
+      (stateRecord.tenantId &&
+        command.tenantId?.trim() &&
+        command.tenantId.trim() !== stateRecord.tenantId) ||
+      (stateRecord.partnerId &&
+        command.partnerId?.trim() &&
+        command.partnerId.trim() !== stateRecord.partnerId)
+    ) {
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "Callback scope does not match login state.",
+      );
+    }
+
+    // Check state reuse & consume globally
+    const isFreshState = await this.consumedStateRepo.consumeState(
+      command.state,
+      stateRecord.expiresAt,
+    );
+    if (!isFreshState) {
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "OIDC state parameter has already been used.",
+      );
+    }
+
     // 4. Validate Code & Obtain Claims (Real OIDC or Synthetic Test Matrix)
     const claims = await this.performOidcCodeExchange(command, stateRecord);
 
@@ -992,7 +1110,9 @@ export class OidcPkceService {
     const tokenEndpoint =
       process.env.OIDC_TOKEN_ENDPOINT ??
       (process.env.OIDC_ISSUER
-        ? `${process.env.OIDC_ISSUER}/oauth2/v1/token`
+        ? isGoogleOidcIssuer(process.env.OIDC_ISSUER)
+          ? GOOGLE_OIDC_ENDPOINTS.token
+          : `${process.env.OIDC_ISSUER}/oauth2/v1/token`
         : null);
 
     const isMockMode = process.env.OIDC_MOCK_MODE === "true";
@@ -1265,7 +1385,9 @@ export class OidcPkceService {
       const userinfoEndpoint =
         process.env.OIDC_USERINFO_ENDPOINT ??
         (process.env.OIDC_ISSUER
-          ? `${process.env.OIDC_ISSUER}/oauth2/v1/userinfo`
+          ? isGoogleOidcIssuer(process.env.OIDC_ISSUER)
+            ? GOOGLE_OIDC_ENDPOINTS.userinfo
+            : `${process.env.OIDC_ISSUER}/oauth2/v1/userinfo`
           : null);
 
       let userinfoClaims: Partial<OidcClaims> = {};
@@ -1283,7 +1405,10 @@ export class OidcPkceService {
         }
       }
 
-      if (userinfoClaims.sub && userinfoClaims.sub !== claimsFromToken.sub) {
+      if (
+        Object.keys(userinfoClaims).length > 0 &&
+        userinfoClaims.sub !== claimsFromToken.sub
+      ) {
         throw new ApiRequestError(
           400,
           "AUTH_SESSION_EXCHANGE_DENIED",
@@ -1298,16 +1423,15 @@ export class OidcPkceService {
           process.env.OIDC_ISSUER ||
           "https://auth.staging.drts.internal",
         aud: claimsFromToken.aud || clientId,
-        email: userinfoClaims.email || claimsFromToken.email || "",
+        email: claimsFromToken.email || userinfoClaims.email || "",
         email_verified:
-          userinfoClaims.email_verified ??
           claimsFromToken.email_verified ??
-          false,
-        amr: claimsFromToken.amr || userinfoClaims.amr || ["pwd", "mfa"],
-        acr:
-          claimsFromToken.acr ||
-          userinfoClaims.acr ||
-          "urn:mace:incommon:iap:silver",
+          (!claimsFromToken.email ||
+          userinfoClaims.email === claimsFromToken.email
+            ? (userinfoClaims.email_verified ?? false)
+            : false),
+        amr: claimsFromToken.amr ?? [],
+        acr: claimsFromToken.acr,
         auth_time: claimsFromToken.auth_time || Math.floor(Date.now() / 1000),
         nonce: claimsFromToken.nonce,
         tenant_id: claimsFromToken.tenant_id || userinfoClaims.tenant_id,
@@ -1337,146 +1461,14 @@ export class OidcPkceService {
     idToken: string,
     stateRecord?: OidcStateRecord | null,
   ): Promise<Partial<OidcClaims>> {
-    try {
-      const parts = idToken.split(".");
-      if (parts.length !== 3) {
-        throw new ApiRequestError(
-          400,
-          "AUTH_SESSION_EXCHANGE_DENIED",
-          "Malformed OIDC ID token structure.",
-        );
-      }
-
-      const [headerB64] = parts;
-      let header: { alg?: string; kid?: string; typ?: string };
-      try {
-        const headerJsonStr = Buffer.from(headerB64!, "base64url").toString(
-          "utf8",
-        );
-        header = JSON.parse(headerJsonStr);
-      } catch {
-        throw new ApiRequestError(
-          400,
-          "AUTH_SESSION_EXCHANGE_DENIED",
-          "Invalid OIDC ID token header JSON.",
-        );
-      }
-
-      if (!header.alg || header.alg.toLowerCase() === "none") {
-        throw new ApiRequestError(
-          400,
-          "AUTH_SESSION_EXCHANGE_DENIED",
-          "OIDC ID token header specifies unsafe 'none' algorithm.",
-        );
-      }
-
-      let secretOrKey: string | Buffer | KeyObject | null = null;
-      if (header.alg.startsWith("HS")) {
-        secretOrKey =
-          process.env.OIDC_CLIENT_SECRET ||
-          process.env.JWT_SECRET ||
-          "drts_oidc_state_secret_key_32bytes_min";
-      } else if (
-        header.alg.startsWith("RS") ||
-        header.alg.startsWith("ES") ||
-        header.alg.startsWith("PS")
-      ) {
-        secretOrKey = await this.resolveJwksPublicKey(header.kid);
-      }
-
-      if (!secretOrKey) {
-        secretOrKey =
-          process.env.JWT_SECRET || process.env.OIDC_CLIENT_SECRET || null;
-      }
-
-      if (!secretOrKey) {
-        throw new ApiRequestError(
-          400,
-          "AUTH_SESSION_EXCHANGE_DENIED",
-          "OIDC ID token verification key or secret is missing.",
-        );
-      }
-
-      const expectedIssuer =
-        process.env.OIDC_ISSUER ??
-        process.env.JWT_ISSUER ??
-        "https://auth.staging.drts.internal";
-      const expectedAudience =
-        process.env.OIDC_CLIENT_ID ??
-        process.env.JWT_AUDIENCE ??
-        "drts-bff-client";
-
-      const verifiedPayload = jwt.verify(idToken, secretOrKey as any, {
-        algorithms: [header.alg as jwt.Algorithm],
-        issuer: expectedIssuer,
-        audience: expectedAudience,
-      }) as jwt.JwtPayload;
-
-      if (stateRecord && stateRecord.nonce) {
-        if (
-          !verifiedPayload.nonce ||
-          verifiedPayload.nonce !== stateRecord.nonce
-        ) {
-          throw new ApiRequestError(
-            400,
-            "AUTH_SESSION_EXCHANGE_DENIED",
-            "OIDC ID token nonce missing or mismatch.",
-          );
-        }
-      }
-
-      return verifiedPayload as Partial<OidcClaims>;
-    } catch (error) {
-      if (error instanceof ApiRequestError) throw error;
-      throw new ApiRequestError(
-        400,
-        "AUTH_SESSION_EXCHANGE_DENIED",
-        "OIDC ID token signature/JWKS verification failed.",
-      );
-    }
-  }
-
-  private async resolveJwksPublicKey(kid?: string): Promise<KeyObject | null> {
-    try {
-      if (process.env.OIDC_JWKS_JSON) {
-        const parsed = JSON.parse(process.env.OIDC_JWKS_JSON);
-        const keys = parsed.keys || [];
-        const matching =
-          keys.find((k: any) => !kid || k.kid === kid) || keys[0];
-        if (matching) {
-          return createPublicKey({ key: matching, format: "jwk" });
-        }
-      }
-
-      const jwksUri =
-        process.env.OIDC_JWKS_URI ??
-        (process.env.OIDC_ISSUER
-          ? `${process.env.OIDC_ISSUER}/.well-known/jwks.json`
-          : null);
-
-      if (!jwksUri) return null;
-
-      const now = Date.now();
-      if (!this.jwksCache || now - this.jwksCache.fetchedAt > 5 * 60 * 1000) {
-        const res = await fetch(jwksUri);
-        if (res.ok) {
-          const body = (await res.json()) as { keys?: any[] };
-          this.jwksCache = { keys: body.keys || [], fetchedAt: now };
-        }
-      }
-
-      if (this.jwksCache?.keys?.length) {
-        const matching =
-          this.jwksCache.keys.find((k: any) => !kid || k.kid === kid) ||
-          this.jwksCache.keys[0];
-        if (matching) {
-          return createPublicKey({ key: matching, format: "jwk" });
-        }
-      }
-    } catch {
-      this.logger.warn("OIDC JWKS key resolution failed.");
-    }
-    return null;
+    const claims = await this.idTokenVerifier.verify(
+      idToken,
+      stateRecord?.nonce,
+    );
+    return {
+      ...claims,
+      aud: process.env.OIDC_CLIENT_ID ?? "drts-bff-client",
+    } as Partial<OidcClaims>;
   }
 
   public decodeJwtClaims(token: string): Partial<OidcClaims> {
@@ -1493,6 +1485,7 @@ export class OidcPkceService {
 
   private recordSecurityEvent(params: {
     eventType: string;
+    requirePersistence?: boolean;
     outcome: "success" | "denied";
     realm: AuthRealm;
     tenantId?: string | null;
@@ -1529,7 +1522,14 @@ export class OidcPkceService {
           : "tenant_admin"
         : "system");
 
-    this.securityEventsService?.recordEvent({
+    const write = params.requirePersistence
+      ? this.securityEventsService?.recordEventRequired.bind(
+          this.securityEventsService,
+        )
+      : this.securityEventsService?.recordEvent.bind(
+          this.securityEventsService,
+        );
+    return write?.({
       actorId: params.actorId ?? null,
       actorType: resolvedActorType,
       subjectId: params.subjectId ?? null,
