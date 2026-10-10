@@ -5486,6 +5486,7 @@ export class OwnedMobilityService
     orderId: string,
     command: CancelOwnedOrderCommand,
     requestId?: string,
+    options?: { systemBypassCancelableCheck?: boolean },
   ) {
     const now = new Date().toISOString();
     const prepare = (bundle: {
@@ -5497,7 +5498,9 @@ export class OwnedMobilityService
       dispatchJobs: DispatchJobRecord[];
     }) => {
       const order = this.cloneOrder(bundle.order);
-      this.assertOrderCancelable(order);
+      if (!options?.systemBypassCancelableCheck) {
+        this.assertOrderCancelable(order);
+      }
       const assignment = bundle.assignment ? { ...bundle.assignment } : null;
       const task = bundle.task ? this.cloneTask(bundle.task) : null;
       // The persisted branch prepares from assignment/task rows locked in the

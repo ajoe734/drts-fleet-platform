@@ -153,7 +153,15 @@ export class PassengerBookingService {
         new Date(req.passengerConfirmedAt).toISOString(),
       );
     } catch {
-      await this.repository.rollbackFailedOrder(result.ride.orderId);
+      try {
+        await this.multiTaxiService.compensateFailedTrustedPassengerRide(
+          result.ride.orderId,
+          "passenger_booking_history_failed",
+          requestId,
+        );
+      } catch {
+        // The persistence failure remains the authoritative error.
+      }
       throw new ApiRequestError(
         HttpStatus.INTERNAL_SERVER_ERROR,
         "PASSENGER_BOOKING_HISTORY_FAILED",
@@ -182,8 +190,11 @@ export class PassengerBookingService {
         const decoded = JSON.parse(
           Buffer.from(cursor, "base64").toString("utf-8"),
         );
-        if (!decoded || typeof decoded !== 'object' || !decoded.createdAt || !decoded.orderId) {
+        if (!decoded || typeof decoded !== 'object') {
           throw new Error("Missing fields");
+        }
+        if (typeof decoded.createdAt !== 'string' || typeof decoded.orderId !== 'string') {
+          throw new Error("Invalid types");
         }
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(decoded.orderId)) {
           throw new Error("Invalid UUID");

@@ -576,6 +576,20 @@ export class MultiTaxiService implements OnModuleInit {
     );
   }
 
+  async compensateFailedTrustedPassengerRide(
+    orderId: string,
+    reason: string,
+    requestId?: string,
+  ) {
+    const order = this.requireMultiTaxiOrder(orderId);
+    return this.ownedMobilityService.cancelOwnedOrder(
+      order.orderId,
+      { reason },
+      requestId,
+      { systemBypassCancelableCheck: true },
+    );
+  }
+
   async submitTrustedPassengerRating(
     orderId: string,
     command: SubmitPassengerTripRatingCommand,
@@ -2015,6 +2029,7 @@ export class MultiTaxiService implements OnModuleInit {
         order.orderId,
         { reason: "passenger_access_token_persistence_failed" },
         requestId,
+        { systemBypassCancelableCheck: true },
       );
     } catch {
       // The persistence failure remains the authoritative error.

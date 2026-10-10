@@ -13,11 +13,11 @@ describe("Passenger Booking History API - Spec requirements", () => {
       createBookingHistory: vi.fn(),
       listBookingHistories: vi.fn(),
       getBookingHistoryOwner: vi.fn(),
-      rollbackFailedOrder: vi.fn(),
     };
     multiTaxiMock = {
       createTrustedPassengerRide: vi.fn(),
       cancelTrustedPassengerRide: vi.fn(),
+      compensateFailedTrustedPassengerRide: vi.fn(),
       getPassengerRideById: vi.fn(),
       submitTrustedPassengerRating: vi.fn(),
       getTrustedPassengerReceipt: vi.fn(),
@@ -50,9 +50,13 @@ describe("Passenger Booking History API - Spec requirements", () => {
       });
     });
 
+    const mockNow = Date.now();
+    const scheduledAtStr = new Date(mockNow + 2 * 60 * 60 * 1000).toISOString();
+    const expiresAtStr = new Date(mockNow + 10 * 60 * 1000).toISOString();
+
     fareMock.findOwnedSnapshot.mockResolvedValue({
-      scheduledAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-      expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      scheduledAt: scheduledAtStr,
+      expiresAt: expiresAtStr,
       origin: { lat: 25.04, lng: 121.51 },
       destination: { lat: 25.06, lng: 121.55 },
     });
@@ -66,7 +70,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
     });
 
     const command = {
-      scheduledAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+      scheduledAt: scheduledAtStr,
       origin: { lat: 25.04, lng: 121.51, address: "Origin Address" },
       destination: { lat: 25.06, lng: 121.55, address: "Dest Address" },
       paymentMethodId: "pm-1",
@@ -126,7 +130,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
     let err3: any;
     try { await service.createRide("pax-1", command, "req-1"); } catch (e) { err3 = e; }
     expect(err3.response.error.message).toMatch(/Failed to save booking history/);
-    expect(repoMock.rollbackFailedOrder).toHaveBeenCalledWith("order-1");
+    expect(multiTaxiMock.compensateFailedTrustedPassengerRide).toHaveBeenCalledWith("order-1", "passenger_booking_history_failed", "req-1");
   });
 
   it("pax-booking_history_and_ride_actions: prevents cross-account viewing, paginates properly", async () => {

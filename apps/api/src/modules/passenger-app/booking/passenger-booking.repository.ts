@@ -63,15 +63,4 @@ export class PassengerBookingRepository {
     );
     return result.rows[0]?.drts_passenger_id ?? null;
   }
-
-  async rollbackFailedOrder(orderId: string) {
-    await this.db.query(
-      `
-      UPDATE ops.phase1_owned_orders
-      SET status = 'cancelled', cancel_reason = 'passenger_booking_history_failed', cancelled_at = now(), updated_at = now()
-      WHERE order_id = $1 AND status IN ('created', 'ready_for_dispatch')
-      `,
-      [orderId],
-    );
-  }
 }
