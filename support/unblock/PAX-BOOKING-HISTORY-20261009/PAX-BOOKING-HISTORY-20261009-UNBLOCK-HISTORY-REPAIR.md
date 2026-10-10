@@ -22,8 +22,9 @@ be3f5983a wip(PAX-BOOKING-HISTORY-20261009): anchor uat doc update for R8 and R2
 ```
 
 `git show --stat be3f5983a` confirmed the commit only touched
-`docs/04-uat/passenger-app-20261009/PAX-BOOKING-HISTORY-20261009.md` (the
-task's own UAT/evidence doc), updating it to record that R8 was fixed and
+docs/04-uat/passenger-app-20261009/PAX-BOOKING-HISTORY-20261009.md (the
+task's own UAT/evidence doc, present on `gemini/pax-booking-history-20261009`
+but not on this doc-only unblock branch), updating it to record that R8 was fixed and
 R2 was blocked pending a `write_scopes` grant — matching the owner's
 `progress`/`system-block` machine-truth entries at `2026-10-10T08:27:59Z`
 and `2026-10-10T08:32:32Z`.
