@@ -34,10 +34,18 @@ function fixture(
           rows: [
             {
               drts_passenger_id: id,
+              display_name: null,
+              contact_phone: null,
               status: "active",
               contact_phone_verified: false,
+              verified_phone: null,
+              verified_email: null,
+              terms_version: null,
+              privacy_version: null,
+              fee_acknowledgement_version: null,
               contact_consent: false,
               created_at: new Date(),
+              updated_at: new Date(),
               deleted_at: null,
             },
           ],
