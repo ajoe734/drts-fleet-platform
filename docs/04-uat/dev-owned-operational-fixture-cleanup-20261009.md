@@ -77,7 +77,19 @@
   - R18-02: 延續 R17-02，UAT 依舊宣稱不存在之 unit regressions 並缺乏修復 traceability。
   - R18-03: Official full-range trailers 檢查失敗 (commit subject 不合規)。
 
-### 本次修復狀態對應表 (Per-finding Evidence Mapping for R18):
+### 候選版本 19 (Round 19): 8986f2b5244d4129c0b558852ddc513d1e5d9ede / Generation: 173837aa8ec04250b761da4f8beb3130
+- 獨立審查裁決: `REOPEN / not approved` (Codex)
+- 審查發現:
+  - R19-01: 延續 R18-01，raw planner 仍盲目賦予 authority；direct inspector 接受 default gcloud runner；pipeline guard 不阻止 DB fallback。
+  - R19-02: 延續 R18-02，UAT 記錄的 unit regressions 數字不實（舊版應為 58 PASS / 1 ERROR），且 synthetic positive test 吞沒例外而非正確 assert。
+
+### 本次修復狀態對應表 (Per-finding Evidence Mapping for R19):
+| 發現編號 | 先前狀態 / 舊 SHA (8986) | 修復邊界 / 證據 | 限制與保留 |
+| --- | --- | --- | --- |
+| R19-01 | 8986 中 raw planner 盲目 promote `_VALID_PROOF`，且 pipeline 未正確阻擋 fallback 到 live route。 | `build_cleanup_plan` 不再核發 authority。由 `run_cleanup_pipeline` 在確認 preflights 後注入。所有直接執行者與巡檢強制檢驗 `simulation_mode=True`。 | 不自動升級 historical archive validation 為 live runtime authority。 |
+| R19-02 | UAT 宣稱 4 FAIL / 1 PASS 不實（實際為 58 PASS / 1 ERROR）。`test_legitimate_synthetic_route` 吞沒錯誤。 | 更新 SAME UAT 帶入實際 old/new 版次狀態。補齊 `test_legitimate_synthetic_route` 的真實 assertions（包含 receipts `synthetic` 屬性檢查）。目前新 branch 59 tests 全部 PASS。 | 保留 prior-review-hashes，不縮寫。 |
+
+### 歷史修復狀態對應表 (Per-finding Evidence Mapping for R18):
 | 發現編號 | 先前狀態 / 舊 SHA (88f1) | 修復邊界 / 證據 | 限制與保留 |
 | --- | --- | --- | --- |
 | R18-01 | 88f1 中 public `_VALID_PROOF` 仍可進行 live route mock reads。 | 於 `execute_gcs_cleanup` 與 `run_cleanup_pipeline` 中，強制要求 `simulation_mode=True` 方可繼續。未開啟則 explicitunverified/blocked。已提交4項 formal regressions (`TestR18Regressions`)。 | 不自動升級 historical archive validation 為 live runtime authority。 |
@@ -86,7 +98,7 @@
 
 ## 3. 本機驗證日誌與退出碼 (Local Verification Logs & Exit Codes)
 
-執行指令 (舊 e8f2/88f1 上 4 FAIL / 1 PASS，新 branch 上全數 PASS):
+執行指令 (舊 8986f2b5 上 58 PASS / 1 ERROR，新 branch 上全數 PASS):
 ```bash
 python3 -B -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py -v
 ```
