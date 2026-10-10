@@ -46,6 +46,10 @@ on:
         default: '4a166f3ed2a7000061acc737ee475ae3c47dca56'
         type: string
 
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -178,7 +182,8 @@ jobs:
             --product-run-id "$INPUT_PRODUCT_RUN_ID" \
             --artifact-id "$INPUT_ARTIFACT_ID" \
             --source-sha "$INPUT_SOURCE_REF" \
-            --workflow-def-sha "$INPUT_WORKFLOW_DEF_SHA" > assessment-report.json
+            --workflow-def-sha "$INPUT_WORKFLOW_DEF_SHA" \
+            --cloud-metadata .local-cloud-metadata.json > assessment-report.json
 
       - name: Upload assessment report
         if: always()

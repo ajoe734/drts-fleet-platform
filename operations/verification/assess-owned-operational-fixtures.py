@@ -94,18 +94,31 @@ def fetch_and_validate_provenance(args) -> None:
     require(args.workflow_def_sha == AUTHORIZED_PROVENANCE["workflow_sha"], "Unauthorized workflow_def_sha")
     
     # Check run
-    res_run = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}"], capture_output=True, text=True, check=False)
+    res_run = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}"], capture_output=True, text=True, check=False, timeout=30)
     require(res_run.returncode == 0, "Failed to fetch run from GitHub API")
     run_data = json.loads(res_run.stdout)
+    require(str(run_data.get("id")) == args.product_run_id, "Run ID mismatch")
     require(run_data.get("head_sha") == AUTHORIZED_PROVENANCE["workflow_sha"], "Run source SHA mismatch")
+    require(run_data.get("status") == "completed", "Run not completed")
     require(run_data.get("conclusion") == "success", "Run not successful")
     require(run_data.get("workflow_id") is not None, "Run workflow linkage missing")
+    require(run_data.get("run_attempt") == 1, "Run attempt mismatch")
+    require(run_data.get("path") == ".github/workflows/upload-owned-operational-fixtures.yml", "Workflow path mismatch")
+    
+    import datetime
+    start_window = datetime.datetime.fromisoformat("2026-10-09T08:39:23+00:00")
+    end_window = datetime.datetime.fromisoformat("2026-10-09T09:04:10+00:00")
+    try:
+        run_created = datetime.datetime.fromisoformat(run_data.get("created_at", "").replace("Z", "+00:00"))
+        require(start_window <= run_created <= end_window, "Run created_at out of window")
+    except Exception:
+        raise ValueError("Invalid run created_at")
     
     # Check jobs
     jobs = []
     page = 1
     while True:
-        res_jobs = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}/jobs?per_page=100&page={page}"], capture_output=True, text=True, check=False)
+        res_jobs = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}/jobs?per_page=100&page={page}"], capture_output=True, text=True, check=False, timeout=30)
         require(res_jobs.returncode == 0, "Failed to fetch jobs from GitHub API")
         page_jobs = json.loads(res_jobs.stdout).get("jobs", [])
         if not page_jobs:
@@ -114,16 +127,25 @@ def fetch_and_validate_provenance(args) -> None:
         if len(page_jobs) < 100:
             break
         page += 1
-    require(len(jobs) > 0, "No jobs found")
-    for job in jobs:
-        require(job.get("status") == "completed", f"Job {job.get('id')} not completed")
-        require(job.get("conclusion") == "success", f"Job {job.get('id')} not successful")
+    require(len(jobs) == 1, "Expected exactly 1 job")
+    job = jobs[0]
+    require(str(job.get("run_id")) == args.product_run_id, "Job run_id mismatch")
+    require(job.get("head_sha") == AUTHORIZED_PROVENANCE["workflow_sha"], "Job head_sha mismatch")
+    require(job.get("status") == "completed", f"Job {job.get('id')} not completed")
+    require(job.get("conclusion") == "success", f"Job {job.get('id')} not successful")
+    try:
+        job_started = datetime.datetime.fromisoformat(job.get("started_at", "").replace("Z", "+00:00"))
+        job_completed = datetime.datetime.fromisoformat(job.get("completed_at", "").replace("Z", "+00:00"))
+        require(start_window <= job_started <= end_window, "Job started_at out of window")
+        require(start_window <= job_completed <= end_window, "Job completed_at out of window")
+    except Exception:
+        raise ValueError("Invalid job times")
     
     # Check artifacts pagination
     arts = []
     page = 1
     while True:
-        res_arts = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}/artifacts?per_page=100&page={page}"], capture_output=True, text=True, check=False)
+        res_arts = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}/artifacts?per_page=100&page={page}"], capture_output=True, text=True, check=False, timeout=30)
         require(res_arts.returncode == 0, "Failed to fetch artifacts from GitHub API")
         page_arts = json.loads(res_arts.stdout).get("artifacts", [])
         if not page_arts:
@@ -141,6 +163,13 @@ def fetch_and_validate_provenance(args) -> None:
     require(matched_art is not None, "Artifact not associated with authoritative run")
     require(matched_art.get("name") == f"operational-browser-evidence-{AUTHORIZED_PROVENANCE['source_sha']}", "Artifact name mismatch")
     require(not matched_art.get("expired"), "Artifact expired")
+    require(str(matched_art.get("workflow_run", {}).get("id")) == args.product_run_id, "Artifact run linkage mismatch")
+    require(matched_art.get("size_in_bytes") == 5850, "Artifact size mismatch")
+    try:
+        art_created = datetime.datetime.fromisoformat(matched_art.get("created_at", "").replace("Z", "+00:00"))
+        require(start_window <= art_created <= end_window, "Artifact created_at out of window")
+    except Exception:
+        raise ValueError("Invalid artifact created_at")
     
     with tempfile.TemporaryDirectory() as td:
         zip_path = os.path.join(td, "artifact.zip")
@@ -156,6 +185,10 @@ def fetch_and_validate_provenance(args) -> None:
         with zipfile.ZipFile(zip_path, 'r') as zf:
             members = zf.namelist()
             require(set(members) == {"operational-browser/report.json", "operational-browser/operational-browser-evidence.json"}, "Archive exact safe members mismatch")
+            
+            report_data = json.loads(zf.read("operational-browser/report.json").decode("utf-8"))
+            require(report_data is not None, "Missing or invalid report.json")
+            
             evidence_data = json.loads(zf.read("operational-browser/operational-browser-evidence.json").decode("utf-8"))
             require(evidence_data is not None, "Missing operational-browser-evidence.json")
             
@@ -193,11 +226,11 @@ def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]]) -> Dic
     for logical_key in CANONICAL_OWNED_OBJECTS.keys():
         physical_key = logical_to_physical_gcs_key(logical_key)
         desc = runner("describe", BUCKET, physical_key)
-        if desc.get("status") == "error":
-            raise RuntimeError(f"GCS error describing gs://{BUCKET}/{physical_key}: {desc.get('stderr')}")
         if desc.get("status") == "not_found":
             # Return proper rejection for missing instead of throwing generic ValueError
             return {"status": "rejected", "reason": f"Missing object gs://{BUCKET}/{physical_key}"}
+        if desc.get("status") != "ok":
+            raise RuntimeError(f"GCS error describing gs://{BUCKET}/{physical_key}: {desc.get('stderr', 'unknown_error')}")
         
         meta = desc.get("metadata", {})
         
@@ -297,6 +330,14 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         SELECT count(*) as c FROM reg.vehicle_passenger_disclosure_profiles WHERE source_submission_id IN ({safe_subs})
     ), creds AS (
         SELECT count(*) as c FROM reg.driver_public_registration_credentials WHERE source_submission_id IN ({safe_subs})
+    ), cdriv AS (
+        SELECT count(*) as c FROM reg.professional_drivers WHERE source_submission_id IN ({safe_subs})
+    ), cveh AS (
+        SELECT count(*) as c FROM reg.registered_vehicles WHERE source_submission_id IN ({safe_subs})
+    ), cpol AS (
+        SELECT count(*) as c FROM reg.vehicle_insurance_policies WHERE source_submission_id IN ({safe_subs})
+    ), ccont AS (
+        SELECT count(*) as c FROM fleet.vehicle_operating_contracts WHERE source_submission_id IN ({safe_subs})
     )
     SELECT json_build_object(
         'subs', (SELECT data FROM subs),
@@ -305,25 +346,30 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         'affs', (SELECT c FROM affs),
         'discs', (SELECT c FROM discs),
         'creds', (SELECT c FROM creds),
+        'cdriv', (SELECT c FROM cdriv),
+        'cveh', (SELECT c FROM cveh),
+        'cpol', (SELECT c FROM cpol),
+        'ccont', (SELECT c FROM ccont),
         'tx_ro', current_setting('transaction_read_only'),
         'tx_iso', current_setting('transaction_isolation')
     );
     COMMIT;
     """
     res = db_runner(query, [])
-    if "error" in res:
-        return {"status": "error", "error": res["error"]}
+    if "error" in res or res.get("status") == "error":
+        return {"status": "error", "error": res.get("error", "Unknown DB runner error")}
         
     try:
         counts = json.loads(res["rows"][0][0])
-    except (IndexError, json.JSONDecodeError) as e:
+    except (IndexError, json.JSONDecodeError, TypeError, KeyError) as e:
         return {"status": "error", "error": f"Failed to parse DB results: {e}"}
         
     if counts.get('tx_ro') != 'on' or counts.get('tx_iso') != 'repeatable read':
         return {"status": "rejected", "reason": "Transaction mode not verified"}
         
-    if any(counts.get(k, 0) < 0 for k in ['revs', 'affs', 'discs', 'creds']):
-        return {"status": "rejected", "reason": "Negative reference counts"}
+    for k in ['revs', 'affs', 'discs', 'creds', 'cdriv', 'cveh', 'cpol', 'ccont']:
+        if counts.get(k, 0) < 0:
+            return {"status": "rejected", "reason": f"Negative reference counts for {k}"}
         
     subs = counts.get('subs', [])
     docs = counts.get('docs', [])
@@ -333,17 +379,35 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
     if len(docs) != 8:
         return {"status": "rejected", "reason": "Missing expected supply_documents"}
         
+    seen_subs = set()
     for s in subs:
-        if s.get("status") == "error":
-            return {"status": "rejected", "reason": "Submission has error status"}
+        if s.get("status") not in ("approved", "pending", "in_review", "rejected"): # Require a well known literal
+            return {"status": "rejected", "reason": "Submission has arbitrary/error status"}
         if s.get("fleet_partner_id") != "fleet-demo-001":
             return {"status": "rejected", "reason": "Submission has foreign fleet partner"}
         if "revision_no" not in s or "created_at" not in s or s.get("revision_no") is None:
             return {"status": "rejected", "reason": "Submission missing revision_no/created_at"}
-        if s.get("submission_id") not in CANONICAL_OWNED_SUBMISSIONS:
+        if int(s.get("revision_no", -1)) < 0:
+            return {"status": "rejected", "reason": "Negative revision_no"}
+        sub_id = s.get("submission_id") or s.get("id")
+        if sub_id not in CANONICAL_OWNED_SUBMISSIONS:
             return {"status": "rejected", "reason": "Submission has unowned submission_id"}
         if not s.get("created_at"):
             return {"status": "rejected", "reason": "Submission missing valid created_at"}
+        
+        import datetime
+        try:
+            ca = datetime.datetime.fromisoformat(s.get("created_at").replace("Z", "+00:00"))
+            start = datetime.datetime.fromisoformat("2026-10-09T08:39:23+00:00")
+            end = datetime.datetime.fromisoformat("2026-10-09T09:04:10+00:00")
+            if not (start <= ca <= end):
+                return {"status": "rejected", "reason": f"Submission {sub_id} created_at out of window"}
+        except Exception:
+            return {"status": "rejected", "reason": f"Submission {sub_id} invalid created_at"}
+        seen_subs.add(sub_id)
+        
+    if seen_subs != set(CANONICAL_OWNED_SUBMISSIONS):
+        return {"status": "rejected", "reason": "Exact unique submission set mismatch"}
             
     for logical_key, expected in CANONICAL_OWNED_OBJECTS.items():
         doc_id = expected["documentId"]
@@ -358,6 +422,10 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
             return {"status": "rejected", "reason": f"Document {doc_id} wrong checksum_sha256"}
         if matched_doc.get("document_type") != expected["document_type"]:
             return {"status": "rejected", "reason": f"Document {doc_id} wrong document_type"}
+        if matched_doc.get("file_size") is not None and matched_doc.get("file_size") != EXPECTED_FILE_SIZE:
+            return {"status": "rejected", "reason": f"Document {doc_id} wrong file_size"}
+        if matched_doc.get("content_type") is not None and matched_doc.get("content_type") != EXPECTED_MIME:
+            return {"status": "rejected", "reason": f"Document {doc_id} wrong content_type"}
             
         uploaded = matched_doc.get("uploaded_at")
         if not uploaded:
@@ -373,23 +441,31 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         except Exception:
             return {"status": "rejected", "reason": f"Document {doc_id} invalid uploaded_at"}
             
-    if counts['revs'] > 0:
+    if counts.get('revs', 0) > 0:
         return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['revs']} review_events exist", "reason": "review_events found"}
-    if counts['affs'] > 0:
+    if counts.get('affs', 0) > 0:
         return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['affs']} vehicle_fleet_affiliations exist", "reason": "vehicle_fleet_affiliations found"}
-    if counts['discs'] > 0:
+    if counts.get('discs', 0) > 0:
         return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['discs']} disclosure_profiles exist", "reason": "disclosure_profiles found"}
-    if counts['creds'] > 0:
+    if counts.get('creds', 0) > 0:
         return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['creds']} credentials exist", "reason": "credentials found"}
+    if counts.get('cdriv', 0) > 0:
+        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['cdriv']} professional_drivers exist", "reason": "professional_drivers found"}
+    if counts.get('cveh', 0) > 0:
+        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['cveh']} registered_vehicles exist", "reason": "registered_vehicles found"}
+    if counts.get('cpol', 0) > 0:
+        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['cpol']} vehicle_insurance_policies exist", "reason": "vehicle_insurance_policies found"}
+    if counts.get('ccont', 0) > 0:
+        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['ccont']} vehicle_operating_contracts exist", "reason": "vehicle_operating_contracts found"}
         
     return {
         "status": "success", 
         "submissions_found": len(subs),
         "documents_found": len(docs),
-        "review_events_count": counts['revs'], 
-        "affiliations_count": counts['affs'],
-        "disclosure_count": counts['discs'],
-        "credential_count": counts['creds'],
+        "review_events_count": counts.get('revs', 0), 
+        "affiliations_count": counts.get('affs', 0),
+        "disclosure_count": counts.get('discs', 0),
+        "credential_count": counts.get('creds', 0),
     }
 
 def default_gcs_runner(action: str, bucket: str, key: str) -> Dict[str, Any]:
@@ -411,15 +487,27 @@ def default_gcs_runner(action: str, bucket: str, key: str) -> Dict[str, Any]:
     elif action == "cat":
         cmd = ["gcloud", "storage", "cat", f"gs://{bucket}/{key}", "--project", PROJECT, "--quiet"]
         try:
+            import time
+            start_time = time.time()
             with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
-                try:
-                    out, err = p.communicate(timeout=30)
-                except subprocess.TimeoutExpired:
-                    p.kill()
-                    return {"status": "error", "stderr": "cat timeout"}
-                body = out
-                if len(body) > 10 * 1024 * 1024:
-                    return {"status": "error", "stderr": "File too large"}
+                body = b""
+                # Read stdout incrementally
+                while True:
+                    if time.time() - start_time > 30:
+                        p.kill()
+                        return {"status": "error", "stderr": "cat timeout"}
+                    import select
+                    r, _, _ = select.select([p.stdout], [], [], 1.0)
+                    if p.stdout in r:
+                        chunk = p.stdout.read(4096)
+                        if not chunk and p.poll() is not None:
+                            break
+                        body += chunk
+                        if len(body) > 10 * 1024 * 1024:
+                            p.kill()
+                            return {"status": "error", "stderr": "File too large"}
+                    elif p.poll() is not None:
+                        break
                 if p.returncode == 0:
                     return {"status": "ok", "body": body}
                 return {"status": "error", "stderr": "gcloud cat failed"}
@@ -528,6 +616,7 @@ def main():
     parser.add_argument("--artifact-id", type=str, default="")
     parser.add_argument("--source-sha", type=str, default="")
     parser.add_argument("--workflow-def-sha", type=str, default="")
+    parser.add_argument("--cloud-metadata", type=str, default="")
     args = parser.parse_args()
     
     report = {
@@ -538,6 +627,12 @@ def main():
     }
     
     try:
+        if args.cloud_metadata and os.path.exists(args.cloud_metadata):
+            with open(args.cloud_metadata, 'r') as f:
+                report["cloud_metadata"] = json.load(f)
+        else:
+            require(args.mock_db, "Missing cloud metadata receipt")
+
         if args.mock_db:
             report["disposition"] = "synthetic"
             gcs_res = {"status": "success", "validated_count": len(CANONICAL_OWNED_OBJECTS), "receipts": []}

@@ -19,37 +19,30 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 
 Command run for tests: `python3 -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_assessment.py -v` (Exit Code 0).
 
-1. **F1**: Authentic producer authority (Completed)
-   - Checks: Workflow fetches jobs, paginates artifacts, validates exact archive members, strictly verifies `confirmDocumentType`, `workflow_sha` and `fleet-demo-001`. Fixes missing artifact name matching actual `source_sha`. Fixes missing correct ZIP file member checks.
-   - Result: Tests updated to simulate genuine 5850-byte ZIP and exact properties. Mock transport tests PASS.
-2. **F2**: Hosted rails and Operator protection (Completed)
-   - Checks: Workflow verifies `github.sha` merge base against `dev` (ensuring CI/protected merge) BEFORE authentication step.
-   - Result: Implemented in workflow. Live cloud execution skipped.
-3. **F3**: Native GCS boundaries (Completed)
-   - Checks: Scripts strictly match bucket and name on initial retrieval and rechecks, bounds `timeCreated`/`updated`/`stored-at`, enforces bounded `subprocess.Popen.communicate()` up to 10MiB with proper timeout.
-   - Result: Mock transport tests PASS. Real cloud execution skipped.
-4. **F4/F5**: Formal snapshot & DB bounds (Completed)
-   - Checks: Scripts check transaction mode (`tx_ro`, `tx_iso`), negative reference counts, and specific foreign references exist. Checks `revision_no`, `checksum_sha256`, `submission_id`, `created_at` matching correct canonical values. Implemented strict `psql` timeouts, readiness probes, and lock bounds.
-   - Result: DB transport mocks PASS. Live Postgres DB check skipped.
-5. **F6/F7**: UAT Claims and committed evidence (Completed)
-   - Checks: Workflow includes upload-artifact for `assessment-report.json`. Mocks correctly replicate exact expected file sizes and real hashes.
-   - Result: Verified. Mock transport tests PASS.
-6. **F8**: Publication
-   - Result: Prefix matched strictly in commits: `SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010`.
+### Matrix of repairs and unverified claims
+
+| Finding | Source / Action Taken | Status |
+|---------|-----------------------|--------|
+| **F1 Authentic Authority** | Added strict checks for `run_id`, `run_attempt`, window bounds, exact 1 `job`, and job/artifact timeline linkage. Tests restored `AUTHORIZED_PROVENANCE` to prevent mutation. | PARTIAL (Mock tested, real API NOT EXECUTED) |
+| **F2 Hosted Rails** | Added `concurrency: group: deploy-dev` to workflow. Added `--cloud-metadata` arg and `read-dev-cloud-metadata.py` binding into the assessment report. | PARTIAL (Workflow config updated, real runtime NOT EXECUTED) |
+| **F3 Native Bounds** | Replaced `communicate()` with bounded streaming `read(4096)` and strict 10MiB enforcement limit. Handled `error` vs `not_found` explicitly, rejecting malformed status. | PARTIAL (Unit tests pass, GCS NOT EXECUTED) |
+| **F4/F5 Formal DB** | Added full relationship query covering `professional_drivers`, `registered_vehicles`, `vehicle_insurance_policies`, `vehicle_operating_contracts`. Added status string literal checks, exact unique submission set checks. | PARTIAL (Mock transport passes, live DB snapshot NOT EXECUTED) |
+| **F6/F7 Evidence** | Corrected UAT claims to be truthful. Added `tearDown` in tests to prevent `AUTHORIZED_PROVENANCE` digest mutation. Verified `NOT EXECUTED` statements remain. | PARTIAL (Unit tests verified, UAT updated) |
+| **F8 Publication** | Retained clean v2/PR2542 match and prefix. | PARTIAL (Pending normal close of old PR preserving history) |
 
 ## Execution Bounds and Reporting
 
-The workflow correctly restricts secrets, body, and non-fixture rows. It produces a bounded hosted JSON report which is uploaded as a durable artifact.
+The workflow correctly restricts secrets, body, and non-fixture rows. It produces a bounded hosted JSON report which is uploaded as a durable artifact. The report now includes `cloud_metadata` verifying the reservation and environment runtime.
 Real ownership (GCS and DB) is clearly differentiated from synthetic disposition.
-The CLI `main()` executes zero real transport when invoked with `--mock-db`. Error responses are strictly sanitized, removing raw tool output leakage.
+The CLI `main()` executes zero real transport when invoked with `--mock-db`. Error responses are strictly sanitized.
 
 ## Acceptance Criteria Verified
 
 1. **`owned_fixture_assessment_actual_producer_and_boundary_regressions`**:
-   - Completed (via tests). Genuine boundary tests run successfully with exact PDF bytes without mocking hash validators.
+   - **NOT MET**. Formal PG limits disclosed; no runtime waiver. Genuine boundary tests run successfully with exact PDF bytes in unit tests, but real actual producer runs are not validated locally.
 
 2. **`owned_fixture_assessment_exact_sha_review_ci_protected_merge`**:
-   - Unexecuted. To be verified by CI and GitHub PR status once submitted.
+   - **NOT MET**. To be verified by CI and GitHub PR status once submitted.
 
 3. **`owned_fixture_assessment_genuine_reserved_hosted_native_objects_db_snapshot`**:
-   - NOT EXECUTED in the live environment. Script boundaries defined but execution deferred to Operator in isolated run.
+   - **NOT EXECUTED / NOT MET**. Genuine reserved immutable Operator/native/formal-submission snapshot not executed in the live environment. Script boundaries defined but execution deferred.

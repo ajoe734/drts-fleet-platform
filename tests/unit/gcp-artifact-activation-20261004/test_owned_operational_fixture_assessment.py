@@ -37,6 +37,10 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
         self.expected_sha256 = assess.EXPECTED_SHA256
         self.expected_size = assess.EXPECTED_FILE_SIZE
         self.expected_mime = assess.EXPECTED_MIME
+        self.original_provenance = assess.AUTHORIZED_PROVENANCE.copy()
+
+    def tearDown(self):
+        assess.AUTHORIZED_PROVENANCE.update(self.original_provenance)
 
     def test_logical_to_physical_key(self):
         logical = "fleet-partner/fleet-demo-001/supply-submissions/uuid/doc.pdf"
@@ -201,15 +205,15 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                     assess.AUTHORIZED_PROVENANCE["archive_sha256"] = h
                     return MagicMock(returncode=0)
                 elif len(cmd) > 2 and cmd[2] == f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}":
-                    return MagicMock(returncode=0, stdout=json.dumps({"head_sha": args.workflow_def_sha, "conclusion": "success", "workflow_id": "123"}))
+                    return MagicMock(returncode=0, stdout=json.dumps({"id": int(args.product_run_id), "head_sha": args.workflow_def_sha, "conclusion": "success", "status": "completed", "workflow_id": 123, "run_attempt": 1, "path": ".github/workflows/upload-owned-operational-fixtures.yml", "created_at": "2026-10-09T08:40:00Z"}))
                 elif len(cmd) > 2 and "jobs" in cmd[2]:
                     if "page=1" in cmd[2]:
-                        return MagicMock(returncode=0, stdout=json.dumps({"jobs": [{"id": 1, "status": "completed", "conclusion": "success"}]}))
+                        return MagicMock(returncode=0, stdout=json.dumps({"jobs": [{"id": 1, "run_id": int(args.product_run_id), "head_sha": args.workflow_def_sha, "status": "completed", "conclusion": "success", "started_at": "2026-10-09T08:41:00Z", "completed_at": "2026-10-09T08:42:00Z"}]}))
                     else:
                         return MagicMock(returncode=0, stdout=json.dumps({"jobs": []}))
                 elif len(cmd) > 2 and "artifacts" in cmd[2]:
                     if "page=1" in cmd[2]:
-                        return MagicMock(returncode=0, stdout=json.dumps({"artifacts": [{"id": args.artifact_id, "name": f"operational-browser-evidence-{assess.AUTHORIZED_PROVENANCE['source_sha']}", "expired": False}]}))
+                        return MagicMock(returncode=0, stdout=json.dumps({"artifacts": [{"id": args.artifact_id, "name": f"operational-browser-evidence-{assess.AUTHORIZED_PROVENANCE['source_sha']}", "expired": False, "workflow_run": {"id": int(args.product_run_id)}, "size_in_bytes": 5850, "created_at": "2026-10-09T08:43:00Z"}]}))
                     else:
                         return MagicMock(returncode=0, stdout=json.dumps({"artifacts": []}))
             return MagicMock(returncode=1)
@@ -254,15 +258,15 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                     assess.AUTHORIZED_PROVENANCE["archive_sha256"] = h
                     return MagicMock(returncode=0)
                 elif len(cmd) > 2 and cmd[2] == f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}":
-                    return MagicMock(returncode=0, stdout=json.dumps({"head_sha": args.workflow_def_sha, "conclusion": "success", "workflow_id": "123"}))
+                    return MagicMock(returncode=0, stdout=json.dumps({"id": int(args.product_run_id), "head_sha": args.workflow_def_sha, "conclusion": "success", "status": "completed", "workflow_id": 123, "run_attempt": 1, "path": ".github/workflows/upload-owned-operational-fixtures.yml", "created_at": "2026-10-09T08:40:00Z"}))
                 elif len(cmd) > 2 and "jobs" in cmd[2]:
                     if "page=1" in cmd[2]:
-                        return MagicMock(returncode=0, stdout=json.dumps({"jobs": [{"id": 1, "status": "completed", "conclusion": "success"}]}))
+                        return MagicMock(returncode=0, stdout=json.dumps({"jobs": [{"id": 1, "run_id": int(args.product_run_id), "head_sha": args.workflow_def_sha, "status": "completed", "conclusion": "success", "started_at": "2026-10-09T08:41:00Z", "completed_at": "2026-10-09T08:42:00Z"}]}))
                     else:
                         return MagicMock(returncode=0, stdout=json.dumps({"jobs": []}))
                 elif len(cmd) > 2 and "artifacts" in cmd[2]:
                     if "page=1" in cmd[2]:
-                        return MagicMock(returncode=0, stdout=json.dumps({"artifacts": [{"id": args.artifact_id, "name": f"operational-browser-evidence-{assess.AUTHORIZED_PROVENANCE['source_sha']}", "expired": False}]}))
+                        return MagicMock(returncode=0, stdout=json.dumps({"artifacts": [{"id": args.artifact_id, "name": f"operational-browser-evidence-{assess.AUTHORIZED_PROVENANCE['source_sha']}", "expired": False, "workflow_run": {"id": int(args.product_run_id)}, "size_in_bytes": 5850, "created_at": "2026-10-09T08:43:00Z"}]}))
                     else:
                         return MagicMock(returncode=0, stdout=json.dumps({"artifacts": []}))
             return MagicMock(returncode=1)
