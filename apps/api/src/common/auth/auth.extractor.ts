@@ -144,6 +144,12 @@ export function extractBootstrapRequestIdentity(
   headers: AuthBootstrapHeaders,
   options: ExtractIdentityOptions,
 ): BootstrapRequestIdentity | null {
+  // Passenger identities always require a signed JWT and a live passenger session.
+  if (
+    normalizeHeaderValue(headers["x-actor-type"]) === "first_party_passenger" ||
+    normalizeHeaderValue(headers["x-realm"]) === "passenger"
+  )
+    return null;
   const hasSignal = hasAuthSignal(headers);
   if (!hasSignal && !options.allowAnonymous) {
     return null;
@@ -256,4 +262,3 @@ export function isDriverIdentityMatching(
   }
   return normActor === normTarget;
 }
-

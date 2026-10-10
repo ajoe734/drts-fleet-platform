@@ -31,8 +31,9 @@ export const REALM_COLORS = {
     dark: { fg: "#FCD34D", bg: "#3A2A0A", border: "#5C4218" },
   },
   passenger: {
-    light: { fg: "#0B5CAB", bg: "#EAF2FB", border: "#D0E1F5" },
-    dark: { fg: "#60A5FA", bg: "#07437E", border: "#1E3A8A" },
+    // Preserve verified P5 brand=#0B5CAB, brandBg=#EAF2FB, headerBg=#07437E. Other values are missing in P5 canvas design.
+    light: { fg: "#0B5CAB", bg: "#EAF2FB", border: "" /* FIXME: Missing border design */, headerBg: "#07437E" },
+    dark: { fg: "" /* FIXME: Missing dark mode design */, bg: "" /* #07437E is a light-screen header bg, now in light.headerBg */, border: "" },
   },
 } as const satisfies Record<RealmName, Record<TokenMode, ToneRamp>>;
 
