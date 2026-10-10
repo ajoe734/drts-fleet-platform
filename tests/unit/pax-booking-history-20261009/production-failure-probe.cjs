@@ -13,6 +13,7 @@ if (reference && !/^[a-f0-9]{40}$/.test(reference))
 const previousFiles = new Set([
   "apps/api/src/modules/passenger-app/booking/passenger-booking.service.ts",
   "apps/api/src/modules/passenger-app/booking/passenger-booking.repository.ts",
+  "apps/api/src/modules/passenger-app/booking/passenger-booking.controller.ts",
   "apps/api/src/modules/multi-taxi/multi-taxi.service.ts",
   "apps/api/src/modules/owned-mobility/owned-mobility.service.ts",
 ]);
@@ -112,6 +113,55 @@ async function main() {
     );
   }
   console.log(`PRODUCTION_FAILURE_PROBE failures=${failures}`);
+  for (const scenario of [
+    "http_envelope",
+    "expired_at_now",
+    "array_confirmation",
+    "malformed_order_id",
+  ]) {
+    const f = createProductionBookingFixture();
+    let error = null,
+      result = null;
+    if (scenario === "expired_at_now")
+      f.snapshot.expiresAt = new Date(NOW).toISOString();
+    if (scenario === "array_confirmation")
+      f.command.passengerConfirmedAt = [f.command.passengerConfirmedAt];
+    try {
+      result =
+        scenario === "malformed_order_id"
+          ? await f.service.getRide(OWNER, "not-a-uuid")
+          : await f.controller.createRide(
+              { realm: "passenger", drtsPassengerId: OWNER },
+              "probe-request",
+              f.command,
+            );
+    } catch (e) {
+      error = e.code || e.message;
+    }
+    const safe =
+      scenario === "http_envelope"
+        ? result?.data?.ride?.order?.orderId === f.state.order?.orderId &&
+          result?.meta?.requestId === "probe-request"
+        : scenario === "malformed_order_id"
+          ? error === "PASSENGER_RIDE_NOT_FOUND" && f.calls.length === 0
+          : error ===
+              (scenario === "expired_at_now"
+                ? "FARE_QUOTE_EXPIRED"
+                : "PASSENGER_NOT_CONFIRMED") &&
+            f.state.order === null &&
+            f.published.length === 0;
+    if (!safe) failures++;
+    console.log(
+      JSON.stringify({
+        sha: reference || "working-tree",
+        scenario,
+        error,
+        safe,
+        databaseCalls: f.calls.length,
+      }),
+    );
+  }
+  console.log(`PRODUCTION_CONTRACT_PROBE total_failures=${failures}`);
   process.exitCode = failures ? 1 : 0;
 }
 main().catch((error) => {

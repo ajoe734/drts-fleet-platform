@@ -10,7 +10,7 @@ CREATE TABLE passenger.booking_histories (
   CHECK (passenger_confirmed_at <= created_at)
 );
 
-CREATE INDEX passenger_booking_histories_account_idx 
+CREATE INDEX passenger_booking_histories_account_idx
   ON passenger.booking_histories(drts_passenger_id, created_at DESC);
 
 COMMIT;

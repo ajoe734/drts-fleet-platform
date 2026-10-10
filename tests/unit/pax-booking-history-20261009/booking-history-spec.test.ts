@@ -259,7 +259,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
     expect(res2.rides[0]?.order.orderId).toBe(id3);
 
     // Check getActiveRides traversing multiple pages, with real UUID shapes.
-    const completedIds = Array.from({ length: 50 }, () => randomUUID());
+    const completedIds: string[] = Array.from({ length: 50 }, () => randomUUID());
     const activeId = randomUUID();
     repoMock.listBookingHistories.mockImplementation(
       async (_paxId: any, limit: any, cursorCreatedAt: any) => {

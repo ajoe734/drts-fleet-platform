@@ -80,7 +80,18 @@ describe("R2: production booking and repositories commit before dispatch", () =>
     ["history", "rollback"],
   ])("keeps failed creation invisible, faults=%j", async (...faults) => {
     const f = createProductionBookingFixture(faults);
-    await expect(f.service.createRide(OWNER, f.command)).rejects.toBeDefined();
+    const creating = f.service.createRide(OWNER, f.command);
+    if (faults.includes("history")) {
+      await expect(creating).rejects.toMatchObject({
+        code: "PASSENGER_BOOKING_HISTORY_FAILED",
+      });
+    } else if (faults.includes("token")) {
+      await expect(creating).rejects.toMatchObject({
+        code: "PASSENGER_ACCESS_TOKEN_PERSISTENCE_FAILED",
+      });
+    } else {
+      await expect(creating).rejects.toThrow(`injected ${faults[0]} failure`);
+    }
     expect(f.state).toEqual({ order: null, token: null, history: null });
     expect(f.owned.listOrders()).toEqual([]);
     expect(f.published).toEqual([]);
