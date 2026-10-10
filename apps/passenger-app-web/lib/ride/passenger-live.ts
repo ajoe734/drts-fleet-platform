@@ -441,21 +441,22 @@ export function mapPassengerCertificate(
         result.pdfUrl = receipt.pdfUrl;
       }
       
-      if (receipt.plateNo) {
+      const r = receipt as any;
+      if (r.plateNo) {
         result.rows = [
-          { label: "乘車證明編號", value: receipt.receiptNo || "", mono: true },
-          { label: "開立時間", value: receipt.issuedAt || "", mono: true },
-          { label: "車牌", value: receipt.plateNo, mono: true },
-          { label: "上車時間", value: receipt.pickupAt || "", mono: true },
-          { label: "下車時間", value: receipt.dropoffAt || "", mono: true },
-          { label: "行駛時間", value: receipt.duration || "" },
-          { label: "路線", value: receipt.route || "" },
-          { label: "行駛里程", value: receipt.distance || "", mono: true },
-          { label: "車資", value: receipt.fare || "", mono: true },
-          { label: "通行費", value: receipt.toll || "NT$ 0", mono: true },
-          { label: "客服電話", value: receipt.customerServicePhone || "", mono: true },
-          { label: "主管機關申訴電話", value: receipt.authorityComplaintPhone || "", mono: true },
-        ].filter(r => r.value !== "");
+          { label: "乘車證明編號", value: r.receiptNo || "", mono: true },
+          { label: "開立時間", value: r.issuedAt || "", mono: true },
+          { label: "車牌", value: r.plateNo, mono: true },
+          { label: "上車時間", value: r.pickupAt || "", mono: true },
+          { label: "下車時間", value: r.dropoffAt || "", mono: true },
+          { label: "行駛時間", value: r.duration || "" },
+          { label: "路線", value: r.route || "" },
+          { label: "行駛里程", value: r.distance || "", mono: true },
+          { label: "車資", value: r.fare || "", mono: true },
+          { label: "通行費", value: r.toll || "NT$ 0", mono: true },
+          { label: "客服電話", value: r.customerServicePhone || "", mono: true },
+          { label: "主管機關申訴電話", value: r.authorityComplaintPhone || "", mono: true },
+        ].filter(x => x.value !== "");
       }
       
       return result;
