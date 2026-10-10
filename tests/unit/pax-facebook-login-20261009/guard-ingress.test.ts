@@ -71,9 +71,9 @@ describe.each(["staging", "production", "development"])(
     it("requires OpenRoute metadata as well as the exact matcher", async () => {
       configure(environment);
       const guard = new BootstrapAuthGuard(new Reflector());
-      const { execution } = context("POST", PATH);
+      const { request } = context("POST", PATH);
       const closed = {
-        ...execution,
+        switchToHttp: () => ({ getRequest: () => request }),
         getHandler: () => function closedHandler() {},
         getClass: () => class ClosedController {},
       } as never;

@@ -2,6 +2,11 @@
 
 Owner: Codex · Reviewer: Codex2
 
+最新狀態（2026-10-10 guard 修復輪）：FB-INGRESS-1 的 middleware 與 guard
+兩層均已完成本機正式函式回歸；下方前輪「未解」及 expected-denial 記錄保留作歷史。
+最新證據見本文末段。整項 acceptance 尚待同 candidate hosted CI、Codex2 review、
+merge 與指定 acceptance evidence；本機 pass 不等於 PG／HTTP／真實 Meta 通過。
+
 ## 正式依據與修改
 
 SD `01_system_sa_sd.md` §2–4 定義 Facebook OAuth2、`/me` 帶 appsecret_proof、FACEBOOK_APP_ID/SECRET 全有全無、email 不作帳號合併、唯一登入身分刪除視同軟刪帳號。沿用 V0111 transaction 與 V0109 account repository；SQL 逐欄核對 migration。
@@ -127,3 +132,48 @@ CI、獨立 review、merge、acceptance：未完成。
 PR 若建立為 draft，只供 scope coordination，未鎖候選。
 入口修复後才用實際完整 HEAD handoff 給 Codex2。
 未部署、未啟動 VM runtime／PG／browser／Docker，未呼叫真實 Meta endpoint。
+
+## 2026-10-10：dependency 合併後的 guard 修復與交審證據
+
+本輪讀完整原 artifact、正式 SD §2–4、controller metadata、middleware／guard
+與 account、OTP、fare guard callers。live GitHub 核對 #2499 於 04:12:44Z 合併，
+merge SHA `7991c0e01c6a3778bcc69a28bad0fc2d506499e9`；遵守 Supervisor 指示，
+先普通 merge `origin/dev`（無衝突），再修改 guard，保留 published history。
+此前 #2503 仍為 draft checkpoint，未有 review candidate 或獨立退修。
+
+修復只在 `BootstrapAuthGuard.activatePassenger` 清除 identity 之後，要求
+OpenRoute metadata **且**正式 `isFacebookDataDeletionRequest(method, originalUrl ?? url)`
+精確匹配，才放行到 controller 的 signed_request／receipt HMAC 驗證。
+不從此入口的 Bearer 授予乘客 identity；bootstrap identity headers 仍先拒絕。
+Google/LINE/Facebook OAuth、OTP、account、fare 和 geo 的原驗證路徑保持既有行為。
+原 `strict-ingress.blocker.test.ts` 已移除，改用真正 admission 的
+`guard-ingress.test.ts`，不再用 expected-denial 充作入口通過。
+
+| Finding／驗收項                                                               | 原始碼依據與修改位置                                                                                                                  | 舊版重現 → 修正版結果                                                                                                                                                                                                                                                                                     | 命令、退出碼、版本與證據位置                                                                                                                                                     | 未驗項與具體限制                                                                                                                                                                                    |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FB-INGRESS-1 guard                                                            | `bootstrap-auth.guard.ts / canActivate → activatePassenger`；共用 `isFacebookDataDeletionRequest`；正式 controller OpenRoute metadata | 舊產品碼＋最終 probe checkpoint `731620876`：6 fail／12 pass，合法 POST/GET 因 `INTERNAL_KEY_REQUIRED` 被擋 → 修復 checkpoint `64df0362a38072c65fd7f963f16cc5c7dc746307`：18／18 pass                                                                                                                     | 下方 guard 命令 exit 1 → exit 0；`.local/facebook-guard-20261010/before.{sha,json,log}` 與 `after.{sha,json,log}`；Node 22.23.2、pnpm 10.33.0、Vitest 4.1.4                      | 直接執行正式 middleware、guard、controller、service，未測 HTTP server/parser、Cloud Run ingress                                                                                                     |
+| FB-INGRESS-1 middleware／安全拒絕回歸                                         | 原 middleware matcher；guard OpenRoute 邊界、正式 signed_request／receipt HMAC                                                        | staging、production、development（internal key enforced）合法 POST/GET 與 query 通過；錯 method、child/trailing path、receipt 格式、缺 OpenRoute、bootstrap header、相鄰 OAuth/OTP/me、相鄰路由 spoofed Bearer 均拒絕；偽造 signed_request 在 transaction 前拒絕，合法回呼產生可驗收據、偽造 receipt 拒絕 | 18 guard＋9 middleware tests 包含於 root regression，exit 0；`.local/facebook-guard-20261010/regression.{json,log}`                                                              | account persistence 為既有 MemoryPassengerStore；HMAC、matcher、guard、controller 未 mock。多重 API prefix 的拒絕由 middleware suite 驗證，未將不存在的 router path 假接到 controller 作 guard 驗收 |
+| token／app／subject／proof、state／PKCE／link、signed_request／刪除結果／格式 | 原 Facebook adapter/service、OAuth transaction、account repository 與 API controller                                                  | 原 Facebook 正負向及 Google/LINE/account/OTP 回歸全部通過；原 middleware 和共用 auth/geo/fare regression 通過                                                                                                                                                                                             | root 17 files：476 passed、2 skipped；API 4 files：120 passed；兩者 exit 0，`.local/facebook-guard-20261010/{regression,api}.{json,log}`                                         | root 的 2 skips 是既有 fare/geo 僅 strict 環境的案例在 development 略過，同案例 staging/production 通過；不算 Facebook skip。API 正式 SQL 使用 PoolClient stub，未宣稱 PG concurrency 通過          |
+| pax-facebook_flow_verification_and_data_deletion                              | 上述全部 finding＋原 acceptance 要求                                                                                                  | 本機 implementation 與受影響回歸已通過；整項尚未滿足                                                                                                                                                                                                                                                      | PR #2503 的最終 candidate 以 active release handoff 的完整 SHA 為準；本 artifact 所在 closeout commit 僅附加證據，產品碼／測試與 `64df0362a38072c65fd7f963f16cc5c7dc746307` 相同 | 同 SHA hosted CI、Codex2 獨立 review、merge／record-acceptance 待 lifecycle；真實 Meta App、provider-side PKCE、HTTP form parser、PG、公開 HTTPS API origin 的 hosted 驗證仍待外部環境              |
+
+本輪工具啟動失敗單列：Vitest dependency symlink 再次失效，首次 0 tests；只移除
+本 task worktree 的 node_modules symlinks，offline frozen-lockfile install exit 0。
+第一次 cleanup 因重複 root path 報 FileNotFoundError，去重後完成；canonical dependencies
+未修改，證據 `.local/facebook-guard-20261010/{dependency-links.txt,install.log}`。
+第一版 probe 將不存在的 `/api//api/...` 假接 OpenRoute handler，導致 3 個 fixture assertion
+失敗；移除該 guard fixture（middleware 已覆蓋此錯 prefix）後才記錄可追溯的 6 fail／12 pass。
+這些工具／fixture 失敗不計作產品缺陷重現。
+
+```bash
+pnpm exec vitest run tests/unit/pax-facebook-login-20261009/guard-ingress.test.ts --reporter=default --reporter=json --outputFile.json=.local/facebook-guard-20261010/before.json
+# 舊碼 exit 1：6 fail／12 pass；修復後相同案例、outputFile=after.json，exit 0：18 pass
+
+pnpm exec vitest run tests/unit/pax-facebook-login-20261009 tests/unit/pax-oidc-login-20261009 tests/unit/pax-account-session-20261009 tests/unit/pax-otp-20261009 tests/unit/pax-fare-quote-20261009/geo-realm.test.ts tests/unit/internal-key.middleware.test.ts tests/unit/bootstrap-auth-guard-strict-env.test.ts tests/unit/system-remediation/sr-proof-001/proof-download-auth.test.ts --reporter=default --reporter=json --outputFile.json=.local/facebook-guard-20261010/regression.json
+# exit 0：476 pass／2 既有 skips
+
+pnpm --filter @drts/api exec vitest run tests/unit/facebook-data-deletion.repository.test.ts tests/unit/passenger-oauth-transaction.repository.test.ts tests/unit/passenger-auth-provider-routing.test.ts tests/unit/auth-bootstrap.test.ts --reporter=default --reporter=json --outputFile.json=../../.local/facebook-guard-20261010/api.json
+# exit 0：120 pass
+
+pnpm exec eslint apps/api/src/common/auth/bootstrap-auth.guard.ts apps/api/src/common/auth/internal-key.middleware.ts apps/api/src/modules/passenger-app/oauth/facebook*.ts apps/api/src/modules/passenger-app/oauth/oauth-provider.config.ts apps/api/src/modules/passenger-app/oauth/passenger-oauth.service.ts apps/api/src/modules/passenger-app/passenger-app.module.ts apps/api/src/common/auth/auth.policy.ts apps/api/tests/unit/facebook-data-deletion.repository.test.ts tests/unit/pax-facebook-login-20261009 --max-warnings=0
+# exit 0，.local/facebook-guard-20261010/lint.log
+```
