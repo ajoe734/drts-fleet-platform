@@ -25,7 +25,8 @@ ARG DRTS_CANDIDATE_SHA
 ENV DRTS_CANDIDATE_SHA=$DRTS_CANDIDATE_SHA
 COPY apps/passenger-app-web/ apps/passenger-app-web/
 COPY tsconfig.base.json .
-RUN pnpm --filter @drts/contracts build && \
+RUN mkdir -p apps/passenger-app-web/public && \
+    pnpm --filter @drts/contracts build && \
     pnpm --filter @drts/ui-tokens build && \
     pnpm --filter @drts/ui-web build && \
     pnpm --filter @drts/passenger-client build && \
@@ -38,6 +39,6 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=build /workspace/apps/passenger-app-web/.next/standalone ./
 COPY --from=build /workspace/apps/passenger-app-web/.next/static ./apps/passenger-app-web/.next/static
-# The shell has no public directory; static assets currently live in .next/static.
+COPY --from=build /workspace/apps/passenger-app-web/public ./apps/passenger-app-web/public
 EXPOSE 3009
 CMD ["node", "apps/passenger-app-web/server.js"]

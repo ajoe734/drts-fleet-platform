@@ -1953,6 +1953,9 @@ jobs:
           echo "  enterprise-dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}"
           echo "  channel-partner-portal: ${{ steps.urls.outputs.channel_partner_portal }}"
           echo "  passenger-app: ${{ steps.urls.outputs.passenger_app }} (/ and /fares; candidate SHA checked)"
+          for provider in google facebook line; do
+            echo "  passenger default callback: ${{ steps.urls.outputs.passenger_app }}/auth/callback/${provider}"
+          done
 
   retired-service-cleanup:
     name: Fail-closed retired service cleanup
