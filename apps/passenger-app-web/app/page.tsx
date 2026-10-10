@@ -57,11 +57,16 @@ export default function BookingPage() {
         return;
       }
 
-      const [acc, currentFares, currentSettings] = await Promise.all([
+      const [acc, currentFares] = await Promise.all([
         client.getAccount(),
         client.getFares(),
-        client.getSettings(),
       ]);
+      let currentSettings: any = null;
+      try {
+        currentSettings = await client.getSettings();
+      } catch (err: any) {
+        console.warn("Settings fetch failed:", err.message);
+      }
 
       setFares(currentFares);
       setSettings(currentSettings);
@@ -89,31 +94,9 @@ export default function BookingPage() {
   const handleAgreeE19a = async () => {
     if (!fares) return;
     try {
-      const res = await fetch("/api/passenger-app/me", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          feeAcknowledgementVersion: fares.currentVersion.version,
-        }),
+      await client.updateAccount({
+        feeAcknowledgementVersion: fares.currentVersion.version,
       });
-      if (!res.ok) {
-        let domainCode = undefined;
-        try {
-          const body = await res.json();
-          if (body?.error && typeof body.error === 'object') {
-            domainCode = body.error.code;
-          } else {
-            domainCode = body?.error || body?.domainCode || body?.code;
-          }
-        } catch {
-          // ignore json parse error
-        }
-        throw new Error(
-          domainCode
-            ? `API error: ${res.status} (${domainCode})`
-            : `API error: ${res.status}`,
-        );
-      }
       setStatus("form");
     } catch (err: any) {
       setError(t.error.updateFeeFailed + err.message);
@@ -128,8 +111,12 @@ export default function BookingPage() {
     setError(null);
     setDraft(data);
     const selectedTime = new Date(data.scheduledAt).getTime();
-    const minTime =
-      Date.now() + (settings?.booking?.minLeadTimeMinutes ?? 15) * 60000;
+    const minLeadTime = settings?.booking?.minLeadTimeMinutes;
+    if (typeof minLeadTime !== "number" || isNaN(minLeadTime) || minLeadTime < 0) {
+      setError("無法取得預約設定，請稍後重試");
+      return;
+    }
+    const minTime = Date.now() + minLeadTime * 60000;
     if (selectedTime < minTime) {
       setError("預約時間不符合最短前置時間規定");
       return;
@@ -191,8 +178,13 @@ export default function BookingPage() {
     }
 
     const selectedTime = new Date(quoteData.scheduledAt).getTime();
-    const minTime =
-      Date.now() + (settings?.booking?.minLeadTimeMinutes ?? 15) * 60000;
+    const minLeadTime = settings?.booking?.minLeadTimeMinutes;
+    if (typeof minLeadTime !== "number" || isNaN(minLeadTime) || minLeadTime < 0) {
+      setError("無法取得預約設定，請稍後重試");
+      setStatus("form");
+      return;
+    }
+    const minTime = Date.now() + minLeadTime * 60000;
     if (selectedTime < minTime) {
       setError("預約時間不符合最短前置時間規定");
       setStatus("form");
@@ -343,16 +335,12 @@ export default function BookingPage() {
     return (
       <P5Phone>
         <P5Header status="正在確認預約" />
-        <div style={{ flex: 1, padding: "14px" }}>
-          <P5Card>
-            <div style={{ color: P5.danger, fontWeight: 700, marginBottom: 8, fontSize: 14 }}>
-              目前無法取得正式報價
-            </div>
-            <div style={{ color: P5.dim, fontSize: 12 }}>
-              請稍後重試或聯絡客服
-            </div>
-          </P5Card>
-        </div>
+        <P5Map state="missing" />
+        <P5RouteFare
+          mode="anomaly"
+          pickup={quoteData?.origin.address}
+          dropoff={quoteData?.destination.address}
+        />
         <div
           style={{
             margin: "0 14px 12px",
@@ -361,18 +349,20 @@ export default function BookingPage() {
             gap: 8,
           }}
         >
-          <div onClick={() => {
-            if (draft.origin && draft.destination && draft.scheduledAt) {
-              handleQuoteReady(draft as any);
-            } else {
-              setStatus("form");
-            }
-          }}>
+          <div
+            onClick={() => {
+              if (draft.origin && draft.destination && draft.scheduledAt) {
+                handleQuoteReady(draft as any);
+              } else {
+                setStatus("form");
+              }
+            }}
+          >
             <P5Btn kind="primary" icon="refresh" disabled={false}>
               重新取得報價
             </P5Btn>
           </div>
-          <a href="tel:+886800000000" style={{ textDecoration: 'none' }}>
+          <a href="tel:02-2944-0985" style={{ textDecoration: "none" }}>
             <P5Btn icon="phone" disabled={false}>
               聯絡客服
             </P5Btn>
@@ -398,7 +388,7 @@ export default function BookingPage() {
       onQuoteReady={handleQuoteReady}
       error={error}
       onClearError={() => setError(null)}
-      minLeadTimeMinutes={settings?.booking?.minLeadTimeMinutes ?? 15}
+      minLeadTimeMinutes={settings?.booking?.minLeadTimeMinutes ?? 0}
       initialDraft={draft}
     />
   );

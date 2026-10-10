@@ -4,12 +4,14 @@ import { AddressMapPicker, type AddressPayload, buildCanvasTheme } from "@drts/u
 import { createPassengerGeoProvider } from "../../lib/booking/passenger-geo-provider";
 import { bookingTranslations as t } from "../../lib/booking/translations";
 
+import { REALM_COLORS } from "@drts/ui-tokens";
+
 const baseTheme = buildCanvasTheme({ surface: "platform" });
 const passengerTheme = {
   ...baseTheme,
-  accent: "#0B5CAB",
-  accentHi: "#07437E",
-  accentBg: "#EAF2FB",
+  accent: REALM_COLORS.passenger.light.fg,
+  accentHi: REALM_COLORS.passenger.light.headerBg,
+  accentBg: REALM_COLORS.passenger.light.bg,
   surfaceName: "Passenger",
 };
 
@@ -35,7 +37,7 @@ export function BookingForm({
   onQuoteReady,
   error,
   onClearError,
-  minLeadTimeMinutes = 15,
+  minLeadTimeMinutes,
   initialDraft,
 }: BookingFormProps) {
   const [origin, setOrigin] = useState<AddressPayload | null>(
@@ -44,9 +46,13 @@ export function BookingForm({
   const [destination, setDestination] = useState<AddressPayload | null>(
     initialDraft?.destination ?? null,
   );
-  const [scheduledAt, setScheduledAt] = useState<string>(
-    initialDraft?.scheduledAt ?? "",
-  );
+  const [scheduledAt, setScheduledAt] = useState<string>(() => {
+    if (!initialDraft?.scheduledAt) return "";
+    const d = new Date(initialDraft.scheduledAt);
+    if (isNaN(d.getTime())) return "";
+    const tzOffset = d.getTimezoneOffset() * 60000;
+    return new Date(d.getTime() - tzOffset).toISOString().slice(0, 16);
+  });
   const [minLocalTime, setMinLocalTime] = useState<string>("");
 
   const [pickerMode, setPickerMode] = useState<"origin" | "destination" | null>(
@@ -55,6 +61,10 @@ export function BookingForm({
 
   useEffect(() => {
     const d = new Date();
+    if (d.getSeconds() > 0 || d.getMilliseconds() > 0) {
+      d.setSeconds(0, 0);
+      d.setMinutes(d.getMinutes() + 1);
+    }
     d.setMinutes(d.getMinutes() + minLeadTimeMinutes);
     const tzOffset = d.getTimezoneOffset() * 60000;
     const localISOTime = new Date(d.getTime() - tzOffset)

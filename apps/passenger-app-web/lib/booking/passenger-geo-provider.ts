@@ -49,16 +49,5 @@ export function createPassengerGeoProvider(): AddressMapPickerProvider {
         body: JSON.stringify(command),
       });
     },
-    async evaluateServiceArea(
-      command: ServiceAreaPreviewCommand,
-    ): Promise<ServiceAreaEvaluationResult> {
-      return fetchBFF("evaluate", {
-        method: "POST",
-        body: JSON.stringify(command),
-      });
-    },
-    async getHealth(): Promise<AddressProviderHealth> {
-      return fetchBFF("health");
-    },
   };
 }

@@ -119,6 +119,17 @@ export class PassengerClient implements PassengerViewModel {
     return res.account;
   }
 
+  async updateAccount(command: import("./types.js").UpdatePassengerMeCommand): Promise<PassengerAccount> {
+    const res = await this.request<import("./types.js").PassengerMeResponse>(
+      "/api/passenger-app/me",
+      {
+        method: "PATCH",
+        body: JSON.stringify(command),
+      }
+    );
+    return res.account;
+  }
+
   async getProviders(): Promise<import("./types.js").AuthProvidersResponse> {
     return this.request<import("./types.js").AuthProvidersResponse>(
       "/api/passenger-app/auth/providers",
