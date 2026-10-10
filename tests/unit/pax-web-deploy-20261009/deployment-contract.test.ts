@@ -104,7 +104,6 @@ const groups = {
     "PSP_SANDBOX",
     "PSP_TOKEN_ENCRYPTION_KEY_NAME",
   ],
-  cookie: ["COOKIE_SECRET"],
 } as const;
 
 function secretName(setting: string) {
@@ -142,9 +141,9 @@ describe("passenger dev workflow executable contracts", () => {
     const result = resolveSecrets([]);
     expect(result.status, result.stderr).toBe(0);
     expect(result.outputs.api).toBe("");
-    expect(result.outputs.web).toBe("");
+    expect(result.outputs.web).toBeUndefined();
     for (const group of Object.keys(groups))
-      expect(result.outputs[`${group}_configured`]).toBe("false");
+      expect(result.outputs[`${group}_mounts_complete`]).toBe("false");
     expect(
       result.commands.every((command) =>
         command.startsWith("secrets describe "),
@@ -156,14 +155,12 @@ describe("passenger dev workflow executable contracts", () => {
     it(`mounts the complete ${group} group only on its intended server`, () => {
       const result = resolveSecrets(settings);
       expect(result.status, result.stderr).toBe(0);
-      expect(result.outputs[`${group}_configured`]).toBe("true");
+      expect(result.outputs[`${group}_mounts_complete`]).toBe("true");
       for (const setting of settings) {
         expect(result.outputs.api).toContain(
           `${setting}=${secretName(setting)}:latest`,
         );
-        if (group === "cookie")
-          expect(result.outputs.web).toContain("COOKIE_SECRET=");
-        else expect(result.outputs.web).toBe("");
+        expect(result.outputs.web).toBeUndefined();
       }
     });
     for (const missing of settings) {
@@ -174,7 +171,7 @@ describe("passenger dev workflow executable contracts", () => {
           ...independent,
         ]);
         expect(result.status, result.stderr).toBe(0);
-        expect(result.outputs[`${group}_configured`]).toBe("false");
+        expect(result.outputs[`${group}_mounts_complete`]).toBe("false");
         for (const setting of settings) {
           // Email can independently use the pepper when SMS is incomplete.
           if (setting !== "PASSENGER_OTP_PEPPER")
@@ -182,10 +179,10 @@ describe("passenger dev workflow executable contracts", () => {
         }
         expect(
           result.outputs[
-            group === "google" ? "line_configured" : "google_configured"
+            group === "google" ? "line_mounts_complete" : "google_mounts_complete"
           ],
         ).toBe("true");
-        expect(result.outputs.web).toBe("");
+        expect(result.outputs.web).toBeUndefined();
       });
     }
   }
@@ -194,8 +191,50 @@ describe("passenger dev workflow executable contracts", () => {
     const result = resolveSecrets(Object.values(groups).flat());
     expect(result.status, result.stderr).toBe(0);
     expect(result.outputs.api.match(/PASSENGER_OTP_PEPPER=/g)).toHaveLength(1);
-    expect(result.outputs.web).toBe(
-      "COOKIE_SECRET=drts-dev-cookie-secret:latest",
+    expect(result.outputs.web).toBeUndefined();
+    expect(result.outputs.api).not.toContain("COOKIE_SECRET");
+    expect(result.commands.join("\n")).not.toContain("cookie-secret");
+    expect(Object.keys(result.outputs).some((key) => key.endsWith("_configured"))).toBe(false);
+  });
+
+  it.each([
+    ["absent", []],
+    ["partial", ["GOOGLE_OAUTH_CLIENT_ID", "PSP_MERCHANT_ID"]],
+    ["complete", Object.values(groups).flat()],
+  ] as const)("passes only resolved %s references to the real API deploy wrapper", (_label, settings) => {
+    const resolved = resolveSecrets(settings);
+    expect(resolved.status, resolved.stderr).toBe(0);
+    const dir = directory();
+    const log = path.join(dir, "arguments");
+    executable(dir, "gcloud", `
+[[ "$1 $2" == 'run deploy' ]] || exit 90
+printf '%s\\n' "$@" > "$COMMAND_LOG"
+`);
+    const base = "JWT_SECRET=core-jwt:latest,DATABASE_URL=core-db:latest";
+    const expressions: Record<string, string> = {
+      "needs.prepare.outputs.registry": "registry.test/drts",
+      "needs.build-push.outputs.image_tag": sha,
+      "steps.api_secrets.outputs.api": base,
+      "steps.passenger_secrets.outputs.api": resolved.outputs.api!,
+      "needs.prepare.outputs.api_service": "drts-dev-api",
+      "needs.prepare.outputs.region": "us-central1",
+      "needs.prepare.outputs.cloudsql": "test-project:us-central1:db",
+      "needs.prepare.outputs.runtime_service_account": "runtime@test-project.iam.gserviceaccount.com",
+      "steps.api_env.outputs.vars": `DRTS_CANDIDATE_SHA=${sha}`,
+      "needs.prepare.outputs.api_exposure_flag": "--no-allow-unauthenticated",
+      "needs.prepare.outputs.project_id": "test-project",
+    };
+    const script = step(deploy, "Deploy — api").replace(/\$\{\{([^}]+)\}\}/g, (_match, expression: string) => {
+      const value = expressions[expression.trim()];
+      if (value === undefined) throw new Error(`Unexpected deploy expression: ${expression}`);
+      return value;
+    });
+    const result = run(script, { COMMAND_LOG: log }, dir);
+    expect(result.status, result.stderr).toBe(0);
+    const args = readFileSync(log, "utf8").trim().split("\n");
+    expect(args.slice(0, 3)).toEqual(["run", "deploy", "drts-dev-api"]);
+    expect(args[args.indexOf("--set-secrets") + 1]).toBe(
+      base + (resolved.outputs.api ? `,${resolved.outputs.api}` : ""),
     );
   });
 
@@ -360,7 +399,7 @@ exit 1
     ["200", "b".repeat(40), 1],
     ["404", sha, 1],
   ])(
-    "checks / and /fares using exact 200 and candidate headers (%s, %s)",
+    "checks / and /login using exact 200 and candidate headers (%s, %s)",
     (status, servedSha, expectedExit) => {
       const dir = directory();
       const log = path.join(dir, "commands");
@@ -395,7 +434,7 @@ printf '%s' "$MOCK_STATUS"
       expect(commands).toContain("Authorization: Bearer test-token");
       expect(commands).not.toContain("--location");
       if (expectedExit === 0)
-        expect(commands).toContain("https://passenger.test/fares");
+        expect(commands).toContain("https://passenger.test/login");
     },
   );
 
@@ -409,12 +448,12 @@ printf '%s' "$MOCK_STATUS"
     );
     const deployStep = step(deploy, "Deploy — passenger-app-web");
     expect(deployStep).toContain("--port 3009");
-    expect(deployStep).toContain("secret_flags=(--clear-secrets)");
+    expect(deployStep).toContain("--clear-secrets");
     expect(deployStep).toContain(
       "DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}",
     );
     expect(deployStep).not.toMatch(
-      /JWT_SECRET|NEXT_PUBLIC|CLIENT_SECRET|PSP_API_KEY/,
+      /JWT_SECRET|NEXT_PUBLIC|CLIENT_SECRET|PSP_API_KEY|COOKIE_SECRET|--set-secrets/,
     );
     expect(deploy).toContain("Enforce no public access — passenger-app-web");
     expect(step(deploy, "Wait for services to be Ready")).toContain(

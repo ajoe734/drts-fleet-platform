@@ -276,7 +276,11 @@ class DevArtifactProvidersTest(unittest.TestCase):
         self.assertIn("ARTIFACT_PROVIDER_ENV_SUFFIX: ${{ steps.artifact_providers.outputs.env_suffix }}", workflow)
         self.assertIn('env_vars="${env_vars}${ARTIFACT_PROVIDER_ENV_SUFFIX}"', workflow)
         api = workflow.split("      - name: Deploy — api\n", 1)[1].split("      - name: Resolve API URL\n", 1)[0]
-        self.assertIn('--set-secrets "${{ steps.api_secrets.outputs.api }}"', api)
+        self.assertIn('api_secrets="${{ steps.api_secrets.outputs.api }}"', api)
+        self.assertIn('passenger_secrets="${{ steps.passenger_secrets.outputs.api }}"', api)
+        self.assertIn('if [[ -n "$passenger_secrets" ]]; then', api)
+        self.assertIn('api_secrets="${api_secrets},${passenger_secrets}"', api)
+        self.assertIn('--set-secrets "$api_secrets"', api)
         self.assertIn('--set-env-vars "${{ steps.api_env.outputs.vars }}"', api)
         self.assertIn("WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS", workflow)
         self.assertIn("NOTIFICATION_OUTBOX_TYPE=postgres", workflow)

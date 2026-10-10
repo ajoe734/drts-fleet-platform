@@ -29,7 +29,7 @@ on:
         options:
           - "current"
       retired_service_cleanup:
-        description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 9 active services plus drts-passenger-web."
+        description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 10 active services plus drts-passenger-web."
         required: false
         default: "none"
         type: choice
@@ -929,15 +929,14 @@ jobs:
         run: |
           set -euo pipefail
           api_mounts=""
-          web_mounts=""
 
           # Probe metadata only. Do not access values or create secrets. Each
           # group either mounts all references or none, including partial sets.
           # --set-secrets replaces old references, so removing one credential
           # also disables an already-configured provider on the next rollout.
           optional_group() {
-            local group="$1" destination="$2"
-            shift 2
+            local group="$1"
+            shift
             local setting suffix secret mounts="" complete=true
             for setting in "$@"; do
               suffix="$(printf '%s' "$setting" | tr '[:upper:]_' '[:lower:]-')"
@@ -949,29 +948,26 @@ jobs:
               fi
             done
             if [[ "$complete" == true ]]; then
-              if [[ "$destination" == api || "$destination" == both ]]; then
-                api_mounts="${api_mounts:+${api_mounts},}${mounts}"
-              fi
-              if [[ "$destination" == web || "$destination" == both ]]; then
-                web_mounts="${web_mounts:+${web_mounts},}${mounts}"
-              fi
+              api_mounts="${api_mounts:+${api_mounts},}${mounts}"
             else
               echo "::notice::Passenger ${group} configuration is absent or partial; no credentials from this group are mounted."
             fi
-            echo "${group}_configured=${complete}" >> "$GITHUB_OUTPUT"
+            # Metadata completeness is not provider availability. SMS/PSP
+            # adapters remain external gates even when references are complete.
+            echo "${group}_mounts_complete=${complete}" >> "$GITHUB_OUTPUT"
           }
 
-          optional_group google api GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET
-          optional_group line api LINE_CHANNEL_ID LINE_CHANNEL_SECRET
-          optional_group facebook api FACEBOOK_APP_ID FACEBOOK_APP_SECRET
-          optional_group otp api PASSENGER_OTP_PEPPER
-          optional_group sms api SMS_PROVIDER_API_KEY SMS_PROVIDER_SENDER_ID PASSENGER_OTP_PEPPER
-          optional_group payment api PSP_MERCHANT_ID PSP_API_KEY PSP_SANDBOX PSP_TOKEN_ENCRYPTION_KEY_NAME
-          optional_group cookie both COOKIE_SECRET
+          optional_group google GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET
+          optional_group line LINE_CHANNEL_ID LINE_CHANNEL_SECRET
+          optional_group facebook FACEBOOK_APP_ID FACEBOOK_APP_SECRET
+          optional_group otp PASSENGER_OTP_PEPPER
+          optional_group sms SMS_PROVIDER_API_KEY SMS_PROVIDER_SENDER_ID PASSENGER_OTP_PEPPER
+          optional_group payment PSP_MERCHANT_ID PSP_API_KEY PSP_SANDBOX PSP_TOKEN_ENCRYPTION_KEY_NAME
+          # The current BFF does not consume a cookie encryption/signing key.
+          # Do not declare a secret until its reader and contract exist.
           # OTP pepper is shared by email and SMS. Keep one reference per slot.
           api_mounts="$(printf '%s' "$api_mounts" | tr ',' '\n' | awk 'NF && !seen[$0]++' | paste -sd, -)"
           echo "api=${api_mounts}" >> "$GITHUB_OUTPUT"
-          echo "web=${web_mounts}" >> "$GITHUB_OUTPUT"
 
       - name: Verify live Google Maps provider
         if: ${{ steps.api_secrets.outputs.map_provider_mode == 'external' }}
@@ -1392,15 +1388,9 @@ jobs:
             "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — passenger-app-web
-        env:
-          PASSENGER_COOKIE_SECRETS: ${{ steps.passenger_secrets.outputs.web }}
         run: |
           set -euo pipefail
           IMAGE="${{ needs.prepare.outputs.registry }}/passenger-app-web:${{ needs.build-push.outputs.image_tag }}"
-          secret_flags=(--clear-secrets)
-          if [[ -n "$PASSENGER_COOKIE_SECRETS" ]]; then
-            secret_flags=(--set-secrets "$PASSENGER_COOKIE_SECRETS")
-          fi
           # Dedicated BFF env: no tenant identity, client secret, or browser API URL.
           env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},DRTS_API_URL=${{ steps.api_url.outputs.url }},DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}"
           operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.passenger_app_service }}" \
@@ -1409,7 +1399,7 @@ jobs:
             --port 3009 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            "${secret_flags[@]}" \
+            --clear-secrets \
             --set-env-vars "$env_vars" \
             ${{ needs.prepare.outputs.passenger_app_exposure_flag }} \
             --cpu 1 \
@@ -1689,7 +1679,8 @@ jobs:
           set -euo pipefail
           [[ -n "$PASSENGER_APP_ID_TOKEN" ]]
           echo "::add-mask::${PASSENGER_APP_ID_TOKEN}"
-          for path in / /fares; do
+          # PAX-QA adds /fares after PAX-WEB-BOOKING-UI provides that page.
+          for path in / /login; do
             headers="$(mktemp)"
             status="$(curl --silent --show-error --fail \
               --retry 10 --retry-all-errors --retry-delay 3 --max-time 30 \
@@ -1952,7 +1943,7 @@ jobs:
           echo "  partner-booking: PAUSED (service removed; code preserved)"
           echo "  enterprise-dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}"
           echo "  channel-partner-portal: ${{ steps.urls.outputs.channel_partner_portal }}"
-          echo "  passenger-app: ${{ steps.urls.outputs.passenger_app }} (/ and /fares; candidate SHA checked)"
+          echo "  passenger-app: ${{ steps.urls.outputs.passenger_app }} (/ and /login; candidate SHA checked)"
           for provider in google facebook line; do
             echo "  passenger default callback: ${{ steps.urls.outputs.passenger_app }}/auth/callback/${provider}"
           done

@@ -136,7 +136,8 @@ DNS 不會開放 Cloud Run IAM。新乘客服務預設 private，shared dev oper
 須按既有公開流程明確設定 `DEV_PASSENGER_APP_ALLOW_UNAUTHENTICATED=true`
 並透過 immutable publish workflow 部署，乘客才可直接使用網址；設回 false
 時 workflow 會撤除 allUsers binding。health-check 用 WIF ID token 驗證
-`/` 與 `/fares` 均回 **200**，並比對 `x-drts-candidate-sha`，不接受 redirect。
+`/` 與 `/login` 均回 **200**，並比對 `x-drts-candidate-sha`，不接受 redirect。
+`/fares` 由 PAX-WEB-BOOKING-UI 提供；PAX-QA 在該頁合併後補上 smoke。
 本機只執行 repo checks，不啟動 App、browser 或 Docker 環境。
 
 ### 4.1 OAuth callback 交付
@@ -172,10 +173,9 @@ env 名稱的小寫 kebab case。例如 `GOOGLE_OAUTH_CLIENT_SECRET` 對應
 | Email OTP pepper        | `PASSENGER_OTP_PEPPER` / `passenger-otp-pepper`                                                                                                                        | API；Email 另須既有完整 SMTP 與平台 delivery 可用 |
 | SMS                     | `SMS_PROVIDER_API_KEY` / `sms-provider-api-key`；`SMS_PROVIDER_SENDER_ID` / `sms-provider-sender-id`；`PASSENGER_OTP_PEPPER` / `passenger-otp-pepper`                  | API；仍須實際 SmsPort adapter                     |
 | PSP + payment token key | `PSP_MERCHANT_ID` / `psp-merchant-id`；`PSP_API_KEY` / `psp-api-key`；`PSP_SANDBOX` / `psp-sandbox`；`PSP_TOKEN_ENCRYPTION_KEY_NAME` / `psp-token-encryption-key-name` | API；完整套組才掛載                               |
-| Cookie key              | `COOKIE_SECRET` / `cookie-secret`                                                                                                                                      | API + passenger BFF；單一 optional slot           |
 
 各群組缺任一項時整組不掛載並輸出 notice；其他完整 provider 獨立保留。
-API `--set-secrets` 與 BFF `--clear-secrets`／`--set-secrets` 也會移除前次
+API `--set-secrets` 與 BFF `--clear-secrets` 也會移除前次
 部署殘留的配置。OAuth／SMS／PSP secret 不進 BFF 或 `NEXT_PUBLIC_*`。
 本 task 沒有建立、讀值或驗證任何實際 secret，沒有呼叫真實 provider。
 現有 tenant OIDC、SMTP、Maps 的配置檢查仍沿用原流程；它們的既有 partial
@@ -183,11 +183,12 @@ configuration 錯誤不因新增乘客服務而放寬。
 
 完整 metadata 套組只代表可以掛載，**不代表功能已驗收啟用**：目前 API 的
 SMS port 是 `UnconfiguredSmsPort`、PSP adapter 是外部 gate，
-`REQUIRE_SMS_VERIFICATION=false`。SD §4 尚未定義 cookie slot；本 task 沿用
-既有 auth startup 的 `COOKIE_SECRET`，shell 的 HttpOnly bearer cookies
-目前不消耗此 key，不以配置結果冒充 cookie crypto 驗收。付款核心須確認
-`PSP_TOKEN_ENCRYPTION_KEY_NAME` 是 key name 或 key bytes 與正式讀取端一致後
-再 provision；本 task 不自行選 PSP 或產生金鑰。
+`REQUIRE_SMS_VERIFICATION=false`。workflow 的 `*_mounts_complete` 只記錄
+reference metadata 是否齊全，並非 feature-enabled 或 provider 可用旗標。
+SD §4 尚未定義 cookie slot，shell 的 HttpOnly bearer cookies 也不消耗
+crypto key，因此目前不宣告、不查詢或掛載 cookie secret。付款 token
+欄位依 SD §4 使用 `PSP_TOKEN_ENCRYPTION_KEY_NAME`，由 PAX-PAYMENT-CORE
+對齊正式讀取端後再 provision；本 task 不自行選 PSP 或產生金鑰。
 
 ## 5. 2026-07-31 實測現況
 
