@@ -23,7 +23,8 @@ export function validateFareTariff(t: FareTariff): void {
   if (!t.version?.trim() || !t.sourceReference?.trim())
     throw new RangeError("Tariff version and approved source are required.");
   const from = Date.parse(t.effectiveAt);
-  const until = t.effectiveUntil === null ? Infinity : Date.parse(t.effectiveUntil);
+  const until =
+    t.effectiveUntil === null ? Infinity : Date.parse(t.effectiveUntil);
   if (!Number.isFinite(from) || Number.isNaN(until) || until <= from)
     throw new RangeError("Invalid tariff effective window.");
   for (const [key, value] of Object.entries({
@@ -31,7 +32,8 @@ export function validateFareTariff(t: FareTariff): void {
     distanceRate: t.distanceRate,
     delayRate: t.delayRate,
     nightSurchargeBps: t.nightSurchargeBps,
-  })) integer(value, key);
+  }))
+    integer(value, key);
   if (t.nightSurchargeBps > 10000)
     throw new RangeError("Night surcharge exceeds 100%.");
   for (const [key, value] of Object.entries({
@@ -39,34 +41,46 @@ export function validateFareTariff(t: FareTariff): void {
     distanceIncrementMeters: t.distanceIncrementMeters,
     delayIncrementSeconds: t.delayIncrementSeconds,
     totalIncrement: t.totalIncrement,
-  })) integer(value, key, 1);
+  }))
+    integer(value, key, 1);
   if (!t.additionalFees || Array.isArray(t.additionalFees))
     throw new RangeError("Additional fees must be a map.");
-  for (const [key, value] of Object.entries(t.additionalFees)) integer(value, key);
+  for (const [key, value] of Object.entries(t.additionalFees))
+    integer(value, key);
   if (
     !["ceil", "floor"].includes(t.distanceRounding) ||
     !["ceil", "floor"].includes(t.delayRounding) ||
     !["ceil", "floor", "nearest"].includes(t.totalRounding) ||
     !["pickup", "any_overlap"].includes(t.nightApplication)
-  ) throw new RangeError("Approved rounding and night application rules are required.");
+  )
+    throw new RangeError(
+      "Approved rounding and night application rules are required.",
+    );
   if (minute(t.nightSurchargeWindowStart) === minute(t.nightSurchargeWindowEnd))
     throw new RangeError("Night window must not be empty.");
 }
 
-function nightApplies(t: FareTariff, pickupMs: number, durationSeconds: number) {
+function nightApplies(
+  t: FareTariff,
+  pickupMs: number,
+  durationSeconds: number,
+) {
   const start = minute(t.nightSurchargeWindowStart) * 60_000;
   const end = minute(t.nightSurchargeWindowEnd) * 60_000;
   const local = pickupMs + TAIPEI_OFFSET_MS;
   const time = ((local % DAY_MS) + DAY_MS) % DAY_MS;
-  const atPickup = start < end ? time >= start && time < end : time >= start || time < end;
-  if (atPickup || t.nightApplication === "pickup" || durationSeconds === 0) return atPickup;
+  const atPickup =
+    start < end ? time >= start && time < end : time >= start || time < end;
+  if (atPickup || t.nightApplication === "pickup" || durationSeconds === 0)
+    return atPickup;
   // [pickup, arrival): arrival exactly at night start has no night overlap.
   const untilNextStart = (start - time + DAY_MS) % DAY_MS;
   return durationSeconds * 1000 > untilNextStart;
 }
 
 function safeNumber(value: bigint): number {
-  if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError("Fare exceeds safe monetary range.");
+  if (value > BigInt(Number.MAX_SAFE_INTEGER))
+    throw new RangeError("Fare exceeds safe monetary range.");
   return Number(value);
 }
 function total(amount: bigint, t: FareTariff, night: boolean): number {
@@ -75,8 +89,11 @@ function total(amount: bigint, t: FareTariff, night: boolean): number {
   const denominator = 10000n * BigInt(t.totalIncrement);
   let units = numerator / denominator;
   const remainder = numerator % denominator;
-  if ((t.totalRounding === "ceil" && remainder > 0n) ||
-      (t.totalRounding === "nearest" && remainder * 2n >= denominator)) units += 1n;
+  if (
+    (t.totalRounding === "ceil" && remainder > 0n) ||
+    (t.totalRounding === "nearest" && remainder * 2n >= denominator)
+  )
+    units += 1n;
   return safeNumber(units * BigInt(t.totalIncrement));
 }
 
@@ -86,20 +103,33 @@ function total(amount: bigint, t: FareTariff, night: boolean): number {
  */
 export function estimateFare(
   t: FareTariff,
-  input: { distanceMeters: number; durationSeconds: number; scheduledAt: string },
+  input: {
+    distanceMeters: number;
+    durationSeconds: number;
+    scheduledAt: string;
+  },
 ): FareEstimate {
   validateFareTariff(t);
   nonnegative(input.distanceMeters, "distanceMeters");
   nonnegative(input.durationSeconds, "durationSeconds");
   const pickupMs = Date.parse(input.scheduledAt);
-  if (!Number.isFinite(pickupMs)) throw new RangeError("Invalid pickup timestamp.");
-  const distanceUnits = Math[t.distanceRounding](Math.max(0, input.distanceMeters - t.baseDistanceMeters) / t.distanceIncrementMeters);
-  const delayUnits = Math[t.delayRounding](input.durationSeconds / t.delayIncrementSeconds);
+  if (!Number.isFinite(pickupMs))
+    throw new RangeError("Invalid pickup timestamp.");
+  const distanceUnits = Math[t.distanceRounding](
+    Math.max(0, input.distanceMeters - t.baseDistanceMeters) /
+      t.distanceIncrementMeters,
+  );
+  const delayUnits = Math[t.delayRounding](
+    input.durationSeconds / t.delayIncrementSeconds,
+  );
   integer(distanceUnits, "distanceUnits");
   integer(delayUnits, "delayUnits");
   const distanceFare = BigInt(distanceUnits) * BigInt(t.distanceRate);
   const delayFare = BigInt(delayUnits) * BigInt(t.delayRate);
-  const extras = Object.values(t.additionalFees).reduce((sum, fee) => sum + BigInt(fee), 0n);
+  const extras = Object.values(t.additionalFees).reduce(
+    (sum, fee) => sum + BigInt(fee),
+    0n,
+  );
   const base = BigInt(t.baseFare) + distanceFare + extras;
   const night = nightApplies(t, pickupMs, input.durationSeconds);
   return {
