@@ -268,7 +268,10 @@ export class PassengerOtpService {
     if (this.options.pepper.length < 32) notConfigured();
     // Resolve account authority before acquiring the OTP connection: never nest
     // account transactions inside OTP transactions (including with a pool of one).
-    const currentBinding = identity ? await this.binding(identity) : null;
+    // CurrentIdentity returns an anonymous bootstrap identity on BFF login.
+    // Only a passenger identity can supply authority for session-bound purposes.
+    const currentBinding =
+      identity?.realm === "passenger" ? await this.binding(identity) : null;
     const r = await this.store.transaction(async (tx) => {
       const stored = await tx.lockChallenge(
         this.digest("challenge", command.challenge),
