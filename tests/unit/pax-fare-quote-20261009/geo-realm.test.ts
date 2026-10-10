@@ -364,13 +364,15 @@ describe.each(["development", "staging", "production"])(
         f.session.accessToken,
       );
       expect(
-        await f.guard.canActivate(context(r, "quote", PassengerFareController)),
+        await f.guard.canActivate(
+          context(r, "estimateQuote", PassengerFareController),
+        ),
       ).toBe(true);
       await expect(
         f.guard.canActivate(
           context(
             request("POST", "/api/passenger-app/quotes"),
-            "quote",
+            "estimateQuote",
             PassengerFareController,
           ),
         ),

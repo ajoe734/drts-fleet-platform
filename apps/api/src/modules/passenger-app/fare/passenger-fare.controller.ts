@@ -20,7 +20,9 @@ export class PassengerFareController {
   }
 
   @Post("quotes")
-  async quote(
+  // An estimate calculation with an expiring evidence snapshot, not a booking
+  // or payment command. Repeated calculations may produce distinct snapshots.
+  async estimateQuote(
     @CurrentIdentity() identity: RequestIdentity | null,
     @Body() body: unknown,
     @Headers("x-request-id") requestId?: string,

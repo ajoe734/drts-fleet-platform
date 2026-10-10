@@ -92,7 +92,7 @@ async function fixture(areas = new ServiceAreaService()) {
 describe("production quote and public fares flow (external/storage boundaries stubbed)", () => {
   it("creates an owned route/time/version snapshot with fifteen-minute expiry and a range", async () => {
     const f = await fixture();
-    const response = await f.controller.quote(
+    const response = await f.controller.estimateQuote(
       f.identity,
       body,
       "fare-request-id",
