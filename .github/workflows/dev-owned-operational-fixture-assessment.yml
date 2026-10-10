@@ -137,6 +137,7 @@ jobs:
           INPUT_CURRENT_RUNTIME_SHA: ${{ github.event.inputs.current_runtime_sha || github.sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          ulimit -v 262144
           python3 operations/verification/read-dev-cloud-metadata.py \
             --expected-runtime-sha "$INPUT_CURRENT_RUNTIME_SHA" \
             --definition-sha "$INPUT_WORKFLOW_DEF_SHA" \
