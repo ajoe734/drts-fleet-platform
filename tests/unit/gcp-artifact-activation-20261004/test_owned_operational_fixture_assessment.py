@@ -327,5 +327,73 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
         with patch.object(assess, "run_bounded", side_effect=mock_run), patch("subprocess.Popen", side_effect=mock_popen):
             assess.fetch_and_validate_provenance(args)
 
+    @patch("sys.exit")
+    @patch("builtins.print")
+    def test_report_byte_cap_enforcement_and_schema(self, mock_print, mock_exit):
+        # Trigger an exception that creates an error report, ensure schema is dev-owned-assessment-report-v1
+        with patch("sys.argv", ["script.py"]):
+            assess.main()
+            mock_exit.assert_called_with(1)
+            output = mock_print.call_args[0][0]
+            parsed = json.loads(output)
+            self.assertEqual(parsed["schema"], "dev-owned-assessment-report-v1")
+            self.assertEqual(parsed["payload"]["disposition"], "error")
+            self.assertIn("Missing cloud metadata receipt", parsed["payload"]["error"])
+            self.assertTrue(len(output.encode("utf-8")) <= 512 * 1024)
+
+    @patch("sys.exit")
+    @patch("builtins.print")
+    def test_cloud_metadata_unknown_field_rejection(self, mock_print, mock_exit):
+        import datetime, tempfile
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+            now = datetime.datetime.now(datetime.timezone.utc)
+            cm = {
+                "schema": "dev-readonly-cloud-metadata-v1",
+                "project": assess.PROJECT,
+                "region": assess.REGION,
+                "definition_sha": assess.AUTHORIZED_PROVENANCE["workflow_sha"],
+                "observed_at": now.isoformat().replace("+00:00", "Z"),
+                "services": {
+                    "drts-dev-api": {
+                        "runtime_sha": "testsha",
+                        "identity": f"drts-dev-runtime@{assess.PROJECT}.iam.gserviceaccount.com",
+                        "providers": {
+                            "DOCUMENT_ARTIFACT_GCS_BUCKET": assess.BUCKET,
+                            "DOCUMENT_ARTIFACT_STORAGE_PROVIDER": "gcs"
+                        },
+                        "MALICIOUS_RAW_FIELD": "some_extra_data"
+                    },
+                    "drts-dev-scanner": {
+                        "identity": f"drts-dev-artifact-scanner@{assess.PROJECT}.iam.gserviceaccount.com",
+                        "spec_sha256": "78d699ef021ef42c4346cdaeea539e7df00ff7c53cd8c2c89278c7c52403f4ad"
+                    },
+                    **{name: {"identity": f"drts-dev-runtime@{assess.PROJECT}.iam.gserviceaccount.com", "bindings": []} for name in ["drts-channel-partner-portal-web", "drts-dev-bank-console-web", "drts-dev-enterprise-dispatch-web", "drts-dev-fleet-partner-portal-web", "drts-dev-ops-console-web", "drts-dev-platform-admin-web", "drts-dev-tenant-console-web"]}
+                }
+            }
+            json.dump(cm, f)
+            path = f.name
+            
+        def mock_run(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "/runs/37906298090/jobs" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"jobs": [{"name": "Owned fixture assessment (Read-only GCS / DB)"}]}))
+            if "/runs/37906298090" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"id": 37906298090, "head_branch": "dev", "event": "workflow_dispatch", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml"}))
+            if "check-suites" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"check_suites": [{"status": "completed", "conclusion": "success"}]}))
+            if "actions/runs?status=in_progress" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"workflow_runs": []}))
+            return MagicMock(returncode=0, stdout="{}")
+            
+        with patch("sys.argv", ["script.py", "--mock-db", "--cloud-metadata", path, "--current-runtime-sha", "testsha", "--current-run-id", "37906298090", "--tooling-run-sha", "bb78535193b712f80f2a989cbd03b800ec44c46c"]):
+            with patch.object(assess, "run_bounded", side_effect=mock_run):
+                assess.main()
+                mock_exit.assert_called_with(1) # Exits 1 due to mock_db
+                output = mock_print.call_args[0][0]
+                parsed = json.loads(output)
+                # Check that malicious field was stripped
+                api_service = parsed["payload"]["cloud_metadata"]["services"]["drts-dev-api"]
+                self.assertNotIn("MALICIOUS_RAW_FIELD", api_service)
+
 if __name__ == '__main__':
     unittest.main()
