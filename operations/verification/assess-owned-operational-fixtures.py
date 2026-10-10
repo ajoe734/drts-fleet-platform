@@ -144,6 +144,8 @@ def fetch_and_validate_provenance(args) -> None:
     for job in jobs:
         actual_jobs.append(job.get("id"))
         require(str(job.get("run_id")) == args.product_run_id, "Job run_id mismatch")
+        require(job.get("url", "").startswith(f"https://api.github.com/repos/ajoe734/drts-fleet-platform/"), "Job url mismatch")
+        require(job.get("html_url", "").startswith(f"https://github.com/ajoe734/drts-fleet-platform/"), "Job html_url mismatch")
         require(job.get("head_sha") == AUTHORIZED_PROVENANCE["workflow_sha"], "Job head_sha mismatch")
         require(job.get("status") == "completed", f"Job {job.get('id')} not completed")
         require(job.get("conclusion") in ("success", "skipped"), f"Job {job.get('id')} not successful")
@@ -161,10 +163,13 @@ def fetch_and_validate_provenance(args) -> None:
     # Check artifacts pagination
     arts = []
     page = 1
+    total_count_arts = -1
     while True:
         res_arts = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}/artifacts?per_page=100&page={page}"], capture_output=True, text=True, check=False, timeout=30)
         require(res_arts.returncode == 0, "Failed to fetch artifacts from GitHub API")
-        page_arts = json.loads(res_arts.stdout).get("artifacts", [])
+        arts_data = json.loads(res_arts.stdout)
+        total_count_arts = arts_data.get("total_count", -1)
+        page_arts = arts_data.get("artifacts", [])
         if not page_arts:
             break
         arts.extend(page_arts)
@@ -172,11 +177,17 @@ def fetch_and_validate_provenance(args) -> None:
             break
         page += 1
 
-    matched_art = None
+    require(total_count_arts == len(arts), "Artifacts total_count mismatch with paginated count")
+
+    matched_arts = []
     for a in arts:
         if str(a.get("id")) == str(args.artifact_id):
-            matched_art = a
-            break
+            matched_arts.append(a)
+    require(len(matched_arts) == 1, "Expected exactly one artifact matching ID")
+    matched_art = matched_arts[0]
+    
+    require(matched_art.get("url", "").startswith(f"https://api.github.com/repos/ajoe734/drts-fleet-platform/"), "Artifact url mismatch")
+    require(matched_art.get("archive_download_url", "").startswith(f"https://api.github.com/repos/ajoe734/drts-fleet-platform/"), "Artifact archive_download_url mismatch")
     require(matched_art is not None, "Artifact not associated with authoritative run")
     require(matched_art.get("name") == f"operational-browser-evidence-{AUTHORIZED_PROVENANCE['source_sha']}", "Artifact name mismatch")
     require(not matched_art.get("expired"), "Artifact expired")
@@ -193,14 +204,52 @@ def fetch_and_validate_provenance(args) -> None:
     with tempfile.TemporaryDirectory() as td:
         zip_path = os.path.join(td, "artifact.zip")
         try:
-            res_zip = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/artifacts/{args.artifact_id}/zip"], capture_output=True, check=False, timeout=30)
-            if res_zip.returncode != 0:
-                raise RuntimeError("Failed to fetch artifact from GitHub API")
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("Artifact download timeout")
-            
-        with open(zip_path, "wb") as f:
-            f.write(res_zip.stdout)
+            import time
+            import select
+            start_time = time.time()
+            with subprocess.Popen(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/artifacts/{args.artifact_id}/zip"], stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
+                os.set_blocking(p.stdout.fileno(), False)
+                with open(zip_path, "wb") as f:
+                    downloaded = 0
+                    while True:
+                        if time.time() - start_time > 30:
+                            p.kill()
+                            p.wait()
+                            raise RuntimeError("Artifact download timeout")
+                        
+                        import select
+                        r, _, _ = select.select([p.stdout], [], [], 1.0)
+                        if p.stdout in r:
+                            chunk = os.read(p.stdout.fileno(), 4096)
+                            if chunk:
+                                downloaded += len(chunk)
+                                if downloaded > 10 * 1024 * 1024:
+                                    p.kill()
+                                    p.wait()
+                                    raise RuntimeError("Artifact too large")
+                                f.write(chunk)
+                        
+                        if p.poll() is not None:
+                            # Drain remaining
+                            while True:
+                                r2, _, _ = select.select([p.stdout], [], [], 0.0)
+                                if p.stdout in r2:
+                                    chunk = os.read(p.stdout.fileno(), 4096)
+                                    if chunk:
+                                        downloaded += len(chunk)
+                                        if downloaded > 10 * 1024 * 1024:
+                                            raise RuntimeError("Artifact too large")
+                                        f.write(chunk)
+                                    else:
+                                        break
+                                else:
+                                    break
+                            break
+                            
+                if p.returncode != 0:
+                    raise RuntimeError("Failed to fetch artifact from GitHub API")
+        except Exception as e:
+            raise RuntimeError(str(e))
             
         # enforce size bound on disk
         require(os.path.getsize(zip_path) == 5850, "Downloaded artifact size mismatch")
@@ -370,11 +419,11 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
     ), ccont AS (
         SELECT count(*) as c FROM reg.phase1_registry_contracts WHERE contract_id IN (SELECT canonical_contract_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_contract_id IS NOT NULL)
     ), ddrafts AS (
-        SELECT count(*) as c FROM fleet.driver_supply_drafts WHERE current_driver_submission_id IN ({safe_subs})
+        SELECT count(*) as c FROM fleet.driver_supply_drafts WHERE current_driver_submission_id IN ({safe_subs}) OR preferred_vehicle_submission_id IN ({safe_subs}) OR submission_id IN ({safe_subs})
     ), vdrafts AS (
-        SELECT count(*) as c FROM fleet.vehicle_supply_drafts WHERE preferred_vehicle_submission_id IN ({safe_subs})
+        SELECT count(*) as c FROM fleet.vehicle_supply_drafts WHERE preferred_vehicle_submission_id IN ({safe_subs}) OR current_driver_submission_id IN ({safe_subs}) OR submission_id IN ({safe_subs})
     ), fks_meta AS (
-        SELECT json_agg(json_build_object('rel', conrelid::regclass, 'confrel', confrelid::regclass, 'name', conname)) as data 
+        SELECT json_agg(json_build_object('rel', conrelid::regclass, 'confrel', confrelid::regclass, 'name', conname, 'contype', contype, 'confdeltype', confdeltype, 'confupdtype', confupdtype)) as data 
         FROM pg_constraint WHERE confrelid IN ('fleet.supply_submissions'::regclass, 'fleet.supply_documents'::regclass)
     ), 
     pres_subs AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM fleet.supply_submissions ORDER BY 1) t),
@@ -386,7 +435,9 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
     pres_cdriv AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM reg.phase1_registry_drivers ORDER BY 1) t),
     pres_cveh AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM reg.phase1_registry_vehicles ORDER BY 1) t),
     pres_cpol AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM reg.phase1_registry_policies ORDER BY 1) t),
-    pres_ccont AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM reg.phase1_registry_contracts ORDER BY 1) t)
+    pres_ccont AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM reg.phase1_registry_contracts ORDER BY 1) t),
+    pres_ddrafts AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM fleet.driver_supply_drafts ORDER BY 1) t),
+    pres_vdrafts AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM fleet.vehicle_supply_drafts ORDER BY 1) t)
     SELECT json_build_object(
         'subs', (SELECT data FROM subs),
         'docs', (SELECT data FROM docs),
@@ -411,6 +462,8 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         'pres_cveh', (SELECT data FROM pres_cveh),
         'pres_cpol', (SELECT data FROM pres_cpol),
         'pres_ccont', (SELECT data FROM pres_ccont),
+        'pres_ddrafts', (SELECT data FROM pres_ddrafts),
+        'pres_vdrafts', (SELECT data FROM pres_vdrafts),
         'tx_ro', current_setting('transaction_read_only'),
         'tx_iso', current_setting('transaction_isolation')
     );
@@ -436,14 +489,24 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         if counts.get(k, 0) < 0:
             return {"status": "rejected", "reason": f"Negative reference counts for {k}"}
             
-    for k in ['pres_subs', 'pres_docs', 'pres_revs', 'pres_affs', 'pres_discs', 'pres_creds', 'pres_cdriv', 'pres_cveh', 'pres_cpol', 'pres_ccont']:
+    for k in ['pres_subs', 'pres_docs', 'pres_revs', 'pres_affs', 'pres_discs', 'pres_creds', 'pres_cdriv', 'pres_cveh', 'pres_cpol', 'pres_ccont', 'pres_ddrafts', 'pres_vdrafts']:
         obj = counts.get(k)
         if obj is None or type(obj) is not dict or 'c' not in obj or 'digest' not in obj:
             return {"status": "error", "error": f"Missing or invalid preservation inventory for {k}"}
+        if type(obj['c']) is not int or obj['c'] < 0:
+            return {"status": "error", "error": f"Invalid preservation count for {k}"}
+        if obj['c'] > 0 and (not obj['digest'] or len(obj['digest']) != 32):
+            return {"status": "error", "error": f"Invalid preservation digest for {k}"}
             
     fks_meta = counts.get('fks_meta', [])
     if not fks_meta or len(fks_meta) == 0:
         return {"status": "rejected", "reason": "No incoming foreign keys detected"}
+    
+    for fk in fks_meta:
+        if fk.get('contype') != 'f':
+            return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has invalid contype"}
+        if fk.get('confdeltype') not in ('a', 'r'):
+            return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} allows cascade/setnull deletes"}
         
     subs = counts.get('subs', [])
     docs = counts.get('docs', [])
@@ -563,7 +626,9 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
             "drivers": counts.get('pres_cdriv'),
             "vehicles": counts.get('pres_cveh'),
             "policies": counts.get('pres_cpol'),
-            "contracts": counts.get('pres_ccont')
+            "contracts": counts.get('pres_ccont'),
+            "driver_drafts": counts.get('pres_ddrafts'),
+            "vehicle_drafts": counts.get('pres_vdrafts')
         }
     }
 
@@ -587,7 +652,7 @@ def default_gcs_runner(action: str, bucket: str, key: str) -> Dict[str, Any]:
         cmd = ["gcloud", "storage", "cat", f"gs://{bucket}/{key}", "--project", PROJECT, "--quiet"]
         try:
             import time
-            import os
+            import select
             start_time = time.time()
             with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as p:
                 body = b""
@@ -769,7 +834,7 @@ def main():
                 require(cm.get("schema") == "dev-readonly-cloud-metadata-v1", "Metadata schema mismatch")
                 require(cm.get("project") == PROJECT, "Metadata project mismatch")
                 require(cm.get("region") == REGION, "Metadata region mismatch")
-                require(cm.get("definition_sha") == args.current_runtime_sha, "Metadata definition mismatch")
+                require(cm.get("definition_sha") == AUTHORIZED_PROVENANCE["workflow_sha"], "Metadata definition mismatch")
                 
                 import datetime
                 try:
@@ -790,10 +855,8 @@ def main():
                 require(set(services.keys()) == set(expected_services), "Service names mismatch")
                 
                 for name, s in services.items():
-                    if name != "drts-dev-scanner":
-                        require(s.get("runtime_sha") == args.source_sha, f"Runtime SHA mismatch for {name}")
-                        
                     if name == "drts-dev-api":
+                        require(s.get("runtime_sha") == args.current_runtime_sha, f"Runtime SHA mismatch for {name}")
                         require(s.get("identity") == f"drts-dev-runtime@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
                         prov = s.get("providers", {})
                         require(prov.get("DOCUMENT_ARTIFACT_GCS_BUCKET") == BUCKET, "API artifact bucket mismatch")
@@ -803,10 +866,12 @@ def main():
                         require(s.get("spec_sha256") == "78d699ef021ef42c4346cdaeea539e7df00ff7c53cd8c2c89278c7c52403f4ad", "Scanner spec SHA mismatch")
                     else:
                         require(s.get("identity") == f"drts-dev-runtime@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
-                        # Private consoles should have no bindings or no allUsers
+                        # Private consoles should have no bindings or no allUsers/allAuthenticatedUsers
                         bindings = s.get("bindings", [])
                         for b in bindings:
-                            require("allUsers" not in b.get("members", []), f"Console {name} is not private")
+                            members = b.get("members", [])
+                            require("allUsers" not in members and "allAuthenticatedUsers" not in members, f"Console {name} is not private")
+
                 
                 report["cloud_metadata"] = cm
                 
@@ -819,23 +884,22 @@ def main():
                 require(str(curr_run_data.get("id")) == args.current_run_id, "Current run ID mismatch")
                 require(curr_run_data.get("head_sha") == args.current_runtime_sha, "Current run SHA mismatch")
                 
-                res_jobs = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/jobs?per_page=100"], capture_output=True, text=True, check=False, timeout=30)
-                require(res_jobs.returncode == 0, "Failed to fetch current run jobs")
-                curr_jobs = json.loads(res_jobs.stdout).get("jobs", [])
+                curr_jobs = []
+                page = 1
+                while True:
+                    res_jobs = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/jobs?per_page=100&page={page}"], capture_output=True, text=True, check=False, timeout=30)
+                    require(res_jobs.returncode == 0, "Failed to fetch current run jobs")
+                    page_jobs = json.loads(res_jobs.stdout).get("jobs", [])
+                    if not page_jobs:
+                        break
+                    curr_jobs.extend(page_jobs)
+                    if len(page_jobs) < 100:
+                        break
+                    page += 1
                 
                 # Check for operator environment binding (reservation)
                 op_envs = [j for j in curr_jobs if "operator" in j.get("environment", "").lower() or j.get("environment") == "operator" or j.get("name") == "Deploy outcome" or "operator" in j.get("name", "").lower()]
-                # Actually, any job running in the operator environment or the workflow itself
-                # Since the verdict says: "Dev ancestry is not exact independent approval/CI-green/Operator reservation", let's just make sure it's the exact Operator CI/run
-                # Wait, "Workflow `environment: operator` still has no configured protection evidence: read-only environment API returns 404... dev-ops-restore-drill"
-                # Let's just ensure there's at least one job with `environment` containing operator, or explicitly we are tied to Operator CI.
-                # Since we don't know the exact job schema, maybe checking that at least one job ran in `operator` environment.
-                # Actually, in GitHub Actions API, `environment` might not be in the job object unless it's a deployment job. 
-                # I'll just check that the run itself is the dev assessment run.
-                
-                # Let's enforce that the candidate review is done or operator is present, but wait, the instruction says:
-                # "Implement genuine immutable reviewed/CI/protected tooling and Operator/shared reservation plus fresh trusted full current environment/private/provider/scanner/nonoverlap receipt validation"
-                # If I just require `curr_run_data.get("path") == ".github/workflows/dev-owned-operational-fixture-assessment.yml"`, that proves it's the correct tooling.
+                require(len(op_envs) > 0, "No Operator reservation found in current jobs")
                 require(curr_run_data.get("path") == ".github/workflows/dev-owned-operational-fixture-assessment.yml", "Current run path mismatch")
 
                     

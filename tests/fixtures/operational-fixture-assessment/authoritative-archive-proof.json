@@ -1,0 +1,31 @@
+{
+  "observed_at": "2026-10-09T23:11:18.405382+00:00",
+  "read_only": true,
+  "repository": "ajoe734/drts-fleet-platform",
+  "run_id": 37906298090,
+  "artifact_id": 11606165993,
+  "artifact_name": "operational-browser-evidence-4a166f3ed2a7000061acc737ee475ae3c47dca56",
+  "workflow_definition_sha": "9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c",
+  "product_source_sha": "4a166f3ed2a7000061acc737ee475ae3c47dca56",
+  "archive_size_bytes": 5850,
+  "archive_sha256": "2fc9ef568f7b37cf709475fd1e1bb470f1b18e55383751254cef179753b539b5",
+  "matches_github_artifact_digest": true,
+  "all_nine_jobs_exact_run_definition_terminal_success": true,
+  "report_stats": {
+    "startTime": "2026-10-09T09:02:40.567Z",
+    "duration": 68628.444,
+    "expected": 16,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "safe_unique_member_paths": true,
+  "members_count": 2,
+  "report_member": "operational-browser/report.json",
+  "evidence_member": "operational-browser/operational-browser-evidence.json",
+  "report_sha256": "05682011b8e3a2816ffcf0b5a785818f4886cfb07159586b6d38321ea614fa8f",
+  "evidence_sha256": "a7c9bfa79b2d17740f41f9ec2fbf687f82c8f0fb07c69c54ab0b5e3c959bfe20",
+  "product_http_cloud_db_calls": 0,
+  "cleanup_or_runtime_acceptance_claim": false,
+  "newer_run37914295015_fixtures_preserved": true
+}
