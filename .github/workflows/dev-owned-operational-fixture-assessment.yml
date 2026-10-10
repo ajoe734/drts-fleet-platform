@@ -40,6 +40,11 @@ on:
         required: true
         default: "11606165993"
         type: string
+      current_runtime_sha:
+        description: 'Expected current runtime SHA'
+        required: true
+        default: '4a166f3ed2a7000061acc737ee475ae3c47dca56'
+        type: string
 
 permissions:
   contents: read
@@ -84,49 +89,17 @@ jobs:
     runs-on: ubuntu-latest
     needs: [unit-tests]
     if: github.event_name == 'workflow_dispatch'
+    environment: operator
     permissions:
       contents: read
       id-token: write
+      actions: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.source_ref }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
-
-      - name: Fresh Cloud metadata and overlap reservation check
-        env:
-          INPUT_WORKFLOW_DEF_SHA: ${{ github.event.inputs.workflow_def_sha }}
-          INPUT_SOURCE_REF: ${{ github.event.inputs.source_ref }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          python3 operations/verification/read-dev-cloud-metadata.py \
-            --expected-runtime-sha "$INPUT_SOURCE_REF" \
-            --definition-sha "$INPUT_WORKFLOW_DEF_SHA" \
-            --output .local-cloud-metadata.json
-            
-          # Paginated cross-workflow reservation check
-          PAGE=1
-          HAS_NEXT=true
-          ACTIVE_JOBS=""
-          while [ "$HAS_NEXT" = "true" ]; do
-            RES=$(gh api "/repos/${{ github.repository }}/actions/runs?status=in_progress&per_page=100&page=$PAGE")
-            MATCHES=$(echo "$RES" | jq -r '.workflow_runs[] | select(.name | test("Deploy|Restore|Provision")) | .id')
-            if [ -n "$MATCHES" ]; then
-              ACTIVE_JOBS="$ACTIVE_JOBS $MATCHES"
-            fi
-            COUNT=$(echo "$RES" | jq '.workflow_runs | length')
-            if [ "$COUNT" -lt 100 ]; then
-              HAS_NEXT=false
-            else
-              PAGE=$((PAGE+1))
-            fi
-          done
-          
-          if [ -n "$ACTIVE_JOBS" ]; then
-            echo "Overlap detected: $ACTIVE_JOBS"
-            exit 1
-          fi
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -138,6 +111,42 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Fresh Cloud metadata and overlap reservation check
+        env:
+          INPUT_WORKFLOW_DEF_SHA: ${{ github.event.inputs.workflow_def_sha }}
+          INPUT_CURRENT_RUNTIME_SHA: ${{ github.event.inputs.current_runtime_sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 operations/verification/read-dev-cloud-metadata.py \
+            --expected-runtime-sha "$INPUT_CURRENT_RUNTIME_SHA" \
+            --definition-sha "$INPUT_WORKFLOW_DEF_SHA" \
+            --output .local-cloud-metadata.json
+            
+          # Paginated cross-workflow reservation check
+          ACTIVE_JOBS=""
+          for STATUS in queued waiting pending in_progress; do
+            PAGE=1
+            HAS_NEXT=true
+            while [ "$HAS_NEXT" = "true" ]; do
+              RES=$(gh api "/repos/${{ github.repository }}/actions/runs?status=$STATUS&per_page=100&page=$PAGE")
+              MATCHES=$(echo "$RES" | jq -r '.workflow_runs[] | select(.name | test("Deploy|Restore|Provision|Provider|Scanner")) | .id')
+              if [ -n "$MATCHES" ]; then
+                ACTIVE_JOBS="$ACTIVE_JOBS $MATCHES"
+              fi
+              COUNT=$(echo "$RES" | jq '.workflow_runs | length')
+              if [ "$COUNT" -lt 100 ]; then
+                HAS_NEXT=false
+              else
+                PAGE=$((PAGE+1))
+              fi
+            done
+          done
+          
+          if [ -n "$ACTIVE_JOBS" ]; then
+            echo "Overlap detected: $ACTIVE_JOBS"
+            exit 1
+          fi
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -147,6 +156,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y postgresql-client
+
+      - name: Set up Cloud SQL Proxy
+        run: |
+          curl -o $RUNNER_TEMP/cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.13.0/cloud-sql-proxy.linux.amd64
+          chmod +x $RUNNER_TEMP/cloud-sql-proxy
 
       - name: Execute read-only assessment
         env:

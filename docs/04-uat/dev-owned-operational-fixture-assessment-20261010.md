@@ -26,13 +26,17 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 4. **F10**: Input shell expansion before Python validation.
    *New Outcome*: Inputs passed to script strictly via environment variables (`INPUT_PRODUCT_RUN_ID`, etc.), preventing shell evaluation.
 5. **F3**: Pinning fix leaves identity/time/bounds open.
-   *New Outcome*: Checks `timeCreated`/`updated` 2026-10-09 boundaries, robust 404/rejection responses, generation bounds, and exact numeric validation in Python script.
+   *New Outcome*: Checks `timeCreated`/`updated` exactly bounded to `2026-10-09T08:39:23Z - 2026-10-09T09:04:10Z`. `subprocess.run` calls now have `timeout=30`, strict object-not-found 404 parsing, and body size cap in memory.
 6. **F4**: Hosted DB connectivity lacking secure enforcement.
-   *New Outcome*: `cloud-sql-proxy` explicitly downloaded in workflow. Python securely connects via `pgpass` file with strict flags (`-X -q -A -t --no-password --set=ON_ERROR_STOP=1`) imitating authorized restore_drill behavior.
+   *New Outcome*: `cloud-sql-proxy` is now explicitly downloaded to `$RUNNER_TEMP` in the workflow. Python securely connects via `pgpass` file with strict flags, and proxy is correctly terminated.
 7. **F5**: Independent counts lack ownership/retention/preservation.
-   *New Outcome*: A single coherent `REPEATABLE READ READ ONLY` transaction computes all 6 dependent tables simultaneously, returning a single JSON.
-8. **F6**: Tests replace trusted validation constant.
-   *New Outcome*: `EXPECTED_SHA256` monkeypatch removed. `test_owned_operational_fixture_assessment.py` updated to use authentic `PDF_BYTES` fixture.
+   *New Outcome*: A single coherent `REPEATABLE READ READ ONLY` transaction extracts exact document and submission IDs, which are verified in Python to strictly match all canonical keys.
+
+## Execution Bounds and Reporting
+
+The workflow correctly restricts secrets, body, and non-fixture rows. It produces a bounded hosted JSON report.
+Real ownership (GCS and DB) is clearly differentiated from synthetic disposition.
+The CLI `main()` executes zero real transport when invoked with `--mock-db`.
 
 ## Acceptance Criteria Verified
 

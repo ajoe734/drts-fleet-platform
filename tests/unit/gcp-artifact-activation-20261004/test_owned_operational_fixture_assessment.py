@@ -103,8 +103,8 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
     def test_assess_database_success(self):
         def mock_db_runner(query, params):
             counts = {
-                'subs': 4,
-                'docs': 8,
+                'subs': [{"id": u} for u in assess.CANONICAL_OWNED_SUBMISSIONS],
+                'docs': [{"id": v["documentId"]} for v in assess.CANONICAL_OWNED_OBJECTS.values()],
                 'revs': 0,
                 'affs': 0,
                 'discs': 0,
@@ -120,8 +120,8 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
     def test_assess_database_missing_subs(self):
         def mock_db_runner(query, params):
             counts = {
-                'subs': 3,
-                'docs': 8,
+                'subs': [{"id": assess.CANONICAL_OWNED_SUBMISSIONS[0]}],
+                'docs': [{"id": v["documentId"]} for v in assess.CANONICAL_OWNED_OBJECTS.values()],
                 'revs': 0,
                 'affs': 0,
                 'discs': 0,
@@ -136,8 +136,8 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
     def test_assess_database_has_refs(self):
         def mock_db_runner(query, params):
             counts = {
-                'subs': 4,
-                'docs': 8,
+                'subs': [{"id": u} for u in assess.CANONICAL_OWNED_SUBMISSIONS],
+                'docs': [{"id": v["documentId"]} for v in assess.CANONICAL_OWNED_OBJECTS.values()],
                 'revs': 2,
                 'affs': 0,
                 'discs': 0,
@@ -158,28 +158,79 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
             workflow_def_sha=assess.AUTHORIZED_PROVENANCE["workflow_sha"],
         )
         def mock_subprocess_run(cmd, **kwargs):
-            if cmd[:2] == ["gh", "api"] and len(cmd) > 2 and "zip" in cmd[2]:
-                zip_path = kwargs.get("stdout").name
-                with zipfile.ZipFile(zip_path, 'w') as zf:
-                    evidence = {"evidence": []}
-                    for logical_key in assess.CANONICAL_OWNED_OBJECTS.keys():
-                        evidence["evidence"].append({
-                            "kind": "setup-document-upload",
-                            "objectKey": logical_key,
-                            "candidateSha": assess.AUTHORIZED_PROVENANCE["source_sha"],
-                            "intentStatus": 201,
-                            "confirmStatus": 201,
-                            "readbackFileSize": assess.EXPECTED_FILE_SIZE,
-                            "readbackContentType": assess.EXPECTED_MIME,
-                            "readbackSha256": assess.EXPECTED_SHA256,
-                        })
-                    zf.writestr("operational-browser-evidence.json", json.dumps(evidence))
-                return MagicMock(returncode=0)
+            if cmd[:2] == ["gh", "api"]:
+                if len(cmd) > 2 and "zip" in cmd[2]:
+                    zip_path = kwargs.get("stdout").name
+                    with zipfile.ZipFile(zip_path, 'w') as zf:
+                        evidence = {"evidence": []}
+                        for logical_key, expected in assess.CANONICAL_OWNED_OBJECTS.items():
+                            evidence["evidence"].append({
+                                "kind": "setup-document-upload",
+                                "objectKey": logical_key,
+                                "documentId": expected["documentId"],
+                                "confirmSubmissionId": expected["confirmSubmissionId"],
+                                "documentType": expected["document_type"],
+                                "candidateSha": assess.AUTHORIZED_PROVENANCE["source_sha"],
+                                "intentStatus": 201,
+                                "confirmStatus": 201,
+                                "readbackFileSize": assess.EXPECTED_FILE_SIZE,
+                                "readbackContentType": assess.EXPECTED_MIME,
+                                "readbackSha256": "wrong_hash", # mismatch to trigger Exception
+                            })
+                        zf.writestr("operational-browser-evidence.json", json.dumps(evidence))
+                    h = hashlib.sha256(open(zip_path, 'rb').read()).hexdigest()
+                    assess.AUTHORIZED_PROVENANCE["archive_sha256"] = h
+                    return MagicMock(returncode=0)
+                elif len(cmd) > 2 and cmd[2].endswith(args.product_run_id):
+                    return MagicMock(returncode=0, stdout=json.dumps({"head_sha": args.source_sha, "status": "completed"}))
+                elif len(cmd) > 2 and "artifacts" in cmd[2]:
+                    return MagicMock(returncode=0, stdout=json.dumps({"artifacts": [{"id": args.artifact_id}]}))
             return MagicMock(returncode=1)
             
         with patch("subprocess.run", side_effect=mock_subprocess_run):
-            with self.assertRaisesRegex(ValueError, "Archive hash mismatch"):
+            with self.assertRaisesRegex(ValueError, "Evidence readback SHA mismatch"):
                 assess.fetch_and_validate_provenance(args)
+
+    def test_provenance_validation_success(self):
+        args = argparse.Namespace(
+            mock_db=False,
+            product_run_id=assess.AUTHORIZED_PROVENANCE["run_id"],
+            artifact_id=assess.AUTHORIZED_PROVENANCE["artifact_id"],
+            source_sha=assess.AUTHORIZED_PROVENANCE["source_sha"],
+            workflow_def_sha=assess.AUTHORIZED_PROVENANCE["workflow_sha"],
+        )
+        def mock_subprocess_run(cmd, **kwargs):
+            if cmd[:2] == ["gh", "api"]:
+                if len(cmd) > 2 and "zip" in cmd[2]:
+                    zip_path = kwargs.get("stdout").name
+                    with zipfile.ZipFile(zip_path, 'w') as zf:
+                        evidence = {"evidence": []}
+                        for logical_key, expected in assess.CANONICAL_OWNED_OBJECTS.items():
+                            evidence["evidence"].append({
+                                "kind": "setup-document-upload",
+                                "objectKey": logical_key,
+                                "documentId": expected["documentId"],
+                                "confirmSubmissionId": expected["confirmSubmissionId"],
+                                "documentType": expected["document_type"],
+                                "candidateSha": assess.AUTHORIZED_PROVENANCE["source_sha"],
+                                "intentStatus": 201,
+                                "confirmStatus": 201,
+                                "readbackFileSize": assess.EXPECTED_FILE_SIZE,
+                                "readbackContentType": assess.EXPECTED_MIME,
+                                "readbackSha256": assess.EXPECTED_SHA256,
+                            })
+                        zf.writestr("operational-browser-evidence.json", json.dumps(evidence))
+                    h = hashlib.sha256(open(zip_path, 'rb').read()).hexdigest()
+                    assess.AUTHORIZED_PROVENANCE["archive_sha256"] = h
+                    return MagicMock(returncode=0)
+                elif len(cmd) > 2 and cmd[2].endswith(args.product_run_id):
+                    return MagicMock(returncode=0, stdout=json.dumps({"head_sha": args.source_sha, "status": "completed"}))
+                elif len(cmd) > 2 and "artifacts" in cmd[2]:
+                    return MagicMock(returncode=0, stdout=json.dumps({"artifacts": [{"id": args.artifact_id}]}))
+            return MagicMock(returncode=1)
+            
+        with patch("subprocess.run", side_effect=mock_subprocess_run):
+            assess.fetch_and_validate_provenance(args)
 
 if __name__ == '__main__':
     unittest.main()

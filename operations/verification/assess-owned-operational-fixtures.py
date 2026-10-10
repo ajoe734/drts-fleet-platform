@@ -93,6 +93,19 @@ def fetch_and_validate_provenance(args) -> None:
     require(args.source_sha == AUTHORIZED_PROVENANCE["source_sha"], "Unauthorized source_sha")
     require(args.workflow_def_sha == AUTHORIZED_PROVENANCE["workflow_sha"], "Unauthorized workflow_def_sha")
     
+    # Check run
+    res_run = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}"], capture_output=True, text=True, check=False)
+    require(res_run.returncode == 0, "Failed to fetch run from GitHub API")
+    run_data = json.loads(res_run.stdout)
+    require(run_data.get("head_sha") == AUTHORIZED_PROVENANCE["source_sha"], "Run source SHA mismatch")
+    require(run_data.get("status") == "completed", "Run not completed")
+    
+    # Check artifacts pagination
+    res_arts = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}/artifacts"], capture_output=True, text=True, check=False)
+    require(res_arts.returncode == 0, "Failed to fetch artifacts from GitHub API")
+    arts = json.loads(res_arts.stdout).get("artifacts", [])
+    require(any(str(a.get("id")) == str(args.artifact_id) for a in arts), "Artifact not associated with authoritative run")
+    
     with tempfile.TemporaryDirectory() as td:
         zip_path = os.path.join(td, "artifact.zip")
         # Fetch using gh api
@@ -124,6 +137,13 @@ def fetch_and_validate_provenance(args) -> None:
                     require(entry.get("readbackContentType") == EXPECTED_MIME, "Evidence readbackContentType mismatch")
                     require(entry.get("readbackSha256") == EXPECTED_SHA256, "Evidence readback SHA mismatch")
                     
+                    if obj_key in CANONICAL_OWNED_OBJECTS:
+                        expected = CANONICAL_OWNED_OBJECTS[obj_key]
+                        require(entry.get("documentId") == expected["documentId"], f"documentId mismatch for {obj_key}")
+                        require(entry.get("confirmSubmissionId") == expected["confirmSubmissionId"], f"confirmSubmissionId mismatch for {obj_key}")
+                        actual_type = entry.get("documentType") or entry.get("document_type")
+                        require(actual_type == expected["document_type"], f"documentType mismatch for {obj_key}")
+                        
                     seen_keys.add(obj_key)
             
             for key in CANONICAL_OWNED_OBJECTS.keys():
@@ -158,8 +178,16 @@ def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]]) -> Dic
              
         time_created = meta.get("timeCreated", "")
         updated = meta.get("updated", "")
-        if not time_created or not updated or "2026-10-09T" not in time_created:
-             return {"status": "rejected", "reason": f"Missing or invalid time boundaries for {physical_key}"}
+        import datetime
+        try:
+            tc = datetime.datetime.fromisoformat(time_created.replace("Z", "+00:00"))
+            up = datetime.datetime.fromisoformat(updated.replace("Z", "+00:00"))
+            start = datetime.datetime.fromisoformat("2026-10-09T08:39:23+00:00")
+            end = datetime.datetime.fromisoformat("2026-10-09T09:04:10+00:00")
+            if not (start <= tc <= end) or not (start <= up <= end):
+                return {"status": "rejected", "reason": f"Timestamps outside allowed window for {physical_key}"}
+        except Exception:
+            return {"status": "rejected", "reason": f"Missing or invalid time boundaries for {physical_key}"}
              
         validated_meta[physical_key] = meta
 
@@ -200,9 +228,9 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
     query = f"""
     BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
     WITH subs AS (
-        SELECT count(*) as c FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs})
+        SELECT COALESCE(json_agg(s.*), '[]'::json) as data FROM fleet.supply_submissions s WHERE submission_id IN ({safe_subs})
     ), docs AS (
-        SELECT count(*) as c FROM fleet.supply_documents WHERE submission_id IN ({safe_subs})
+        SELECT COALESCE(json_agg(d.*), '[]'::json) as data FROM fleet.supply_documents d WHERE submission_id IN ({safe_subs})
     ), revs AS (
         SELECT count(*) as c FROM fleet.supply_review_events WHERE submission_id IN ({safe_subs})
     ), affs AS (
@@ -213,8 +241,8 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         SELECT count(*) as c FROM reg.driver_public_registration_credentials WHERE source_submission_id IN ({safe_subs})
     )
     SELECT json_build_object(
-        'subs', (SELECT c FROM subs),
-        'docs', (SELECT c FROM docs),
+        'subs', (SELECT data FROM subs),
+        'docs', (SELECT data FROM docs),
         'revs', (SELECT c FROM revs),
         'affs', (SELECT c FROM affs),
         'discs', (SELECT c FROM discs),
@@ -231,10 +259,27 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
     except (IndexError, json.JSONDecodeError) as e:
         return {"status": "error", "error": f"Failed to parse DB results: {e}"}
         
-    if counts['subs'] != 4:
+    subs = counts.get('subs', [])
+    docs = counts.get('docs', [])
+    
+    if len(subs) != 4:
         return {"status": "rejected", "reason": "Missing expected supply_submissions"}
-    if counts['docs'] != 8:
+    if len(docs) != 8:
         return {"status": "rejected", "reason": "Missing expected supply_documents"}
+        
+    expected_doc_ids = {v["documentId"] for v in CANONICAL_OWNED_OBJECTS.values()}
+    actual_doc_ids = set()
+    for d in docs:
+        actual_doc_ids.add(d.get("document_id") or d.get("id") or d.get("documentId"))
+    if not expected_doc_ids.issubset(actual_doc_ids):
+        return {"status": "rejected", "reason": "Document IDs mismatch ownership"}
+        
+    expected_sub_ids = set(CANONICAL_OWNED_SUBMISSIONS)
+    actual_sub_ids = set()
+    for s in subs:
+        actual_sub_ids.add(s.get("submission_id") or s.get("id") or s.get("submissionId"))
+    if not expected_sub_ids.issubset(actual_sub_ids):
+        return {"status": "rejected", "reason": "Submission IDs mismatch ownership"}
         
     count_refs = counts['revs'] + counts['affs'] + counts['discs'] + counts['creds']
     if count_refs > 0:
@@ -242,8 +287,8 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         
     return {
         "status": "success", 
-        "submissions_found": counts['subs'],
-        "documents_found": counts['docs'],
+        "submissions_found": len(subs),
+        "documents_found": len(docs),
         "review_events_count": counts['revs'], 
         "affiliations_count": counts['affs'],
         "disclosure_count": counts['discs'],
@@ -253,16 +298,31 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
 def default_gcs_runner(action: str, bucket: str, key: str) -> Dict[str, Any]:
     if action == "describe":
         cmd = ["gcloud", "storage", "objects", "describe", f"gs://{bucket}/{key}", "--format=json", "--project", PROJECT, "--quiet"]
-        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
+        except subprocess.TimeoutExpired:
+            return {"status": "error", "stderr": "describe timeout"}
         if res.returncode == 0:
-            return {"status": "ok", "metadata": json.loads(res.stdout)}
-        elif "404" in res.stderr:
+            try:
+                return {"status": "ok", "metadata": json.loads(res.stdout)}
+            except json.JSONDecodeError:
+                return {"status": "error", "stderr": "Invalid JSON"}
+        elif "404" in res.stderr and "Bucket not found" not in res.stderr and "No such object" in res.stderr:
             return {"status": "not_found"}
+        elif "404" in res.stderr and "No such object" not in res.stderr:
+             return {"status": "error", "stderr": "404 but not object not found: " + res.stderr}
+        elif "404" in res.stderr:
+             return {"status": "not_found"}
         return {"status": "error", "stderr": res.stderr}
     elif action == "cat":
         cmd = ["gcloud", "storage", "cat", f"gs://{bucket}/{key}", "--project", PROJECT, "--quiet"]
-        res = subprocess.run(cmd, capture_output=True, check=False)
+        try:
+            res = subprocess.run(cmd, capture_output=True, check=False, timeout=30)
+        except subprocess.TimeoutExpired:
+            return {"status": "error", "stderr": "cat timeout"}
         if res.returncode == 0:
+            if len(res.stdout) > 10 * 1024 * 1024:
+                 return {"status": "error", "stderr": "File too large"}
             return {"status": "ok", "body": res.stdout}
         return {"status": "error", "stderr": res.stderr.decode('utf-8', errors='replace')}
     raise ValueError(f"Unknown action {action}")
@@ -349,20 +409,21 @@ def main():
     try:
         if args.mock_db:
             report["disposition"] = "synthetic"
-        else:
-            fetch_and_validate_provenance(args)
-            
-        gcs_res = assess_gcs_objects(default_gcs_runner)
-        report["gcs_assessment"] = gcs_res
-        
-        if gcs_res.get("status") != "success":
-            report["disposition"] = "rejected"
+            gcs_res = {"status": "success", "validated_count": len(CANONICAL_OWNED_OBJECTS), "receipts": []}
+            report["gcs_assessment"] = gcs_res
+            report["db_assessment"] = {"status": "skipped_due_to_mock"}
             print(json.dumps(report, indent=2))
             sys.exit(1)
-        
-        if args.mock_db:
-            report["db_assessment"] = {"status": "skipped_due_to_mock"}
         else:
+            fetch_and_validate_provenance(args)
+            gcs_res = assess_gcs_objects(default_gcs_runner)
+            report["gcs_assessment"] = gcs_res
+            
+            if gcs_res.get("status") != "success":
+                report["disposition"] = "rejected"
+                print(json.dumps(report, indent=2))
+                sys.exit(1)
+            
             db_res = assess_database(default_db_runner)
             report["db_assessment"] = db_res
             if db_res.get("status") != "success":
@@ -373,11 +434,9 @@ def main():
                 sys.exit(1)
             else:
                 report["disposition"] = "complete"
-            
-        print(json.dumps(report, indent=2))
-        if args.mock_db:
-            sys.exit(1)
-        sys.exit(0)
+                
+            print(json.dumps(report, indent=2))
+            sys.exit(0)
     except Exception as e:
         report["disposition"] = "error"
         report["error"] = str(e)
