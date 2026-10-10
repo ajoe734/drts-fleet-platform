@@ -4,7 +4,7 @@ import {
   SetMetadata,
 } from "@nestjs/common";
 
-import type { AuthRealm, BootstrapRequestIdentity } from "./auth.types";
+import type { RequestAuthRealm, RequestIdentity } from "./auth.types";
 import {
   AUTH_ALLOWED_REALMS_KEY,
   AUTH_OPEN_ROUTE_KEY,
@@ -18,20 +18,17 @@ export const OpenRoute = () => SetMetadata(AUTH_OPEN_ROUTE_KEY, true);
 export const RequireScopes = (...scopes: string[]) =>
   SetMetadata(AUTH_REQUIRED_SCOPES_KEY, scopes);
 
-export const RequireRealms = (...allowedRealms: AuthRealm[]) =>
+export const RequireRealms = (...allowedRealms: RequestAuthRealm[]) =>
   SetMetadata(AUTH_ALLOWED_REALMS_KEY, allowedRealms);
 
 export const FeatureGated = (flagKey: string) =>
   SetMetadata(FEATURE_GATED_FLAG_KEY, flagKey);
 
 export const CurrentIdentity = createParamDecorator(
-  (
-    _data: unknown,
-    context: ExecutionContext,
-  ): BootstrapRequestIdentity | null => {
+  (_data: unknown, context: ExecutionContext): RequestIdentity | null => {
     const request = context.switchToHttp().getRequest<{
       headers: Record<string, string | string[] | undefined>;
-      identity?: BootstrapRequestIdentity;
+      identity?: RequestIdentity;
       method?: string;
       originalUrl?: string;
       url?: string;

@@ -7650,3 +7650,4 @@ export * from "./remittance-proof";
 export * from "./passenger-push-delivery";
 export * from "./partner-passenger-notification";
 export * from "./passenger-notification-channel";
+export * from "./passenger-app";
