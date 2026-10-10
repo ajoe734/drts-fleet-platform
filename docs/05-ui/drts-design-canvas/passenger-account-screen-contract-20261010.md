@@ -76,5 +76,5 @@
   - Request: `POST /api/passenger-app/rides/:id/complaints` (`CreatePassengerComplaintCommand`, path mapping: `rideId`, body: `category`, `content`, optional `lostItemDescription`, `contactConsent`).
   - Response: `CreatePassengerComplaintResponse` (returns `complaintId`).
 - **Payment Methods (A-20, A-20a)**:
-  - `A-20`: `GET /api/passenger-app/payment-methods` (`GetPaymentMethodsQuery` -> `PaymentMethodsResponse`), `PUT /api/passenger-app/payment-methods/:id/default` (`SetDefaultPaymentMethodCommand` -> `SetDefaultPaymentMethodResponse`).
+  - `A-20`: `GET /api/passenger-app/payment-methods` (`GetPaymentMethodsQuery` -> `PaymentMethodsResponse`), `PUT /api/passenger-app/payment-methods/:id/default` (`SetDefaultPaymentMethodCommand` -> `PaymentMethodResponse`).
   - `A-20a`: `DELETE /api/passenger-app/payment-methods/:id` (`RemovePaymentMethodCommand` -> `RemovePaymentMethodResponse`).

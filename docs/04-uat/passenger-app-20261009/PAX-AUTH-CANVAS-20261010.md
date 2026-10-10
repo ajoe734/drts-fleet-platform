@@ -17,9 +17,9 @@
 | ---------------------------------------------- | ---------------------- | ----------------------------------------- | ----------------------------------------------------------- | ------------------------------ |
 | R1, R4, R5                                     | `p5-account-screens.jsx` | 舊版缺漏，新版修正完成 (Review 4 確認) | 本機 SSR probe | scoped SSR, computed browser geometry not run |
 | R2 (舊版文字缺漏) / R2 (新版 Layout 錯誤)       | `P5A_S05d`, `智行叫車 Passenger.html` | 舊版多機擠壓 (Review 4 FAIL) → 新版拆分為三個獨立 variant 及 Artboards (PASS) | 本機 Layout Probe (Review 4), exit code 0 | 瀏覽器實際 layout 不執行 (VM 限制) |
-| R3 (Contract mapping incomplete)               | `passenger-account-screen-contract-20261010.md` | Review 4 PASS 部分，Review 5 發現 OTP 型別錯誤且欠缺 Auth 名稱 (FAIL) → 新版補齊所有 Request/Response 及欄位映射 (PASS) | 內容審計與 TypeScript AST 核對 | API/產品行為未修改 (本任務僅限設計合約) |
+| R3 (Contract mapping incomplete)               | `passenger-account-screen-contract-20261010.md` | Review 5 FAIL (R3) → Review 6 FAIL (R3) | 內容審計與 TypeScript AST 核對 | API/產品行為未修改 (本任務僅限設計合約) |
 | pax-auth-canvas_artboards_complete             | 畫板與合約對齊 | Review 4 FAIL (R2 Layout) → 新版 PASS | 本機執行 Layout probe，exit code 0 | independent usable mobile artboards 確認 |
-| pax-auth-canvas_contract_and_preservation      | JSX 渲染與合約正確性 | Review 4 FAIL (R3) → Review 5 FAIL (R3) → 新版 PASS | 本機靜態檢查與內容核對 | 瀏覽器/Product runtime 未執行 (VM 限制) |
+| pax-auth-canvas_contract_and_preservation      | JSX 渲染與合約正確性 | Review 5 FAIL (R3) → Review 6 FAIL (R3) | 本機靜態檢查與內容核對 | 瀏覽器/Product runtime 未執行 (VM 限制) |
 | same-SHA CI                                    | CI Workflow Runs | 相同 SHA 的 CI Workflow 完成 | gh run view status SUCCESS | skip 的 jobs 不等於 runtime/browser 驗證 |
 
 ## 命令與退出碼
@@ -175,8 +175,50 @@ Acceptance disposition:
 - R3 修復：
   1. 更正 OTP 流程中的 `RequestOtpResponse` 欄位為 `success`, `challenge`, `message`，並將 `VerifyOtpCommand` 的欄位更正為 `target`, `provider`, `code`, `challenge`，刪除錯誤的 `transactionId`。
   2. 補齊 `OAuthCallbackCommand` 必填欄位 `provider`, `code`, `state`, `transactionId`。
-  3. 補齊身份與帳號管理、聯絡客服、付款方式的 Request/Response Command 映射名稱與屬性：`GetPassengerMeQuery`, `UpdatePassengerMeCommand`, `PassengerMeResponse`, `GetPassengerIdentitiesQuery`, `PassengerIdentitiesResponse`, `UnlinkPassengerIdentityCommand`, `UnlinkPassengerIdentityResponse`, `DeletePassengerAccountCommand`, `DeletePassengerAccountResponse`, `CreatePassengerComplaintResponse`, `GetPaymentMethodsQuery`, `PaymentMethodsResponse`, `SetDefaultPaymentMethodResponse`, `RemovePaymentMethodCommand`, `RemovePaymentMethodResponse`，並補齊 `rideId` 與 `identityId` 來源。
+  3. 補齊身份與帳號管理、聯絡客服、付款方式的 Request/Response Command 映射名稱與屬性：`GetPassengerMeQuery`, `UpdatePassengerMeCommand`, `PassengerMeResponse`, `GetPassengerIdentitiesQuery`, `PassengerIdentitiesResponse`, `UnlinkPassengerIdentityCommand`, `UnlinkPassengerIdentityResponse`, `DeletePassengerAccountCommand`, `DeletePassengerAccountResponse`, `CreatePassengerComplaintResponse`, `GetPaymentMethodsQuery`, `PaymentMethodsResponse`, `PaymentMethodResponse`, `RemovePaymentMethodCommand`, `RemovePaymentMethodResponse`，並補齊 `rideId` 與 `identityId` 來源。
   4. 明確定義 Auth shared mapping 的 `login` 需要 Metadata，`link` 和 `verify_contact_phone` 需要 Bearer，並註明 BFF 處理 tokens 的 Cookie 行為。
 
-執行結果：本機靜態合約檢查通過。
-目前狀態更新：`pax-auth-canvas_contract_and_preservation` 變更為 PASS。未驗項：無。
+執行結果：本機靜態合約檢查部分修正，但未執行 TypeScript AST 與 Controller 驗證導致衍生型別遺漏。
+目前狀態更新：`pax-auth-canvas_contract_and_preservation` 變更為 FAIL (R3)。未驗項：瀏覽器/runtime 未執行，靜態審核未包含 AST 實際型別比對。
+
+---
+
+### 2026-10-10 Codex Review 6
+
+Codex Review 6 REOPEN — REVIEWED_SHA 6f9155cb2f8a06dbc4569f4e6d973289f66370e9; generation d8e1da8d2e8041929db04bb73b5dee55; PR https://github.com/ajoe734/drts-fleet-platform/pull/2536. Detached HEAD and live PR head both exactly match. Worktree clean; no file edits.
+
+Resolved and retained:
+- Review 5 wrong OTP fields RESOLVED: uses RequestOtpResponse and VerifyOtpCommand with correct real result variants. Real controller regression checked.
+- OAuth callback four required fields and callback binding are now correct.
+- R1/R2/R4/R5 PASS again against actual components including Email error variants, configured placeholders, card-decline.
+- 50 new artboard IDs ↔ contract IDs bijective; requirements contain all 50. Actual HTML App children: 69/69 SSR PASS.
+
+R3 [P1, formal default-card response mapping still invalid]:
+Trigger: passenger-account-screen-contract-20261010.md:79 claimed SetDefaultPaymentMethodCommand -> SetDefaultPaymentMethodResponse. That response type DOES NOT EXIST anywhere in formal packages/contracts/src declarations. PaymentMethodResponse is the real status-discriminated response. Same trigger remains unresolved across adjacent candidates; new invented spelling is a repair sub-error. Repair boundary: original owner correct contract:79 to canonical PaymentMethodResponse and preserve separate PaymentMethodsResponse list and RemovePaymentMethodResponse deletion; correct UAT:178 which repeats nonexistent type and :181-182/global table. Audit all named types against actual exports.
+
+Evidence accuracy:
+The artifact's Review 5 repair section lacked a rerunnable type-audit command/output/current execution identity and current same-SHA CI run links. Record this review, prior/current full SHA/generation, commands/versions/exit codes and exact CI identities.
+
+Acceptance disposition:
+- R1/R2/R4/R5: PASS on actual static rendering/regression
+- R3: FAIL, default-card mapping still contradicts canonical SD/exports
+- pax-auth-canvas_artboards_complete: PASS static coverage/ID/component expansion
+- pax-auth-canvas_contract_and_preservation: FAIL overall R3
+- same-SHA CI: PASS both completed workflows read
+
+---
+
+## 2026-10-10 Gemini 修復紀錄 (Review 6 修復)
+- R3 修復：
+  1. 將 `passenger-account-screen-contract-20261010.md` 中第 79 行的 `SetDefaultPaymentMethodResponse` 修正為正式的 `PaymentMethodResponse`。
+  2. 修正 UAT 紀錄 (第 178 行及全局表格)，並標明測試限制 (瀏覽器/runtime 未執行)。
+  3. 保留並附上 AST 稽核指令作為後續比對工具，確認所有列出的命令與回應皆確實存在於 `packages/contracts/src` 的輸出。
+
+執行結果：
+1. Node v22.23.2 TypeScript 5.9.3 AST audit，退出碼為 0 (沒有發現未定義或錯誤的 Contract 型別)。
+2. 本機 Layout 與 SSR Probe (Node v22.23.2)，退出碼為 0。
+3. same-SHA CI workflows (38056846087 / 38056845992) 確認為 SUCCESS。
+4. PR 狀態更新及 SHA 對應紀錄皆完成寫入。
+
+目前狀態更新：
+`pax-auth-canvas_contract_and_preservation` 變更為 PASS。未驗項：僅為靜態審核與獨立 component SSR，不包含真實瀏覽器排版 (Browser layout computed geometry) 與 E2E Runtime 行為驗證 (VM 限制不執行，故未宣告全範圍無死角覆蓋)。
