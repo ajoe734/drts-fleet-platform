@@ -92,7 +92,7 @@ def fetch_and_validate_provenance(args) -> None:
     require(args.workflow_def_sha == AUTHORIZED_PROVENANCE["workflow_sha"], "Unauthorized workflow_def_sha")
     
     # Check run
-    res_run = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}"], timeout=30, capture_output=True, text=True, check=False)
+    res_run = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}"])
     require(res_run.returncode == 0, "Failed to fetch run from GitHub API")
     run_data = json.loads(res_run.stdout)
     require(str(run_data.get("id")) == args.product_run_id, "Run ID mismatch")
@@ -117,7 +117,7 @@ def fetch_and_validate_provenance(args) -> None:
     page = 1
     total_count = -1
     while True:
-        res_jobs = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}/jobs?per_page=100&page={page}"], timeout=30, capture_output=True, text=True, check=False)
+        res_jobs = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}/jobs?per_page=100&page={page}"])
         require(res_jobs.returncode == 0, "Failed to fetch jobs from GitHub API")
         jobs_data = json.loads(res_jobs.stdout)
         total_count = jobs_data.get("total_count", -1)
@@ -164,7 +164,7 @@ def fetch_and_validate_provenance(args) -> None:
     page = 1
     total_count_arts = -1
     while True:
-        res_arts = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}/artifacts?per_page=100&page={page}"], timeout=30, capture_output=True, text=True, check=False)
+        res_arts = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}/artifacts?per_page=100&page={page}"])
         require(res_arts.returncode == 0, "Failed to fetch artifacts from GitHub API")
         arts_data = json.loads(res_arts.stdout)
         total_count_arts = arts_data.get("total_count", -1)
@@ -202,7 +202,7 @@ def fetch_and_validate_provenance(args) -> None:
     
     with tempfile.TemporaryDirectory() as td:
         zip_path = os.path.join(td, "artifact.zip")
-        res = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/artifacts/{args.artifact_id}/zip"], stdout=open(zip_path, "wb"))
+        res = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/artifacts/{args.artifact_id}/zip"], binary_out=True, out_path=zip_path)
         if res.returncode != 0:
             raise RuntimeError("Failed to fetch artifact from GitHub API")
             
@@ -459,14 +459,14 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
     if counts.get('tx_ro') != 'on' or counts.get('tx_iso') != 'repeatable read':
         return {"status": "rejected", "reason": "Transaction mode not verified"}
         
-    for k in ['revs', 'affs', 'discs', 'creds']:
+    for k in ['revs', 'affs', 'discs', 'creds', 'cdriv', 'cveh', 'cpol', 'ccont', 'ddrafts', 'vdrafts', 'cpairs', 'cexcl', 'audits']:
         if counts.get(k) is None:
             return {"status": "error", "error": f"Missing count for {k}"}
         if type(counts.get(k)) is not int:
              return {"status": "error", "error": f"Non-integer count for {k}"}
         if counts.get(k, 0) < 0:
             return {"status": "rejected", "reason": f"Negative reference counts for {k}"}
-    for k in []: # Don't error out on missing mock keys
+    for k in ['pres_subs', 'pres_docs', 'pres_revs', 'pres_affs', 'pres_discs', 'pres_creds', 'pres_cdriv', 'pres_cveh', 'pres_cpol', 'pres_ccont', 'pres_ddrafts', 'pres_vdrafts', 'pres_cpairs', 'pres_cexcl', 'pres_audits']:
         obj = counts.get(k)
         if obj is None or type(obj) is not dict or 'c' not in obj or 'digest' not in obj:
             return {"status": "error", "error": f"Missing or invalid preservation inventory for {k}"}
@@ -475,15 +475,14 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         if not obj['digest'] or len(obj['digest']) != 32 or not all(c in '0123456789abcdef' for c in obj['digest']):
             return {"status": "error", "error": f"Invalid preservation digest for {k}"}
             
-    if counts.get('pres_subs', {}).get('c', 4) < 4:
+    if counts.get('pres_subs', {}).get('c', 0) < 4:
         return {"status": "rejected", "reason": "Preservation subs count less than expected 4"}
     if counts.get('pres_docs', {}).get('c', 8) < 8:
         return {"status": "rejected", "reason": "Preservation docs count less than expected 8"}
             
     fks_meta = counts.get('fks_meta')
-    if fks_meta is not None:
-        if not fks_meta or len(fks_meta) == 0:
-            return {"status": "rejected", "reason": "No incoming foreign keys detected"}
+    if fks_meta is None or not isinstance(fks_meta, list) or len(fks_meta) == 0:
+        return {"status": "rejected", "reason": "No incoming foreign keys detected"}
     
     expected_fks = {
         ('fleet.supply_documents', 'fleet.supply_submissions'): ('supply_documents_submission_id_fkey', 'FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE', 'c'),
@@ -493,34 +492,33 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         ('fleet.vehicle_supply_drafts', 'fleet.supply_submissions'): ('vehicle_supply_drafts_submission_id_fkey', 'FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE', 'c'),
     }
     
-    if fks_meta is not None and len(fks_meta) != len(expected_fks):
+    if len(fks_meta) != len(expected_fks):
         return {"status": "rejected", "reason": "Duplicate or missing foreign keys"}
     
-    if fks_meta is not None:
-        seen_fks = set()
-        for fk in fks_meta:
-            if fk.get('contype') != 'f':
-                return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has invalid contype"}
-            rel = fk.get('rel')
-            confrel = fk.get('confrel')
-            deltype = fk.get('confdeltype')
-            updtype = fk.get('confupdtype')
-            if (rel, confrel) in expected_fks:
-                expected_name, expected_def, expected_deltype = expected_fks[(rel, confrel)]
-                if fk.get('name') != expected_name:
-                    return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} wrong name, expected {expected_name}"}
-                if fk.get('def') != expected_def:
-                    return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} wrong def"}
-                if deltype != expected_deltype:
-                    return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has wrong confdeltype"}
-                if updtype != 'a':
-                    return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has wrong confupdtype"}
-                seen_fks.add((rel, confrel))
-            else:
-                return {"status": "rejected", "reason": f"Unexpected foreign key {fk.get('name')} from {rel} to {confrel}"}
-                
-        if seen_fks != set(expected_fks.keys()):
-            return {"status": "rejected", "reason": "Missing expected foreign key relationships"}
+    seen_fks = set()
+    for fk in fks_meta:
+        if fk.get('contype') != 'f':
+            return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has invalid contype"}
+        rel = fk.get('rel')
+        confrel = fk.get('confrel')
+        deltype = fk.get('confdeltype')
+        updtype = fk.get('confupdtype')
+        if (rel, confrel) in expected_fks:
+            expected_name, expected_def, expected_deltype = expected_fks[(rel, confrel)]
+            if fk.get('name') != expected_name:
+                return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} wrong name, expected {expected_name}"}
+            if fk.get('def') != expected_def:
+                return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} wrong def"}
+            if deltype != expected_deltype:
+                return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has wrong confdeltype"}
+            if updtype != 'a':
+                return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has wrong confupdtype"}
+            seen_fks.add((rel, confrel))
+        else:
+            return {"status": "rejected", "reason": f"Unexpected foreign key {fk.get('name')} from {rel} to {confrel}"}
+            
+    if seen_fks != set(expected_fks.keys()):
+        return {"status": "rejected", "reason": "Missing expected foreign key relationships"}
         
     subs = counts.get('subs', [])
     docs = counts.get('docs', [])
@@ -668,7 +666,7 @@ def default_gcs_runner(action: str, bucket: str, key: str) -> Dict[str, Any]:
     if action == "describe":
         cmd = ["gcloud", "storage", "objects", "describe", f"gs://{bucket}/{key}", "--format=json", "--project", PROJECT, "--quiet"]
         try:
-            res = subprocess.run(cmd, timeout=30, capture_output=True, text=True, check=False)
+            res = run_bounded(cmd)
         except Exception:
             return {"status": "error", "stderr": "describe timeout"}
         if res.returncode == 0:
@@ -706,7 +704,7 @@ def default_db_runner(query: str, params: List[Any]) -> Dict[str, Any]:
     
     sec_cmd = ["gcloud", "secrets", "versions", "access", "latest", "--secret=drts-dev-db-url", "--project", PROJECT, "--quiet"]
     try:
-        sec_res = subprocess.run(sec_cmd, timeout=10, capture_output=True, text=True, check=False)
+        sec_res = run_bounded(sec_cmd)
     except Exception:
         return {"error": "secret timeout"}
     if sec_res.returncode != 0:
@@ -714,7 +712,7 @@ def default_db_runner(query: str, params: List[Any]) -> Dict[str, Any]:
         
     node_cmd = ["node", str(cred_helper)]
     try:
-        node_res = subprocess.run(node_cmd, input=sec_res.stdout, timeout=10, capture_output=True, text=True, check=False)
+        node_res = run_bounded(node_cmd, input_str=sec_res.stdout)
     except Exception:
         return {"error": "node timeout"}
     if node_res.returncode != 0:
@@ -750,7 +748,7 @@ def default_db_runner(query: str, params: List[Any]) -> Dict[str, Any]:
             ready = False
             for _ in range(15):
                 try:
-                    c = subprocess.run(["psql", "-X", "-q", "-A", "-t", "--no-password", "-c", "SELECT 1"], env=env, timeout=2, capture_output=True, text=True, check=False)
+                    c = run_bounded(["psql", "-X", "-q", "-A", "-t", "--no-password", "-c", "SELECT 1"], env=env)
                     if c.returncode == 0:
                         ready = True
                         break
@@ -773,7 +771,7 @@ def default_db_runner(query: str, params: List[Any]) -> Dict[str, Any]:
             sql_file.write_text(query)
             
             psql_cmd = ["psql", "-X", "-q", "-A", "-t", "--no-password", "--set=ON_ERROR_STOP=1", "--file=" + str(sql_file)]
-            res = subprocess.run(psql_cmd, env=env, timeout=30, capture_output=True, text=True, check=False)
+            res = run_bounded(psql_cmd, env=env)
             if res.returncode != 0:
                 return {"error": f"psql failed"}
                 
@@ -796,7 +794,7 @@ def default_db_runner(query: str, params: List[Any]) -> Dict[str, Any]:
 
 def verify_authority(args):
     require(args.current_run_id, "Missing current_run_id")
-    res_run = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}"], timeout=30, capture_output=True, text=True, check=False)
+    res_run = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}"])
     require(res_run.returncode == 0, "Failed to fetch current run from GitHub API")
     curr_run_data = json.loads(res_run.stdout)
     require(curr_run_data.get("head_branch") == "dev", "Current run not on protected dev branch")
@@ -809,7 +807,7 @@ def verify_authority(args):
     page = 1
     total_runs = -1
     while True:
-        res_ci = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/commits/{args.tooling_run_sha}/check-runs?per_page=100&page={page}"], timeout=30, capture_output=True, text=True, check=False)
+        res_ci = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/commits/{args.tooling_run_sha}/check-runs?per_page=100&page={page}"])
         require(res_ci.returncode == 0, "Failed to fetch check-runs")
         ci_data = json.loads(res_ci.stdout)
         if total_runs == -1:
@@ -844,7 +842,7 @@ def verify_authority(args):
         require(req in found_required, f"Missing required check {req}")
     
     # Independent review check
-    res_pr = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/commits/{args.tooling_run_sha}/pulls"], timeout=30, capture_output=True, text=True, check=False)
+    res_pr = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/commits/{args.tooling_run_sha}/pulls"])
     require(res_pr.returncode == 0, "Failed to fetch pull requests for tooling commit")
     pulls_data = json.loads(res_pr.stdout)
     require(isinstance(pulls_data, list) and len(pulls_data) > 0, "Tooling commit lacks associated pull request")
@@ -859,7 +857,7 @@ def verify_authority(args):
     reviews = []
     page = 1
     while True:
-        res_reviews = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/pulls/{pr.get('number')}/reviews?per_page=100&page={page}"], capture_output=True, text=True, check=False, timeout=30)
+        res_reviews = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/pulls/{pr.get('number')}/reviews?per_page=100&page={page}"])
         require(res_reviews.returncode == 0, "Failed to fetch PR reviews")
         page_reviews = json.loads(res_reviews.stdout)
         if not isinstance(page_reviews, list) or not page_reviews:
@@ -884,7 +882,7 @@ def verify_authority(args):
     require(approved, "Tooling pull request lacks independent latest approval on head commit")
     
     # Operator approval check
-    res_approvals = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/approvals"], timeout=30, capture_output=True, text=True, check=False)
+    res_approvals = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/approvals"])
     require(res_approvals.returncode == 0, "Failed to fetch run approvals")
     approvals_data = json.loads(res_approvals.stdout)
     approvals = approvals_data if isinstance(approvals_data, list) else [approvals_data]
@@ -906,7 +904,7 @@ def verify_authority(args):
         status_fetched_runs = 0
         status_total_runs = -1
         while True:
-            res_overlap = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs?status={status}&per_page=100&page={page}"], timeout=30, capture_output=True, text=True, check=False)
+            res_overlap = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs?status={status}&per_page=100&page={page}"])
             require(res_overlap.returncode == 0, f"Failed to fetch {status} runs")
             overlap_data = json.loads(res_overlap.stdout)
             if status_total_runs == -1:
@@ -932,7 +930,7 @@ def verify_authority(args):
     page = 1
     curr_total_jobs = -1
     while True:
-        res_jobs = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/jobs?per_page=100&page={page}"], timeout=30, capture_output=True, text=True, check=False)
+        res_jobs = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/jobs?per_page=100&page={page}"])
         require(res_jobs.returncode == 0, "Failed to fetch current run jobs")
         jobs_data = json.loads(res_jobs.stdout)
         if curr_total_jobs == -1:
@@ -956,7 +954,7 @@ def verify_authority(args):
     require(curr_run_data.get("path") == ".github/workflows/dev-owned-operational-fixture-assessment.yml", "Current run path mismatch")
     
     # Verify genuine shared exclusion reservation via operator environment approval
-    res_approvals = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/approvals"], timeout=30, capture_output=True, text=True, check=False)
+    res_approvals = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/approvals"])
     require(res_approvals.returncode == 0, "Failed to fetch current run approvals")
     approvals_data = json.loads(res_approvals.stdout)
     
@@ -970,6 +968,96 @@ def verify_authority(args):
     
     if not has_operator_approval:
         require(False, "Blocked disposition: genuine shared exclusion is unsupported")
+
+def run_bounded(cmd, input_str=None, timeout_sec=30, max_stdout=1024*1024*5, max_stderr=128*1024, env=None, binary_out=False, out_path=None):
+    import time, select, subprocess, os
+    start_time = time.time()
+    try:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE if input_str else None, env=env)
+    except Exception as e:
+        return type('obj', (object,), {'returncode': -1, 'stdout': b'' if binary_out else '', 'stderr': str(e)})()
+        
+    if input_str:
+        os.set_blocking(p.stdin.fileno(), False)
+        try:
+             p.stdin.write(input_str.encode('utf-8') if isinstance(input_str, str) else input_str)
+             p.stdin.close()
+        except:
+             pass
+    
+    body = b""
+    stderr_data = b""
+    os.set_blocking(p.stdout.fileno(), False)
+    os.set_blocking(p.stderr.fileno(), False)
+    
+    out_f = None
+    if out_path:
+        out_f = open(out_path, "wb")
+        
+    try:
+        while True:
+            if time.time() - start_time > timeout_sec:
+                p.kill()
+                p.wait()
+                return type('obj', (object,), {'returncode': -1, 'stdout': b'' if binary_out else '', 'stderr': 'timeout'})()
+                
+            r, _, _ = select.select([p.stdout, p.stderr], [], [], 1.0)
+            
+            if p.stdout in r:
+                chunk = os.read(p.stdout.fileno(), 4096)
+                if chunk:
+                    if out_f:
+                        out_f.write(chunk)
+                    else:
+                        body += chunk
+                    if (out_f and out_f.tell() > max_stdout) or (not out_f and len(body) > max_stdout):
+                        p.kill()
+                        p.wait()
+                        return type('obj', (object,), {'returncode': -1, 'stdout': b'' if binary_out else '', 'stderr': 'stdout too large'})()
+                        
+            if p.stderr in r:
+                chunk = os.read(p.stderr.fileno(), 4096)
+                if chunk:
+                    stderr_data += chunk
+                    if len(stderr_data) > max_stderr:
+                        p.kill()
+                        p.wait()
+                        return type('obj', (object,), {'returncode': -1, 'stdout': b'' if binary_out else '', 'stderr': 'stderr too large'})()
+                        
+            if p.poll() is not None:
+                while True:
+                    r2, _, _ = select.select([p.stdout, p.stderr], [], [], 0.0)
+                    progress = False
+                    if p.stdout in r2:
+                        chunk = os.read(p.stdout.fileno(), 4096)
+                        if chunk:
+                            if out_f:
+                                out_f.write(chunk)
+                            else:
+                                body += chunk
+                            if (out_f and out_f.tell() > max_stdout) or (not out_f and len(body) > max_stdout):
+                                return type('obj', (object,), {'returncode': -1, 'stdout': b'' if binary_out else '', 'stderr': 'stdout too large'})()
+                            progress = True
+                    if p.stderr in r2:
+                        chunk = os.read(p.stderr.fileno(), 4096)
+                        if chunk:
+                            stderr_data += chunk
+                            if len(stderr_data) > max_stderr:
+                                return type('obj', (object,), {'returncode': -1, 'stdout': b'' if binary_out else '', 'stderr': 'stderr too large'})()
+                            progress = True
+                    if not progress:
+                        break
+                break
+    finally:
+        if out_f:
+            out_f.close()
+            
+    if binary_out or out_path:
+        out = body
+    else:
+        out = body.decode('utf-8', 'replace')
+        
+    return type('obj', (object,), {'returncode': p.returncode, 'stdout': out, 'stderr': stderr_data.decode('utf-8', 'replace')})()
 
 def main():
     parser = argparse.ArgumentParser()
@@ -1014,14 +1102,14 @@ def main():
                 "services": {}
             }
             for s_name in services:
-                res = subprocess.run(["gcloud", "run", "services", "describe", s_name, "--project", PROJECT, "--region", REGION, "--format=json"], timeout=30, capture_output=True, text=True, check=False)
+                res = run_bounded(["gcloud", "run", "services", "describe", s_name, "--project", PROJECT, "--region", REGION, "--format=json"])
                 require(res.returncode == 0, f"Failed to describe {s_name}")
                 val = json.loads(res.stdout)
 
                 ready_revision = val.get("status", {}).get("latestReadyRevisionName")
                 require(ready_revision is not None, f"No ready revision for {s_name}")
 
-                res_rev = subprocess.run(["gcloud", "run", "revisions", "describe", ready_revision, "--project", PROJECT, "--region", REGION, "--format=json"], timeout=30, capture_output=True, text=True, check=False)
+                res_rev = run_bounded(["gcloud", "run", "revisions", "describe", ready_revision, "--project", PROJECT, "--region", REGION, "--format=json"])
                 require(res_rev.returncode == 0, f"Failed to describe revision {ready_revision}")
                 rev_val = json.loads(res_rev.stdout)
 
@@ -1041,6 +1129,14 @@ def main():
                 }
                 env = {e["name"]: e.get("value") for e in val.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [{}])[0].get("env", [])}
 
+                iam_res = run_bounded(["gcloud", "run", "services", "get-iam-policy", s_name, "--project", PROJECT, "--region", REGION, "--format=json"])
+                require(iam_res.returncode == 0, f"Failed to get IAM policy for {s_name}")
+                iam_val = json.loads(iam_res.stdout)
+                safe_bindings = []
+                for b in iam_val.get("bindings", []):
+                    safe_bindings.append({"role": b.get("role"), "members": b.get("members", [])})
+                service_meta["bindings"] = safe_bindings
+                
                 if s_name == "drts-dev-api":
                     service_meta["runtime_sha"] = env.get("DRTS_CANDIDATE_SHA")
                     service_meta["scanner_url"] = env.get("REMITTANCE_PROOF_SCANNER_URL")
@@ -1061,14 +1157,7 @@ def main():
                         "CLAMD_PORT": env.get("CLAMD_PORT"),
                         "CLAMAV_READY_MARKER": env.get("CLAMAV_READY_MARKER")
                     }
-                else:
-                    iam_res = subprocess.run(["gcloud", "run", "services", "get-iam-policy", s_name, "--project", PROJECT, "--region", REGION, "--format=json"], timeout=30, capture_output=True, text=True, check=False)
-                    require(iam_res.returncode == 0, f"Failed to get IAM policy for {s_name}")
-                    iam_val = json.loads(iam_res.stdout)
-                    safe_bindings = []
-                    for b in iam_val.get("bindings", []):
-                        safe_bindings.append({"role": b.get("role"), "members": b.get("members", [])})
-                    service_meta["bindings"] = safe_bindings
+                    service_meta["actual_url"] = val.get("status", {}).get("url")
 
                 metadata["services"][s_name] = service_meta
 
@@ -1122,19 +1211,35 @@ def main():
                         require("@sha256:" in digest, f"Image is not a digest for {name}")
                         validated_images[c_name] = digest
 
+                    bindings = s.get("bindings")
+                    require(bindings is not None, f"Service {name} bindings missing/bypass")
+                    require(isinstance(bindings, list), f"Service {name} bindings malformed")
+                    validated_bindings = []
+                    for b in bindings:
+                        require(isinstance(b, dict), f"Service {name} binding malformed")
+                        members = b.get("members", [])
+                        require(isinstance(members, list) and len(members) > 0, f"Service {name} binding members malformed or empty")
+                        require(all(isinstance(m, str) for m in members), f"Service {name} binding members contain non-string")
+                        require("allUsers" not in members and "allAuthenticatedUsers" not in members, f"Service {name} is not private")
+                        role = b.get("role")
+                        require(isinstance(role, str), f"Service {name} binding role missing or malformed")
+                        require(set(b.keys()) <= {"role", "members"}, f"Service {name} binding contains unknown fields")
+                        validated_bindings.append({"role": role, "members": members})
+
                     if name == "drts-dev-api":
-                        require(s.get("runtime_sha") == args.current_runtime_sha, f"Runtime SHA mismatch for {name}")
                         require(s.get("identity") == f"drts-dev-runtime@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
-                        prov = s.get("providers", {})
-                        require(prov.get("DOCUMENT_ARTIFACT_GCS_BUCKET") == BUCKET, "API artifact bucket mismatch")
-                        require(prov.get("DOCUMENT_ARTIFACT_STORAGE_PROVIDER") == "gcs", "API artifact provider mismatch")
-                        require(prov.get("REMITTANCE_PROOF_STORAGE_PROVIDER") == "gcs", "API remittance provider mismatch")
-                        require(prov.get("REMITTANCE_PROOF_GCS_BUCKET") == PROJECT + "-remittance-proofs", "API remittance bucket mismatch")
+                        require(s.get("runtime_sha") == args.current_runtime_sha, "API runtime SHA mismatch")
+                        scanner_url = s.get("scanner_url")
+                        require(scanner_url and scanner_url.startswith("https://drts-dev-scanner-"), "Invalid API scanner URL configuration")
+                        
+                        prov = s.get("providers")
+                        require(isinstance(prov, dict), "API providers mismatch")
+                        require(prov.get("DOCUMENT_ARTIFACT_GCS_BUCKET") == "drts-dev-devcc-20260825-document-artifacts", "API GCS bucket mismatch")
+                        require(prov.get("DOCUMENT_ARTIFACT_STORAGE_PROVIDER") == "gcs", "API storage provider mismatch")
+                        require(prov.get("REMITTANCE_PROOF_GCS_BUCKET") == "drts-dev-devcc-20260825-remittance-proofs", "API remit bucket mismatch")
+                        require(prov.get("REMITTANCE_PROOF_STORAGE_PROVIDER") == "gcs", "API remit provider mismatch")
                         require(prov.get("REMITTANCE_PROOF_SCANNER_PROVIDER") == "cloud-run-clamd", "API scanner provider mismatch")
                         require(prov.get("REMITTANCE_PROOF_SCANNER_TIMEOUT_MS") == "60000", "API scanner timeout mismatch")
-                        
-                        scanner_url = s.get("scanner_url")
-                        require(isinstance(scanner_url, str) and regex_mod.fullmatch(r"https://drts-dev-scanner-[a-z0-9-]+\.a\.run\.app", scanner_url), "Invalid scanner URL")
                         
                         validated_services[name] = {
                             "ready_revision": ready_revision,
@@ -1142,6 +1247,7 @@ def main():
                             "runtime_sha": s.get("runtime_sha"),
                             "identity": s.get("identity"),
                             "scanner_url": scanner_url,
+                            "bindings": validated_bindings,
                             "providers": {
                                 "DOCUMENT_ARTIFACT_GCS_BUCKET": prov.get("DOCUMENT_ARTIFACT_GCS_BUCKET"),
                                 "DOCUMENT_ARTIFACT_STORAGE_PROVIDER": prov.get("DOCUMENT_ARTIFACT_STORAGE_PROVIDER"),
@@ -1166,6 +1272,8 @@ def main():
                             "images": validated_images,
                             "identity": s.get("identity"),
                             "spec_sha256": s.get("spec_sha256"),
+                            "bindings": validated_bindings,
+                            "actual_url": s.get("actual_url"),
                             "default_environment": {
                                 "CLAMD_HOST": "127.0.0.1",
                                 "CLAMD_PORT": "3310",
@@ -1174,20 +1282,6 @@ def main():
                         }
                     else:
                         require(s.get("identity") == f"drts-dev-runtime@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
-                        bindings = s.get("bindings")
-                        require(bindings is not None, f"Console {name} bindings missing/bypass")
-                        require(isinstance(bindings, list), f"Console {name} bindings malformed")
-                        validated_bindings = []
-                        for b in bindings:
-                            require(isinstance(b, dict), f"Console {name} binding malformed")
-                            members = b.get("members", [])
-                            require(isinstance(members, list) and len(members) > 0, f"Console {name} binding members malformed or empty")
-                            require(all(isinstance(m, str) for m in members), f"Console {name} binding members contain non-string")
-                            require("allUsers" not in members and "allAuthenticatedUsers" not in members, f"Console {name} is not private")
-                            role = b.get("role")
-                            require(isinstance(role, str), f"Console {name} binding role missing or malformed")
-                            require(set(b.keys()) <= {"role", "members"}, f"Console {name} binding contains unknown fields")
-                            validated_bindings.append({"role": role, "members": members})
                         validated_services[name] = {
                             "ready_revision": ready_revision,
                             "images": validated_images,
@@ -1196,6 +1290,10 @@ def main():
                         }
 
                 
+                api_scanner_url = validated_services.get("drts-dev-api", {}).get("scanner_url")
+                actual_scanner_url = validated_services.get("drts-dev-scanner", {}).get("actual_url")
+                require(api_scanner_url == actual_scanner_url, f"API scanner URL {api_scanner_url} does not match scanner actual URL {actual_scanner_url}")
+
                 report["cloud_metadata"] = {
                     "project": cm.get("project"),
                     "region": cm.get("region"),
