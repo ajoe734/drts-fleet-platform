@@ -165,7 +165,7 @@ describe("hourly publish promotion safety", () => {
       "env DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/drts_fleet_platform",
     );
     // All commands inherit the same DATABASE_URL; && stops tests if migration fails.
-    expect(smoke![1].split(" && ")).toEqual([
+    expect(smoke?.[1]?.split(" && ")).toEqual([
       "pnpm install --frozen-lockfile",
       "pnpm run lint",
       "pnpm run typecheck",
