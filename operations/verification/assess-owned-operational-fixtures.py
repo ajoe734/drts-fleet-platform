@@ -405,9 +405,18 @@ def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]]) -> Dic
              return {"status": "rejected", "reason": f"Stored-at drift for {physical_key}"}
              
         validated_reads.append({
+            "bucket": BUCKET,
+            "logical_key": logical_key,
             "key": physical_key, 
             "generation": meta["generation"],
-            "metageneration": meta["metageneration"]
+            "metageneration": meta["metageneration"],
+            "size": meta["size"],
+            "contentType": meta["contentType"],
+            "timeCreated": meta["timeCreated"],
+            "updated": meta["updated"],
+            "hash": EXPECTED_SHA256,
+            "documentId": CANONICAL_OWNED_OBJECTS[logical_key]["documentId"],
+            "confirmSubmissionId": CANONICAL_OWNED_OBJECTS[logical_key]["confirmSubmissionId"]
         })
         
     return {"status": "success", "validated_count": len(validated_reads), "receipts": validated_reads}
@@ -441,21 +450,21 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
     ), vdrafts AS (
         SELECT count(*) as c FROM fleet.vehicle_supply_drafts WHERE current_driver_submission_id IN ({safe_subs}) OR submission_id IN ({safe_subs})
     ), fks_meta AS (
-        SELECT json_agg(json_build_object('rel', conrelid::regclass, 'confrel', confrelid::regclass, 'name', conname, 'contype', contype, 'confdeltype', confdeltype, 'confupdtype', confupdtype)) as data 
+        SELECT json_agg(json_build_object('rel', conrelid::regclass, 'confrel', confrelid::regclass, 'name', conname, 'contype', contype, 'confdeltype', confdeltype, 'confupdtype', confupdtype, 'def', pg_get_constraintdef(oid))) as data 
         FROM pg_constraint WHERE confrelid IN ('fleet.supply_submissions'::regclass, 'fleet.supply_documents'::regclass, 'fleet.supply_review_events'::regclass, 'fleet.vehicle_fleet_affiliations'::regclass, 'reg.vehicle_passenger_disclosure_profiles'::regclass, 'reg.driver_public_registration_credentials'::regclass, 'reg.phase1_registry_drivers'::regclass, 'reg.phase1_registry_vehicles'::regclass, 'reg.phase1_registry_policies'::regclass, 'reg.phase1_registry_contracts'::regclass, 'fleet.driver_supply_drafts'::regclass, 'fleet.vehicle_supply_drafts'::regclass)
     ), 
-    pres_subs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_submissions), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM fleet.supply_submissions ORDER BY 1 LIMIT 1000) t),
-    pres_docs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_documents), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM fleet.supply_documents ORDER BY 1 LIMIT 1000) t),
-    pres_revs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_review_events), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM fleet.supply_review_events ORDER BY 1 LIMIT 1000) t),
-    pres_affs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_fleet_affiliations), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM fleet.vehicle_fleet_affiliations ORDER BY 1 LIMIT 1000) t),
-    pres_discs AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.vehicle_passenger_disclosure_profiles), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM reg.vehicle_passenger_disclosure_profiles ORDER BY 1 LIMIT 1000) t),
-    pres_creds AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.driver_public_registration_credentials), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM reg.driver_public_registration_credentials ORDER BY 1 LIMIT 1000) t),
-    pres_cdriv AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_drivers), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM reg.phase1_registry_drivers ORDER BY 1 LIMIT 1000) t),
-    pres_cveh AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_vehicles), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM reg.phase1_registry_vehicles ORDER BY 1 LIMIT 1000) t),
-    pres_cpol AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_policies), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM reg.phase1_registry_policies ORDER BY 1 LIMIT 1000) t),
-    pres_ccont AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_contracts), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM reg.phase1_registry_contracts ORDER BY 1 LIMIT 1000) t),
-    pres_ddrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.driver_supply_drafts), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM fleet.driver_supply_drafts ORDER BY 1 LIMIT 1000) t),
-    pres_vdrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_supply_drafts), 'digest', md5(string_agg(left(t::text, 256), ''))) as data FROM (SELECT * FROM fleet.vehicle_supply_drafts ORDER BY 1 LIMIT 1000) t)
+    pres_subs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_submissions), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.supply_submissions ORDER BY 1) t),
+    pres_docs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_documents), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.supply_documents ORDER BY 1) t),
+    pres_revs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_review_events), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.supply_review_events ORDER BY 1) t),
+    pres_affs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_fleet_affiliations), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.vehicle_fleet_affiliations ORDER BY 1) t),
+    pres_discs AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.vehicle_passenger_disclosure_profiles), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.vehicle_passenger_disclosure_profiles ORDER BY 1) t),
+    pres_creds AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.driver_public_registration_credentials), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.driver_public_registration_credentials ORDER BY 1) t),
+    pres_cdriv AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_drivers), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_drivers ORDER BY 1) t),
+    pres_cveh AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_vehicles), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_vehicles ORDER BY 1) t),
+    pres_cpol AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_policies), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_policies ORDER BY 1) t),
+    pres_ccont AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_contracts), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_contracts ORDER BY 1) t),
+    pres_ddrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.driver_supply_drafts), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.driver_supply_drafts ORDER BY 1) t),
+    pres_vdrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_supply_drafts), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.vehicle_supply_drafts ORDER BY 1) t)
     SELECT json_build_object(
         'subs', (SELECT data FROM subs),
         'docs', (SELECT data FROM docs),
@@ -513,7 +522,7 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
             return {"status": "error", "error": f"Missing or invalid preservation inventory for {k}"}
         if type(obj['c']) is not int or obj['c'] < 0:
             return {"status": "error", "error": f"Invalid preservation count for {k}"}
-        if obj['c'] > 0 and (not obj['digest'] or len(obj['digest']) != 32 or not all(c in '0123456789abcdef' for c in obj['digest'])):
+        if not obj['digest'] or len(obj['digest']) != 32 or not all(c in '0123456789abcdef' for c in obj['digest']):
             return {"status": "error", "error": f"Invalid preservation digest for {k}"}
             
     if counts['pres_subs']['c'] < 4:
@@ -540,9 +549,12 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         rel = fk.get('rel')
         confrel = fk.get('confrel')
         deltype = fk.get('confdeltype')
+        updtype = fk.get('confupdtype')
         if (rel, confrel) in expected_fks:
             if deltype != expected_fks[(rel, confrel)]:
                 return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has wrong confdeltype"}
+            if updtype != 'a':
+                return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has wrong confupdtype"}
             seen_fks.add((rel, confrel))
         else:
             return {"status": "rejected", "reason": f"Unexpected foreign key {fk.get('name')} from {rel} to {confrel}"}
@@ -665,6 +677,7 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         "disclosure_count": counts.get('discs', 0),
         "credential_count": counts.get('creds', 0),
         "preservation_inventory": {
+            "incoming_fks": fks_meta,
             "submissions": counts.get('pres_subs'),
             "documents": counts.get('pres_docs'),
             "review_events": counts.get('pres_revs'),
@@ -745,11 +758,15 @@ def default_gcs_runner(action: str, bucket: str, key: str) -> Dict[str, Any]:
                                 chunk = os.read(p.stdout.fileno(), 4096)
                                 if chunk:
                                     body += chunk
+                                    if len(body) > 10 * 1024 * 1024:
+                                        return {"status": "error", "stderr": "File too large"}
                                     progress = True
                             if p.stderr in r2:
                                 chunk = os.read(p.stderr.fileno(), 4096)
                                 if chunk:
                                     stderr_data += chunk
+                                    if len(stderr_data) > 1 * 1024 * 1024:
+                                        return {"status": "error", "stderr": "Stderr too large"}
                                     progress = True
                             if not progress:
                                 break
@@ -839,6 +856,9 @@ def default_db_runner(query: str, params: List[Any]) -> Dict[str, Any]:
             res = subprocess.run(psql_cmd, capture_output=True, text=True, env=env, check=False, timeout=30)
             if res.returncode != 0:
                 return {"error": f"psql failed"}
+                
+            if len(res.stdout) > 512 * 1024:
+                return {"error": "psql output too large"}
                 
             rows = []
             for line in res.stdout.strip().split("\n"):
