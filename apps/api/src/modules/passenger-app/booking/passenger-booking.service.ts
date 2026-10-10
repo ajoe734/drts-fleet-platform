@@ -4,7 +4,11 @@ import { MultiTaxiService } from "../../multi-taxi/multi-taxi.service";
 import { PassengerFareRepository } from "../fare/passenger-fare.repository";
 import { PassengerAccountRepository } from "../account/passenger-account.repository";
 import { ApiRequestError } from "../../../common/api-envelope";
-import { CreateMultiTaxiRideCommand } from "@drts/contracts";
+import { CreateMultiTaxiRideCommand } from "../../multi-taxi/multi-taxi.types";
+import {
+  CreatePassengerRideCommand,
+  PassengerRideListResponse,
+} from "@drts/contracts";
 
 @Injectable()
 export class PassengerBookingService {
@@ -17,9 +21,7 @@ export class PassengerBookingService {
 
   async createRide(
     passengerId: string,
-    fareSnapshotId: string,
-    passengerConfirmedAt: string,
-    paymentMethodTokenRef: string | null,
+    req: CreatePassengerRideCommand,
     requestId?: string,
   ) {
     const account = await this.accountRepository.transaction((tx) =>
@@ -33,8 +35,30 @@ export class PassengerBookingService {
       );
     }
 
+    const requireSms = process.env.REQUIRE_SMS_VERIFICATION === "true";
+    let phone = "";
+    if (requireSms) {
+      if (!account.verifiedPhone) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "PASSENGER_PHONE_REQUIRED",
+          "Verified phone is required",
+        );
+      }
+      phone = account.verifiedPhone;
+    } else {
+      phone = account.verifiedPhone || account.contactPhone || "";
+      if (!phone) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "PASSENGER_PHONE_REQUIRED",
+          "Phone number is required",
+        );
+      }
+    }
+
     const snapshot = await this.fareRepository.findOwnedSnapshot(
-      fareSnapshotId,
+      req.fareSnapshotId,
       passengerId,
     );
     if (!snapshot) {
@@ -53,11 +77,21 @@ export class PassengerBookingService {
       );
     }
 
-    if (!passengerConfirmedAt) {
+    if (!req.passengerConfirmedAt) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "PASSENGER_NOT_CONFIRMED",
         "E-19b confirmation time is required.",
+      );
+    }
+
+    const now = Date.now();
+    const confirmedTime = new Date(req.passengerConfirmedAt).getTime();
+    if (isNaN(confirmedTime) || confirmedTime > now + 60000) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PASSENGER_NOT_CONFIRMED",
+        "E-19b confirmation time is required and cannot be in the future.",
       );
     }
 
@@ -69,24 +103,39 @@ export class PassengerBookingService {
       );
     }
 
+    if (
+      req.scheduledAt !== snapshot.scheduledAt ||
+      req.origin.lat !== snapshot.origin.lat ||
+      req.origin.lng !== snapshot.origin.lng ||
+      req.destination.lat !== snapshot.destination.lat ||
+      req.destination.lng !== snapshot.destination.lng
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FARE_QUOTE_MISMATCH",
+        "The requested route or schedule does not match the quote.",
+      );
+    }
+
     const command: CreateMultiTaxiRideCommand = {
       pickup: {
-        lat: snapshot.origin.lat,
-        lng: snapshot.origin.lng,
-        address: "Origin",
+        lat: req.origin.lat,
+        lng: req.origin.lng,
+        address: req.origin.address || "Origin",
       },
       dropoff: {
-        lat: snapshot.destination.lat,
-        lng: snapshot.destination.lng,
-        address: "Destination",
+        lat: req.destination.lat,
+        lng: req.destination.lng,
+        address: req.destination.address || "Destination",
       },
       passenger: {
+        passengerId,
         name: account.displayName || "Passenger",
-        phone: account.contactPhone || account.verifiedPhone || "",
+        phone,
       },
       requestedPickupAt: snapshot.scheduledAt,
       timingMode: "scheduled",
-      paymentMethodTokenRef,
+      paymentMethodTokenRef: req.paymentMethodId || null,
     };
 
     const result = await this.multiTaxiService.createTrustedPassengerRide(
@@ -95,59 +144,160 @@ export class PassengerBookingService {
       requestId,
     );
 
-    await this.repository.createBookingHistory(
-      passengerId,
-      result.ride.orderId,
-      fareSnapshotId,
-      passengerConfirmedAt,
-    );
+    try {
+      await this.repository.createBookingHistory(
+        passengerId,
+        result.ride.orderId,
+        req.fareSnapshotId,
+        new Date(req.passengerConfirmedAt).toISOString(),
+      );
+    } catch (e) {
+      await this.multiTaxiService.cancelTrustedPassengerRide(
+        result.ride.orderId,
+        passengerId,
+        requestId,
+      );
+      throw new ApiRequestError(
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        "PASSENGER_BOOKING_HISTORY_FAILED",
+        "Failed to save booking history",
+      );
+    }
 
-    return result;
+    return { ride: result.ride };
   }
 
-  async getRideList(passengerId: string, limit: number, offset: number) {
-    const orderIds = await this.repository.listBookingHistories(
-      passengerId,
-      limit,
-      offset,
-    );
-    const rides = [];
-    for (const orderId of orderIds) {
+  async getRideList(
+    passengerId: string,
+    limit: number,
+    cursor?: string,
+    status?: "active" | "completed" | "cancelled",
+  ): Promise<PassengerRideListResponse> {
+    let currentCursorCreatedAt = undefined;
+    let currentCursorOrderId = undefined;
+
+    if (cursor) {
       try {
-        const view = await this.multiTaxiService.getPassengerRideById(
-          orderId,
-          passengerId,
+        const decoded = JSON.parse(
+          Buffer.from(cursor, "base64").toString("utf-8"),
         );
-        rides.push(view);
-      } catch {
-        // skip not found
+        currentCursorCreatedAt = decoded.createdAt;
+        currentCursorOrderId = decoded.orderId;
+      } catch (e) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_CURSOR",
+          "Invalid cursor",
+        );
       }
     }
-    return { rides };
+
+    const maxItems = limit;
+    const rides = [];
+    let nextCursor = undefined;
+    let hasMore = true;
+
+    while (rides.length < maxItems && hasMore) {
+      const fetchLimit = status ? Math.max(maxItems - rides.length, 50) : maxItems - rides.length;
+      const historyBatch = await this.repository.listBookingHistories(
+        passengerId,
+        fetchLimit,
+        currentCursorCreatedAt,
+        currentCursorOrderId,
+      );
+
+      if (historyBatch.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      for (const history of historyBatch) {
+        currentCursorCreatedAt = history.createdAt;
+        currentCursorOrderId = history.orderId;
+
+        try {
+          const view = await this.multiTaxiService.getPassengerRideById(
+            history.orderId,
+            passengerId,
+          );
+
+          let matches = true;
+          if (status === "active") {
+            matches = !["completed", "cancelled", "exception_hold"].includes(
+              view.order.status,
+            );
+          } else if (status === "completed" || status === "cancelled") {
+            matches = view.order.status === status;
+          }
+
+          if (matches) {
+            rides.push(view);
+          }
+        } catch {
+          // skip not found
+        }
+
+        if (rides.length >= maxItems) {
+          nextCursor = Buffer.from(
+            JSON.stringify({
+              createdAt: currentCursorCreatedAt,
+              orderId: currentCursorOrderId,
+            }),
+          ).toString("base64");
+          break;
+        }
+      }
+
+      if (historyBatch.length < fetchLimit) {
+        hasMore = false;
+      }
+    }
+
+    return { rides, nextCursor };
   }
 
   async getActiveRides(passengerId: string) {
-    const orderIds = await this.repository.listBookingHistories(
-      passengerId,
-      50,
-      0,
-    );
     const rides = [];
-    for (const orderId of orderIds) {
-      try {
-        const view = await this.multiTaxiService.getPassengerRideById(
-          orderId,
-          passengerId,
-        );
-        if (
-          !["completed", "cancelled", "exception_hold"].includes(
-            view.order.status,
-          )
-        ) {
-          rides.push(view);
+    let currentCursorCreatedAt = undefined;
+    let currentCursorOrderId = undefined;
+    let hasMore = true;
+
+    while (hasMore) {
+      const historyBatch = await this.repository.listBookingHistories(
+        passengerId,
+        50,
+        currentCursorCreatedAt,
+        currentCursorOrderId,
+      );
+
+      if (historyBatch.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      for (const history of historyBatch) {
+        currentCursorCreatedAt = history.createdAt;
+        currentCursorOrderId = history.orderId;
+
+        try {
+          const view = await this.multiTaxiService.getPassengerRideById(
+            history.orderId,
+            passengerId,
+          );
+          if (
+            !["completed", "cancelled", "exception_hold"].includes(
+              view.order.status,
+            )
+          ) {
+            rides.push(view);
+          }
+        } catch {
+          /* ignore */
         }
-      } catch {
-        /* ignore */
+      }
+
+      if (historyBatch.length < 50) {
+        hasMore = false;
       }
     }
     return { rides };

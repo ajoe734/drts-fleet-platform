@@ -25,19 +25,31 @@ export class PassengerBookingRepository {
   async listBookingHistories(
     passengerId: string,
     limit: number,
-    offset: number,
-  ): Promise<string[]> {
-    const result = await this.db.query(
-      `
-      SELECT order_id
+    cursorCreatedAt?: string,
+    cursorOrderId?: string,
+  ): Promise<{ orderId: string; createdAt: string }[]> {
+    let query = `
+      SELECT order_id, created_at
       FROM passenger.booking_histories
       WHERE drts_passenger_id = $1
-      ORDER BY created_at DESC
-      LIMIT $2 OFFSET $3
-      `,
-      [passengerId, limit, offset],
-    );
-    return result.rows.map((r) => r.order_id);
+    `;
+    const params: any[] = [passengerId, limit];
+    
+    if (cursorCreatedAt && cursorOrderId) {
+      query += ` AND (created_at < $3 OR (created_at = $3 AND order_id < $4)) `;
+      params.push(cursorCreatedAt, cursorOrderId);
+    }
+    
+    query += `
+      ORDER BY created_at DESC, order_id DESC
+      LIMIT $2
+    `;
+
+    const result = await this.db.query(query, params);
+    return result.rows.map((r) => ({
+      orderId: r.order_id,
+      createdAt: r.created_at.toISOString(),
+    }));
   }
 
   async getBookingHistoryOwner(orderId: string): Promise<string | null> {

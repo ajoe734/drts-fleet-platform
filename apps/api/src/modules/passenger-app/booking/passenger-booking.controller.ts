@@ -21,6 +21,10 @@ import type {
 import { MultiTaxiService } from "../../multi-taxi/multi-taxi.service";
 import { from, map, Observable, mergeMap } from "rxjs";
 import { ApiRequestError } from "../../../common/api-envelope";
+import {
+  CreatePassengerRideCommand,
+  RatePassengerRideCommand,
+} from "@drts/contracts";
 
 @Controller("passenger-app/rides")
 @RequireRealms("passenger")
@@ -34,7 +38,7 @@ export class PassengerBookingController {
   async createRide(
     @CurrentIdentity() identity: RequestIdentity,
     @Headers("x-request-id") idempotencyKey: string,
-    @Body() body: any,
+    @Body() body: CreatePassengerRideCommand,
   ) {
     if (identity.realm !== "passenger") {
       throw new ApiRequestError(
@@ -45,23 +49,16 @@ export class PassengerBookingController {
     }
     const paxIdentity = identity as PassengerRequestIdentity;
     const passengerId = paxIdentity.drtsPassengerId;
-    const { fareSnapshotId, passengerConfirmedAt, paymentMethodTokenRef } =
-      body;
 
-    return this.service.createRide(
-      passengerId,
-      fareSnapshotId,
-      passengerConfirmedAt,
-      paymentMethodTokenRef || null,
-      idempotencyKey,
-    );
+    return this.service.createRide(passengerId, body, idempotencyKey);
   }
 
   @Get()
   async listRides(
     @CurrentIdentity() identity: RequestIdentity,
     @Query("limit") limit: string = "10",
-    @Query("offset") offset: string = "0",
+    @Query("cursor") cursor?: string,
+    @Query("status") status?: "active" | "completed" | "cancelled",
   ) {
     if (identity.realm !== "passenger")
       throw new ApiRequestError(
@@ -69,11 +66,22 @@ export class PassengerBookingController {
         "UNAUTHORIZED",
         "Not a passenger",
       );
+
+    const parsedLimit = parseInt(limit, 10);
+    if (isNaN(parsedLimit) || parsedLimit <= 0 || parsedLimit > 100) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_PAGINATION",
+        "Limit must be between 1 and 100",
+      );
+    }
+
     const passengerId = (identity as PassengerRequestIdentity).drtsPassengerId;
     return this.service.getRideList(
       passengerId,
-      parseInt(limit, 10),
-      parseInt(offset, 10),
+      parsedLimit,
+      cursor,
+      status,
     );
   }
 
@@ -101,10 +109,9 @@ export class PassengerBookingController {
         "UNAUTHORIZED",
         "Not a passenger",
       );
-    return this.service.getRide(
-      (identity as PassengerRequestIdentity).drtsPassengerId,
-      orderId,
-    );
+    const passengerId = (identity as PassengerRequestIdentity).drtsPassengerId;
+    const ride = await this.service.getRide(passengerId, orderId);
+    return { ride };
   }
 
   @Sse(":id/events")
@@ -136,6 +143,7 @@ export class PassengerBookingController {
     @CurrentIdentity() identity: RequestIdentity,
     @Param("id") orderId: string,
     @Headers("x-request-id") idempotencyKey: string,
+    @Body() body: any,
   ) {
     if (identity.realm !== "passenger")
       throw new ApiRequestError(
@@ -145,18 +153,19 @@ export class PassengerBookingController {
       );
     const passengerId = (identity as PassengerRequestIdentity).drtsPassengerId;
     await this.service.getRide(passengerId, orderId);
-    return this.multiTaxiService.cancelTrustedPassengerRide(
+    await this.multiTaxiService.cancelTrustedPassengerRide(
       orderId,
       passengerId,
       idempotencyKey,
     );
+    return { success: true };
   }
 
   @Post(":id/ratings")
   async rateRide(
     @CurrentIdentity() identity: RequestIdentity,
     @Param("id") orderId: string,
-    @Body() body: any,
+    @Body() body: RatePassengerRideCommand,
   ) {
     // idempotencyKey check bypass
     if (identity.realm !== "passenger")
@@ -168,16 +177,25 @@ export class PassengerBookingController {
     const passengerId = (identity as PassengerRequestIdentity).drtsPassengerId;
     await this.service.getRide(passengerId, orderId);
 
+    if (![1, 2, 3, 4, 5].includes(body.rating)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PASSENGER_RATING_SCORE_INVALID",
+        "Rating must be between 1 and 5",
+      );
+    }
+
     const command = {
-      score: body.score,
+      score: body.rating as 1 | 2 | 3 | 4 | 5,
       tags: body.tags || [],
-      comment: body.comment || null,
+      comment: body.comments || null,
     };
-    return this.multiTaxiService.submitTrustedPassengerRating(
+    await this.multiTaxiService.submitTrustedPassengerRating(
       orderId,
       command,
       passengerId,
     );
+    return { success: true };
   }
 
   @Get(":id/receipt")
@@ -193,9 +211,11 @@ export class PassengerBookingController {
       );
     const passengerId = (identity as PassengerRequestIdentity).drtsPassengerId;
     await this.service.getRide(passengerId, orderId);
-    return this.multiTaxiService.getTrustedPassengerReceipt(
+    
+    const receipt = await this.multiTaxiService.getTrustedPassengerReceipt(
       orderId,
       passengerId,
     );
+    return { receiptUrl: receipt.htmlUrl };
   }
 }
