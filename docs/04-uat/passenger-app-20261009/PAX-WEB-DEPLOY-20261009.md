@@ -4,8 +4,9 @@ Owner: Codex2；指定 reviewer: Codex。2026-10-10。
 
 ## 本輪修復（Supervisor 04:52:06Z scope 決議後）
 
-本輪 repository 實作與檢查已完成；同 SHA hosted CI、獨立 review、merge 和
-required acceptance 仍由 candidate lifecycle 收錄。未宣稱 dev 已上線。
+F1–F6 已修復並驗證；**F7 仍 blocked：需要 Supervisor 擴充 global-UX inventory
+與既有 unit gate 的 write scopes**。尚未 ready PR／handoff／建立 review candidate。
+同 SHA hosted CI、獨立 review、merge 和 required acceptance 仍未完成；未宣稱 dev 已上線。
 PR：[2507](https://github.com/ajoe734/drts-fleet-platform/pull/2507)，base `dev`，
 branch `codex2/pax-web-deploy-20261009`。最終 candidate 是加入本成果紀錄後的
 PR head；完整 SHA 由 PR、handoff machine truth 和
@@ -25,7 +26,8 @@ PR head；完整 SHA 由 PR、handoff machine truth 和
 - 修復 commits：inventory `9edb9699f`、workflow `004642296`；最後 source
   首次整體 regression source `915d356c5f8e2c688410e2a83aba39fac5e2868b` 包含執行下列驗證時的完全相同
   source/formatting。F5 後最新 source 為 `00824068ccece322b968e2f82b8090744ea39b3c`；
-  其後候選僅新增本成果紀錄。所有 anchors 普通 push，
+  F6 後最新 source 為 `8215cc7628a86bd1e12a1d26c5f5d38d43e29183`；
+  隨後僅保存此 blocker/evidence，仍是 checkpoint，不是 candidate。所有 anchors 普通 push，
   無 rebase/amend/force-push/stash，無 VM runtime/browser/Compose。
 
 | Finding／驗收項                                           | 正式呼叫路徑與修復                                                                                                                    | 舊版 → 修正版證據                                                                                                                                                                                                                                                                    | 命令／版本／退出碼與 evidence                                                                                                                                                                                                                                               | 未驗項／限制                                                                                                                                                                                 |
@@ -56,7 +58,43 @@ F5 後重跑下列八檔完整 regression 命令，outputFile 改為
 另 `pnpm typecheck:root` exit0，測試 ESLint／Prettier exit0，所有啟動檢查
 已結束並讀過。Python100與App lint/typecheck所依據檔案無變更，沿用先前結果。
 
-### 本輪已讀檢查
+### F6 修復與 F7 scope blocker（CI 38026690604）
+
+`151341a06bd325a72ef68a665cac4f3abad43459` 的
+[CI 38026690604](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38026690604)
+結果已讀：lint、完整 typecheck、正式 migrations 均 PASS；unit 為
+**6729 PASS / 2 FAIL / 51 SKIP**，547 files PASS / 2 FAIL / 9 SKIP。
+API unit 因前置失敗未執行；後續 PG gate 的狀態與成功 unit cases 分開，不宣稱全過。
+draft integration aggregate [38026690571](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38026690571)
+PASS，產品 jobs 依 draft policy skip，不能作為 full integration PASS。
+
+| Finding／驗收項                                                                                  | 正式原始碼、觸發與修復邊界                                                                                                                                                                                                                                                                                                                      | 舊版 → 修正版／待修狀態                                                                                                                                                                                                                                                | 命令、版本、退出碼與 evidence                                                                                                                                                                                                                                                                                                                                                                                 | 未驗項／限制                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F6／pax-web-deploy_workflow_and_secret_gating：observer gate 抽取真正 workflow shell，未帶新 env | `Build API env vars` 新增 `PASSENGER_APP_SERVICE` step env；既有 observer test 抽出 run body，env 未設而被 `set -u` 拒絕。改為與 tenant/dispatch 相同的 `needs.prepare.outputs.passenger_app_service` inline interpolation；正式 guarded target 不變，不修改 scope 外 observer test                                                             | `151341a06` 本機選定案例 0 PASS / 1 FAIL / 16 SKIP，exit1；`8215cc762` 8檔原回歸+完整observer17 cases，**159 PASS / 0 FAIL / 0 SKIP**，exit0                                                                                                                           | `pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001/observer-identity.test.ts -t 'deploys observer provisioning' --reporter=json --outputFile=...`；before-observer-env.json；修正版九檔 command 與 earlier 八檔相同，追加完整 observer file，outputFile `final-regression-observer-fix.json`；Node22.23.2/Vitest4.1.4                                                                        | 只 mock 外部 gcloud URL，正式 workflow script 與既有 auth memory regressions 皆執行；未啟動 runtime。root typecheck/private deps、ESLint/actionlint exit0；新完整 hosted CI 尚未通過                                                                                              |
+| F7／pax-web-deploy_workflow_and_secret_gating：正式UX manifest仍固定八web                        | `tests/e2e/system-remediation/sr-live-global-ux-20261007/inventory.ts:inventoryAt` 的 surfaces closure，與 `sourceAt(runtimeSha, deploy-dev.yml)` 的 `assert_exact_active_service` inventory exact compare；caller `tests/unit/system-remediation/sr-live-global-ux-20261007/gates.test.ts` 的 real commit page discovery，亦被正式 runner 使用 | 正式 unit 最小重現 **0 PASS / 1 FAIL / 38 SKIP**，exit1；版本 probe 用同正式函式，base `e07c0b95110706f32ff78c85ad6a1e30ec4b1d5d` 接受8web/190screens，新 `151341a06` 拒絕 `deployment active surface inventory changed; review required`。**未修：兩檔仍在原scope外** | `pnpm exec vitest run tests/unit/system-remediation/sr-live-global-ux-20261007/gates.test.ts -t 'discovers every active page' --reporter=json --outputFile=.local/pax-web-deploy-20261009/ux-inventory-repro.json`；`node --experimental-strip-types --input-type=module` 直接呼叫 `inventoryAt` 兩個完整SHA，exit0表示成功觀測舊accept／新reject，非guard通過；ux-inventory-versioned-probe.log；Node22.23.2 | Supervisor核對平行task後追加inventory.ts/gates.test.ts兩scope；不能更名部署step、隱藏新app、縮分母或放寬exact compare。以正式passenger actor/realm來源加surface，保留retired/paused exclusions、source blob/commit/design unverified、全部真頁面與拒絕回歸；真UI驗收仍由hosted/QA |
+
+F7 的正式身分依據是 `packages/contracts/src/passenger-app.ts` 的
+`PASSENGER_REALM="passenger"`、`FIRST_PARTY_PASSENGER_ACTOR_TYPE="first_party_passenger"`，
+以及 `apps/api/src/common/auth/passenger-jwt.service.ts:PassengerJwtService`：
+JWT 使用 passenger realm/actor，並**拒絕 legacy roles/scopes claims**。
+inventory 的角色案例標籤必須依此權威來源與既有 Session 契約核對，不得捏造
+passenger IAM role、改 JWT 或縮減頁面。本 task 未寫入上述 scope 外檔案。
+
+F6 後一次 root typecheck exit2 是共享 node_modules 的 workspace symlink
+被其他 worktree 重連，ApiClient 私有欄位來自兩個工作樹，屬環境錯誤，不是PASS。
+只移除此 task worktree 的22個 generated dependency symlink，**保留外部 targets**，
+以 `CI=true pnpm install --frozen-lockfile --ignore-scripts --offline` 建立本worktree
+獨立依賴，exit0；重跑 `pnpm typecheck:root` exit0。
+evidence：private-dependency-links.log、private-install.log、
+observer-fix-root-typecheck.log（FAIL）、observer-fix-root-typecheck-private.log（PASS）、
+observer-fix-lint.log／observer-fix-actionlint.log（PASS）。沒有改source或lockfile。
+
+最新source `8215cc7628a86bd1e12a1d26c5f5d38d43e29183` 的本機必要檢查已
+全部結束並讀完；保留PR draft，不hand off、不done、不merge。
+後續checkpoint的自動CI可能pending；不視為candidate/full acceptance，也不重送
+同一F7缺陷交審。機器blocker等待Codex／Supervisor核scope，再由原owner續做。
+
+### 本輪已讀檢查（F1–F5；F6最新結果見上節）
 
 下列檢查均結束且讀過結果；evidence 在本 isolated worktree 的
 `.local/pax-web-deploy-20261009/`，不是canonical runtime或外部驗收。
