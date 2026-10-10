@@ -5,26 +5,55 @@ const RUN_APP_HOST_SUFFIX = ".run.app";
 const METADATA_IDENTITY_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
 const REQUEST_HEADER_BLOCKLIST = new Set([
-  "host",
+  "connection",
   "content-length",
-  "authorization",
   "cookie",
-  "x-actor-id",
+  "host",
+  "transfer-encoding",
   "x-drts-internal-key",
-  "x-realm",
-  "x-roles",
-  "x-scopes",
+  "x-drts-google-id-token",
+  "x-actor-id",
+  "x-actor-type",
+  "x-auth-mode",
   "x-forwarded-for",
   "x-forwarded-host",
-  "x-forwarded-proto"
+  "x-forwarded-port",
+  "x-forwarded-proto",
+  "x-realm",
+  "x-role-families",
+  "x-roles",
+  "x-scopes",
+  "x-serverless-authorization",
+  "authorization",
 ]);
 
-function isAllowedPath(method: string, path: string[]) {
-  for (const segment of path) {
-    if (segment === ".." || segment === "." || segment.includes("/") || segment.includes("\\")) {
-      return false;
+function hasUnsafePathSegment(path: string[]) {
+  return path.some((segment) => {
+    if (segment.length === 0) return true;
+    let current = segment;
+    let prev = "";
+    let iter = 0;
+    while (current !== prev && iter < 10) {
+      prev = current;
+      try {
+        current = decodeURIComponent(current);
+      } catch {
+        return true;
+      }
+      iter++;
     }
-  }
+    return (
+      current === "." ||
+      current === ".." ||
+      current.includes("/") ||
+      current.includes("\\") ||
+      current.includes("\0")
+    );
+  });
+}
+
+function isAllowedPath(method: string, path: string[]) {
+  if (hasUnsafePathSegment(path)) return false;
   // Token endpoints allowed:
   // GET /passenger-rides/:token
   // GET /passenger-rides/:token/events
