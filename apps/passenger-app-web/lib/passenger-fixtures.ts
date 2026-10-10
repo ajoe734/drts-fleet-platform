@@ -314,7 +314,7 @@ export function getPassengerRideFixture(
         etaSub: "請於 3 分鐘內上車 · 核對車牌後再上車",
         etaTone: "success",
         seatbeltNotice: true,
-        cancelNote: "取消可能產生 NT$ 80 費用",
+        cancelNote: "取消不收費",
       };
     case "P5-07":
       return {
@@ -403,7 +403,7 @@ export function getPassengerRideFixture(
             { label: "行駛里程", value: "6.4 公里", mono: true },
             { label: "車資", value: "NT$ 355", mono: true },
             { label: "通行費", value: "NT$ 0", mono: true },
-            { label: "客服電話", value: "0800-090-000", mono: true },
+            { label: "客服電話", value: "02-2944-0985", mono: true },
             { label: "主管機關申訴電話", value: "1999", mono: true },
           ],
         },

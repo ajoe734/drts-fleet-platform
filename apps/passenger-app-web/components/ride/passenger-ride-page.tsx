@@ -62,24 +62,6 @@ function Shell({
       <div style={{ width: "100%", maxWidth: 430 }}>
         <div
           style={{
-            marginBottom: 14,
-            borderRadius: 18,
-            background: source.tone.bg,
-            color: source.tone.fg,
-            border: `1px solid ${source.tone.border}`,
-            padding: "12px 14px",
-          }}
-        >
-          <div style={{ fontSize: 12, fontWeight: 800 }}>{source.title}</div>
-          <div style={{ marginTop: 4, fontSize: 12.5, lineHeight: 1.55 }}>
-            {source.detail}
-          </div>
-          <div style={{ marginTop: 6, fontSize: 11, opacity: 0.92 }}>
-            token `{token}` · {getPassengerFixtureSourceLabel(sourceMode)}
-          </div>
-        </div>
-        <div
-          style={{
             width: "100%",
             maxWidth: 390,
             margin: "0 auto",
@@ -128,7 +110,7 @@ function TopChrome({
       >
         <span style={{ fontFamily: monoFont }}>14:29</span>
         <span style={{ opacity: 0.85, fontSize: 10.5, fontFamily: monoFont }}>
-          ride.zhixing.tw/r/{token.slice(0, 4)}••
+          ride.smarttransport.tw/r/{token.slice(0, 4)}••
         </span>
         <span style={{ fontFamily: monoFont }}>5G ▮▮▮</span>
       </div>
@@ -1189,6 +1171,7 @@ function RatingCard({
   const [submittedScore, setSubmittedScore] = useState<number | null>(null);
   const [comment, setComment] = useState("");
   const [contactRequested, setContactRequested] = useState(true);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   if (!fixture.ratingSummary) return null;
   if (submittedScore !== null) {
     return (
@@ -1232,29 +1215,20 @@ function RatingCard({
       return;
     }
     setSubmitting(true);
-    const ratingPromise = requestPassengerRideAction<{ score: number }>(
+    requestPassengerRideAction<{ score: number }>(
       token,
       "ratings",
       {
-        score: selectedScore,
-        ...(selectedScore <= 3 && comment ? { comment } : {}),
+        rideId: token,
+        rating: selectedScore,
+        tags: selectedTags,
+        comments: comment,
+        contactRequested: selectedScore <= 2 ? Boolean(contactRequested) : false,
       },
       authMode === "token",
-    );
-
-    const contactPromise =
-      selectedScore <= 3 && comment && contactRequested
-        ? requestPassengerRideAction(
-            token,
-            "contact",
-            { body: comment },
-            authMode === "token",
-          )
-        : Promise.resolve();
-
-    void Promise.all([ratingPromise, contactPromise])
-      .then(([res]) => {
-        const rating = (res as { score: number }) || { score: selectedScore };
+    )
+      .then((res) => {
+        const rating = res || { score: selectedScore };
         setSubmittedScore(rating.score || selectedScore);
         setSubmitting(false);
       })
@@ -1301,40 +1275,50 @@ function RatingCard({
           marginTop: 8,
         }}
       >
-        {fixture.ratingSummary.chips?.map((chip, index) => (
-          <span
-            key={chip}
-            style={{
-              fontSize: 12,
-              fontWeight: 600,
-              padding: "7px 13px",
-              borderRadius: 999,
-              border: `1px solid ${index < 2 ? passengerChrome.shell : passengerChrome.border}`,
-              color: index < 2 ? passengerChrome.shell : passengerChrome.muted,
-              background:
-                index < 2 ? passengerChrome.info.bg : passengerChrome.card,
-            }}
-          >
-            {chip}
-          </span>
-        ))}
+        {fixture.ratingSummary.chips?.map((chip) => {
+          const selected = selectedTags.includes(chip);
+          return (
+            <button
+              key={chip}
+              type="button"
+              onClick={() => {
+                setSelectedTags((prev) =>
+                  prev.includes(chip) ? prev.filter((t) => t !== chip) : [...prev, chip],
+                );
+              }}
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                padding: "7px 13px",
+                borderRadius: 999,
+                border: `1px solid ${selected ? passengerChrome.shell : passengerChrome.border}`,
+                color: selected ? passengerChrome.shell : passengerChrome.muted,
+                background: selected ? passengerChrome.info.bg : passengerChrome.card,
+                cursor: "pointer",
+              }}
+            >
+              {chip}
+            </button>
+          );
+        })}
       </div>
-      {selectedScore <= 3 && (
-        <div style={{ marginTop: 16 }}>
-          <textarea
-            placeholder={t.LeaveComment}
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            style={{
-              width: "100%",
-              height: 80,
-              padding: 12,
-              borderRadius: 8,
-              border: `1px solid ${passengerChrome.border}`,
-              resize: "none",
-              fontSize: 14,
-            }}
-          />
+      <div style={{ marginTop: 16 }}>
+        <textarea
+          placeholder={t.LeaveComment}
+          value={comment}
+          maxLength={200}
+          onChange={(e) => setComment(e.target.value)}
+          style={{
+            width: "100%",
+            height: 80,
+            padding: 12,
+            borderRadius: 8,
+            border: `1px solid ${passengerChrome.border}`,
+            resize: "none",
+            fontSize: 14,
+          }}
+        />
+        {selectedScore <= 2 && (
           <label
             style={{
               display: "flex",
@@ -1353,8 +1337,8 @@ function RatingCard({
             />
             {t.NeedSupportContact}
           </label>
-        </div>
-      )}
+        )}
+      </div>
       <button
         type="button"
         style={{ ...buttonStyle("primary"), marginTop: 12 }}
@@ -1367,6 +1351,16 @@ function RatingCard({
             ? "送出中..."
             : "送出評價"}
       </button>
+      <div
+        style={{
+          marginTop: 12,
+          textAlign: "center",
+          fontSize: 11,
+          color: passengerChrome.muted,
+        }}
+      >
+        評價內容將匿名提供給車隊以提升服務品質；送出後無法修改。
+      </div>
     </Card>
   );
 }
@@ -1680,7 +1674,7 @@ function Actions({
   if (fixture.screenId === "P5-09") {
     return (
       <ActionGroup>
-        <Link href={`/ride/${token}/receipt`} style={buttonStyle("secondary")}>
+        <Link href={authMode === "token" ? `/r/${token}/receipt` : `/rides/${token}/receipt`} style={buttonStyle("secondary")}>
           {t.ViewReceipt}
         </Link>
         <Link href="/" style={buttonStyle("ghost")}>
@@ -1691,9 +1685,30 @@ function Actions({
   }
 
   if (fixture.screenId === "P5-10") {
+    const cert = fixture.certificate;
     return (
       <ActionGroup>
-        <Link href={`/ride/${token}`} style={buttonStyle("ghost")}>
+        {cert?.state === "available" && cert.pdfUrl ? (
+          <a
+            href={cert.pdfUrl}
+            target="_blank"
+            rel="noreferrer"
+            style={buttonStyle("primary")}
+          >
+            下載 PDF
+          </a>
+        ) : null}
+        {cert?.state === "available" && cert.htmlUrl ? (
+          <a
+            href={cert.htmlUrl}
+            target="_blank"
+            rel="noreferrer"
+            style={buttonStyle("secondary")}
+          >
+            下載 HTML
+          </a>
+        ) : null}
+        <Link href={authMode === "token" ? `/r/${token}` : `/rides/${token}`} style={buttonStyle("ghost")}>
           {t.BackToRide}
         </Link>
       </ActionGroup>
@@ -1858,7 +1873,7 @@ function RideContent({
         <MapCard fixture={fixture} />
         <ProgressCard
           title={t.ArrangingVehicle}
-          detail="預約時間 今日 14:45 · 通常 1–3 分鐘完成指派"
+          detail={fixture.requestedPickupText ? `${fixture.requestedPickupText} · 通常 1–3 分鐘完成指派` : "通常 1–3 分鐘完成指派"}
         />
         <FareCard fixture={fixture} />
         <Actions fixture={fixture} token={token} authMode={authMode} />
@@ -2098,14 +2113,14 @@ export function PassengerRidePage({
             startTransition(() => {
               setLiveFixture(
                 mapPassengerRideAuthorityToFixture(
-                  (nextView as any).view || nextView,
+                  nextView.data,
                   token,
                   kind,
                 ),
               );
             });
           },
-          undefined,
+          authMode === "token",
         );
       })
       .catch((error: unknown) => {

@@ -23,7 +23,7 @@ export function ComplaintForm({
           marginTop: 12,
           width: "100%",
           padding: "12px",
-          border: `1px solid \${passengerChrome.border}`,
+          border: `1px solid ${passengerChrome.border}`,
           borderRadius: 8,
           background: "transparent",
           cursor: "pointer",
@@ -40,7 +40,7 @@ export function ComplaintForm({
       <div
         style={{
           marginTop: 12,
-          border: `1px solid \${passengerChrome.border}`,
+          border: `1px solid ${passengerChrome.border}`,
           borderRadius: 8,
           padding: 16,
         }}
@@ -67,8 +67,14 @@ export function ComplaintForm({
     try {
       await requestPassengerRideAction(
         token,
-        "contact",
-        { body: content },
+        "complaints",
+        {
+          rideId: token,
+          category: "lost_item",
+          content: content,
+          contactConsent: true,
+          lostItemDescription: content,
+        },
         authMode === "token",
       );
       setSubmitted(true);
@@ -83,7 +89,7 @@ export function ComplaintForm({
     <div
       style={{
         marginTop: 12,
-        border: `1px solid \${passengerChrome.border}`,
+        border: `1px solid ${passengerChrome.border}`,
         borderRadius: 8,
         padding: 16,
       }}
@@ -101,7 +107,7 @@ export function ComplaintForm({
           padding: 8,
           fontSize: 13,
           borderRadius: 8,
-          border: `1px solid \${passengerChrome.border}`,
+          border: `1px solid ${passengerChrome.border}`,
           resize: "none",
           marginTop: 8,
         }}
@@ -113,7 +119,7 @@ export function ComplaintForm({
             flex: 1,
             padding: "12px",
             borderRadius: 8,
-            border: `1px solid \${passengerChrome.border}`,
+            border: `1px solid ${passengerChrome.border}`,
             background: "transparent",
             cursor: "pointer",
           }}

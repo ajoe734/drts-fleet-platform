@@ -74,13 +74,14 @@ export async function fetchPassengerRideAuthority(
 
 export async function requestPassengerRideAction<T>(
   idOrToken: string,
-  action: "cancel" | "ratings" | "contact",
+  action: "cancel" | "ratings" | "contact" | "complaints",
   body?: Record<string, unknown>,
   isToken: boolean = false,
 ) {
   if (isToken) {
+    const routeAction = action === "complaints" ? "complaints" : action;
     const response = await fetch(
-      `${PASSENGER_PROXY_BASE}/${encodeURIComponent(idOrToken)}/${action}`,
+      `/api/passenger-rides/${encodeURIComponent(idOrToken)}/${routeAction}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -98,19 +99,20 @@ export async function requestPassengerRideAction<T>(
     if (action === "cancel") {
       return (await passengerClient.cancelRide(
         idOrToken,
-        body as any,
+        body as Parameters<typeof passengerClient.cancelRide>[1],
       )) as unknown as T;
     } else if (action === "ratings") {
       return (await passengerClient.rateRide(
         idOrToken,
-        body as any,
+        body as Parameters<typeof passengerClient.rateRide>[1],
       )) as unknown as T;
-    } else if (action === "contact") {
-      // Create complaint?
+    } else if (action === "complaints") {
       return (await passengerClient.createComplaint(
         idOrToken,
-        body as any,
+        body as Parameters<typeof passengerClient.createComplaint>[1],
       )) as unknown as T;
+    } else if (action === "contact") {
+      return { contactUri: "tel:02-2944-0985" } as unknown as T;
     }
     throw new PassengerAuthorityError(400, "INVALID_ACTION");
   }
@@ -122,17 +124,46 @@ export function subscribePassengerRideAuthority(
   isToken: boolean = false,
 ) {
   const url = isToken
-    ? `${PASSENGER_PROXY_BASE}/${encodeURIComponent(idOrToken)}/events`
+    ? `/api/passenger-rides/${encodeURIComponent(idOrToken)}/events`
     : `/api/passenger-app/rides/${encodeURIComponent(idOrToken)}/events`;
   const es = new EventSource(url);
-  es.onmessage = (msg) => {
+  
+  const PASSENGER_RIDE_SSE_EVENTS = [
+    "assignment_disclosure_ready",
+    "assignment_replaced",
+    "driver_location_updated",
+    "eta_changed",
+    "driver_arrived",
+    "trip_started",
+    "trip_completed",
+    "trip_cancelled",
+    "receipt_ready",
+  ] as const;
+
+  let lastVersion = -1;
+
+  const handleMsg = (msg: MessageEvent) => {
     try {
-      const parsed = camelizeKeys(JSON.parse(msg.data));
+      const parsed = camelizeKeys(JSON.parse(msg.data)) as PassengerRideSseEventEnvelope;
+      if (parsed.eventVersion <= lastVersion) {
+        return; // replay/out-of-order rejected
+      }
+      lastVersion = parsed.eventVersion;
       onEvent(parsed);
     } catch (err) {
       console.error("SSE parse error", err);
     }
   };
+
+  for (const eventName of PASSENGER_RIDE_SSE_EVENTS) {
+    es.addEventListener(eventName, handleMsg);
+  }
+
+  es.onerror = (err) => {
+    console.error("SSE error", err);
+    // Let browser's native EventSource reconnect.
+  };
+
   return () => es.close();
 }
 
@@ -142,7 +173,7 @@ export async function fetchPassengerReceipt(
 ) {
   if (isToken) {
     const response = await fetch(
-      `${PASSENGER_PROXY_BASE}/${encodeURIComponent(idOrToken)}/receipt`,
+      `/api/passenger-rides/${encodeURIComponent(idOrToken)}/receipt`,
       { cache: "no-store" },
     );
     if (!response.ok) {
@@ -152,11 +183,10 @@ export async function fetchPassengerReceipt(
       );
     }
     const payload = camelizeKeys(await response.json());
-    return payload.data as MultiTaxiElectronicReceipt;
+    return payload.data as { receiptUrl: string };
   } else {
     try {
-      const res = await passengerClient.getReceipt(idOrToken);
-      return res as unknown as MultiTaxiElectronicReceipt;
+      return await passengerClient.getReceipt(idOrToken);
     } catch (e: any) {
       throw new PassengerAuthorityError(500, e.message);
     }
@@ -189,6 +219,9 @@ export function mapPassengerRideAuthorityToFixture(
     status: statusLabel(view.order.status),
     ...(view.order.status === "created"
       ? { statusSubline: "系統正在安排可派車輛" }
+      : {}),
+    ...(view.order.requestedPickupAt
+      ? { requestedPickupText: `預約時間 ${formatDateTime(view.order.requestedPickupAt)}` }
       : {}),
     ...(assignment?.eta.minutes === null ||
     assignment?.eta.minutes === undefined
@@ -245,7 +278,7 @@ export function mapPassengerRideAuthorityToFixture(
     ...(certificate ? { certificate } : {}),
     ...(view.order.status === "completed"
       ? {
-          ratingSummary: view.rating
+        ratingSummary: view.rating
             ? {
                 state: "rated",
                 scoreText: `${view.rating.score} 星`,
@@ -254,6 +287,7 @@ export function mapPassengerRideAuthorityToFixture(
             : {
                 state: "unavailable",
                 countText: "請為本趟服務評分",
+                chips: ["態度親切", "車內整潔", "平穩安全", "準時抵達", "熟悉路線"],
               },
         }
       : {}),
@@ -338,8 +372,6 @@ export function mapPassengerCertificate(
   }
 
   const record = receipt.record;
-  const driverName = readText(record, "driverName");
-  const fleetName = readText(record, "fleetName");
   const plateNo = readText(record, "plateNo");
   const pickupAt = readDate(record, "pickupAt");
   const dropoffAt = readDate(record, "dropoffAt");
@@ -352,9 +384,11 @@ export function mapPassengerCertificate(
   const tollMinor = readNonNegativeNumber(record, "tollMinor");
   const consumerServicePhone = readText(record, "consumerServicePhone");
   const authorityComplaintPhone = readText(record, "authorityComplaintPhone");
+
+  const htmlUrl = readText(record, "htmlUrl");
+  const pdfUrl = readText(record, "pdfUrl");
+
   if (
-    !driverName ||
-    !fleetName ||
     !plateNo ||
     !pickupAt ||
     !dropoffAt ||
@@ -372,41 +406,69 @@ export function mapPassengerCertificate(
     };
   }
 
+  const rows: PassengerCertificateRow[] = [
+    { label: "乘車證明編號", value: receipt.receiptNo, mono: true },
+    {
+      label: "開立時間",
+      value: formatDateTime(receipt.issuedAt),
+      mono: true,
+    },
+    { label: "車牌", value: plateNo, mono: true },
+    { label: "上車時間", value: formatDateTime(pickupAt), mono: true },
+    { label: "下車時間", value: formatDateTime(dropoffAt), mono: true },
+    { label: "行駛時間", value: formatDuration(travelDurationSeconds) },
+    { label: "路線", value: routeSummary },
+    {
+      label: "行駛里程",
+      value: `${(distanceMeters / 1000).toFixed(1)} 公里`,
+      mono: true,
+    },
+    {
+      label: "車資金額",
+      value: formatMoney(receipt.amountMinor),
+      mono: true,
+    },
+    { label: "通行費", value: formatMoney(tollMinor), mono: true },
+    { label: "客服電話", value: consumerServicePhone, mono: true },
+    {
+      label: "主管機關申訴電話",
+      value: authorityComplaintPhone,
+      mono: true,
+    },
+  ];
+
+  // Optional fields that might be missing in contract but requested in UI
+  const driverRegistrationNo = readText(record, "driverRegistrationNo");
+  if (driverRegistrationNo) {
+    rows.push({ label: "遮罩執登號", value: driverRegistrationNo, mono: true });
+  }
+  const fareBaseMinor = readNonNegativeNumber(record, "fareBaseMinor");
+  if (fareBaseMinor !== null) {
+    rows.push({ label: "起程", value: formatMoney(fareBaseMinor), mono: true });
+  }
+  const fareDistanceMinor = readNonNegativeNumber(record, "fareDistanceMinor");
+  if (fareDistanceMinor !== null) {
+    rows.push({ label: "續程", value: formatMoney(fareDistanceMinor), mono: true });
+  }
+  const fareTimeMinor = readNonNegativeNumber(record, "fareTimeMinor");
+  if (fareTimeMinor !== null) {
+    rows.push({ label: "延滯", value: formatMoney(fareTimeMinor), mono: true });
+  }
+  const fareNightMinor = readNonNegativeNumber(record, "fareNightMinor");
+  if (fareNightMinor !== null) {
+    rows.push({ label: "夜間明細", value: formatMoney(fareNightMinor), mono: true });
+  }
+  const paymentMethod = readText(record, "paymentMethod");
+  if (paymentMethod) {
+    rows.push({ label: "支付方式", value: paymentMethod });
+  }
+
   return {
     state: "available",
     receiptNo: receipt.receiptNo,
-    rows: [
-      { label: "乘車證明編號", value: receipt.receiptNo, mono: true },
-      {
-        label: "開立時間",
-        value: formatDateTime(receipt.issuedAt),
-        mono: true,
-      },
-      { label: "車隊名稱", value: fleetName },
-      { label: "駕駛姓名", value: driverName },
-      { label: "車號", value: plateNo, mono: true },
-      { label: "上車時間", value: formatDateTime(pickupAt), mono: true },
-      { label: "下車時間", value: formatDateTime(dropoffAt), mono: true },
-      { label: "行駛時間", value: formatDuration(travelDurationSeconds) },
-      { label: "路線", value: routeSummary },
-      {
-        label: "行駛里程",
-        value: `${(distanceMeters / 1000).toFixed(1)} 公里`,
-        mono: true,
-      },
-      {
-        label: "車資金額",
-        value: formatMoney(receipt.amountMinor),
-        mono: true,
-      },
-      { label: "通行費", value: formatMoney(tollMinor), mono: true },
-      { label: "客服電話", value: consumerServicePhone, mono: true },
-      {
-        label: "主管機關申訴電話",
-        value: authorityComplaintPhone,
-        mono: true,
-      },
-    ],
+    rows,
+    htmlUrl: htmlUrl ?? undefined,
+    pdfUrl: pdfUrl ?? undefined,
   };
 }
 
@@ -415,16 +477,16 @@ function resolveScreenId(
   kind: "ride" | "fares" | "receipt",
 ): PassengerScreenId {
   if (kind === "receipt") return "P5-10";
+  if (view.order.status === "cancelled") return "P5-12";
   if (view.order.status === "completed") return view.rating ? "P5-09" : "P5-08";
   if (view.receipt) return "P5-10";
   if (view.order.status === "on_trip") return "P5-07";
   if (view.order.status === "arrived_pickup") return "P5-06";
+  if (view.order.status === "redispatch_required") return "P5-04";
   if (!view.assignment) {
-    return ["assigned", "driver_accepted", "enroute_pickup"].includes(
-      view.order.status,
-    )
-      ? "P5-11"
-      : "P5-01";
+    if (["assigned", "driver_accepted", "enroute_pickup"].includes(view.order.status)) return "P5-11";
+    if (view.order.timingMode === "scheduled" && view.order.status === "created") return "A04";
+    return "P5-01";
   }
   if (view.assignment.assignmentVersion > 1) return "P5-05";
   return view.assignment.rating.displayState === "new_driver"

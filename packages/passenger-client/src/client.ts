@@ -205,7 +205,7 @@ export class PassengerClient implements PassengerViewModel {
   async getRides(
     query?: import("./types.js").GetPassengerRidesQuery,
   ): Promise<import("./types.js").PassengerRideListResponse> {
-    const qs = query ? "?" + new URLSearchParams(query as any).toString() : "";
+    const qs = query ? "?" + Object.entries(query).filter(([_, v]) => v !== undefined).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&") : "";
     return this.request<import("./types.js").PassengerRideListResponse>(
       `/api/passenger-app/rides${qs}`,
     );

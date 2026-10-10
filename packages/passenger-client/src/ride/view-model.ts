@@ -56,6 +56,8 @@ export interface PassengerCertificatePresentation {
   state: "pending" | "available" | "error";
   receiptNo?: string;
   rows?: PassengerCertificateRow[];
+  htmlUrl?: string;
+  pdfUrl?: string;
   errorCode?: string;
 }
 
@@ -75,6 +77,7 @@ export interface PassengerRideFixture {
   etaMain?: string;
   etaSub?: string;
   etaTone?: "accent" | "success";
+  requestedPickupText?: string;
   routeDistanceKm?: string;
   routeDurationMinutes?: string;
   routeFareMode?: "range" | "anomaly";

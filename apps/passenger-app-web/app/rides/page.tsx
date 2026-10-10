@@ -1,6 +1,5 @@
 "use client";
 import { t } from "../../components/ride/translations";
-
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { passengerClient } from "@/lib/client";
@@ -10,27 +9,62 @@ export default function RidesListPage() {
   const [active, setActive] = useState<PassengerRideAuthorityView[]>([]);
   const [history, setHistory] = useState<PassengerRideAuthorityView[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const loadInitial = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [activeRes, historyRes] = await Promise.all([
+        passengerClient.getActiveRides(),
+        passengerClient.getRides({ limit: 20 }),
+      ]);
+      const activeRides = activeRes.rides || [];
+      const activeIds = new Set(activeRides.map(r => r.order.orderId));
+      
+      setActive(activeRides);
+      setHistory((historyRes.rides || []).filter(r => !activeIds.has(r.order.orderId)));
+      setNextCursor(historyRes.nextCursor || null);
+    } catch (err) {
+      console.error(err);
+      setError("無法載入行程紀錄，請稍後再試。");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    async function load() {
-      try {
-        const [activeRes, historyRes] = await Promise.all([
-          passengerClient.getActiveRides(),
-          passengerClient.getRides({ limit: 20 }),
-        ]);
-        setActive(activeRes.rides || []);
-        setHistory(historyRes.rides || []);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
+    loadInitial();
   }, []);
+
+  const loadMore = async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await passengerClient.getRides({ limit: 20, cursor: nextCursor });
+      const activeIds = new Set(active.map(r => r.order.orderId));
+      setHistory(prev => [...prev, ...(res.rides || []).filter(r => !activeIds.has(r.order.orderId))]);
+      setNextCursor(res.nextCursor || null);
+    } catch (err) {
+      console.error("載入更多失敗", err);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   if (loading) {
     return <div style={{ padding: 20 }}>{t.Loading}</div>;
+  }
+  
+  if (error) {
+    return (
+      <div style={{ padding: 20 }}>
+        <p>{error}</p>
+        <button onClick={loadInitial} style={{ padding: "8px 16px" }}>重試</button>
+      </div>
+    );
   }
 
   return (
@@ -53,8 +87,8 @@ export default function RidesListPage() {
           </h2>
           {active.map((ride) => (
             <Link
-              href={`/rides/${ride.order.orderNo}`}
-              key={ride.order.orderNo}
+              href={`/rides/${ride.order.orderId}`}
+              key={ride.order.orderId}
               style={{
                 display: "block",
                 textDecoration: "none",
@@ -84,14 +118,11 @@ export default function RidesListPage() {
           <div style={{ color: "#475569" }}>{t.NoRideHistory}</div>
         ) : (
           history.map((ride) => {
-            const isRecent =
-              Date.now() - new Date(ride.order.requestedPickupAt).getTime() <
-              24 * 60 * 60 * 1000;
-            const needsRating = ride.order.status === "completed" && isRecent;
+            const needsRating = ride.actions.canRate;
             return (
               <Link
-                href={`/rides/${ride.order.orderNo}`}
-                key={ride.order.orderNo}
+                href={`/rides/${ride.order.orderId}`}
+                key={ride.order.orderId}
                 style={{
                   display: "block",
                   textDecoration: "none",
@@ -139,12 +170,17 @@ export default function RidesListPage() {
                       fontWeight: "bold",
                     }}
                   >
-                    {t.WriteReview}
+                    ⭐ 填寫評價
                   </div>
                 )}
               </Link>
             );
           })
+        )}
+        {nextCursor && (
+          <button onClick={loadMore} disabled={loadingMore} style={{ marginTop: 12, padding: "8px 16px", borderRadius: 4, background: "#f1f5f9", border: "1px solid #cbd5e1" }}>
+            {loadingMore ? "載入中..." : "載入更多"}
+          </button>
         )}
       </section>
     </main>
