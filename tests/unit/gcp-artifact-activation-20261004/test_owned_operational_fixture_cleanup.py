@@ -25,6 +25,17 @@ cleanup = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(cleanup)
 
 # Authoritative authentic artifact test data (derived directly from real run 37906298090 / artifact 11606165993)
+# Genuine 327-byte PDF bytes from authorized product run 37906298090
+PDF_BYTES = (
+    b"%PDF-1.4\n"
+    b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+    b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+    b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>\nendobj\n"
+    b"xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n"
+    b"trailer\n<< /Size 4 /Root 1 0 R >>\n"
+    b"startxref\n184\n%%EOF\n"
+)
+
 AUTHENTIC_ARTIFACTS_JSON = {
     "total_count": 1,
     "artifacts": [
@@ -700,7 +711,7 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
             },
         }
         with self.assertRaises(ValueError) as ctx:
-            cleanup.inspect_and_validate_gcs_target(desc, target)
+            cleanup.inspect_and_validate_gcs_target(desc, target, simulation_mode=True)
         self.assertIn("Missing live hash/body verification", str(ctx.exception))
 
     def test_gcs_metadata_non_numeric_generation_rejected(self):
@@ -920,7 +931,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
             },
         }
         with self.assertRaises(ValueError) as ctx:
-            cleanup.inspect_and_validate_gcs_target(desc, target)
+            cleanup.inspect_and_validate_gcs_target(desc, target, simulation_mode=True)
         self.assertIn("Missing live hash/body verification", str(ctx.exception))
 
     def test_gcs_target_stale_timestamp_rejected(self):
@@ -1085,7 +1096,7 @@ class TestR21Regressions(unittest.TestCase):
                 "timeCreated": "2026-10-09T09:03:18.572Z",
             }
         }
-        mock_runner = MagicMock(return_value={"status": "ok", "size": 327, "sha256": cleanup.EXPECTED_SHA256})
+        mock_runner = MagicMock(return_value={"status": "ok", "size": 327, "body_bytes": PDF_BYTES})
         
         with self.assertRaises(ValueError) as ctx:
             cleanup.inspect_and_validate_gcs_target(
@@ -1099,10 +1110,47 @@ class TestR21Regressions(unittest.TestCase):
         inv_valid["authority_established"] = cleanup._VALID_PROOF
         plan = cleanup.build_cleanup_plan(inv_valid, mode="dry-run")
         plan["authority_established"] = cleanup._VALID_PROOF
+        for t in plan["gcs_targets"]:
+            t["authority_established"] = cleanup._VALID_PROOF
         
+        def mock_subprocess_run(cmd, **kwargs):
+            import subprocess
+            if "ls" in cmd:
+                return subprocess.CompletedProcess(
+                    args=cmd,
+                    returncode=0,
+                    stdout=f'{{"name": "foo", "size": "327", "timeCreated": "2026-10-09T09:03:18.572Z", "updated": "2026-10-09T09:03:18.572Z", "contentType": "application/pdf", "generation": "123", "metageneration": "1"}}'.encode("utf-8")
+                )
+            elif "cat" in cmd:
+                return subprocess.CompletedProcess(
+                    args=cmd,
+                    returncode=0,
+                    stdout=PDF_BYTES
+                )
+            return subprocess.CompletedProcess(args=cmd, returncode=1)
+            
+        with patch("subprocess.run", side_effect=mock_subprocess_run) as mock_run:
+            with self.assertRaises(ValueError) as ctx:
+                cleanup.execute_gcs_cleanup(plan, gcs_runner=None, simulation_mode=True)
+            self.assertIn("Explicit synthetic gcs_runner is required", str(ctx.exception))
+            self.assertEqual(mock_run.call_count, 0)
+        
+        target = self._create_valid_target()
+        desc = {
+            "status": "ok",
+            "metadata": {
+                "bucket": cleanup.BUCKET,
+                "name": target["key"],
+                "generation": "1728464600123456",
+                "metageneration": "1",
+                "size": 327,
+                "contentType": cleanup.EXPECTED_MIME,
+                "timeCreated": "2026-10-09T09:03:18.572Z",
+            }
+        }
         with self.assertRaises(ValueError) as ctx:
-            cleanup.execute_gcs_cleanup(plan, gcs_runner=None, simulation_mode=True)
-        self.assertIn("Explicit synthetic gcs_runner is required", str(ctx.exception))
+            cleanup.inspect_and_validate_gcs_target(desc, target, runner=None, simulation_mode=True)
+        self.assertIn("Missing live hash/body verification", str(ctx.exception))
 
     def test_simulation_receipts_always_synthetic(self):
         target = self._create_valid_target()
@@ -1118,10 +1166,50 @@ class TestR21Regressions(unittest.TestCase):
                 "timeCreated": "2026-10-09T09:03:18.572Z",
             }
         }
-        mock_runner = MagicMock(return_value={"status": "ok", "size": 327, "sha256": cleanup.EXPECTED_SHA256})
+        mock_runner = MagicMock(return_value={"status": "ok", "size": 327, "body_bytes": PDF_BYTES})
         
         result = cleanup.inspect_and_validate_gcs_target(
             desc, target, runner=mock_runner, simulation_mode=True
         )
         self.assertTrue(result["synthetic"])
+        self.assertEqual(result["verified_hash"], cleanup.EXPECTED_SHA256)
+
+    def test_inline_body_assertions(self):
+        target = self._create_valid_target()
+        desc = {
+            "status": "ok",
+            "metadata": {
+                "bucket": cleanup.BUCKET,
+                "name": target["key"],
+                "generation": "1728464600123456",
+                "metageneration": "1",
+                "size": 327,
+                "contentType": cleanup.EXPECTED_MIME,
+                "timeCreated": "2026-10-09T09:03:18.572Z",
+                "body_bytes": PDF_BYTES,
+            }
+        }
+        # 1. Inline body, no runner, not simulation
+        with self.assertRaises(ValueError) as ctx:
+            cleanup.inspect_and_validate_gcs_target(
+                desc, target, runner=None, simulation_mode=False
+            )
+        self.assertIn("Unsupported direct inspector live read without simulation_mode=True", str(ctx.exception))
+
+        # 2. Inline body, with runner, not simulation
+        mock_runner = MagicMock()
+        with self.assertRaises(ValueError) as ctx:
+            cleanup.inspect_and_validate_gcs_target(
+                desc, target, runner=mock_runner, simulation_mode=False
+            )
+        self.assertIn("Unsupported direct inspector live read without simulation_mode=True", str(ctx.exception))
+        self.assertEqual(mock_runner.call_count, 0)
+        
+        # 3. Explicit simulation positive
+        result = cleanup.inspect_and_validate_gcs_target(
+            desc, target, runner=None, simulation_mode=True
+        )
+        self.assertEqual(result["status"], "valid")
+        self.assertTrue(result["synthetic"])
+        self.assertEqual(result["verified_hash"], cleanup.EXPECTED_SHA256)
 

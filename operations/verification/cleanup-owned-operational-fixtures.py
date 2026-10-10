@@ -1208,6 +1208,8 @@ def inspect_and_validate_gcs_target(
     live_hash = None
     body_bytes = meta.get("body_bytes")
     is_synthetic = desc.get("synthetic", False)
+    if not simulation_mode:
+        raise ValueError("Unsupported direct inspector live read without simulation_mode=True")
     if simulation_mode:
         is_synthetic = True
     if body_bytes is not None:
@@ -1224,8 +1226,6 @@ def inspect_and_validate_gcs_target(
         )
         live_hash = computed_hash
     elif runner is not None:
-        if not simulation_mode:
-            raise ValueError("Unsupported direct inspector live read without simulation_mode=True")
         try:
             body_res = runner("read_body", bucket, key, generation=generation)
             if body_res.get("status") == "ok":
