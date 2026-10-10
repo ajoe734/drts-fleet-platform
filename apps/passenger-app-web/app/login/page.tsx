@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { PassengerClient } from "@drts/passenger-client";
-import { P5Card, P5Btn, P5 } from "../../components/p5-ui";
+import { PassengerAuthClient } from "../../lib/auth/client";
+import { P5Card, P5Btn, P5 } from "../../components/auth/ui";
 
-const client = new PassengerClient({
+const baseClient = new PassengerClient({
   baseUrl: "",
-  fetchFn: (...args) => fetch(...args),
+  fetchFn: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
 });
+const client = new PassengerAuthClient(baseClient);
 
 export default function LoginPage() {
   const [providers, setProviders] = useState<string[]>([]);
@@ -27,10 +29,30 @@ export default function LoginPage() {
   useEffect(() => {
     client
       .getProviders()
-      .then((res) => {
+      .then((res: import("@drts/passenger-client").AuthProvidersResponse) => {
         setProviders(res.providers || []);
       })
-      .catch((err) => console.error(err));
+      .catch((err: any) => console.error(err));
+
+    const saved = sessionStorage.getItem("otp_login_state");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        const elapsed = Math.floor((Date.now() - parsed.timestamp) / 1000);
+        if (elapsed < 60) {
+          setOtpSent(true);
+          setChallenge(parsed.challenge);
+          setProviderUsed(parsed.provider);
+          if (parsed.provider === "phone") setPhone(parsed.target);
+          if (parsed.provider === "email") setEmail(parsed.target);
+          setCountdown(60 - elapsed);
+        } else {
+          sessionStorage.removeItem("otp_login_state");
+        }
+      } catch {
+        /* ignore */
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -41,6 +63,7 @@ export default function LoginPage() {
   }, [countdown]);
 
   const handleRequestOtp = async (provider: "phone" | "email") => {
+    if (countdown > 0) return;
     setLoading(true);
     setError("");
     try {
@@ -55,6 +78,15 @@ export default function LoginPage() {
         setChallenge(res.challenge);
         setProviderUsed(provider);
         setCountdown(60);
+        sessionStorage.setItem(
+          "otp_login_state",
+          JSON.stringify({
+            challenge: res.challenge,
+            provider,
+            target,
+            timestamp: Date.now(),
+          }),
+        );
       } else {
         setError(res.message || "發送失敗");
       }
@@ -77,9 +109,10 @@ export default function LoginPage() {
         code,
       });
       if (res.result === "logged_in") {
+        sessionStorage.removeItem("otp_login_state");
         try {
           const acc = await client.getAccount();
-          if (!acc.termsVersion) {
+          if (!acc.termsVersion || !acc.privacyVersion) {
             setConsentRequired(true);
           } else {
             window.location.href = "/";
@@ -92,9 +125,9 @@ export default function LoginPage() {
       }
     } catch (err: any) {
       if (err.message && err.message.includes("429")) {
-         setError("嘗試次數過多，請稍後重試");
+        setError("嘗試次數過多，請稍後重試");
       } else {
-         setError("驗證碼錯誤或已過期");
+        setError("驗證碼錯誤或已過期");
       }
     } finally {
       setLoading(false);
@@ -109,7 +142,10 @@ export default function LoginPage() {
     setLoading(true);
     setConsentError("");
     try {
-      await client.updateAccount({ termsVersion: "v1.0", privacyVersion: "v1.0" });
+      await client.updateAccount({
+        termsVersion: "v1.0",
+        privacyVersion: "v1.0",
+      });
       window.location.href = "/";
     } catch {
       setConsentError("儲存失敗，請重試");
@@ -141,31 +177,72 @@ export default function LoginPage() {
   };
 
   if (consentRequired) {
+    const termsUrl = process.env.NEXT_PUBLIC_TERMS_URL || "#";
+    const privacyUrl = process.env.NEXT_PUBLIC_PRIVACY_URL || "#";
     return (
       <div style={{ padding: 14 }}>
         <P5Card title="服務條款與隱私權政策">
           <div style={{ marginBottom: 14, fontSize: 13, color: P5.ink }}>
             歡迎使用智行叫車。請先閱讀並同意我們的服務條款與隱私權政策。
+            <div style={{ color: P5.mut, marginTop: 4, fontSize: 11 }}>
+              (Full terms/privacy text pending from user)
+            </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-            <input 
-              type="checkbox" 
-              id="consent" 
-              checked={consentChecked} 
-              onChange={(e) => setConsentChecked(e.target.checked)} 
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 14,
+            }}
+          >
+            <input
+              type="checkbox"
+              id="consent"
+              checked={consentChecked}
+              onChange={(e) => setConsentChecked(e.target.checked)}
               disabled={loading}
             />
-            <label htmlFor="consent" style={{ fontSize: 13, color: P5.ink, cursor: "pointer" }}>
+            <label
+              htmlFor="consent"
+              style={{ fontSize: 13, color: P5.ink, cursor: "pointer" }}
+            >
               我同意
-              <a href="/terms" target="_blank" style={{ color: P5.brand, textDecoration: "none", margin: "0 4px" }}>服務條款</a>
+              <a
+                href={termsUrl}
+                target="_blank"
+                style={{
+                  color: P5.brand,
+                  textDecoration: "none",
+                  margin: "0 4px",
+                }}
+              >
+                服務條款
+              </a>
               與
-              <a href="/privacy" target="_blank" style={{ color: P5.brand, textDecoration: "none", margin: "0 4px" }}>隱私權政策</a>
+              <a
+                href={privacyUrl}
+                target="_blank"
+                style={{
+                  color: P5.brand,
+                  textDecoration: "none",
+                  margin: "0 4px",
+                }}
+              >
+                隱私權政策
+              </a>
             </label>
           </div>
           {consentError && (
-            <div style={{ color: P5.danger, fontSize: 13, marginBottom: 14 }}>{consentError}</div>
+            <div style={{ color: P5.danger, fontSize: 13, marginBottom: 14 }}>
+              {consentError}
+            </div>
           )}
-          <P5Btn kind="primary" disabled={loading} onClick={handleConsentSubmit}>
+          <P5Btn
+            kind="primary"
+            disabled={loading}
+            onClick={handleConsentSubmit}
+          >
             {loading ? "處理中..." : "同意並繼續"}
           </P5Btn>
         </P5Card>
@@ -192,10 +269,18 @@ export default function LoginPage() {
             {error && (
               <div style={{ color: P5.danger, fontSize: 13 }}>{error}</div>
             )}
-            <P5Btn kind="primary" disabled={loading || code.length !== 6} onClick={handleVerifyOtp}>
+            <P5Btn
+              kind="primary"
+              disabled={loading || code.length !== 6}
+              onClick={handleVerifyOtp}
+            >
               {loading ? "驗證中..." : "驗證並登入"}
             </P5Btn>
-            <P5Btn kind="ghost" disabled={loading || countdown > 0} onClick={() => handleRequestOtp(providerUsed)}>
+            <P5Btn
+              kind="ghost"
+              disabled={loading || countdown > 0}
+              onClick={() => handleRequestOtp(providerUsed)}
+            >
               {countdown > 0 ? `重送驗證碼 (${countdown}s)` : "重新發送"}
             </P5Btn>
             <P5Btn
@@ -204,6 +289,7 @@ export default function LoginPage() {
                 setOtpSent(false);
                 setCode("");
                 setError("");
+                sessionStorage.removeItem("otp_login_state");
               }}
             >
               返回
@@ -233,7 +319,11 @@ export default function LoginPage() {
                 style={inputStyle}
               />
               <div style={{ marginTop: 8 }}>
-                <P5Btn kind="primary" disabled={loading || !phone} onClick={() => handleRequestOtp("phone")}>
+                <P5Btn
+                  kind="primary"
+                  disabled={loading || !phone}
+                  onClick={() => handleRequestOtp("phone")}
+                >
                   使用手機登入
                 </P5Btn>
               </div>
@@ -254,7 +344,11 @@ export default function LoginPage() {
                 style={inputStyle}
               />
               <div style={{ marginTop: 8 }}>
-                <P5Btn kind="primary" disabled={loading || !email} onClick={() => handleRequestOtp("email")}>
+                <P5Btn
+                  kind="primary"
+                  disabled={loading || !email}
+                  onClick={() => handleRequestOtp("email")}
+                >
                   使用 Email 登入
                 </P5Btn>
               </div>
@@ -280,7 +374,9 @@ export default function LoginPage() {
               </P5Btn>
             )}
             {providers.includes("line") && (
-              <P5Btn disabled={loading} onClick={() => handleOAuth("line")}>使用 LINE 登入</P5Btn>
+              <P5Btn disabled={loading} onClick={() => handleOAuth("line")}>
+                使用 LINE 登入
+              </P5Btn>
             )}
           </div>
           {error && (
@@ -299,7 +395,7 @@ export default function LoginPage() {
           >
             登入或註冊即表示您同意
             <a
-              href="/terms"
+              href={process.env.NEXT_PUBLIC_TERMS_URL || "#"}
               target="_blank"
               style={{ color: P5.brand, textDecoration: "none", marginLeft: 4 }}
             >
@@ -307,7 +403,7 @@ export default function LoginPage() {
             </a>
             與
             <a
-              href="/privacy"
+              href={process.env.NEXT_PUBLIC_PRIVACY_URL || "#"}
               target="_blank"
               style={{ color: P5.brand, textDecoration: "none", marginLeft: 4 }}
             >

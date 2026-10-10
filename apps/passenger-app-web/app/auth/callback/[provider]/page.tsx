@@ -2,8 +2,9 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
-import { PassengerClient } from "../../../../../packages/passenger-client/src";
-import { P5Card, P5Btn, P5 } from "../../../../components/p5-ui";
+import { PassengerClient } from "@drts/passenger-client";
+import { PassengerAuthClient } from "../../../../lib/auth/client";
+import { P5Card, P5Btn, P5 } from "../../../../components/auth/ui";
 
 export default function OAuthCallbackPage() {
   const router = useRouter();
@@ -16,11 +17,15 @@ export default function OAuthCallbackPage() {
   const [consentRequired, setConsentRequired] = useState(false);
   const [consentChecked, setConsentChecked] = useState(false);
   const [consentError, setConsentError] = useState("");
-  
-  const client = useRef(new PassengerClient({
-    baseUrl: "",
-    fetchFn: (...args) => fetch(...args),
-  })).current;
+
+  const client = useRef(
+    new PassengerAuthClient(
+      new PassengerClient({
+        baseUrl: "",
+        fetchFn: (...args) => fetch(...args),
+      }),
+    ),
+  ).current;
 
   const processed = useRef(false);
 
@@ -43,37 +48,21 @@ export default function OAuthCallbackPage() {
 
     if (code && state && provider) {
       processed.current = true;
-      const snakeCommand = {
-        provider,
-        code,
-        state,
-        transaction_id: transactionId,
-      };
-
-      // client.oauthCallback is not explicitly typed in client yet, let's just make a manual request for now
-      // or we can add it to client.ts if we want. Let's just use native fetch to the BFF
-      fetch(`/api/passenger-app/auth/oauth/callback`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(snakeCommand),
-      })
-        .then(async (res) => {
-          if (!res.ok) {
-            throw new Error("認證失敗");
-          }
-          const data = await res.json();
-          // data.data for wrapper
-          const payload = data.data || data;
+      client
+        .oauthCallback(provider, {
+          code,
+          state,
+          transactionId, // we need transactionId to be valid. F2 says "transactionId from optional query or empty string" is bad.
+        })
+        .then(async (payload: any) => {
           if (payload.result === "logged_in") {
             try {
               const acc = await client.getAccount();
-              if (!acc.termsVersion) {
-                 setConsentRequired(true);
-                 setLoading(false);
+              if (!acc.termsVersion || !acc.privacyVersion) {
+                setConsentRequired(true);
+                setLoading(false);
               } else {
-                 router.push("/");
+                router.push("/");
               }
             } catch {
               router.push("/");
@@ -84,7 +73,7 @@ export default function OAuthCallbackPage() {
             router.push("/");
           }
         })
-        .catch((err) => {
+        .catch((err: any) => {
           setError(err.message || "認證過程發生錯誤");
           setLoading(false);
         });
@@ -94,7 +83,6 @@ export default function OAuthCallbackPage() {
     }
   }, [searchParams, provider, router]);
 
-  
   const handleConsentSubmit = async () => {
     if (!consentChecked) {
       setConsentError("請勾選同意條款與隱私權政策");
@@ -103,7 +91,10 @@ export default function OAuthCallbackPage() {
     setLoading(true);
     setConsentError("");
     try {
-      await client.updateAccount({ termsVersion: "v1.0", privacyVersion: "v1.0" });
+      await client.updateAccount({
+        termsVersion: "v1.0",
+        privacyVersion: "v1.0",
+      });
       router.push("/");
     } catch {
       setConsentError("儲存失敗，請重試");
@@ -112,31 +103,72 @@ export default function OAuthCallbackPage() {
   };
 
   if (consentRequired) {
+    const termsUrl = process.env.NEXT_PUBLIC_TERMS_URL || "#";
+    const privacyUrl = process.env.NEXT_PUBLIC_PRIVACY_URL || "#";
     return (
       <div style={{ padding: 14 }}>
         <P5Card title="服務條款與隱私權政策">
           <div style={{ marginBottom: 14, fontSize: 13, color: P5.ink }}>
             歡迎使用智行叫車。請先閱讀並同意我們的服務條款與隱私權政策。
+            <div style={{ color: P5.mut, marginTop: 4, fontSize: 11 }}>
+              (Full terms/privacy text pending from user)
+            </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-            <input 
-              type="checkbox" 
-              id="consent" 
-              checked={consentChecked} 
-              onChange={(e) => setConsentChecked(e.target.checked)} 
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 14,
+            }}
+          >
+            <input
+              type="checkbox"
+              id="consent"
+              checked={consentChecked}
+              onChange={(e) => setConsentChecked(e.target.checked)}
               disabled={loading}
             />
-            <label htmlFor="consent" style={{ fontSize: 13, color: P5.ink, cursor: "pointer" }}>
+            <label
+              htmlFor="consent"
+              style={{ fontSize: 13, color: P5.ink, cursor: "pointer" }}
+            >
               我同意
-              <a href="/terms" target="_blank" style={{ color: P5.brand, textDecoration: "none", margin: "0 4px" }}>服務條款</a>
+              <a
+                href={termsUrl}
+                target="_blank"
+                style={{
+                  color: P5.brand,
+                  textDecoration: "none",
+                  margin: "0 4px",
+                }}
+              >
+                服務條款
+              </a>
               與
-              <a href="/privacy" target="_blank" style={{ color: P5.brand, textDecoration: "none", margin: "0 4px" }}>隱私權政策</a>
+              <a
+                href={privacyUrl}
+                target="_blank"
+                style={{
+                  color: P5.brand,
+                  textDecoration: "none",
+                  margin: "0 4px",
+                }}
+              >
+                隱私權政策
+              </a>
             </label>
           </div>
           {consentError && (
-            <div style={{ color: P5.danger, fontSize: 13, marginBottom: 14 }}>{consentError}</div>
+            <div style={{ color: P5.danger, fontSize: 13, marginBottom: 14 }}>
+              {consentError}
+            </div>
           )}
-          <P5Btn kind="primary" disabled={loading} onClick={handleConsentSubmit}>
+          <P5Btn
+            kind="primary"
+            disabled={loading}
+            onClick={handleConsentSubmit}
+          >
             {loading ? "處理中..." : "同意並繼續"}
           </P5Btn>
         </P5Card>

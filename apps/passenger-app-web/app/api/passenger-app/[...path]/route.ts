@@ -83,6 +83,19 @@ function isAllowedPassengerPath(path: string[], method: string) {
   if (method === "POST" && fullPath === "auth/refresh") return true;
   if (method === "POST" && fullPath === "auth/logout") return true;
   if (method === "GET" && fullPath === "me") return true;
+  if (method === "PATCH" && fullPath === "me") return true;
+  if (method === "DELETE" && fullPath === "me") return true;
+  if (method === "GET" && fullPath === "me/identities") return true;
+  if (method === "PATCH" && fullPath === "me/consent") return true;
+  if (
+    method === "DELETE" &&
+    path.length === 3 &&
+    path[0] === "me" &&
+    path[1] === "identities"
+  ) {
+    // me/identities/:id
+    return true;
+  }
   if (method === "GET" && fullPath === "fares") return true;
   if (method === "POST" && fullPath === "rides") return true;
   return false;
@@ -354,17 +367,27 @@ async function forward(
     }
 
     // Normal forward path
-    
-    if (fullPath === "auth/oauth/callback" && method === "POST") {
+
+    if (
+      fullPath.startsWith("auth/oauth/") &&
+      fullPath.endsWith("/callback") &&
+      method === "POST"
+    ) {
       if (initialBodyData) {
         try {
-          const parsed = JSON.parse(initialBodyData);
+          const text = new TextDecoder().decode(initialBodyData as ArrayBuffer);
+          const parsed = JSON.parse(text);
           const txn = request.cookies.get("pax_oauth_txn")?.value;
           if (txn) {
-            parsed.transaction_id = txn;
-            initialBodyData = JSON.stringify(parsed);
+            // Note: service.ts expects camelCase transactionId in oauthCallback
+            parsed.transactionId = txn;
+            initialBodyData = new TextEncoder().encode(
+              JSON.stringify(parsed),
+            ).buffer;
           }
-        } catch(e) {}
+        } catch (e) {
+          console.error("Failed to parse callback body", e);
+        }
       }
     }
 
@@ -414,16 +437,31 @@ async function forward(
       fullPath === "auth/mfa/verify" ||
       fullPath.startsWith("auth/oauth");
 
-    
     let oauthTxn = null;
-    if (fullPath === "auth/oauth/start" && method === "POST" && upstream.ok) {
-       try {
-         const text = await upstream.clone().text();
-         const parsed = JSON.parse(text);
-         if (parsed.data?.transaction_id || parsed.transaction_id || parsed.data?.transactionId || parsed.transactionId) {
-            oauthTxn = parsed.data?.transaction_id || parsed.transaction_id || parsed.data?.transactionId || parsed.transactionId;
-         }
-       } catch(e) {}
+    if (
+      fullPath.startsWith("auth/oauth/") &&
+      fullPath.endsWith("/start") &&
+      method === "POST" &&
+      upstream.ok
+    ) {
+      try {
+        const text = await upstream.clone().text();
+        const parsed = JSON.parse(text);
+        if (
+          parsed.data?.transaction_id ||
+          parsed.transaction_id ||
+          parsed.data?.transactionId ||
+          parsed.transactionId
+        ) {
+          oauthTxn =
+            parsed.data?.transaction_id ||
+            parsed.transaction_id ||
+            parsed.data?.transactionId ||
+            parsed.transactionId;
+        }
+      } catch (e) {
+        console.error("Failed to parse oauth start response", e);
+      }
     }
 
     let loginData = null;
@@ -470,9 +508,11 @@ async function forward(
       path: "/",
     };
 
-    
     if (oauthTxn) {
-      nextResponse.cookies.set("pax_oauth_txn", oauthTxn, { ...opts, maxAge: 600 });
+      nextResponse.cookies.set("pax_oauth_txn", oauthTxn, {
+        ...opts,
+        maxAge: 600,
+      });
     }
 
     if (didClearTokens) {
@@ -534,4 +574,3 @@ export async function PATCH(
 ) {
   return forward(request, context);
 }
-

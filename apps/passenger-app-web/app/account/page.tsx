@@ -3,12 +3,14 @@
 import { useEffect, useState } from "react";
 import { PassengerClient } from "@drts/passenger-client";
 import { PassengerAccount } from "@drts/contracts";
-import { P5Card, P5Btn, P5 } from "../../components/p5-ui";
+import { PassengerAuthClient } from "../../lib/auth/client";
+import { P5Card, P5Btn, P5 } from "../../components/auth/ui";
 
-const client = new PassengerClient({
+const baseClient = new PassengerClient({
   baseUrl: "",
-  fetchFn: (...args) => fetch(...args),
+  fetchFn: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
 });
+const client = new PassengerAuthClient(baseClient);
 
 export default function AccountPage() {
   const [account, setAccount] = useState<PassengerAccount | null>(null);
@@ -22,8 +24,12 @@ export default function AccountPage() {
 
   // OTP State
   const [otpSent, setOtpSent] = useState(false);
-  const [otpProvider, setOtpProvider] = useState<"phone" | "email" | null>(null);
-  const [otpPurpose, setOtpPurpose] = useState<"link" | "verify_contact_phone" | null>(null);
+  const [otpProvider, setOtpProvider] = useState<"phone" | "email" | null>(
+    null,
+  );
+  const [otpPurpose, setOtpPurpose] = useState<
+    "link" | "verify_contact_phone" | null
+  >(null);
   const [otpTarget, setOtpTarget] = useState("");
   const [challenge, setChallenge] = useState("");
   const [code, setCode] = useState("");
@@ -53,6 +59,26 @@ export default function AccountPage() {
 
   useEffect(() => {
     fetchData();
+
+    const saved = sessionStorage.getItem("otp_account_state");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        const elapsed = Math.floor((Date.now() - parsed.timestamp) / 1000);
+        if (elapsed < 60) {
+          setOtpSent(true);
+          setChallenge(parsed.challenge);
+          setOtpProvider(parsed.provider);
+          setOtpPurpose(parsed.purpose);
+          setOtpTarget(parsed.target);
+          setCountdown(60 - elapsed);
+        } else {
+          sessionStorage.removeItem("otp_account_state");
+        }
+      } catch {
+        /* ignore */
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -118,8 +144,13 @@ export default function AccountPage() {
     }
   };
 
-  const handleRequestOtp = async (provider: "phone" | "email", purpose: "link" | "verify_contact_phone", target: string) => {
+  const handleRequestOtp = async (
+    provider: "phone" | "email",
+    purpose: "link" | "verify_contact_phone",
+    target: string,
+  ) => {
     if (!target) return;
+    if (countdown > 0) return;
     setOtpLoading(true);
     setOtpError("");
     try {
@@ -135,6 +166,16 @@ export default function AccountPage() {
         setOtpPurpose(purpose);
         setOtpTarget(target);
         setCountdown(60);
+        sessionStorage.setItem(
+          "otp_account_state",
+          JSON.stringify({
+            challenge: res.challenge,
+            provider,
+            purpose,
+            target,
+            timestamp: Date.now(),
+          }),
+        );
       } else {
         setOtpError(res.message || "發送失敗");
       }
@@ -158,6 +199,7 @@ export default function AccountPage() {
       // linked or verified_contact_phone
       setOtpSent(false);
       setCode("");
+      sessionStorage.removeItem("otp_account_state");
       fetchData();
     } catch {
       setOtpError("驗證碼錯誤或已過期");
@@ -199,10 +241,20 @@ export default function AccountPage() {
             {otpError && (
               <div style={{ color: P5.danger, fontSize: 13 }}>{otpError}</div>
             )}
-            <P5Btn kind="primary" disabled={otpLoading || code.length !== 6} onClick={handleVerifyOtp}>
+            <P5Btn
+              kind="primary"
+              disabled={otpLoading || code.length !== 6}
+              onClick={handleVerifyOtp}
+            >
               {otpLoading ? "驗證中..." : "驗證"}
             </P5Btn>
-            <P5Btn kind="ghost" disabled={otpLoading || countdown > 0} onClick={() => handleRequestOtp(otpProvider!, otpPurpose!, otpTarget)}>
+            <P5Btn
+              kind="ghost"
+              disabled={otpLoading || countdown > 0}
+              onClick={() =>
+                handleRequestOtp(otpProvider!, otpPurpose!, otpTarget)
+              }
+            >
               {countdown > 0 ? `重送驗證碼 (${countdown}s)` : "重新發送"}
             </P5Btn>
             <P5Btn
@@ -211,6 +263,7 @@ export default function AccountPage() {
                 setOtpSent(false);
                 setCode("");
                 setOtpError("");
+                sessionStorage.removeItem("otp_account_state");
               }}
             >
               取消
@@ -221,8 +274,10 @@ export default function AccountPage() {
     );
   }
 
-  const identityProviders = identities.map(i => i.provider);
-  const availableProviders = providers.filter(p => !identityProviders.includes(p));
+  const identityProviders = identities.map((i) => i.provider);
+  const availableProviders = providers.filter(
+    (p) => !identityProviders.includes(p),
+  );
 
   return (
     <div
@@ -262,7 +317,13 @@ export default function AccountPage() {
             </div>
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 12, color: P5.mut }}>聯絡手機</div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
                 <div>
                   {account.contactPhone || "未設定"}
                   {account.contactPhone && (
@@ -279,11 +340,30 @@ export default function AccountPage() {
                     </span>
                   )}
                 </div>
-                {account.contactPhone && !account.contactPhoneVerified && (
-                  <button onClick={() => handleRequestOtp("phone", "verify_contact_phone", account.contactPhone!)} style={{ color: P5.brand, background: "none", border: "none", cursor: "pointer", fontSize: 13 }}>
-                    去驗證
-                  </button>
-                )}
+                {providers.includes("phone") &&
+                  account.contactPhone &&
+                  !account.contactPhoneVerified && (
+                    <button
+                      disabled={otpLoading}
+                      onClick={() =>
+                        handleRequestOtp(
+                          "phone",
+                          "verify_contact_phone",
+                          account.contactPhone!,
+                        )
+                      }
+                      style={{
+                        color: P5.brand,
+                        background: "none",
+                        border: "none",
+                        cursor: otpLoading ? "not-allowed" : "pointer",
+                        fontSize: 13,
+                        opacity: otpLoading ? 0.5 : 1,
+                      }}
+                    >
+                      {otpLoading ? "處理中..." : "去驗證"}
+                    </button>
+                  )}
               </div>
             </div>
             <P5Btn onClick={() => setIsEditing(true)}>編輯資料</P5Btn>
@@ -329,26 +409,68 @@ export default function AccountPage() {
                 新增綁定
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {availableProviders.includes("google") && <P5Btn onClick={() => handleOAuthBind("google")}>綁定 Google</P5Btn>}
-                {availableProviders.includes("facebook") && <P5Btn onClick={() => handleOAuthBind("facebook")}>綁定 Facebook</P5Btn>}
-                {availableProviders.includes("line") && <P5Btn onClick={() => handleOAuthBind("line")}>綁定 LINE</P5Btn>}
-                
+                {availableProviders.includes("google") && (
+                  <P5Btn onClick={() => handleOAuthBind("google")}>
+                    綁定 Google
+                  </P5Btn>
+                )}
+                {availableProviders.includes("facebook") && (
+                  <P5Btn onClick={() => handleOAuthBind("facebook")}>
+                    綁定 Facebook
+                  </P5Btn>
+                )}
+                {availableProviders.includes("line") && (
+                  <P5Btn onClick={() => handleOAuthBind("line")}>
+                    綁定 LINE
+                  </P5Btn>
+                )}
+
                 {availableProviders.includes("phone") && (
                   <div style={{ display: "flex", gap: 8 }}>
-                    <input id="link-phone" type="tel" placeholder="綁定手機" style={{...inputStyle, marginBottom: 0, flex: 1}} />
-                    <P5Btn onClick={() => {
-                      const v = (document.getElementById("link-phone") as HTMLInputElement).value;
-                      if (v) handleRequestOtp("phone", "link", v);
-                    }} style={{ flex: 1 }}>綁定手機</P5Btn>
+                    <input
+                      id="link-phone"
+                      type="tel"
+                      placeholder="綁定手機"
+                      style={{ ...inputStyle, marginBottom: 0, flex: 1 }}
+                    />
+                    <div style={{ flex: 1 }}>
+                      <P5Btn
+                        onClick={() => {
+                          const v = (
+                            document.getElementById(
+                              "link-phone",
+                            ) as HTMLInputElement
+                          ).value;
+                          if (v) handleRequestOtp("phone", "link", v);
+                        }}
+                      >
+                        綁定手機
+                      </P5Btn>
+                    </div>
                   </div>
                 )}
                 {availableProviders.includes("email") && (
                   <div style={{ display: "flex", gap: 8 }}>
-                    <input id="link-email" type="email" placeholder="綁定 Email" style={{...inputStyle, marginBottom: 0, flex: 1}} />
-                    <P5Btn onClick={() => {
-                      const v = (document.getElementById("link-email") as HTMLInputElement).value;
-                      if (v) handleRequestOtp("email", "link", v);
-                    }} style={{ flex: 1 }}>綁定 Email</P5Btn>
+                    <input
+                      id="link-email"
+                      type="email"
+                      placeholder="綁定 Email"
+                      style={{ ...inputStyle, marginBottom: 0, flex: 1 }}
+                    />
+                    <div style={{ flex: 1 }}>
+                      <P5Btn
+                        onClick={() => {
+                          const v = (
+                            document.getElementById(
+                              "link-email",
+                            ) as HTMLInputElement
+                          ).value;
+                          if (v) handleRequestOtp("email", "link", v);
+                        }}
+                      >
+                        綁定 Email
+                      </P5Btn>
+                    </div>
                   </div>
                 )}
               </div>
