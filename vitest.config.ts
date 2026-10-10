@@ -16,6 +16,10 @@ export default defineConfig({
         __dirname,
         "packages/ui-tokens/src/index.ts",
       ),
+      "@drts/ui-web/canvas-tokens": path.resolve(
+        __dirname,
+        "packages/ui-web/src/canvas-tokens.ts",
+      ),
       "@drts/ui-web": path.resolve(
         __dirname,
         "packages/ui-web/src/index.tsx",
