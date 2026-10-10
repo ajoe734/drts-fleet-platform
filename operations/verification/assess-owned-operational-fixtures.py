@@ -1218,9 +1218,9 @@ def main():
                 service_meta = {
                     "ready_revision": ready_revision,
                     "images": images,
-                    "identity": rev_val.get("spec", {}).get("serviceAccountName")
+                    "identity": val.get("spec", {}).get("template", {}).get("spec", {}).get("serviceAccountName")
                 }
-                env = {e["name"]: e.get("value") for e in rev_val.get("spec", {}).get("containers", [{}])[0].get("env", [])}
+                env = {e["name"]: e.get("value") for e in val.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [{}])[0].get("env", [])}
 
                 if s_name == "drts-dev-api":
                     service_meta["runtime_sha"] = env.get("DRTS_CANDIDATE_SHA")
@@ -1235,7 +1235,7 @@ def main():
                     }
                 elif s_name == "drts-dev-scanner":
                     import hashlib
-                    spec_bytes = json.dumps(rev_val.get("spec", {}), sort_keys=True, separators=(',', ':')).encode("utf-8")
+                    spec_bytes = json.dumps(val.get("spec", {}), sort_keys=True, separators=(',', ':')).encode("utf-8")
                     service_meta["spec_sha256"] = hashlib.sha256(spec_bytes).hexdigest()
                     service_meta["default_environment"] = {
                         "CLAMD_HOST": env.get("CLAMD_HOST"),
