@@ -528,7 +528,7 @@ export class OwnedMobilityService
       process.env.MULTI_TAXI_MIN_LEAD_TIME_MINUTES;
     if (envVal !== undefined && envVal !== "") {
       const parsed = Number(envVal);
-      if (!Number.isNaN(parsed) && parsed >= 0) {
+      if (Number.isFinite(parsed) && parsed >= 0) {
         return parsed;
       }
     }

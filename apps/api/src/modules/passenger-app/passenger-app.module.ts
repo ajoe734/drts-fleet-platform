@@ -27,6 +27,7 @@ import { PassengerBookingController } from "./booking/passenger-booking.controll
 import { PassengerBookingService } from "./booking/passenger-booking.service";
 import { PassengerBookingRepository } from "./booking/passenger-booking.repository";
 import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
+import { PassengerBookingSettingsController } from "./booking/passenger-booking-settings.controller";
 
 @Global()
 @Module({
@@ -37,6 +38,7 @@ import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
     PassengerFareController,
     PassengerOAuthController,
     PassengerBookingController,
+    PassengerBookingSettingsController,
   ],
   providers: [
     PassengerJwtService,

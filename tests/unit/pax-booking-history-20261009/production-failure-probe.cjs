@@ -1,5 +1,6 @@
 // Replay the same production boundary fixture against an immutable prior SHA.
 // No checkout/reset, server, real PG or substituted business SQL.
+/* eslint-disable @typescript-eslint/no-require-imports -- This replay loader must load CommonJS-transpiled historical TypeScript via Node's module hooks. */
 const fs = require("node:fs");
 const path = require("node:path");
 const Module = require("node:module");

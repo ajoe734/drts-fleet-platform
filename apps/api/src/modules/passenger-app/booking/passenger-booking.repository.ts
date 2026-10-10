@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { DatabaseService } from "../../../common/db/database.service";
 import type { PoolClient } from "pg";
 import { ApiRequestError } from "../../../common/api-envelope";
+import type { OwnedMobilityQueryExecutor } from "../../owned-mobility/owned-mobility.repository";
 
 @Injectable()
 export class PassengerBookingRepository {
@@ -13,7 +14,7 @@ export class PassengerBookingRepository {
     orderId: string,
     fareSnapshotId: string,
     passengerConfirmedAt: string,
-    executor: Pick<PoolClient, "query"> = this.db,
+    executor: OwnedMobilityQueryExecutor = this.db,
   ) {
     await executor.query(
       `

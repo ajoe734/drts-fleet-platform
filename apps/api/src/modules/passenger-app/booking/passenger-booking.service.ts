@@ -7,6 +7,7 @@ import { ApiRequestError } from "../../../common/api-envelope";
 import type { CreateMultiTaxiRideCommand } from "@drts/contracts";
 import {
   CreatePassengerRideCommand,
+  PassengerBookingSettingsResponse,
   PassengerRideListResponse,
 } from "@drts/contracts";
 
@@ -18,6 +19,13 @@ export class PassengerBookingService {
     private readonly fareRepository: PassengerFareRepository,
     private readonly accountRepository: PassengerAccountRepository,
   ) {}
+
+  getBookingSettings(): PassengerBookingSettingsResponse {
+    return {
+      minLeadTimeMinutes: this.multiTaxiService.getMinLeadTimeMinutes(),
+      requireSmsVerification: process.env.REQUIRE_SMS_VERIFICATION === "true",
+    };
+  }
 
   async createRide(
     passengerId: string,
@@ -69,7 +77,8 @@ export class PassengerBookingService {
       );
     }
 
-    if (new Date(snapshot.expiresAt).getTime() < Date.now()) {
+    const expiresAt = Date.parse(snapshot.expiresAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "FARE_QUOTE_EXPIRED",
@@ -77,7 +86,7 @@ export class PassengerBookingService {
       );
     }
 
-    if (!req.passengerConfirmedAt) {
+    if (typeof req.passengerConfirmedAt !== "string" || !req.passengerConfirmedAt) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "PASSENGER_NOT_CONFIRMED",
@@ -248,8 +257,9 @@ export class PassengerBookingService {
           if (matches) {
             rides.push(view);
           }
-        } catch {
-          // skip not found
+        } catch (error) {
+          if (!(error instanceof ApiRequestError) || error.getStatus() !== 404)
+            throw error;
         }
 
         if (rides.length >= maxItems) {
@@ -306,8 +316,9 @@ export class PassengerBookingService {
           ) {
             rides.push(view);
           }
-        } catch {
-          /* ignore */
+        } catch (error) {
+          if (!(error instanceof ApiRequestError) || error.getStatus() !== 404)
+            throw error;
         }
       }
 
@@ -319,6 +330,9 @@ export class PassengerBookingService {
   }
 
   async getRide(passengerId: string, orderId: string) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId)) {
+      throw new ApiRequestError(HttpStatus.NOT_FOUND, "PASSENGER_RIDE_NOT_FOUND", "Ride not found");
+    }
     const ownerId = await this.repository.getBookingHistoryOwner(orderId);
     if (ownerId !== passengerId) {
       throw new ApiRequestError(

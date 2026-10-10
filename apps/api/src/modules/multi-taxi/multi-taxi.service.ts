@@ -502,6 +502,10 @@ export class MultiTaxiService implements OnModuleInit {
       );
   }
 
+  getMinLeadTimeMinutes(): number {
+    return this.ownedMobilityService.getMinLeadTimeMinutes();
+  }
+
   async createTrustedPassengerRide(
     command: CreateMultiTaxiRideCommand,
     passengerSubjectRef: string,
