@@ -158,6 +158,7 @@ const P5A_S05c = () => (
       <div style={{ display: 'flex', gap: 8 }}>
         {[1,2,3,4,5,6].map(i => <div key={i} style={{ flex: 1, height: 50, background: P5.surface, border: '1px solid '+P5.line, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontFamily: P5.mono }}>{i<=4 ? '8' : ''}</div>)}
       </div>
+      <div style={{ fontSize: 13, color: P5.mut, textAlign: 'center' }}>重新發送 (59s)</div>
       <P5Btn kind="primary">驗證</P5Btn>
     </div>
   </P5APhone>
@@ -167,8 +168,10 @@ const P5A_S05d = () => (
   <P5APhone>
     <P5Header status="輸入驗證碼" order="" />
     <div style={{ padding: '24px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <P5AAlert kind="danger">驗證碼錯誤或過期</P5AAlert>
-      <P5Btn kind="primary">重新發送驗證碼</P5Btn>
+      <P5AAlert kind="danger">驗證碼嘗試次數達上限，請稍後再試</P5AAlert>
+      <div style={{ marginTop: 16 }}>
+        <P5Btn kind="secondary">返回</P5Btn>
+      </div>
     </div>
   </P5APhone>
 );
@@ -183,7 +186,7 @@ const P5A_S06 = () => (
       </div>
       <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 14 }}>
         <input type="checkbox" defaultChecked style={{ marginTop: 4 }} />
-        <span>我已閱讀並同意 <a href="/terms" style={{ color: P5.brand, textDecoration: 'underline' }}>服務條款</a> 與 <a href="/privacy" style={{ color: P5.brand, textDecoration: 'underline' }}>隱私權政策</a></span>
+        <span>我已閱讀並同意 <a href="{{CONFIG_TERMS_URL}}" style={{ color: P5.brand, textDecoration: 'underline' }}>服務條款</a> 與 <a href="{{CONFIG_PRIVACY_URL}}" style={{ color: P5.brand, textDecoration: 'underline' }}>隱私權政策</a></span>
       </label>
       <P5Btn kind="primary" icon="check">繼續</P5Btn>
     </div>
@@ -200,9 +203,9 @@ const P5A_S06a = () => (
       </div>
       <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 14 }}>
         <input type="checkbox" style={{ marginTop: 4 }} />
-        <span>我已閱讀並同意 <a href="/terms" style={{ color: P5.brand, textDecoration: 'underline' }}>服務條款</a> 與 <a href="/privacy" style={{ color: P5.brand, textDecoration: 'underline' }}>隱私權政策</a></span>
+        <span>我已閱讀並同意 <a href="{{CONFIG_TERMS_URL}}" style={{ color: P5.brand, textDecoration: 'underline' }}>服務條款</a> 與 <a href="{{CONFIG_PRIVACY_URL}}" style={{ color: P5.brand, textDecoration: 'underline' }}>隱私權政策</a></span>
       </label>
-      <P5Btn kind="ghost">繼續</P5Btn>
+      <button disabled aria-disabled="true" style={{ width: '100%', height: 48, borderRadius: 8, border: 'none', background: P5.line, color: P5.mut, fontSize: 16, fontWeight: 700, cursor: 'not-allowed', fontFamily: 'inherit' }}>繼續</button>
     </div>
   </P5APhone>
 );
@@ -381,7 +384,7 @@ const P5A_S15 = () => (
         <P5Icon name="check" size={32} />
       </div>
       <div style={{ fontSize: 18, fontWeight: 700 }}>帳號已成功刪除</div>
-      <P5Btn kind="primary" style={{marginTop: 24}}>返回首頁</P5Btn>
+      <div style={{marginTop: 24}}><P5Btn kind="primary">返回首頁</P5Btn></div>
     </div>
   </P5APhone>
 );
@@ -397,7 +400,7 @@ const P5A_S16 = () => (
       <P5Card title="進行中行程" tag={<span style={{background:P5.brand,color:P5.surface,padding:'2px 6px',borderRadius:4,fontSize:10,marginLeft:8}}>進行中</span>}>
         <div style={{ fontSize: 12, color: P5.mut, marginBottom: 4 }}>2026-10-10 14:30</div>
         <div style={{ fontSize: 14 }}>台北市信義區松仁路 100 號</div>
-        <P5Btn kind="secondary" style={{marginTop:8}}>查看行程</P5Btn>
+        <div style={{marginTop: 8}}><P5Btn kind="secondary">查看行程</P5Btn></div>
       </P5Card>
 
       <P5Card title="已完成">
@@ -426,7 +429,7 @@ const P5A_S17 = () => (
     <div style={{ padding: '32px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', justifyContent: 'center' }}>
       <P5Icon name="car" size={48} style={{ color: P5.line }} />
       <div style={{ color: P5.mut, fontSize: 15 }}>目前沒有行程紀錄</div>
-      <P5Btn kind="primary" style={{marginTop: 16}}>預約叫車</P5Btn>
+      <div style={{marginTop: 16}}><P5Btn kind="primary">預約叫車</P5Btn></div>
     </div>
   </P5APhone>
 );
@@ -466,7 +469,7 @@ const P5A_S19 = () => (
       </div>
       <div style={{ fontSize: 18, fontWeight: 700 }}>我們已收到您的問題</div>
       <div style={{ fontSize: 14, color: P5.mut, textAlign: 'center' }}>客服專員將盡快為您處理，如有需要會主動與您聯繫。</div>
-      <P5Btn kind="secondary" style={{marginTop: 24}}>返回行程</P5Btn>
+      <div style={{marginTop: 24}}><P5Btn kind="secondary">返回行程</P5Btn></div>
     </div>
   </P5APhone>
 );
@@ -525,6 +528,19 @@ const P5A_S21 = () => (
         [PSP Hosted Fields 刷卡元件位置]
       </div>
       <P5Btn kind="primary">綁定卡片</P5Btn>
+    </div>
+  </P5APhone>
+);
+
+const P5A_S21a = () => (
+  <P5APhone>
+    <P5Header status="新增付款卡片" order="" />
+    <div style={{ padding: '24px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <P5AAlert kind="danger">綁定失敗或發卡行拒絕，請改用其他卡片</P5AAlert>
+      <div style={{ background: P5.lineSoft, border: '1px dashed '+P5.dim, height: 160, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', color: P5.mut }}>
+        [PSP Hosted Fields 刷卡元件位置]
+      </div>
+      <P5Btn kind="primary">重新綁定</P5Btn>
     </div>
   </P5APhone>
 );
