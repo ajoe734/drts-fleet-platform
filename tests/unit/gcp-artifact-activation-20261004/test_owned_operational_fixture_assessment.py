@@ -357,6 +357,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                     "drts-dev-api": {
                         "runtime_sha": "testsha",
                         "identity": f"drts-dev-runtime@{assess.PROJECT}.iam.gserviceaccount.com",
+                        "scanner_url": "https://scanner",
                         "providers": {
                             "DOCUMENT_ARTIFACT_GCS_BUCKET": assess.BUCKET,
                             "DOCUMENT_ARTIFACT_STORAGE_PROVIDER": "gcs",
@@ -369,7 +370,12 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                     },
                     "drts-dev-scanner": {
                         "identity": f"drts-dev-artifact-scanner@{assess.PROJECT}.iam.gserviceaccount.com",
-                        "spec_sha256": "78d699ef021ef42c4346cdaeea539e7df00ff7c53cd8c2c89278c7c52403f4ad", "ready_revision": "rev-123", "images": ["gcr.io/image"], "scanner_url": "https://scanner", "default_environment": "drts-dev-devcc-20260825"
+                        "spec_sha256": "78d699ef021ef42c4346cdaeea539e7df00ff7c53cd8c2c89278c7c52403f4ad",
+                        "default_environment": {
+                            "CLAMD_HOST": "127.0.0.1",
+                            "CLAMD_PORT": "3310",
+                            "CLAMAV_READY_MARKER": "/var/run/clamav-ready/ready"
+                        }
                     },
                     **{name: {"identity": f"drts-dev-runtime@{assess.PROJECT}.iam.gserviceaccount.com", "bindings": []} for name in ["drts-channel-partner-portal-web", "drts-dev-bank-console-web", "drts-dev-enterprise-dispatch-web", "drts-dev-fleet-partner-portal-web", "drts-dev-ops-console-web", "drts-dev-platform-admin-web", "drts-dev-tenant-console-web"]}
                 }
@@ -380,9 +386,9 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
         def mock_run(cmd, **kwargs):
             cmd_str = " ".join(cmd)
             if "/runs/37906298090/jobs" in cmd_str:
-                return MagicMock(returncode=0, stdout=json.dumps({"jobs": [{"name": "Owned fixture assessment (Read-only GCS / DB)"}]}))
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "jobs": [{"id": 1, "run_id": 37906298090, "name": "Owned fixture assessment (Read-only GCS / DB)"}]}))
             if "/runs/37906298090/approvals" in cmd_str:
-                return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved", "environment": {"name": "operator"}}]))
+                return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved", "environments": [{"name": "operator"}]}]))
             if "/runs/37906298090" in cmd_str:
                 return MagicMock(returncode=0, stdout=json.dumps({"id": 37906298090, "head_branch": "dev", "event": "workflow_dispatch", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml"}))
             if "check-runs" in cmd_str:
