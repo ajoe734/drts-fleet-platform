@@ -14,7 +14,7 @@ vi.mock("../../../lib/ride/passenger-live", () => ({
   fetchPassengerReceipt: vi.fn(),
   subscribePassengerRideAuthority: vi.fn(() => vi.fn()),
   mapPassengerCertificate: vi.fn((r) => ({
-    state: "ready",
+    state: "available",
     rows: [
       { label: "Receipt No", value: r.receiptNo },
       { label: "Driver Name", value: r.record?.driverName },
@@ -108,13 +108,7 @@ describe("Passenger Ride Page", () => {
       expect(requestPassengerRideAction).toHaveBeenCalledWith(
         "test",
         "ratings",
-        expect.objectContaining({ score: 2, comment: "Too slow" }),
-        false,
-      );
-      expect(requestPassengerRideAction).toHaveBeenCalledWith(
-        "test",
-        "contact",
-        expect.objectContaining({ body: "Too slow" }),
+        expect.objectContaining({ rating: 2, comments: "Too slow", contactRequested: true }),
         false,
       );
     });
@@ -142,6 +136,10 @@ describe("Passenger Ride Page", () => {
         tollMinor: 10,
         consumerServicePhone: "0912345678",
         authorityComplaintPhone: "0912345678",
+        driverRegistrationNo: "REG-999",
+        paymentMethod: "CASH",
+        htmlUrl: "/legal/receipt.html",
+        pdfUrl: "/legal/receipt.pdf",
       },
     });
 

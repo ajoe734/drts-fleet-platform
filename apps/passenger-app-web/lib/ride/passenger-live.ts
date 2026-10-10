@@ -7,14 +7,13 @@ import type {
 
 import type {
   PassengerCertificatePresentation,
+  PassengerCertificateRow,
   PassengerPaymentPresentation,
   PassengerRideFixture,
   PassengerScreenId,
 } from "@drts/passenger-client";
 
 import { passengerClient } from "@/lib/client";
-
-const PASSENGER_PROXY_BASE = "/api/passenger-app/rides";
 
 export class PassengerAuthorityError extends Error {
   constructor(
@@ -47,7 +46,7 @@ export async function fetchPassengerRideAuthority(
 ): Promise<PassengerRideAuthorityView> {
   if (isToken) {
     const response = await fetch(
-      `${PASSENGER_PROXY_BASE}/${encodeURIComponent(idOrToken)}`,
+      `/api/passenger-rides/${encodeURIComponent(idOrToken)}`,
       { cache: "no-store" },
     );
     const payload = camelizeKeys(await response.json()) as
@@ -99,17 +98,17 @@ export async function requestPassengerRideAction<T>(
     if (action === "cancel") {
       return (await passengerClient.cancelRide(
         idOrToken,
-        body as Parameters<typeof passengerClient.cancelRide>[1],
+        body as unknown as Parameters<typeof passengerClient.cancelRide>[1],
       )) as unknown as T;
     } else if (action === "ratings") {
       return (await passengerClient.rateRide(
         idOrToken,
-        body as Parameters<typeof passengerClient.rateRide>[1],
+        body as unknown as Parameters<typeof passengerClient.rateRide>[1],
       )) as unknown as T;
     } else if (action === "complaints") {
       return (await passengerClient.createComplaint(
         idOrToken,
-        body as Parameters<typeof passengerClient.createComplaint>[1],
+        body as unknown as Parameters<typeof passengerClient.createComplaint>[1],
       )) as unknown as T;
     } else if (action === "contact") {
       return { contactUri: "tel:02-2944-0985" } as unknown as T;
@@ -122,12 +121,15 @@ export function subscribePassengerRideAuthority(
   idOrToken: string,
   onEvent: (event: PassengerRideSseEventEnvelope) => void,
   isToken: boolean = false,
+  onStateChange?: (state: "connecting" | "connected" | "disconnected") => void,
 ) {
   const url = isToken
     ? `/api/passenger-rides/${encodeURIComponent(idOrToken)}/events`
     : `/api/passenger-app/rides/${encodeURIComponent(idOrToken)}/events`;
   const es = new EventSource(url);
   
+  if (onStateChange) onStateChange("connecting");
+
   const PASSENGER_RIDE_SSE_EVENTS = [
     "assignment_disclosure_ready",
     "assignment_replaced",
@@ -145,6 +147,9 @@ export function subscribePassengerRideAuthority(
   const handleMsg = (msg: MessageEvent) => {
     try {
       const parsed = camelizeKeys(JSON.parse(msg.data)) as PassengerRideSseEventEnvelope;
+      if (typeof parsed.eventVersion !== "number" || !Number.isFinite(parsed.eventVersion)) {
+        return; // invalid version
+      }
       if (parsed.eventVersion <= lastVersion) {
         return; // replay/out-of-order rejected
       }
@@ -159,12 +164,20 @@ export function subscribePassengerRideAuthority(
     es.addEventListener(eventName, handleMsg);
   }
 
+  es.onopen = () => {
+    if (onStateChange) onStateChange("connected");
+  };
+
   es.onerror = (err) => {
     console.error("SSE error", err);
+    if (onStateChange) onStateChange("disconnected");
     // Let browser's native EventSource reconnect.
   };
 
-  return () => es.close();
+  return () => {
+    es.close();
+    if (onStateChange) onStateChange("disconnected");
+  };
 }
 
 export async function fetchPassengerReceipt(
@@ -372,6 +385,12 @@ export function mapPassengerCertificate(
   }
 
   const record = receipt.record;
+  if (!record) {
+    if ("receiptUrl" in receipt && typeof receipt.receiptUrl === "string") {
+      return { state: "available", receiptNo: receipt.receiptNo || "", rows: [], htmlUrl: receipt.receiptUrl };
+    }
+    return { state: "pending" };
+  }
   const plateNo = readText(record, "plateNo");
   const pickupAt = readDate(record, "pickupAt");
   const dropoffAt = readDate(record, "dropoffAt");
@@ -388,6 +407,11 @@ export function mapPassengerCertificate(
   const htmlUrl = readText(record, "htmlUrl");
   const pdfUrl = readText(record, "pdfUrl");
 
+  const driverRegistrationNo = readText(record, "driverRegistrationNo");
+  const paymentMethod = readText(record, "paymentMethod");
+  const fleetName = readText(record, "fleetName");
+  const driverName = readText(record, "driverName");
+
   if (
     !plateNo ||
     !pickupAt ||
@@ -397,7 +421,11 @@ export function mapPassengerCertificate(
     distanceMeters === null ||
     tollMinor === null ||
     !consumerServicePhone ||
-    !authorityComplaintPhone
+    !authorityComplaintPhone ||
+    !driverRegistrationNo ||
+    !paymentMethod ||
+    !fleetName ||
+    !driverName
   ) {
     return {
       state: "error",
@@ -413,7 +441,10 @@ export function mapPassengerCertificate(
       value: formatDateTime(receipt.issuedAt),
       mono: true,
     },
+    { label: "車隊", value: fleetName },
+    { label: "駕駛", value: driverName },
     { label: "車牌", value: plateNo, mono: true },
+    { label: "遮罩執登號", value: driverRegistrationNo, mono: true },
     { label: "上車時間", value: formatDateTime(pickupAt), mono: true },
     { label: "下車時間", value: formatDateTime(dropoffAt), mono: true },
     { label: "行駛時間", value: formatDuration(travelDurationSeconds) },
@@ -435,13 +466,9 @@ export function mapPassengerCertificate(
       value: authorityComplaintPhone,
       mono: true,
     },
+    { label: "支付方式", value: paymentMethod },
   ];
 
-  // Optional fields that might be missing in contract but requested in UI
-  const driverRegistrationNo = readText(record, "driverRegistrationNo");
-  if (driverRegistrationNo) {
-    rows.push({ label: "遮罩執登號", value: driverRegistrationNo, mono: true });
-  }
   const fareBaseMinor = readNonNegativeNumber(record, "fareBaseMinor");
   if (fareBaseMinor !== null) {
     rows.push({ label: "起程", value: formatMoney(fareBaseMinor), mono: true });
@@ -458,18 +485,15 @@ export function mapPassengerCertificate(
   if (fareNightMinor !== null) {
     rows.push({ label: "夜間明細", value: formatMoney(fareNightMinor), mono: true });
   }
-  const paymentMethod = readText(record, "paymentMethod");
-  if (paymentMethod) {
-    rows.push({ label: "支付方式", value: paymentMethod });
-  }
 
-  return {
+  const result: PassengerCertificatePresentation = {
     state: "available",
     receiptNo: receipt.receiptNo,
     rows,
-    htmlUrl: htmlUrl ?? undefined,
-    pdfUrl: pdfUrl ?? undefined,
   };
+  if (htmlUrl) result.htmlUrl = htmlUrl;
+  if (pdfUrl) result.pdfUrl = pdfUrl;
+  return result;
 }
 
 function resolveScreenId(
@@ -477,7 +501,9 @@ function resolveScreenId(
   kind: "ride" | "fares" | "receipt",
 ): PassengerScreenId {
   if (kind === "receipt") return "P5-10";
-  if (view.order.status === "cancelled") return "P5-12";
+  if (view.order.status === "cancelled") {
+    throw new Error("SCREEN_REQUIREMENT: Missing cancelled terminal screen in canvas");
+  }
   if (view.order.status === "completed") return view.rating ? "P5-09" : "P5-08";
   if (view.receipt) return "P5-10";
   if (view.order.status === "on_trip") return "P5-07";
@@ -485,7 +511,6 @@ function resolveScreenId(
   if (view.order.status === "redispatch_required") return "P5-04";
   if (!view.assignment) {
     if (["assigned", "driver_accepted", "enroute_pickup"].includes(view.order.status)) return "P5-11";
-    if (view.order.timingMode === "scheduled" && view.order.status === "created") return "A04";
     return "P5-01";
   }
   if (view.assignment.assignmentVersion > 1) return "P5-05";

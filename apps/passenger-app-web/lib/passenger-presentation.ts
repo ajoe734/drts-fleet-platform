@@ -14,8 +14,8 @@ export const passengerTheme = buildCanvasTheme({
 });
 
 export const passengerChrome = {
-  shell: passengerTheme.accent,
-  shellDark: passengerTheme.accentHi,
+  shell: REALM_COLORS.passenger.light.fg,
+  shellDark: REALM_COLORS.passenger.dark.fg,
   background: passengerTheme.bg,
   card: passengerTheme.surface,
   border: passengerTheme.border,

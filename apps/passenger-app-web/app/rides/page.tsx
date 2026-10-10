@@ -3,6 +3,7 @@ import { t } from "../../components/ride/translations";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { passengerClient } from "@/lib/client";
+import { passengerChrome } from "@/lib/passenger-presentation";
 import type { PassengerRideAuthorityView } from "@drts/contracts";
 
 export default function RidesListPage() {
@@ -55,12 +56,12 @@ export default function RidesListPage() {
   };
 
   if (loading) {
-    return <div style={{ padding: 20 }}>{t.Loading}</div>;
+    return <div style={{ padding: 20, color: passengerChrome.text }}>{t.Loading}</div>;
   }
   
   if (error) {
     return (
-      <div style={{ padding: 20 }}>
+      <div style={{ padding: 20, color: passengerChrome.text }}>
         <p>{error}</p>
         <button onClick={loadInitial} style={{ padding: "8px 16px" }}>重試</button>
       </div>
@@ -68,7 +69,7 @@ export default function RidesListPage() {
   }
 
   return (
-    <main style={{ padding: "16px", fontFamily: "sans-serif" }}>
+    <main style={{ padding: "16px", fontFamily: "sans-serif", color: passengerChrome.text }}>
       <h1 style={{ fontSize: 24, fontWeight: "bold", marginBottom: 16 }}>
         {t.MyRides}
       </h1>
@@ -80,7 +81,7 @@ export default function RidesListPage() {
               fontSize: 18,
               fontWeight: "bold",
               marginBottom: 8,
-              color: "#1F5DB8",
+              color: passengerChrome.shell,
             }}
           >
             {t.InProgress}
@@ -94,7 +95,7 @@ export default function RidesListPage() {
                 textDecoration: "none",
                 color: "inherit",
                 padding: 12,
-                border: "1px solid #CBD5E1",
+                border: `1px solid ${passengerChrome.border}`,
                 borderRadius: 8,
                 marginBottom: 8,
               }}
@@ -102,7 +103,7 @@ export default function RidesListPage() {
               <div style={{ fontWeight: "bold" }}>
                 {new Date(ride.order.requestedPickupAt).toLocaleString()}
               </div>
-              <div style={{ fontSize: 14, color: "#475569" }}>
+              <div style={{ fontSize: 14, color: passengerChrome.muted }}>
                 {ride.order.pickup.address}
               </div>
             </Link>
@@ -115,7 +116,7 @@ export default function RidesListPage() {
           {t.History}
         </h2>
         {history.length === 0 ? (
-          <div style={{ color: "#475569" }}>{t.NoRideHistory}</div>
+          <div style={{ color: passengerChrome.muted }}>{t.NoRideHistory}</div>
         ) : (
           history.map((ride) => {
             const needsRating = ride.actions.canRate;
@@ -128,7 +129,7 @@ export default function RidesListPage() {
                   textDecoration: "none",
                   color: "inherit",
                   padding: 12,
-                  border: "1px solid #CBD5E1",
+                  border: `1px solid ${passengerChrome.border}`,
                   borderRadius: 8,
                   marginBottom: 8,
                 }}
@@ -147,8 +148,8 @@ export default function RidesListPage() {
                     style={{
                       color:
                         ride.order.status === "completed"
-                          ? "#0F7B5A"
-                          : "#475569",
+                          ? passengerChrome.success.fg
+                          : passengerChrome.muted,
                     }}
                   >
                     {ride.order.status === "completed"
@@ -158,14 +159,14 @@ export default function RidesListPage() {
                         : t.InProgress}
                   </span>
                 </div>
-                <div style={{ fontSize: 14, color: "#475569", marginTop: 4 }}>
+                <div style={{ fontSize: 14, color: passengerChrome.muted, marginTop: 4 }}>
                   {ride.order.pickup.address}
                 </div>
                 {needsRating && (
                   <div
                     style={{
                       marginTop: 8,
-                      color: "#0B5CAB",
+                      color: passengerChrome.shell,
                       fontSize: 13,
                       fontWeight: "bold",
                     }}
@@ -178,7 +179,7 @@ export default function RidesListPage() {
           })
         )}
         {nextCursor && (
-          <button onClick={loadMore} disabled={loadingMore} style={{ marginTop: 12, padding: "8px 16px", borderRadius: 4, background: "#f1f5f9", border: "1px solid #cbd5e1" }}>
+          <button onClick={loadMore} disabled={loadingMore} style={{ marginTop: 12, padding: "8px 16px", borderRadius: 4, background: passengerChrome.background, border: `1px solid ${passengerChrome.border}`, color: passengerChrome.text, cursor: "pointer" }}>
             {loadingMore ? "載入中..." : "載入更多"}
           </button>
         )}

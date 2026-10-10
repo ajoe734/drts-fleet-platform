@@ -29,6 +29,7 @@ describe("RidesListPage", () => {
   it("should render active and history rides", async () => {
     const activeRide = {
       order: {
+        orderId: "active-123",
         orderNo: "active-123",
         requestedPickupAt: new Date().toISOString(),
         status: "assigned",
@@ -38,11 +39,13 @@ describe("RidesListPage", () => {
 
     const historyRide = {
       order: {
+        orderId: "history-456",
         orderNo: "history-456",
         requestedPickupAt: new Date(Date.now() - 3600 * 1000).toISOString(),
         status: "completed",
         pickup: { address: "456 Elm St" },
       },
+      actions: { canRate: true },
     } as unknown as PassengerRideAuthorityView;
 
     (passengerClient.getActiveRides as any).mockResolvedValue({
@@ -69,6 +72,7 @@ describe("RidesListPage", () => {
   it("should not render rating link for old history rides", async () => {
     const oldHistoryRide = {
       order: {
+        orderId: "history-789",
         orderNo: "history-789",
         requestedPickupAt: new Date(
           Date.now() - 48 * 3600 * 1000,
@@ -76,6 +80,7 @@ describe("RidesListPage", () => {
         status: "completed",
         pickup: { address: "789 Oak St" },
       },
+      actions: { canRate: false },
     } as unknown as PassengerRideAuthorityView;
 
     (passengerClient.getActiveRides as any).mockResolvedValue({ rides: [] });

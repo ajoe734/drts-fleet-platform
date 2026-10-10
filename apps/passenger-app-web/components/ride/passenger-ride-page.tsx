@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { t } from "./translations";
 import Link from "next/link";
 import {
@@ -10,24 +11,25 @@ import {
   type ReactNode,
 } from "react";
 import {
-  getPassengerFixtureSourceLabel,
-  getPassengerSourceCallout,
   getToneRamp,
   passengerChrome,
 } from "@/lib/passenger-presentation";
 import { loadPassengerRideFixture } from "@/lib/passenger-fixture-loader";
 import { resolvePassengerDataMode } from "@/lib/runtime-config";
-import type { PassengerRideFixture } from "@drts/passenger-client";
+import type { PassengerRideFixture, PassengerCertificatePresentation } from "@drts/passenger-client";
 import {
   fetchPassengerRideAuthority,
   fetchPassengerReceipt,
-  mapPassengerCertificate,
   mapPassengerRideAuthorityToFixture,
+  mapPassengerCertificate,
   PassengerAuthorityError,
   requestPassengerRideAction,
   subscribePassengerRideAuthority,
 } from "@/lib/ride/passenger-live";
 import { ComplaintForm } from "./complaint-form";
+
+
+const ConnectionContext = React.createContext<{ connectionState: "connecting" | "connected" | "disconnected", lastEventTime: number }>({ connectionState: "connected", lastEventTime: Date.now() });
 
 function readQueryValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -38,17 +40,10 @@ const shellInset = 14;
 const starTone = passengerChrome.driverRealm.fg;
 
 function Shell({
-  token,
-  sourceMode,
   children,
 }: {
-  token: string;
-  authMode?: "id" | "token" | undefined;
-  sourceMode: "fixture" | "live";
   children: ReactNode;
 }) {
-  const source = getPassengerSourceCallout(sourceMode);
-
   return (
     <main
       style={{
@@ -342,6 +337,17 @@ function InlineBanner({ fixture }: { fixture: PassengerRideFixture }) {
 }
 
 function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
+  const { lastEventTime } = React.useContext(ConnectionContext);
+  const [now, setNow] = React.useState(Date.now());
+
+  React.useEffect(() => {
+    if (fixture.mapState !== "fresh" && fixture.mapState !== "stale") return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [fixture.mapState]);
+
+  const elapsedSeconds = Math.max(0, Math.floor((now - lastEventTime) / 1000));
+
   return (
     <div
       style={{
@@ -456,7 +462,7 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
             fontWeight: 700,
           }}
         >
-          {t.LocationUpdated5sAgo}
+          {`位置更新於 ${elapsedSeconds} 秒前`}
         </div>
       ) : null}
       {fixture.mapState === "stale" ? (
@@ -976,10 +982,12 @@ function CertificateCard({
   fixture,
   token,
   authMode,
+  onCertificateUpdate,
 }: {
   fixture: PassengerRideFixture;
   token: string;
   authMode?: "id" | "token" | undefined;
+  onCertificateUpdate?: ((cert: PassengerCertificatePresentation) => void) | undefined;
 }) {
   const [certificate, setCertificate] = useState(fixture.certificate);
   const [retrying, setRetrying] = useState(false);
@@ -994,25 +1002,30 @@ function CertificateCard({
     if (fixture.canReadReceipt !== true || retrying) return;
     setRetrying(true);
     void fetchPassengerReceipt(token, authMode === "token")
-      .then((receipt) => {
-        setCertificate(mapPassengerCertificate(receipt, true));
+      .then((receiptRes) => {
+        const newCert = mapPassengerCertificate(receiptRes as any, true);
+        setCertificate(newCert);
+        onCertificateUpdate?.(newCert);
         setRetrying(false);
       })
       .catch((error: unknown) => {
+        let errCert: PassengerCertificatePresentation;
         if (
           error instanceof PassengerAuthorityError &&
           error.code === "PASSENGER_RECEIPT_NOT_READY"
         ) {
-          setCertificate({ state: "pending" });
+          errCert = { state: "pending" };
         } else {
-          setCertificate({
+          errCert = {
             state: "error",
             errorCode:
               error instanceof PassengerAuthorityError
                 ? error.code
                 : "PASSENGER_RECEIPT_REQUEST_FAILED",
-          });
+          };
         }
+        setCertificate(errCert);
+        onCertificateUpdate?.(errCert);
         setRetrying(false);
       });
   };
@@ -1215,16 +1228,24 @@ function RatingCard({
       return;
     }
     setSubmitting(true);
+    const payload = authMode === "token"
+      ? {
+          score: selectedScore,
+          tags: selectedTags.length > 0 ? selectedTags : undefined,
+          comment: comment || undefined,
+        }
+      : {
+          rideId: token,
+          rating: selectedScore,
+          tags: selectedTags,
+          comments: comment,
+          contactRequested: selectedScore <= 2 ? Boolean(contactRequested) : false,
+        };
+
     requestPassengerRideAction<{ score: number }>(
       token,
       "ratings",
-      {
-        rideId: token,
-        rating: selectedScore,
-        tags: selectedTags,
-        comments: comment,
-        contactRequested: selectedScore <= 2 ? Boolean(contactRequested) : false,
-      },
+      payload,
       authMode === "token",
     )
       .then((res) => {
@@ -1447,9 +1468,9 @@ function ContactUnavailableCard({
         </div>
       </div>
       <div style={{ marginTop: 10 }}>
-        <button type="button" style={buttonStyle("primary")}>
+        <a href="tel:02-2944-0985" style={{ ...buttonStyle("primary"), display: "block", textAlign: "center", textDecoration: "none" }}>
           {t.ContactSupportPhone}
-        </button>
+        </a>
       </div>
     </div>
   );
@@ -1721,9 +1742,9 @@ function Actions({
         <button type="button" style={buttonStyle("primary")}>
           {t.Refresh}
         </button>
-        <button type="button" style={buttonStyle("secondary")}>
+        <a href="tel:02-2944-0985" style={{ ...buttonStyle("secondary"), display: "block", textAlign: "center", textDecoration: "none" }}>
           {t.ContactSupport}
-        </button>
+        </a>
       </ActionGroup>
     );
   }
@@ -1750,9 +1771,9 @@ function Actions({
           <button type="button" style={buttonStyle("primary")}>
             {t.Requote}
           </button>
-          <button type="button" style={buttonStyle("secondary")}>
+          <a href="tel:02-2944-0985" style={{ ...buttonStyle("secondary"), display: "block", textAlign: "center", textDecoration: "none" }}>
             {t.ContactSupport}
-          </button>
+          </a>
         </ActionGroup>
         <div
           style={{
@@ -1808,10 +1829,12 @@ function RideContent({
   fixture,
   token,
   authMode,
+  onCertificateUpdate,
 }: {
   fixture: PassengerRideFixture;
   token: string;
   authMode?: "id" | "token" | undefined;
+  onCertificateUpdate?: ((cert: PassengerCertificatePresentation) => void) | undefined;
 }) {
   if (fixture.screenId === "P5-11") {
     return (
@@ -1831,7 +1854,7 @@ function RideContent({
       <>
         <CompletedThanks />
         <PaymentCard fixture={fixture} />
-        <CertificateCard fixture={fixture} token={token} authMode={authMode} />
+        <CertificateCard fixture={fixture} token={token} authMode={authMode} onCertificateUpdate={onCertificateUpdate} />
         <ComplaintForm token={token} authMode={authMode} />
         <Actions fixture={fixture} token={token} authMode={authMode} />
       </>
@@ -1842,7 +1865,7 @@ function RideContent({
     return (
       <>
         <PaymentCard fixture={fixture} />
-        <CertificateCard fixture={fixture} token={token} authMode={authMode} />
+        <CertificateCard fixture={fixture} token={token} authMode={authMode} onCertificateUpdate={onCertificateUpdate} />
         <ComplaintForm token={token} authMode={authMode} />
         <Actions fixture={fixture} token={token} authMode={authMode} />
       </>
@@ -1946,7 +1969,7 @@ function RideContent({
           </div>
         </Card>
         <PaymentCard fixture={fixture} />
-        <CertificateCard fixture={fixture} token={token} authMode={authMode} />
+        <CertificateCard fixture={fixture} token={token} authMode={authMode} onCertificateUpdate={onCertificateUpdate} />
       </>
     );
   }
@@ -2019,10 +2042,12 @@ function PassengerScreen({
   fixture,
   token,
   authMode,
+  onCertificateUpdate,
 }: {
   fixture: PassengerRideFixture;
   token: string;
   authMode?: "id" | "token" | undefined;
+  onCertificateUpdate?: ((cert: PassengerCertificatePresentation) => void) | undefined;
 }) {
   return (
     <>
@@ -2045,7 +2070,7 @@ function PassengerScreen({
           flexDirection: "column",
         }}
       >
-        <RideContent fixture={fixture} token={token} authMode={authMode} />
+        <RideContent fixture={fixture} token={token} authMode={authMode} onCertificateUpdate={onCertificateUpdate} />
         <FooterNotice />
       </div>
     </>
@@ -2093,18 +2118,23 @@ export function PassengerRidePage({
     };
   }, [kind, searchParams.screen, sourceMode, token]);
 
+  const [connectionState, setConnectionState] = useState<"connecting" | "connected" | "disconnected">("connecting");
+  const [lastEventTime, setLastEventTime] = useState<number>(Date.now());
+
   useEffect(() => {
     if (sourceMode !== "live") {
       return;
     }
     let active = true;
     let unsubscribe: () => void = () => {};
+    setConnectionState("connecting");
     void fetchPassengerRideAuthority(token, authMode === "token")
       .then((view) => {
         if (!active) return;
         startTransition(() => {
           setLiveFixture(mapPassengerRideAuthorityToFixture(view, token, kind));
           setAuthorityError(null);
+          setLastEventTime(Date.now());
         });
         unsubscribe = subscribePassengerRideAuthority(
           token,
@@ -2118,9 +2148,13 @@ export function PassengerRidePage({
                   kind,
                 ),
               );
+              setLastEventTime(Date.now());
             });
           },
           authMode === "token",
+          (state) => {
+            if (active) setConnectionState(state);
+          }
         );
       })
       .catch((error: unknown) => {
@@ -2130,18 +2164,19 @@ export function PassengerRidePage({
             ? error.message
             : "PASSENGER_AUTHORITY_UNAVAILABLE",
         );
+        setConnectionState("disconnected");
       });
     return () => {
       active = false;
       unsubscribe();
     };
-  }, [kind, sourceMode, token]);
+  }, [kind, sourceMode, token, authMode]);
 
   const fixture = sourceMode === "fixture" ? previewFixture : liveFixture;
 
   if (!fixture) {
     return (
-      <Shell token={token} authMode={authMode} sourceMode={sourceMode}>
+      <Shell>
         <div style={{ minHeight: 760, display: "flex" }}>
           <EmptyState
             tone={
@@ -2159,9 +2194,19 @@ export function PassengerRidePage({
     );
   }
 
+  const handleCertificateUpdate = (cert: PassengerCertificatePresentation) => {
+    if (sourceMode === "fixture") {
+      setPreviewFixture((prev) => prev ? { ...prev, certificate: cert } : null);
+    } else {
+      setLiveFixture((prev) => prev ? { ...prev, certificate: cert } : null);
+    }
+  };
+
   return (
-    <Shell token={token} authMode={authMode} sourceMode={sourceMode}>
-      <PassengerScreen fixture={fixture} token={token} authMode={authMode} />
+    <Shell>
+      <ConnectionContext.Provider value={{ connectionState, lastEventTime }}>
+        <PassengerScreen fixture={fixture} token={token} authMode={authMode} onCertificateUpdate={handleCertificateUpdate} />
+      </ConnectionContext.Provider>
     </Shell>
   );
 }
