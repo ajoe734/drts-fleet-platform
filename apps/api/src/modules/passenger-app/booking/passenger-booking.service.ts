@@ -53,6 +53,22 @@ export class PassengerBookingService {
       );
     }
 
+    if (!passengerConfirmedAt) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PASSENGER_NOT_CONFIRMED",
+        "E-19b confirmation time is required.",
+      );
+    }
+
+    if (!snapshot.scheduledAt) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FARE_QUOTE_NOT_SCHEDULED",
+        "Only scheduled rides are supported.",
+      );
+    }
+
     const command: CreateMultiTaxiRideCommand = {
       pickup: {
         lat: snapshot.origin.lat,
