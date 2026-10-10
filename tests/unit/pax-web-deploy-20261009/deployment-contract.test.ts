@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -53,11 +54,12 @@ function run(
   script: string,
   env: Record<string, string> = {},
   dir = directory(),
+  cwd = root,
 ) {
   const output = path.join(dir, "outputs");
   writeFileSync(output, "");
   const result = spawnSync("bash", ["-c", script], {
-    cwd: root,
+    cwd,
     encoding: "utf8",
     env: {
       ...process.env,
@@ -196,6 +198,127 @@ describe("passenger dev workflow executable contracts", () => {
       "COOKIE_SECRET=drts-dev-cookie-secret:latest",
     );
   });
+
+  it.each([
+    ["https://new-passenger.a.run.app", 0],
+    ["", 0],
+    ["http://unsafe.test", 1],
+  ])(
+    "builds exact callback allowlists with discovered origin '%s'",
+    (origin, exit) => {
+      const dir = directory();
+      executable(dir, "gcloud", 'printf "%s" "$MOCK_ORIGIN"');
+      const script = step(deploy, "Build API env vars").replace(
+        /\$\{\{([^}]+)\}\}/g,
+        (_match, expression: string) => {
+          const name = expression.trim();
+          if (name.includes("candidate_sha")) return sha;
+          if (name.includes("oidc_enabled")) return "false";
+          if (name.includes("map_provider_mode")) return "mock";
+          if (name.endsWith("_origin") || name.endsWith("_url")) return "";
+          return "test-value";
+        },
+      );
+      const result = run(
+        script,
+        {
+          MOCK_ORIGIN: origin,
+          PASSENGER_APP_SERVICE: "drts-dev-passenger-app-web",
+          DEV_WORKLOAD_IDENTITY_ISSUER: "issuer",
+          DEV_WORKLOAD_IDENTITY_AUDIENCE: "audience",
+          ARTIFACT_PROVIDER_ENV_SUFFIX: "",
+        },
+        dir,
+      );
+      expect(result.status, result.stderr).toBe(exit);
+      if (exit === 0) {
+        const origins = [
+          "https://ride.smarttransport.tw",
+          ...(origin ? [origin] : []),
+        ];
+        const callbacks = origins.flatMap((base) =>
+          ["google", "facebook", "line"].map(
+            (provider) => `${base}/auth/callback/${provider}`,
+          ),
+        );
+        expect(result.outputs.vars).toContain(
+          `@OAUTH_REDIRECT_ALLOWLIST=${callbacks.join(",")}@`,
+        );
+      }
+    },
+  );
+
+  it.each([
+    ["absent", 0],
+    ["correct", 0],
+    ["retired", 1],
+  ])(
+    "maps ride via the production helper with existing mapping '%s'",
+    (mapping, exit) => {
+      const dir = directory();
+      const log = path.join(dir, "commands");
+      mkdirSync(path.join(dir, "operations/deployment"), { recursive: true });
+      executable(
+        dir,
+        "operations/deployment/map-domain-service.sh",
+        readFileSync(
+          path.join(root, "operations/deployment/map-domain-service.sh"),
+          "utf8",
+        ),
+      );
+      executable(
+        dir,
+        "gcloud",
+        `
+printf '%s\\n' "$*" >> "$COMMAND_LOG"
+if [[ "$*" == *'domain-mappings create'* ]]; then exit 0; fi
+[[ "$*" == *'domain-mappings describe'* ]] || exit 90
+while (($#)); do
+  if [[ "$1" == '--domain' ]]; then domain="$2"; break; fi
+  shift
+done
+if [[ "$domain" == ride.smarttransport.tw && "$MOCK_MAPPING" != absent ]]; then
+  if [[ "$MOCK_MAPPING" == correct ]]; then printf '%s' drts-dev-passenger-app-web;
+  else printf '%s' drts-passenger-web; fi
+  exit 0
+fi
+echo "ERROR: (gcloud.beta.run.domain-mappings.describe) NOT_FOUND: Cannot find domain mapping '$domain'." >&2
+exit 1
+`,
+      );
+      const script = step(domain, "Create domain mappings")
+        .replaceAll("${{ env.DEV_GCP_PROJECT_ID }}", "test-project")
+        .replaceAll("${{ env.DEV_GCP_REGION }}", "us-central1");
+      const result = run(
+        script,
+        {
+          DEV_PARTNER_BOOKING_STATE: "paused",
+          DEV_GCP_PASSENGER_APP_SERVICE: "",
+          MOCK_MAPPING: mapping,
+          COMMAND_LOG: log,
+        },
+        dir,
+        dir,
+      );
+      expect(result.status, result.stderr).toBe(exit);
+      const commands = readFileSync(log, "utf8");
+      const rideCreation = commands
+        .split("\n")
+        .filter(
+          (command) =>
+            command.includes("domain-mappings create") &&
+            command.includes("ride.smarttransport.tw"),
+        );
+      expect(rideCreation).toHaveLength(mapping === "absent" ? 1 : 0);
+      if (mapping === "absent")
+        expect(rideCreation[0]).toContain(
+          "--service drts-dev-passenger-app-web --domain ride.smarttransport.tw --region us-central1 --project test-project",
+        );
+      if (mapping === "retired")
+        expect(result.stderr).toContain("Refusing to mutate a live mapping");
+      expect(commands).not.toMatch(/--force-override|domain-mappings delete/);
+    },
+  );
 
   it.each([
     ["", 0],
