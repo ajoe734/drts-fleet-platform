@@ -24,7 +24,7 @@ These changes provide the passenger app with the necessary authorized UI tokens 
 ### Appended Retained Helper Reviews
 
 #### Codex Independent Review REOPEN (2026-10-10T00:54:27Z, generation 15e0287260be42a0841dab2c769239d3)
-- Current helper candidate / exact live PR to be established = new `gemini/pax-web-shell-20261009-unblock-manual-unblock-v8` successor branch.
+- Historical helper candidate / exact live PR2487 head = `0c2e44c8476d8bf604d4be34c559d474c15e87ab`.
 - **U1 scoped delivery VERIFIED:** Token scope retained.
 - **U3 authorized palette VERIFIED:** `brand=#0B5CAB`/`brandBg=#EAF2FB`/`white=#FFFFFF` and `passenger.light.headerBg=#07437E` retained, backed by Passenger.html.
 - **U4 required trailers REGRESSION:** Previous candidate `0c2e44c8` included invalid ancestors (`e952db0a`, `f2af9693`, `4a22421d`). Bounded repair: established new clean successor branch `gemini/pax-web-shell-20261009-unblock-manual-unblock-v8` directly from dev `ce5b3e63d05c0494413d17db2ff16035a55ab924` without rewriting published historical refs.
@@ -64,10 +64,20 @@ These changes provide the passenger app with the necessary authorized UI tokens 
 - Typecheck: `node /home/lupin/workspace/drts-fleet-platform/.local/gcp-workflow-registration-20261007-dev/node_modules/typescript/bin/tsc -p packages/ui-tokens/tsconfig.json --noEmit --incremental false` -> exit 0
 - Target live branch `gemini/pax-web-shell-20261009-unblock-manual-unblock-v8` verified pointing to `dev` branch with fixed actual base `ce5b3e63d05c0494413d17db2ff16035a55ab924`.
 - Whole-range trailer gate `python3 tools/ci/git/check_commit_trailers.py --base ce5b3e63d05c0494413d17db2ff16035a55ab924 --head HEAD` exit 0 (1 commit OK).
-- Current Hosted CI: Pending push of clean successor branch `gemini/pax-web-shell-20261009-unblock-manual-unblock-v8`. No reviewer-started jobs remain pending for historical branches.
+- Current Hosted CI: [pre-push snapshot] Pending push of clean successor branch `gemini/pax-web-shell-20261009-unblock-manual-unblock-v8`. [actual] PR2496/current queued-CI evidence 38011220253/38011220208 QUEUED. No reviewer-started jobs remain pending for historical branches.
 
 ## Unblocked Next Step
 The parent task `PAX-WEB-SHELL-20261009` code unit remains R7: retry-call3 network/401 with rotated JWT/trusted refresh body/both deletion cookies; refresh-only/empty/non-string token pairs; logout metadata mint failure; actual Next-decoded POST traversal and allowed-shaped GET oauth encoded-dot rejection with zero metadata/API calls; successful OTP/OAuth/refresh positives and truthful same-SHA CI/provenance. Preserve existing session/logout/traversal/token/portability fixes.
 U5 Consumer Blocker: Original parent owner later consumes `light.headerBg` within parent scope and verifies actual P5Phone/P5Header composition (mapping REALM_COLORS.passenger.dark.bg -> P5.brandDark to light.headerBg); do not ask parent to edit ui-tokens outside its scope.
 Await merged helper only for necessary token synchronization; normal merge preserves published PR history, never rebase/amend/force-push.
 Truthful current disposition: Supervisor gateway coordination updates helper metadata to `resolved_parent_status=blocked`, `resolved_parent_waiting_for=Codex`, and `resolved_parent_next` explicitly retaining U5 parent mapping/P5Phone/P5Header regression plus R7.
+
+## U5 Gateway Coordination Evidence
+The Supervisor has successfully executed gateway metadata coordination for the remaining consumer blocker (U5). Static agreement probe confirms truthfulness:
+```json
+{
+  "resolved_parent_status": "blocked",
+  "resolved_parent_waiting_for": "Codex",
+  "resolved_parent_next": "PAX-WEB-SHELL-20261009 待辦（helper 合併後）：(U5) 在 parent 自己的範圍內（apps/passenger-app-web/components/p5-ui.tsx 等），把 P5Phone 與 P5Header 的背景從 REALM_COLORS.passenger.dark.bg 改為 helper 合併提供的 REALM_COLORS.passenger.light.headerBg（#07437E，白字），並補 P5Phone／P5Header 的回歸測試；不修改 packages/ui-tokens。(R7) 完成既有 R7 全部項目：retry-call3 遇 network／401 時的 rotated JWT、受信任的 refresh body 與兩個 cookie 的刪除；refresh-only／空值／非字串 token pair；logout 的 metadata mint 失敗；Next 解碼後的 POST traversal 與看似允許的 GET oauth encoded-dot 一律拒絕且零 metadata／API 呼叫；OTP／OAuth／refresh 的成功路徑；同 SHA CI 與 provenance 屬實。保留既有 session／logout／traversal／token／portability 修正；以一般 merge 帶入 dev，不得 rebase／amend／force-push 已發布的 PR #2464。"
+}
+```
