@@ -419,13 +419,13 @@ fare 目錄、V0112、bootstrap guard 與定案內容文件相對已 approve 的
 `candidate-evidence.json` 記完整 final SHA、remote/PR head、UAT hash、全部本機
 結果，以及同 SHA hosted CI run/jobs/logs。它不覆蓋前兩輪 manifest。
 
-| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼與證據 | 未驗項／限制 |
-| --- | --- | --- | --- | --- |
-| OAuth 整合衝突 | 正式 PassengerAppModule 的 imports/controllers/providers；PR #2501 | a455c0707 對 2bb31e7fd 的 merge-tree exit1，唯一 module 衝突 → 796982bdb 對同一 dev exit0；live PR 改為 MERGEABLE | `git merge-tree --write-tree <head> 2bb31e7fd60074773932caa00a1c56711bb9b6ac`；merge-before/merge-after.log 及 result.json | merge-tree 只驗整合；不冒充產品 runtime |
-| pax-fare_tariff_and_engine | 未變的正式 V0112 seed、FareTariff、estimateFare；前節 F-TARIFF-01 定案來源 | 本次 root 包含全部 fare/官方數字/boundary 回歸；root 合計 504 pass、0 fail、2 skip | 下列 root 命令 exit0；root.json／root.log | 春節年度／機場特殊規則仍未納入一般日 seed；正式 PG 仍走 PAX-QA hosted gate |
-| pax-fare_quote_and_public_fares | 正式 FareController/Service/Repository、live session/geo guard、GeoService/ServiceAreaService | quote/public fare/owner/expiry/服務範圍與四路由三環境正向及拒絕回歸通過；API 合計 228 pass、0 fail/skip | root/API 命令均 exit0；root.json／api.json | storage/routing/provider 外部邊界 stub；BFF/runtime 與正式 PG repository/constraints 未在 VM 執行 |
-| F-GEO-01／F-CI-01／F-TARIFF-01 及 OTP/OAuth 回歸 | 正式 guard/account/session、固定每趟20元/60秒/官方進位、既有 inventory、OAuth controller/service 與真 Nest metadata | 舊缺陷回歸保留；root 504 pass/2 development strict-only skip、API 228 pass；五個登入路由唯一 handler | root/API exit0；inventory exit0（94 test files）；inventory.log | 不把兩個明確 skip 列 pass；OAuth/mail/SMS 無真實外部請求 |
-| lint／format／typecheck／metadata | 合併後 module/policy、正式 API/root tsconfig、trailers/canonical/diff | scoped lint/format、API typecheck、inventory、trailers、canonical 均 exit0；標準 root typecheck exit2（下列共享依賴限制），worktree 來源解析與最終文件 checks 結果見 manifest | 每項獨立 result.json/log；最終同 SHA CI 必須全部完成並讀結果再 handoff | checkpoint CI 不當 final candidate 綠燈；review/merge/兩個 named acceptance 留原 lifecycle |
+| Finding／驗收項                                  | 原始碼依據與修改位置                                                                                                | 舊版重現 → 修正版結果                                                                                                                                                         | 命令、退出碼與證據                                                                                                         | 未驗項／限制                                                                                      |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| OAuth 整合衝突                                   | 正式 PassengerAppModule 的 imports/controllers/providers；PR #2501                                                  | a455c0707 對 2bb31e7fd 的 merge-tree exit1，唯一 module 衝突 → 796982bdb 對同一 dev exit0；live PR 改為 MERGEABLE                                                             | `git merge-tree --write-tree <head> 2bb31e7fd60074773932caa00a1c56711bb9b6ac`；merge-before/merge-after.log 及 result.json | merge-tree 只驗整合；不冒充產品 runtime                                                           |
+| pax-fare_tariff_and_engine                       | 未變的正式 V0112 seed、FareTariff、estimateFare；前節 F-TARIFF-01 定案來源                                          | 本次 root 包含全部 fare/官方數字/boundary 回歸；root 合計 504 pass、0 fail、2 skip                                                                                            | 下列 root 命令 exit0；root.json／root.log                                                                                  | 春節年度／機場特殊規則仍未納入一般日 seed；正式 PG 仍走 PAX-QA hosted gate                        |
+| pax-fare_quote_and_public_fares                  | 正式 FareController/Service/Repository、live session/geo guard、GeoService/ServiceAreaService                       | quote/public fare/owner/expiry/服務範圍與四路由三環境正向及拒絕回歸通過；API 合計 228 pass、0 fail/skip                                                                       | root/API 命令均 exit0；root.json／api.json                                                                                 | storage/routing/provider 外部邊界 stub；BFF/runtime 與正式 PG repository/constraints 未在 VM 執行 |
+| F-GEO-01／F-CI-01／F-TARIFF-01 及 OTP/OAuth 回歸 | 正式 guard/account/session、固定每趟20元/60秒/官方進位、既有 inventory、OAuth controller/service 與真 Nest metadata | 舊缺陷回歸保留；root 504 pass/2 development strict-only skip、API 228 pass；五個登入路由唯一 handler                                                                          | root/API exit0；inventory exit0（94 test files）；inventory.log                                                            | 不把兩個明確 skip 列 pass；OAuth/mail/SMS 無真實外部請求                                          |
+| lint／format／typecheck／metadata                | 合併後 module/policy、正式 API/root tsconfig、trailers/canonical/diff                                               | scoped lint/format、API typecheck、inventory、trailers、canonical 均 exit0；標準 root typecheck exit2（下列共享依賴限制），worktree 來源解析與最終文件 checks 結果見 manifest | 每項獨立 result.json/log；最終同 SHA CI 必須全部完成並讀結果再 handoff                                                     | checkpoint CI 不當 final candidate 綠燈；review/merge/兩個 named acceptance 留原 lifecycle        |
 
 本次已結束的正式回歸命令（JSON reporter 的輸出路徑位於上述 evidence root）：
 
@@ -442,6 +442,14 @@ pnpm --filter @drts/api exec vitest run tests/unit/geo.service.test.ts tests/uni
 原 root config，保留全部 include/options 與 contracts/control-plane aliases，
 只增加 `@drts/api-client` 指向本 worktree 原始碼；完整 root 檢查的實際結果
 保留於 root-typecheck-worktree.result.json/log。不將原 exit2 改寫成 pass。
+
+來源解析重跑啟動時，共享 TypeScript 與 Prettier symlink 已失效，該次 exit1
+為 MODULE_NOT_FOUND，未執行型別檢查；完整失敗 log 保留。為避免再次被其他
+worktree 依賴變動影響，只 unlink 本 task worktree 的 22 個 node_modules
+symlink，清單見 dependency-symlinks-unlinked.json，沒有更動 canonical root。
+`CI=true pnpm install --frozen-lockfile --ignore-scripts` exit0；之後重跑原標準
+`pnpm typecheck:root`，結果獨立記在 root-typecheck-isolated.result.json/log。
+正式 config、來源與 lockfile 未改，沒有以縮減 include 的檢查代替完整 root 檢查。
 
 沒有 rebase/amend/force push/reset 活躍工作樹；沒有啟動 VM 產品、PG、preview、
 browser/E2E 或 Docker Compose。普通 push 後以 final CANDIDATE_SHA/BRANCH
