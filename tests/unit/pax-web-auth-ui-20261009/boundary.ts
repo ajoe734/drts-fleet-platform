@@ -245,7 +245,11 @@ export function installBoundary(
       method as "GET" | "POST" | "PATCH" | "DELETE"
     ];
     const response = await handler(
-      new NextRequest(full, { method, headers, ...(init?.body != null ? { body: init.body } : {}) }),
+      new NextRequest(full, {
+        method,
+        headers,
+        ...(init?.body != null ? { body: init.body } : {}),
+      }),
       { params: Promise.resolve({ path }) },
     );
     for (const cookie of response.cookies.getAll()) {

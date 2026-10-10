@@ -293,12 +293,14 @@ describe("Passenger BFF Route", () => {
         refreshToken: "oauth-refresh",
       };
       const calls: Array<{ url: string; init?: RequestInit }> = [];
-      global.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
-        calls.push({ url, ...(init ? { init } : {}) });
-        if (url.includes("metadata.google.internal"))
-          return new Response("trusted-identity");
-        return apiWireResponse(url.endsWith("/start") ? start : callback);
-      });
+      global.fetch = vi
+        .fn()
+        .mockImplementation(async (url: string, init?: RequestInit) => {
+          calls.push({ url, ...(init ? { init } : {}) });
+          if (url.includes("metadata.google.internal"))
+            return new Response("trusted-identity");
+          return apiWireResponse(url.endsWith("/start") ? start : callback);
+        });
       const origin = "https://ride.smarttransport.tw";
       const startCommand = {
         provider,
