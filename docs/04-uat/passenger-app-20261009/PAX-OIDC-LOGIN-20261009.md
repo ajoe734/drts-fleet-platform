@@ -43,6 +43,47 @@ node node_modules/vitest/vitest.mjs run --root apps/api tests/unit/passenger-aut
 node node_modules/vitest/vitest.mjs run tests/unit/pax-oidc-login-20261009/passenger-oauth.test.ts -t 'GET /passenger-app/auth/providers' --reporter=dot
 ```
 
+### Complete affected local regression
+
+Executed on anchor `bfce01d2c029fce70f8889993e9951b531800adb`, whose
+production/test bytes will be unchanged in the final evidence commit.
+
+| Check                                                                                              | Result                                                                                                                                                                                                                                                          | Evidence under this worktree's `.local/pax-oidc-login-20261009/`     |
+| -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Root OAuth, OTP, account/session and legacy tenant OIDC suites                                     | 14 files / 321 tests pass, exit 0; OAuth includes 79 cases                                                                                                                                                                                                      | `root-regression.log`                                                |
+| API route metadata, OAuth production repository/boundary, auth-bootstrap and tenant/partner suites | 4 files / 187 tests pass, exit 0                                                                                                                                                                                                                                | `api-regression.log`                                                 |
+| Scoped lint                                                                                        | Pass, exit 0                                                                                                                                                                                                                                                    | `lint.log`                                                           |
+| Workspace declarations + API typecheck (TypeScript 5.9.3)                                          | Pass, exit 0                                                                                                                                                                                                                                                    | `typecheck.log`                                                      |
+| Standard root typecheck                                                                            | Exit 2: shared node_modules points `@drts/api-client` at the Gemini worktree, while relative imports use this worktree; TypeScript treats their private class members as different declarations                                                                 | `root-typecheck.log`; environment failure, not a provider regression |
+| Root typecheck with worktree source resolution                                                     | Pass, exit 0. Local config extends the unchanged root config and retains its full includes/options, adding only `@drts/api-client` → this worktree's source (plus the existing contracts/control-plane aliases). No shared modules or repository config changed | `tsconfig.root.json`, `root-typecheck-worktree-alias.log`            |
+
+```bash
+node node_modules/vitest/vitest.mjs run tests/unit/pax-oidc-login-20261009/passenger-oauth.test.ts tests/unit/pax-otp-20261009 tests/unit/auth-oidc-pkce.test.ts tests/unit/tenant-google-bff.test.ts tests/unit/tenant-google-invitation.test.ts tests/unit/tenant-oidc-replay-store.test.ts tests/unit/pax-account-session-20261009 --reporter=dot
+# From apps/api:
+node ../../node_modules/vitest/vitest.mjs run tests/unit/passenger-auth-provider-routing.test.ts tests/unit/passenger-oauth-transaction.repository.test.ts tests/unit/auth-bootstrap.test.ts tests/unit/tenant-partner.service.test.ts --reporter=dot
+# From the worktree root:
+node node_modules/eslint/bin/eslint.js tests/unit/pax-oidc-login-20261009/passenger-oauth.test.ts apps/api/tests/unit/passenger-auth-provider-routing.test.ts apps/api/tests/unit/passenger-oauth-transaction.repository.test.ts apps/api/src/modules/passenger-app/oauth apps/api/src/modules/passenger-app/otp/passenger-otp.controller.ts apps/api/src/modules/auth/oidc-id-token-verifier.ts --max-warnings=0
+node node_modules/typescript/bin/tsc -p packages/contracts/tsconfig.json
+node node_modules/typescript/bin/tsc -p packages/control-plane-auth/tsconfig.json
+node node_modules/typescript/bin/tsc -p apps/api/tsconfig.json --noEmit
+node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
+node node_modules/typescript/bin/tsc -p .local/pax-oidc-login-20261009/tsconfig.root.json --noEmit
+```
+
+Same-final-SHA hosted CI run/job identities, completed conclusions and read
+log results are recorded in canonical `handoff` / progress evidence and
+`.local/pax-oidc-login-20261009/` receipts, so recording CI does not modify
+the locked candidate. Both remote task branches and PR #2501 must equal
+that final SHA. The earlier anchor's CI is not candidate evidence.
+
+SQL was re-read in this continuation against the formal V0111 allocation,
+V0109 account key, all 12 transaction columns/types, 11 INSERT bindings,
+row mapping and atomic consumption/expiry predicate; no SQL changes were
+needed. The reviewer must independently compare these. Local test doubles
+do not prove passenger PostgreSQL casts, locking or concurrency; those
+remain the formal-schema PAX-QA hosted gate. Real Google/LINE credentials
+and runtime flows remain external acceptance; no live endpoints were called.
+
 ## Historical integration blocker after dev advanced (2026-10-10 03:03 UTC)
 
 The checks below passed on published `130e7846346fbc736fd1d355e1f3554fef5932ff`.
@@ -78,7 +119,7 @@ handoff. Supervisor subsequently authorized the scope; the repair and actual
 new regression results are recorded above. Neither required acceptance key
 is claimed complete by this owner artifact.
 
-## Codex2 continuation: repeated findings and current verification
+## Historical pre-merge Codex2 continuation: repeated findings and verification
 
 Reviewed predecessors: `9701679ffcaa12afd90dc01698317e79def43483` (first REOPEN)
 and `595c07133624264b7f49c91183d1b7d167e45f51` (second REOPEN, generation
@@ -222,9 +263,9 @@ jwksUri: LINE's certs endpoint, hsSecret: <channel secret>}` — the `hsSecret`
   (types), `oauth-transaction.repository.ts` (production SQL, bound params
   only), `oauth-provider.config.ts` (all-or-nothing env gating per SD §4:
   `GOOGLE_OAUTH_CLIENT_ID`+`_SECRET`, `LINE_CHANNEL_ID`+`_SECRET`; exact-string
-  `OAUTH_REDIRECT_ALLOWLIST` match; `GET providers` also reports `phone`
-  gated on `SMS_PROVIDER_API_KEY`+`_SENDER_ID`, `email` always on, and never
-  reports `facebook` — the transaction table's provider CHECK already allows
+  `OAUTH_REDIRECT_ALLOWLIST` match; `GET providers` now aggregates `phone`
+  and `email` from `PassengerOtpService.providers()` (pepper, sender and actual
+  mail/SMS transport availability), and never reports `facebook` — the transaction table's provider CHECK already allows
   it for later reuse, but no OAuth2 exchange is implemented in this task),
   `passenger-oauth.service.ts` (start/callback), `passenger-oauth.controller.ts`
   (`POST auth/oauth/:provider/start`, `POST auth/oauth/:provider/callback`,
