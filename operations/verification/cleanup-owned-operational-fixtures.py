@@ -19,8 +19,7 @@ Safety & Governance Constraints:
   operational report statistics (16 passed / 0 failed / 0 skipped), and evidence records.
 - Physical key mapping: derives physical GCS object keys per the immutable
   GcsDocumentArtifactStoreAdapter contract.
-- Zero socket or network calls on VM (stdlib only; external boundary mocked in unit tests).
-  Without a genuine artifact or Operator environment, this provides simulated local planning.
+- External mutations are securely disabled. Local parsing and planning use only stdlib, but inspecting a genuine artifact without --offline delegates to the gcloud CLI to query live object metadata over the network.
 """
 from __future__ import annotations
 
@@ -57,6 +56,9 @@ EXPECTED_SHA256 = (
 EXPECTED_MIME = "application/pdf"
 KEY_PREFIX = "fleet-partner/fleet-demo-001/supply-submissions/"
 EXPECTED_FLEET_PARTNER_ID = "fleet-demo-001"
+EXPECTED_RUN_BOUNDS_START = "2026-10-09T08:00:00Z"
+EXPECTED_RUN_BOUNDS_END = "2026-10-09T10:05:00Z"
+
 OWNED_OBJECT_COUNT = 8
 OWNED_SUBMISSION_COUNT = 4
 
@@ -235,6 +237,19 @@ def validate_provenance(
         require(
             actual_def == expected_def,
             f"Workflow definition SHA mismatch: expected {expected_def}, got {actual_def}",
+        )
+
+    run_bounds = inventory_or_evidence.get("run_bounds")
+    if run_bounds is not None:
+        start_bound = run_bounds.get("start")
+        end_bound = run_bounds.get("end")
+        require(
+            start_bound == EXPECTED_RUN_BOUNDS_START,
+            f"run_bounds start mismatch: expected {EXPECTED_RUN_BOUNDS_START}, got {start_bound}",
+        )
+        require(
+            end_bound == EXPECTED_RUN_BOUNDS_END,
+            f"run_bounds end mismatch: expected {EXPECTED_RUN_BOUNDS_END}, got {end_bound}",
         )
 
     if artifact_id is not None:
@@ -471,13 +486,12 @@ def load_and_validate_authoritative_artifact(
     jobs_list = jobs_meta.get("jobs")
     require(isinstance(jobs_list, list), "Invalid jobs.json: missing jobs list")
     
-    acceptance_job = None
-    for job in jobs_list:
-        if job.get("name") and "acceptance" in job.get("name", "").lower():
-            acceptance_job = job
-            break
+    acceptance_jobs = [job for job in jobs_list if job.get("name") and "acceptance" in job.get("name", "").lower()]
+    require(len(acceptance_jobs) == 1, f"Expected exactly 1 acceptance job, found {len(acceptance_jobs)}")
+    acceptance_job = acceptance_jobs[0]
             
-    require(acceptance_job is not None, "Missing successful acceptance job in jobs.json")
+    require(len(jobs_list) == 9, f"Expected exactly 9 required jobs in run, got {len(jobs_list)}")
+    require(acceptance_job.get("id") == 113747921500, f"Acceptance job ID mismatch: expected 113747921500, got {acceptance_job.get('id')}")
     require(acceptance_job.get("status") == "completed", "Acceptance job is not completed")
     require(acceptance_job.get("conclusion") == "success", "Acceptance job was not successful")
     require(acceptance_job.get("run_id") == expected_run_id, f"Acceptance job run_id mismatch: expected {expected_run_id}")
@@ -485,11 +499,14 @@ def load_and_validate_authoritative_artifact(
     # Require unique identity binding and no missing fields
     require(acceptance_job.get("head_sha") == expected_workflow_def_sha, f"Acceptance job head_sha mismatch: expected {expected_workflow_def_sha}")
     html_url = acceptance_job.get("html_url", "")
-    require("ajoe734/drts-fleet-platform" in html_url, f"Acceptance job foreign repository/URL: {html_url}")
+    require(html_url == f"https://github.com/ajoe734/drts-fleet-platform/actions/runs/{expected_run_id}/job/113747921500", f"Acceptance job foreign repository/URL: {html_url}")
+    api_url = acceptance_job.get("url", "")
+    require(api_url == "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/113747921500", f"Acceptance job foreign API URL: {api_url}")
 
     # Check terminal status for all jobs
     for job in jobs_list:
         require(job.get("status") == "completed", f"Required job {job.get('name')} is not completed")
+        require(job.get("conclusion") == "success", f"Required job {job.get('name')} was not successful")
 
     # 2. Locate and parse report.json and operational-browser-evidence.json directly from the hashed ZIP
     report_data = None
@@ -1054,9 +1071,12 @@ def inspect_and_validate_gcs_target(
     def parse_time(ts_str):
         if not ts_str: return None
         try:
-            return datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-        except ValueError:
-            raise ValueError(f"Malformed timestamp for gs://{bucket}/{key}: {ts_str}")
+            dt = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                raise ValueError("Naive timestamp")
+            return dt
+        except ValueError as e:
+            raise ValueError(f"Malformed or naive timestamp for gs://{bucket}/{key}: {ts_str} ({e})")
 
     tc_str = meta.get("timeCreated")
     up_str = meta.get("updated")

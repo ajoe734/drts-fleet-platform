@@ -144,7 +144,7 @@ def create_authentic_inventory() -> Dict[str, Any]:
         "workflow_definition_sha": cleanup.EXPECTED_WORKFLOW_DEF_SHA,
         "artifact_id": cleanup.EXPECTED_ARTIFACT_ID,
         "artifact_digest": cleanup.EXPECTED_ARTIFACT_DIGEST,
-        "run_bounds": {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"},
+        "run_bounds": {"start": cleanup.EXPECTED_RUN_BOUNDS_START, "end": cleanup.EXPECTED_RUN_BOUNDS_END},
         "storage_documents": docs,
         "mutation_records": [
             {
@@ -230,6 +230,13 @@ class TestProvenanceValidation(unittest.TestCase):
         with self.assertRaises(ValueError):
             cleanup.validate_full_sha("4a166f3")  # short SHA rejected
 
+    def test_forged_bounds_rejected(self):
+        data = copy.deepcopy(self.data)
+        data["run_bounds"] = {"start": "2020-01-01T00:00:00Z", "end": "2030-01-01T00:00:00Z"}
+        with self.assertRaises(ValueError) as ctx:
+            cleanup.validate_provenance(data)
+        self.assertIn("run_bounds start mismatch", str(ctx.exception))
+
 
 class TestAuthoritativeArtifactCollection(unittest.TestCase):
     def setUp(self):
@@ -242,10 +249,25 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
             "head_sha": cleanup.EXPECTED_WORKFLOW_DEF_SHA,
             "status": "completed",
             "conclusion": "success",
-            "run_started_at": "2026-10-09T08:00:00Z",
+            "run_started_at": cleanup.EXPECTED_RUN_BOUNDS_START,
             "repository": {"full_name": "ajoe734/drts-fleet-platform"}
         }
-        self.jobs_meta = {"jobs": [{"name": "acceptance tests", "status": "completed", "conclusion": "success", "run_id": cleanup.EXPECTED_PRODUCT_RUN_ID, "completed_at": "2026-10-09T10:05:00Z", "started_at": "2026-10-09T08:05:00Z", "head_sha": cleanup.EXPECTED_WORKFLOW_DEF_SHA, "html_url": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/1"}]}
+        jobs = []
+        for i in range(8):
+            jobs.append({
+                "name": f"other job {i}", "status": "completed", "conclusion": "success"
+            })
+        jobs.append({
+            "id": 113747921500,
+            "name": "acceptance tests", "status": "completed", "conclusion": "success", 
+            "run_id": cleanup.EXPECTED_PRODUCT_RUN_ID, 
+            "completed_at": cleanup.EXPECTED_RUN_BOUNDS_END, 
+            "started_at": cleanup.EXPECTED_RUN_BOUNDS_START, 
+            "head_sha": cleanup.EXPECTED_WORKFLOW_DEF_SHA, 
+            "html_url": f"https://github.com/ajoe734/drts-fleet-platform/actions/runs/{cleanup.EXPECTED_PRODUCT_RUN_ID}/job/113747921500",
+            "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/113747921500"
+        })
+        self.jobs_meta = {"jobs": jobs}
         
         # Create a real zip containing report.json and operational-browser-evidence.json
         buf = io.BytesIO()
@@ -341,6 +363,82 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
                 with self.assertRaises(ValueError) as ctx:
                     cleanup.load_and_validate_authoritative_artifact(dir_path)
             self.assertIn("Unexpected failures in report", str(ctx.exception))
+
+    def test_missing_required_jobs_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dir_path = Path(tmpdir)
+            (dir_path / "evidence.zip").write_bytes(self.mock_zip_content)
+            
+            art_meta = copy.deepcopy(AUTHENTIC_ARTIFACTS_JSON)
+            art_meta["artifacts"][0]["digest"] = "sha256:" + self.mock_hash
+            (dir_path / "artifacts.json").write_text(json.dumps(art_meta), encoding="utf-8")
+            (dir_path / "run.json").write_text(json.dumps(self.run_meta), encoding="utf-8")
+            
+            bad_jobs = copy.deepcopy(self.jobs_meta)
+            bad_jobs["jobs"] = [bad_jobs["jobs"][-1]] # Keep only acceptance
+            (dir_path / "jobs.json").write_text(json.dumps(bad_jobs), encoding="utf-8")
+            
+            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', 'sha256:' + self.mock_hash):
+                with self.assertRaises(ValueError) as ctx:
+                    cleanup.load_and_validate_authoritative_artifact(dir_path)
+            self.assertIn("Expected exactly 9 required jobs", str(ctx.exception))
+
+    def test_duplicate_acceptance_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dir_path = Path(tmpdir)
+            (dir_path / "evidence.zip").write_bytes(self.mock_zip_content)
+            
+            art_meta = copy.deepcopy(AUTHENTIC_ARTIFACTS_JSON)
+            art_meta["artifacts"][0]["digest"] = "sha256:" + self.mock_hash
+            (dir_path / "artifacts.json").write_text(json.dumps(art_meta), encoding="utf-8")
+            (dir_path / "run.json").write_text(json.dumps(self.run_meta), encoding="utf-8")
+            
+            bad_jobs = copy.deepcopy(self.jobs_meta)
+            bad_jobs["jobs"].append(bad_jobs["jobs"][-1]) # Duplicate acceptance
+            (dir_path / "jobs.json").write_text(json.dumps(bad_jobs), encoding="utf-8")
+            
+            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', 'sha256:' + self.mock_hash):
+                with self.assertRaises(ValueError) as ctx:
+                    cleanup.load_and_validate_authoritative_artifact(dir_path)
+            self.assertIn("Expected exactly 1 acceptance job", str(ctx.exception))
+            
+    def test_failed_completed_other_job_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dir_path = Path(tmpdir)
+            (dir_path / "evidence.zip").write_bytes(self.mock_zip_content)
+            
+            art_meta = copy.deepcopy(AUTHENTIC_ARTIFACTS_JSON)
+            art_meta["artifacts"][0]["digest"] = "sha256:" + self.mock_hash
+            (dir_path / "artifacts.json").write_text(json.dumps(art_meta), encoding="utf-8")
+            (dir_path / "run.json").write_text(json.dumps(self.run_meta), encoding="utf-8")
+            
+            bad_jobs = copy.deepcopy(self.jobs_meta)
+            bad_jobs["jobs"][0]["conclusion"] = "failure"
+            (dir_path / "jobs.json").write_text(json.dumps(bad_jobs), encoding="utf-8")
+            
+            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', 'sha256:' + self.mock_hash):
+                with self.assertRaises(ValueError) as ctx:
+                    cleanup.load_and_validate_authoritative_artifact(dir_path)
+            self.assertIn("was not successful", str(ctx.exception))
+
+    def test_foreign_url_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dir_path = Path(tmpdir)
+            (dir_path / "evidence.zip").write_bytes(self.mock_zip_content)
+            
+            art_meta = copy.deepcopy(AUTHENTIC_ARTIFACTS_JSON)
+            art_meta["artifacts"][0]["digest"] = "sha256:" + self.mock_hash
+            (dir_path / "artifacts.json").write_text(json.dumps(art_meta), encoding="utf-8")
+            (dir_path / "run.json").write_text(json.dumps(self.run_meta), encoding="utf-8")
+            
+            bad_jobs = copy.deepcopy(self.jobs_meta)
+            bad_jobs["jobs"][-1]["html_url"] = "https://example.invalid/ajoe734/drts-fleet-platform/actions/runs/1/job/1"
+            (dir_path / "jobs.json").write_text(json.dumps(bad_jobs), encoding="utf-8")
+            
+            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', 'sha256:' + self.mock_hash):
+                with self.assertRaises(ValueError) as ctx:
+                    cleanup.load_and_validate_authoritative_artifact(dir_path)
+            self.assertIn("Acceptance job foreign repository/URL", str(ctx.exception))
 
 
 class TestInventoryValidation(unittest.TestCase):
@@ -441,6 +539,38 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             cleanup.inspect_and_validate_gcs_target(desc, target, prior_receipts=None)
         self.assertIn("Pre-existing absence", str(ctx.exception))
+
+    def test_gcs_metadata_naive_timestamp_rejected(self):
+        target = {
+            "bucket": cleanup.BUCKET,
+            "key": list(cleanup.CANONICAL_OWNED_OBJECTS.keys())[0],
+            "expected_size": 327,
+            "expected_content_type": "application/pdf",
+            "expected_sha256": cleanup.EXPECTED_SHA256,
+            "run_bounds": {"start": cleanup.EXPECTED_RUN_BOUNDS_START, "end": cleanup.EXPECTED_RUN_BOUNDS_END},
+        }
+        desc = {
+            "status": "ok",
+            "metadata": {
+                "bucket": cleanup.BUCKET,
+                "name": target["key"],
+                "generation": "1728464600123456",
+                "metageneration": "1",
+                "size": 327,
+                "contentType": "application/pdf",
+                "sha256": cleanup.EXPECTED_SHA256,
+                "timeCreated": "2026-10-09T09:03:18.572", # Naive
+            },
+        }
+        with self.assertRaises(ValueError) as ctx:
+            cleanup.inspect_and_validate_gcs_target(desc, target)
+        self.assertIn("Naive timestamp", str(ctx.exception))
+
+    def test_exported_pipeline_with_untrusted_inventory_blocks(self):
+        inv = create_authentic_inventory()
+        inv["run_bounds"] = {"start": "2026-10-09T08:00:00Z", "end": "2026-10-09T10:00:00Z"}
+        with self.assertRaises(ValueError):
+            cleanup.build_cleanup_plan(inv, mode="dry-run")
 
     def test_gcs_metadata_bad_content_type_rejected(self):
         target = {
