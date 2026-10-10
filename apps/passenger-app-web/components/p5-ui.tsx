@@ -1,5 +1,10 @@
 import React, { ReactNode, CSSProperties } from "react";
-import { REALM_COLORS, STATUS_TONES, CORE_SURFACES, CORE_FOREGROUNDS } from "@drts/ui-tokens";
+import {
+  REALM_COLORS,
+  STATUS_TONES,
+  CORE_SURFACES,
+  CORE_FOREGROUNDS,
+} from "@drts/ui-tokens";
 
 const pTokens = REALM_COLORS.passenger.light;
 
@@ -12,7 +17,7 @@ const P5 = {
   line: STATUS_TONES.neutral.light.border,
   lineSoft: STATUS_TONES.neutral.light.bg,
   brand: pTokens.fg,
-  brandDark: REALM_COLORS.passenger.dark.bg,
+  brandDark: pTokens.headerBg,
   brandBg: pTokens.bg,
   ok: STATUS_TONES.success.light.fg,
   okBg: STATUS_TONES.success.light.bg,
@@ -236,8 +241,18 @@ export function P5Map({
   pickupAddress?: string;
   updateNotice?: string;
   routeSvgPath?: string;
-  carPosition?: { left?: number | string; top?: number | string; right?: number | string; bottom?: number | string };
-  pinPosition?: { left?: number | string; top?: number | string; right?: number | string; bottom?: number | string };
+  carPosition?: {
+    left?: number | string;
+    top?: number | string;
+    right?: number | string;
+    bottom?: number | string;
+  };
+  pinPosition?: {
+    left?: number | string;
+    top?: number | string;
+    right?: number | string;
+    bottom?: number | string;
+  };
 }) {
   return (
     <div
@@ -306,7 +321,8 @@ export function P5Map({
           )}
         </>
       )}
-      {(state === "missing" || (!routeSvgPath && !carPosition && !pinPosition)) && (
+      {(state === "missing" ||
+        (!routeSvgPath && !carPosition && !pinPosition)) && (
         <div
           style={{
             position: "absolute",
@@ -515,7 +531,9 @@ export function P5VehicleCard({
               flexWrap: "wrap",
             }}
           >
-            <span style={{ fontSize: 14, fontWeight: 700 }}>{driver || "未知"}</span>
+            <span style={{ fontSize: 14, fontWeight: 700 }}>
+              {driver || "未知"}
+            </span>
             {registrationValid === true && (
               <span
                 style={{
@@ -584,10 +602,16 @@ export function P5VehicleCard({
                     gap: 3,
                   }}
                 >
-                  <P5Icon name="star" size={13} style={{ fill: STATUS_TONES.warning.light.fg }} />
+                  <P5Icon
+                    name="star"
+                    size={13}
+                    style={{ fill: STATUS_TONES.warning.light.fg }}
+                  />
                   <b style={{ fontSize: 15, color: P5.ink }}>{ratingScore}</b>
                 </span>
-                <span style={{ fontSize: 11, color: P5.mut }}>{ratingCount || 0} 則評價</span>
+                <span style={{ fontSize: 11, color: P5.mut }}>
+                  {ratingCount || 0} 則評價
+                </span>
               </span>
             ) : rating === "new" ? (
               <span
@@ -679,7 +703,8 @@ export function P5RouteFare({
         </div>
         <div style={{ fontSize: 11, color: P5.mut, textAlign: "right" }}>
           {distance || ""}
-          <br />{duration || ""}
+          <br />
+          {duration || ""}
         </div>
       </div>
       <div style={{ borderTop: "1px solid " + P5.lineSoft, paddingTop: 10 }}>
@@ -766,7 +791,11 @@ export function P5Btn({
   };
   const v =
     kind === "primary"
-      ? { ...s, background: danger ? P5.danger : P5.brand, color: CORE_FOREGROUNDS.foregroundInvert }
+      ? {
+          ...s,
+          background: danger ? P5.danger : P5.brand,
+          color: CORE_FOREGROUNDS.foregroundInvert,
+        }
       : kind === "ghost"
         ? {
             ...s,
