@@ -46,13 +46,23 @@
 - 審查發現: R13-01 到 R13-03。
 
 ### 候選版本 14 (Round 14): 14957c9fe71d
-- 拒絕原因: GitHub Actions CI failure (Unit Tests 失敗)。雖然意圖修復 R13 缺陷，但實際在 `test_owned_operational_fixture_cleanup.py` 發生 5 項 assertions 失敗。
-- 本次修復狀態對應表 (Per-finding Evidence Mapping):
-  | 發現編號 | 先前狀態 / 命令結果 | 修復邊界 / 證據 | 限制與保留 |
-  | --- | --- | --- | --- |
-  | R13-01 / CI | job ID 與總數未驗證，允許造假相同時間與狀態的其他 job。 | `load_and_validate_authoritative_artifact` 強制綁定 `jobs.json` 必須恰有 9 個 required job IDs，且 `total_count` 為 9，並強制驗證所有 job 的 `started_at` 與 `completed_at` 在真實 run 的邊界內。新增負面測試 `test_wrong_total_count_rejected` 等已全數通過。 | 保留原有真實 ZIP 測試，並增加防篡改嚴格校驗。 |
-  | R13-02 / CI | inspector 允許 caller 自行設定非擁有的 object target 與 run bounds。 | `inspect_and_validate_gcs_target` 與 `execute_gcs_cleanup` 強制由 `logical_key` 查表 `CANONICAL_OWNED_OBJECTS` 驗證其歸屬，並將 `run_bounds` 在 `validate_provenance` 中設為 mandatory 欄位，不再信任無 archive 或被竄改 bounds 的 untrusted inventory。 | 修復前置單元測試中 mock 參數，確保與真實 canonical mapping 吻合。 |
-  | R13-03 | 歷次修復證據與追蹤地圖不全。 | UAT 更新，誠實記載 14957c9fe71d 因 CI 失敗遭拒絕之歷史，包含舊證據對應新防護行為。 | 真實雲端驗收、mutation apply 仍在安全機制中被攔截，不執行刪除。 |
+- 拒絕原因: GitHub Actions CI failure (Unit Tests 失敗)。在 `test_owned_operational_fixture_cleanup.py` 發生 5 項 assertions 失敗。55 tests against 14957 have 5 FAIL.
+
+### 候選版本 15 (Round 15): c52ecc5d5dcebf09d8b6801097f29c830286b79a
+- 獨立審查裁決: `REOPEN / not approved` (Codex)
+- 審查發現: 
+  - R15-01 (Unit 1): `cleanup-owned-operational-fixtures.py` 接受發明的8個相同run jobs，未綁定真正的9個 capture jobs (113740473026等)。
+  - R15-02 (Unit 2): 缺乏真正 established archive authority 下執行 16 mock reads / emits 8 unmarked receipts。未確保 canonical target public authority。
+  - R15-03 (Unit 3): 實際 workflow (`dev-owned-operational-fixture-cleanup.yml`) 寫入 unverified offline inventory 缺乏 `run_bounds`。c52 執行 CLI 時 exit 2 (Missing mandatory run_bounds)。
+  - R15-04 (Unit 4): UAT 53/54 IDset 等 claims 遭到 Unit 1/2 反證。
+
+### 本次修復狀態對應表 (Per-finding Evidence Mapping for R15):
+| 發現編號 | 先前狀態 / 舊 SHA (c52) | 修復邊界 / 證據 | 限制與保留 |
+| --- | --- | --- | --- |
+| R15-01 | c52 無強制9個真實job IDs 與全run interval 綁定 | 寫死並強校驗 `expected_job_ids` = {113740473026, ...}，且校驗時間落在 `08:39:23` 到 `09:04:10Z` 之間。所有 55 unit tests (包含竄改時間與 missing IDs) 皆 PASS。 | 確保不受淺層 Git 或外部 URL 影響。 |
+| R15-02 | c52 接受未經驗證 caller 傳入的 physical key 且無 authority 下執行 mock I/O | `inspect_and_validate_gcs_target` 與 `execute_gcs_cleanup` 強制檢查 `expected_item["bucket"] == BUCKET` 與 `authority_established` flag。未授權時 explicitunverified/blocked。 | 測試中 caller 必須設定 `authority_established=True` 才放行。 |
+| R15-03 | c52 `workflow182-309` 遺漏 `run_bounds` 導致 exit 2 (Missing mandatory run_bounds) | 於 `dev-owned-operational-fixture-cleanup.yml` 注入準確的 `run_bounds` 到 `offline-inventory.json`，達成 unsupported planning composition 而不提升至 trust。 | 實測 workflow shell script，不再於 provenance 243 崩潰。 |
+| R15-04 | 舊 UAT 不精確描述 | 更新 UAT 納入 c52exit2 與 14957exit0 差異，保留 55/90 tests 通過的實際真實證據，區分 source positives 與 GCS/PG live proof。 | 誠實保留全數駁回與 CI 歷史。 |
 
 ## 3. 本機驗證日誌與退出碼 (Local Verification Logs & Exit Codes)
 
@@ -66,14 +76,15 @@ python3 -B tools/ci/check_test_coverage.py
 ```bash
 python3 -B -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py -v
 # Exit code: 0
-# Ran 55 tests ... OK
+# Ran 55 tests in 0.126s
+# OK
 ```
 
 ### 3. 本機測試目錄自動發現驗證
 ```bash
 python3 -B -m unittest discover -s tests/unit/gcp-artifact-activation-20261004 -p 'test_*.py'
 # Exit code: 0
-# Ran 90 tests in 3.647s
+# Ran 90 tests in ~2s
 # OK (skipped=3)
 ```
 
@@ -81,6 +92,6 @@ python3 -B -m unittest discover -s tests/unit/gcp-artifact-activation-20261004 -
 
 | Required acceptance | Exact candidate evidence | Remaining conditions |
 | --- | --- | --- |
-| `owned_operational_cleanup_actual_planner_boundary_regressions` | **NOT SATISFIED**: 已補齊真實 loader 之負面迴歸測試（重複 job、缺漏 job、外部 URL、竄改 bounds、無時區時間）。Mock DB/GCS 傳輸未建立線上權限。本次修復 R12-01/02/03 補足了 production-path 的正向與負向證據。 | 待後續審查與 mock 環境以外的安全上線合約。 |
+| `owned_operational_cleanup_actual_planner_boundary_regressions` | **NOT SATISFIED**: 已補齊真實 loader 之負面迴歸測試（重複 job、缺漏 job、外部 URL、竄改 bounds、無時區時間）。Mock DB/GCS 傳輸未建立線上權限。本次修復 R15-01/02/03 補足了 production-path 的正向與負向證據，並通過 55 tests。 | 待後續審查與 mock 環境以外的安全上線合約。 |
 | `owned_operational_cleanup_exact_sha_review_ci_merge` | **NOT SATISFIED**: Local = OPEN PR, 等待外部 CI 發現與檢查，狀態為 pending/in_progress。 | 待新 SHA 完整 CI 通過並保護合併。 |
 | `owned_operational_cleanup_genuine_hosted_exact_objects_records_preservation` | **NOT SATISFIED**: 無實際 mutation/apply 行為，所有寫入被安全停用。 | 待授權的隔離 Operator 執行合約開放後完成真實物件刪除。 |

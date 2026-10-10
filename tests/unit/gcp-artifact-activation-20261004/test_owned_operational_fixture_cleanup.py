@@ -256,7 +256,7 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
             "head_sha": cleanup.EXPECTED_WORKFLOW_DEF_SHA,
             "status": "completed",
             "conclusion": "success",
-            "run_started_at": cleanup.EXPECTED_RUN_BOUNDS_START,
+            "run_started_at": cleanup.EXPECTED_FULL_RUN_START,
             "repository": {"full_name": "ajoe734/drts-fleet-platform"}
         }
         jobs = []
@@ -624,6 +624,7 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
             "logical_key": logical,
             "expected_size": 327,
             "expected_content_type": "application/pdf",
+            "authority_established": True,
             "expected_sha256": cleanup.EXPECTED_SHA256,
             "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
         }
@@ -871,6 +872,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
             "logical_key": logical,
             "expected_size": 327,
             "expected_content_type": "application/pdf",
+            "authority_established": True,
             "expected_sha256": cleanup.EXPECTED_SHA256,
             "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
         }

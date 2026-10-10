@@ -56,6 +56,8 @@ EXPECTED_SHA256 = (
 EXPECTED_MIME = "application/pdf"
 KEY_PREFIX = "fleet-partner/fleet-demo-001/supply-submissions/"
 EXPECTED_FLEET_PARTNER_ID = "fleet-demo-001"
+EXPECTED_FULL_RUN_START = "2026-10-09T08:39:23Z"
+EXPECTED_FULL_RUN_END = "2026-10-09T09:04:10Z"
 EXPECTED_RUN_BOUNDS_START = "2026-10-09T09:01:12Z"
 EXPECTED_RUN_BOUNDS_END = "2026-10-09T09:04:01Z"
 
@@ -519,11 +521,22 @@ def load_and_validate_authoritative_artifact(
     acc_completed_str = acceptance_job.get("completed_at")
     require(acc_completed_str is not None, "acceptance job missing completed_at")
 
+    expected_job_ids = {
+        113740473026, 113740518866, 113744327840, 113745681997,
+        113746824327, 113747086904, 113747511276, 113747921500,
+        113748909497
+    }
+
     try:
         r_start = datetime.datetime.fromisoformat(run_start_str.replace("Z", "+00:00"))
+        expected_full_run_start = datetime.datetime.fromisoformat(EXPECTED_FULL_RUN_START.replace("Z", "+00:00"))
+        expected_full_run_end = datetime.datetime.fromisoformat(EXPECTED_FULL_RUN_END.replace("Z", "+00:00"))
+        
+        require(r_start == expected_full_run_start, f"Run start time mismatch: expected {EXPECTED_FULL_RUN_START}, got {run_start_str}")
+        
         acc_start = datetime.datetime.fromisoformat(acc_started_str.replace("Z", "+00:00"))
         acc_end = datetime.datetime.fromisoformat(acc_completed_str.replace("Z", "+00:00"))
-        require(r_start <= acc_start <= acc_end, "Invalid run/job temporal interval bounds")
+        require(r_start <= acc_start <= acc_end <= expected_full_run_end, "Invalid run/job temporal interval bounds")
     except ValueError as e:
         require(False, f"Malformed run bounds: {e}")
 
@@ -555,9 +568,11 @@ def load_and_validate_authoritative_artifact(
         try:
             j_start = datetime.datetime.fromisoformat(job_started.replace("Z", "+00:00"))
             j_end = datetime.datetime.fromisoformat(job_completed.replace("Z", "+00:00"))
-            require(r_start <= j_start <= j_end, f"Job {job_id} temporal interval out of bounds or reversed")
+            require(r_start <= j_start <= j_end <= expected_full_run_end, f"Job {job_id} temporal interval out of bounds or reversed")
         except ValueError as e:
             require(False, f"Malformed job bounds for {job_id}: {e}")
+
+    require(seen_job_ids == expected_job_ids, f"Captured jobs mismatch: missing {expected_job_ids - seen_job_ids} / foreign {seen_job_ids - expected_job_ids}")
 
     # 2. Locate and parse report.json and operational-browser-evidence.json directly from the hashed ZIP
     report_data = None
@@ -736,6 +751,7 @@ def build_cleanup_plan(
             "expected_content_type": doc["content_type"],
             "documentId": doc["documentId"],
             "confirmSubmissionId": doc["confirmSubmissionId"],
+            "authority_established": not inventory_data.get("unverified_planning_only", False),
         }
         if run_bounds:
             target_dict["run_bounds"] = run_bounds
@@ -895,6 +911,7 @@ def build_cleanup_plan(
         "db_targets": db_targets,
         "preservation_plan": preservation_plan,
         "db_blocker": DB_CONCRETE_BLOCKER,
+        "authority_established": not inventory_data.get("unverified_planning_only", False),
     }
 
 
@@ -1052,13 +1069,19 @@ def inspect_and_validate_gcs_target(
     simulation_mode: bool = False,
 ) -> Dict[str, Any]:
     """Validate live object identity before delete (bucket, key, generation, metageneration, MIME, size, timestamps, hash)."""
+    require(expected_item.get("authority_established") is True, "explicitunverified/blocked: truly established archive/runtime authority required")
     logical_key = expected_item.get("logical_key")
     require(
         logical_key is not None and logical_key.startswith(KEY_PREFIX) and logical_key in CANONICAL_OWNED_OBJECTS,
         f"Foreign object key expected to be owned, got: {logical_key}"
     )
-    bucket = expected_item["bucket"]
-    key = expected_item["key"]
+    bucket = expected_item.get("bucket")
+    require(bucket == BUCKET, f"Foreign target bucket: {bucket} (expected {BUCKET})")
+    
+    key = expected_item.get("key")
+    require(key is not None, "Missing target key")
+    require(key == logical_to_physical_gcs_key(logical_key), f"Key does not match authoritative derivation: {key}")
+
     expected_size = expected_item["expected_size"]
     expected_content_type = expected_item["expected_content_type"]
     expected_sha256 = expected_item["expected_sha256"]
@@ -1249,6 +1272,14 @@ def execute_gcs_cleanup(
     mode = plan["mode"]
     if mode == "apply":
         raise ValueError("Mutation is explicitly disabled: unsupported apply mode is rejected at entrypoint")
+
+    if not plan.get("authority_established"):
+        return {
+            "status": "blocked",
+            "mode": mode,
+            "total_targets": len(plan.get("gcs_targets", [])),
+            "receipts": [{"status": "explicitunverified/blocked"}] * len(plan.get("gcs_targets", []))
+        }
 
     runner = gcs_runner or default_gcs_runner
     targets = plan["gcs_targets"]

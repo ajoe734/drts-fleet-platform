@@ -287,6 +287,10 @@ jobs:
                 "resultId": "booking-2e367210-fc7b-4bf0-9512-8ff7626b5165"
               }
             ],
+            "run_bounds": {
+              "start": "2026-10-09T09:01:12Z",
+              "end": "2026-10-09T09:04:01Z"
+            },
             "preserve_failed_8d_03a_and_user_data": true
           }
           EOF
