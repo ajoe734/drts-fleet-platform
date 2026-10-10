@@ -74,6 +74,7 @@ import { AccidentInvestigationModule } from "./modules/accident-investigation/ac
 import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regulatory-reporting.module";
 
 import { CandidateShaMiddleware } from "./common/candidate-sha.middleware";
+import { PassengerAppModule } from "./modules/passenger-app/passenger-app.module";
 
 @Module({
   imports: [
@@ -81,6 +82,7 @@ import { CandidateShaMiddleware } from "./common/candidate-sha.middleware";
     ThrottlerModule.forRoot([...GLOBAL_RATE_LIMIT]),
     LlmGatewayModule,
     AuthModule,
+    PassengerAppModule,
     AssistantModule,
     HealthModule,
     FoundationModule,

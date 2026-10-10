@@ -1,24 +1,24 @@
 # smarttransport.tw 自訂網域設定 Runbook
 
-**產生日期：** 2026-08-01
-**GCP Project：** `nodal-alloy-503700-s3`
+**更新日期：** 2026-10-10（PAX-WEB-DEPLOY-20261009）
+**GCP Project：** 以 live `DEV_GCP_PROJECT_ID` 為準；2026-10-10 唯讀查詢為 `drts-dev-devcc-20260825`
 **Region：** `us-central1`
-**目標：** 記錄 dev active inventory 與 `smarttransport.tw` 目前可觀測的 custom-domain 狀態，僅供控管與後續清理；本 task 不部署、不改 billing。
+**目標：** 記錄 shared dev 的部署／網域目標態及 DNS 交付；沒有部署或 DNS 生效證據前，不宣稱已上線。本機不部署、不改 DNS 或 billing。
 
-> ⚠️ **歷史範圍（2026-10-02 補註）：** 本 runbook 全文的 GCP project 是
-> `nodal-alloy-503700-s3`，依 `AGENTS.md` 記錄，該 project 已於 2026-09-07
+> **歷史範圍：** §5、§6 保留 `nodal-alloy-503700-s3` 的原始觀測。
+> 依 `AGENTS.md` 記錄，該 project 已於 2026-09-07
 > 因 content/ToS 問題停權；現行 live 共用 dev target 是 GitHub repo
 > variables `DEV_GCP_PROJECT_ID`／`DEV_GCP_REGION` 當時的值（2026-09-08 起為
 > `drts-dev-devcc-20260825` / `us-central1`），且必須在使用前重新查詢，不可
-> 從任何已提交文件推斷。以下章節的 project ID、domain mapping 指令與
-> 2026-07-31／2026-08-01 實測記錄，保留為該舊 project 當時狀態的歷史記錄；
+> 從任何已提交文件推斷。2026-07-31／2026-08-01 實測記錄
+> 保留為該舊 project 當時狀態的歷史記錄；
 > 若要對現行 live project 執行或驗證 domain mapping，先讀
 > `.github/workflows/deploy-dev.yml` 與現行 repo variables，以其為準，不要
 > 直接套用本文件的 project ID。
 
 > ⚠️ **執行前提（只有具權限者能做）**
 >
-> 1. `gcloud auth login`。
+> 1. GitHub authorized workflow 的現有 WIF 身分與 shared dev 權限。
 > 2. `smarttransport.tw` 的 DNS 控制權。
 > 3. `smarttransport.tw` 已在對應 GCP 帳號完成網域驗證（`gcloud domains verify smarttransport.tw` 或 Search Console）。
 
@@ -26,20 +26,27 @@
 
 ## 1. 前綴 → 服務對照
 
-| 子網域                       | Cloud Run 服務                      | 用途         |
-| ---------------------------- | ----------------------------------- | ------------ |
-| `fleets.smarttransport.tw`   | `drts-dev-platform-admin-web`       | 車隊管理後臺 |
-| `ops.smarttransport.tw`      | `drts-dev-ops-console-web`          | 營運中心     |
-| `partners.smarttransport.tw` | `drts-dev-fleet-partner-portal-web` | 車行夥伴     |
-| `dispatch.smarttransport.tw` | `drts-dev-enterprise-dispatch-web`  | 企業派車     |
-| `bank.smarttransport.tw`     | `drts-dev-bank-console-web`         | 銀行後臺     |
-| `channel.smarttransport.tw`  | `drts-channel-partner-portal-web`   | 渠道夥伴     |
-| `tenant.smarttransport.tw`   | `drts-dev-tenant-console-web`       | 企業租戶     |
-| `refer.smarttransport.tw`    | `drts-dev-referral-embed-web`       | 推薦嵌入     |
-| `api.smarttransport.tw`      | `drts-dev-api`                      | 後端 API     |
+| 子網域                       | Cloud Run 服務                      | 用途                                            |
+| ---------------------------- | ----------------------------------- | ----------------------------------------------- |
+| `fleets.smarttransport.tw`   | `drts-dev-platform-admin-web`       | 車隊管理後臺                                    |
+| `ops.smarttransport.tw`      | `drts-dev-ops-console-web`          | 營運中心                                        |
+| `partners.smarttransport.tw` | `drts-dev-fleet-partner-portal-web` | 車行夥伴                                        |
+| `dispatch.smarttransport.tw` | `drts-dev-enterprise-dispatch-web`  | 企業派車                                        |
+| `bank.smarttransport.tw`     | `drts-dev-bank-console-web`         | 銀行後臺                                        |
+| `channel.smarttransport.tw`  | `drts-channel-partner-portal-web`   | 渠道夥伴                                        |
+| `tenant.smarttransport.tw`   | `drts-dev-tenant-console-web`       | 企業租戶                                        |
+| `refer.smarttransport.tw`    | `drts-dev-referral-embed-web`       | 推薦嵌入                                        |
+| `api.smarttransport.tw`      | `drts-dev-api`                      | 後端 API                                        |
+| `ride.smarttransport.tw`     | `drts-dev-passenger-app-web`        | 第一方乘客網頁 App（2026-10-09 重開；部署待驗） |
 
 > `passenger-web` 已於 2026-06-16 退休，`concierge-portal-web` / `assisted-entry-web`
 > 亦已退休；三者不得回到 authoritative domain mapping inventory、deploy workflow、smoke URL inventory。
+
+2026-10-09 使用者重開的是新 `passenger-app-web`，並沿用 `ride.smarttransport.tw`。
+原 `passenger-web` 仍退役；新的 inventory 為 10 個 Cloud Run 服務（9 web + API）。
+服務名稱從 `DEV_GCP_PASSENGER_APP_SERVICE` 解析，未設定時用
+`drts-dev-passenger-app-web`；workflow 拒絕其他 target。既有分類規則已由
+PAX-WEB-SHELL 登記新 App，本 task 不重複改 `repo-classification.json`。
 
 ### Partner Booking — PAUSED
 
@@ -55,28 +62,21 @@ service，並會以 fail-closed cleanup 刪除殘留的
 ## 2. 建立 domain mappings（domain-maintenance；idempotent；不覆寫既有 live mapping）
 
 ```bash
-PROJECT=nodal-alloy-503700-s3
-REGION=us-central1
-
-gcloud auth login   # 前提 1
-
-# （若尚未驗證）先驗證網域，照輸出加 TXT 記錄後再繼續：
-gcloud domains verify smarttransport.tw
-
-# 使用經審核的 helper 進行網域檢查與建立（具備 command header/NOT_FOUND 嚴格比對）
-./operations/deployment/map-domain-service.sh fleets.smarttransport.tw     drts-dev-platform-admin-web       "$REGION" "$PROJECT"
-./operations/deployment/map-domain-service.sh ops.smarttransport.tw        drts-dev-ops-console-web          "$REGION" "$PROJECT"
-./operations/deployment/map-domain-service.sh partners.smarttransport.tw   drts-dev-fleet-partner-portal-web "$REGION" "$PROJECT"
-./operations/deployment/map-domain-service.sh dispatch.smarttransport.tw   drts-dev-enterprise-dispatch-web "$REGION" "$PROJECT"
-./operations/deployment/map-domain-service.sh bank.smarttransport.tw       drts-dev-bank-console-web        "$REGION" "$PROJECT"
-./operations/deployment/map-domain-service.sh channel.smarttransport.tw    drts-channel-partner-portal-web  "$REGION" "$PROJECT"
-./operations/deployment/map-domain-service.sh tenant.smarttransport.tw     drts-dev-tenant-console-web      "$REGION" "$PROJECT"
-./operations/deployment/map-domain-service.sh refer.smarttransport.tw      drts-dev-referral-embed-web      "$REGION" "$PROJECT"
-./operations/deployment/map-domain-service.sh api.smarttransport.tw        drts-dev-api                     "$REGION" "$PROJECT"
+# 唯讀核對 live variables；不得用舊 project 或推測 hostname。
+gh variable get DEV_GCP_PROJECT_ID
+gh variable get DEV_GCP_REGION
+# PUBLISH_REF 必須是包含本 task 已審核變更的 immutable publish/v* snapshot。
+# 先讓 publish 流程部署新服務成功，再由具權限 operator 執行 mapping workflow。
+gh workflow run domain-mappings-dev.yml --ref "$PUBLISH_REF" -f confirm=apply
 ```
 
 每條新建 `create` 會輸出該子網域要加的 DNS 記錄（子網域一律 CNAME → `ghs.googlehosted.com.`）。
 若 mapping 已正確存在，腳本會直接 skip；若 mapping 指向錯誤 service，腳本會 fail closed and hand off to the single deploy cleanup task.，不在此 repo-only task 直接覆寫 live target。
+
+若現行 project 內的 `ride.smarttransport.tw` 仍指向舊 passenger 服務，helper
+會拒絕覆寫。由既有 cleanup/operator 流程核對後處理；worker 不使用
+`--force-override`。網域驗證 TXT 的值由 Search Console 對 workflow acting
+identity 產生，不能預填或沿用舊 project 的值。
 
 ---
 
@@ -94,10 +94,22 @@ channel    CNAME  ghs.googlehosted.com.
 tenant     CNAME  ghs.googlehosted.com.
 refer      CNAME  ghs.googlehosted.com.
 api        CNAME  ghs.googlehosted.com.
+ride       CNAME  ghs.googlehosted.com.
 ```
 
-> 若 DNS 供應商不允許 CNAME 指到 apex 以外的具名 host，以 `domain-mappings create`
-> 實際輸出的 `rrdata` 為準（Google 有時給多筆 A/AAAA 而非 CNAME）。
+乘客 App 要由使用者在 **smarttransport.tw zone** 新增／核對這一筆：
+
+| 欄位           | 精確值                                       |
+| -------------- | -------------------------------------------- |
+| Name / Host    | `ride`（完整名稱 `ride.smarttransport.tw.`） |
+| Type           | `CNAME`                                      |
+| Target / Value | `ghs.googlehosted.com.`                      |
+| TTL            | `300` 秒（或 DNS 供應商支援的預設值）        |
+
+同名 A/AAAA 與 CNAME 不能共存；DNS 變更由使用者執行。以現行 mapping
+輸出的 `status.resourceRecords` 核對最終記錄，不能將本表視為已生效證據。
+Cloud Run 的 DNS 設定與受管憑證程序見
+[Google 官方文件](https://docs.cloud.google.com/run/docs/mapping-custom-domains#dns_update)。
 
 Google 會自動為每個對應簽發受管 SSL 憑證（首次 provisioning 可能數分鐘～數小時）。
 
@@ -106,16 +118,77 @@ Google 會自動為每個對應簽發受管 SSL 憑證（首次 provisioning 可
 ## 4. 驗證指令
 
 ```bash
-for sub in fleets ops partners dispatch bank channel tenant refer api; do
+for sub in fleets ops partners dispatch bank channel tenant refer api ride; do
   echo -n "$sub.smarttransport.tw → "
   curl -s -o /dev/null -w "%{http_code}\n" --max-time 20 "https://$sub.smarttransport.tw" || echo "尚未生效"
 done
-gcloud beta run domain-mappings list --region us-central1 --project nodal-alloy-503700-s3
+PROJECT="$(gh variable get DEV_GCP_PROJECT_ID)"
+REGION="$(gh variable get DEV_GCP_REGION)"
+gcloud beta run domain-mappings describe --domain ride.smarttransport.tw \
+  --region "$REGION" --project "$PROJECT" --format='yaml(spec,status)'
 ```
 
 全部 active mapping `READY=True` 且憑證 ACTIVE 即完成。`book.smarttransport.tw`
 若仍可解析或仍有既有 mapping，只代表待清理的外部殘留，不是 active surface，
 也不得由本 workflow 重建。
+
+DNS 不會開放 Cloud Run IAM。新乘客服務預設 private，shared dev operator
+須按既有公開流程明確設定 `DEV_PASSENGER_APP_ALLOW_UNAUTHENTICATED=true`
+並透過 immutable publish workflow 部署，乘客才可直接使用網址；設回 false
+時 workflow 會撤除 allUsers binding。health-check 用 WIF ID token 驗證
+`/` 與 `/login` 均回 **200**，並比對 `x-drts-candidate-sha`，不接受 redirect。
+`/fares` 由 PAX-WEB-BOOKING-UI 提供；PAX-QA 在該頁合併後補上 smoke。
+本機只執行 repo checks，不啟動 App、browser 或 Docker 環境。
+
+### 4.1 OAuth callback 交付
+
+| Provider | 乘客 App callback（須由使用者登記於該 provider）        |
+| -------- | ------------------------------------------------------- |
+| Google   | `https://ride.smarttransport.tw/auth/callback/google`   |
+| Facebook | `https://ride.smarttransport.tw/auth/callback/facebook` |
+| LINE     | `https://ride.smarttransport.tw/auth/callback/line`     |
+
+API 的 `OAUTH_REDIRECT_ALLOWLIST` 採這三個完整 URL，不能用 origin 或 wildcard。
+workflow 另從現行新服務的 `status.url` 加入相同三個 `/auth/callback/<provider>`
+URL，dev provider console 要另外登記；不要使用本文件 §6 的舊 hostname。
+首次部署前服務尚不存在，API allowlist 只有 custom callbacks；新 URL 從
+health-check `Resolve service URLs`／Summary 取得，再以**同一 immutable
+publish reference** 重跑部署加入預設網域 callbacks。沒有新服務的 run
+evidence 前，Cloud Run 預設 callback URL 仍待交付，不猜 suffix。
+callback route 的產品驗證由 PAX-WEB-AUTH-UI／PAX-QA 提供，不以網址字串宣稱登入可用。
+
+### 4.2 Passenger optional secret reference 契約
+
+`Resolve passenger app optional secret mounts` 只在 hosted runner 使用
+`gcloud secrets describe` 查 metadata；不 create，也不 access value。
+每個 env slot 的 secret 名稱是 `${DEV_SECRET_PREFIX:-drts-dev}-` 加上
+env 名稱的小寫 kebab case。例如 `GOOGLE_OAUTH_CLIENT_SECRET` 對應
+`drts-dev-google-oauth-client-secret`；值僅由 Cloud Run `:latest` 掛載。
+
+| 群組                    | 全部必須存在的 env／secret suffix                                                                                                                                      | 掛載位置                                          |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| Google                  | `GOOGLE_OAUTH_CLIENT_ID` / `google-oauth-client-id`；`GOOGLE_OAUTH_CLIENT_SECRET` / `google-oauth-client-secret`                                                       | API                                               |
+| LINE                    | `LINE_CHANNEL_ID` / `line-channel-id`；`LINE_CHANNEL_SECRET` / `line-channel-secret`                                                                                   | API                                               |
+| Facebook                | `FACEBOOK_APP_ID` / `facebook-app-id`；`FACEBOOK_APP_SECRET` / `facebook-app-secret`                                                                                   | API                                               |
+| Email OTP pepper        | `PASSENGER_OTP_PEPPER` / `passenger-otp-pepper`                                                                                                                        | API；Email 另須既有完整 SMTP 與平台 delivery 可用 |
+| SMS                     | `SMS_PROVIDER_API_KEY` / `sms-provider-api-key`；`SMS_PROVIDER_SENDER_ID` / `sms-provider-sender-id`；`PASSENGER_OTP_PEPPER` / `passenger-otp-pepper`                  | API；仍須實際 SmsPort adapter                     |
+| PSP + payment token key | `PSP_MERCHANT_ID` / `psp-merchant-id`；`PSP_API_KEY` / `psp-api-key`；`PSP_SANDBOX` / `psp-sandbox`；`PSP_TOKEN_ENCRYPTION_KEY_NAME` / `psp-token-encryption-key-name` | API；完整套組才掛載                               |
+
+各群組缺任一項時整組不掛載並輸出 notice；其他完整 provider 獨立保留。
+API `--set-secrets` 與 BFF `--clear-secrets` 也會移除前次
+部署殘留的配置。OAuth／SMS／PSP secret 不進 BFF 或 `NEXT_PUBLIC_*`。
+本 task 沒有建立、讀值或驗證任何實際 secret，沒有呼叫真實 provider。
+現有 tenant OIDC、SMTP、Maps 的配置檢查仍沿用原流程；它們的既有 partial
+configuration 錯誤不因新增乘客服務而放寬。
+
+完整 metadata 套組只代表可以掛載，**不代表功能已驗收啟用**：目前 API 的
+SMS port 是 `UnconfiguredSmsPort`、PSP adapter 是外部 gate，
+`REQUIRE_SMS_VERIFICATION=false`。workflow 的 `*_mounts_complete` 只記錄
+reference metadata 是否齊全，並非 feature-enabled 或 provider 可用旗標。
+SD §4 尚未定義 cookie slot，shell 的 HttpOnly bearer cookies 也不消耗
+crypto key，因此目前不宣告、不查詢或掛載 cookie secret。付款 token
+欄位依 SD §4 使用 `PSP_TOKEN_ENCRYPTION_KEY_NAME`，由 PAX-PAYMENT-CORE
+對齊正式讀取端後再 provision；本 task 不自行選 PSP 或產生金鑰。
 
 ## 5. 2026-07-31 實測現況
 

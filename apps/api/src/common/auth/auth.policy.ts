@@ -1,9 +1,9 @@
-import type { AuthRealm } from "./auth.types";
+import type { AuthRealm, RequestAuthRealm } from "./auth.types";
 import { AUTH_ROUTE_READ_METHODS } from "./auth.constants";
 
 export interface RouteAuthPolicy {
   requiredScopes: string[];
-  allowedRealms: AuthRealm[];
+  allowedRealms: RequestAuthRealm[];
   description: string;
 }
 
@@ -35,6 +35,73 @@ export function resolveRouteAuthPolicy(
 ): ResolvedRouteAuthPolicy | null {
   const routePath = normalizeRoutePath(url);
   const upperMethod = method.toUpperCase();
+
+  // Append the passenger realm only to address/routing utilities. Existing realm
+  // decorators are unioned by BootstrapAuthGuard; health/admin routes stay unchanged.
+  if (
+    (routePath === "geo/search" && upperMethod === "GET") ||
+    (["geo/resolve", "geo/reverse", "geo/route"].includes(routePath) &&
+      upperMethod === "POST")
+  ) {
+    return {
+      routeKey: `passenger-app:geo:${routePath.slice(4)}:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: ["passenger"],
+      description:
+        "First-party passenger address and route utilities; existing decorators preserve other realms",
+    };
+  }
+
+  if (
+    (upperMethod === "POST" &&
+      [
+        "passenger-app/auth/otp/request",
+        "passenger-app/auth/otp/verify",
+      ].includes(routePath)) ||
+    (upperMethod === "GET" && routePath === "passenger-app/auth/providers")
+  ) {
+    return {
+      routeKey: "passenger-app:otp",
+      requiredScopes: [],
+      allowedRealms: ["passenger"],
+      description:
+        "OpenRoute BFF login; link/contact-phone require a live passenger session bound to the challenge",
+    };
+  }
+
+  if (routePath === "passenger-app" || routePath.startsWith("passenger-app/")) {
+    if (routePath.startsWith("passenger-app/platform/")) {
+      return {
+        routeKey: "passenger-app:platform",
+        requiredScopes: [],
+        allowedRealms: ["platform"],
+        description: "Passenger platform administration",
+      };
+    }
+    if (
+      routePath === "passenger-app/auth/providers" ||
+      /^passenger-app\/auth\/oauth\/[^/]+\/(start|callback)$/.test(routePath)
+    ) {
+      // Pre-login traffic carries a BFF metadata identity, not a passenger
+      // Bearer; the guard's activatePassenger() open-route branch (not this
+      // table) is what actually admits these two requests. A `purpose: "link"`
+      // call additionally requires a live passenger Bearer, enforced inside
+      // PassengerOAuthService, not by this route-level realm/scope gate.
+      return {
+        routeKey: `passenger-app:oauth:${routePath}`,
+        requiredScopes: [],
+        allowedRealms: ["passenger"],
+        description:
+          "Passenger OAuth/OIDC login provider discovery, start, and callback",
+      };
+    }
+    return {
+      routeKey: "passenger-app:self",
+      requiredScopes: [],
+      allowedRealms: ["passenger"],
+      description: "First-party passenger account and owned resources",
+    };
+  }
 
   if (routePath === "audit" && upperMethod === "GET") {
     return {
@@ -876,7 +943,8 @@ export function resolveRouteAuthPolicy(
       routeKey: "billing:driver:proof:create",
       requiredScopes: ["driver:write"],
       allowedRealms: ["driver"],
-      description: "Driver proof staging and upload; batch ownership enforced by service",
+      description:
+        "Driver proof staging and upload; batch ownership enforced by service",
     };
   }
 

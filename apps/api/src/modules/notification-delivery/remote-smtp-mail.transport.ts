@@ -5,7 +5,9 @@ import {
   DeliveryTransportError,
   type MailTransport,
   type ProviderAcknowledgement,
+  type OutgoingMailMessage,
   type TransportMessage,
+  type PlatformTransportMessage,
 } from "./notification-delivery.types";
 
 const DOMAIN =
@@ -65,7 +67,10 @@ export class RemoteSmtpMailTransport implements MailTransport {
   #allowlist: string[];
   #redactions: string[];
 
-  constructor(env: NodeJS.ProcessEnv = process.env) {
+  constructor(
+    env: NodeJS.ProcessEnv = process.env,
+    createMailer: typeof createTransport = createTransport,
+  ) {
     if (REQUIRED.some((key) => !env[key]?.trim())) invalidConfiguration();
     const host = env.REMOTE_SMTP_HOST!.trim();
     const port = env.REMOTE_SMTP_PORT!.trim();
@@ -101,7 +106,7 @@ export class RemoteSmtpMailTransport implements MailTransport {
         Buffer.from(`\0${user}\0${pass}`).toString("base64"),
       ]),
     ].sort((a, b) => b.length - a.length);
-    this.#mailer = createTransport({
+    this.#mailer = createMailer({
       host,
       port: Number(port),
       secure: port === "465",
@@ -150,7 +155,17 @@ export class RemoteSmtpMailTransport implements MailTransport {
     );
   }
 
-  async send(message: TransportMessage): Promise<ProviderAcknowledgement> {
+  send(message: TransportMessage): Promise<ProviderAcknowledgement> {
+    return this.sendMessage(message);
+  }
+  sendPlatform(
+    message: PlatformTransportMessage,
+  ): Promise<ProviderAcknowledgement> {
+    return this.sendMessage(message);
+  }
+  private async sendMessage(
+    message: OutgoingMailMessage,
+  ): Promise<ProviderAcknowledgement> {
     if (
       !mailbox(message.recipientEmail) ||
       !mailbox(message.fromEmail) ||
