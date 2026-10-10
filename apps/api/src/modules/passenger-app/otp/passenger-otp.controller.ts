@@ -1,5 +1,5 @@
 import { isIP } from "node:net";
-import { Body, Controller, Get, Inject, Post, Req } from "@nestjs/common";
+import { Body, Controller, Inject, Post, Req } from "@nestjs/common";
 import type { RequestOtpCommand, VerifyOtpCommand } from "@drts/contracts";
 import {
   ApiRequestError,
@@ -70,7 +70,6 @@ export class PassengerOtpController {
     private readonly otp: PassengerOtpService,
     @Inject(OTP_OPTIONS) private readonly options: OtpOptions,
   ) {}
-  @Get("providers")
   @OpenRoute()
   providers() {
     return toApiSuccessEnvelope(this.otp.providers());

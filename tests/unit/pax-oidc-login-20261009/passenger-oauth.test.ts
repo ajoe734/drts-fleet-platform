@@ -5,12 +5,19 @@ import { PassengerJwtService } from "../../../apps/api/src/common/auth/passenger
 import { PassengerAccountService } from "../../../apps/api/src/modules/passenger-app/account/passenger-account.service";
 import { PassengerOAuthController } from "../../../apps/api/src/modules/passenger-app/oauth/passenger-oauth.controller";
 import { PassengerOAuthService } from "../../../apps/api/src/modules/passenger-app/oauth/passenger-oauth.service";
+import { NotificationDeliveryService } from "../../../apps/api/src/modules/notification-delivery/notification-delivery.service";
+import {
+  PassengerOtpService,
+  type OtpOptions,
+} from "../../../apps/api/src/modules/passenger-app/otp/passenger-otp.service";
+import { UnconfiguredSmsPort } from "../../../apps/api/src/modules/passenger-app/otp/sms.port";
 import type { OAuthTransactionRecord } from "../../../apps/api/src/modules/passenger-app/oauth/oauth-transaction.port";
 import {
   GOOGLE_OIDC_ENDPOINTS,
   LINE_OIDC_ENDPOINTS,
 } from "../../../apps/api/src/modules/auth/oidc-id-token-verifier";
 import { MemoryPassengerStore } from "../pax-account-session-20261009/memory-store";
+import { MemoryOtpStore } from "../pax-otp-20261009/memory-store";
 
 const GOOGLE_CALLBACK = "https://ride.smarttransport.tw/auth/callback/google";
 const LINE_CALLBACK = "https://ride.smarttransport.tw/auth/callback/line";
@@ -187,13 +194,47 @@ class MemoryOAuthTransactionStore {
   }
 }
 
-function fixture() {
+function fixture(
+  otpConfiguration: {
+    options?: Partial<OtpOptions>;
+    mailEnabled?: boolean;
+    smsEnabled?: boolean;
+  } = {},
+) {
   const oauthStore = new MemoryOAuthTransactionStore();
   const accountStore = new MemoryPassengerStore();
   const tokens = new PassengerJwtService();
   const accounts = new PassengerAccountService(accountStore, tokens);
   const oauth = new PassengerOAuthService(oauthStore, accounts);
-  const controller = new PassengerOAuthController(oauth);
+  const send = vi.fn(async () => {
+    throw new Error("provider discovery must not send OTPs");
+  });
+  const delivery = new NotificationDeliveryService(
+    {
+      transaction: vi.fn(async () => {
+        throw new Error("provider discovery must not persist mail");
+      }),
+    },
+    otpConfiguration.mailEnabled === false
+      ? null
+      : { provider: "unit-mail", send, sendPlatform: send },
+  );
+  const otp = new PassengerOtpService(
+    new MemoryOtpStore(),
+    accounts,
+    delivery,
+    otpConfiguration.smsEnabled
+      ? { availability: () => "available", sendOtp: send }
+      : new UnconfiguredSmsPort(),
+    {
+      pepper: "unit-only-pepper-with-at-least-32-characters",
+      fromEmail: "sender@example.test",
+      ipHourlyLimit: 20,
+      trustedProxyHops: 0,
+      ...otpConfiguration.options,
+    },
+  );
+  const controller = new PassengerOAuthController(oauth, otp);
   return { oauthStore, accountStore, accounts, oauth, controller };
 }
 async function signedIn(
@@ -209,6 +250,59 @@ async function signedIn(
 }
 
 describe("GET /passenger-app/auth/providers", () => {
+  it.each([
+    ["mail only", {}, ["email", "google", "line"]],
+    [
+      "mail and SMS",
+      { smsEnabled: true },
+      ["email", "phone", "google", "line"],
+    ],
+    [
+      "SMS only",
+      { mailEnabled: false, smsEnabled: true },
+      ["phone", "google", "line"],
+    ],
+    ["no transport", { mailEnabled: false }, ["google", "line"]],
+    ["missing sender", { options: { fromEmail: "" } }, ["google", "line"]],
+    [
+      "missing pepper",
+      { options: { pepper: "" }, smsEnabled: true },
+      ["google", "line"],
+    ],
+    [
+      "short pepper",
+      { options: { pepper: "too-short" }, smsEnabled: true },
+      ["google", "line"],
+    ],
+  ] as const)(
+    "aggregates actual OTP availability with OAuth configuration: %s",
+    (_label, configuration, expected) => {
+      // Production OTP and notification services decide availability; only
+      // persistence and external mail/SMS transports are test boundaries.
+      const f = fixture(configuration);
+      expect(f.controller.providers().data).toEqual({ providers: expected });
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not enable phone merely because SMS environment variables are present", () => {
+    vi.stubEnv("SMS_PROVIDER_API_KEY", "unit-unused-key");
+    vi.stubEnv("SMS_PROVIDER_SENDER_ID", "unit-unused-sender");
+    expect(fixture().controller.providers().data.providers).toEqual([
+      "email",
+      "google",
+      "line",
+    ]);
+  });
+
+  it("keeps available OTP providers when Google and LINE are unconfigured", () => {
+    vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "");
+    vi.stubEnv("LINE_CHANNEL_SECRET", "");
+    expect(
+      fixture({ smsEnabled: true }).controller.providers().data.providers,
+    ).toEqual(["email", "phone"]);
+  });
+
   it("reports google/line disabled until both client id and secret are set, and never reports facebook", async () => {
     const { controller } = fixture();
     expect((await controller.providers()).data.providers).toEqual(

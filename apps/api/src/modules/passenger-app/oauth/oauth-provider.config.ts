@@ -82,12 +82,6 @@ export function resolveOAuthProviderConfig(
 
 export function listConfiguredAuthProviders(): AuthProvider[] {
   const providers: AuthProvider[] = [];
-  if (
-    process.env.SMS_PROVIDER_API_KEY?.trim() &&
-    process.env.SMS_PROVIDER_SENDER_ID?.trim()
-  )
-    providers.push("phone");
-  providers.push("email");
   if (resolveOAuthProviderConfig("google")) providers.push("google");
   // Facebook's OAuth2 (not OIDC) exchange is not implemented by this task,
   // regardless of env config, so it is never reported as available here.

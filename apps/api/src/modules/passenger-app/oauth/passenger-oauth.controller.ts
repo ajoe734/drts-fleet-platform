@@ -1,7 +1,14 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
-import { ApiRequestError, toApiSuccessEnvelope } from "../../../common/api-envelope";
-import { CurrentIdentity, OpenRoute } from "../../../common/auth/auth.decorators";
+import {
+  ApiRequestError,
+  toApiSuccessEnvelope,
+} from "../../../common/api-envelope";
+import {
+  CurrentIdentity,
+  OpenRoute,
+} from "../../../common/auth/auth.decorators";
 import type { RequestIdentity } from "../../../common/auth/auth.types";
+import { PassengerOtpService } from "../otp/passenger-otp.service";
 import { listConfiguredAuthProviders } from "./oauth-provider.config";
 import type { OAuthProvider } from "./oauth-transaction.port";
 import { PassengerOAuthService } from "./passenger-oauth.service";
@@ -23,12 +30,20 @@ function providerFromPath(raw: string): OAuthProvider {
 
 @Controller("passenger-app/auth")
 export class PassengerOAuthController {
-  constructor(private readonly oauth: PassengerOAuthService) {}
+  constructor(
+    private readonly oauth: PassengerOAuthService,
+    private readonly otp: PassengerOtpService,
+  ) {}
 
   @Get("providers")
   @OpenRoute()
   providers() {
-    return toApiSuccessEnvelope({ providers: listConfiguredAuthProviders() });
+    return toApiSuccessEnvelope({
+      providers: [
+        ...this.otp.providers().providers,
+        ...listConfiguredAuthProviders(),
+      ],
+    });
   }
 
   @Post("oauth/:provider/start")

@@ -8,7 +8,42 @@ head branch `claude/pax-oidc-login-20261009`.
 The exact final candidate SHA / PR are recorded by canonical `handoff`; nothing
 in this document is a reviewer approval, merge, or passenger PostgreSQL acceptance claim.
 
-## Current integration blocker after dev advanced (2026-10-10 03:03 UTC)
+## Provider discovery repair (2026-10-10 continuation)
+
+Supervisor authorized the OTP controller write scope at 03:06 UTC. The
+published predecessor is `9967a0f0271a1d9829adb628b4affae3d2f738a7` (both
+task branches and PR #2501). This continuation resolves the post-merge
+discovery blocker below; it retains the previous R1–R4 fixes and their
+finding-level history.
+
+`PassengerOAuthController.providers` now injects `PassengerOtpService` and
+combines its real OTP availability with independently configured Google/LINE.
+`listConfiguredAuthProviders` only lists implemented OAuth providers. The
+OTP controller loses only its GET decorator/import: its `providers` helper,
+`OpenRoute` metadata, OTP request/verify routes and existing callers remain.
+`PassengerAppModule` already registers both services, so no module change
+is required. All direct constructor/helper callers were searched; the sole
+direct OAuth controller constructor in the root OAuth fixture was updated.
+
+| Finding / acceptance                                                           | Production source / repair                                                                                              | Old reproduction → current result                                                                                                                                                                                                                                     | Commands / exit / evidence                                                                                         | Remaining limit                                                                             |
+| ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| Duplicate providers GET after OTP merge                                        | Actual `PassengerAppModule.controllers`, Nest `MetadataScanner`, method/path metadata; OTP helper GET decorator removed | Published predecessor: 2 handlers instead of 1, exit 1. Fixed: each of the 5 auth routes has exactly one expected open handler; helper remains open without route metadata, 6 tests pass                                                                              | API routing command below; `provider-route-before-9967a0f.log` / `provider-route-after.log`                        | Metadata regression; no local HTTP listener under VM restriction                            |
+| Discovery differs from OTP availability / `pax-oidc_linking_and_config_gating` | Real OAuth controller, real OTP and notification services; only persistence and mail/SMS boundaries stubbed             | Same new tests before production repair: 8 failures / 2 passes / 69 filtered. Fixed: 10 passes / 69 filtered. Covers mail/SMS/both/neither, missing sender, missing/short pepper, credentials with unconfigured SMS port, and OTP independent of disabled Google/LINE | Root discovery command below; `provider-gating-before-9967a0f.log` / `provider-gating-after.log`                   | Narrow tests only; complete affected regression and same-SHA hosted CI still required       |
+| `pax-oidc_google_line_flow_and_verification`                                   | R1–R4 production fixes/tests retained below                                                                             | No new OAuth exchange/ID-token behavior changed in this repair                                                                                                                                                                                                        | Full affected OAuth/OTP/account/legacy regression, lint/typecheck and candidate CI will be recorded before handoff | Reviewer SQL comparison, integration and PAX-QA formal-schema PG acceptance remain separate |
+
+Commands ran from the assigned isolated worktree with Node 22.23.2 and
+Vitest 4.1.4. Full outputs are under this worktree's
+`.local/pax-oidc-login-20261009/`; the pre-fix runs executed the published
+predecessor's production source bytes, adding only the content regression
+cases. No active worktree was reset. All four runs completed and their
+outputs were read. No development/browser/PG/Compose service was started.
+
+```bash
+node node_modules/vitest/vitest.mjs run --root apps/api tests/unit/passenger-auth-provider-routing.test.ts --reporter=verbose
+node node_modules/vitest/vitest.mjs run tests/unit/pax-oidc-login-20261009/passenger-oauth.test.ts -t 'GET /passenger-app/auth/providers' --reporter=dot
+```
+
+## Historical integration blocker after dev advanced (2026-10-10 03:03 UTC)
 
 The checks below passed on published `130e7846346fbc736fd1d355e1f3554fef5932ff`.
 Both remote branches and PR #2501 matched it. Before handoff, live PR
@@ -30,17 +65,18 @@ always lists email and infers phone from environment variables.
 | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Post-merge duplicate provider discovery route and inconsistent gating | `PassengerAppModule.controllers`; both controller `providers` handlers; OAuth config listing versus `PassengerOtpService.providers` | New `apps/api/tests/unit/passenger-auth-provider-routing.test.ts` scans production module controllers with Nest `MetadataScanner` and actual method/path metadata. Expected 1 handler; actual 2. No application listener or metadata mock. | `node node_modules/vitest/vitest.mjs run --root apps/api tests/unit/passenger-auth-provider-routing.test.ts --reporter=verbose`, exit 1 (1 actual regression failure); `.local/pax-oidc-login-20261009/provider-route-collision.log`. Runtime request routing not run under VM restriction. |
 
-Canonical task note requests Supervisor scope coordination: add exactly
+At that checkpoint, the canonical task note requested Supervisor scope coordination: add exactly
 `apps/api/src/modules/passenger-app/otp/passenger-otp.controller.ts` after
 checking parallel ownership. Proposed next repair: keep the OAuth discovery
 route, inject `PassengerOtpService` to aggregate its actual configured
 providers with Google/LINE, and remove only the OTP helper's `@Get("providers")`
 decorator while retaining that helper and `@OpenRoute` for existing unit
-callers. Current write scopes do not include that controller; it was not
-edited. The route regression must pass, with valid OTP and OAuth availability
+callers. At that checkpoint, write scopes did not include that controller; it was not
+edited. The route regression had to pass, with valid OTP and OAuth availability
 and negative provider gating cases, before full regression/new SHA CI and
-handoff. This scope blocker supersedes all prospective CI/handoff wording
-below; neither required acceptance key is claimed complete.
+handoff. Supervisor subsequently authorized the scope; the repair and actual
+new regression results are recorded above. Neither required acceptance key
+is claimed complete by this owner artifact.
 
 ## Codex2 continuation: repeated findings and current verification
 
