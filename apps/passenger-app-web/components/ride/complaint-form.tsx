@@ -1,7 +1,7 @@
 import { t } from "./translations";
 import { useState } from "react";
-import { passengerChrome } from "@/lib/passenger-presentation";
-import { requestPassengerRideAction } from "@/lib/ride/passenger-live";
+import { passengerChrome } from "../../lib/passenger-presentation";
+import { requestPassengerRideAction } from "../../lib/ride/passenger-live";
 
 const shellInset = 14;
 
@@ -13,7 +13,9 @@ export function ComplaintForm({
   authMode?: "id" | "token" | undefined;
 }) {
   const [open, setOpen] = useState(false);
-  const [category, setCategory] = useState<"service" | "fare" | "lost_item" | "other">("service");
+  const [category, setCategory] = useState<
+    "service" | "fare" | "lost_item" | "other"
+  >("service");
   const [content, setContent] = useState("");
   const [lostItemDescription, setLostItemDescription] = useState("");
   const [contactConsent, setContactConsent] = useState(false);
@@ -55,7 +57,13 @@ export function ComplaintForm({
           borderRadius: 12,
         }}
       >
-        <div style={{ fontWeight: 600, marginBottom: 8, color: passengerChrome.text }}>
+        <div
+          style={{
+            fontWeight: 600,
+            marginBottom: 8,
+            color: passengerChrome.text,
+          }}
+        >
           客訴與遺失物表單
         </div>
         <div
@@ -105,14 +113,25 @@ export function ComplaintForm({
         background: passengerChrome.card,
       }}
     >
-      <div style={{ fontWeight: 600, marginBottom: 12, color: passengerChrome.text }}>
+      <div
+        style={{
+          fontWeight: 600,
+          marginBottom: 12,
+          color: passengerChrome.text,
+        }}
+      >
         {t.ComplaintAndLostFound}
       </div>
       <div style={{ marginBottom: 8 }}>
         <select
           value={category}
           onChange={(e) => setCategory(e.target.value as any)}
-          style={{ width: "100%", padding: 8, borderRadius: 8, border: `1px solid ${passengerChrome.border}` }}
+          style={{
+            width: "100%",
+            padding: 8,
+            borderRadius: 8,
+            border: `1px solid ${passengerChrome.border}`,
+          }}
         >
           <option value="service">服務問題</option>
           <option value="fare">車資問題</option>
@@ -151,7 +170,15 @@ export function ComplaintForm({
           }}
         />
       )}
-      <div style={{ marginBottom: 12, fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+      <div
+        style={{
+          marginBottom: 12,
+          fontSize: 13,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
         <input
           type="checkbox"
           checked={contactConsent}

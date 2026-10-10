@@ -2,8 +2,8 @@
 import { t } from "../../components/ride/translations";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { passengerClient } from "@/lib/client";
-import { passengerChrome } from "@/lib/passenger-presentation";
+import { passengerClient } from "../../lib/client";
+import { passengerChrome } from "../../lib/passenger-presentation";
 import type { PassengerRideAuthorityView } from "@drts/contracts";
 
 export default function RidesListPage() {

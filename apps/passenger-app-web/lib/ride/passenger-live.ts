@@ -13,7 +13,7 @@ import type {
   PassengerScreenId,
 } from "@drts/passenger-client";
 
-import { passengerClient } from "@/lib/client";
+import { passengerClient } from "../../lib/client";
 
 export class PassengerAuthorityError extends Error {
   constructor(
@@ -108,7 +108,9 @@ export async function requestPassengerRideAction<T>(
     } else if (action === "complaints") {
       return (await passengerClient.createComplaint(
         idOrToken,
-        body as unknown as Parameters<typeof passengerClient.createComplaint>[1],
+        body as unknown as Parameters<
+          typeof passengerClient.createComplaint
+        >[1],
       )) as unknown as T;
     } else if (action === "contact") {
       return { contactUri: "tel:02-2944-0985" } as unknown as T;
@@ -127,7 +129,7 @@ export function subscribePassengerRideAuthority(
     ? `/api/passenger-rides/${encodeURIComponent(idOrToken)}/events`
     : `/api/passenger-app/rides/${encodeURIComponent(idOrToken)}/events`;
   const es = new EventSource(url);
-  
+
   if (onStateChange) onStateChange("connecting");
 
   const PASSENGER_RIDE_SSE_EVENTS = [
@@ -146,8 +148,13 @@ export function subscribePassengerRideAuthority(
 
   const handleMsg = (msg: MessageEvent) => {
     try {
-      const parsed = camelizeKeys(JSON.parse(msg.data)) as PassengerRideSseEventEnvelope;
-      if (typeof parsed.eventVersion !== "number" || !Number.isFinite(parsed.eventVersion)) {
+      const parsed = camelizeKeys(
+        JSON.parse(msg.data),
+      ) as PassengerRideSseEventEnvelope;
+      if (
+        typeof parsed.eventVersion !== "number" ||
+        !Number.isFinite(parsed.eventVersion)
+      ) {
         return; // invalid version
       }
       if (parsed.eventVersion <= lastVersion) {
@@ -234,7 +241,9 @@ export function mapPassengerRideAuthorityToFixture(
       ? { statusSubline: "系統正在安排可派車輛" }
       : {}),
     ...(view.order.requestedPickupAt
-      ? { requestedPickupText: `預約時間 ${formatDateTime(view.order.requestedPickupAt)}` }
+      ? {
+          requestedPickupText: `預約時間 ${formatDateTime(view.order.requestedPickupAt)}`,
+        }
       : {}),
     ...(assignment?.eta.minutes === null ||
     assignment?.eta.minutes === undefined
@@ -291,7 +300,7 @@ export function mapPassengerRideAuthorityToFixture(
     ...(certificate ? { certificate } : {}),
     ...(view.order.status === "completed"
       ? {
-        ratingSummary: view.rating
+          ratingSummary: view.rating
             ? {
                 state: "rated",
                 scoreText: `${view.rating.score} 星`,
@@ -300,7 +309,13 @@ export function mapPassengerRideAuthorityToFixture(
             : {
                 state: "unavailable",
                 countText: "請為本趟服務評分",
-                chips: ["態度親切", "車內整潔", "平穩安全", "準時抵達", "熟悉路線"],
+                chips: [
+                  "態度親切",
+                  "車內整潔",
+                  "平穩安全",
+                  "準時抵達",
+                  "熟悉路線",
+                ],
               },
         }
       : {}),
@@ -387,7 +402,12 @@ export function mapPassengerCertificate(
   const record = receipt.record;
   if (!record) {
     if ("receiptUrl" in receipt && typeof receipt.receiptUrl === "string") {
-      return { state: "available", receiptNo: receipt.receiptNo || "", rows: [], htmlUrl: receipt.receiptUrl };
+      return {
+        state: "available",
+        receiptNo: receipt.receiptNo || "",
+        rows: [],
+        htmlUrl: receipt.receiptUrl,
+      };
     }
     return { state: "pending" };
   }
@@ -475,7 +495,11 @@ export function mapPassengerCertificate(
   }
   const fareDistanceMinor = readNonNegativeNumber(record, "fareDistanceMinor");
   if (fareDistanceMinor !== null) {
-    rows.push({ label: "續程", value: formatMoney(fareDistanceMinor), mono: true });
+    rows.push({
+      label: "續程",
+      value: formatMoney(fareDistanceMinor),
+      mono: true,
+    });
   }
   const fareTimeMinor = readNonNegativeNumber(record, "fareTimeMinor");
   if (fareTimeMinor !== null) {
@@ -483,7 +507,11 @@ export function mapPassengerCertificate(
   }
   const fareNightMinor = readNonNegativeNumber(record, "fareNightMinor");
   if (fareNightMinor !== null) {
-    rows.push({ label: "夜間明細", value: formatMoney(fareNightMinor), mono: true });
+    rows.push({
+      label: "夜間明細",
+      value: formatMoney(fareNightMinor),
+      mono: true,
+    });
   }
 
   const result: PassengerCertificatePresentation = {
@@ -502,7 +530,9 @@ function resolveScreenId(
 ): PassengerScreenId {
   if (kind === "receipt") return "P5-10";
   if (view.order.status === "cancelled") {
-    throw new Error("SCREEN_REQUIREMENT: Missing cancelled terminal screen in canvas");
+    throw new Error(
+      "SCREEN_REQUIREMENT: Missing cancelled terminal screen in canvas",
+    );
   }
   if (view.order.status === "completed") return view.rating ? "P5-09" : "P5-08";
   if (view.receipt) return "P5-10";
@@ -510,7 +540,12 @@ function resolveScreenId(
   if (view.order.status === "arrived_pickup") return "P5-06";
   if (view.order.status === "redispatch_required") return "P5-04";
   if (!view.assignment) {
-    if (["assigned", "driver_accepted", "enroute_pickup"].includes(view.order.status)) return "P5-11";
+    if (
+      ["assigned", "driver_accepted", "enroute_pickup"].includes(
+        view.order.status,
+      )
+    )
+      return "P5-11";
     return "P5-01";
   }
   if (view.assignment.assignmentVersion > 1) return "P5-05";

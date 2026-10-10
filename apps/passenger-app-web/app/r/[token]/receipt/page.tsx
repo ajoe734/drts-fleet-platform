@@ -1,4 +1,4 @@
-import { PassengerRidePage } from "@/components/ride/passenger-ride-page";
+import { PassengerRidePage } from "../../../../components/ride/passenger-ride-page";
 
 export default function TokenReceiptRoute({
   params,

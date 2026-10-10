@@ -1,10 +1,11 @@
+/** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
-import RidesListPage from "@/app/rides/page";
-import { passengerClient } from "@/lib/client";
+import RidesListPage from "../../../apps/passenger-app-web/app/rides/page";
+import { passengerClient } from "../../../apps/passenger-app-web/lib/client";
 import { PassengerRideAuthorityView } from "@drts/contracts";
 
-vi.mock("@/lib/client", () => ({
+vi.mock("../../../apps/passenger-app-web/lib/client", () => ({
   passengerClient: {
     getActiveRides: vi.fn(),
     getRides: vi.fn(),

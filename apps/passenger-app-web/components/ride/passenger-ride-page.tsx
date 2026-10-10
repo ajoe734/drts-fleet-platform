@@ -10,9 +10,9 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { getToneRamp, passengerChrome } from "@/lib/passenger-presentation";
-import { loadPassengerRideFixture } from "@/lib/passenger-fixture-loader";
-import { resolvePassengerDataMode } from "@/lib/runtime-config";
+import { getToneRamp, passengerChrome } from "../../lib/passenger-presentation";
+import { loadPassengerRideFixture } from "../../lib/passenger-fixture-loader";
+import { resolvePassengerDataMode } from "../../lib/runtime-config";
 import type {
   PassengerRideFixture,
   PassengerCertificatePresentation,
@@ -25,7 +25,7 @@ import {
   PassengerAuthorityError,
   requestPassengerRideAction,
   subscribePassengerRideAuthority,
-} from "@/lib/ride/passenger-live";
+} from "../../lib/ride/passenger-live";
 import { ComplaintForm } from "./complaint-form";
 
 const ConnectionContext = React.createContext<{
