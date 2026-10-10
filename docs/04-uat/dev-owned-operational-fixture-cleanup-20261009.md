@@ -37,15 +37,18 @@
 - 獨立審查裁決: `REOPEN / not approved` (Codex)
 
 ### 候選版本 12 (Round 12): 9dcaa35a97
-- 拒絕候選 SHA: `9dcaa35a97171111a4098c8cad1fbc10679e8a98` / Generation: `7e610a6179b049ed9495180995342d36`
+- 獨立審查裁決: `REOPEN / not approved` (Codex)
+- 處理 R12-01 到 R12-04 缺陷。
+
+### 候選版本 13 (Round 13): 9a7eb7e50b22
+- 拒絕候選 SHA: `9a7eb7e50b2265666f1f6e2de6e5045e0e381e8a` / Generation: `79cf96353f264629894446f19b470ee3`
 - 獨立審查裁決: `REOPEN / not approved` (Codex)
 - 本次修復狀態對應表 (Per-finding Evidence Mapping):
   | 發現編號 | 先前狀態 / 命令結果 | 修復邊界 / 證據 | 限制與保留 |
   | --- | --- | --- | --- |
-  | R12-01 | 新的寫死 bounds (`08:00`-`10:05`) 拒絕了真實且未修改的 archive。測試中的 loader positives 透過 patch digest 與發明的新 constants 來驗證，並非真實證明。 | 修改程式碼中的 global constants 為真實的 job bounds (`09:01:12` - `09:04:01`)，使真實未修改的 ZIP 能夠成功通過載入檢驗。 | 不竄改真實在線證明；未經授權的伴隨 dates 會被標記或阻擋。 |
-  | R12-02 | 9-job 列表中的 8 個 "other jobs" 僅驗證長度與狀態，導致同 cardinality 且造假的 jobs 亦被視作驗證成功。 | 針對 jobs.json 中的每一筆 entry，強制執行 `id` 唯一性、`run_id`、`head_sha`，以及 `html_url`/`url` 的前綴格式綁定，不依賴空泛長度或狀態。 | 保留原有真實 ZIP 正向測試與嚴格竄改拒絕；並非所有 job 身分問題都由空泛描述涵蓋。 |
-  | R12-03 | 匯出的 direct inspector 或 pipeline 仍依賴 caller 提供的 bounds，若 caller 仿造公開的 constants，仍可製造 false validity。 | 放棄信任 target 的 caller `run_bounds`。在 `inspect_and_validate_gcs_target` 強制套用與驗證真實捕獲之 `EXPECTED_RUN_BOUNDS_START/END`。 | 所有 caller 仿造日期的 object 檢查都會因真實邊界失敗；不依賴外部 boolean。 |
-  | R12-04 | UAT 描述錯誤，包含宣稱真實 9-job ZIP 通過測試、不實的修復聲明、錯誤的歷史關聯與測試數字。 | 重寫 UAT，如實反映 R12-01 至 R12-03 未修復時的行為，更正歷史 round mapping，並更正測試數字為 84 (81 PASS / 3 SKIP)。 | UAT 不作為單純的鏡像測試，而是真實反映機器環境行為。 |
+  | R13-01 | job ID 與總數未驗證，允許造假相同時間與狀態的其他 job。 | `load_and_validate_authoritative_artifact` 強制綁定 `jobs.json` 必須恰有 9 個 required job IDs，且 `total_count` 為 9，並強制驗證 `started_at` 與 `completed_at` 在真實 run 的邊界內。新增負面測試 `test_wrong_total_count_rejected` 等。 | 保留原有真實 ZIP 測試，並增加防篡改嚴格校驗。 |
+  | R13-02 | inspector 允許 caller 自行設定非擁有的 object target 與 run bounds。 | `inspect_and_validate_gcs_target` 強制由 `logical_key` 查表 `CANONICAL_OWNED_OBJECTS`，不再信任 mock 提供的任意 bucket/key，並新增測試確保 `run_bounds` 不可被覆寫。 | 修復前置單元測試中 mock 參數，確保與真實 canonical mapping 吻合。 |
+  | R13-03 | 歷次修復證據與追蹤地圖不全。 | UAT 更新，包含舊證據對應新防護行為（old->new, exact mapping）。 | 真實雲端驗收、mutation apply 仍在安全機制中被攔截，不執行刪除。 |
 
 ## 3. 本機驗證日誌與退出碼 (Local Verification Logs & Exit Codes)
 
@@ -59,14 +62,14 @@ python3 -B tools/ci/check_test_coverage.py
 ```bash
 python3 -B -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py -v
 # Exit code: 0
-# Ran 49 tests ... OK
+# Ran 55 tests ... OK
 ```
 
 ### 3. 本機測試目錄自動發現驗證
 ```bash
 python3 -B -m unittest discover -s tests/unit/gcp-artifact-activation-20261004 -p 'test_*.py'
 # Exit code: 0
-# Ran 84 tests in 3.634s
+# Ran 90 tests in 3.647s
 # OK (skipped=3)
 ```
 

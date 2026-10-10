@@ -237,6 +237,13 @@ class TestProvenanceValidation(unittest.TestCase):
             cleanup.validate_provenance(data)
         self.assertIn("run_bounds start mismatch", str(ctx.exception))
 
+    def test_missing_bounds_rejected(self):
+        data = copy.deepcopy(self.data)
+        del data["run_bounds"]
+        with self.assertRaises(ValueError) as ctx:
+            cleanup.validate_provenance(data)
+        self.assertIn("Missing mandatory run_bounds", str(ctx.exception))
+
 
 class TestAuthoritativeArtifactCollection(unittest.TestCase):
     def setUp(self):
@@ -253,8 +260,9 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
             "repository": {"full_name": "ajoe734/drts-fleet-platform"}
         }
         jobs = []
-        for i in range(8):
-            job_id = 113747921501 + i
+        expected_ids = [113740473026, 113740518866, 113744327840, 113745681997, 
+                        113746824327, 113747086904, 113747511276, 113748909497]
+        for i, job_id in enumerate(expected_ids):
             jobs.append({
                 "id": job_id,
                 "name": f"other job {i}",
@@ -262,6 +270,8 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
                 "conclusion": "success",
                 "run_id": cleanup.EXPECTED_PRODUCT_RUN_ID,
                 "head_sha": cleanup.EXPECTED_WORKFLOW_DEF_SHA,
+                "started_at": cleanup.EXPECTED_RUN_BOUNDS_START,
+                "completed_at": cleanup.EXPECTED_RUN_BOUNDS_END,
                 "html_url": f"https://github.com/ajoe734/drts-fleet-platform/actions/runs/{cleanup.EXPECTED_PRODUCT_RUN_ID}/job/{job_id}",
                 "url": f"https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/{job_id}"
             })
@@ -275,7 +285,7 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
             "html_url": f"https://github.com/ajoe734/drts-fleet-platform/actions/runs/{cleanup.EXPECTED_PRODUCT_RUN_ID}/job/113747921500",
             "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/113747921500"
         })
-        self.jobs_meta = {"jobs": jobs}
+        self.jobs_meta = {"jobs": jobs, "total_count": 9}
         
         # Create a real zip containing report.json and operational-browser-evidence.json
         buf = io.BytesIO()
@@ -372,6 +382,20 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
                     cleanup.load_and_validate_authoritative_artifact(dir_path)
             self.assertIn("Unexpected failures in report", str(ctx.exception))
 
+    def test_pipeline_without_archive_returns_unverified_planning_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dir_path = Path(tmpdir)
+            # Do NOT write evidence.zip
+            
+            art_meta = copy.deepcopy(AUTHENTIC_ARTIFACTS_JSON)
+            (dir_path / "artifacts.json").write_text(json.dumps(art_meta), encoding="utf-8")
+            (dir_path / "run.json").write_text(json.dumps(self.run_meta), encoding="utf-8")
+            (dir_path / "jobs.json").write_text(json.dumps(self.jobs_meta), encoding="utf-8")
+            
+            res = cleanup.load_and_validate_authoritative_artifact(dir_path)
+            self.assertTrue(res.get("unverified_planning_only"))
+            self.assertIn("No archive zip found for hashing", res.get("error_reason", ""))
+
     def test_missing_required_jobs_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             dir_path = Path(tmpdir)
@@ -448,6 +472,64 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
                     cleanup.load_and_validate_authoritative_artifact(dir_path)
             self.assertIn("Acceptance job foreign repository/URL", str(ctx.exception))
 
+    def test_job_missing_started_at_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dir_path = Path(tmpdir)
+            (dir_path / "evidence.zip").write_bytes(self.mock_zip_content)
+            
+            art_meta = copy.deepcopy(AUTHENTIC_ARTIFACTS_JSON)
+            art_meta["artifacts"][0]["digest"] = "sha256:" + self.mock_hash
+            (dir_path / "artifacts.json").write_text(json.dumps(art_meta), encoding="utf-8")
+            (dir_path / "run.json").write_text(json.dumps(self.run_meta), encoding="utf-8")
+            
+            bad_jobs = copy.deepcopy(self.jobs_meta)
+            del bad_jobs["jobs"][0]["started_at"]
+            (dir_path / "jobs.json").write_text(json.dumps(bad_jobs), encoding="utf-8")
+            
+            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', 'sha256:' + self.mock_hash):
+                with self.assertRaises(ValueError) as ctx:
+                    cleanup.load_and_validate_authoritative_artifact(dir_path)
+            self.assertIn("missing started_at", str(ctx.exception))
+
+    def test_job_reversed_dates_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dir_path = Path(tmpdir)
+            (dir_path / "evidence.zip").write_bytes(self.mock_zip_content)
+            
+            art_meta = copy.deepcopy(AUTHENTIC_ARTIFACTS_JSON)
+            art_meta["artifacts"][0]["digest"] = "sha256:" + self.mock_hash
+            (dir_path / "artifacts.json").write_text(json.dumps(art_meta), encoding="utf-8")
+            (dir_path / "run.json").write_text(json.dumps(self.run_meta), encoding="utf-8")
+            
+            bad_jobs = copy.deepcopy(self.jobs_meta)
+            # Reverse start and end
+            bad_jobs["jobs"][0]["started_at"] = cleanup.EXPECTED_RUN_BOUNDS_END
+            bad_jobs["jobs"][0]["completed_at"] = cleanup.EXPECTED_RUN_BOUNDS_START
+            (dir_path / "jobs.json").write_text(json.dumps(bad_jobs), encoding="utf-8")
+            
+            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', 'sha256:' + self.mock_hash):
+                with self.assertRaises(ValueError) as ctx:
+                    cleanup.load_and_validate_authoritative_artifact(dir_path)
+            self.assertIn("out of bounds or reversed", str(ctx.exception))
+
+    def test_wrong_total_count_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dir_path = Path(tmpdir)
+            (dir_path / "evidence.zip").write_bytes(self.mock_zip_content)
+            
+            art_meta = copy.deepcopy(AUTHENTIC_ARTIFACTS_JSON)
+            art_meta["artifacts"][0]["digest"] = "sha256:" + self.mock_hash
+            (dir_path / "artifacts.json").write_text(json.dumps(art_meta), encoding="utf-8")
+            (dir_path / "run.json").write_text(json.dumps(self.run_meta), encoding="utf-8")
+            
+            bad_jobs = copy.deepcopy(self.jobs_meta)
+            bad_jobs["total_count"] = 100
+            (dir_path / "jobs.json").write_text(json.dumps(bad_jobs), encoding="utf-8")
+            
+            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', 'sha256:' + self.mock_hash):
+                with self.assertRaises(ValueError) as ctx:
+                    cleanup.load_and_validate_authoritative_artifact(dir_path)
+            self.assertIn("Expected total_count 9", str(ctx.exception))
 
 class TestInventoryValidation(unittest.TestCase):
     def setUp(self):
@@ -534,29 +616,28 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
             self.assertEqual(res["status"], "error")
             self.assertEqual(res["error_type"], "permission_or_network")
 
-    def test_preexisting_absence_without_receipt_raises(self):
-        target = {
+    def _create_valid_target(self):
+        logical = list(cleanup.CANONICAL_OWNED_OBJECTS.keys())[0]
+        return {
             "bucket": cleanup.BUCKET,
-            "key": list(cleanup.CANONICAL_OWNED_OBJECTS.keys())[0],
+            "key": cleanup.logical_to_physical_gcs_key(logical),
+            "logical_key": logical,
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
             "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
         }
+
+    def test_preexisting_absence_without_receipt_raises(self):
+        target = self._create_valid_target()
         desc = {"status": "not_found", "returncode": 1, "stderr": "No such object"}
         with self.assertRaises(ValueError) as ctx:
             cleanup.inspect_and_validate_gcs_target(desc, target, prior_receipts=None)
         self.assertIn("Pre-existing absence", str(ctx.exception))
 
     def test_gcs_metadata_naive_timestamp_rejected(self):
-        target = {
-            "bucket": cleanup.BUCKET,
-            "key": list(cleanup.CANONICAL_OWNED_OBJECTS.keys())[0],
-            "expected_size": 327,
-            "expected_content_type": "application/pdf",
-            "expected_sha256": cleanup.EXPECTED_SHA256,
-            "run_bounds": {"start": cleanup.EXPECTED_RUN_BOUNDS_START, "end": cleanup.EXPECTED_RUN_BOUNDS_END},
-        }
+        target = self._create_valid_target()
+        target["run_bounds"] = {"start": cleanup.EXPECTED_RUN_BOUNDS_START, "end": cleanup.EXPECTED_RUN_BOUNDS_END}
         desc = {
             "status": "ok",
             "metadata": {
@@ -581,14 +662,7 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
             cleanup.build_cleanup_plan(inv, mode="dry-run")
 
     def test_gcs_metadata_bad_content_type_rejected(self):
-        target = {
-            "bucket": cleanup.BUCKET,
-            "key": list(cleanup.CANONICAL_OWNED_OBJECTS.keys())[0],
-            "expected_size": 327,
-            "expected_content_type": "application/pdf",
-            "expected_sha256": cleanup.EXPECTED_SHA256,
-            "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
-        }
+        target = self._create_valid_target()
         desc = {
             "status": "ok",
             "metadata": {
@@ -606,14 +680,7 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
         self.assertIn("content-type mismatch", str(ctx.exception))
 
     def test_gcs_metadata_bad_hash_rejected(self):
-        target = {
-            "bucket": cleanup.BUCKET,
-            "key": list(cleanup.CANONICAL_OWNED_OBJECTS.keys())[0],
-            "expected_size": 327,
-            "expected_content_type": "application/pdf",
-            "expected_sha256": cleanup.EXPECTED_SHA256,
-            "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
-        }
+        target = self._create_valid_target()
         desc = {
             "status": "ok",
             "metadata": {
@@ -632,14 +699,7 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
         self.assertIn("Missing live hash/body verification", str(ctx.exception))
 
     def test_gcs_metadata_non_numeric_generation_rejected(self):
-        target = {
-            "bucket": cleanup.BUCKET,
-            "key": list(cleanup.CANONICAL_OWNED_OBJECTS.keys())[0],
-            "expected_size": 327,
-            "expected_content_type": "application/pdf",
-            "expected_sha256": cleanup.EXPECTED_SHA256,
-            "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
-        }
+        target = self._create_valid_target()
         desc = {
             "status": "ok",
             "metadata": {
@@ -655,6 +715,13 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
             cleanup.inspect_and_validate_gcs_target(desc, target)
         self.assertIn("non-numeric generation", str(ctx.exception))
 
+    def test_inspector_unowned_target_rejected(self):
+        target = self._create_valid_target()
+        target["logical_key"] = "foreign-partner/some-other-file.pdf"
+        desc = {"status": "not_found", "returncode": 1, "stderr": "No such object"}
+        with self.assertRaises(ValueError) as ctx:
+            cleanup.inspect_and_validate_gcs_target(desc, target)
+        self.assertIn("Foreign object key expected", str(ctx.exception))
 
 
 class TestDbCleanupGuardsAndPreflight(unittest.TestCase):
@@ -796,15 +863,20 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
         self.assertEqual(res["status"], "error")
         self.assertIn("permission denied", res["error"])
 
-    def test_gcs_target_missing_metageneration_rejected(self):
-        target = {
+    def _create_valid_target(self):
+        logical = list(cleanup.CANONICAL_OWNED_OBJECTS.keys())[0]
+        return {
             "bucket": cleanup.BUCKET,
-            "key": "document-artifacts/fleet-upload-content/test.pdf",
+            "key": cleanup.logical_to_physical_gcs_key(logical),
+            "logical_key": logical,
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "expected_sha256": cleanup.EXPECTED_SHA256,
             "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
         }
+
+    def test_gcs_target_missing_metageneration_rejected(self):
+        target = self._create_valid_target()
         desc = {
             "status": "ok",
             "metadata": {
@@ -822,14 +894,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
         self.assertIn("Missing or invalid metageneration", str(ctx.exception))
 
     def test_gcs_target_missing_hash_and_body_rejected(self):
-        target = {
-            "bucket": cleanup.BUCKET,
-            "key": "document-artifacts/fleet-upload-content/test.pdf",
-            "expected_size": 327,
-            "expected_content_type": "application/pdf",
-            "expected_sha256": cleanup.EXPECTED_SHA256,
-            "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
-        }
+        target = self._create_valid_target()
         desc = {
             "status": "ok",
             "metadata": {
@@ -847,14 +912,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
         self.assertIn("Missing live hash/body verification", str(ctx.exception))
 
     def test_gcs_target_stale_timestamp_rejected(self):
-        target = {
-            "bucket": cleanup.BUCKET,
-            "key": "document-artifacts/fleet-upload-content/test.pdf",
-            "expected_size": 327,
-            "expected_content_type": "application/pdf",
-            "expected_sha256": cleanup.EXPECTED_SHA256,
-            "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
-        }
+        target = self._create_valid_target()
         desc = {
             "status": "ok",
             "metadata": {
@@ -873,14 +931,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
         self.assertIn("out of bounds", str(ctx.exception))
 
     def test_gcs_target_prior_receipt_validation(self):
-        target = {
-            "bucket": cleanup.BUCKET,
-            "key": "document-artifacts/fleet-upload-content/test.pdf",
-            "expected_size": 327,
-            "expected_content_type": "application/pdf",
-            "expected_sha256": cleanup.EXPECTED_SHA256,
-            "run_bounds": {"start": "2026-10-09T09:01:12Z", "end": "2026-10-09T09:04:01Z"},
-        }
+        target = self._create_valid_target()
         desc = {"status": "not_found", "returncode": 1, "stderr": "Not found"}
         foreign_receipt = [{"key": target["key"], "bucket": "wrong-bucket", "status": "deleted", "generation": "123", "verified_absent": True}]
         with self.assertRaises(ValueError) as ctx:
