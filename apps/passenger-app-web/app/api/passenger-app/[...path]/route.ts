@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 const METADATA_IDENTITY_TOKEN_URL =
@@ -29,6 +30,47 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const OAUTH_COOKIE = "pax_oauth_txn";
+type OAuthBinding = {
+  transactionId: string;
+  state: string;
+  provider: string;
+  purpose: "login" | "link";
+  expiresAt: number;
+  session: string;
+};
+function sessionFingerprint(token: string | undefined): string {
+  if (!token) return "anonymous";
+  let binding = token;
+  try {
+    const claims = JSON.parse(
+      Buffer.from(token.split(".")[1]!, "base64url").toString("utf8"),
+    );
+    // This is a rotation-stable equality check, not authentication. API verifies
+    // the JWT and live family on both start and callback.
+    if (typeof claims.sub === "string" && typeof claims.sid === "string")
+      binding = `${claims.sub}:${claims.sid}`;
+  } catch {
+    /* Opaque legacy tokens remain bound by their exact value. */
+  }
+  return createHash("sha256").update(binding).digest("hex");
+}
+function clearOAuth(response: NextResponse) {
+  response.cookies.set(OAUTH_COOKIE, "", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
+    expires: new Date(0),
+  });
+}
+function oauthFailure(status = 400, code = "invalid_grant") {
+  const response = NextResponse.json({ error: { code } }, { status });
+  clearOAuth(response);
+  return withSecurityHeaders(response);
+}
 
 function hasUnsafePathSegment(path: string[]) {
   return path.some((segment) => {
@@ -83,6 +125,19 @@ function isAllowedPassengerPath(path: string[], method: string) {
   if (method === "POST" && fullPath === "auth/refresh") return true;
   if (method === "POST" && fullPath === "auth/logout") return true;
   if (method === "GET" && fullPath === "me") return true;
+  if (method === "PATCH" && fullPath === "me") return true;
+  if (method === "DELETE" && fullPath === "me") return true;
+  if (method === "GET" && fullPath === "me/identities") return true;
+  if (
+    method === "DELETE" &&
+    path.length === 3 &&
+    path[0] === "me" &&
+    path[1] === "identities" &&
+    UUID.test(path[2]!)
+  ) {
+    // me/identities/:id
+    return true;
+  }
   if (method === "GET" && fullPath === "fares") return true;
   if (method === "POST" && fullPath === "rides") return true;
   return false;
@@ -176,6 +231,7 @@ function withSecurityHeaders(response: NextResponse) {
 }
 
 function deleteCookies(resp: NextResponse) {
+  clearOAuth(resp);
   resp.cookies.set("pax_session", "", {
     maxAge: 0,
     expires: new Date(0),
@@ -193,11 +249,22 @@ async function forward(
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   let isLogout = false;
+  let isOAuthCallback = false;
   try {
     const { path } = await params;
     const method = request.method.toUpperCase();
     const fullPath = path.join("/");
     isLogout = fullPath === "auth/logout" && method === "POST";
+    isOAuthCallback =
+      path[0] === "auth" &&
+      path[1] === "oauth" &&
+      path[3] === "callback" &&
+      method === "POST";
+    const isOAuthStart =
+      path[0] === "auth" &&
+      path[1] === "oauth" &&
+      path[3] === "start" &&
+      method === "POST";
 
     if (!(await checkCSRF(request))) {
       return withSecurityHeaders(
@@ -226,9 +293,81 @@ async function forward(
       );
     }
 
-    let initialBodyData: BodyInit | null = null;
+    let initialBodyData: ArrayBuffer | null = null;
     if (!["GET", "HEAD"].includes(method)) {
       initialBodyData = await request.arrayBuffer();
+    }
+    let oauthCommand: Record<string, unknown> | null = null;
+    if (isOAuthStart || isOAuthCallback) {
+      try {
+        oauthCommand = JSON.parse(new TextDecoder().decode(initialBodyData!));
+        if (
+          !oauthCommand ||
+          Array.isArray(oauthCommand) ||
+          typeof oauthCommand !== "object"
+        )
+          return oauthFailure();
+      } catch {
+        return oauthFailure();
+      }
+      const command = oauthCommand;
+      if (command.provider !== path[2]) return oauthFailure();
+      if (isOAuthStart) {
+        if (
+          Object.keys(command).some(
+            (k) => !["provider", "purpose", "redirectUri"].includes(k),
+          ) ||
+          !["login", "link"].includes(String(command.purpose)) ||
+          command.redirectUri !==
+            `${new URL(request.url).origin}/auth/callback/${path[2]}`
+        )
+          return oauthFailure(400, "validation_error");
+        if (command.purpose === "link" && !token)
+          return oauthFailure(401, "unauthorized");
+      } else {
+        let binding: OAuthBinding;
+        try {
+          binding = JSON.parse(
+            Buffer.from(
+              request.cookies.get(OAUTH_COOKIE)?.value ?? "",
+              "base64url",
+            ).toString("utf8"),
+          );
+        } catch {
+          return oauthFailure();
+        }
+        if (
+          !binding ||
+          !UUID.test(binding.transactionId ?? "") ||
+          binding.provider !== path[2] ||
+          !["login", "link"].includes(binding.purpose) ||
+          typeof binding.state !== "string" ||
+          !binding.state ||
+          !Number.isFinite(binding.expiresAt) ||
+          binding.expiresAt <= Date.now() ||
+          binding.expiresAt > Date.now() + 600_000 ||
+          binding.state !== command.state ||
+          binding.session !== sessionFingerprint(token) ||
+          (binding.purpose === "link" && !token) ||
+          Object.keys(command).some(
+            (k) => !["provider", "code", "state", "error"].includes(k),
+          )
+        )
+          return oauthFailure();
+        // A declined provider callback still consumes the browser binding.
+        if (typeof command.error === "string")
+          return oauthFailure(400, "oauth_denied");
+        if (typeof command.code !== "string" || !command.code.trim())
+          return oauthFailure();
+        initialBodyData = new TextEncoder().encode(
+          JSON.stringify({
+            provider: path[2],
+            code: command.code,
+            state: binding.state,
+            transactionId: binding.transactionId,
+          }),
+        ).buffer as ArrayBuffer;
+      }
     }
 
     function extractTokens(
@@ -354,6 +493,7 @@ async function forward(
     }
 
     // Normal forward path
+
     let init = await buildInit(token, refreshToken);
     let upstream = await fetch(targetUrl.toString(), init);
 
@@ -400,8 +540,52 @@ async function forward(
       fullPath === "auth/mfa/verify" ||
       fullPath.startsWith("auth/oauth");
 
+    let oauthTxn: OAuthBinding | null = null;
+    if (isOAuthStart && upstream.ok) {
+      try {
+        const parsed = await upstream.clone().json();
+        const data = parsed.data ?? parsed;
+        const transactionId = data.transaction_id ?? data.transactionId;
+        const authUrl = new URL(data.auth_url ?? data.authUrl);
+        const expiresAt = Date.parse(data.expires_at ?? data.expiresAt);
+        if (
+          !UUID.test(transactionId ?? "") ||
+          typeof data.state !== "string" ||
+          !data.state ||
+          authUrl.protocol !== "https:" ||
+          authUrl.username ||
+          authUrl.password ||
+          authUrl.searchParams.get("state") !== data.state ||
+          !Number.isFinite(expiresAt) ||
+          expiresAt <= Date.now() ||
+          expiresAt > Date.now() + 600_000
+        )
+          return oauthFailure(503, "unavailable");
+        oauthTxn = {
+          transactionId,
+          state: data.state,
+          provider: path[2]!,
+          purpose: oauthCommand!.purpose as "login" | "link",
+          expiresAt,
+          session: sessionFingerprint(token),
+        };
+        finalBody = JSON.stringify(
+          parsed.data
+            ? { ...parsed, data: { auth_url: authUrl.toString() } }
+            : { authUrl: authUrl.toString() },
+        );
+      } catch {
+        return oauthFailure(503, "unavailable");
+      }
+    }
+
     let loginData = null;
-    if (isLogin && upstream.ok && (method === "POST" || method === "GET")) {
+    if (
+      isLogin &&
+      !isOAuthStart &&
+      upstream.ok &&
+      (method === "POST" || method === "GET")
+    ) {
       const contentType = upstream.headers.get("content-type") || "";
       if (contentType.includes("application/json")) {
         let parsed;
@@ -424,6 +608,7 @@ async function forward(
                 { error: "INVALID_TOKEN_PAYLOAD" },
                 { status: 503 },
               );
+              if (isOAuthCallback) clearOAuth(resp);
               return withSecurityHeaders(resp);
             }
           }
@@ -444,9 +629,24 @@ async function forward(
       path: "/",
     };
 
+    if (oauthTxn) {
+      nextResponse.cookies.set(
+        OAUTH_COOKIE,
+        Buffer.from(JSON.stringify(oauthTxn)).toString("base64url"),
+        {
+          ...opts,
+          maxAge: Math.max(
+            1,
+            Math.floor((oauthTxn.expiresAt - Date.now()) / 1000),
+          ),
+        },
+      );
+    }
+
     if (didClearTokens) {
       deleteCookies(nextResponse);
     } else if (loginData && loginData.accessToken && loginData.refreshToken) {
+      clearOAuth(nextResponse);
       nextResponse.cookies.set("pax_session", loginData.accessToken, opts);
       nextResponse.cookies.set("pax_refresh", loginData.refreshToken, opts);
     } else if (refreshedTokens) {
@@ -462,6 +662,10 @@ async function forward(
       );
     }
 
+    if (isOAuthCallback) clearOAuth(nextResponse);
+    if (fullPath === "me" && method === "DELETE" && upstream.ok)
+      deleteCookies(nextResponse);
+
     return nextResponse;
   } catch {
     // Top-level catch for any unhandled errors (e.g. metadata text read fail on normal requests, arrayBuffer errors)
@@ -469,6 +673,7 @@ async function forward(
       { error: "PASSENGER_AUTHORITY_UNAVAILABLE" },
       { status: 503 },
     );
+    if (isOAuthCallback) clearOAuth(resp);
     if (isLogout) {
       deleteCookies(resp);
     }
@@ -491,6 +696,13 @@ export async function POST(
 }
 
 export async function DELETE(
+  request: NextRequest,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  return forward(request, context);
+}
+
+export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
 ) {
