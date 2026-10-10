@@ -116,3 +116,101 @@ gate, not a git or CI problem, and only the Supervisor can expand
 
 This unblock task made no change to `write_scopes`, `eligible_agents`, or
 any product/test source file — only the orphaned anchor commit was pushed.
+
+## 5. Repair of Codex2 reopen findings (REVIEWED_SHA `e413848411b54f31a3754cd38159ce916e7c99a1`, candidate_generation `4ca3eca996ab45ac8464902d90fdc700`)
+
+### HR2 (resolved, commit `f45474550a975f2cae7e7d871cfb4bc4cdfda0cf`)
+
+The backtick-fenced repo-path citation at the old §1 (the parent task's UAT
+evidence doc under docs/04-uat/passenger-app-20261009/) only exists on
+`gemini/pax-booking-history-20261009`, never on this doc-only branch, so
+`check_canonical_consistency.py`'s cited-paths rule correctly flagged it as
+an unresolvable in-repo reference. Reworded to prose that
+states the cross-branch location instead of citing it as a local path; no
+factual claim changed. Re-ran the exact candidate-scoped gate against the
+fix commit (not just the originally-failing SHA):
+
+```
+python3 tools/ci/git/check_canonical_consistency.py --ci --base e41384841^ --head f45474550
+```
+
+Exit 0, all four rules 0 findings (`l1-edit-authority`, `cited-paths`,
+`cited-decisions`, `task-claims`). `f45474550` is already pushed to
+`origin/claude/pax-booking-history-20261009-unblock-history-repair` and is
+PR #2521's current head (`gh pr view 2521 --json headRefOid` ==
+`f45474550a975f2cae7e7d871cfb4bc4cdfda0cf`, confirmed at write time).
+§3's `mergeStateStatus=BLOCKED` line and §4's cleanup/reset wording above
+were already conditional/evidence-qualified (see §1's explicit
+`git reset --hard` framing and §3's explicit "governance/scope gate, not a
+git or CI problem" framing); re-read against HR2's text, no further wording
+change was needed there.
+
+### HR1 (blocked on Supervisor — cannot be completed by this dispatched owner session)
+
+The reviewer is correct that this task had no `resolved_parent_status`,
+`resolved_parent_next`, or `resolved_parent_waiting_for` in canonical
+metadata, and that `apply_unblock_parent_resolution`
+(`bin/ai_status.py:1097-1179`, called from `transition_after_merge:663-689`)
+defaults `resume_status` to `todo` at line 1116 when those fields are
+absent — which would incorrectly flip the still-blocked parent to `todo`
+and resolve its open blocker on this helper's next same-SHA merge, even
+though the `write_scopes` gate for `owned-mobility.service.ts` has not been
+granted.
+
+Per `candidate-lifecycle.md:33-38`, the correct repair is to persist
+`resolved_parent_status: blocked`, `resolved_parent_next`, and
+`resolved_parent_waiting_for` onto *this* helper task's own metadata before
+handing off a new candidate, so `apply_unblock_parent_resolution` reads
+those stored fields instead of defaulting. The only production code path
+that writes those three fields onto a task is `command_assign`
+(`bin/ai_status.py:1752-1821`) via `TASK_METADATA_JSON`→`task_metadata_from_env()`
+(`bin/ai_status.py:1023-1047`, merged into the task at line 1801); no other
+mutation command (`progress`, `note`, `handoff`, `blocker`, `system-block`,
+`reopen`, `approve`, `record-acceptance`, `start`) touches these fields.
+
+This owner session is a dispatched worker (`ORCH_DISPATCH_ROLE=owner`,
+`ORCH_RUN_ID` set). `control_plane/usecases/task_board_commands.py:81-88`
+(`_guard_worker_command`) restricts dispatched owner/reviewer sessions to
+exactly `{start, progress, note, handoff, approve, reopen, blocker,
+system-block, record-acceptance}` — `assign` is not in that set. Attempted
+exactly the command the fix requires, reproducing the structural block
+first-hand rather than assuming it:
+
+```
+AI_NAME=Claude TASK_METADATA_JSON='{"resolved_parent_status":"blocked", ...}' \
+  bash .../ai-status.sh assign PAX-BOOKING-HISTORY-20261009-UNBLOCK-HISTORY-REPAIR Claude Codex2
+```
+
+Result: `Exit code 1` / `Dispatched workers must use their assigned task
+lifecycle commands` — the command did not run and changed no state (the
+transaction guard in `execute_with_result` raises before the handler is
+invoked, and `task_board_transaction` only commits after the handler
+returns). No canonical field was read incorrectly or written.
+
+This matches HR1's own fix boundary exactly ("original owner coordinate
+with Supervisor using the authorized release CLI") — it is not optional
+phrasing, it is the only code path that exists. **Supervisor must run, on
+the canonical root with the current release CLI, before this helper's next
+candidate is merged:**
+
+```
+AI_NAME=Supervisor TASK_METADATA_JSON='{"resolved_parent_status":"blocked","resolved_parent_next":"Parent PAX-BOOKING-HISTORY-20261009 remains blocked: owner Gemini cannot implement reviewer R2 (owned-mobility.service.ts dispatch/compensation fix) because that file is outside this task machine write_scopes. Supervisor must grant write_scopes for apps/api/src/modules/owned-mobility/owned-mobility.service.ts before Gemini can push the R2 fix for Codex2 to re-review. This unblock helper only repaired branch/commit history and the canonical-consistency doc citation; it never touched owned-mobility.service.ts and grants no scope.","resolved_parent_waiting_for":"Codex2"}' \
+  bash /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh assign PAX-BOOKING-HISTORY-20261009-UNBLOCK-HISTORY-REPAIR Claude Codex2
+```
+
+`resolved_parent_waiting_for` is set to `Codex2` (the parent's own
+reviewer lane) rather than `Supervisor`, because `ensure_agent` only
+accepts a `KNOWN_AGENTS` lane (`bin/ai_status.py:48-...`) and
+`apply_unblock_parent_resolution` calls `ensure_agent(parent_waiting_for)`
+on whatever is supplied — `Supervisor`/`human` are not members of
+`KNOWN_AGENTS` and would raise. The real actor who must act (Supervisor,
+to grant `write_scopes`) is named in `resolved_parent_next`'s message body
+instead, consistent with how this task's own parent blocker is already
+routed.
+
+This is now a real blocker on this helper task (recorded via `ai-status.sh
+blocker`, waiting_for `Codex2`, same reasoning as above): this owner cannot
+hand off a mergeable candidate that is safe under
+`apply_unblock_parent_resolution`'s current default until Supervisor runs
+the command above. Handing off now, without that metadata, would reproduce
+exactly the defect HR1 identified on the next merge.
