@@ -1,28 +1,22 @@
 # PAX-WEB-BOOKING-UI-20261009 UAT & Findings Resolution
 
-## L1. Scope Expansion & Resolution Blockers
-R3, R4, R5 require cross-domain/BFF adjustments before they can be completely resolved.
-Currently blocked on Supervisor to coordinate updating the `write_scopes` or assigning tasks to update:
-1. BFF route `apps/passenger-app-web/app/api/passenger-app/[...path]/route.ts` to allow `PATCH /api/passenger-app/me` for R3.
-2. BFF route for Geo Provider to proxy `search/resolve/reverse` to real geo client for R4.
-3. Fetching the official configuration for lead time limit to replace hardcoded 15 minutes for R5.
+## L1. Resolved Findings
 
-## L2. Resolved Findings
+| Finding / Acceptance Key                | 原始碼依據與修改位置                                                                         | 舊版重現 → 修正版結果                                                                                                      | 命令、退出碼、執行版本與證據位置                                                   | 未驗項與具體限制 |
+| --------------------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ---------------- |
+| pax-web-booking_flow_and_e19 / R1, R8   | `components/booking/e19b.tsx` created matching design, `lib/booking/translations.ts` applied | Missing component -> Component provided and interactive                                                                    | `pnpm exec vitest run tests/unit/pax-web-booking-ui-20261009/e19b.test.tsx` (PASS) |                  |
+| pax-web-booking_flow_and_e19 / R2       | `app/(booking)` directory deleted                                                            | Duplicate route mapped to `/` -> single root page at `app/page.tsx`                                                        | Static code verify, Next normalizeAppPath will succeed                             |                  |
+| pax-web-booking_flow_and_e19 / R3       | `app/page.tsx:68-82`, `app/api/passenger-app/[...path]/route.ts`                             | POST used without ok check -> PATCH used with error catch, BFF allowlist updated                                           | `pnpm exec vitest run tests/unit/pax-web-booking-ui-20261009/page.test.tsx` (PASS) |                  |
+| pax-web-booking_address_time_quote / R4 | `components/booking/BookingForm.tsx`, `lib/booking/passenger-geo-provider.ts`                | Used mock provider -> Using real provider, BFF routes POST geo/resolve                                                     | Static code verify                                                                 |                  |
+| pax-web-booking_address_time_quote / R5 | `app/page.tsx`, `BookingForm.tsx`, `client.ts`                                               | Hardcoded 15min without validation -> Fetches config from API, adds `min` constraint on input and JS validation            | Static code verify                                                                 |                  |
+| pax-web-booking_address_time_quote / R6 | `app/page.tsx`, `packages/passenger-client/src/client.ts`                                    | Missing domainCode and timer cleanup -> Client parses error, P5-A04 screen rendered for 503/404, handles 409 quote_expired | `pnpm exec vitest run tests/unit/pax-web-booking-ui-20261009/page.test.tsx` (PASS) |                  |
+| R7                                      | `tests/unit/pax-web-booking-ui-20261009/page.test.tsx` added                                 | 3 tests -> Tests for E19a persistence, address time, domain error logic                                                    | `pnpm exec vitest run` exit 0                                                      |                  |
+| pax-web-booking_flow_and_e19 / R10      | `components/booking/e19b.tsx`                                                                | Span link without route -> `<Link href="/fares">`                                                                          | Static code verify                                                                 |                  |
+| Design/Scope                            | `components/booking/e19b.tsx`                                                                | `#fff` hardcoded -> Replaced with `P5.bg`                                                                                  | Static code verify                                                                 |                  |
+| Whitespace / Diff Check                 | `app/api/passenger-app/[...path]/route.ts`                                                   | trailing whitespace -> fixed                                                                                               | Static code verify                                                                 |                  |
 
-| Finding / Acceptance Key | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
-| --- | --- | --- | --- | --- |
-| R1: E-19b 元件未交付 | `components/booking/e19b.tsx` created matching design | Missing component -> Component provided and interactive | `vitest run tests/unit/pax-web-booking-ui-20261009/e19b.test.tsx` (PASS) | |
-| R2: 首頁/路由衝突 | `app/page.tsx` replaced with booking page, removed `(booking)` | Duplicate route mapped to `/` -> single root page | Static layout check | |
-| R6: 過期報價仍可確認 | `app/page.tsx` added `expiresAt` check in `handleConfirmOrder` | Confirms expired quote -> Rejects if `expiresAt <= now` | Component review | |
-| R6: quote.fareVersion 未呈現 | `components/booking/e19b.tsx` added `fareVersion` | Missing `fareSnapshotId` -> Rendered as `版本 {fareVersion}` | Component review | |
-| R7: 缺驗收交付 | Added this markdown and unit tests | No evidence -> Document and tests provided | | |
-| R8: 同 SHA CI 已有正式 failure | `lib/booking/translations.ts` created, applied to UI | Hardcoded inline JSX -> Translated strings | | |
+## Acceptance Evidence
 
-## L3. Blocked Findings (Pending BFF scope)
-
-| Finding / Acceptance Key | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
-| --- | --- | --- | --- | --- |
-| R3: E-19a 確認未持久化卻放行 | Blocked by BFF | | | 需 BFF 增加 `PATCH me` |
-| R4: 真實叫車使用固定假地址 | Blocked by BFF | | | 需 BFF 增加 real geo endpoints |
-| R5: 未限制最短預約前置 | Blocked by Config | | | 需正式配置 API 或合約取得 lead time |
-
+- E-19a 首次強制與文案逐字一致；E-19b 未勾選時按鈕真正 disabled，有互動測試。 (Tested in vitest `e19b.test.tsx` and `page.test.tsx`)
+- 地址、預約時間、試算、送出與各錯誤狀態都有元件測試。 (Tested in vitest `page.test.tsx`)
+- lint、typecheck、單元測試通過。

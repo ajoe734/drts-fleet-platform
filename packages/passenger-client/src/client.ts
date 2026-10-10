@@ -1,4 +1,8 @@
-import { PassengerViewModel, SessionStatus, PassengerAccount } from "./types.js";
+import {
+  PassengerViewModel,
+  SessionStatus,
+  PassengerAccount,
+} from "./types.js";
 
 export interface FetchOptions {
   method?: string;
@@ -23,17 +27,17 @@ export interface PassengerClientOptions {
 }
 
 function toCamelCase(str: string): string {
-  return str.replace(/([-_][a-z])/g, group =>
-    group.toUpperCase().replace('-', '').replace('_', '')
+  return str.replace(/([-_][a-z])/g, (group) =>
+    group.toUpperCase().replace("-", "").replace("_", ""),
   );
 }
 
 function deepToCamelCase(obj: any): any {
   if (obj === null || obj === undefined) return obj;
   if (Array.isArray(obj)) {
-    return obj.map(v => deepToCamelCase(v));
+    return obj.map((v) => deepToCamelCase(v));
   }
-  if (typeof obj === 'object') {
+  if (typeof obj === "object") {
     const result: any = {};
     for (const key of Object.keys(obj)) {
       result[toCamelCase(key)] = deepToCamelCase(obj[key]);
@@ -74,67 +78,108 @@ export class PassengerClient implements PassengerViewModel {
 
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
-        this.sessionStatus.isActive = false; delete this.sessionStatus.account;
+        this.sessionStatus.isActive = false;
+        delete this.sessionStatus.account;
       }
-      throw new Error(`API error: ${response.status}`);
+      let errorData: any = null;
+      try {
+        errorData = await response.json();
+      } catch {
+        // ignore
+      }
+      const domainCode =
+        errorData?.error || errorData?.domainCode || errorData?.code;
+      const errorMsg = domainCode
+        ? `API error: ${response.status} (${domainCode})`
+        : `API error: ${response.status}`;
+      const error = new Error(errorMsg) as any;
+      error.status = response.status;
+      error.domainCode = domainCode;
+      throw error;
     }
 
     const payload = await response.json();
     const camelCased = deepToCamelCase(payload);
-    
+
     // Unwrap the `{ data: ... }` envelope if it exists
-    if (camelCased && typeof camelCased === 'object' && 'data' in camelCased) {
+    if (camelCased && typeof camelCased === "object" && "data" in camelCased) {
       return camelCased.data as T;
     }
     return camelCased as T;
   }
 
   async getAccount(): Promise<PassengerAccount> {
-    const res = await this.request<import("./types.js").PassengerMeResponse>("/api/passenger-app/me");
+    const res = await this.request<import("./types.js").PassengerMeResponse>(
+      "/api/passenger-app/me",
+    );
     return res.account;
   }
 
   async getProviders(): Promise<import("./types.js").AuthProvidersResponse> {
-    return this.request<import("./types.js").AuthProvidersResponse>("/api/passenger-app/auth/providers");
+    return this.request<import("./types.js").AuthProvidersResponse>(
+      "/api/passenger-app/auth/providers",
+    );
   }
 
   async getFares(): Promise<import("./types.js").FaresResponse> {
-    return this.request<import("./types.js").FaresResponse>("/api/passenger-app/fares");
+    return this.request<import("./types.js").FaresResponse>(
+      "/api/passenger-app/fares",
+    );
   }
 
-  async getFareQuote(command: import("./types.js").FareQuoteCommand): Promise<import("./types.js").FareQuoteResponse> {
+  async getSettings(): Promise<any> {
+    return this.request<any>("/api/passenger-app/settings");
+  }
+
+  async getFareQuote(
+    command: import("./types.js").FareQuoteCommand,
+  ): Promise<import("./types.js").FareQuoteResponse> {
     // Convert to snake_case for the payload to backend
     const snakeCommand: any = {};
     for (const [key, value] of Object.entries(command)) {
-      const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+      const snakeKey = key.replace(
+        /[A-Z]/g,
+        (letter) => `_${letter.toLowerCase()}`,
+      );
       snakeCommand[snakeKey] = value;
     }
-    return this.request<import("./types.js").FareQuoteResponse>("/api/passenger-app/quotes", {
-      method: "POST",
-      body: JSON.stringify(snakeCommand)
-    });
+    return this.request<import("./types.js").FareQuoteResponse>(
+      "/api/passenger-app/quotes",
+      {
+        method: "POST",
+        body: JSON.stringify(snakeCommand),
+      },
+    );
   }
 
-  async login(request: import("./types.js").VerifyOtpCommand): Promise<import("./types.js").VerifyOtpResponse> {
+  async login(
+    request: import("./types.js").VerifyOtpCommand,
+  ): Promise<import("./types.js").VerifyOtpResponse> {
     const snakeCommand: any = {};
     for (const [key, value] of Object.entries(request)) {
-      const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+      const snakeKey = key.replace(
+        /[A-Z]/g,
+        (letter) => `_${letter.toLowerCase()}`,
+      );
       snakeCommand[snakeKey] = value;
     }
-    const res = await this.request<import("./types.js").VerifyOtpResponse>("/api/passenger-app/auth/otp/verify", {
-      method: "POST",
-      body: JSON.stringify(snakeCommand)
-    });
+    const res = await this.request<import("./types.js").VerifyOtpResponse>(
+      "/api/passenger-app/auth/otp/verify",
+      {
+        method: "POST",
+        body: JSON.stringify(snakeCommand),
+      },
+    );
     if (res.result === "logged_in") {
       try {
-         const account = await this.getAccount();
-         if (account) {
-           this.sessionStatus.isActive = true;
-           this.sessionStatus.account = account;
-         }
+        const account = await this.getAccount();
+        if (account) {
+          this.sessionStatus.isActive = true;
+          this.sessionStatus.account = account;
+        }
       } catch {
-         this.sessionStatus.isActive = false;
-         delete this.sessionStatus.account;
+        this.sessionStatus.isActive = false;
+        delete this.sessionStatus.account;
       }
     }
     return res;
@@ -143,16 +188,17 @@ export class PassengerClient implements PassengerViewModel {
   async logout(): Promise<void> {
     try {
       await this.request<void>("/api/passenger-app/auth/logout", {
-        method: "POST"
+        method: "POST",
       });
     } finally {
-      this.sessionStatus.isActive = false; delete this.sessionStatus.account;
+      this.sessionStatus.isActive = false;
+      delete this.sessionStatus.account;
     }
   }
 
   async refreshSession(): Promise<void> {
     await this.request<void>("/api/passenger-app/auth/refresh", {
-      method: "POST"
+      method: "POST",
     });
   }
 
@@ -160,13 +206,16 @@ export class PassengerClient implements PassengerViewModel {
     try {
       const account = await this.getAccount();
       if (account) {
-        this.sessionStatus.isActive = true; this.sessionStatus.account = account;
+        this.sessionStatus.isActive = true;
+        this.sessionStatus.account = account;
       } else {
-        this.sessionStatus.isActive = false; delete this.sessionStatus.account;
+        this.sessionStatus.isActive = false;
+        delete this.sessionStatus.account;
       }
       return this.sessionStatus;
     } catch {
-      this.sessionStatus.isActive = false; delete this.sessionStatus.account;
+      this.sessionStatus.isActive = false;
+      delete this.sessionStatus.account;
       return this.sessionStatus;
     }
   }

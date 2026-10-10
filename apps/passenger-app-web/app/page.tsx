@@ -3,7 +3,14 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { PassengerClient } from "@drts/passenger-client";
-import { P5Phone, P5Header, P5Card, P5 } from "../components/p5-ui";
+import {
+  P5Phone,
+  P5Header,
+  P5Card,
+  P5,
+  P5Btn,
+  P5Notice,
+} from "../components/p5-ui";
 import { P5E19a } from "../components/booking/e19a";
 import { P5E19b } from "../components/booking/e19b";
 import { BookingForm } from "../components/booking/BookingForm";
@@ -14,12 +21,13 @@ import { bookingTranslations as t } from "../lib/booking/translations";
 export default function BookingPage() {
   const router = useRouter();
   const [client] = useState(() => new PassengerClient({ baseUrl: "" }));
-  const [status, setStatus] = useState<"loading" | "e19a" | "form" | "confirm">(
-    "loading",
-  );
+  const [status, setStatus] = useState<
+    "loading" | "e19a" | "form" | "confirm" | "p5a04"
+  >("loading");
 
   // Account state not needed currently
   const [fares, setFares] = useState<FaresResponse | null>(null);
+  const [settings, setSettings] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Quote State
@@ -44,12 +52,14 @@ export default function BookingPage() {
           return;
         }
 
-        const [acc, currentFares] = await Promise.all([
+        const [acc, currentFares, currentSettings] = await Promise.all([
           client.getAccount(),
           client.getFares(),
+          client.getSettings().catch(() => null), // fall back to null if endpoint missing
         ]);
 
         setFares(currentFares);
+        setSettings(currentSettings);
 
         if (
           acc.feeAcknowledgementVersion !== currentFares.currentVersion.version
@@ -63,19 +73,36 @@ export default function BookingPage() {
       }
     }
     init();
+
+    return () => {
+      if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current);
+    };
   }, [client, router]);
 
   const handleAgreeE19a = async () => {
     if (!fares) return;
     try {
-      // NOTE: blocked by R3. Waiting for Supervisor to add PATCH me to BFF allowlist.
-      await fetch("/api/passenger-app/me", {
-        method: "POST", // Should be PATCH
+      const res = await fetch("/api/passenger-app/me", {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           feeAcknowledgementVersion: fares.currentVersion.version,
         }),
       });
+      if (!res.ok) {
+        let domainCode = undefined;
+        try {
+          const body = await res.json();
+          domainCode = body?.error || body?.domainCode || body?.code;
+        } catch {
+          // ignore json parse error
+        }
+        throw new Error(
+          domainCode
+            ? `API error: ${res.status} (${domainCode})`
+            : `API error: ${res.status}`,
+        );
+      }
       setStatus("form");
     } catch (err: any) {
       setError(t.error.updateFeeFailed + err.message);
@@ -88,6 +115,15 @@ export default function BookingPage() {
     scheduledAt: string;
   }) => {
     setError(null);
+    const selectedTime = new Date(data.scheduledAt).getTime();
+    const minTime =
+      Date.now() + (settings?.booking?.minLeadTimeMinutes ?? 15) * 60000;
+    if (selectedTime < minTime - 60000) {
+      // Add 1 minute buffer for user thinking time
+      setError("預約時間不符合最短前置時間規定");
+      return;
+    }
+
     try {
       const quote = await client.getFareQuote({
         originLat: data.origin.lat!,
@@ -120,11 +156,11 @@ export default function BookingPage() {
       }
     } catch (err: any) {
       // Handle P5-A04 case (Quote failed)
-      setError(
-        err.message === "API error: 404" || err.message === "API error: 503"
-          ? t.error.quoteFailedP5A04
-          : t.error.quoteFailedGeneric + err.message,
-      );
+      if (err.status === 404 || err.status === 503) {
+        setStatus("p5a04");
+      } else {
+        setError(t.error.quoteFailedGeneric + err.message);
+      }
     }
   };
 
@@ -164,14 +200,33 @@ export default function BookingPage() {
       });
 
       if (!res.ok) {
-        throw new Error("API error: " + res.status);
+        let domainCode = undefined;
+        try {
+          const body = await res.json();
+          domainCode = body?.error || body?.domainCode || body?.code;
+        } catch {
+          // ignore json parse error
+        }
+        const errorMsg = domainCode
+          ? `API error: ${res.status} (${domainCode})`
+          : `API error: ${res.status}`;
+        const err = new Error(errorMsg) as any;
+        err.status = res.status;
+        err.domainCode = domainCode;
+        throw err;
       }
 
       // 送出後進入行程頁
       router.push("/ride");
     } catch (err: any) {
-      setError(t.error.orderFailed + err.message);
-      setStatus("form");
+      if (err.status === 409 && err.domainCode === "quote_expired") {
+        setError(t.error.quoteExpired);
+      } else if (err.status === 404 || err.status === 503) {
+        setStatus("p5a04");
+      } else {
+        setError(t.error.orderFailed + err.message);
+      }
+      setStatus(status === "p5a04" ? "p5a04" : "form");
     }
   };
 
@@ -240,8 +295,47 @@ export default function BookingPage() {
         quoteMin={q.estimatedMin}
         quoteMax={q.estimatedMax}
         paymentMethod={t.e19b.paymentMethod}
-        fareVersion={q.fareSnapshotId}
+        fareVersion={q.fareVersion}
       />
+    );
+  }
+
+  if (status === "p5a04") {
+    return (
+      <P5Phone>
+        <P5Header status="正在確認預約" />
+        <div style={{ flex: 1, padding: "14px" }}>
+          {/* Missing map & route fare anomaly mock representation */}
+        </div>
+        <div
+          style={{
+            margin: "0 14px 12px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <div onClick={() => setStatus("form")}>
+            <P5Btn kind="primary" icon="refresh" disabled={false}>
+              重新取得報價
+            </P5Btn>
+          </div>
+          <P5Btn icon="phone" disabled={false}>
+            聯絡客服
+          </P5Btn>
+        </div>
+        <div
+          style={{
+            margin: "0 14px",
+            fontSize: 10.5,
+            color: P5.dim,
+            textAlign: "center",
+          }}
+        >
+          正式報價完成前不會為您確認訂單
+        </div>
+        <P5Notice />
+      </P5Phone>
     );
   }
 
@@ -250,6 +344,7 @@ export default function BookingPage() {
       onQuoteReady={handleQuoteReady}
       error={error}
       onClearError={() => setError(null)}
+      minLeadTimeMinutes={settings?.booking?.minLeadTimeMinutes ?? 15}
     />
   );
 }

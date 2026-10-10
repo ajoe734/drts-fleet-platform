@@ -83,7 +83,7 @@ describe("Passenger BFF Route", () => {
       { method: "GET", path: ["admin", "users"] },
       { method: "POST", path: ["auth", "otp-extra", "something"] }, // prefix collision
       { method: "GET", path: ["auth", "oauth", "google", "extra"] }, // extra segments
-      
+
       // new rejections for PAX-WEB-BOOKING-UI-20261009 additions
       { method: "POST", path: ["geo", "search"] }, // wrong method
       { method: "PUT", path: ["me"] }, // wrong method
@@ -98,7 +98,14 @@ describe("Passenger BFF Route", () => {
         `http://localhost/api/passenger-app/${path.join("/")}`,
         { method, headers: { Origin: "http://localhost" } },
       );
-      const handler = method === "POST" ? POST : method === "PATCH" ? PATCH : method === "DELETE" ? DELETE : GET;
+      const handler =
+        method === "POST"
+          ? POST
+          : method === "PATCH"
+            ? PATCH
+            : method === "DELETE"
+              ? DELETE
+              : GET;
       const res = await handler(req, { params: Promise.resolve({ path }) });
       expect(res.status).toBe(404);
       expect(global.fetch).not.toHaveBeenCalled();
@@ -192,19 +199,19 @@ describe("Passenger BFF Route", () => {
         mockResponse: new Response("ok", { status: 200 }),
       },
       {
-        method: "GET",
+        method: "POST",
         path: ["geo", "resolve"],
         expectedStatus: 200,
         mockResponse: new Response("ok", { status: 200 }),
       },
       {
-        method: "GET",
+        method: "POST",
         path: ["geo", "reverse"],
         expectedStatus: 200,
         mockResponse: new Response("ok", { status: 200 }),
       },
       {
-        method: "GET",
+        method: "POST",
         path: ["geo", "route"],
         expectedStatus: 200,
         mockResponse: new Response("ok", { status: 200 }),
@@ -226,10 +233,28 @@ describe("Passenger BFF Route", () => {
         `http://localhost/api/passenger-app/${v.path.join("/")}`,
         { method: v.method, headers: { Origin: "http://localhost" } },
       );
-      const handler = v.method === "POST" ? POST : v.method === "PATCH" ? PATCH : v.method === "DELETE" ? DELETE : GET;
+      const handler =
+        v.method === "POST"
+          ? POST
+          : v.method === "PATCH"
+            ? PATCH
+            : v.method === "DELETE"
+              ? DELETE
+              : GET;
       const res = await handler(req, {
         params: Promise.resolve({ path: v.path }),
       });
+      if (res.status !== v.expectedStatus)
+        throw new Error(
+          "Failed path: " +
+            v.path.join("/") +
+            " method: " +
+            v.method +
+            " expected: " +
+            v.expectedStatus +
+            " got: " +
+            res.status,
+        );
       expect(res.status).toBe(v.expectedStatus);
       expect(res.status).not.toBe(404);
       // We expect fetch to be called (unless it fails early due to no refresh token)
@@ -540,7 +565,14 @@ describe("Passenger BFF Route", () => {
         const path = new URL(url).pathname
           .slice("/api/passenger-app/".length)
           .split("/");
-        const handler = req.method === "POST" ? POST : req.method === "PATCH" ? PATCH : req.method === "DELETE" ? DELETE : GET;
+        const handler =
+          req.method === "POST"
+            ? POST
+            : req.method === "PATCH"
+              ? PATCH
+              : req.method === "DELETE"
+                ? DELETE
+                : GET;
         const response = await handler(req, {
           params: Promise.resolve({ path }),
         });

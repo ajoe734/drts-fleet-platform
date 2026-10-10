@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { P5Phone, P5Header, P5Card, P5Btn, P5Notice, P5 } from "../p5-ui";
 import { AddressMapPicker, type AddressPayload } from "@drts/ui-web";
-import { createMockGeoProvider } from "../../lib/booking/mock-geo-provider";
+import { createPassengerGeoProvider } from "../../lib/booking/passenger-geo-provider";
 import { bookingTranslations as t } from "../../lib/booking/translations";
 
 interface BookingFormProps {
@@ -12,34 +12,36 @@ interface BookingFormProps {
   }) => void;
   error?: string | null;
   onClearError?: () => void;
+  minLeadTimeMinutes?: number;
 }
 
-const geoProvider = createMockGeoProvider();
+const geoProvider = createPassengerGeoProvider();
 
 export function BookingForm({
   onQuoteReady,
   error,
   onClearError,
+  minLeadTimeMinutes = 15,
 }: BookingFormProps) {
   const [origin, setOrigin] = useState<AddressPayload | null>(null);
   const [destination, setDestination] = useState<AddressPayload | null>(null);
   const [scheduledAt, setScheduledAt] = useState<string>("");
+  const [minLocalTime, setMinLocalTime] = useState<string>("");
 
   const [pickerMode, setPickerMode] = useState<"origin" | "destination" | null>(
     null,
   );
 
   useEffect(() => {
-    // Default to 15 mins from now - blocked by R5 config requirement from BFF
     const d = new Date();
-    d.setMinutes(d.getMinutes() + 15);
-    // Format to YYYY-MM-DDTHH:mm
+    d.setMinutes(d.getMinutes() + minLeadTimeMinutes);
     const tzOffset = d.getTimezoneOffset() * 60000;
     const localISOTime = new Date(d.getTime() - tzOffset)
       .toISOString()
       .slice(0, 16);
     setScheduledAt(localISOTime);
-  }, []);
+    setMinLocalTime(localISOTime);
+  }, [minLeadTimeMinutes]);
 
   if (pickerMode) {
     return (
@@ -183,6 +185,7 @@ export function BookingForm({
               <input
                 type="datetime-local"
                 value={scheduledAt}
+                min={minLocalTime}
                 onChange={(e) => {
                   setScheduledAt(e.target.value);
                   onClearError?.();

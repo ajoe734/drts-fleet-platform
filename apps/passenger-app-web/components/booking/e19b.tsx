@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 import { P5Phone, P5Header, P5Btn, P5 } from "../p5-ui";
 import { bookingTranslations as t } from "../../lib/booking/translations";
 
@@ -145,11 +146,13 @@ export function P5E19b({
               </div>
             ))}
             <div style={{ textAlign: "right", marginTop: 4 }}>
-              <span
-                style={{ fontSize: 11.5, color: P5.brand, fontWeight: 700 }}
-              >
-                {t.e19b.feeDetailsLink}
-              </span>
+              <Link href="/fares" style={{ textDecoration: "none" }}>
+                <span
+                  style={{ fontSize: 11.5, color: P5.brand, fontWeight: 700 }}
+                >
+                  {t.e19b.feeDetailsLink}
+                </span>
+              </Link>
             </div>
           </div>
           {/* Native label for proper accessibility and interaction tracking */}
@@ -184,7 +187,7 @@ export function P5E19b({
                 borderRadius: 5,
                 border: "1.5px solid " + (checked ? P5.brand : P5.line),
                 background: checked ? P5.brand : P5.surface,
-                color: "#fff",
+                color: P5.bg,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -208,7 +211,7 @@ export function P5E19b({
                 fontWeight: 700,
                 border: "none",
                 background: checked ? P5.brand : P5.line,
-                color: checked ? "#fff" : P5.dim,
+                color: checked ? P5.bg : P5.dim,
                 cursor: checked ? "pointer" : "not-allowed",
                 fontFamily: "inherit",
               }}

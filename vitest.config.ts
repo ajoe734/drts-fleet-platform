@@ -4,6 +4,10 @@ import path from "node:path";
 export default defineConfig({
   resolve: {
     alias: {
+      "next/navigation": path.resolve(
+        __dirname,
+        "tests/unit/pax-web-booking-ui-20261009/__mocks__/next-navigation.ts",
+      ),
       "@drts/contracts": path.resolve(
         __dirname,
         "packages/contracts/src/index.ts",
@@ -20,6 +24,11 @@ export default defineConfig({
         __dirname,
         "packages/api-client/src/index.ts",
       ),
+      "@drts/passenger-client": path.resolve(
+        __dirname,
+        "packages/passenger-client/src/index.ts",
+      ),
+      "@drts/ui-web": path.resolve(__dirname, "packages/ui-web/src/index.tsx"),
       "@/lib/admin-client": path.resolve(
         __dirname,
         "apps/platform-admin-web/lib/admin-client.ts",

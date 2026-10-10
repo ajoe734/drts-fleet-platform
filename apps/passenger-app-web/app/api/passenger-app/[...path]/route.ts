@@ -85,11 +85,11 @@ function isAllowedPassengerPath(path: string[], method: string) {
   if (method === "GET" && fullPath === "me") return true;
   if (method === "GET" && fullPath === "fares") return true;
   if (method === "POST" && fullPath === "rides") return true;
-  
+
   if (method === "GET" && fullPath === "geo/search") return true;
-  if (method === "GET" && fullPath === "geo/resolve") return true;
-  if (method === "GET" && fullPath === "geo/reverse") return true;
-  if (method === "GET" && fullPath === "geo/route") return true;
+  if (method === "POST" && fullPath === "geo/resolve") return true;
+  if (method === "POST" && fullPath === "geo/reverse") return true;
+  if (method === "POST" && fullPath === "geo/route") return true;
   if (method === "GET" && fullPath === "settings") return true;
   if (method === "PATCH" && fullPath === "me") return true;
 
@@ -101,8 +101,10 @@ function resolveTargetOrigin() {
 }
 
 function buildTargetUrl(request: NextRequest, path: string[]) {
+  const isGeo = path[0] === "geo";
+  const basePath = isGeo ? ["api"] : ["api", "passenger-app"];
   const targetUrl = new URL(
-    ["api", "passenger-app", ...path].join("/"),
+    [...basePath, ...path].join("/"),
     `${resolveTargetOrigin()}/`,
   );
   targetUrl.search = request.nextUrl.search;
@@ -225,7 +227,10 @@ async function forward(
     let refreshToken = request.cookies.get("pax_refresh")?.value;
 
     const targetUrl = buildTargetUrl(request, path);
-    if (!targetUrl.pathname.startsWith("/api/passenger-app/")) {
+    if (
+      !targetUrl.pathname.startsWith("/api/passenger-app/") &&
+      !targetUrl.pathname.startsWith("/api/geo/")
+    ) {
       return withSecurityHeaders(
         NextResponse.json(
           { error: "PASSENGER_PROXY_PATH_NOT_ALLOWED" },
