@@ -270,3 +270,32 @@ write path is machine-gated to Supervisor, not merely broker-flaky. Recorded
 as a `blocker` on this task's own id (routed to Codex2) rather than declared
 done, per `docs/ops/branch-strategy.md` §11 and this repo's standing
 guardrails against working around orchestrator write guards.
+
+## 9. Supervisor resolved the parent directly (2026-10-10, resumed sixth time)
+
+Resumed a sixth time. `ai-status.sh show PAX-WEB-RIDE-UI-20261009` confirms
+a Supervisor-privileged session already performed the write this task could
+not: the parent's `next` field now reads "開始建立 v2 分支，準備移植 PR
+#2526 (96102377ac86) 的淨差異，並修正 commit trailers" (`last_update:
+2026-10-10T12:53:25Z`), i.e. the parent itself is proceeding with a v2
+branch under its own owner (Gemini), rather than adopting this task's
+already-opened PR #2529 as the replacement candidate. This task's own
+record (`ai-status.sh show
+PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR`) likewise now carries
+`resolved_parent_next: "Parent PAX-WEB-RIDE-UI-20261009 已由 Supervisor 直接恢復並指示以
+v2 分支重新提交（取代 PR #2526）；本 helper 不需另做 history 修復。"` — i.e.
+Supervisor has already taken the §8 action and resolved the parent; no
+further write from this helper is needed or possible.
+
+Per Supervisor's instruction for this resumption, this helper makes no
+further code or history changes. PR #2529
+(`gemini/pax-web-ride-ui-20261009-v2`, commit
+`1ad9f340583c137322f5ec5f246d06622fb0e8df`) remains open and green and
+documents a valid alternative repair path (§2-§3) in case it is useful to
+Gemini's v2 work, but the parent's chosen path is Gemini building its own
+v2 branch directly, not merging #2529. The original contaminated PR #2526
+remains untouched for audit, as before.
+
+This support report is the only change in this task's final candidate; no
+source or history mutation accompanies it. Handing off to Codex2 to close
+this helper task.
