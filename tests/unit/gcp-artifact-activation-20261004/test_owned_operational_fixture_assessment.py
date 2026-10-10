@@ -298,6 +298,9 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
             elif "/runs/37906298090" in cmd_str:
                 return MagicMock(returncode=0, stdout=run_data)
             elif "artifacts/11606165993/zip" in cmd_str:
+                if "stdout" in kwargs and hasattr(kwargs["stdout"], "write"):
+                    kwargs["stdout"].write(zip_bytes)
+                    kwargs["stdout"].flush()
                 return MagicMock(returncode=0, stdout=zip_bytes)
             return MagicMock(returncode=1)
             
@@ -324,7 +327,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 return m
             return MagicMock(returncode=1)
 
-        with patch.object(assess, "run_bounded", side_effect=mock_run), patch("subprocess.Popen", side_effect=mock_popen):
+        with patch.object(assess.subprocess, "run", side_effect=mock_run), patch("subprocess.Popen", side_effect=mock_popen):
             assess.fetch_and_validate_provenance(args)
 
     @patch("sys.exit")
@@ -405,7 +408,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
             return MagicMock(returncode=0, stdout="{}")
         with patch("sys.argv", ["script.py", "--mock-db", "--cloud-metadata", path, "--current-runtime-sha", "testsha", "--current-run-id", "37906298090", "--tooling-run-sha", "bb78535193b712f80f2a989cbd03b800ec44c46c"]):
-            with patch.object(assess, "run_bounded", side_effect=mock_run):
+            with patch.object(assess.subprocess, "run", side_effect=mock_run):
                 assess.main()
                 mock_exit.assert_called_with(1) # Exits 1 due to mock_db
                 output = mock_print.call_args[0][0]
@@ -415,7 +418,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 self.assertNotIn("MALICIOUS_RAW_FIELD", api_service)
 
 
-    @patch('assess_owned_operational_fixtures.run_bounded')
+    @patch('assess_owned_operational_fixtures.subprocess.run')
     def test_acquire_cloud_metadata_success(self, mock_run_bounded):
         def mock_run(cmd, **kwargs):
             cmd_str = " ".join(cmd)
@@ -469,7 +472,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
         finally:
             os.remove(meta_file)
 
-    @patch('assess_owned_operational_fixtures.run_bounded')
+    @patch('assess_owned_operational_fixtures.subprocess.run')
     def test_shared_reservation_overlap(self, mock_run_bounded):
         def mock_run(cmd, **kwargs):
             cmd_str = " ".join(cmd)
