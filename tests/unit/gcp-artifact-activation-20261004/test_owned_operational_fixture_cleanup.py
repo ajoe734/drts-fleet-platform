@@ -1115,19 +1115,32 @@ class TestR21Regressions(unittest.TestCase):
         
         def mock_subprocess_run(cmd, **kwargs):
             import subprocess
-            if "ls" in cmd:
-                return subprocess.CompletedProcess(
-                    args=cmd,
-                    returncode=0,
-                    stdout=f'{{"name": "foo", "size": "327", "timeCreated": "2026-10-09T09:03:18.572Z", "updated": "2026-10-09T09:03:18.572Z", "contentType": "application/pdf", "generation": "123", "metageneration": "1"}}'.encode("utf-8")
-                )
-            elif "cat" in cmd:
+            import json
+            if cmd[:2] == ["gcloud", "storage"] and cmd[2] == "objects" and cmd[3] == "describe":
+                # cmd[4] is the gs:// url
+                target = next((t for t in plan["gcs_targets"] if cmd[4] == f"gs://{t['bucket']}/{t['key']}"), None)
+                if target:
+                    metadata = {
+                        "bucket": target["bucket"],
+                        "name": target["key"],
+                        "generation": "123",
+                        "metageneration": "1",
+                        "size": 327,
+                        "contentType": "application/pdf",
+                        "timeCreated": "2026-10-09T09:03:18.572Z"
+                    }
+                    return subprocess.CompletedProcess(
+                        args=cmd,
+                        returncode=0,
+                        stdout=json.dumps(metadata)
+                    )
+            elif cmd[:2] == ["gcloud", "storage"] and cmd[2] == "cat":
                 return subprocess.CompletedProcess(
                     args=cmd,
                     returncode=0,
                     stdout=PDF_BYTES
                 )
-            return subprocess.CompletedProcess(args=cmd, returncode=1)
+            return subprocess.CompletedProcess(args=cmd, returncode=1, stderr="No such object")
             
         with patch("subprocess.run", side_effect=mock_subprocess_run) as mock_run:
             with self.assertRaises(ValueError) as ctx:
