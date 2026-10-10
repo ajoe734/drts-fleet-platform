@@ -491,6 +491,71 @@ describe("Facebook signed_request deletion and completion receipt", () => {
       }
     },
   );
+  it("rejects an old Facebook callback after deletion and recreation on a new account", async () => {
+    const f = fixture();
+    const original = await owner(f);
+    await f.accounts.linkIdentity(original.identity, "facebook", USER_ID);
+    let reached!: () => void;
+    const atIssuance = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let resume!: () => void;
+    const afterRecreation = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const realIssue = f.accounts.issueSession.bind(f.accounts);
+    // Gate only the stale callback; the new callback issues through the real service.
+    const gate = vi
+      .spyOn(f.accounts, "issueSession")
+      .mockImplementationOnce(async (...args) => {
+        reached();
+        await afterRecreation;
+        return realIssue(...args);
+      });
+    const pending = callback(f, await start(f)).then(
+      (result) => ({ result, error: null }),
+      (error: unknown) => ({ result: null, error }),
+    );
+    await atIssuance;
+    try {
+      const receipt = await f.controller.delete({
+        signed_request: signedRequest(),
+      });
+      expect(f.controller.status(receipt.confirmation_code).status).toBe(
+        "completed",
+      );
+      expect(await f.store.findIdentity("facebook", USER_ID)).toBeNull();
+      expect(
+        await f.accounts.authenticateAccessToken(original.session.accessToken),
+      ).toBeNull();
+      const fresh = await callback(f, await start(f));
+      expect(fresh.result).toBe("logged_in");
+      if (fresh.result !== "logged_in") throw new Error("Expected fresh login");
+      expect(fresh.drtsPassengerId).not.toBe(original.account.drtsPassengerId);
+      expect(
+        (await f.store.findIdentity("facebook", USER_ID))!.drtsPassengerId,
+      ).toBe(fresh.drtsPassengerId);
+      expect(
+        (await f.accounts.authenticateAccessToken(fresh.accessToken))!
+          .drtsPassengerId,
+      ).toBe(fresh.drtsPassengerId);
+    } finally {
+      resume();
+    }
+    const outcome = await pending;
+    gate.mockRestore();
+    if (outcome.result?.result === "logged_in")
+      expect(
+        await f.accounts.authenticateAccessToken(outcome.result.accessToken),
+      ).toBeNull();
+    expect(outcome.error).toMatchObject({ code: "unauthorized" });
+    expect(outcome.result).toBeNull();
+    expect(
+      [...f.store.sessions.values()]
+        .filter((s) => s.drtsPassengerId === original.account.drtsPassengerId)
+        .every((s) => s.revokedAt),
+    ).toBe(true);
+  });
   it("revokes a Facebook session when issuance commits before deletion, even before callback returns", async () => {
     const f = fixture();
     const a = await owner(f);
