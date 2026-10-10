@@ -172,6 +172,10 @@ jobs:
             HAS_NEXT=true
             while [ "$HAS_NEXT" = "true" ]; do
               RES=$(gh api "/repos/${{ github.repository }}/actions/runs?status=$STATUS&per_page=100&page=$PAGE")
+              if ! echo "$RES" | jq -e '.workflow_runs' >/dev/null; then
+                echo "::error::Failed to fetch workflow_runs (API error): $RES"
+                exit 1
+              fi
               MATCHES=$(echo "$RES" | jq -r '.workflow_runs[] | select(.name | test("deploy|restore|provision|provider|scanner"; "i")) | .id')
               if [ -n "$MATCHES" ]; then
                 ACTIVE_JOBS="$ACTIVE_JOBS $MATCHES"
