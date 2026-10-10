@@ -355,3 +355,23 @@ normalized ISO；不算產品缺陷（fare-after.json 保留，最終 root-after
 沒有啟動本 VM 產品、PG、Docker Compose、preview、browser/E2E 服務。
 handoff 後 review、merge、兩個 required_acceptance 仍由原 candidate lifecycle 處理；
 owner 不直接 done。
+
+### 候選前同步：PR merge conflict
+
+第一次普通推送 head `5c9c49edf6f872a3059c053f24d6e9600ad44ff6` 尚未 handoff，
+GitHub 回報 `CONFLICTING/DIRTY`，兩 CI workflow 沒有產生此 SHA 的 run。
+fetch 後確認 dev 已合入 OTP `9e0162ff4`；依 branch-strategy §11.4 正常 merge
+`origin/dev`，不 rebase/amend/force push。merge checkpoint
+`eb77e33066893b2ed29042f3677485b2f708af8d` 保留完整兩側歷史。
+
+衝突只在已授權的 `auth.policy.ts` 與 `passenger-app.module.ts`：兩份 additive
+policy 分別保留 geo 與 OTP 路由；module 合併原 OTP controller/repository/service、
+SMS/mail providers 與 fare controller/providers、Geo/ServiceArea imports/exports。
+沒有重寫 OTP 業務或更動其他檔案的設計。上述首次推送是 recoverability checkpoint，
+不是 locked candidate，舊 SHA CI 不替代最終候選 CI。
+
+合併後同一 root 命令另加 `tests/unit/pax-otp-20261009`，exit0、364 pass、0 fail、
+2 development strict-only skip，16 files；`merged-root-after.json`／`.log`。
+合併後 API/root typecheck、shared policy/module/fare 的 scoped eslint、format、
+test coverage／trailers／canonical consistency／diff 重新驗證，其結果同本輪 manifest。
+最終 head 只追加本段證據；同 SHA CI 全部結束並讀取後才 handoff Codex。
