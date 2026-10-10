@@ -8,9 +8,19 @@ import type {
   AuthProvidersResponse,
   PassengerMeResponse,
   FaresResponse,
+  RequestOtpCommand,
+  RequestOtpResponse,
+  UpdatePassengerMeCommand,
+  PassengerIdentitiesResponse,
+  UnlinkPassengerIdentityCommand,
+  UnlinkPassengerIdentityResponse,
+  DeletePassengerAccountCommand,
+  DeletePassengerAccountResponse,
+  OAuthStartCommand,
+  OAuthStartResponse,
 } from "@drts/contracts";
 
-export type VerifyOtpResponse = 
+export type VerifyOtpResponse =
   | { result: "logged_in" }
   | { result: "linked" }
   | { result: "verified_contact_phone" };
@@ -25,6 +35,16 @@ export type {
   AuthProvidersResponse,
   PassengerMeResponse,
   FaresResponse,
+  RequestOtpCommand,
+  RequestOtpResponse,
+  UpdatePassengerMeCommand,
+  PassengerIdentitiesResponse,
+  UnlinkPassengerIdentityCommand,
+  UnlinkPassengerIdentityResponse,
+  DeletePassengerAccountCommand,
+  DeletePassengerAccountResponse,
+  OAuthStartCommand,
+  OAuthStartResponse,
 };
 
 export interface SessionStatus {

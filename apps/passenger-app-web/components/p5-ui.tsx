@@ -8,7 +8,7 @@ import {
 
 const pTokens = REALM_COLORS.passenger.light;
 
-const P5 = {
+export const P5 = {
   bg: STATUS_TONES.neutral.light.bg,
   surface: CORE_SURFACES.surface,
   ink: STATUS_TONES.neutral.dark.bg,
