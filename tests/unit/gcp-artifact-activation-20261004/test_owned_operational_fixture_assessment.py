@@ -414,5 +414,95 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 import sys; sys.stderr.write("OUTPUT IS: " + json.dumps(parsed) + "\n"); api_service = parsed["payload"]["cloud_metadata"]["services"]["drts-dev-api"]
                 self.assertNotIn("MALICIOUS_RAW_FIELD", api_service)
 
+
+    @patch('assess_owned_operational_fixtures.run_bounded')
+    def test_acquire_cloud_metadata_success(self, mock_run_bounded):
+        def mock_run(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "actions/runs/" in cmd_str and "approvals" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved", "environments": [{"name": "operator"}]}]))
+            if "actions/runs/" in cmd_str and "jobs" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "jobs": [{"id": 1, "run_id": 12345, "name": "Owned fixture assessment (Read-only GCS / DB)"}]}))
+            if "actions/runs/" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"id": 12345, "head_branch": "dev", "event": "workflow_dispatch", "head_sha": "abc", "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml"}))
+            if "commits/abc/check-runs" in cmd_str:
+                checks = [{"name": n, "head_sha": "abc", "status": "completed", "conclusion": "success"} for n in ["Commit trailers", "Runtime mirror guard", "Smoke acceptance", "ci-integ"]]
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 4, "check_runs": checks}))
+            if "commits/abc/pulls" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"merged_at": "2026-10-10", "merge_commit_sha": "abc", "base": {"ref": "dev"}, "head": {"sha": "headsha"}, "user": {"login": "author"}, "number": 1}]))
+            if "pulls/1/reviews" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"user": {"login": "reviewer"}, "state": "APPROVED", "commit_id": "headsha"}]))
+            if "actions/runs?status=" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
+            if "services describe" in cmd_str:
+                if "drts-dev-api" in cmd_str:
+                    return MagicMock(returncode=0, stdout=json.dumps({"status": {"latestReadyRevisionName": "drts-dev-api-rev1"}}))
+                elif "drts-dev-scanner" in cmd_str:
+                    return MagicMock(returncode=0, stdout=json.dumps({"status": {"latestReadyRevisionName": "drts-dev-scanner-rev1"}}))
+                else:
+                    return MagicMock(returncode=0, stdout=json.dumps({"status": {"latestReadyRevisionName": "web-rev1"}}))
+            if "revisions describe" in cmd_str:
+                if "drts-dev-api-rev1" in cmd_str:
+                    return MagicMock(returncode=0, stdout=json.dumps({"spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "api", "image": "img", "env": [{"name": "DRTS_CANDIDATE_SHA", "value": "xyz"}, {"name": "REMITTANCE_PROOF_SCANNER_URL", "value": "https://drts-dev-scanner-xyz.a.run.app"}, {"name": "DOCUMENT_ARTIFACT_GCS_BUCKET", "value": "bkt"}, {"name": "DOCUMENT_ARTIFACT_STORAGE_PROVIDER", "value": "gcs"}, {"name": "REMITTANCE_PROOF_STORAGE_PROVIDER", "value": "gcs"}, {"name": "REMITTANCE_PROOF_GCS_BUCKET", "value": "bkt2"}, {"name": "REMITTANCE_PROOF_SCANNER_PROVIDER", "value": "cloud-run-clamd"}, {"name": "REMITTANCE_PROOF_SCANNER_TIMEOUT_MS", "value": "60000"}]}]}, "status": {"imageDigest": "sha256:123"}}))
+                elif "drts-dev-scanner-rev1" in cmd_str:
+                    return MagicMock(returncode=0, stdout=json.dumps({"spec": {"serviceAccountName": "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "scanner", "image": "img", "env": [{"name": "CLAMD_HOST", "value": "127.0.0.1"}, {"name": "CLAMD_PORT", "value": "3310"}, {"name": "CLAMAV_READY_MARKER", "value": "/var/run/clamav-ready/ready"}]}]}, "status": {"imageDigest": "sha256:456"}}))
+                else:
+                    return MagicMock(returncode=0, stdout=json.dumps({"spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "web", "image": "img", "env": []}]}, "status": {"imageDigest": "sha256:789"}}))
+            if "get-iam-policy" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"bindings": [{"role": "roles/run.invoker", "members": ["serviceAccount:foo@bar"]}]}))
+            return MagicMock(returncode=1, stdout="", stderr="Unknown command")
+        mock_run_bounded.side_effect = mock_run
+
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            meta_file = f.name
+
+        try:
+            sys.argv = ["assess-owned-operational-fixtures.py", "--current-run-id", "12345", "--tooling-run-sha", "abc", "--acquire-cloud-metadata-to", meta_file, "--current-runtime-sha", "xyz"]
+            with self.assertRaises(SystemExit) as cm:
+                assess.main()
+            self.assertEqual(cm.exception.code, 0)
+            
+            with open(meta_file, "r") as f:
+                data = json.load(f)
+            self.assertEqual(len(data["services"]), 9)
+            self.assertEqual(data["services"]["drts-dev-api"]["providers"]["DOCUMENT_ARTIFACT_GCS_BUCKET"], "bkt")
+        finally:
+            os.remove(meta_file)
+
+    @patch('assess_owned_operational_fixtures.run_bounded')
+    def test_shared_reservation_overlap(self, mock_run_bounded):
+        def mock_run(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "actions/runs/" in cmd_str and "approvals" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved", "environments": [{"name": "operator"}]}]))
+            if "actions/runs/" in cmd_str and "jobs" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "jobs": [{"id": 1, "run_id": 12345, "name": "Owned fixture assessment (Read-only GCS / DB)"}]}))
+            if "actions/runs/" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"id": 12345, "head_branch": "dev", "event": "workflow_dispatch", "head_sha": "abc", "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml"}))
+            if "commits/abc/check-runs" in cmd_str:
+                checks = [{"name": n, "head_sha": "abc", "status": "completed", "conclusion": "success"} for n in ["Commit trailers", "Runtime mirror guard", "Smoke acceptance", "ci-integ"]]
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 4, "check_runs": checks}))
+            if "commits/abc/pulls" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"merged_at": "2026-10-10", "merge_commit_sha": "abc", "base": {"ref": "dev"}, "head": {"sha": "headsha"}, "user": {"login": "author"}, "number": 1}]))
+            if "pulls/1/reviews" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"user": {"login": "reviewer"}, "state": "APPROVED", "commit_id": "headsha"}]))
+            if "actions/runs?status=" in cmd_str:
+                # Simulate overlap
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "workflow_runs": [{"id": 999, "path": ".github/workflows/deploy-dev.yml"}]}))
+            return MagicMock(returncode=1, stdout="", stderr="Unknown command")
+        mock_run_bounded.side_effect = mock_run
+
+        sys.argv = ["assess-owned-operational-fixtures.py", "--current-run-id", "12345", "--tooling-run-sha", "abc", "--acquire-cloud-metadata-to", "/tmp/out.json"]
+        
+        with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
+            with self.assertRaises(SystemExit) as cm:
+                assess.main()
+            self.assertEqual(cm.exception.code, 1)
+            out = mock_stdout.getvalue()
+            self.assertIn("Overlapping restricted workflows detected", out)
+
 if __name__ == '__main__':
     unittest.main()
+
+
+    

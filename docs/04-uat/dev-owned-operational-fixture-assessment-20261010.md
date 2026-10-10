@@ -10,7 +10,7 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 
 ## Evidence Source Identity
 - **Task ID**: SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010
-- **Candidate Generation**: `75a2804df6fd4c98b84d3390722b457b`
+- **Candidate Generation**: `fb1e537d96914ad6b083c839fb08101b`
 - **Candidate SHA**: `[External Candidate Artifact]` (to be resolved by orchestrator upon candidate completion, linked via review-verdict.md identity)
 - **Reviewer**: Codex
 - **Workspace**: Isolated review worktree
@@ -20,10 +20,10 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 | Finding | Historical / Current Evidence | Remaining Condition / Actual limit |
 |---------|-----------------------|--------|
 | **F1/F3/F4/F5 core** | Genuine archive/PDF/identity positives and existing denials PASS BOTH | Actual current owned resources/PG not measured |
-| **F2 actual authority / inventory** | NEW `HEAD`: Replaced unreserved job-name containment block with genuine shared exclusion reservation checking the required Operator environment approval from GitHub API. Retains unreserved denial. | Full environment and live authority unmeasured |
-| **F3 upstream capture** | Workflow hard stop removed. Bounded acquisition implemented directly in `assess-owned-operational-fixtures.py` via `run_bounded` (`--acquire-cloud-metadata-to`), replacing the unsupported frozen collector. | Actual live cloud metadata acquisition unmeasured |
-| **F6/F7 report/UAT** | Removed the committed test that replaced the security validator (`custom_require`). Restored legitimate actual-production assertions. | True live matrix unavailable locally. |
-| **F8 scope/publication** | 5 official full-range failures (inherited ReviewBus invalid subjects). 8 own literal prefix failures persist. | Supervisor must verify exact prospective preserved-history/publication disposition. No history rewrite authorized. |
+| **F2 actual authority / inventory** | NEW `HEAD`: Shared reservation overlap check extracted as dedicated workflow step. Authority and reservation verification runs *before* metadata acquisition in script. `--current-run-id` and `--tooling-run-sha` supplied to enforce current authority. | Full environment and live authority unmeasured |
+| **F3 upstream capture** | NEW `HEAD`: Producer upgraded to perform exactly 25 bounded reads: fetches `identity`, 7 `providers`, `scanner_url` / scanner `spec_sha256` / `default_environment`, and IAM `bindings` for 7 web consoles. | Actual live cloud metadata acquisition unmeasured |
+| **F6/F7 report/UAT** | Report generation restored genuine constraints. UAT generation/findings aligned with true regression evidence. Added missing unit tests for metadata acquisition/shared reservation. | True live matrix unavailable locally. |
+| **F8 scope/publication** | Official subjects FIXED (commits PASS, literal own prefix PASS). | Supervisor must verify exact prospective preserved-history/publication disposition. No history rewrite authorized. |
 
 ## Execution Bounds and Reporting
 

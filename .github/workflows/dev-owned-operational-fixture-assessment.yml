@@ -131,39 +131,8 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Fresh Cloud metadata
+      - name: Verify shared reservation
         env:
-          INPUT_WORKFLOW_DEF_SHA: ${{ github.event.inputs.workflow_def_sha || '9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c' }}
-          INPUT_CURRENT_RUNTIME_SHA: ${{ github.event.inputs.current_runtime_sha || github.sha }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          python3 operations/verification/assess-owned-operational-fixtures.py \
-            --acquire-cloud-metadata-to .local-cloud-metadata.json \
-            --current-runtime-sha "$INPUT_CURRENT_RUNTIME_SHA" \
-            --workflow-def-sha "$INPUT_WORKFLOW_DEF_SHA"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Set up PostgreSQL client
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
-
-      - name: Set up Cloud SQL Proxy
-        run: |
-          curl -o $RUNNER_TEMP/cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.13.0/cloud-sql-proxy.linux.amd64
-          chmod +x $RUNNER_TEMP/cloud-sql-proxy
-
-      - name: Execute read-only assessment
-        env:
-          INPUT_PRODUCT_RUN_ID: ${{ github.event.inputs.product_run_id }}
-          INPUT_ARTIFACT_ID: ${{ github.event.inputs.artifact_id }}
-          INPUT_SOURCE_REF: ${{ github.event.inputs.source_ref }}
-          INPUT_WORKFLOW_DEF_SHA: ${{ github.event.inputs.workflow_def_sha }}
-          INPUT_CURRENT_RUNTIME_SHA: ${{ github.event.inputs.current_runtime_sha || github.sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ACTIVE_JOBS=""
@@ -193,6 +162,43 @@ jobs:
             exit 1
           fi
 
+      - name: Fresh Cloud metadata
+        env:
+          INPUT_WORKFLOW_DEF_SHA: ${{ github.event.inputs.workflow_def_sha || '9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c' }}
+          INPUT_CURRENT_RUNTIME_SHA: ${{ github.event.inputs.current_runtime_sha || github.sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 operations/verification/assess-owned-operational-fixtures.py \
+            --acquire-cloud-metadata-to .local-cloud-metadata.json \
+            --current-runtime-sha "$INPUT_CURRENT_RUNTIME_SHA" \
+            --workflow-def-sha "$INPUT_WORKFLOW_DEF_SHA" \
+            --current-run-id "${{ github.run_id }}" \
+            --tooling-run-sha "${{ github.sha }}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Set up Cloud SQL Proxy
+        run: |
+          curl -o $RUNNER_TEMP/cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.13.0/cloud-sql-proxy.linux.amd64
+          chmod +x $RUNNER_TEMP/cloud-sql-proxy
+
+      - name: Execute read-only assessment
+        env:
+          INPUT_PRODUCT_RUN_ID: ${{ github.event.inputs.product_run_id }}
+          INPUT_ARTIFACT_ID: ${{ github.event.inputs.artifact_id }}
+          INPUT_SOURCE_REF: ${{ github.event.inputs.source_ref }}
+          INPUT_WORKFLOW_DEF_SHA: ${{ github.event.inputs.workflow_def_sha }}
+          INPUT_CURRENT_RUNTIME_SHA: ${{ github.event.inputs.current_runtime_sha || github.sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           python3 operations/verification/assess-owned-operational-fixtures.py \
             --product-run-id "$INPUT_PRODUCT_RUN_ID" \
             --artifact-id "$INPUT_ARTIFACT_ID" \
