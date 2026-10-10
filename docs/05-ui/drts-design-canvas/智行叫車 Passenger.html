@@ -21,6 +21,7 @@
 <script type="text/babel" src="p5-ui.jsx"></script>
 <script type="text/babel" src="p5-screens.jsx"></script>
 <script type="text/babel" src="p5-e-screens.jsx"></script>
+<script type="text/babel" src="p5-account-screens.jsx"></script>
 <script type="text/babel">
 function App(){
   const W=390+28, H=844+28;
@@ -55,6 +56,28 @@ function App(){
       </DCSection>
       <DCSection id="public" title="04 · 公開頁 P5-A03" subtitle="公開車資版本（active）· 生效日 · 備查文號 · 車資變更規則">
         <DCArtboard id="p5-a03" label="P5-A03 · 公開計費說明頁 /fares" width={W} height={H}><F><P5_A03/></F></DCArtboard>
+      </DCSection>
+      <DCSection id="auth-account" title="05 · 登入與帳號 (PAX-AUTH-CANVAS-20261010)" subtitle="登入入口 · 手機/Email 驗證 · 第三方登入 · 帳號管理 · 行程紀錄 · 付款管理">
+        <DCArtboard id="a-01" label="A-01 · 登入入口 · 已啟用方式" width={W} height={H}><F><P5A_S01/></F></DCArtboard>
+        <DCArtboard id="a-02" label="A-02 · 登入入口 · 無可用方式空狀態" width={W} height={H}><F><P5A_S02/></F></DCArtboard>
+        <DCArtboard id="a-03" label="A-03 · 手機驗證碼 · 輸入手機" width={W} height={H}><F><P5A_S03/></F></DCArtboard>
+        <DCArtboard id="a-04" label="A-04 · 手機驗證碼 · 輸入驗證碼" width={W} height={H}><F><P5A_S04/></F></DCArtboard>
+        <DCArtboard id="a-05" label="A-05 · 手機驗證碼 · 錯誤狀態" width={W} height={H}><F><P5A_S05/></F></DCArtboard>
+        <DCArtboard id="a-06" label="A-06 · 首次登入 · 同意條款" width={W} height={H}><F><P5A_S06/></F></DCArtboard>
+        <DCArtboard id="a-07" label="A-07 · 第三方登入 · 導向中" width={W} height={H}><F><P5A_S07/></F></DCArtboard>
+        <DCArtboard id="a-08" label="A-08 · 第三方登入 · 已綁定錯誤" width={W} height={H}><F><P5A_S08/></F></DCArtboard>
+        <DCArtboard id="a-10" label="A-10 · 帳號管理" width={W} height={H}><F><P5A_S10/></F></DCArtboard>
+        <DCArtboard id="a-11" label="A-11 · 登入方式管理" width={W} height={H}><F><P5A_S11/></F></DCArtboard>
+        <DCArtboard id="a-12" label="A-12 · 登入方式管理 · 解除限制" width={W} height={H}><F><P5A_S12/></F></DCArtboard>
+        <DCArtboard id="a-14" label="A-14 · 刪除帳號" width={W} height={H}><F><P5A_S14/></F></DCArtboard>
+        <DCArtboard id="a-16" label="A-16 · 行程紀錄" width={W} height={H}><F><P5A_S16/></F></DCArtboard>
+        <DCArtboard id="a-17" label="A-17 · 行程紀錄 · 空狀態" width={W} height={H}><F><P5A_S17/></F></DCArtboard>
+        <DCArtboard id="a-18" label="A-18 · 聯絡客服與遺失物" width={W} height={H}><F><P5A_S18/></F></DCArtboard>
+        <DCArtboard id="a-19" label="A-19 · 聯絡客服送出成功" width={W} height={H}><F><P5A_S19/></F></DCArtboard>
+        <DCArtboard id="a-20" label="A-20 · 付款卡片管理" width={W} height={H}><F><P5A_S20/></F></DCArtboard>
+        <DCArtboard id="a-21" label="A-21 · 新增付款卡片" width={W} height={H}><F><P5A_S21/></F></DCArtboard>
+        <DCArtboard id="a-22" label="A-22 · 叫車選擇付款方式" width={W} height={H}><F><P5A_S22/></F></DCArtboard>
+        <DCArtboard id="a-23" label="A-23 · 扣款失敗阻擋" width={W} height={H}><F><P5A_S23/></F></DCArtboard>
       </DCSection>
     </DesignCanvas>
   );
