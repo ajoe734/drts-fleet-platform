@@ -15,8 +15,8 @@ const row = {
   distance_rate: 5,
   distance_increment_meters: 200,
   delay_rate: 5,
-  delay_increment_seconds: 80,
-  night_surcharge_bps: 2000,
+  delay_increment_seconds: 60,
+  night_surcharge_amount: 20,
   night_window_start: "23:00",
   night_window_end: "06:00",
   additional_fees: {},
@@ -79,6 +79,8 @@ describe("production fare repository at the pool boundary; PG acceptance pending
     );
     expect(sql).toContain("effective_until > $1::timestamptz");
     expect(sql).toContain("LIMIT 2");
+    expect(sql).toContain("night_surcharge_amount");
+    expect(sql).not.toContain("night_surcharge_bps");
   });
   it("returns no tariff when none applies, and fails closed on ambiguity/corrupt rules", async () => {
     expect(await fixture().repository.publishedTariff(at)).toBeNull();
@@ -95,6 +97,13 @@ describe("production fare repository at the pool boundary; PG acceptance pending
         { ...row, additional_fees: { fee: -1 } },
       ]).repository.publishedTariff(at),
     ).rejects.toMatchObject({ code: "unavailable" });
+    for (const night_surcharge_amount of [-1, undefined, 0.2]) {
+      await expect(
+        fixture([
+          { ...row, night_surcharge_amount },
+        ]).repository.publishedTariff(at),
+      ).rejects.toMatchObject({ code: "unavailable" });
+    }
   });
   it("writes the owned route/time/range/version and approved rules with sixteen bound parameters", async () => {
     const f = fixture(),

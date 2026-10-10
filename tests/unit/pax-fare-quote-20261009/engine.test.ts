@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { estimateFare } from "../../../apps/api/src/modules/passenger-app/fare/fare.engine";
-import { tariff } from "./fixture";
+import { publishedTariff, tariff } from "./fixture";
 
 const day = "2026-10-10T04:00:00.000Z";
 function estimate(
@@ -36,10 +36,10 @@ describe("fare engine with explicit, synthetic publication rules", () => {
   it.each([
     [0, 0],
     [0.01, 5],
-    [79.99, 5],
-    [80, 5],
-    [80.01, 10],
-    [160, 10],
+    [59.99, 5],
+    [60, 5],
+    [60.01, 10],
+    [120, 10],
   ])("duration %s gives zero-to-full-delay bound %s", (duration, delay) => {
     const result = estimate(0, duration);
     expect(result.estimatedMin).toBe(85);
@@ -48,13 +48,13 @@ describe("fare engine with explicit, synthetic publication rules", () => {
   });
   it("uses completed ticks only when that rule is explicitly selected", () => {
     expect(
-      estimate(1449, 79, day, {
+      estimate(1449, 59, day, {
         distanceRounding: "floor",
         delayRounding: "floor",
       }),
     ).toMatchObject({ estimatedMin: 85, estimatedMax: 85 });
     expect(
-      estimate(1450, 80, day, {
+      estimate(1450, 60, day, {
         distanceRounding: "floor",
         delayRounding: "floor",
       }),
@@ -68,8 +68,8 @@ describe("fare engine with explicit, synthetic publication rules", () => {
     ["2026-10-10T22:00:00.000Z", false],
   ])("Taipei night boundary %s => %s", (pickup, night) => {
     expect(estimate(0, 0, pickup)).toMatchObject({
-      estimatedMin: night ? 102 : 85,
-      breakdown: { nightApplies: night },
+      estimatedMin: night ? 105 : 85,
+      breakdown: { nightApplies: night, nightSurchargeAmount: night ? 20 : 0 },
     });
   });
   it("pickup-based night rule remains bound to pickup across both time boundaries", () => {
@@ -101,19 +101,20 @@ describe("fare engine with explicit, synthetic publication rules", () => {
         nightSurchargeWindowStart: "10:00",
         nightSurchargeWindowEnd: "14:00",
       }).estimatedMin,
-    ).toBe(102);
+    ).toBe(105);
   });
   it.each([
-    ["ceil", 105],
-    ["floor", 100],
-    ["nearest", 100],
+    ["ceil", 110],
+    ["floor", 105],
+    ["nearest", 105],
   ])(
-    "percentage is applied before total %s to a five-dollar increment",
+    "fixed night fee is included before synthetic total %s to a five-dollar increment",
     (rounding, expected) => {
       expect(
         estimate(0, 0, "2026-10-10T15:00:00Z", {
           totalRounding: rounding,
           totalIncrement: 5,
+          additionalFees: { unitOnlyFee: 2 },
         }).estimatedMin,
       ).toBe(expected);
     },
@@ -147,7 +148,9 @@ describe("fare engine with explicit, synthetic publication rules", () => {
       { totalIncrement: 0 },
       { delayIncrementSeconds: 0 },
       { baseFare: 1.1 },
-      { nightSurchargeBps: 10001 },
+      { nightSurchargeAmount: -1 },
+      { nightSurchargeAmount: 0.2 },
+      { nightSurchargeAmount: undefined },
       { distanceRounding: undefined },
       { nightApplication: undefined },
       { nightSurchargeWindowEnd: "23:00" },
@@ -157,4 +160,75 @@ describe("fare engine with explicit, synthetic publication rules", () => {
       expect(() => estimate(0, 0, day, changes)).toThrow(RangeError);
     }
   });
+  it("rejects overflow caused solely by adding the fixed night fee", () => {
+    expect(
+      estimate(0, 0, day, { baseFare: Number.MAX_SAFE_INTEGER }).estimatedMin,
+    ).toBe(Number.MAX_SAFE_INTEGER);
+    expect(() =>
+      estimate(0, 0, "2026-10-10T15:00:00Z", {
+        baseFare: Number.MAX_SAFE_INTEGER,
+      }),
+    ).toThrow(RangeError);
+  });
+});
+
+describe("published Taipei 112/04/01 ordinary-day rules (official ceil distance / floor delay / pickup)", () => {
+  it.each([
+    [0, 0, 85, 85],
+    [1250, 59.999, 85, 85],
+    [1250.001, 60, 90, 95],
+    [1450, 60.001, 90, 95],
+    [1450.001, 120, 95, 105],
+    [100000, 3600, 2555, 2855],
+  ])("%sm/%ss => [%s, %s]", (distanceMeters, durationSeconds, min, max) => {
+    const result = estimateFare(publishedTariff, {
+      distanceMeters,
+      durationSeconds,
+      scheduledAt: day,
+    });
+    expect([result.estimatedMin, result.estimatedMax]).toEqual([min, max]);
+    expect(result.breakdown.nightSurchargeAmount).toBe(0);
+  });
+  it.each([0, 1250, 3250, 100000])(
+    "adds exactly 20 once to both bounds for %sm, including delay",
+    (distanceMeters) => {
+      const input = { distanceMeters, durationSeconds: 800, scheduledAt: day };
+      const daytime = estimateFare(publishedTariff, input);
+      const night = estimateFare(publishedTariff, {
+        ...input,
+        scheduledAt: "2026-10-10T15:00:00Z",
+      });
+      expect(night.estimatedMin - daytime.estimatedMin).toBe(20);
+      expect(night.estimatedMax - daytime.estimatedMax).toBe(20);
+      expect(night.breakdown).toMatchObject({
+        nightApplies: true,
+        nightSurchargeAmount: 20,
+      });
+      expect(night.breakdown.additionalFees).toEqual({});
+    },
+  );
+  it.each([
+    ["2026-10-10T14:59:00Z", 120, false, 85],
+    ["2026-10-10T15:00:00Z", 120, true, 105],
+    ["2026-10-10T21:59:00Z", 120, true, 105],
+    ["2026-10-10T22:00:00Z", 120, false, 85],
+    [day, 86400, false, 85],
+  ])(
+    "binds the official night charge to pickup %s across the window",
+    (scheduledAt, durationSeconds, night, min) => {
+      expect(
+        estimateFare(publishedTariff, {
+          distanceMeters: 0,
+          durationSeconds,
+          scheduledAt,
+        }),
+      ).toMatchObject({
+        estimatedMin: min,
+        breakdown: {
+          nightApplies: night,
+          nightSurchargeAmount: night ? 20 : 0,
+        },
+      });
+    },
+  );
 });

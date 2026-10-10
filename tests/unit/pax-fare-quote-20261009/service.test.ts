@@ -7,7 +7,7 @@ import { PassengerJwtService } from "../../../apps/api/src/common/auth/passenger
 import { GeoService } from "../../../apps/api/src/modules/geo/geo.service";
 import { ServiceAreaService } from "../../../apps/api/src/modules/service-area/service-area.service";
 import { MemoryPassengerStore } from "../pax-account-session-20261009/memory-store";
-import { tariff } from "./fixture";
+import { publishedTariff, tariff } from "./fixture";
 
 const now = "2026-10-10T00:00:00.000Z";
 const body = {
@@ -102,7 +102,7 @@ describe("production quote and public fares flow (external/storage boundaries st
       data: {
         serviceAreaResult: "serviceable",
         estimatedMin: 135,
-        estimatedMax: 185,
+        estimatedMax: 205,
         fareVersion: tariff.version,
         expiresAt: "2026-10-10T00:15:00.000Z",
         isGuaranteed: false,
@@ -234,7 +234,7 @@ describe("production quote and public fares flow (external/storage boundaries st
     expect(f.provider.route).not.toHaveBeenCalled();
     expect(f.store.insertSnapshot).not.toHaveBeenCalled();
   });
-  it("returns only the public effective version contract, as a percentage fraction", async () => {
+  it("returns only the public effective version with a fixed per-trip TWD night fee", async () => {
     const f = await fixture();
     expect((await f.controller.fares()).data).toEqual({
       currentVersion: {
@@ -245,8 +245,10 @@ describe("production quote and public fares flow (external/storage boundaries st
         distanceRate: 5,
         distanceIncrementMeters: 200,
         delayRate: 5,
-        delayIncrementSeconds: 80,
-        nightSurcharge: 0.2,
+        delayIncrementSeconds: 60,
+        nightSurcharge: 20,
+        nightSurchargeUnit: "TWD_per_trip",
+        nightApplication: "pickup",
         nightSurchargeWindowStart: "23:00",
         nightSurchargeWindowEnd: "06:00",
         additionalFees: {},
@@ -254,6 +256,43 @@ describe("production quote and public fares flow (external/storage boundaries st
     });
     expect(f.store.publishedTariff).toHaveBeenCalledWith(now);
     expect(f.store.insertSnapshot).not.toHaveBeenCalled();
+  });
+  it("quotes published ordinary-day rules and snapshots the fixed fee across both pickup boundaries", async () => {
+    const f = await fixture();
+    f.store.publishedTariff.mockResolvedValue(structuredClone(publishedTariff));
+    const fares = (await f.controller.fares()).data;
+    expect(fares.currentVersion).toMatchObject({
+      version: "taipei-20230401",
+      effectiveAt: "2023-03-31T16:00:00.000Z",
+      delayIncrementSeconds: 60,
+      nightSurcharge: 20,
+      nightSurchargeUnit: "TWD_per_trip",
+    });
+    for (const [scheduledAt, min, max, fee] of [
+      ["2026-10-11T14:59:00Z", 135, 200, 0],
+      ["2026-10-11T15:00:00Z", 155, 220, 20],
+      ["2026-10-11T21:59:00Z", 155, 220, 20],
+      ["2026-10-11T22:00:00Z", 135, 200, 0],
+    ] as const) {
+      const result = await f.controller.estimateQuote(f.identity, {
+        ...body,
+        scheduledAt,
+      });
+      expect(result.data).toMatchObject({
+        estimatedMin: min,
+        estimatedMax: max,
+        fareVersion: publishedTariff.version,
+        isGuaranteed: false,
+        breakdown: { nightSurchargeAmount: fee, additionalFees: {} },
+      });
+      expect(f.snapshots.at(-1)).toMatchObject({
+        estimatedMin: min,
+        estimatedMax: max,
+        scheduledAt: new Date(scheduledAt).toISOString(),
+        tariffSnapshot: { nightSurchargeAmount: 20, delayIncrementSeconds: 60 },
+        breakdown: { nightSurchargeAmount: fee },
+      });
+    }
   });
   it("fails unavailable without a finalized effective tariff, for both public fares and quotes", async () => {
     const f = await fixture();
