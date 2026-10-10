@@ -57,6 +57,8 @@ export default function OAuthCallbackPage() {
   const exit = async () => {
     try {
       await client.logout();
+    } catch {
+      // The BFF clears cookies on failed logout as well.
     } finally {
       clearOtpState();
       router.replace("/login");

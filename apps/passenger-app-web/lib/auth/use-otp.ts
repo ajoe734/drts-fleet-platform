@@ -100,13 +100,18 @@ export function useOtp(scope: string, allowed: readonly string[]) {
     setPending(true);
     setError("");
     try {
-      const response = await client.requestOtp(command);
+      const wire: RequestOtpCommand = {
+        provider: command.provider,
+        purpose: command.purpose,
+        target: normalizedOtpTarget(command.provider, command.target),
+      };
+      const response = await client.requestOtp(wire);
       if (scopeRef.current !== startedScope) return;
       if (!response.success || !response.challenge)
         throw new Error("missing challenge");
       const timestamp = Date.now();
       const next = {
-        ...command,
+        ...wire,
         target: normalizedOtpTarget(command.provider, command.target),
         challenge: response.challenge,
         resendAt: timestamp + 60000,

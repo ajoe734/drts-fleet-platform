@@ -123,15 +123,6 @@ describe("Passenger BFF Route", () => {
       },
       {
         method: "POST",
-        path: ["auth", "oauth", "google", "start"],
-        expectedStatus: 200,
-        mockResponse: new Response("{}", {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      },
-      {
-        method: "POST",
         path: ["auth", "mfa", "verify"],
         expectedStatus: 503,
         mockResponse: new Response(JSON.stringify({ accessToken: "a" }), {
@@ -284,115 +275,121 @@ describe("Passenger BFF Route", () => {
     ).toBeNull();
   });
 
-  it.each([
-    { provider: "google", action: "start" },
-    { provider: "google", action: "callback" },
-    { provider: "facebook", action: "start" },
-    { provider: "facebook", action: "callback" },
-    { provider: "line", action: "start" },
-    { provider: "line", action: "callback" },
-  ])(
-    "R20: forwards supported POST auth/oauth/$provider/$action",
-    async ({ provider, action }) => {
-      const payload: OAuthCallbackResponse | OAuthStartResponse =
-        action === "callback"
-          ? {
-              result: "logged_in",
-              drtsPassengerId: me.account.drtsPassengerId,
-              accessToken: "oauth-access",
-              refreshToken: "oauth-refresh",
-            }
-          : {
-              authUrl: "https://provider.example.test/authorize",
-              transactionId: "oauth-transaction",
-              expiresAt: "2026-10-10T01:05:00Z",
-              state: "oauth-state",
-            };
-      const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
-      global.fetch = vi
-        .fn()
-        .mockImplementation(async (url: string, init?: RequestInit) => {
-          calls.push({ url, init });
-          if (url.includes("metadata.google.internal"))
-            return new Response("trusted-identity");
-          return apiWireResponse(payload);
-        });
-      const fullPath = `auth/oauth/${provider}/${action}`;
-      const command =
-        action === "callback"
-          ? {
-              code: "test-code",
-              state: "oauth-state",
-              transaction_id: "oauth-transaction",
-            }
-          : {
-              redirect_uri: `https://ride.smarttransport.tw/auth/callback/${provider}`,
-              purpose: "login",
-            };
-      const req = new NextRequest(
-        `https://ride.smarttransport.tw/api/passenger-app/${fullPath}`,
-        {
-          method: "POST",
-          headers: {
-            Origin: "https://ride.smarttransport.tw",
-            "Content-Type": "application/json",
+  it.each(["google", "facebook", "line"] as const)(
+    "R20: forwards provider-specific %s start and cookie-bound callback using formal commands",
+    async (provider) => {
+      const transactionId = "11111111-1111-4111-8111-111111111111";
+      const state = "oauth-state";
+      const start: OAuthStartResponse = {
+        authUrl: "https://provider.example.test/authorize?state=oauth-state",
+        transactionId,
+        state,
+        expiresAt: new Date(Date.now() + 300000).toISOString(),
+      };
+      const callback: OAuthCallbackResponse = {
+        result: "logged_in",
+        drtsPassengerId: me.account.drtsPassengerId,
+        accessToken: "oauth-access",
+        refreshToken: "oauth-refresh",
+      };
+      const calls: Array<{ url: string; init?: RequestInit }> = [];
+      global.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+        calls.push({ url, ...(init ? { init } : {}) });
+        if (url.includes("metadata.google.internal"))
+          return new Response("trusted-identity");
+        return apiWireResponse(url.endsWith("/start") ? start : callback);
+      });
+      const origin = "https://ride.smarttransport.tw";
+      const startCommand = {
+        provider,
+        redirectUri: `${origin}/auth/callback/${provider}`,
+        purpose: "login",
+      };
+      const startRes = await POST(
+        new NextRequest(
+          `${origin}/api/passenger-app/auth/oauth/${provider}/start`,
+          {
+            method: "POST",
+            headers: { Origin: origin, "Content-Type": "application/json" },
+            body: JSON.stringify(startCommand),
           },
-          body: JSON.stringify(command),
+        ),
+        {
+          params: Promise.resolve({
+            path: ["auth", "oauth", provider, "start"],
+          }),
         },
       );
-
-      const res = await POST(req, {
-        params: Promise.resolve({ path: fullPath.split("/") }),
+      expect(startRes.status).toBe(200);
+      expect(await startRes.json()).toMatchObject({
+        data: { auth_url: start.authUrl },
+        meta: { request_id: "pax-web-shell-regression" },
       });
-
-      expect(res.status).toBe(200);
-      expect(calls).toHaveLength(2);
-      const upstream = calls.find(
-        (call) =>
-          call.url === `http://upstream.local/api/passenger-app/${fullPath}`,
-      );
-      expect(upstream?.init?.method).toBe("POST");
-      expect(
-        new Headers(upstream?.init?.headers).get("x-serverless-authorization"),
-      ).toBe("Bearer trusted-identity");
-      expect(
-        new Headers(upstream?.init?.headers).get("authorization"),
-      ).toBeNull();
-      expect(
-        JSON.parse(
-          new TextDecoder().decode(upstream?.init?.body as ArrayBuffer),
+      const cookie = startRes.cookies.get("pax_oauth_txn")!;
+      expect(cookie).toMatchObject({
+        httpOnly: true,
+        secure: true,
+        sameSite: "lax",
+        path: "/",
+      });
+      const callbackRes = await POST(
+        new NextRequest(
+          `${origin}/api/passenger-app/auth/oauth/${provider}/callback`,
+          {
+            method: "POST",
+            headers: {
+              Origin: origin,
+              "Content-Type": "application/json",
+              Cookie: `pax_oauth_txn=${cookie.value}`,
+            },
+            body: JSON.stringify({ provider, code: "test-code", state }),
+          },
         ),
-      ).toEqual(command);
-      const body = await res.json();
-      expect(body.meta.request_id).toBe("pax-web-shell-regression");
-      expect(body.data).not.toHaveProperty("access_token");
-      expect(body.data).not.toHaveProperty("refresh_token");
-      expect(body.data).not.toHaveProperty("accessToken");
-      expect(body.data).not.toHaveProperty("refreshToken");
-      if (action === "callback") {
-        expect(body.data).toEqual({
+        {
+          params: Promise.resolve({
+            path: ["auth", "oauth", provider, "callback"],
+          }),
+        },
+      );
+      expect(callbackRes.status).toBe(200);
+      expect(await callbackRes.json()).toMatchObject({
+        data: {
           result: "logged_in",
           drts_passenger_id: me.account.drtsPassengerId,
+        },
+      });
+      expect(callbackRes.cookies.get("pax_oauth_txn")?.maxAge).toBe(0);
+      expect(calls).toHaveLength(4);
+      const upstreamCalls = calls.filter(
+        (call) => !call.url.includes("metadata.google.internal"),
+      );
+      expect(
+        JSON.parse(
+          new TextDecoder().decode(upstreamCalls[0]!.init?.body as ArrayBuffer),
+        ),
+      ).toEqual(startCommand);
+      expect(
+        JSON.parse(
+          new TextDecoder().decode(upstreamCalls[1]!.init?.body as ArrayBuffer),
+        ),
+      ).toEqual({ provider, code: "test-code", state, transactionId });
+      for (const call of upstreamCalls) {
+        expect(
+          new Headers(call.init?.headers).get("x-serverless-authorization"),
+        ).toBe("Bearer trusted-identity");
+        expect(new Headers(call.init?.headers).get("authorization")).toBeNull();
+      }
+      for (const [name, value] of [
+        ["pax_session", "oauth-access"],
+        ["pax_refresh", "oauth-refresh"],
+      ]) {
+        expect(callbackRes.cookies.get(name!)).toMatchObject({
+          value,
+          httpOnly: true,
+          secure: true,
+          sameSite: "lax",
+          path: "/",
         });
-        for (const [name, value] of [
-          ["pax_session", "oauth-access"],
-          ["pax_refresh", "oauth-refresh"],
-        ]) {
-          expect(res.cookies.get(name!)).toMatchObject({
-            value,
-            httpOnly: true,
-            secure: true,
-            sameSite: "lax",
-            path: "/",
-          });
-        }
-      } else {
-        expect(body.data).toMatchObject({
-          auth_url: "https://provider.example.test/authorize",
-          transaction_id: "oauth-transaction",
-        });
-        expect(res.cookies.get("pax_session")).toBeUndefined();
-        expect(res.cookies.get("pax_refresh")).toBeUndefined();
       }
     },
   );

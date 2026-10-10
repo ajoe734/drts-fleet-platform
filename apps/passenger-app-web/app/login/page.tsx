@@ -57,6 +57,8 @@ export default function LoginPage() {
   const exit = async () => {
     try {
       await client.logout();
+    } catch {
+      // The BFF clears cookies on failed logout as well.
     } finally {
       clearOtpState();
       setAuthenticated(false);

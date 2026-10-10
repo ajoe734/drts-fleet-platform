@@ -37,7 +37,8 @@ describe("Adjacent review repair probes (no server)", () => {
     const transport = async (url: string, init?: RequestInit) =>
       POST(
         new NextRequest(`https://ride.smarttransport.tw${url}`, {
-          ...init,
+          method: init?.method ?? "GET",
+          ...(init?.body != null ? { body: init.body } : {}),
           headers: { Origin: "https://ride.smarttransport.tw" },
         }),
         {
