@@ -94,7 +94,9 @@ export async function requestPassengerRideAction<T>(
       );
     }
     const payload = await response.json();
-    return (payload.data ? camelizeKeys(payload.data) : camelizeKeys(payload)) as T;
+    return (
+      payload.data ? camelizeKeys(payload.data) : camelizeKeys(payload)
+    ) as T;
   } else {
     if (action === "cancel") {
       return (await passengerClient.cancelRide(
@@ -221,11 +223,11 @@ export function mapPassengerRideAuthorityToFixture(
 ): PassengerRideFixture {
   const assignment = view.assignment;
   const screenId = resolveScreenId(view, kind);
-  const fareMinor = assignment?.routeFare.estimatedFareMinor ?? null;
-  const payableFareMinor = assignment?.routeFare.payableFareMinor ?? null;
-  const distanceMeters = assignment?.routeFare.estimatedDistanceMeters ?? null;
+  const fareMinor = assignment?.routeFare?.estimatedFareMinor ?? null;
+  const payableFareMinor = assignment?.routeFare?.payableFareMinor ?? null;
+  const distanceMeters = assignment?.routeFare?.estimatedDistanceMeters ?? null;
   const durationSeconds =
-    assignment?.routeFare.estimatedDurationSeconds ?? null;
+    assignment?.routeFare?.estimatedDurationSeconds ?? null;
   const payment = mapPassengerPayment(view.payment);
   const certificate =
     view.order.status === "completed" || view.receipt
@@ -268,15 +270,19 @@ export function mapPassengerRideAuthorityToFixture(
         : fareMinor === null
           ? "依計費表實際金額收費"
           : `預估 ${formatMoney(fareMinor)}`,
-    ...(assignment?.routeFare.fareChangeRuleDisplayText
+    ...(assignment?.routeFare?.fareChangeRuleDisplayText
       ? {
           routeFareHint: assignment.routeFare.fareChangeRuleDisplayText,
         }
       : {}),
     pickupLabel:
-      assignment?.routeFare.pickup.address || view.order.pickup.address,
+      assignment?.routeFare?.pickup?.address ||
+      view.order.pickup?.address ||
+      "",
     dropoffLabel:
-      assignment?.routeFare.dropoff.address || view.order.dropoff.address,
+      assignment?.routeFare?.dropoff?.address ||
+      view.order.dropoff?.address ||
+      "",
     mapState:
       assignment?.eta.locationFreshness === "fresh"
         ? "fresh"
@@ -321,17 +327,17 @@ export function mapPassengerRideAuthorityToFixture(
         }
       : {}),
     driver: {
-      name: assignment?.driver.displayName || "尚未指派",
-      vehicle: assignment
+      name: assignment?.driver?.displayName || "尚未指派",
+      vehicle: assignment?.vehicle
         ? `${assignment.vehicle.make} ${assignment.vehicle.model}`
         : "尚未指派",
-      plateNo: assignment?.vehicle.plateNo || "尚未指派",
-      color: assignment?.vehicle.color || "未提供",
+      plateNo: assignment?.vehicle?.plateNo || "尚未指派",
+      color: assignment?.vehicle?.color || "未提供",
       registrationMaskedDisplay:
-        assignment?.driver.registrationMaskedDisplay || "尚未提供",
+        assignment?.driver?.registrationMaskedDisplay || "尚未提供",
       registrationEffectiveUntil:
-        assignment?.driver.registrationEffectiveUntil || "尚未提供",
-      ratingState: assignment?.rating.displayState || "unavailable",
+        assignment?.driver?.registrationEffectiveUntil || "尚未提供",
+      ratingState: assignment?.rating?.displayState || "unavailable",
     },
     assignment,
     timeline: [],
@@ -549,7 +555,7 @@ function resolveScreenId(
     return "P5-01";
   }
   if (view.assignment.assignmentVersion > 1) return "P5-05";
-  return view.assignment.rating.displayState === "new_driver"
+  return view.assignment.rating?.displayState === "new_driver"
     ? "P5-03"
     : "P5-02";
 }

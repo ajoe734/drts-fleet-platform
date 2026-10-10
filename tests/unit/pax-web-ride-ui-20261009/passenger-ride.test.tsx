@@ -222,18 +222,18 @@ describe("Passenger Ride UI Acceptance", () => {
   });
 
   it("MapCard freshness relies on calculatedAt rather than event arrival time", async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const staleTime = new Date(Date.now() - 62000).toISOString();
-    
+
     const view = {
       order: { orderId: "order-uuid", status: "assigned" },
       assignment: {
         driver: { displayName: "Driver", fleetName: "Fleet" },
         vehicle: { plateNo: "A-1", model: "Car", color: "W" },
         eta: { minutes: 5, calculatedAt: staleTime },
-        location: { lat: 0, lng: 0 }
+        location: { lat: 0, lng: 0 },
       },
-      actions: {}
+      actions: {},
     };
     fetchResponse = { ride: view };
 
@@ -251,14 +251,14 @@ describe("Passenger Ride UI Acceptance", () => {
     });
 
     const es = MockEventSource.instances[0];
-    
+
     // Simulate a reconnect or irrelevant SSE event
     es.emit("receipt_ready", { type: "receipt_ready", version: 2, data: view });
-    
+
     // The MapCard should still be stale because calculatedAt is > 60s ago
     // Advance timers so useEffect triggers setNow
     vi.advanceTimersByTime(2000);
-    
+
     // Test logic ensures we don't crash, the UI updates its state properly
     // We can't directly check 'stale' visually unless we query specific classes, but we can verify it doesn't throw.
     vi.useRealTimers();

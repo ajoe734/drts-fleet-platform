@@ -563,11 +563,11 @@ function VehicleCard({
 }) {
   if (!fixture.assignment) return null;
   const assignment = fixture.assignment;
-  const rated = assignment.rating.displayState === "rated";
+  const rated = assignment.rating?.displayState === "rated";
   const vehicleDetails = [
-    `${assignment.vehicle.modelYear} 年出廠`,
-    `${assignment.vehicle.doorCount} 門`,
-    assignment.vehicle.color,
+    `${assignment.vehicle?.modelYear} 年出廠`,
+    `${assignment.vehicle?.doorCount} 門`,
+    assignment.vehicle?.color,
   ].filter((value): value is string => Boolean(value));
 
   return (
@@ -1107,52 +1107,64 @@ function CertificateCard({
 
   const rows = certificate.rows ?? [];
   const hasRows = rows.length > 0;
-  
+
   return (
     <Card title={t.EReceipt}>
       {certificate.htmlUrl ? (
         <iframe
           src={certificate.htmlUrl}
-          style={{ width: "100%", height: "400px", border: "none", marginBottom: hasRows ? 16 : 0 }}
+          style={{
+            width: "100%",
+            height: "400px",
+            border: "none",
+            marginBottom: hasRows ? 16 : 0,
+          }}
           title={t.EReceiptIframeTitle}
         />
       ) : null}
-      
+
       {!certificate.htmlUrl && !hasRows ? (
-        <div style={{ textAlign: "center", padding: "20px 0", color: passengerChrome.muted, fontSize: 13 }}>
+        <div
+          style={{
+            textAlign: "center",
+            padding: "20px 0",
+            color: passengerChrome.muted,
+            fontSize: 13,
+          }}
+        >
           {t.CannotLoadReceiptDetails}
         </div>
       ) : null}
 
-      {hasRows ? (
-        rows.map((row, index) => (
-          <div
-            key={`${row.label}-${index}`}
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 12,
-              padding: "8px 0",
-              borderBottom:
-                index < rows.length - 1
-                  ? `1px solid ${passengerChrome.border}`
-                  : undefined,
-              fontSize: 12.5,
-            }}
-          >
-            <span style={{ color: passengerChrome.muted }}>{row.label}</span>
-            <span
+      {hasRows
+        ? rows.map((row, index) => (
+            <div
+              key={`${row.label}-${index}`}
               style={{
-                fontWeight: 600,
-                fontFamily: row.mono ? monoFont : undefined,
-                textAlign: "right",
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "8px 0",
+                borderBottom:
+                  index < rows.length - 1
+                    ? `1px solid ${passengerChrome.border}`
+                    : undefined,
+                fontSize: 12.5,
               }}
             >
-              {row.value}
-            </span>
-          </div>
-        ))
-      ) : null}
+              <span style={{ color: passengerChrome.muted }}>{row.label}</span>
+              <span
+                style={{
+                  fontWeight: 600,
+                  fontFamily: row.mono ? monoFont : undefined,
+                  textAlign: "right",
+                }}
+              >
+                {row.value}
+              </span>
+            </div>
+          ))
+        : null}
     </Card>
   );
 }
@@ -1664,7 +1676,8 @@ function Actions({
       return;
     }
     setActionPending(true);
-    const body = action === "cancel" && authMode !== "token" ? { rideId: token } : {};
+    const body =
+      action === "cancel" && authMode !== "token" ? { rideId: token } : {};
     void requestPassengerRideAction(token, action, body, authMode === "token")
       .then((res: unknown) => {
         const result = res as { contactUri?: string };
@@ -1874,7 +1887,11 @@ function Actions({
         type="button"
         style={buttonStyle("primary")}
         onClick={contact}
-        disabled={(fixture.canContact === false && fixture.actionMode !== "support_only") || actionPending}
+        disabled={
+          (fixture.canContact === false &&
+            fixture.actionMode !== "support_only") ||
+          actionPending
+        }
       >
         {contactLabel}
       </button>
@@ -2240,7 +2257,11 @@ export function PassengerRidePage({
         startTransition(() => {
           setLiveFixture(mapPassengerRideAuthorityToFixture(view, token, kind));
           setAuthorityError(null);
-          setLastEventTime(view.assignment?.eta?.calculatedAt ? new Date(view.assignment.eta.calculatedAt).getTime() : Date.now());
+          setLastEventTime(
+            view.assignment?.eta?.calculatedAt
+              ? new Date(view.assignment.eta.calculatedAt).getTime()
+              : Date.now(),
+          );
         });
         unsubscribe = subscribePassengerRideAuthority(
           token,
@@ -2250,7 +2271,13 @@ export function PassengerRidePage({
               setLiveFixture(
                 mapPassengerRideAuthorityToFixture(nextView.data, token, kind),
               );
-              setLastEventTime(nextView.data.assignment?.eta?.calculatedAt ? new Date(nextView.data.assignment.eta.calculatedAt).getTime() : Date.now());
+              setLastEventTime(
+                nextView.data.assignment?.eta?.calculatedAt
+                  ? new Date(
+                      nextView.data.assignment.eta.calculatedAt,
+                    ).getTime()
+                  : Date.now(),
+              );
             });
           },
           authMode === "token",

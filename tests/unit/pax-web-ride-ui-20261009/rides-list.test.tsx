@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import RidesListPage from "../../../apps/passenger-app-web/app/rides/page";
 import { passengerClient } from "../../../apps/passenger-app-web/lib/client";
 import { PassengerRideAuthorityView } from "@drts/contracts";
@@ -101,23 +101,49 @@ describe("RidesListPage", () => {
 
   it("should handle pagination, errors, and duplicate history deduplication", async () => {
     const activeRide = {
-      order: { orderId: "o1", orderNo: "O1", requestedPickupAt: new Date().toISOString(), status: "assigned", pickup: { address: "A" } },
-    } as any;
-    
-    const historyRide1 = {
-      order: { orderId: "o2", orderNo: "O2", requestedPickupAt: new Date().toISOString(), status: "completed", pickup: { address: "B" } },
-    } as any;
-    const historyRideDuplicate = {
-      order: { orderId: "o1", orderNo: "O1", requestedPickupAt: new Date().toISOString(), status: "assigned", pickup: { address: "A" } },
-    } as any;
-    const historyRide2 = {
-      order: { orderId: "o3", orderNo: "O3", requestedPickupAt: new Date().toISOString(), status: "completed", pickup: { address: "C" } },
+      order: {
+        orderId: "o1",
+        orderNo: "O1",
+        requestedPickupAt: new Date().toISOString(),
+        status: "assigned",
+        pickup: { address: "A" },
+      },
     } as any;
 
-    (passengerClient.getActiveRides as any).mockResolvedValue({ rides: [activeRide] });
+    const historyRide1 = {
+      order: {
+        orderId: "o2",
+        orderNo: "O2",
+        requestedPickupAt: new Date().toISOString(),
+        status: "completed",
+        pickup: { address: "B" },
+      },
+    } as any;
+    const historyRideDuplicate = {
+      order: {
+        orderId: "o1",
+        orderNo: "O1",
+        requestedPickupAt: new Date().toISOString(),
+        status: "assigned",
+        pickup: { address: "A" },
+      },
+    } as any;
+    const historyRide2 = {
+      order: {
+        orderId: "o3",
+        orderNo: "O3",
+        requestedPickupAt: new Date().toISOString(),
+        status: "completed",
+        pickup: { address: "C" },
+      },
+    } as any;
+
+    (passengerClient.getActiveRides as any).mockResolvedValue({
+      rides: [activeRide],
+    });
     (passengerClient.getRides as any).mockResolvedValueOnce({
       rides: [historyRide1, historyRideDuplicate],
-      nextCursor: "cursor-2"
+      nextCursor: "cursor-2",
     });
 
     render(<RidesListPage />);
@@ -128,18 +154,20 @@ describe("RidesListPage", () => {
     expect(screen.getByText("A")).toBeTruthy();
     expect(screen.getByText("B")).toBeTruthy();
 
-    (passengerClient.getRides as any).mockRejectedValueOnce(new Error("Network Error"));
+    (passengerClient.getRides as any).mockRejectedValueOnce(
+      new Error("Network Error"),
+    );
     const loadMoreBtn = screen.getByText("載入更多");
     fireEvent.click(loadMoreBtn);
-    
+
     // We expect the error to be handled (e.g. state reset to not loading)
     await waitFor(() => {
-      expect(loadMoreBtn).not.toBeDisabled();
+      expect(loadMoreBtn.hasAttribute("disabled")).toBe(false);
     });
 
     (passengerClient.getRides as any).mockResolvedValueOnce({
       rides: [historyRide2],
-      nextCursor: null
+      nextCursor: null,
     });
     fireEvent.click(loadMoreBtn);
 

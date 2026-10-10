@@ -133,7 +133,7 @@ export default function RidesListPage() {
           <div style={{ color: passengerChrome.muted }}>{t.NoRideHistory}</div>
         ) : (
           history.map((ride) => {
-            const needsRating = ride.actions.canRate;
+            const needsRating = ride.actions?.canRate;
             return (
               <Link
                 href={`/rides/${ride.order.orderId}`}
