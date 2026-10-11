@@ -1717,7 +1717,7 @@ export class MultiTaxiRepository {
             calculated_at = EXCLUDED.calculated_at
           RETURNING *
         `,
-        [rating.driverId, calculatedAt],
+        [storedRating.driverId, calculatedAt],
       );
       await client.query("COMMIT");
       committed = true;

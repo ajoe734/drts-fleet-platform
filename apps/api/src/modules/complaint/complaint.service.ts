@@ -78,6 +78,7 @@ export class ComplaintService implements OnModuleInit {
   private complaintCases: ComplaintCaseRecord[] = [];
 
   private complaintTimelines = new Map<string, ComplaintTimelineEntry[]>();
+  private readonly auditedPassengerCases = new Set<string>();
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
@@ -194,7 +195,7 @@ export class ComplaintService implements OnModuleInit {
       complaintCase,
       timeline,
     );
-    this.publishPassengerCase(stored, intake.passengerId);
+    await this.publishPassengerCase(stored, intake.passengerId);
     return { complaintId: stored.complaintCase.caseNo };
   }
 
@@ -244,10 +245,30 @@ export class ComplaintService implements OnModuleInit {
     return { complaintCase, timeline };
   }
 
-  private publishPassengerCase(
+  private async publishPassengerCase(
     stored: PassengerIntakeResult,
     passengerId: string,
   ) {
+    // Stable audit identity also recovers when COMMIT succeeded but its reply was lost.
+    if (!this.auditedPassengerCases.has(stored.complaintCase.caseNo)) {
+      await this.auditNotificationService.recordAuditLogAsync({
+        actorId: passengerId,
+        actorType: "first_party_passenger",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: "create_passenger_complaint_case",
+        resourceType: "complaint_case",
+        resourceId: stored.complaintCase.caseNo,
+        requestId: `passenger-complaint:${stored.complaintCase.caseNo}`,
+        newValuesSummary: {
+          source: "passenger_app",
+          drtsPassengerId: passengerId,
+          relatedOrderId: stored.complaintCase.relatedOrderId,
+          category: stored.complaintCase.category,
+        },
+      });
+      this.auditedPassengerCases.add(stored.complaintCase.caseNo);
+    }
     // Publish to the existing Ops authority only after the durable transaction.
     if (
       !this.complaintCases.some(
@@ -258,22 +279,6 @@ export class ComplaintService implements OnModuleInit {
       this.complaintTimelines.set(stored.complaintCase.caseNo, [
         stored.timeline,
       ]);
-    }
-    if (!stored.replayed) {
-      this.recordAudit({
-        actorId: passengerId,
-        actorType: "first_party_passenger",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "create_passenger_complaint_case",
-        resourceType: "complaint_case",
-        resourceId: stored.complaintCase.caseNo,
-        newValuesSummary: {
-          source: "passenger_app",
-          relatedOrderId: stored.complaintCase.relatedOrderId,
-          category: stored.complaintCase.category,
-        },
-      });
     }
   }
 
@@ -334,8 +339,8 @@ export class ComplaintService implements OnModuleInit {
           draft,
         );
       },
-      afterCommit: () => {
-        if (stored) this.publishPassengerCase(stored, passengerId);
+      afterCommit: async () => {
+        if (stored) await this.publishPassengerCase(stored, passengerId);
       },
     };
   }
@@ -367,6 +372,9 @@ export class ComplaintService implements OnModuleInit {
   }
 
   async getComplaintCaseForOps(caseNo: string) {
+    // Passenger intake owns this UUID namespace; other CRM reads keep their original behavior.
+    if (!/^PAX-[0-9a-f-]{36}$/i.test(caseNo))
+      return this.getComplaintCase(caseNo);
     if (this.complaintRepository?.isEnabled()) {
       const record = await this.complaintRepository.getPassengerCase(caseNo);
       if (record) this.mergePassengerCase(record);
@@ -375,6 +383,8 @@ export class ComplaintService implements OnModuleInit {
   }
 
   async getComplaintTimelineForOps(caseNo: string) {
+    if (!/^PAX-[0-9a-f-]{36}$/i.test(caseNo))
+      return this.getComplaintTimeline(caseNo);
     await this.getComplaintCaseForOps(caseNo);
     if (this.complaintRepository?.isEnabled()) {
       const persisted =

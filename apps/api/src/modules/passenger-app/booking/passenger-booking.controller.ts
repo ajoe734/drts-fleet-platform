@@ -188,13 +188,17 @@ export class PassengerBookingController {
     @Param("id") orderId: string,
     @Body() body: RatePassengerRideCommand,
   ) {
-    if (identity.realm !== "passenger")
+    if (
+      !identity ||
+      identity.realm !== "passenger" ||
+      identity.actorType !== "first_party_passenger"
+    )
       throw new ApiRequestError(
         HttpStatus.UNAUTHORIZED,
         "UNAUTHORIZED",
         "Not a passenger",
       );
-    const passengerId = (identity as PassengerRequestIdentity).drtsPassengerId;
+    const passengerId = identity.drtsPassengerId;
     const result = await this.service.rateRide(passengerId, orderId, body);
     return toApiSuccessEnvelope(result);
   }

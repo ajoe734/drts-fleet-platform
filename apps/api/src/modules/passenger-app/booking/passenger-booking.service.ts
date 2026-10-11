@@ -401,7 +401,7 @@ export class PassengerBookingService {
       passengerId,
       hook,
     );
-    hook.afterCommit();
+    await hook.afterCommit();
     return { success: true };
   }
 

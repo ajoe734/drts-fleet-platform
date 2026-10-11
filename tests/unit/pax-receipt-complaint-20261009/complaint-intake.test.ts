@@ -129,6 +129,12 @@ async function fixture(fault?: Fault) {
   const bookingQuery = booking.database.query.bind(booking.database);
   vi.spyOn(booking.database, "query").mockImplementation(
     async (sql, values) => {
+      if (sql.includes("FROM passenger.complaints p")) {
+        const record = sql.includes("SELECT t.record")
+          ? stored?.timelineRecord
+          : stored?.caseRecord;
+        return { rows: record ? [{ record }] : [] } as never;
+      }
       if (sql.includes("FROM crm.phase1_complaint_cases"))
         return { rows: stored ? [{ record: stored.caseRecord }] : [] } as never;
       if (sql.includes("FROM crm.phase1_complaint_timelines"))
@@ -143,10 +149,8 @@ async function fixture(fault?: Fault) {
     return { query, release } as never;
   });
   const repository = new ComplaintRepository(booking.database);
-  const complaint = new ComplaintService(
-    new AuditNotificationService(),
-    repository,
-  );
+  const audit = new AuditNotificationService();
+  const complaint = new ComplaintService(audit, repository);
   const service = new PassengerComplaintService(booking.service, complaint);
   const controller = new PassengerComplaintController(service);
   const ops = new ComplaintController(complaint, {} as never, {} as never);
@@ -158,6 +162,7 @@ async function fixture(fault?: Fault) {
   };
   return {
     booking,
+    audit,
     orderId,
     repository,
     complaint,
@@ -189,7 +194,7 @@ describe("passenger complaint intake: actual booking, CRM and Ops path", () => {
       });
       expect(response.data.complaintId).toMatch(/^PAX-/);
       expect(response.meta.requestId).toBe("request-1");
-      const cases = f.ops.listComplaintCases().data.items;
+      const cases = (await f.ops.listComplaintCases()).data.items;
       expect(cases).toHaveLength(1);
       expect(cases[0]).toMatchObject({
         caseNo: response.data.complaintId,
@@ -212,8 +217,9 @@ describe("passenger complaint intake: actual booking, CRM and Ops path", () => {
       );
       if (category === "lost_item")
         expect(cases[0]!.description).toContain("遺失物：藍色背包");
-      const timeline = f.ops.getComplaintTimeline(response.data.complaintId)
-        .data.items;
+      const timeline = (
+        await f.ops.getComplaintTimeline(response.data.complaintId)
+      ).data.items;
       expect(timeline).toHaveLength(1);
       expect(timeline[0]!.note).toContain("同意客服聯繫：否");
       const intake = f.calls.find((c) =>
@@ -249,7 +255,7 @@ describe("passenger complaint intake: actual booking, CRM and Ops path", () => {
         c.sql.startsWith("INSERT INTO crm.phase1_complaint_cases"),
       ),
     ).toHaveLength(1);
-    expect(f.ops.listComplaintCases().data.items).toHaveLength(1);
+    expect((await f.ops.listComplaintCases()).data.items).toHaveLength(1);
     expect(
       f.calls.filter((c) => c.sql.includes("pg_advisory_xact_lock")),
     ).toHaveLength(2);
@@ -268,12 +274,14 @@ describe("passenger complaint intake: actual booking, CRM and Ops path", () => {
     );
     await restarted.onModuleInit();
     const ops = new ComplaintController(restarted, {} as never, {} as never);
-    expect(ops.getComplaintCase(response.data.complaintId).data).toEqual(
-      f.ops.getComplaintCase(response.data.complaintId).data,
-    );
     expect(
-      ops.getComplaintTimeline(response.data.complaintId).data.items,
-    ).toEqual(f.ops.getComplaintTimeline(response.data.complaintId).data.items);
+      (await ops.getComplaintCase(response.data.complaintId)).data,
+    ).toEqual((await f.ops.getComplaintCase(response.data.complaintId)).data);
+    expect(
+      (await ops.getComplaintTimeline(response.data.complaintId)).data.items,
+    ).toEqual(
+      (await f.ops.getComplaintTimeline(response.data.complaintId)).data.items,
+    );
   });
 
   it.each(["content", "contactConsent", "category"] as const)(
@@ -294,7 +302,7 @@ describe("passenger complaint intake: actual booking, CRM and Ops path", () => {
         status: 409,
         code: "IDEMPOTENCY_KEY_REUSED",
       });
-      expect(f.ops.listComplaintCases().data.items).toHaveLength(1);
+      expect((await f.ops.listComplaintCases()).data.items).toHaveLength(1);
       expect(f.calls.at(-1)?.sql).toBe("ROLLBACK");
       expect(f.release).toHaveBeenLastCalledWith(true);
     },
@@ -322,7 +330,7 @@ describe("passenger complaint intake: actual booking, CRM and Ops path", () => {
         code: "PASSENGER_RIDE_NOT_FOUND",
       });
       expect(f.calls).toEqual([]);
-      expect(f.ops.listComplaintCases().data.items).toEqual([]);
+      expect((await f.ops.listComplaintCases()).data.items).toEqual([]);
     },
   );
 
@@ -337,7 +345,7 @@ describe("passenger complaint intake: actual booking, CRM and Ops path", () => {
         code: "PASSENGER_RIDE_NOT_FOUND",
       });
       expect(f.calls.some((c) => c.sql.startsWith("INSERT"))).toBe(false);
-      expect(f.ops.listComplaintCases().data.items).toEqual([]);
+      expect((await f.ops.listComplaintCases()).data.items).toEqual([]);
     },
   );
 
@@ -394,7 +402,7 @@ describe("passenger complaint intake: actual booking, CRM and Ops path", () => {
     async (fault) => {
       const f = await fixture(fault);
       await expect(f.submit()).rejects.toThrow(`${fault} failure`);
-      expect(f.ops.listComplaintCases().data.items).toEqual([]);
+      expect((await f.ops.listComplaintCases()).data.items).toEqual([]);
       expect(f.stored()).toBeUndefined();
       if (fault !== "connect") {
         expect(f.calls.at(-1)?.sql).toBe("ROLLBACK");
@@ -413,19 +421,20 @@ describe("passenger complaint intake: actual booking, CRM and Ops path", () => {
       code: "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
     });
     expect(f.calls).toEqual([]);
-    expect(f.ops.listComplaintCases().data.items).toEqual([]);
+    expect((await f.ops.listComplaintCases()).data.items).toEqual([]);
   });
 
   it("a lost COMMIT reply recovers the original case on retry", async () => {
     const f = await fixture("lost_commit_reply");
     await expect(f.submit()).rejects.toThrow("lost commit reply");
-    expect(f.ops.listComplaintCases().data.items).toEqual([]);
+    expect(f.complaint.listComplaintCases()).toEqual([]);
+    expect((await f.ops.listComplaintCases()).data.items).toHaveLength(1);
     const originalCase = f.stored()?.caseRecord;
     f.access.fault = undefined;
     const response = await f.submit();
-    expect(f.ops.getComplaintCase(response.data.complaintId).data).toEqual(
-      originalCase,
-    );
+    expect(
+      (await f.ops.getComplaintCase(response.data.complaintId)).data,
+    ).toEqual(originalCase);
     expect(
       f.calls.filter((c) =>
         c.sql.startsWith("INSERT INTO crm.phase1_complaint_cases"),
@@ -438,6 +447,6 @@ describe("passenger complaint intake: actual booking, CRM and Ops path", () => {
     f.access.rollbackFails = true;
     await expect(f.submit()).rejects.toThrow("timeline failure");
     expect(f.release).toHaveBeenCalledWith(true);
-    expect(f.ops.listComplaintCases().data.items).toEqual([]);
+    expect((await f.ops.listComplaintCases()).data.items).toEqual([]);
   });
 });
