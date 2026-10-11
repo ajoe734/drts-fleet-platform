@@ -22,7 +22,7 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 | **F1/F3/F4/F5 core** | Genuine archive/PDF/identity positives and existing denials PASS BOTH | Actual current owned resources/PG not measured |
 | **F2 actual authority / inventory** | NEW `HEAD`: Shared reservation overlap check extracted as dedicated workflow step. Authority and reservation verification runs *before* metadata acquisition in script. `--current-run-id` and `--tooling-run-sha` supplied to enforce current authority. | Full environment and live authority unmeasured |
 | **F3 upstream capture** | NEW `HEAD`: Producer upgraded to perform exactly 25 bounded reads: fetches `identity`, 7 `providers`, `scanner_url` / scanner `spec_sha256` / `default_environment`, and IAM `bindings` for 7 web consoles. | Actual live cloud metadata acquisition unmeasured |
-| **F6/F7 report/UAT** | Committed actual trigger tests (14 tests passed in test_owned_operational_fixture_assessment.py) and verified real command / cwd / version / exit / log / matrix. | True live matrix unavailable locally. |
+| **F6/F7 report/UAT** | Committed actual trigger tests (18 tests passed in test_owned_operational_fixture_assessment.py) and verified real command / cwd / version / exit / log / matrix. | True live matrix unavailable locally. |
 | **F8 scope/publication** | Official subjects FIXED (commits PASS, literal own prefix PASS). | Supervisor must verify exact prospective preserved-history/publication disposition. No history rewrite authorized. |
 
 ## Execution Bounds and Reporting
@@ -53,7 +53,7 @@ CWD: /home/lupin/workspace/drts-fleet-platform
 Version: Python 3.12
 Exit: 0
 Log:
-Ran 14 tests in 0.030s
+Ran 18 tests in 0.134s
 OK
 ```
 

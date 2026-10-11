@@ -316,11 +316,12 @@ def fetch_and_validate_provenance(args) -> None:
             for key in CANONICAL_OWNED_OBJECTS.keys():
                 require(key in seen_keys, f"Missing canonical object in evidence: {key}")
 
-def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]]) -> Dict[str, Any]:
+def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]], check_authority=None) -> Dict[str, Any]:
     validated_meta = {}
     
     for logical_key in CANONICAL_OWNED_OBJECTS.keys():
         physical_key = logical_to_physical_gcs_key(logical_key)
+        if check_authority: check_authority()
         desc = runner("describe", BUCKET, physical_key)
         if desc.get("status") == "not_found":
             # Return proper rejection for missing instead of throwing generic ValueError
@@ -372,6 +373,7 @@ def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]]) -> Dic
     for logical_key in CANONICAL_OWNED_OBJECTS.keys():
         physical_key = logical_to_physical_gcs_key(logical_key)
         meta = validated_meta[physical_key]
+        if check_authority: check_authority()
         body_res = runner("cat", BUCKET, f"{physical_key}#{meta['generation']}")
         if body_res.get("status") != "ok":
              return {"status": "rejected", "reason": f"Failed to read body for {physical_key}: {body_res.get('stderr')}"}
@@ -383,6 +385,7 @@ def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]]) -> Dic
         if actual_sha256 != EXPECTED_SHA256:
              return {"status": "rejected", "reason": f"Hash mismatch for {physical_key}"}
         
+        if check_authority: check_authority()
         re_desc = runner("describe", BUCKET, physical_key)
         if re_desc.get("status") != "ok":
              return {"status": "rejected", "reason": f"Failed to describe on recheck for {physical_key}"}
@@ -420,7 +423,7 @@ def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]]) -> Dic
         
     return {"status": "success", "validated_count": len(validated_reads), "receipts": validated_reads}
 
-def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Dict[str, Any]:
+def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]], check_authority=None) -> Dict[str, Any]:
     safe_subs = ",".join(f"'{u}'" for u in CANONICAL_OWNED_SUBMISSIONS)
     query = f"""
     BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
@@ -508,6 +511,7 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
     );
     COMMIT;
     """
+    if check_authority: check_authority()
     res = db_runner(query, [])
     if "error" in res or res.get("status") == "error":
         return {"status": "error", "error": res.get("error", "Unknown DB runner error")}
@@ -926,12 +930,14 @@ def run_bounded(cmd, input_str=None, timeout_sec=30, max_stdout=512*1024, max_st
     os.set_blocking(p.stderr.fileno(), False)
     
     while True:
-        if time.time() - start_time > timeout_sec:
+        elapsed = time.time() - start_time
+        if elapsed > timeout_sec:
             p.kill()
             p.wait()
             return type('obj', (object,), {'returncode': -1, 'stdout': '', 'stderr': 'timeout'})()
             
-        r, _, _ = select.select([p.stdout, p.stderr], [], [], 1.0)
+        wait_time = min(timeout_sec - elapsed, 1.0)
+        r, _, _ = select.select([p.stdout, p.stderr], [], [], wait_time)
         
         if p.stdout in r:
             chunk = os.read(p.stdout.fileno(), 4096)
@@ -973,7 +979,104 @@ def run_bounded(cmd, input_str=None, timeout_sec=30, max_stdout=512*1024, max_st
                     break
             break
             
+    if time.time() - start_time > timeout_sec:
+        return type('obj', (object,), {'returncode': -1, 'stdout': '', 'stderr': 'timeout'})()
+        
     return type('obj', (object,), {'returncode': p.returncode, 'stdout': body.decode('utf-8', 'replace'), 'stderr': stderr_data.decode('utf-8', 'replace')})()
+
+
+def check_held_window(args):
+    # Operator approval check with adverse history denial
+    res_approvals = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/approvals"], timeout_sec=30)
+    require(res_approvals.returncode == 0, "Failed to fetch run approvals")
+    approvals_data = json.loads(res_approvals.stdout)
+    approvals = approvals_data if isinstance(approvals_data, list) else [approvals_data]
+    
+    operator_approved = False
+    for a in approvals:
+        if isinstance(a, dict):
+            envs = a.get("environments", [])
+            if isinstance(envs, list) and any(e.get("name") == "operator" for e in envs if isinstance(e, dict)):
+                state = a.get("state")
+                if state == "approved":
+                    operator_approved = True
+                elif state in ("rejected", "pending"):
+                    require(False, "Adverse or ambiguous approval history detected")
+    require(operator_approved, "Actual Operator approval missing for 'operator' environment")
+
+    # Workflow inventory and disabled participant state
+    page = 1
+    workflows = []
+    total_workflows = -1
+    while True:
+        res_wf = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/workflows?per_page=100&page={page}"], timeout_sec=30)
+        require(res_wf.returncode == 0, "Failed to fetch workflows")
+        wf_data = json.loads(res_wf.stdout)
+        if total_workflows == -1:
+            total_workflows = wf_data.get("total_count", -1)
+        page_wfs = wf_data.get("workflows", [])
+        if not page_wfs:
+            break
+        workflows.extend(page_wfs)
+        if len(page_wfs) < 100:
+            break
+        page += 1
+    
+    assessment_found = False
+    for wf in workflows:
+        wf_path = wf.get("path", "")
+        wf_state = wf.get("state")
+        if wf_path == ".github/workflows/dev-owned-operational-fixture-assessment.yml":
+            require(wf_state == "active", f"Assessment workflow is not active (state: {wf_state})")
+            assessment_found = True
+        else:
+            require(wf_state in ("disabled_manually", "disabled_inactivity", "disabled_fork"), f"Workflow {wf_path} is not in a disabled state (state: {wf_state})")
+    require(assessment_found, "Missing assessment workflow in inventory")
+
+    # No overlap check
+    active_restricted_runs = []
+    for status in ["in_progress", "queued", "waiting", "pending", "requested"]:
+        page = 1
+        while True:
+            res_overlap = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs?status={status}&per_page=100&page={page}"], timeout_sec=30)
+            require(res_overlap.returncode == 0, f"Failed to fetch {status} runs")
+            overlap_data = json.loads(res_overlap.stdout)
+            page_runs = overlap_data.get("workflow_runs", [])
+            if not page_runs:
+                break
+            for r in page_runs:
+                if str(r.get("id")) != args.current_run_id:
+                    active_restricted_runs.append(r)
+            if len(page_runs) < 100:
+                break
+            page += 1
+    require(len(active_restricted_runs) == 0, "Overlapping restricted workflows detected")
+
+    # Current jobs check
+    curr_jobs = []
+    page = 1
+    curr_total_jobs = -1
+    while True:
+        res_jobs = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/jobs?per_page=100&page={page}"], timeout_sec=30)
+        require(res_jobs.returncode == 0, "Failed to fetch current run jobs")
+        jobs_data = json.loads(res_jobs.stdout)
+        if curr_total_jobs == -1:
+            curr_total_jobs = jobs_data.get("total_count", -1)
+        page_jobs = jobs_data.get("jobs", [])
+        if not page_jobs:
+            break
+        curr_jobs.extend(page_jobs)
+        if len(page_jobs) < 100:
+            break
+        page += 1
+    require(len(curr_jobs) > 0, "Empty job inventory")
+    require(len(curr_jobs) == curr_total_jobs, "Incomplete pagination for current jobs")
+    unique_jobs = {str(j.get("id")) for j in curr_jobs}
+    require(len(unique_jobs) == len(curr_jobs), "Duplicate jobs in inventory")
+    require(all(str(j.get("run_id")) == args.current_run_id for j in curr_jobs), "Foreign job in inventory")
+    op_envs = [j for j in curr_jobs if j.get("name") == "Owned fixture assessment (Read-only GCS / DB)"]
+    require(len(op_envs) > 0, "No Owned fixture assessment job found in current jobs")
+
 
 def verify_authority(args):
     require(args.current_run_id, "Missing current_run_id")
@@ -1005,7 +1108,7 @@ def verify_authority(args):
     require(total_runs == len(runs), "Check runs total_count mismatch")
     require(len(runs) > 0, "tooling_run_sha must have CI runs")
     
-    required_checks = ["Commit trailers", "Runtime mirror guard", "Smoke acceptance", "ci-integ"]
+    required_checks = ["Commit trailers", "Runtime mirror guard", "Product smoke acceptance", "ci-integ"]
     found_required = set()
     
     for r in runs:
@@ -1064,117 +1167,7 @@ def verify_authority(args):
                 break
     require(approved, "Tooling pull request lacks independent latest approval on head commit")
     
-    # Operator approval check
-    res_approvals = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/approvals"], timeout_sec=30)
-    require(res_approvals.returncode == 0, "Failed to fetch run approvals")
-    approvals_data = json.loads(res_approvals.stdout)
-    approvals = approvals_data if isinstance(approvals_data, list) else [approvals_data]
-    
-    operator_approved = False
-    for a in approvals:
-        if isinstance(a, dict) and a.get("state") == "approved":
-            envs = a.get("environments", [])
-            if isinstance(envs, list) and any(e.get("name") == "operator" for e in envs if isinstance(e, dict)):
-                operator_approved = True
-                break
-    require(operator_approved, "Actual Operator approval missing for 'operator' environment")
-    
-    # No overlap check
-    workflows = []
-    page = 1
-    total_workflows = -1
-    while True:
-        res_wf = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/workflows?per_page=100&page={page}"], timeout_sec=30)
-        require(res_wf.returncode == 0, "Failed to fetch workflows")
-        wf_data = json.loads(res_wf.stdout)
-        if total_workflows == -1:
-            total_workflows = wf_data.get("total_count", -1)
-        page_wfs = wf_data.get("workflows", [])
-        if not page_wfs:
-            break
-        workflows.extend(page_wfs)
-        if len(page_wfs) < 100:
-            break
-        page += 1
-    require(total_workflows >= 0, "Failed to determine total workflows")
-    require(len(workflows) == total_workflows, f"Incomplete pagination for workflows: {len(workflows)} != {total_workflows}")
-
-    for wf in workflows:
-        wf_path = wf.get("path", "")
-        wf_state = wf.get("state")
-        if wf_path == ".github/workflows/dev-owned-operational-fixture-assessment.yml":
-            require(wf_state == "active", f"Assessment workflow is not active (state: {wf_state})")
-        else:
-            require(wf_state in ("disabled_manually", "disabled_inactivity", "disabled_fork"), f"Workflow {wf_path} is not in a disabled state (state: {wf_state})")
-
-    active_restricted_runs = []
-    for status in ["in_progress", "queued", "waiting", "pending", "requested"]:
-        page = 1
-        status_fetched_runs = 0
-        status_total_runs = -1
-        while True:
-            res_overlap = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs?status={status}&per_page=100&page={page}"], timeout_sec=30)
-            require(res_overlap.returncode == 0, f"Failed to fetch {status} runs")
-            overlap_data = json.loads(res_overlap.stdout)
-            if status_total_runs == -1:
-                status_total_runs = overlap_data.get("total_count", -1)
-            page_runs = overlap_data.get("workflow_runs", [])
-            if not page_runs:
-                break
-            status_fetched_runs += len(page_runs)
-            for r in page_runs:
-                if str(r.get("id")) != args.current_run_id:
-                    active_restricted_runs.append(r)
-            if len(page_runs) < 100:
-                break
-            page += 1
-        require(status_total_runs >= 0, f"Failed to determine total {status} runs")
-        require(status_fetched_runs == status_total_runs, f"Incomplete pagination for {status} runs: {status_fetched_runs} != {status_total_runs}")
-    
-    require(len(active_restricted_runs) == 0, "Overlapping restricted workflows detected")
-    
-    curr_jobs = []
-    page = 1
-    curr_total_jobs = -1
-    while True:
-        res_jobs = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/jobs?per_page=100&page={page}"], timeout_sec=30)
-        require(res_jobs.returncode == 0, "Failed to fetch current run jobs")
-        jobs_data = json.loads(res_jobs.stdout)
-        if curr_total_jobs == -1:
-            curr_total_jobs = jobs_data.get("total_count", -1)
-        page_jobs = jobs_data.get("jobs", [])
-        if not page_jobs:
-            break
-        curr_jobs.extend(page_jobs)
-        if len(page_jobs) < 100:
-            break
-        page += 1
-    require(curr_total_jobs >= 0, "Failed to determine total current jobs")
-    require(len(curr_jobs) == curr_total_jobs, "Incomplete pagination for current jobs")
-    unique_jobs = {j.get("id") for j in curr_jobs}
-    require(len(unique_jobs) == len(curr_jobs), "Duplicate jobs in inventory")
-    require(all(str(j.get("run_id")) == args.current_run_id for j in curr_jobs), "Foreign job in inventory")
-    
-    # Check for operator environment binding (reservation) by confirming the specific job name that has the environment
-    op_envs = [j for j in curr_jobs if j.get("name") == "Owned fixture assessment (Read-only GCS / DB)"]
-    require(len(op_envs) > 0, "No Owned fixture assessment job found in current jobs")
-    require(curr_run_data.get("path") == ".github/workflows/dev-owned-operational-fixture-assessment.yml", "Current run path mismatch")
-    
-    # Verify genuine shared exclusion reservation via operator environment approval
-    res_approvals = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/approvals"], timeout_sec=30)
-    require(res_approvals.returncode == 0, "Failed to fetch current run approvals")
-    approvals_data = json.loads(res_approvals.stdout)
-    
-    has_operator_approval = False
-    for approval in approvals_data:
-        if approval.get("state") == "approved":
-            for env in approval.get("environments", []):
-                if env.get("name") == "operator":
-                    has_operator_approval = True
-                    break
-    
-    if not has_operator_approval:
-        require(False, "Blocked disposition: genuine shared exclusion is unsupported")
+    check_held_window(args)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -1223,29 +1216,43 @@ def main():
                 require(res.returncode == 0, f"Failed to describe {s_name}")
                 val = json.loads(res.stdout)
 
+                # Validate exact service identity and Ready
+                require(val.get("metadata", {}).get("name") == s_name, f"Service name mismatch for {s_name}")
+                service_conditions = val.get("status", {}).get("conditions", [])
+                ready_cond = next((c for c in service_conditions if c.get("type") == "Ready"), None)
+                require(ready_cond and ready_cond.get("status") == "True", f"Service {s_name} is not Ready")
+
                 ready_revision = val.get("status", {}).get("latestReadyRevisionName")
                 require(ready_revision is not None, f"No ready revision for {s_name}")
                 created_revision = val.get("status", {}).get("latestCreatedRevisionName")
                 require(ready_revision == created_revision, f"Ready revision {ready_revision} does not match created {created_revision} for {s_name}")
+                
+                require(ready_revision.startswith(s_name + "-"), f"Foreign revision name {ready_revision} for {s_name}")
+
                 traffic = val.get("status", {}).get("traffic", [])
-                require(len(traffic) > 0, f"No traffic allocation for {s_name}")
-                found_100 = False
-                for t in traffic:
-                    if t.get("revisionName") == ready_revision and t.get("percent") == 100:
-                        found_100 = True
-                require(found_100, f"Revision {ready_revision} does not have 100% traffic for {s_name}")
+                require(len(traffic) == 1, f"Expected exactly 1 traffic allocation for {s_name}")
+                t = traffic[0]
+                require(t.get("revisionName") == ready_revision and t.get("percent") == 100, f"Revision {ready_revision} does not have whole 100% traffic for {s_name}")
 
                 res_rev = run_bounded(["gcloud", "run", "revisions", "describe", ready_revision, "--project", PROJECT, "--region", REGION, "--format=json"], timeout_sec=30)
                 require(res_rev.returncode == 0, f"Failed to describe revision {ready_revision}")
                 rev_val = json.loads(res_rev.stdout)
 
+                require(rev_val.get("metadata", {}).get("name") == ready_revision, f"Revision identity mismatch for {ready_revision}")
+                rev_conditions = rev_val.get("status", {}).get("conditions", [])
+                rev_ready = next((c for c in rev_conditions if c.get("type") == "Ready"), None)
+                require(rev_ready and rev_ready.get("status") == "True", f"Revision {ready_revision} is not Ready")
+                require(rev_val.get("metadata", {}).get("labels", {}).get("serving.knative.dev/service") == s_name, "Revision service label mismatch")
+
                 containers = rev_val.get("spec", {}).get("containers", [])
                 images = {}
-                for i, c in enumerate(containers):
-                    c_name = c.get("name", str(i))
+                for c in containers:
+                    c_name = c.get("name", "")
                     img = c.get("image", "")
-                    if i == 0 and rev_val.get("status", {}).get("imageDigest"):
-                        img = rev_val["status"]["imageDigest"]
+                    c_statuses = rev_val.get("status", {}).get("containerStatuses", [])
+                    c_status = next((cs for cs in c_statuses if cs.get("name") == c_name), None)
+                    if c_status and c_status.get("imageDigest"):
+                        img = c_status["imageDigest"]
                     images[c_name] = img
 
                 service_meta = {
@@ -1253,7 +1260,9 @@ def main():
                     "images": images,
                     "identity": val.get("spec", {}).get("template", {}).get("spec", {}).get("serviceAccountName")
                 }
-                env = {e["name"]: e.get("value") for e in val.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [{}])[0].get("env", [])}
+                
+                # Effective environment from revision
+                env = {e["name"]: e.get("value") for c in containers for e in c.get("env", [])}
 
                 if s_name == "drts-dev-api":
                     service_meta["runtime_sha"] = env.get("DRTS_CANDIDATE_SHA")
@@ -1275,14 +1284,17 @@ def main():
                         "CLAMD_PORT": env.get("CLAMD_PORT"),
                         "CLAMAV_READY_MARKER": env.get("CLAMAV_READY_MARKER")
                     }
-                else:
-                    iam_res = run_bounded(["gcloud", "run", "services", "get-iam-policy", s_name, "--project", PROJECT, "--region", REGION, "--format=json"], timeout_sec=30)
-                    require(iam_res.returncode == 0, f"Failed to get IAM policy for {s_name}")
-                    iam_val = json.loads(iam_res.stdout)
-                    safe_bindings = []
-                    for b in iam_val.get("bindings", []):
-                        safe_bindings.append({"role": b.get("role"), "members": b.get("members", [])})
-                    service_meta["bindings"] = safe_bindings
+                
+                iam_res = run_bounded(["gcloud", "run", "services", "get-iam-policy", s_name, "--project", PROJECT, "--region", REGION, "--format=json"], timeout_sec=30)
+                require(iam_res.returncode == 0, f"Failed to get IAM policy for {s_name}")
+                iam_val = json.loads(iam_res.stdout)
+                safe_bindings = []
+                for b in iam_val.get("bindings", []):
+                    binding = {"role": b.get("role"), "members": b.get("members", [])}
+                    if "condition" in b:
+                        binding["condition"] = b["condition"]
+                    safe_bindings.append(binding)
+                service_meta["bindings"] = safe_bindings
 
                 metadata["services"][s_name] = service_meta
 
@@ -1336,6 +1348,28 @@ def main():
                         require("@sha256:" in digest, f"Image is not a digest for {name}")
                         validated_images[c_name] = digest
 
+                    bindings = s.get("bindings")
+                    require(bindings is not None, f"Service {name} bindings missing/bypass")
+                    require(isinstance(bindings, list), f"Service {name} bindings malformed")
+                    validated_bindings = []
+                    for b in bindings:
+                        require(isinstance(b, dict), f"Service {name} binding malformed")
+                        members = b.get("members", [])
+                        require(isinstance(members, list) and len(members) > 0, f"Service {name} binding members malformed or empty")
+                        require(all(isinstance(m, str) for m in members), f"Service {name} binding members contain non-string")
+                        role = b.get("role")
+                        require(isinstance(role, str), f"Service {name} binding role missing or malformed")
+                        if "condition" in b:
+                            require(False, f"Service {name} binding has unsupported condition")
+                        
+                        if name == "drts-dev-scanner":
+                            require("allUsers" not in members and "allAuthenticatedUsers" not in members, f"Scanner {name} is not private")
+                            if role == "roles/run.invoker":
+                                require(set(members) == {"serviceAccount:drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com"}, f"Scanner invoker mismatch")
+                        elif name != "drts-dev-api":
+                            require("allUsers" not in members and "allAuthenticatedUsers" not in members, f"Console {name} is not private")
+                        validated_bindings.append({"role": role, "members": members})
+
                     if name == "drts-dev-api":
                         require(s.get("runtime_sha") == args.current_runtime_sha, f"Runtime SHA mismatch for {name}")
                         require(s.get("identity") == f"drts-dev-runtime@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
@@ -1356,52 +1390,27 @@ def main():
                             "runtime_sha": s.get("runtime_sha"),
                             "identity": s.get("identity"),
                             "scanner_url": scanner_url,
-                            "providers": {
-                                "DOCUMENT_ARTIFACT_GCS_BUCKET": prov.get("DOCUMENT_ARTIFACT_GCS_BUCKET"),
-                                "DOCUMENT_ARTIFACT_STORAGE_PROVIDER": prov.get("DOCUMENT_ARTIFACT_STORAGE_PROVIDER"),
-                                "REMITTANCE_PROOF_STORAGE_PROVIDER": prov.get("REMITTANCE_PROOF_STORAGE_PROVIDER"),
-                                "REMITTANCE_PROOF_GCS_BUCKET": prov.get("REMITTANCE_PROOF_GCS_BUCKET"),
-                                "REMITTANCE_PROOF_SCANNER_PROVIDER": prov.get("REMITTANCE_PROOF_SCANNER_PROVIDER"),
-                                "REMITTANCE_PROOF_SCANNER_TIMEOUT_MS": prov.get("REMITTANCE_PROOF_SCANNER_TIMEOUT_MS")
-                            }
+                            "bindings": validated_bindings,
+                            "providers": prov
                         }
                     elif name == "drts-dev-scanner":
                         require(s.get("identity") == f"drts-dev-artifact-scanner@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
                         require(s.get("spec_sha256") == "78d699ef021ef42c4346cdaeea539e7df00ff7c53cd8c2c89278c7c52403f4ad", "Scanner spec SHA mismatch")
-                        
                         env = s.get("default_environment")
                         require(isinstance(env, dict), "Scanner environment mismatch")
                         require(env.get("CLAMD_HOST") == "127.0.0.1", "Scanner environment mismatch")
                         require(env.get("CLAMD_PORT") == "3310", "Scanner environment mismatch")
                         require(env.get("CLAMAV_READY_MARKER") == "/var/run/clamav-ready/ready", "Scanner environment mismatch")
-                        
                         validated_services[name] = {
                             "ready_revision": ready_revision,
                             "images": validated_images,
                             "identity": s.get("identity"),
                             "spec_sha256": s.get("spec_sha256"),
-                            "default_environment": {
-                                "CLAMD_HOST": "127.0.0.1",
-                                "CLAMD_PORT": "3310",
-                                "CLAMAV_READY_MARKER": "/var/run/clamav-ready/ready"
-                            }
+                            "default_environment": env,
+                            "bindings": validated_bindings
                         }
                     else:
                         require(s.get("identity") == f"drts-dev-runtime@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
-                        bindings = s.get("bindings")
-                        require(bindings is not None, f"Console {name} bindings missing/bypass")
-                        require(isinstance(bindings, list), f"Console {name} bindings malformed")
-                        validated_bindings = []
-                        for b in bindings:
-                            require(isinstance(b, dict), f"Console {name} binding malformed")
-                            members = b.get("members", [])
-                            require(isinstance(members, list) and len(members) > 0, f"Console {name} binding members malformed or empty")
-                            require(all(isinstance(m, str) for m in members), f"Console {name} binding members contain non-string")
-                            require("allUsers" not in members and "allAuthenticatedUsers" not in members, f"Console {name} is not private")
-                            role = b.get("role")
-                            require(isinstance(role, str), f"Console {name} binding role missing or malformed")
-                            require(set(b.keys()) <= {"role", "members"}, f"Console {name} binding contains unknown fields")
-                            validated_bindings.append({"role": role, "members": members})
                         validated_services[name] = {
                             "ready_revision": ready_revision,
                             "images": validated_images,
@@ -1409,7 +1418,6 @@ def main():
                             "bindings": validated_bindings
                         }
 
-                
                 report["cloud_metadata"] = {
                     "project": cm.get("project"),
                     "region": cm.get("region"),
@@ -1435,7 +1443,7 @@ def main():
             sys.exit(1)
         else:
             fetch_and_validate_provenance(args)
-            gcs_res = assess_gcs_objects(default_gcs_runner)
+            gcs_res = assess_gcs_objects(default_gcs_runner, lambda: check_held_window(args))
             report["gcs_assessment"] = gcs_res
             
             if gcs_res.get("status") != "success":
@@ -1445,7 +1453,7 @@ def main():
                 print(out)
                 sys.exit(1)
             
-            db_res = assess_database(default_db_runner)
+            db_res = assess_database(default_db_runner, lambda: check_held_window(args))
             report["db_assessment"] = db_res
             if db_res.get("status") != "success":
                 report["disposition"] = "rejected"
@@ -1456,6 +1464,7 @@ def main():
                 print(out)
                 sys.exit(1)
             else:
+                check_held_window(args)
                 report["disposition"] = "complete"
                 
             out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": report}, indent=2)
