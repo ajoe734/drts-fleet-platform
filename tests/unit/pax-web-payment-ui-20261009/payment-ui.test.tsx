@@ -217,6 +217,134 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
+describe("R1 actual provider lifetime at asynchronous binding boundaries", () => {
+  async function holdAccount(stage: "before_collect" | "before_send") {
+    const previousFetch = globalThis.fetch;
+    let accountReads = 0;
+    let resolveAccount!: (value: Response) => void;
+    const accountReply = new Promise<Response>((resolve) => {
+      resolveAccount = resolve;
+    });
+    const blockedRead = stage === "before_collect" ? 3 : 4;
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      if (
+        String(url).startsWith("https://api.example.test") &&
+        new URL(String(url)).pathname.endsWith("/me")
+      ) {
+        accountReads += 1;
+        if (accountReads === blockedRead) return accountReply;
+      }
+      return previousFetch(url, init);
+    });
+    const port = {
+      kind: "hosted" as const,
+      collectCredential: vi.fn(async () => ({
+        providerToken: "synthetic_original_provider_credential",
+      })),
+      dispose: vi.fn(),
+    };
+    const view = render(
+      <PaymentMethodsScreen
+        fields={{ status: "ready", port }}
+        hostedFieldsView={<div>synthetic external hosted provider</div>}
+      />,
+    );
+    await add();
+    fireEvent.click(screen.getByRole("button", { name: "綁定卡片" }));
+    await waitFor(() => expect(accountReads).toBe(blockedRead));
+    expect(port.collectCredential).toHaveBeenCalledTimes(
+      stage === "before_collect" ? 0 : 1,
+    );
+    return {
+      view,
+      port,
+      release: () =>
+        resolveAccount(
+          apiWireResponse({
+            ...me,
+            account: { ...me.account, drtsPassengerId: actor },
+          }),
+        ),
+    };
+  }
+  function renderProvider(
+    view: ReturnType<typeof render>,
+    fields: React.ComponentProps<typeof PaymentMethodsScreen>["fields"],
+  ) {
+    view.rerender(
+      <AppRouterContext.Provider value={navigation}>
+        <PaymentMethodsScreen
+          {...(fields ? { fields } : {})}
+          hostedFieldsView={<div>synthetic external hosted provider</div>}
+        />
+      </AppRouterContext.Provider>,
+    );
+  }
+  async function settledWithoutBinding() {
+    await waitFor(() => {
+      const back = screen.queryByRole("button", {
+        name: "返回卡片清單",
+      }) as HTMLButtonElement | null;
+      expect(back === null || !back.disabled).toBe(true);
+    });
+    expect(commands.filter((row) => row.method === "POST")).toHaveLength(0);
+    expect(screen.queryByText("SYNTHETIC •••• 0003")).toBeNull();
+  }
+  it.each([
+    ["before_collect", "unavailable"],
+    ["before_collect", "replaced"],
+    ["before_send", "unavailable"],
+    ["before_send", "replaced"],
+  ] as const)(
+    "R1 %s: %s provider neither submits old credential nor auto-collects replacement",
+    async (stage, availability) => {
+      const f = await holdAccount(stage);
+      f.port.dispose();
+      const replacement = {
+        kind: "hosted" as const,
+        collectCredential: vi.fn(async () => ({
+          providerToken: "synthetic_replacement_provider_credential",
+        })),
+        dispose: vi.fn(),
+      };
+      renderProvider(
+        f.view,
+        availability === "unavailable"
+          ? { status: "unavailable" }
+          : { status: "ready", port: replacement },
+      );
+      f.release();
+      await settledWithoutBinding();
+      expect(f.port.collectCredential).toHaveBeenCalledTimes(
+        stage === "before_collect" ? 0 : 1,
+      );
+      expect(replacement.collectCredential).not.toHaveBeenCalled();
+    },
+  );
+  it("R1 detached then reattached old port does not revive an in-flight credential", async () => {
+    const f = await holdAccount("before_send");
+    f.port.dispose();
+    renderProvider(f.view, { status: "unavailable" });
+    renderProvider(f.view, { status: "ready", port: f.port });
+    f.release();
+    await settledWithoutBinding();
+    expect(f.port.collectCredential).toHaveBeenCalledTimes(1);
+  });
+  it("R1 lawful same live port still binds exactly once after the final account read", async () => {
+    const f = await holdAccount("before_send");
+    f.release();
+    await screen.findByText("SYNTHETIC •••• 0003");
+    expect(commands.filter((row) => row.method === "POST")).toEqual([
+      {
+        method: "POST",
+        path: "/api/passenger-app/payment-methods",
+        body: { providerToken: "synthetic_original_provider_credential" },
+      },
+    ]);
+    expect(f.port.dispose).not.toHaveBeenCalled();
+    expect(f.port.collectCredential).toHaveBeenCalledTimes(1);
+  });
+});
 describe("actual A20-A21 component → client → bounded BFF → serializer; external HTTP/field/navigation only", () => {
   it("lists masked brand/last4/expiry and actual default, not credentials", async () => {
     mount();

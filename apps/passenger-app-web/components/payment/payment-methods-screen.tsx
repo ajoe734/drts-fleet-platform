@@ -61,6 +61,15 @@ export function PaymentMethodsScreen({
   const actor = useRef<string | undefined>(undefined);
   const invalidIdentity = useRef(false);
   const currentFields = useRef(fields);
+  const fieldsRevision = useRef(0);
+  const previousFields = currentFields.current;
+  if (
+    previousFields.status !== fields.status ||
+    (previousFields.status === "ready" &&
+      fields.status === "ready" &&
+      previousFields.port !== fields.port)
+  )
+    fieldsRevision.current += 1;
   currentFields.current = fields;
   const lock = useRef(false);
   const alive = useRef(true);
@@ -146,17 +155,27 @@ export function PaymentMethodsScreen({
     setBusy(true);
     setError("");
     let sent = false;
-    try {
-      await account();
-      const port = fields.port;
-      const command = await port.collectCredential();
+    const port = fields.port;
+    const revision = fieldsRevision.current;
+    const requireLivePort = () => {
       if (
+        !alive.current ||
+        invalidIdentity.current ||
+        fieldsRevision.current !== revision ||
         currentFields.current.status !== "ready" ||
         currentFields.current.port !== port
       )
         throw new Error("payment_fields_changed");
+    };
+    try {
       await account();
-      if (!alive.current) return;
+      requireLivePort();
+      const command = await port.collectCredential();
+      requireLivePort();
+      await account();
+      // No await is allowed between this live-provider fence and the send.
+      // Reattaching a previously detached port cannot revive its credential.
+      requireLivePort();
       sent = true;
       const result = await client.bindMethod(command);
       await account();
