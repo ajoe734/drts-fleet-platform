@@ -287,3 +287,40 @@ Completion capture, actual dual billing/charge status writes, durable retry,
 unknown acknowledgement, recovery notices, platform refunds, PG/HTTP and full
 same-SHA independent review remain. Neither original acceptance key is recorded;
 this is still an incomplete draft/source checkpoint, not candidate or `done`.
+
+## Explicit injected capture policy decision boundary
+
+Booking source checkpoint:
+`aff151fb531869396acbdb3fd81d5191f42bfeab` (ordinary non-force push, PR head
+verified equal). `payment-capture.policy.ts` now defines the explicitly injected
+`PaymentCapturePolicy` and validates ALL three fields:
+`retryDelaysMs`, `retryDefinitiveDeclines`, `unknownReadbackDelaysMs`.
+Missing/partial/unknown fields, sparse arrays, noninteger/negative/nonfinite
+delays and nonboolean decline policy fail without a fallback. The capture maximum
+is one initial request plus the supplied retry schedule length. Schedules are
+copied and frozen. No configuration name, environment default, production retry
+numbers or deployment settings are invented.
+
+`captureDisposition` distinguishes definitive retryable failures from unknown
+acknowledgement. Unknown/pending can only schedule a readback of the original
+order key, on its separate supplied readback budget; exhausting either applicable
+budget requests `manual_recovery` and a recovery notice. Nonretryable failures
+never schedule another capture. `accepted`, invalid provider results and an empty
+completion reference cannot produce captured status. Only completed acknowledgement
+or completed readback yields captured. The output is a decision, NOT an actual
+ledger write/attempt increment, refund, notification, scheduler or retry executor.
+This boundary is not wired into a money workflow yet.
+
+| Finding / requirement                               | Source / formal boundary                                                                          | Verification / evidence                                                                                                                                                                                                                                                                                                                                                         | Remaining limit                                                                                                                                                                                                   |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Retry business values absent                        | Supervisor's exact supplement permits validated explicit injection and synthetic TEST policy only | `pnpm exec vitest run tests/unit/pax-payment-core-20261009/capture-policy.test.ts`, exit 0, **25 PASS**, `capture-policy-unit-final.log`; missing/invalid policy refuses, caller mutation cannot change schedule                                                                                                                                                                | Approved real policy values still need Supervisor coordination; no product defaults created. New capability did not exist at source62; no behavioral old-policy probe is claimed.                                 |
+| Unknown acknowledgement / durable count distinction | Real `captureDisposition`, real FakePaymentProvider capture/readback                              | Lost-response test calls the real fake once, classifies local unknown as failed/readback, then classifies original-key completed readback as captured; definitive decline boolean/budget exhaustion/notice cases covered                                                                                                                                                        | Synthetic PSP boundary only. Durable DB persistence, crashes, replica races, automatic execution and delivery remain unimplemented/unverified.                                                                    |
+| Source checks                                       | All affected source/tests                                                                         | **17 files / 458 PASS**, exit 0, `policy-affected-regression.log`; root and API typecheck exit 0 (`capture-policy-root-typecheck.log`, `capture-policy-api-typecheck.log`). First scoped ESLint exit 1 for `no-control-regex` (`capture-policy-lint.log`) → equivalent code-point validation, final lint exit 0 (`capture-policy-lint-fixed.log`) and final policy unit 25 PASS | The 458-test run preceded that equivalent lint-only expression repair; final 25-test run exercises repaired source. Node 22.23.2 / pnpm 10.33.0 / Vitest 4.1.4. Hosted CI for each published SHA read separately. |
+
+The first Booking checkpoint commit-message guard refused lowercase agent trailer
+`codex`; the staged source was preserved and publication succeeded with actual
+owner trailer `Codex` / reviewer `Codex2`, without bypassing or modifying either
+the task guard or original Husky chain. Source62 → aff151fb trailer checker then
+passed all five commits with bypass unset. Remaining full financial workflow and
+both acceptance keys from prior rows are still pending, not waived by these
+decision tests or the earlier green binding CI.
