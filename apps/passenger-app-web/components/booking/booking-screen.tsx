@@ -18,10 +18,11 @@ import {
   PASSENGER_FREE_CANCELLATION_NOTICE,
   PASSENGER_SUPPORT_PHONE,
 } from "@drts/passenger-client";
-import { AuthScreen, AuthAlert, P5Btn, P5Card } from "../auth/ui";
+import { AuthScreen, AuthAlert, P5Btn, P5Card, P5 } from "../auth/ui";
 import { P5Map, P5RouteFare } from "../p5-ui";
 import { BookingForm, type BookingDraft } from "./booking-form";
 import { FeeDisclosure } from "./disclosure";
+import { BookingConfirmationSheet } from "./confirmation-sheet";
 import { BOOK_T as T } from "../../lib/booking/translations";
 
 type ServiceableQuote = Extract<
@@ -69,11 +70,13 @@ export function BookingScreen({
   const [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
+  const submitted = useRef(false);
   const mounted = useRef(true);
   // Unknown create acknowledgement retries retain the identical request key AND body.
   const pending = useRef<{
     command: CreatePassengerRideCommand;
     requestId: string;
+    paymentLabel: string;
   } | null>(null);
   function report(reason: unknown, fallback: string) {
     if (reason instanceof PassengerApiError && reason.status === 401)
@@ -126,6 +129,9 @@ export function BookingScreen({
     if (mode !== "confirm" || !quote || pending.current) return;
     let timer: ReturnType<typeof setTimeout>;
     function expire() {
+      // A sent request may already have committed. Expiry only invalidates an
+      // unsent quote, never the immutable recovery command or its confirmation.
+      if (pending.current || submitted.current) return;
       const remaining = Date.parse(quote!.expiresAt) - Date.now();
       if (remaining > 0) {
         timer = setTimeout(expire, Math.min(remaining, 2_147_483_647));
@@ -157,7 +163,10 @@ export function BookingScreen({
       throw new Error("account_changed");
     }
     setAccount(me.account);
-    if (me.account.feeAcknowledgementVersion !== fare?.version) {
+    if (
+      !pending.current &&
+      me.account.feeAcknowledgementVersion !== fare?.version
+    ) {
       setQuote(undefined);
       setChecked(false);
       setMode("form");
@@ -265,13 +274,14 @@ export function BookingScreen({
     }
   }
   async function submit() {
+    if (lock.current || submitted.current) return;
     if (
-      lock.current ||
-      !checked ||
-      !quote ||
-      !paymentSelection?.paymentMethodId ||
-      !draft.origin ||
-      !draft.destination
+      !pending.current &&
+      (!checked ||
+        !quote ||
+        !paymentSelection?.paymentMethodId ||
+        !draft.origin ||
+        !draft.destination)
     )
       return;
     lock.current = true;
@@ -280,11 +290,19 @@ export function BookingScreen({
     try {
       if (!(await currentAccount())) return;
       if (!pending.current) {
+        if (
+          !quote ||
+          !paymentSelection?.paymentMethodId ||
+          !draft.origin ||
+          !draft.destination
+        )
+          return;
         const time = scheduledAt();
         if (Date.parse(quote.expiresAt) <= Date.now())
           throw new Error("quote_expired");
         pending.current = {
           requestId: crypto.randomUUID(),
+          paymentLabel: paymentSelection.label,
           command: {
             scheduledAt: time,
             origin: {
@@ -309,6 +327,7 @@ export function BookingScreen({
       );
       if (!result.ride?.order?.orderId)
         throw new Error("unknown_create_acknowledgement");
+      submitted.current = true;
       pending.current = null;
       router.push(
         `/ride?rideId=${encodeURIComponent(result.ride.order.orderId)}`,
@@ -338,7 +357,21 @@ export function BookingScreen({
         pending.current = null;
         setMode("form");
         setError(T.shortLead);
-      } else if (reason instanceof PassengerApiError && reason.status < 500) {
+      } else if (reason instanceof PassengerApiError && reason.status === 401) {
+        pending.current = null;
+        setQuote(undefined);
+        setChecked(false);
+        setDraft(emptyDraft);
+        setAccount(undefined);
+        setSettings(undefined);
+        setFare(undefined);
+        setMode("loading");
+        report(reason, T.noCreate);
+      } else if (
+        reason instanceof PassengerApiError &&
+        reason.status >= 400 &&
+        reason.status < 500
+      ) {
         pending.current = null;
         setMode("confirm");
         report(reason, T.noCreate);
@@ -360,7 +393,7 @@ export function BookingScreen({
   const acknowledged =
     account && fare && account.feeAcknowledgementVersion === fare.version;
   return (
-    <AuthScreen title={mode === "confirm" ? T.confirm : T.book}>
+    <AuthScreen title={T.book}>
       {error && <AuthAlert>{error}</AuthAlert>}
       {!account || !fare || !settings ? (
         <>
@@ -369,7 +402,7 @@ export function BookingScreen({
             {T.retrySettings}
           </P5Btn>
         </>
-      ) : !acknowledged ? (
+      ) : !acknowledged && !pending.current ? (
         <>
           <FeeDisclosure fare={fare} />
           <P5Btn
@@ -381,20 +414,60 @@ export function BookingScreen({
           </P5Btn>
           <p>{T.disclosureFooter}</p>
         </>
-      ) : !phoneReady ? (
+      ) : !phoneReady && !pending.current ? (
         <>
           <AuthAlert>{T.phone(settings.requireSmsVerification)}</AuthAlert>
           <a href="/account">{T.account}</a>
         </>
       ) : mode === "confirm" && quote ? (
-        <>
-          <P5RouteFare
-            pickup={draft.origin?.address ?? ""}
-            dropoff={draft.destination?.address ?? ""}
-            fareRange={`NT$ ${quote.estimatedMin}–${quote.estimatedMax}`}
-          />
+        <BookingConfirmationSheet
+          canDismiss={!busy && !pending.current && !submitted.current}
+          onDismiss={() => {
+            setChecked(false);
+            setMode("form");
+          }}
+        >
+          <dl
+            style={{
+              border: `1px solid ${P5.line}`,
+              borderRadius: 12,
+              padding: "8px 14px",
+              margin: "0 0 10px",
+            }}
+          >
+            {[
+              [T.pickup, draft.origin?.address ?? ""],
+              [T.dropoff, draft.destination?.address ?? ""],
+              [T.time, draft.localTime.replace("T", " ")],
+              [
+                T.estimatedFare,
+                `NT$ ${quote.estimatedMin}–${quote.estimatedMax}`,
+              ],
+              [
+                T.payment,
+                pending.current?.paymentLabel ??
+                  paymentSelection?.label ??
+                  T.paymentPending,
+              ],
+            ].map(([label, value]) => (
+              <div
+                key={label}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "6px 0",
+                  fontSize: 12.5,
+                }}
+              >
+                <dt style={{ color: P5.mut }}>{label}</dt>
+                <dd style={{ margin: 0, fontWeight: 600, textAlign: "right" }}>
+                  {value}
+                </dd>
+              </div>
+            ))}
+          </dl>
           <p>{T.quoteVersion(quote.fareVersion, quote.expiresAt)}</p>
-          <p>{T.timeValue(draft.localTime)}</p>
           <P5Card title={T.rules}>
             {PASSENGER_CONFIRMATION_ROWS.map((row) => (
               <p key={row}>{row}</p>
@@ -405,40 +478,66 @@ export function BookingScreen({
             </a>
           </P5Card>
           <P5Card title={T.payment}>
-            {paymentSlot ??
-              (paymentSelection ? (
-                <p>{paymentSelection.label}</p>
+            <fieldset
+              disabled={busy || !!pending.current || submitted.current}
+              style={{ border: 0, padding: 0, margin: 0 }}
+            >
+              {pending.current ? (
+                <p>{pending.current.paymentLabel}</p>
               ) : (
-                <p>{T.paymentPending}</p>
-              ))}
+                (paymentSlot ??
+                (paymentSelection ? (
+                  <p>{paymentSelection.label}</p>
+                ) : (
+                  <p>{T.paymentPending}</p>
+                )))
+              )}
+            </fieldset>
           </P5Card>
-          <label>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 9,
+              fontSize: 12.5,
+              fontWeight: 600,
+              marginBottom: 10,
+            }}
+          >
             <input
               type="checkbox"
               checked={checked}
-              disabled={busy}
+              disabled={busy || !!pending.current}
+              style={{ width: 20, height: 20, accentColor: P5.brand }}
               onChange={(event) => setChecked(event.target.checked)}
             />
             {T.checkbox}
           </label>
-          <P5Btn
-            kind="primary"
-            disabled={!checked || busy || !paymentSelection?.paymentMethodId}
-            onClick={() => void submit()}
-          >
-            {T.confirm}
-          </P5Btn>
-          <P5Btn
-            disabled={busy}
-            onClick={() => {
-              setChecked(false);
-              setMode("form");
-            }}
-          >
-            {T.modify}
-          </P5Btn>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <P5Btn
+              kind="primary"
+              disabled={
+                !checked ||
+                busy ||
+                submitted.current ||
+                (!pending.current && !paymentSelection?.paymentMethodId)
+              }
+              onClick={() => void submit()}
+            >
+              {T.confirm}
+            </P5Btn>
+            <P5Btn
+              disabled={busy || !!pending.current || submitted.current}
+              onClick={() => {
+                setChecked(false);
+                setMode("form");
+              }}
+            >
+              {T.modify}
+            </P5Btn>
+          </div>
           <p>{T.confirmationFooter}</p>
-        </>
+        </BookingConfirmationSheet>
       ) : mode === "unavailable" ? (
         <>
           <P5Map state="missing" pickupAddress={draft.origin?.address ?? ""} />

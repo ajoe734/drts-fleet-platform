@@ -18,6 +18,7 @@ import type {
 import type { FetchFn, PassengerClientOptions } from "../client.js";
 import { PassengerApiError } from "../auth/errors.js";
 import { validateBookingSettings } from "./time.js";
+import { decodeBookingWire } from "./wire.js";
 
 /** Portable booking transport; HTTP is the only injected external boundary. */
 export class PassengerBookingClient {
@@ -82,9 +83,10 @@ export class PassengerBookingClient {
         typeof error === "object" && error.retryable === true,
       );
     }
-    // Formal API uses camelCase; do not mutate opaque IDs/metadata recursively.
+    // The actual global HTTP serializer emits snake_case. Decode DTO fields,
+    // retaining opaque values and dictionary/metadata bags unchanged.
     if (payload && typeof payload === "object" && "data" in payload)
-      return payload.data as T;
+      return decodeBookingWire(payload.data) as T;
     throw new PassengerApiError(
       response.status,
       "invalid_response",

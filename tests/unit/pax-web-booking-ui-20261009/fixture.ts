@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { apiWireResponse } from "../pax-web-shell-20261009/api-wire-fixtures";
 import { NextRequest } from "next/server";
 import * as bff from "../../../apps/passenger-app-web/app/api/passenger-app/[...path]/route";
 import type {
@@ -43,6 +44,7 @@ export function bookingFixture() {
     emptyCandidates: false,
     quoteExpires: "2099-10-11T12:00:00Z",
     serviceable: true,
+    createResponder: undefined as undefined | (() => Promise<Response>),
     errors: new Map<string, { status: number; code: string }>(),
     calls: [] as {
       path: string;
@@ -75,6 +77,8 @@ export function bookingFixture() {
     const path = target.pathname;
     const body = init?.body ? await new Response(init.body).json() : {};
     f.calls.push({ path, method, body, headers: new Headers(init?.headers) });
+    if (method === "POST" && path.endsWith("/rides") && f.createResponder)
+      return f.createResponder();
     const failure = f.errors.get(`${method} ${path}`);
     if (failure)
       return Response.json(
@@ -152,7 +156,7 @@ export function bookingFixture() {
     } else if (path.endsWith("/rides"))
       data = { ride: { order: { orderId: "synthetic-owned-order" } } };
     else throw new Error(`Unexpected external boundary: ${method} ${path}`);
-    return Response.json({ data, meta: { traceId: "synthetic-unit-trace" } });
+    return apiWireResponse(data);
   });
   return f;
 }

@@ -16,6 +16,7 @@ import { BookingScreen } from "../../../apps/passenger-app-web/components/bookin
 import Home from "../../../apps/passenger-app-web/app/page";
 import FaresPage from "../../../apps/passenger-app-web/app/fares/page";
 import { bookingFixture, selection } from "./fixture";
+import { apiWireResponse } from "../pax-web-shell-20261009/api-wire-fixtures";
 
 // Actual public source entries, not mocked implementations or a global alias.
 // Root has no passenger-client dependency; production resolves the declared app dependency.
@@ -159,6 +160,45 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
     f.errors.clear();
     click("重試取得設定");
     await form();
+  });
+  it("E19b opens the canonical bottom sheet with actual five-field summary, focus and full draft return", async () => {
+    render(<BookingScreen paymentSelection={selection} />);
+    await quote();
+    const dialog = screen.getByRole("dialog", { name: "確認叫車" });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(document.activeElement).toBe(dialog);
+    expect(dialog.style.borderRadius).toBe("20px 20px 0 0");
+    expect(document.querySelector("[data-booking-backdrop]")).not.toBeNull();
+    for (const label of [
+      "上車地點",
+      "下車地點",
+      "預約時間",
+      "預估車資",
+      "支付方式",
+    ])
+      expect(within(dialog.querySelector("dl")!).getByText(label)).toBeTruthy();
+    expect(within(dialog).getByText("NT$ 320–380")).toBeTruthy();
+    expect(
+      within(dialog)
+        .getByRole("button", { name: "確認叫車" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+    const first = within(dialog).getByRole("link", {
+      name: "查看完整費用與優惠說明",
+    });
+    const last = within(dialog).getByRole("button", { name: "返回修改" });
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    first.focus();
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await form();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect((screen.getByLabelText("預約時間") as HTMLInputElement).value).toBe(
+      "2099-10-11T12:00",
+    );
   });
   it("native checkbox disables the real request; selected opaque method sends formal body", async () => {
     render(<BookingScreen paymentSelection={selection} />);
@@ -414,6 +454,142 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
     expect((screen.getByLabelText("預約時間") as HTMLInputElement).value).toBe(
       "2099-10-11T12:00",
     );
+  });
+  it.each(["503", "network", "invalid_ack"])(
+    "pending expiry followed by %s recovers the identical immutable request",
+    async (outcome) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      f.quoteExpires = new Date(Date.now() + 60_000).toISOString();
+      let release!: (response: Response) => void;
+      let fail!: (reason: Error) => void;
+      f.createResponder = () =>
+        new Promise<Response>((resolve, reject) => {
+          release = resolve;
+          fail = reject;
+        });
+      render(<BookingScreen paymentSelection={selection} />);
+      await quote();
+      confirmed();
+      click("確認叫車");
+      await waitFor(() => expect(calls("/rides")).toHaveLength(1));
+      const first = calls("/rides")[0]!;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_001);
+      });
+      f.createResponder = undefined;
+      await act(async () => {
+        if (outcome === "network")
+          fail(new Error("synthetic lost acknowledgement"));
+        else if (outcome === "invalid_ack")
+          release(Response.json({ unexpected: "opaque_invalid_ack" }));
+        else
+          release(
+            Response.json({ error: { code: "unavailable" } }, { status: 503 }),
+          );
+      });
+      await screen.findByRole("button", { name: "重試同一筆叫車請求" });
+      click("重試同一筆叫車請求");
+      await waitFor(() => expect(calls("/rides")).toHaveLength(2));
+      expect(calls("/rides")[1]!.body).toEqual(first.body);
+      expect(calls("/rides")[1]!.headers.get("x-request-id")).toBe(
+        first.headers.get("x-request-id"),
+      );
+      expect(push).toHaveBeenCalledTimes(1);
+    },
+  );
+  it("pending recovery is not blocked by a later fee/contact prerequisite for NEW bookings", async () => {
+    f.errors.set("POST /api/passenger-app/rides", {
+      status: 503,
+      code: "unavailable",
+    });
+    render(<BookingScreen paymentSelection={selection} />);
+    await quote();
+    confirmed();
+    click("確認叫車");
+    await screen.findByRole("button", { name: "重試同一筆叫車請求" });
+    const first = calls("/rides")[0]!;
+    f.account = {
+      ...f.account,
+      feeAcknowledgementVersion: "synthetic-new-ack",
+      contactPhone: "",
+    };
+    f.errors.delete("POST /api/passenger-app/rides");
+    click("重試同一筆叫車請求");
+    await waitFor(() => expect(calls("/rides")).toHaveLength(2));
+    expect(calls("/rides")[1]!.body).toEqual(first.body);
+    expect(calls("/rides")[1]!.headers.get("x-request-id")).toBe(
+      first.headers.get("x-request-id"),
+    );
+  });
+  it.each(["account_switch", "401"])(
+    "pending recovery after %s discards stale request and never replays another account",
+    async (boundary) => {
+      f.errors.set("POST /api/passenger-app/rides", {
+        status: 503,
+        code: "unavailable",
+      });
+      render(<BookingScreen paymentSelection={selection} />);
+      await quote();
+      confirmed();
+      click("確認叫車");
+      await screen.findByRole("button", { name: "重試同一筆叫車請求" });
+      if (boundary === "account_switch")
+        f.account = {
+          ...f.account,
+          drtsPassengerId: "synthetic-another-account",
+        };
+      else
+        f.errors.set("GET /api/passenger-app/me", {
+          status: 401,
+          code: "unauthorized",
+        });
+      click("重試同一筆叫車請求");
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("button", { name: "重試同一筆叫車請求" }),
+        ).toBeNull(),
+      );
+      expect(calls("/rides")).toHaveLength(1);
+      if (boundary === "401") expect(push).toHaveBeenCalledWith("/login");
+    },
+  );
+  it("a successful acknowledgement seals the request even before router navigation unmounts", async () => {
+    render(<BookingScreen paymentSelection={selection} />);
+    await quote();
+    confirmed();
+    click("確認叫車");
+    await waitFor(() => expect(push).toHaveBeenCalledTimes(1));
+    click("確認叫車");
+    expect(calls("/rides")).toHaveLength(1);
+  });
+  it("slow successful create across expiry navigates once and never re-creates during navigation", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    f.quoteExpires = new Date(Date.now() + 60_000).toISOString();
+    let release!: (response: Response) => void;
+    f.createResponder = () =>
+      new Promise<Response>((resolve) => {
+        release = resolve;
+      });
+    render(<BookingScreen paymentSelection={selection} />);
+    await quote();
+    confirmed();
+    click("確認叫車");
+    await waitFor(() => expect(calls("/rides")).toHaveLength(1));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_001);
+    });
+    await act(async () => {
+      release(
+        apiWireResponse({ ride: { order: { orderId: "opaque_owned_A_B" } } }),
+      );
+    });
+    await waitFor(() =>
+      expect(push).toHaveBeenCalledWith("/ride?rideId=opaque_owned_A_B"),
+    );
+    const submit = screen.queryByRole("button", { name: "確認叫車" });
+    if (submit) fireEvent.click(submit);
+    expect(calls("/rides")).toHaveLength(1);
+    expect(push).toHaveBeenCalledTimes(1);
   });
   it("current quote expiry timer preserves the draft and disables stale submission", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });

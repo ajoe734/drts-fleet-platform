@@ -21,6 +21,7 @@ export const BOOK_T = {
   rules: "費用規則",
   fullFees: "查看完整費用與優惠說明",
   payment: "支付方式",
+  estimatedFare: "預估車資",
   paymentPending: "請使用付款方式選擇介面選卡；尚未選擇時不會送出叫車。",
   checkbox: "我已確認費用與優惠說明",
   modify: "返回修改",

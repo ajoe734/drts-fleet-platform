@@ -3,6 +3,13 @@ import { NextRequest } from "next/server";
 import { PassengerBookingClient } from "../../../packages/passenger-client/src/booking/client";
 import { PassengerApiError } from "../../../packages/passenger-client/src/auth/errors";
 import * as bff from "../../../apps/passenger-app-web/app/api/passenger-app/[...path]/route";
+import { apiWireResponse } from "../pax-web-shell-20261009/api-wire-fixtures";
+import {
+  me,
+  fares,
+  quote,
+  quoteCommand,
+} from "../pax-web-shell-20261009/api-wire-fixtures";
 
 const origin = "https://ride.example.test";
 let upstream: ReturnType<
@@ -35,9 +42,9 @@ beforeEach(() => {
   vi.stubEnv("DRTS_API_AUTH_AUDIENCE", "");
   upstream = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
     async () =>
-      Response.json({
-        data: { minLeadTimeMinutes: 30, requireSmsVerification: false },
-        meta: { traceId: "unit-trace" },
+      apiWireResponse({
+        minLeadTimeMinutes: 30,
+        requireSmsVerification: false,
       }),
   );
   vi.stubGlobal("fetch", upstream);
@@ -60,14 +67,15 @@ describe("real portable booking client → actual bounded Next BFF", () => {
   });
   it.each([0, 15, 30])("preserves configured lead %s", async (lead) => {
     upstream.mockImplementation(async () =>
-      Response.json({
-        data: { minLeadTimeMinutes: lead, requireSmsVerification: true },
+      apiWireResponse({
+        minLeadTimeMinutes: lead,
+        requireSmsVerification: true,
       }),
     );
     expect((await client.getSettings()).minLeadTimeMinutes).toBe(lead);
   });
   it("blocks malformed settings", async () => {
-    upstream.mockImplementation(async () => Response.json({ data: {} }));
+    upstream.mockImplementation(async () => apiWireResponse({}));
     await expect(client.getSettings()).rejects.toThrow(
       "booking_settings_unavailable",
     );
@@ -130,7 +138,7 @@ describe("real portable booking client → actual bounded Next BFF", () => {
       );
     },
   );
-  it("unwraps the genuine camelCase geo envelope and retains selected candidates", async () => {
+  it("maps genuine serialized geo wire fields without altering candidate identifier values", async () => {
     const candidates = [
       {
         candidateId: "synthetic-candidate",
@@ -142,13 +150,10 @@ describe("real portable booking client → actual bounded Next BFF", () => {
       },
     ];
     upstream.mockImplementation(async () =>
-      Response.json({
-        data: {
-          candidates,
-          provider: "synthetic-http",
-          generatedAt: "2026-10-11T10:00:00Z",
-        },
-        meta: { traceId: "unit" },
+      apiWireResponse({
+        candidates,
+        provider: "synthetic-http",
+        generatedAt: "2026-10-11T10:00:00Z",
       }),
     );
     expect(
@@ -160,6 +165,97 @@ describe("real portable booking client → actual bounded Next BFF", () => {
     expect(new URL(url).searchParams.get("surface")).toBe("passenger_entry");
     expect(upstream).toHaveBeenCalledTimes(1); // No fabricated/forbidden health probe.
   });
+  it("consumes actual serialized account, PATCH, fares, quotes and created ride envelopes", async () => {
+    const opaque = "opaque_id_A_B_123";
+    const account = {
+      account: {
+        ...me.account,
+        drtsPassengerId: opaque,
+        metadata: { opaque_metadata_key: { nested_key: opaque } },
+      },
+    };
+    upstream.mockImplementation(async () => apiWireResponse(account));
+    expect((await client.getAccount()).account.drtsPassengerId).toBe(opaque);
+    expect(
+      (await client.updateAccount({ displayName: "測試乘客" })).account
+        .drtsPassengerId,
+    ).toBe(opaque);
+    expect((await client.getAccount()).account).toMatchObject({
+      metadata: { opaque_metadata_key: { nested_key: opaque } },
+    });
+    upstream.mockImplementation(async () =>
+      apiWireResponse({
+        currentVersion: {
+          ...fares.currentVersion,
+          additionalFees: { opaque_fee_key: 10 },
+        },
+      }),
+    );
+    expect((await client.getFares()).currentVersion).toMatchObject({
+      baseDistanceMeters: 1500,
+      additionalFees: { opaque_fee_key: 10 },
+    });
+    upstream.mockImplementation(async () =>
+      apiWireResponse({ ...quote, fareSnapshotId: opaque }),
+    );
+    expect(await client.getFareQuote(quoteCommand)).toMatchObject({
+      serviceAreaResult: "serviceable",
+      fareSnapshotId: opaque,
+      expiresAt: quote.expiresAt,
+    });
+    upstream.mockImplementation(async () =>
+      apiWireResponse({ ride: { order: { orderId: opaque } } }),
+    );
+    expect(
+      (
+        await client.createRide({
+          ...quoteCommand,
+          origin: { lat: 25, lng: 121 },
+          destination: { lat: 25.1, lng: 121.1 },
+          paymentMethodId: opaque,
+          fareSnapshotId: opaque,
+          passengerConfirmedAt: quoteCommand.scheduledAt,
+        })
+      ).ride.order.orderId,
+    ).toBe(opaque);
+  });
+  it.each(["resolve", "reverse"] as const)(
+    "maps actual serialized %s address provenance",
+    async (operation) => {
+      upstream.mockImplementation(async () =>
+        apiWireResponse({
+          address: {
+            address: "測試地址",
+            lat: 25,
+            lng: 121,
+            coordinateSource: "provider_candidate",
+            geocodeConfidence: "exact",
+            metadata: { opaque_key: "opaque_A_B" },
+          },
+          resolvedAt: "2026-10-11T10:00:00Z",
+          provider: "synthetic-http",
+        }),
+      );
+      const result =
+        operation === "resolve"
+          ? await client.resolve({
+              addressText: "測試地址",
+              surface: "passenger_entry",
+            })
+          : await client.reverse({
+              location: { lat: 25, lng: 121 },
+              surface: "passenger_entry",
+            });
+      expect(result).toMatchObject({
+        address: {
+          coordinateSource: "provider_candidate",
+          geocodeConfidence: "exact",
+          metadata: { opaque_key: "opaque_A_B" },
+        },
+        resolvedAt: "2026-10-11T10:00:00Z",
+      });
+    },
+  );
   it.each(["resolve", "reverse", "route"] as const)(
     "routes only formal geo %s commands",
     async (operation) => {
