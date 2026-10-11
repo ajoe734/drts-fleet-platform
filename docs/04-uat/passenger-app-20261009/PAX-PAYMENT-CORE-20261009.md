@@ -922,3 +922,71 @@ The existing consumer dispatcher/claim/FCM transport remains delivery authority.
 Evidence: `.local/pax-payment-core-20261011-recovery-notice/`, backed up to
 canonical `.local/` before closeout. No VM product runtime; no real provider,
 secret, device route enrollment or Booking snapshot producer was taken over.
+
+### Recovery notice dispatcher and module verification continuation
+
+Notice source anchor `de96f53a5d6529eadb627fc5fc010ff02d465775` was ordinarily
+pushed. Its CI `38145994641` completed and was read: product-smoke typecheck
+failed on the new provider mock's widened string literal and two existing
+partner governance fixture callers. Integration `38145994646` completed;
+complete jobs/logs are retained in the notice evidence directory. Product smoke
+checked PR merge tree `9d39298a9` (full identity in raw log), not the owner tree.
+No green CI or candidate is inferred from this failed run.
+
+The owned mock now uses the actual provider function type. The foreign errors
+remain at `sr-partner-notify-transport-20260918/governance.test.ts:229,427`:
+the partner-only harness labels its row with the widened consumer event union.
+Supervisor scope coordination requested ONLY
+`tests/unit/system-remediation/sr-partner-notify-transport-20260918/transport-harness.ts`:
+type import and `ConsumerNotificationOutboxRecord & { eventType:
+PartnerPassengerEventType }` for `harness.row`. Governance calls, old six-event
+catalogs and the production facade are preserved. This exact helper is not in
+the current grant; no unauthorized fixture/source change was made. Root
+typecheck after owned fixes still exits 2 on these two errors only
+(`root-typecheck-own-final.log`).
+
+Actual MultiTaxiService dispatcher tests now traverse the real channel resolver,
+claim, first-party transport/context, receipt and outcome repositories. A live
+competing claim prevents provider IO; a reclaimed fence after synthetic ack
+cannot insert a receipt. Receipt/status/COMMIT exceptions remain unresolved.
+Missing provider/device produces typed failed outcomes and never uses the
+present legacy port. Provider/device/DB replies and clock are external mocks;
+this does not prove PG rollback/constraints/races or actual device delivery.
+Producer/transport/worker regression: **48 PASS / 0 SKIP**, 3 files, exit 0
+(`dispatcher-final.log`). Initial dispatcher fixture omitted the multiline
+claim SELECT reply: **16 PASS / 3 FAIL**, retained in `dispatcher-initial.log`;
+reply matcher corrected without changing production guards. Initial new
+dispatcher compiler errors (optional createdAt/index) were corrected and
+retained in `root-typecheck-dispatcher.log`.
+
+The actual PassengerAppModule notice factories and Nest injector are also
+tested without application bootstrap, timer, DB or HTTP. The real repository
+adapter receives the explicit synthetic expiry; absent expiry/disabled channel
+exposes disabled configuration for the existing worker guard. The initial
+fixture incorrectly called the low-level selector without its required limit,
+then assumed that selector itself was the configuration guard; both failed
+runs are retained (`notice-module-initial.log`, `api-final.log`). The test now
+checks the actual repository configuration seam; worker refusal remains covered
+by its existing production-worker test. API typecheck after the new file passed
+(`api-typecheck-module-final.log`). Commands with mistyped billing/caller file
+names selected only the matching tests; those logs are not full caller evidence.
+The final command uses the actual `billing-payment-exception.test.ts`,
+`facebook-data-deletion.repository.test.ts` and
+`passenger-push-devices.repository.test.ts` alongside both module config files.
+
+Full affected Payment/Booking/Account/Facebook/Billing and existing
+channel/FCM/route/partner/sequence/registry regression finished/read:
+**953 PASS / 14 SKIP**, **45 files PASS / 2 PG files SKIP**, exit 0
+(`affected-final.log`). Lint on all changed notice/payment contracts, source
+and owned tests passed (`lint-final.log`). The generated normal hook formatted
+pre-existing methods in the scoped repository file; a compiler-emitted AST
+comparison against c223 verified **50 repository / 117 service unchanged
+members**, and identical partner runtime catalogs/maps/TTL
+(`audit-preserved-members.cjs`, `preserved-members-final.log`). Initial audit
+scanner/SourceFile text mismatches are retained; the final AST excludes trivia
+and SourceFile raw text, retains all executable child nodes and literal values.
+
+Actual policy/expiry, lawful captured route/device/provider authority, real PG
+payment transaction/concurrency, HTTP/FCM/PSP acceptance and independent
+review/merge remain open. The original two acceptance keys remain unrecorded;
+no handoff, candidate, done or VM product hosting is claimed.

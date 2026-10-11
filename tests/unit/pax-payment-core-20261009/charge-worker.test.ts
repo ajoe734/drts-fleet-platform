@@ -17,14 +17,31 @@ describe("hosted worker lifecycle with fake clock and mocked processing boundary
       query,
     } as unknown as DatabaseService);
     const processOrder = vi.fn().mockResolvedValue(undefined);
+    const processRecoveryNotice = vi.fn().mockResolvedValue(undefined);
     const service = {
       isCaptureConfigured: () => true,
       isRecoveryNoticeConfigured: () => false,
       processOrder,
+      processRecoveryNotice,
     } as unknown as PaymentChargeService;
     const worker = new PaymentChargeWorker(repository, service);
-    return { query, processOrder, worker, service };
+    return { query, processOrder, processRecoveryNotice, worker, service };
   }
+
+  it("drains retained notice requests with capture disabled using the existing worker and notice due query", async () => {
+    const f = fixture();
+    vi.spyOn(f.service, "isCaptureConfigured").mockReturnValue(false);
+    vi.spyOn(f.service, "isRecoveryNoticeConfigured").mockReturnValue(true);
+    f.worker.onApplicationBootstrap();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.processOrder).not.toHaveBeenCalled();
+    expect(f.processRecoveryNotice).toHaveBeenCalledWith("synthetic_order");
+    expect(f.query).toHaveBeenCalledWith(
+      expect.stringContaining("recovery_notice_requested_at IS NOT NULL"),
+      [25],
+    );
+    await f.worker.onModuleDestroy();
+  });
 
   it("scans durable due rows at startup and on later polls; stops cleanly", async () => {
     const f = fixture();

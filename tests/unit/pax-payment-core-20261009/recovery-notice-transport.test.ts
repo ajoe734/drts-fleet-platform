@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DatabaseService } from "../../../apps/api/src/common/db/database.service";
+import type { ConsumerNotificationOutboxRecord } from "@drts/contracts";
 import { MultiTaxiRepository } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
+import {
+  MultiTaxiService,
+  PassengerPushPersistenceUnknownError,
+  PassengerPushClaimConflictError,
+} from "../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
+import type { PassengerPushPort } from "../../../apps/api/src/modules/multi-taxi/passenger-push.port";
 import type { PassengerPushDevicesService } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.service";
 import type { PassengerPushTransportRequest } from "../../../apps/api/src/modules/multi-taxi/passenger-push.adapter";
 import {
@@ -33,7 +40,35 @@ function fixture() {
     fault: "",
     owner: OWNER,
     late: () => {},
+    afterAck: () => {},
+    configured: true,
+    fence: 1,
+    busy: false,
   };
+  const outbox = {
+    outbox_id: "synthetic_notice_outbox",
+    order_id: ORDER,
+    passenger_subject_ref: SUBJECT,
+    event_type: "payment_recovery_required",
+    assignment_version: null,
+    payload: { eventSequence: 1, expiresAt: EXPIRY },
+    status: "pending",
+    attempt_count: 0,
+    next_attempt_at: NOW,
+    created_at: NOW,
+    delivered_at: null,
+  };
+  const route = () => ({
+    order_id: ORDER,
+    tenant_id: "synthetic_captured_tenant",
+    drts_passenger_id: state.owner,
+    passenger_subject_ref: SUBJECT,
+    app_id: "synthetic_captured_app",
+    notification_policy_version: "first_party_notification_v1",
+    consent_version: "synthetic_consent",
+    ride_ref: "synthetic_ride",
+    created_at: NOW,
+  });
   let stored: Record<string, unknown> | null = null;
   const calls: { sql: string; params: readonly unknown[] }[] = [];
   // Formal production repository SQL runs against synthetic external replies;
@@ -44,7 +79,15 @@ function fixture() {
     if (state.fault && sql.includes(state.fault))
       throw new Error("synthetic_private_persistence_error");
     let rows: Record<string, unknown>[] = [];
-    if (sql.includes("AS fence_valid"))
+    if (sql.includes("AS partner_route"))
+      rows = [{ partner_route: null, first_party_route: route() }];
+    else if (sql.includes("SELECT * FROM ops.consumer_notification_outbox"))
+      rows = [outbox];
+    else if (sql.includes("INSERT INTO ops.phase1_push_delivery_claims"))
+      rows = state.busy ? [] : [{ fence_token: state.fence }];
+    else if (sql.includes("INSERT INTO ops.phase1_push_delivery_receipts"))
+      rows = [{ receipt_id: "synthetic_durable_receipt" }];
+    else if (sql.includes("AS fence_valid"))
       rows = [{ fence_valid: true, token: state.token }];
     else if (
       sql.includes(
@@ -55,19 +98,7 @@ function fixture() {
     else if (
       sql.includes("FROM mobility.phase1_order_first_party_notification_routes")
     )
-      rows = [
-        {
-          order_id: ORDER,
-          tenant_id: "synthetic_captured_tenant",
-          drts_passenger_id: state.owner,
-          passenger_subject_ref: SUBJECT,
-          app_id: "synthetic_captured_app",
-          notification_policy_version: "first_party_notification_v1",
-          consent_version: "synthetic_consent",
-          ride_ref: "synthetic_ride",
-          created_at: NOW,
-        },
-      ];
+      rows = [route()];
     else if (sql.includes("FROM passenger.payment_charge_records c"))
       rows = state.eligible ? [{ order_id: ORDER }] : [];
     else if (sql.includes("FROM ops.phase1_owned_orders o"))
@@ -77,9 +108,9 @@ function fixture() {
     )
       rows = [{ outbox_id: "synthetic_notice_outbox" }];
     else if (
-      sql.includes("SELECT fence_token FROM ops.phase1_push_delivery_claims")
+      /SELECT\s+fence_token\s+FROM ops.phase1_push_delivery_claims/.test(sql)
     )
-      rows = [{ fence_token: 1 }];
+      rows = [{ fence_token: state.fence }];
     else if (
       sql.includes(
         "INSERT INTO mobility.phase1_first_party_notification_delivery_contexts",
@@ -110,25 +141,26 @@ function fixture() {
     connect: vi.fn().mockResolvedValue(client),
   } as unknown as DatabaseService);
   const devices = {
-    resolveActiveDevices: vi
-      .fn()
-      .mockResolvedValue([
-        {
-          deviceId: "synthetic_device",
-          tokenSha256: "synthetic_hash",
-          appId: "synthetic_captured_app",
-        },
-      ]),
+    resolveActiveDevices: vi.fn().mockResolvedValue([
+      {
+        deviceId: "synthetic_device",
+        tokenSha256: "synthetic_hash",
+        appId: "synthetic_captured_app",
+      },
+    ]),
     invalidateDevice: vi.fn(),
   };
   const provider: FirstPartyPushProvider = {
-    isConfigured: () => true,
-    send: vi.fn(async (_wire, _target, validate) => {
-      state.late();
-      if (!(await validate(new AbortController().signal)))
-        return { kind: "ineligible" };
-      return { kind: "accepted", messageId: "synthetic_provider_ack" };
-    }),
+    isConfigured: () => state.configured,
+    send: vi.fn<FirstPartyPushProvider["send"]>(
+      async (_wire, _target, validate) => {
+        state.late();
+        if (!(await validate(new AbortController().signal)))
+          return { kind: "ineligible" };
+        state.afterAck();
+        return { kind: "accepted", messageId: "synthetic_provider_ack" };
+      },
+    ),
   };
   const transport = new FirstPartyNotificationTransport(
     repository,
@@ -149,6 +181,31 @@ function fixture() {
     },
     context: { fenceToken: 1 },
   };
+  const legacy = {
+    transportMode: "legacy",
+    isAvailable: vi.fn(() => true),
+    send: vi.fn(),
+  };
+  const dispatcher = new MultiTaxiService(
+    {} as never,
+    repository,
+    undefined,
+    undefined,
+    undefined,
+    legacy as unknown as PassengerPushPort,
+    undefined,
+    undefined,
+    undefined,
+    transport,
+  );
+  const record: ConsumerNotificationOutboxRecord = {
+    ...request.message,
+    createdAt: NOW.toISOString(),
+    status: "pending",
+    attemptCount: 0,
+    nextAttemptAt: NOW.toISOString(),
+    deliveredAt: null,
+  };
   return {
     state,
     calls,
@@ -158,12 +215,128 @@ function fixture() {
     transport,
     request,
     client,
+    dispatcher,
+    record,
+    legacy,
   };
 }
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.useRealTimers();
+});
+
+describe("actual payment-notice consumer dispatcher, claim and durable outcome", () => {
+  it("reserves the existing claim before provider IO and commits receipt/outcome before returning delivery", async () => {
+    const f = fixture();
+    const result = await f.dispatcher.deliverPassengerNotification(f.record);
+    expect(result).toMatchObject({
+      status: "delivered",
+      providerName: "first_party_app",
+      attemptCount: 1,
+    });
+    expect(f.legacy.send).not.toHaveBeenCalled();
+    expect(f.provider.send).toHaveBeenCalledOnce();
+    const sqls = f.calls.map((c) => c.sql);
+    const claim = sqls.findIndex((s) =>
+      s.includes("INSERT INTO ops.phase1_push_delivery_claims"),
+    );
+    const reserve = sqls.findIndex((s) => s.includes("SET status='sending'"));
+    const context = sqls.findIndex((s) =>
+      s.includes(
+        "INSERT INTO mobility.phase1_first_party_notification_delivery_contexts",
+      ),
+    );
+    const receipt = sqls.findIndex((s) =>
+      s.includes("INSERT INTO ops.phase1_push_delivery_receipts"),
+    );
+    expect(claim).toBeGreaterThan(-1);
+    expect(reserve).toBeGreaterThan(claim);
+    expect(context).toBeGreaterThan(reserve);
+    expect(receipt).toBeGreaterThan(context);
+    expect(sqls.at(-1)).toBe("COMMIT");
+    expect(f.calls[receipt]?.params).toEqual([
+      f.record.outboxId,
+      SUBJECT,
+      `${f.record.outboxId}:1`,
+      1,
+      "first_party_app",
+      "provider_acknowledged",
+      "synthetic_provider_ack",
+    ]);
+  });
+
+  it("a live competing claim cannot send or mint a receipt", async () => {
+    const f = fixture();
+    f.state.busy = true;
+    await expect(
+      f.dispatcher.deliverPassengerNotification(f.record),
+    ).rejects.toBeInstanceOf(PassengerPushClaimConflictError);
+    expect(f.provider.send).not.toHaveBeenCalled();
+    expect(
+      f.calls.some((c) =>
+        c.sql.includes("INSERT INTO ops.phase1_push_delivery_receipts"),
+      ),
+    ).toBe(false);
+    expect(f.calls.at(-1)?.sql).toBe("ROLLBACK");
+  });
+
+  it("a reclaimed fence after provider acknowledgement cannot record delivery", async () => {
+    const f = fixture();
+    f.state.afterAck = () => {
+      f.state.fence = 2;
+    };
+    await expect(
+      f.dispatcher.deliverPassengerNotification(f.record),
+    ).rejects.toBeInstanceOf(PassengerPushPersistenceUnknownError);
+    expect(f.provider.send).toHaveBeenCalledOnce();
+    expect(
+      f.calls.some((c) =>
+        c.sql.includes("INSERT INTO ops.phase1_push_delivery_receipts"),
+      ),
+    ).toBe(false);
+    expect(f.calls.at(-1)?.sql).toBe("ROLLBACK");
+  });
+
+  it.each([
+    "INSERT INTO ops.phase1_push_delivery_receipts",
+    "SET\n            status = $2",
+    "COMMIT",
+  ])("post-ack persistence failure %s remains unresolved", async (fault) => {
+    const f = fixture();
+    f.state.afterAck = () => {
+      f.state.fault = fault;
+    };
+    await expect(
+      f.dispatcher.deliverPassengerNotification(f.record),
+    ).rejects.toBeInstanceOf(PassengerPushPersistenceUnknownError);
+    expect(f.provider.send).toHaveBeenCalledOnce();
+    expect(f.legacy.send).not.toHaveBeenCalled();
+    expect(f.calls.at(-1)?.sql).toBe("ROLLBACK");
+  });
+
+  it.each(["provider", "device"])(
+    "missing %s records typed non-delivery without legacy fallback",
+    async (kind) => {
+      const f = fixture();
+      if (kind === "provider") f.state.configured = false;
+      else f.devices.resolveActiveDevices.mockResolvedValue([]);
+      const result = await f.dispatcher.deliverPassengerNotification(f.record);
+      expect(result).toMatchObject({
+        status: "failed",
+        deliveredAt: null,
+        failureReason:
+          kind === "provider" ? "configuration_blocked" : "no_active_device",
+      });
+      expect(f.provider.send).not.toHaveBeenCalled();
+      expect(f.legacy.send).not.toHaveBeenCalled();
+      const receipt = f.calls.find((c) =>
+        c.sql.includes("INSERT INTO ops.phase1_push_delivery_receipts"),
+      );
+      expect(receipt?.params[5]).not.toBe("provider_acknowledged");
+      expect(f.calls.at(-1)?.sql).toBe("COMMIT");
+    },
+  );
 });
 
 describe("real first-party payment recovery transport and repository", () => {
