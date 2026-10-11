@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { createAuthClient } from "../../../../lib/auth/client";
 import { t } from "../../../../lib/auth/translations";
@@ -12,7 +12,7 @@ import {
 import { ConsentGate } from "../../../../components/auth/consent-gate";
 import { PassengerApiError } from "@drts/passenger-client";
 
-export default function OAuthCallbackPage() {
+function OAuthCallbackContent() {
   const router = useRouter();
   const params = useParams();
   const search = useSearchParams();
@@ -101,5 +101,19 @@ export default function OAuthCallbackPage() {
         <div role="status">{t("oauthSuccess")}</div>
       )}
     </AuthScreen>
+  );
+}
+
+export default function OAuthCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <AuthScreen title={t("oauth")}>
+          <div role="status">{t("oauthProcessing")}</div>
+        </AuthScreen>
+      }
+    >
+      <OAuthCallbackContent />
+    </Suspense>
   );
 }

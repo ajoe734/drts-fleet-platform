@@ -279,7 +279,12 @@ export function createFixture() {
     provider: AuthProvider = "google",
     subject = "original",
   ) => {
-    const account = await accounts.findOrCreateByIdentity(provider, provider === "email" && subject === "original" ? "original@example.test" : subject);
+    const account = await accounts.findOrCreateByIdentity(
+      provider,
+      provider === "email" && subject === "original"
+        ? "original@example.test"
+        : subject,
+    );
     const tokens = await accounts.issueSession(account.drtsPassengerId);
     fixture.jar.set("pax_session", tokens.accessToken);
     fixture.jar.set("pax_refresh", tokens.refreshToken);

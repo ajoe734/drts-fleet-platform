@@ -206,7 +206,9 @@ describe("login capabilities and actual OTP components", () => {
       await enterOtp(provider);
       fillCode(f.codes.at(-1)!);
       vi.useFakeTimers();
-      click("返回"); click("返回"); click(provider === "phone" ? "手機號碼登入" : "Email 登入");
+      click("返回");
+      click("返回");
+      click(provider === "phone" ? "手機號碼登入" : "Email 登入");
       fillCode(f.codes.at(-1)!);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(301000);
@@ -563,5 +565,113 @@ describe("real account controls and mutations", () => {
     click("登出");
     await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/login"));
     expect(f.jar.has("pax_refresh")).toBe(false);
+  });
+});
+
+describe("F4/F6 additional component failure and session regressions", () => {
+  it.each(["phone", "email"] as const)(
+    "%s five formal invalid attempts exhaust the actual control",
+    async (provider) => {
+      render(<LoginPage />);
+      await enterOtp(provider);
+      for (let count = 0; count < 5; count++) {
+        fillCode(f.codes.at(-1) === "000000" ? "999999" : "000000");
+        click("驗證");
+        await waitFor(() =>
+          expect((button("驗證") as HTMLButtonElement).disabled).toBe(
+            count === 4,
+          ),
+        );
+        if (count < 4)
+          await screen.findByText(
+            new RegExp(`本次操作剩餘嘗試次數.*${4 - count}`),
+          );
+      }
+      await screen.findByText("錯誤次數已達上限，請重新發送驗證碼");
+      const count = f.calls.filter(
+        (call) => call.path === "auth/otp/verify",
+      ).length;
+      click("驗證");
+      expect(
+        f.calls.filter((call) => call.path === "auth/otp/verify"),
+      ).toHaveLength(count);
+    },
+  );
+  it.each(["phone", "email", "google", "facebook", "line"] as const)(
+    "account hides newly disabled %s binding",
+    async (disabled) => {
+      await f.signIn(disabled === "google" ? "email" : "google");
+      f.enabled = f.enabled.filter((provider) => provider !== disabled);
+      render(<AccountPage />);
+      await screen.findByRole("button", { name: "登入方式管理" });
+      click("登入方式管理");
+      const labels = {
+        phone: "手機號碼",
+        email: "Email",
+        google: "Google",
+        facebook: "Facebook",
+        line: "LINE",
+      };
+      expect(
+        screen.queryByRole("button", { name: `綁定 ${labels[disabled]}` }),
+      ).toBeNull();
+    },
+  );
+  it.each(["google", "facebook", "line"] as const)(
+    "%s account link failure surfaces an actionable error",
+    async (provider) => {
+      await f.signIn("email");
+      f.oauthError = "conflict";
+      render(<AccountPage />);
+      await screen.findByRole("button", { name: "登入方式管理" });
+      click("登入方式管理");
+      click(
+        `綁定 ${provider === "google" ? "Google" : provider === "facebook" ? "Facebook" : "LINE"}`,
+      );
+      await screen.findByText("此身分已綁定於其他智行叫車帳戶。");
+      expect(navigation.external).not.toHaveBeenCalled();
+    },
+  );
+  it("a contact-phone edit after challenge prevents verification of the obsolete target", async () => {
+    const account = await f.signIn();
+    f.accountStore.accounts.get(account.drtsPassengerId)!.contactPhone =
+      "0912345678";
+    render(<AccountPage />);
+    await screen.findByRole("button", { name: "驗證聯絡手機" });
+    click("驗證聯絡手機");
+    click("取得驗證碼");
+    await screen.findByRole("group", { name: "6 位數驗證碼" });
+    f.accountStore.accounts.get(account.drtsPassengerId)!.contactPhone =
+      "0987654321";
+    fillCode(f.codes.at(-1)!);
+    click("驗證");
+    await screen.findByText("登入狀態或聯絡手機已變更，請重新操作。");
+    expect(f.calls.some((call) => call.path === "auth/otp/verify")).toBe(false);
+  });
+  it("switching accounts while OTP link is displayed prevents sending the old proof", async () => {
+    await signedIn();
+    click("登入方式管理");
+    click("綁定 Email");
+    fireEvent.change(screen.getByLabelText("請輸入您的 Email"), {
+      target: { value: "link@example.test" },
+    });
+    click("取得驗證碼");
+    await screen.findByRole("group", { name: "6 位數驗證碼" });
+    await f.signIn("line", "other-account");
+    fillCode(f.codes.at(-1)!);
+    click("驗證");
+    await screen.findByText("登入狀態或聯絡手機已變更，請重新操作。");
+    expect(f.calls.some((call) => call.path === "auth/otp/verify")).toBe(false);
+  });
+  it("duplicate verify clicks consume exactly one formal challenge", async () => {
+    render(<LoginPage />);
+    await enterOtp("email");
+    fillCode(f.codes.at(-1)!);
+    click("驗證");
+    click("驗證");
+    await screen.findByText("歡迎加入，請同意服務條款");
+    expect(
+      f.calls.filter((call) => call.path === "auth/otp/verify"),
+    ).toHaveLength(1);
   });
 });
