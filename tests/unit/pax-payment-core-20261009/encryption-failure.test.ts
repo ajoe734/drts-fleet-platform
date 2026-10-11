@@ -22,9 +22,17 @@ vi.mock("node:crypto", async (importOriginal) => {
     createCipheriv: (...args: Parameters<typeof actual.createCipheriv>) => {
       if (fault.stage === "create")
         throw new Error("synthetic_private_crypto_token_detail");
-      const cipher = actual.createCipheriv(...args);
+      // Production only requests aes-256-gcm; overload Parameters otherwise
+      // selects the legacy Cipheriv return type without GCM methods.
+      const cipher = actual.createCipheriv(
+        ...args,
+      ) as import("node:crypto").CipherGCM;
       if (["setAAD", "update", "final", "getAuthTag"].includes(fault.stage)) {
-        const method = fault.stage as "setAAD" | "update" | "final" | "getAuthTag";
+        const method = fault.stage as
+          | "setAAD"
+          | "update"
+          | "final"
+          | "getAuthTag";
         vi.spyOn(cipher, method).mockImplementation(() => {
           throw new Error("synthetic_private_crypto_token_detail");
         });
@@ -35,7 +43,9 @@ vi.mock("node:crypto", async (importOriginal) => {
 });
 
 const cipherSource = process.env.PAX_PAYMENT_TOKEN_CIPHER_SOURCE;
-const { PaymentTokenCipher }: typeof import("../../../apps/api/src/modules/passenger-app/payment/payment-token-cipher") =
+const {
+  PaymentTokenCipher,
+}: typeof import("../../../apps/api/src/modules/passenger-app/payment/payment-token-cipher") =
   cipherSource
     ? await import(cipherSource)
     : await import("../../../apps/api/src/modules/passenger-app/payment/payment-token-cipher");
@@ -58,7 +68,11 @@ describe("production token encryption with crypto boundary faults", () => {
       fault.stage = stage;
       let failure: unknown;
       try {
-        cipher.encrypt("synthetic_token", "synthetic_owner", "synthetic_method");
+        cipher.encrypt(
+          "synthetic_token",
+          "synthetic_owner",
+          "synthetic_method",
+        );
       } catch (error) {
         failure = error;
       }
@@ -81,9 +95,9 @@ describe("production token encryption with crypto boundary faults", () => {
       "synthetic_owner",
       "synthetic_method",
     );
-    expect(cipher.decrypt(envelope, "synthetic_owner", "synthetic_method")).toBe(
-      "synthetic_token",
-    );
+    expect(
+      cipher.decrypt(envelope, "synthetic_owner", "synthetic_method"),
+    ).toBe("synthetic_token");
     expect(JSON.stringify(envelope)).not.toContain("synthetic_token");
     expect(() =>
       cipher.decrypt(envelope, "synthetic_other_owner", "synthetic_method"),
@@ -141,8 +155,8 @@ describe("production token encryption with crypto boundary faults", () => {
     const stored = repository.completeBinding.mock.calls[0]![2];
     expect(stored).not.toHaveProperty("token");
     expect(JSON.stringify(stored)).not.toContain("synthetic_token_");
-    expect(cipher.decrypt(stored.tokenEnvelope, "synthetic_owner", methodId)).toMatch(
-      /^synthetic_token_/,
-    );
+    expect(
+      cipher.decrypt(stored.tokenEnvelope, "synthetic_owner", methodId),
+    ).toMatch(/^synthetic_token_/);
   });
 });
