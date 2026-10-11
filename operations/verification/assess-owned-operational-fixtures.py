@@ -1295,6 +1295,20 @@ def main():
                 t = traffic[0]
                 require(t.get("revisionName") == ready_revision and t.get("percent") == 100, f"Revision {ready_revision} does not have whole 100% traffic for {s_name}")
 
+                service_containers = val.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+                if s_name == "drts-dev-scanner":
+                    require(len(service_containers) == 2, "Scanner service must have exactly 2 containers")
+                else:
+                    require(len(service_containers) == 1, f"Non-scanner service {s_name} must have exactly 1 container")
+
+                service_implicit = len(service_containers) == 1 and "name" not in service_containers[0]
+                service_c_names = ["0"] if service_implicit else [sc.get("name", str(j)) for j, sc in enumerate(service_containers)]
+                
+                service_image_map = {service_c_names[j]: sc.get("image", "") for j, sc in enumerate(service_containers)}
+                import re as regex_mod
+                for k, img in service_image_map.items():
+                    require(regex_mod.split(r"[@:]", img, maxsplit=1)[0].startswith(f"us-central1-docker.pkg.dev/{PROJECT}/drts/"), f"Invalid service image {img} for {s_name}")
+
                 check_held_window(args)
                 res_rev = run_bounded(["gcloud", "run", "revisions", "describe", ready_revision, "--project", PROJECT, "--region", REGION, "--format=json"], timeout_sec=30)
                 require(res_rev.returncode == 0, f"Failed to describe revision {ready_revision}")
@@ -1382,7 +1396,7 @@ def main():
                             require(digest == p_status["imageDigest"], f"Primary status digest mismatch for {c_name}")
                             
                     # Add to images map using the service key so the consumer gets the expected mapping!
-                    images[service_lookup_key if service_lookup_key != "0" else c_name] = digest
+                    images[service_lookup_key] = digest
                         
                 require(len(images) > 0, f"No images found for {s_name}")
                 if s_name == "drts-dev-scanner":
