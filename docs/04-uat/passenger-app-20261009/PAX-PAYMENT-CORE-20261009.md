@@ -1033,3 +1033,39 @@ Node 22.23.2 / pnpm 10.33.0 / Vitest 4.1.4.
 This is a source checkpoint, not a candidate or handoff. All newly started
 checks must finish and be read before closeout; their final results and published
 identity are recorded in the evidence bundle. No VM product runtime was started.
+
+## 2026-10-11 continuation: retained recovery requests blocked later scans
+
+Baseline `c1132296fe4203296184aa272781714f004fb91a` was freshly equal to local
+HEAD, remote task branch and draft PR #2555. The existing partner harness scope
+blocker and original two acceptance keys remain open.
+
+`PaymentChargeWorker.drain` previously selected the same first 25 un-enqueued
+manual-recovery requests on every poll. A missing/ambiguous/partner route
+correctly retains the request without creating an outbox; a full page of such
+requests therefore prevented later eligible orders from ever reaching the real
+producer. This is scan starvation, separate from any financial retry policy or
+notice lifetime decision.
+
+`PaymentChargeRepository.listRecoveryNoticeOrders` now uses a parameterized UUID
+keyset in order-ID order. The existing worker advances its scan position after a
+completed page and wraps after an empty page. A failed database page read keeps
+the same position. The cursor is ephemeral scan progress only: restart begins a
+new scan; all delivery/request/owner/expiry/claim/sequence authority remains in
+the unchanged production ledger and notice producer. No new timer, claim,
+financial schedule, route, event or delivery acknowledgement is introduced.
+
+| Finding / acceptance                                                  | Actual source and old → repaired result                                                                                                                                                    | Completed command / evidence                                                                                                                                                                                                                                                                                                                           | Limits                                                                                                                                                                     |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Full page of retained non-deliveries starves a later eligible request | Actual PaymentChargeWorker and PaymentChargeRepository; baseline **3 FAIL / 0 SKIP**, repaired **3 PASS / 0 SKIP** for later-page progress, wrap/retry and failed-page cursor preservation | `pnpm exec vitest run tests/unit/pax-payment-core-20261009/recovery-notice-scan.test.ts`: old exit 1, `old-head.log`; same file in `scoped.log`, exit 0                                                                                                                                                                                                | DB page replies and notice processing are external mocks. This tests actual scan orchestration, not SQL execution, PG races or notice delivery                             |
+| Original notice producer/transport and worker controls                | Actual unchanged producer/transport guards, same-client outbox and original worker lifecycle tests                                                                                         | `pnpm exec vitest run tests/unit/pax-payment-core-20261009/recovery-notice-scan.test.ts tests/unit/pax-payment-core-20261009/charge-worker.test.ts tests/unit/pax-payment-core-20261009/recovery-notice-producer.test.ts tests/unit/pax-payment-core-20261009/recovery-notice-transport.test.ts`: **4 files / 51 PASS / 0 SKIP**, exit 0, `scoped.log` | Existing PG/provider/credential/device replies remain synthetic boundaries                                                                                                 |
+| Original two required acceptance keys                                 | **Not recorded**                                                                                                                                                                           | Full regression, publication and CI follow-up are retained in `.local/pax-payment-core-20261011-notice-scan/`, copied to canonical `.local/` before closeout                                                                                                                                                                                           | Exact foreign helper scope/root CI, independent Codex2 review/protected merge, approved real policy/expiry/lawful route and genuine PG/HTTP/FCM/PSP acceptance remain open |
+
+This is another original-task source checkpoint. This dispatch again inherited
+canonical dependency symlinks and omitted generated Husky wrappers. Only the
+canonical generated wrappers were copied into the worktree; `h` matches the
+installed Husky script hash `70200b200ca709b0622784f93839a5b2872333a917a09afddefd7dc2d8cdc680`.
+The Supervisor hooksPath is unchanged; no hook bypass, dependency install or
+canonical dependency mutation was performed. Unit runners may update their
+shared result cache. No product/dev/preview/API/PG/browser/Docker runtime was
+started; the worker lifecycle tests use fake timers and mocked dependencies.

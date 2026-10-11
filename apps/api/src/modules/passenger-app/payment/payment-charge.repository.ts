@@ -477,15 +477,20 @@ export class PaymentChargeRepository {
     );
   }
 
-  async listRecoveryNoticeOrders(limit: number): Promise<string[]> {
+  async listRecoveryNoticeOrders(
+    limit: number,
+    afterOrderId: string | null = null,
+  ): Promise<string[]> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
       throw new Error("payment_batch_invalid");
+    const cursor = afterOrderId === null ? null : paymentMethodId(afterOrderId);
     try {
       const result = await this.database.query(
         `SELECT c.order_id FROM passenger.payment_charge_records c WHERE c.status='manual_recovery' AND c.recovery_notice_requested_at IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM ops.consumer_notification_outbox o WHERE o.outbox_id='pax:payment-recovery:'||c.order_id::text)
-        ORDER BY c.recovery_notice_requested_at,c.order_id LIMIT $1`,
-        [limit],
+        AND ($2::uuid IS NULL OR c.order_id>$2::uuid)
+        ORDER BY c.order_id LIMIT $1`,
+        [limit, cursor],
       );
       return result.rows.map((row) => row.order_id);
     } catch {

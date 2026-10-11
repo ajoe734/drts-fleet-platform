@@ -30,15 +30,17 @@ describe("hosted worker lifecycle with fake clock and mocked processing boundary
 
   it("drains retained notice requests with capture disabled using the existing worker and notice due query", async () => {
     const f = fixture();
+    const noticeOrder = "00000000-0000-4000-8000-000000000061";
+    f.query.mockResolvedValue({ rows: [{ order_id: noticeOrder }] });
     vi.spyOn(f.service, "isCaptureConfigured").mockReturnValue(false);
     vi.spyOn(f.service, "isRecoveryNoticeConfigured").mockReturnValue(true);
     f.worker.onApplicationBootstrap();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.processOrder).not.toHaveBeenCalled();
-    expect(f.processRecoveryNotice).toHaveBeenCalledWith("synthetic_order");
+    expect(f.processRecoveryNotice).toHaveBeenCalledWith(noticeOrder);
     expect(f.query).toHaveBeenCalledWith(
       expect.stringContaining("recovery_notice_requested_at IS NOT NULL"),
-      [25],
+      [25, null],
     );
     await f.worker.onModuleDestroy();
   });

@@ -17,6 +17,10 @@ export class PaymentChargeWorker
   private timer: ReturnType<typeof setInterval> | null = null;
   private inFlight: Promise<void> | null = null;
   private stopping = false;
+  // Scan progress only, never delivery/claim authority. Retained requests with
+  // no lawful route must not monopolize every batch. Wrap after the last page
+  // so earlier requests are retried when their route becomes eligible.
+  private recoveryNoticeAfterOrderId: string | null = null;
   constructor(
     private readonly repository: PaymentChargeRepository,
     private readonly service: PaymentChargeService,
@@ -60,7 +64,10 @@ export class PaymentChargeWorker
       }),
     );
     if (this.service.isRecoveryNoticeConfigured()) {
-      const notices = await this.repository.listRecoveryNoticeOrders(25);
+      const notices = await this.repository.listRecoveryNoticeOrders(
+        25,
+        this.recoveryNoticeAfterOrderId,
+      );
       await Promise.all(
         notices.map(async (orderId) => {
           if (!this.stopping)
@@ -69,6 +76,7 @@ export class PaymentChargeWorker
               .catch(() => undefined);
         }),
       );
+      this.recoveryNoticeAfterOrderId = notices.at(-1) ?? null;
     }
   }
 
