@@ -28,12 +28,13 @@ export class PaymentChargeService {
   constructor(
     private readonly repository: PaymentChargeRepository,
     @Inject(PAYMENT_RUNTIME) private readonly runtime: PaymentRuntime,
-    @Optional() @Inject(PAYMENT_CAPTURE_POLICY) policy?: PaymentCapturePolicy,
+    @Optional()
+    @Inject(PAYMENT_CAPTURE_POLICY)
+    policy?: PaymentCapturePolicy | null,
   ) {
     // No invented financial schedule. Missing policy leaves durable obligations
     // unpaid and never presents money; explicit malformed policy fails startup.
-    this.policy =
-      policy === undefined ? null : validatePaymentCapturePolicy(policy);
+    this.policy = policy == null ? null : validatePaymentCapturePolicy(policy);
   }
 
   @OnEvent(OWNED_MOBILITY_MULTI_TAXI_TRIP_COMPLETED_EVENT, {

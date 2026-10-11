@@ -823,3 +823,46 @@ authoritative recipient/channel and durable delivery integration/test scopes.
 delivery, not a durable financial-notice consumer. The ledger's request marker
 does not satisfy passenger notification. No invented event, tenant, recipient
 fallback or financial schedule can close those remaining requirements.
+
+## 2026-10-11 Supervisor supplement: explicit disabled policy binding
+
+Fresh task slice changed `task_spec_ref` to
+`PAX-PAYMENT-EXACT-RECOVERY-NOTICE-AND-DISABLED-POLICY-BINDING-SUPPLEMENT.md`
+(SHA-256 `86c81f5b55be0a141354279e3d3afa38634beb8c46bae3fb198c762683824365`).
+This authorizes the exact notification integration files and source/config DI
+engineering without numerical decisions. Previous coordination requests above
+are historical evidence; notice implementation can now proceed within those
+seven exact additional files. Actual retry policy and notice expiry remain open.
+
+Encryption checkpoint `561d52b6b7dbeb47808d80f5d8eefa911874ec8b` CI
+`38142871937` completed/read **13 SUCCESS**: formal V0115 migration applied,
+root **7371 PASS / 51 SKIP**, **572 files PASS / 9 SKIP**; API **1667 PASS /
+0 SKIP**, 174 files. Integration `38142871858`: **5 SUCCESS / 12 SKIP**.
+Earlier a97 CI `38142673466`: **11 SUCCESS / 1 CANCELLED / 1 aggregate FAIL**;
+integration `38142673442`: **5 SUCCESS / 12 SKIP**. All four runs ended and
+their full jobs/logs were read and retained under the encryption evidence path.
+These are checkpoints, not candidates or runtime/PG transaction acceptance.
+
+The real PassengerAppModule now registers `PAYMENT_CAPTURE_POLICY` with
+`PAYMENT_RUNTIME` as its factory dependency. `paymentCapturePolicyFromEnv`
+returns null when disabled; the actual service accepts this explicit disabled
+binding. When explicitly enabled, missing/malformed policy or unavailable
+provider/cipher rejects configuration before the service can present money.
+No actual schedule, environment-derived policy, provider default or notice
+lifetime is selected.
+
+| Explicit configuration        | Schema / behavior                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PAX_PAYMENT_CAPTURE_ENABLED` | Missing or literal `false`: disabled; literal `true`: requires explicit validated policy and usable runtime; other values reject configuration                                                                                                                                                                                                                 |
+| `PAX_PAYMENT_CAPTURE_POLICY`  | JSON object with exactly `retryDelaysMs` (array of nonnegative safe integer milliseconds), `retryDefinitiveDeclines` (boolean), `unknownReadbackDelaysMs` (array of nonnegative safe integer milliseconds). No default object or schedule. Explicit arrays retain the existing validator semantics; unknown acknowledgement remains original-key readback only |
+| Runtime prerequisite          | Original selected provider available plus configured token cipher. Existing production fake prohibition remains enforced by the runtime factory                                                                                                                                                                                                                |
+
+| Finding / acceptance                                        | Actual source and old → new                                                                                                                                                                                                                               | Completed evidence / limits                                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Module's policy injection seam unreachable                  | Immutable 561d module's real registrations through Nest injector: **1 FAIL / 16 filter SKIP**, exit 1, missing factory; new actual module/runtime/policy factory/service resolution: **17 PASS / 0 SKIP**, exit 0                                         | API `payment-capture-config.test.ts`; `PAX_PAYMENT_PASSENGER_MODULE_SOURCE="$PWD/.local/pax-payment-core-20261011-policy-binding/passenger-app-module-561d.ts" pnpm --filter @drts/api exec vitest run tests/unit/payment-capture-config.test.ts -t 'resolves an explicitly enabled synthetic'`, `old-module-probe.log`; unfiltered current `config-final.log`. Relocated immutable source changes only import resolution |
+| Legitimate synthetic enabled execution and disabled refusal | Real Nest injector, module factories, cipher, PaymentChargeService and fake PSP; repository/session replies are mocked external persistence. Enabled test reaches actual capture/finish; disabled with the same unpaid charge calls neither begin nor PSP | No application/context bootstrap, worker, HTTP, DB or network. Synthetic schedule only; real provider/PG/financial acceptance is not implied                                                                                                                                                                                                                                                                              |
+| Original two required acceptance keys                       | **Not recorded**; DI source seam is repaired, actual policy decisions and recovery notice source still outstanding                                                                                                                                        | Prior full source/fault matrices remain binding; independent exact-SHA review/merge and external runtime gates pending                                                                                                                                                                                                                                                                                                    |
+
+Policy evidence: `.local/pax-payment-core-20261011-policy-binding/`, backed up
+to canonical `.local/` before closeout. Broader checks and exact checkpoint
+publication will be recorded there after completion. No candidate handoff.

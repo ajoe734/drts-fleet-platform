@@ -43,6 +43,9 @@ import { PaymentChargeWorker } from "./payment/payment-charge.worker";
 import { PaymentRefundController } from "./payment/payment-refund.controller";
 import { PaymentRefundRepository } from "./payment/payment-refund.repository";
 import { PaymentRefundService } from "./payment/payment-refund.service";
+import { PAYMENT_CAPTURE_POLICY } from "./payment/payment-capture.policy";
+import { paymentCapturePolicyFromEnv } from "./payment/payment-capture.config";
+import type { PaymentRuntime } from "./payment/payment-runtime.config";
 
 @Global()
 @Module({
@@ -81,6 +84,12 @@ import { PaymentRefundService } from "./payment/payment-refund.service";
     {
       provide: PAYMENT_RUNTIME,
       useFactory: () => paymentRuntimeFromEnv(process.env),
+    },
+    {
+      provide: PAYMENT_CAPTURE_POLICY,
+      inject: [PAYMENT_RUNTIME],
+      useFactory: (runtime: PaymentRuntime) =>
+        paymentCapturePolicyFromEnv(process.env, runtime),
     },
     { provide: SMS_PORT, useClass: UnconfiguredSmsPort },
     { provide: OTP_OPTIONS, useFactory: () => otpOptionsFromEnv(process.env) },
