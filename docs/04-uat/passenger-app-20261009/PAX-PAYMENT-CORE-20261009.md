@@ -207,3 +207,43 @@ The approved retry-policy and Booking test-scope coordination requests above
 remain unresolved; full charge/recovery/refund/booking source is not complete.
 Neither acceptance key, candidate handoff, independent approval nor `done` has
 been recorded.
+
+## Caller regression and UUID reference repair
+
+Adjacent published checkpoint:
+`2b8934762dd117e33ff71bb415cc596527e42751`. Its CI
+[38127675470](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38127675470)
+finished/read: root/workspace typecheck and migration application passed, root
+unit step passed, API units **1665 passed / 1 failed (174 files)**. The sole
+failure was the preexisting Facebook caller test forbidding any billing SQL,
+which now conflicts with the required unpaid authority read. The product guard
+was retained; within the original allowed API test scope, the test now explicitly
+checks the owner's unpaid read and still forbids all financial writes. A new
+negative test invokes the real `FacebookDataDeletionService.delete` and real
+account repository, refuses debt, rolls back, and returns no deletion receipt.
+`pnpm --dir apps/api exec vitest run tests/unit/facebook-data-deletion.repository.test.ts`
+passed **5 tests**, exit 0; `facebook-caller-unit.log`. Old CI failure log is
+`ci-38127675470-failed.log`. Integration run 38127675482 succeeded with the same
+draft skip limitation; it is not full source acceptance.
+
+An additional finding during caller/SQL inspection: the UUID PK admits
+case-equivalent input, while the previous method-removal obligation query compared
+the order JSON string literally. An upper/lowercase spelling could therefore
+miss a reference even though owned-method lookup resolves the same UUID.
+`PaymentMethodService.paymentMethodId` now canonicalizes the UUID, and
+`PaymentMethodRepository.remove` compares both order reference and parameter in
+lowercase. This protects references saved by the current Booking caller, which
+previously forwarded the request spelling verbatim. No payment IDs are invented.
+
+| Finding / requirement               | Actual boundary / repair                                                                                      | Old → new evidence                                                                                                                                                                                      | Commands / limits                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Case-equivalent removal/default IDs | production service `paymentMethodId`, repository `remove`, formal V0115 uuid PK and OwnedOrder JSON reference | Extracted real 2b893476 service forwards uppercase; same service probe expects canonical owner-scoped argument and fails **1 executed test / 1 other probe passes** → current real service probe passes | `PAX_PAYMENT_METHOD_SOURCE="$PWD/.local/pax-payment-core-20261009/payment-method-service-2b893476.ts" pnpm exec vitest run tests/unit/pax-payment-core-20261009/historical-deletion-probe.test.ts`, exit 1, `method-case-old-2b893476.log`; source snapshot imports only rewritten, no active-tree reset. Repository query examined against formal UUID/JSON fields; actual PG case/race behavior still unverified. |
+| Direct Facebook caller / retention  | API unit file, existing real service+repository                                                               | Old blanket no-billing-read assertion fails exact CI SHA → updated no-financial-write and debt refusal cases pass                                                                                       | 5 API caller tests pass, exit 0; PostgreSQL replies are mocked, not a fabricated PG engine. Preserve other-owner/stale-identity/remaining-login/rollback checks.                                                                                                                                                                                                                                                    |
+| Affected regression                 | root Payment + Booking + Account + Facebook suites                                                            | All previous scoped cases plus new normalization probe pass                                                                                                                                             | Same four-suite command, **15 files / 421 tests**, exit 0; `uuid-caller-regression.log`                                                                                                                                                                                                                                                                                                                             |
+| Compiler/lint                       | Current product normalization and caller-test changes                                                         | root and API compiler both pass                                                                                                                                                                         | `pnpm typecheck:root`, exit 0 (`uuid-root-typecheck.log`); `pnpm --filter @drts/api typecheck`, exit 0 (`uuid-api-typecheck.log`); scoped ESLint exit 0 (`uuid-caller-lint.log`)                                                                                                                                                                                                                                    |
+
+Canonical L1/L2 product/spec/execution bundles were also searched for payment
+retry policy during the CI wait; no approved maximum/delay was found. Both
+Supervisor coordination requests remain. These repaired source checkpoints still
+do not implement the pending completion/dual-state/retry/recovery/notice/refund/
+booking work or supply either original acceptance key.

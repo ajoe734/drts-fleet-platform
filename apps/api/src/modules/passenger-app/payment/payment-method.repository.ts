@@ -228,7 +228,7 @@ export class PaymentMethodRepository {
         `SELECT 1 FROM passenger.booking_histories h
          JOIN ops.phase1_owned_orders o ON o.order_id=h.order_id::text
          LEFT JOIN billing.multi_taxi_passenger_payments p ON p.order_id=h.order_id::text
-         WHERE h.drts_passenger_id=$1 AND o.record->>'paymentMethodTokenRef'=$2
+         WHERE h.drts_passenger_id=$1 AND lower(o.record->>'paymentMethodTokenRef')=lower($2)
            AND o.status<>'cancelled' AND (p.status IS NULL OR p.status NOT IN ('captured','refunded')) LIMIT 1`,
         [passengerId, id],
       );

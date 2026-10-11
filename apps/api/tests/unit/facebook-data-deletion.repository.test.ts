@@ -13,6 +13,7 @@ function fixture(
     otherIdentity?: boolean;
     stale?: boolean;
     failWrite?: boolean;
+    unpaid?: boolean;
   } = {},
 ) {
   vi.stubEnv("FACEBOOK_APP_ID", "123456");
@@ -33,6 +34,8 @@ function fixture(
   const client = {
     query: vi.fn(async (sql: string, values: readonly unknown[] = []) => {
       calls.push({ sql, values });
+      if (sql.includes("FROM passenger.booking_histories"))
+        return { rows: options.unpaid ? [{ exists: true }] : [] };
       if (sql.includes("FROM passenger.accounts"))
         return {
           rows: [
@@ -120,9 +123,27 @@ describe("Facebook deletion production repository boundary (PG stub only)", () =
     expect(f.calls.some((c) => c.sql.includes("device_ua=NULL"))).toBe(true);
     expect(f.calls.at(-1)!.sql).toBe("COMMIT");
     expect(f.client.release).toHaveBeenCalledOnce();
-    expect(f.calls.some((c) => /\b(billing|mobility)\./.test(c.sql))).toBe(
-      false,
-    );
+    // PAYMENT-CORE reads the existing billing authority before deleting the
+    // account; the retention invariant is that it never mutates finance rows.
+    const unpaidGuard = f.calls.find((c) =>
+      c.sql.includes("FROM passenger.booking_histories"),
+    )!;
+    expect(unpaidGuard.values).toEqual([f.id, "deletion"]);
+    expect(
+      f.calls
+        .filter((c) => /^(INSERT|UPDATE|DELETE)/.test(c.sql))
+        .some((c) => /\b(billing|mobility)\./.test(c.sql)),
+    ).toBe(false);
+  });
+  it("refuses last-identity provider deletion with debt and returns no completion receipt", async () => {
+    const f = fixture({ unpaid: true });
+    await expect(f.deletion.delete(f.command)).rejects.toMatchObject({
+      code: "pending_payment_block",
+    });
+    expect(f.calls.at(-1)!.sql).toBe("ROLLBACK");
+    expect(f.calls.some((c) => c.sql === "COMMIT")).toBe(false);
+    expect(f.calls.some((c) => c.sql.includes("status='deleted'"))).toBe(false);
+    expect(f.client.release).toHaveBeenCalledOnce();
   });
   it("removes only the specified login when another method remains", async () => {
     const f = fixture({ otherIdentity: true });

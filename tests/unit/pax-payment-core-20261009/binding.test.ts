@@ -182,6 +182,20 @@ describe("production binding service with mocked persistence boundary", () => {
     ).rejects.toMatchObject({ code: "validation_error" });
     expect(f.repository.remove).toHaveBeenCalledOnce();
   });
+  it("normalizes case-equivalent UUIDs before default/removal so references use the stored canonical id", async () => {
+    const f = fixture();
+    const mixed = "ABCDEFAB-ABCD-4ABC-8DEF-ABCDEFABCDEF";
+    await f.service.setDefault(OWNER, mixed);
+    await f.service.remove(OWNER, mixed);
+    expect(f.repository.setDefault).toHaveBeenCalledWith(
+      OWNER,
+      mixed.toLowerCase(),
+    );
+    expect(f.repository.remove).toHaveBeenCalledWith(
+      OWNER,
+      mixed.toLowerCase(),
+    );
+  });
 });
 
 type Call = { sql: string; params: readonly unknown[] | undefined };
