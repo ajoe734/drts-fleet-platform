@@ -63,25 +63,30 @@ export class PaymentTokenCipher {
     passengerId: string,
     methodId: string,
   ): EncryptedPaymentToken {
-    if (typeof token !== "string" || !token || token.length > 4096) invalid();
-    const nonce = randomBytes(12);
-    const cipher = createCipheriv(
-      "aes-256-gcm",
-      this.keys.get(this.activeKeyId)!,
-      nonce,
-    );
-    cipher.setAAD(this.aad(passengerId, methodId, this.activeKeyId));
-    const ciphertext = Buffer.concat([
-      cipher.update(token, "utf8"),
-      cipher.final(),
-    ]);
-    return {
-      version: 1,
-      keyId: this.activeKeyId,
-      nonce: nonce.toString("base64"),
-      ciphertext: ciphertext.toString("base64"),
-      tag: cipher.getAuthTag().toString("base64"),
-    };
+    try {
+      if (typeof token !== "string" || !token || token.length > 4096) invalid();
+      const nonce = randomBytes(12);
+      const cipher = createCipheriv(
+        "aes-256-gcm",
+        this.keys.get(this.activeKeyId)!,
+        nonce,
+      );
+      cipher.setAAD(this.aad(passengerId, methodId, this.activeKeyId));
+      const ciphertext = Buffer.concat([
+        cipher.update(token, "utf8"),
+        cipher.final(),
+      ]);
+      return {
+        version: 1,
+        keyId: this.activeKeyId,
+        nonce: nonce.toString("base64"),
+        ciphertext: ciphertext.toString("base64"),
+        tag: cipher.getAuthTag().toString("base64"),
+      };
+    } catch {
+      // The binding caller must not receive raw crypto errors or their causes.
+      invalid();
+    }
   }
 
   decrypt(

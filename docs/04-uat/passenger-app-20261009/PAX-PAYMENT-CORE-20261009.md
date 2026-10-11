@@ -734,3 +734,35 @@ successful jobs. No local source handoff, independent review, protected merge
 or acceptance is implied by these checks. Original two acceptance keys remain
 unrecorded, with the same approved-policy and notice integration coordination
 requests and hosted PG/HTTP/delivery limits.
+
+## 2026-10-11 encryption error boundary checkpoint
+
+Continuing original owner Codex / reviewer Codex2 from published source
+`bad5d1b42cde73aab49551b362da38e70b1c2917`, still without a candidate.
+Actual `PaymentMethodService.bind` calls `PaymentTokenCipher.encrypt` before
+`PaymentMethodRepository.completeBinding`. Unlike decrypt, encrypt did not
+sanitize errors from nonce generation, cipher construction, AAD, update, final
+or authentication-tag retrieval. This is a raw crypto exception crossing the
+payment boundary under injected faults, not evidence of a real HTTP/log leak.
+Encrypt now uses the existing generic error helper without a retained cause.
+AES-GCM, owner/method/key AAD, envelope, constructors and API contracts are
+unchanged. Callers were searched across apps/packages/tests: binding is the
+production encryption caller; capture uses decrypt; runtime constructs cipher.
+
+Evidence: `.local/pax-payment-core-20261011-encryption-errors/` in this worktree,
+backed up at the same canonical `.local/` path before closeout. All values are
+synthetic. Crypto fault injection wraps the actual Node crypto boundary, while
+the production cipher and binding service execute. Binding's storage boundary
+is mocked; this does not verify real PostgreSQL persistence or transaction races.
+
+| Finding / acceptance | Source and boundary | Old → repaired result | Command / completed evidence | Remaining limit |
+| --- | --- | --- | --- | --- |
+| Raw encryption failure on nonce/create/setAAD/update/final/getAuthTag | Real `PaymentTokenCipher.encrypt`, external crypto faults only | Immutable bad5d1b: **8 FAIL / 0 SKIP**, exit 1; repaired cipher/binding/security files: **60 PASS / 0 SKIP**, exit 0 | `PAX_PAYMENT_TOKEN_CIPHER_SOURCE="$PWD/.local/pax-payment-core-20261011-encryption-errors/payment-token-cipher-bad5.ts" pnpm exec vitest run tests/unit/pax-payment-core-20261009/encryption-failure.test.ts`, `old-immutable-final.log`; same test plus `security-boundary.test.ts` and `binding.test.ts` without override, `fixed-narrow-final.log`. Immutable source extracted with git show, unchanged. Initial 7-case old failure and 59-case narrow pass retained in `old-immutable.log` / `fixed-narrow.log` | Injected error confidentiality, not real crypto failure/HTTP/log evidence |
+| Valid encryption and same-claim binding replay after rejected encryption | Actual AES-GCM/decrypt and real service/fake PSP; only storage replies mocked | Successful ciphertext decrypts for original owner and rejects foreign owner; failed binding does not complete storage or mutate outcome; recovery replays original key and stores only encrypted token | Included above; no raw error message/stack/cause, no plaintext token property or value persisted | No real PSP or PG |
+| `pax-payment_bind_charge_and_states` | Original bind/capture/refund and billing authority | **Not recorded** | Prior source/migration/reproduction evidence remains binding; broader checks and publication identity recorded below/with local evidence | Approved actual capture policy/binding, hosted PG/HTTP, independent exact-SHA review and protected merge pending |
+| `pax-payment_security_and_recovery` | Symmetric encrypt/decrypt error confidentiality; existing guards retained | **Not recorded** | Existing fake-production, token/AAD and account/unpaid tests remain applicable | Typed notice contract/recipient/transport scope and delivery plus original external PSP gate remain pending |
+
+No financial defaults or notification event invented; no VM product runtime.
+This repair checkpoint does not authorize source handoff or satisfy either
+original acceptance key. Completed broader checks, exact publication identity
+and hosted results will be retained in the evidence directory before closeout.
