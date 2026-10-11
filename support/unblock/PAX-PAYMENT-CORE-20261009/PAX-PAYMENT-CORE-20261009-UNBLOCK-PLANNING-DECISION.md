@@ -107,7 +107,7 @@ handoff/merge; `resolved_parent_at` is left to the real merge transaction:
 ```json
 {
   "resolved_parent_status": "blocked",
-  "resolved_parent_waiting_for": "Supervisor",
+  "resolved_parent_waiting_for": "Claude",
   "resolved_parent_next": "Planning route only: obtain approved retryDelaysMs/retryDefinitiveDeclines/unknownReadbackDelaysMs and explicit notice expiry/provenance; coordinate existing QA hosted Payment-specific PG/HTTP scope and Device API/PSP prerequisite sequencing. Preserve bed2/gen764 review/CI/merge fc77, original roles/keys/dependencies and disabled/failclosed binding. No acceptance resume until actual inputs/evidence change. See support/unblock/PAX-PAYMENT-CORE-20261009/PAX-PAYMENT-CORE-20261009-UNBLOCK-PLANNING-DECISION.md."
 }
 ```
@@ -117,6 +117,14 @@ without resume, acceptance recording or changing candidate evidence. Fresh CLI
 readback of both tasks is required. Absent blocked disposition, the current
 release `apply_unblock_parent_resolution` defaults a blocked parent to `todo`;
 planning documentation alone cannot safely complete this helper lifecycle.
+
+The waiting-for lane is Claude (Guide §3 governance/arbitration), who routes
+the actual operator action to Supervisor; this does not reassign either task.
+The first blocked-status command used incorrect argument order and was rejected
+with exit 1 before mutation. The corrected command exposed that `Supervisor`
+is not a registered waiting-for agent (exit 1, `Unknown agent: Supervisor`).
+The proposed metadata was therefore corrected to the registered Claude lane
+before any handoff. The Supervisor operator remains responsible for the writes.
 
 ## Finding-level verification and delivery
 

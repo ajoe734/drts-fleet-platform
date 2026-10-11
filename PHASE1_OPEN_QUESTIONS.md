@@ -31,7 +31,7 @@ when approved inputs and retrievable authorized evidence actually change.
 
 The dispatched helper's parent-note and metadata commands were rejected by the
 release guard. Before helper handoff/merge, genuine Supervisor must record
-`resolved_parent_status: blocked`, `resolved_parent_waiting_for: Supervisor`
+`resolved_parent_status: blocked`, `resolved_parent_waiting_for: Claude`
 and the packet's concrete `resolved_parent_next`, then update the parent's
 next step without resuming it. This prerequisite is OPEN until readback proves
 it was written. See the [decision request, source evidence, routing matrix and
