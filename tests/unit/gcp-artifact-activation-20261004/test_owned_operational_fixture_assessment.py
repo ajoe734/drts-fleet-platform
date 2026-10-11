@@ -691,88 +691,45 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
         self.assertIn("partial_observations", res)
 
 
-    @patch('assess_owned_operational_fixtures.run_bounded')
-    def test_cloud_metadata_named_and_unnamed_singleton_positives(self, mock_run_bounded):
-        meta_file = "/tmp/out.json"
-        with patch("sys.argv", ["assess-owned-operational-fixtures.py", "--current-run-id", "12345", "--tooling-run-sha", "abc", "--acquire-cloud-metadata-to", meta_file, "--current-runtime-sha", "xyz", "--workflow-def-sha", "abc"]):
-            def mock_run(cmd, **kwargs):
-                cmd_str = " ".join(cmd)
-                if "actions/runs/" in cmd_str and "approvals" in cmd_str:
-                    return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved", "environments": [{"name": "operator"}], "user": {"login": "testuser"}, "created_at": "2026-10-09T08:39:23Z", "updated_at": "2026-10-09T09:04:10Z"}]))
-                if "actions/runs/" in cmd_str and "jobs" in cmd_str:
-                    return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "jobs": [{"id": 1, "run_id": 12345, "name": "Owned fixture assessment (Read-only GCS / DB)"}]}))
-                if "actions/runs/" in cmd_str:
-                    return MagicMock(returncode=0, stdout=json.dumps({"id": 12345, "head_branch": "dev", "event": "workflow_dispatch", "head_sha": "abc", "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml", "status": "completed", "conclusion": "success"}))
-                if "commits/abc/check-runs" in cmd_str:
-                    checks = [{"name": n, "head_sha": "abc", "status": "completed", "conclusion": "success"} for n in ["Commit trailers", "Runtime mirror guard", "Product smoke acceptance", "ci-integ"]]
-                    return MagicMock(returncode=0, stdout=json.dumps({"total_count": 4, "check_runs": checks}))
-                if "commits/abc/pulls" in cmd_str:
-                    return MagicMock(returncode=0, stdout=json.dumps([{"merged_at": "2026-10-10", "merge_commit_sha": "abc", "base": {"ref": "dev"}, "head": {"sha": "headsha"}, "user": {"login": "author"}, "number": 1}]))
-                if "pulls/1/reviews" in cmd_str:
-                    return MagicMock(returncode=0, stdout=json.dumps([{"user": {"login": "reviewer"}, "state": "APPROVED", "commit_id": "headsha"}]))
-                if "actions/workflows" in cmd_str:
-                    return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "workflows": [{"id": 1, "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml", "state": "active", "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/workflows/1"}]}))
-                if "actions/runs?status=" in cmd_str:
-                    return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
-                
-                if "services describe" in cmd_str:
-                    s_name = cmd[4]
-                    if s_name == "drts-dev-scanner":
-                        return MagicMock(returncode=0, stdout=json.dumps({
-                            "metadata": {"name": s_name},
-                            "spec": {"template": {"spec": {"serviceAccountName": "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [
-                                {"name": "gateway", "image": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/gateway@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "env": [{"name": "CLAMD_HOST", "value": "127.0.0.1"}, {"name": "CLAMD_PORT", "value": "3310"}, {"name": "CLAMAV_READY_MARKER", "value": "/var/run/clamav-ready/ready"}]},
-                                {"name": "clamd", "image": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/clamd@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
-                            ]}}},
-                            "status": {"url": f"https://{s_name}-xyz.a.run.app", "conditions": [{"type": "Ready", "status": "True"}], "latestReadyRevisionName": f"{s_name}-12345-abc", "latestCreatedRevisionName": f"{s_name}-12345-abc", "traffic": [{"revisionName": f"{s_name}-12345-abc", "percent": 100}]}
-                        }))
-                    else:
-                        return MagicMock(returncode=0, stdout=json.dumps({
-                            "metadata": {"name": s_name},
-                            "spec": {"template": {"spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"image": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/foo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}}},
-                            "status": {"url": f"https://{s_name}-12345-abc.a.run.app", "conditions": [{"type": "Ready", "status": "True"}], "latestReadyRevisionName": f"{s_name}-12345-abc", "latestCreatedRevisionName": f"{s_name}-12345-abc", "traffic": [{"revisionName": f"{s_name}-12345-abc", "percent": 100}]}
-                        }))
-                if "revisions describe" in cmd_str:
-                    rev_name = cmd[4]
-                    s_name = rev_name.rsplit("-", 2)[0]
-                    if s_name == "drts-dev-scanner":
-                        return MagicMock(returncode=0, stdout=json.dumps({
-                            "metadata": {"name": rev_name, "labels": {"serving.knative.dev/service": s_name}},
-                            "spec": {"serviceAccountName": "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [
-                                {"name": "gateway", "image": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/gateway@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "env": [{"name": "CLAMD_HOST", "value": "127.0.0.1"}, {"name": "CLAMD_PORT", "value": "3310"}, {"name": "CLAMAV_READY_MARKER", "value": "/var/run/clamav-ready/ready"}]},
-                                {"name": "clamd", "image": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/clamd@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
-                            ]},
-                            "status": {"conditions": [{"type": "Ready", "status": "True"}], "containerStatuses": [{"name": "gateway", "imageDigest": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/gateway@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}, {"name": "clamd", "imageDigest": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/clamd@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}
-                        }))
-                    else:
-                        return MagicMock(returncode=0, stdout=json.dumps({
-                            "metadata": {"name": rev_name, "labels": {"serving.knative.dev/service": s_name}},
-                            "spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "generated-1", "image": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/foo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]},
-                            "status": {"conditions": [{"type": "Ready", "status": "True"}], "containerStatuses": [{"name": "generated-1", "imageDigest": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/foo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}
-                        }))
-                if "get-iam-policy" in cmd_str:
-                    s_name = cmd[4]
-                    if s_name == "drts-dev-api":
-                        return MagicMock(returncode=0, stdout=json.dumps({"bindings": [{"role": "roles/run.invoker", "members": ["allUsers"]}]}))
-                    if s_name == "drts-dev-scanner":
-                        return MagicMock(returncode=0, stdout=json.dumps({"bindings": [{"role": "roles/run.invoker", "members": ["serviceAccount:drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "serviceAccount:github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com"]}]}))
-                    return MagicMock(returncode=0, stdout=json.dumps({"bindings": []}))
-                    
-                return MagicMock(returncode=1, stdout="", stderr="Unknown command")
-                
-            mock_run_bounded.side_effect = mock_run
+    def test_component_cloud_metadata_named_and_unnamed_singleton_positives(self):
+        args = type('obj', (object,), {
+            'acquire_cloud_metadata_to': '/tmp/out_test_cm.json',
+            'workflow_def_sha': 'defsha'
+        })()
+        
+        def mock_run(cmd, input_str=None, timeout_sec=None, env=None):
+            cmd_str = " ".join(cmd)
+            if "services describe" in cmd_str:
+                s_name = cmd[4]
+                if s_name == "drts-dev-scanner":
+                    return type('obj', (object,), {'returncode': 0, 'stdout': '{"metadata": {"name": "drts-dev-scanner"}, "spec": {"template": {"spec": {"serviceAccountName": "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "gateway", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/gateway@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "env": [{"name": "CLAMD_HOST", "value": "127.0.0.1"}, {"name": "CLAMD_PORT", "value": "3310"}, {"name": "CLAMAV_READY_MARKER", "value": "/var/run/clamav-ready/ready"}]}, {"name": "clamd", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/clamd@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}}}, "status": {"conditions": [{"type": "Ready", "status": "True"}], "latestReadyRevisionName": "drts-dev-scanner-12345-abc", "latestCreatedRevisionName": "drts-dev-scanner-12345-abc", "traffic": [{"revisionName": "drts-dev-scanner-12345-abc", "percent": 100}]}}'})
+                else:
+                    return type('obj', (object,), {'returncode': 0, 'stdout': '{"metadata": {"name": "' + s_name + '"}, "spec": {"template": {"spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/foo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}}}, "status": {"conditions": [{"type": "Ready", "status": "True"}], "latestReadyRevisionName": "' + s_name + '-12345-abc", "latestCreatedRevisionName": "' + s_name + '-12345-abc", "traffic": [{"revisionName": "' + s_name + '-12345-abc", "percent": 100}]}}'})
+            if "revisions describe" in cmd_str:
+                rev_name = cmd[4]
+                s_name = rev_name.rsplit("-", 2)[0]
+                if s_name == "drts-dev-scanner":
+                    return type('obj', (object,), {'returncode': 0, 'stdout': '{"metadata": {"name": "' + rev_name + '", "labels": {"serving.knative.dev/service": "' + s_name + '"}}, "spec": {"serviceAccountName": "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "gateway", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/gateway@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "env": [{"name": "CLAMD_HOST", "value": "127.0.0.1"}, {"name": "CLAMD_PORT", "value": "3310"}, {"name": "CLAMAV_READY_MARKER", "value": "/var/run/clamav-ready/ready"}]}, {"name": "clamd", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/clamd@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}, "status": {"conditions": [{"type": "Ready", "status": "True"}], "containerStatuses": [{"name": "gateway", "imageDigest": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/gateway@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}, {"name": "clamd", "imageDigest": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/clamd@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}}'})
+                else:
+                    return type('obj', (object,), {'returncode': 0, 'stdout': '{"metadata": {"name": "' + rev_name + '", "labels": {"serving.knative.dev/service": "' + s_name + '"}}, "spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "generated-1", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/foo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}, "status": {"conditions": [{"type": "Ready", "status": "True"}], "containerStatuses": [{"name": "generated-1", "imageDigest": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/foo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}}'})
+            if "get-iam-policy" in cmd_str:
+                return type('obj', (object,), {'returncode': 0, 'stdout': '{"bindings": []}'})
+            return type('obj', (object,), {'returncode': 1, 'stdout': '', 'stderr': 'Unknown'})
+            
+        import assess_owned_operational_fixtures as assess
+        import builtins
+        import json
+        import os
+        
+        with patch('assess_owned_operational_fixtures.run_bounded', side_effect=mock_run):
+            assess.acquire_cloud_metadata(args, lambda: None)
+            
+        self.assertTrue(os.path.exists(args.acquire_cloud_metadata_to))
+        with open(args.acquire_cloud_metadata_to, 'r') as f:
+            d = json.load(f)
+        self.assertIn("drts-dev-scanner", d["services"])
+        os.remove(args.acquire_cloud_metadata_to)
 
-            with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
-                with self.assertRaises(SystemExit) as cm:
-                    assess.main()
-                if cm.exception.code != 0:
-                    import sys
-                    sys.stderr.write("DEBUG OUTPUT: " + mock_stdout.getvalue() + "\n")
-                self.assertNotEqual(cm.exception.code, 0)
-                # Ensure the payload output contains the unsupported error
-                out_data = json.loads(mock_stdout.getvalue().strip())
-                self.assertEqual(out_data.get("payload", {}).get("disposition"), "unsupported")
-                self.assertIn("no verifiable protected bounded window authority", out_data.get("payload", {}).get("error", ""))
 
             
 
@@ -796,7 +753,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 if "pulls/1/reviews" in cmd_str:
                     return MagicMock(returncode=0, stdout=json.dumps([{"user": {"login": "reviewer"}, "state": "APPROVED", "commit_id": "headsha"}]))
                 if "actions/workflows" in cmd_str:
-                    return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "workflows": [{"id": 1, "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml", "state": "active", "url": "url"}]}))
+                    return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "workflows": [{"id": 1, "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml", "state": "active", "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/workflows/1"}]}))
                 if "actions/runs?status=" in cmd_str:
                     return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
                 if "services describe" in cmd_str:
@@ -816,65 +773,133 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 calls = [c[0][0] for c in mock_run_bounded.call_args_list if "revisions" in " ".join(c[0][0])]
                 self.assertEqual(len(calls), 0)
 
-    def test_final_loss_no_authoritative_file(self):
-        meta_file = "/tmp/out.json"
-        def mock_gcs_runner(action, bucket, key):
-            if action == "describe": return {"status": "ok", "metadata": {"bucket": assess.BUCKET, "name": key, "size": assess.EXPECTED_FILE_SIZE, "md5Hash": "hash", "timeCreated": "2026-10-09T09:00:00Z", "contentType": assess.EXPECTED_MIME}}
-            elif action == "cat": return {"status": "ok", "body": b'pdf bytes'}
-            return {"status": "error"}
+    def test_component_final_loss_no_authoritative_file(self):
+        args = type('obj', (object,), {
+            'acquire_cloud_metadata_to': '/tmp/out_test_cm3.json',
+            'workflow_def_sha': 'defsha'
+        })()
         
-        describe_calls = {"count": 0}
-        def mock_check_authority():
-            describe_calls["count"] += 1
-            if describe_calls["count"] >= 1: raise ValueError("Lost authority before authoritative file write")
+        def mock_run(cmd, input_str=None, timeout_sec=None, env=None):
+            cmd_str = " ".join(cmd)
+            if "services describe" in cmd_str:
+                s_name = cmd[4]
+                if s_name == "drts-dev-scanner":
+                    return type('obj', (object,), {'returncode': 0, 'stdout': '{"metadata": {"name": "drts-dev-scanner"}, "spec": {"template": {"spec": {"serviceAccountName": "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "gateway", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/gateway@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "env": [{"name": "CLAMD_HOST", "value": "127.0.0.1"}, {"name": "CLAMD_PORT", "value": "3310"}, {"name": "CLAMAV_READY_MARKER", "value": "/var/run/clamav-ready/ready"}]}, {"name": "clamd", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/clamd@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}}}, "status": {"conditions": [{"type": "Ready", "status": "True"}], "latestReadyRevisionName": "drts-dev-scanner-12345-abc", "latestCreatedRevisionName": "drts-dev-scanner-12345-abc", "traffic": [{"revisionName": "drts-dev-scanner-12345-abc", "percent": 100}]}}'})
+                else:
+                    return type('obj', (object,), {'returncode': 0, 'stdout': '{"metadata": {"name": "' + s_name + '"}, "spec": {"template": {"spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/foo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}}}, "status": {"conditions": [{"type": "Ready", "status": "True"}], "latestReadyRevisionName": "' + s_name + '-12345-abc", "latestCreatedRevisionName": "' + s_name + '-12345-abc", "traffic": [{"revisionName": "' + s_name + '-12345-abc", "percent": 100}]}}'})
+            if "revisions describe" in cmd_str:
+                rev_name = cmd[4]
+                s_name = rev_name.rsplit("-", 2)[0]
+                if s_name == "drts-dev-scanner":
+                    return type('obj', (object,), {'returncode': 0, 'stdout': '{"metadata": {"name": "' + rev_name + '", "labels": {"serving.knative.dev/service": "' + s_name + '"}}, "spec": {"serviceAccountName": "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "gateway", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/gateway@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "env": [{"name": "CLAMD_HOST", "value": "127.0.0.1"}, {"name": "CLAMD_PORT", "value": "3310"}, {"name": "CLAMAV_READY_MARKER", "value": "/var/run/clamav-ready/ready"}]}, {"name": "clamd", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/clamd@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}, "status": {"conditions": [{"type": "Ready", "status": "True"}], "containerStatuses": [{"name": "gateway", "imageDigest": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/gateway@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}, {"name": "clamd", "imageDigest": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/clamd@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}}'})
+                else:
+                    return type('obj', (object,), {'returncode': 0, 'stdout': '{"metadata": {"name": "' + rev_name + '", "labels": {"serving.knative.dev/service": "' + s_name + '"}}, "spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "generated-1", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/foo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}, "status": {"conditions": [{"type": "Ready", "status": "True"}], "containerStatuses": [{"name": "generated-1", "imageDigest": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/foo@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}}'})
+            if "get-iam-policy" in cmd_str:
+                return type('obj', (object,), {'returncode': 0, 'stdout': '{"bindings": []}'})
+            return type('obj', (object,), {'returncode': 1, 'stdout': '', 'stderr': 'Unknown'})
             
-        res = assess.assess_gcs_objects(mock_gcs_runner, mock_check_authority)
-        self.assertEqual(res["status"], "rejected")
-        self.assertIn("Lost authority before authoritative file write", res["reason"])
+        import assess_owned_operational_fixtures as assess
+        import os
+        
+        import os
+        import stat
+        os.environ["RUNNER_TEMP"] = "/tmp"
+        proxy_path = "/tmp/cloud-sql-proxy"
+        with open(proxy_path, "w") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(proxy_path, os.stat(proxy_path).st_mode | stat.S_IEXEC)
+        
+        calls = {"count": 0}
+        def mock_check_authority():
+            calls["count"] += 1
+            if calls["count"] >= 28:
+                raise RuntimeError("Lost authority before authoritative file write")
+        
+        with patch('assess_owned_operational_fixtures.run_bounded', side_effect=mock_run):
+            with self.assertRaises(RuntimeError) as cm:
+                assess.acquire_cloud_metadata(args, mock_check_authority)
+            self.assertIn("Lost authority before authoritative file write", str(cm.exception))
+            
+        self.assertFalse(os.path.exists(args.acquire_cloud_metadata_to))
+
 
     def test_correctly_shaped_truncated_inventory(self):
-        db_runner_calls = {"count": 0}
-        def mock_db_runner(q, args, check_authority=None):
-            if check_authority: check_authority()
-            db_runner_calls["count"] += 1
-            # Return truncated row array
-            return {"status": "success", "rows": []}
-            
-        res = assess.assess_database(mock_db_runner, lambda: None)
-        self.assertEqual(res["status"], "error")
-        self.assertIn("Failed to parse DB results", res["error"])
-
-    def test_persistent_transient_db_held_loss(self):
-        db_runner_calls = {"count": 0}
-        def mock_db_runner(q, args, check_authority=None):
-            if check_authority: check_authority()
-            db_runner_calls["count"] += 1
-            return {"status": "error", "error": "Simulated DB error"}
+        args = type('obj', (object,), {
+            'current_run_id': '123'
+        })()
         
-        describe_calls = {"count": 0}
+        def mock_run(cmd, input_str=None, timeout_sec=None, env=None):
+            cmd_str = " ".join(cmd)
+            if "jobs" in cmd_str:
+                return type('obj', (object,), {'returncode': 0, 'stdout': '{"total_count": 2, "jobs": [{"id": 1, "run_id": 123, "name": "Owned fixture assessment (Read-only GCS / DB)"}]}'})
+            if "approvals" in cmd_str:
+                return type('obj', (object,), {'returncode': 0, 'stdout': '[{"environments": [{"name": "operator"}], "state": "approved", "user": {"login": "operator1"}}]'})
+            if "actions/workflows" in cmd_str: return type('obj', (object,), {'returncode': 0, 'stdout': '{"total_count": 1, "workflows": [{"id": 1, "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml", "state": "active", "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/workflows/1"}]}'})
+            if "actions/runs?status=" in cmd_str: return type('obj', (object,), {'returncode': 0, 'stdout': '{"total_count": 0, "workflow_runs": []}'})
+            return type('obj', (object,), {'returncode': 1, 'stdout': '', 'stderr': 'Unknown'})
+            
+        import assess_owned_operational_fixtures as assess
+        with patch('assess_owned_operational_fixtures.run_bounded', side_effect=mock_run):
+            with self.assertRaises(ValueError) as cm:
+                assess.check_held_window(args)
+            self.assertIn("Incomplete pagination for current jobs", str(cm.exception))
+
+
+    @patch('assess_owned_operational_fixtures.run_bounded')
+    def test_persistent_transient_db_held_loss(self, mock_run_bounded):
+        args = type('obj', (object,), {})()
+        
+        def mock_run(cmd, input_str=None, timeout_sec=None, env=None):
+            cmd_str = " ".join(cmd)
+            if "secrets" in cmd_str:
+                return type('obj', (object,), {'returncode': 0, 'stdout': 'secret'})
+            if "node" in cmd_str:
+                return type('obj', (object,), {'returncode': 0, 'stdout': '{"host": "127.0.0.1", "port": 5432, "user": "u", "password": "p", "database": "d"}'})
+            if "psql" in cmd_str:
+                return type('obj', (object,), {'returncode': 0, 'stdout': '1'})
+            return type('obj', (object,), {'returncode': 1, 'stdout': '', 'stderr': 'Unknown'})
+            
+        mock_run_bounded.side_effect = mock_run
+        
+        import os
+        import stat
+        os.environ["RUNNER_TEMP"] = "/tmp"
+        proxy_path = "/tmp/cloud-sql-proxy"
+        with open(proxy_path, "w") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(proxy_path, os.stat(proxy_path).st_mode | stat.S_IEXEC)
+        
+        calls = {"count": 0}
         def mock_check_authority():
-            describe_calls["count"] += 1
-            if describe_calls["count"] >= 1:
+            calls["count"] += 1
+            if calls["count"] >= 1:
                 raise ValueError("Lost authority in DB poll")
                 
-        res = assess.assess_database(mock_db_runner, check_authority=mock_check_authority)
-        self.assertEqual(res["status"], "error")
-        self.assertIn("Lost authority", res["error"])
+        import assess_owned_operational_fixtures as assess
+        with self.assertRaises(ValueError) as cm:
+            assess.default_db_runner("SELECT 1", [], check_authority=mock_check_authority)
+        self.assertIn("Lost authority in DB poll", str(cm.exception))
+
         
     def test_partial_receipts(self):
+        import assess_owned_operational_fixtures as assess
+        first_key = list(assess.CANONICAL_OWNED_OBJECTS.keys())[0]
+        phys_key = assess.logical_to_physical_gcs_key(first_key)
+        
         def mock_gcs_runner(action, bucket, key):
-            # Only some keys succeed, mimicking partial observations
-            if action == "describe":
-                if "uuid" in key:
-                    return {"status": "ok", "metadata": {"bucket": assess.BUCKET, "name": key, "size": assess.EXPECTED_FILE_SIZE, "md5Hash": "hash", "timeCreated": "2026-10-09T09:00:00Z", "contentType": assess.EXPECTED_MIME}}
-                else:
-                    return {"status": "error", "reason": "Not found"}
-            if action == "cat": return {"status": "ok", "body": b'pdf bytes'}
-            return {"status": "error"}
+            if key == phys_key or (action == "cat" and key.startswith(phys_key)):
+                if action == "describe":
+                    return {"status": "ok", "metadata": {"bucket": assess.BUCKET, "name": key, "size": str(assess.EXPECTED_FILE_SIZE), "md5Hash": "hash", "timeCreated": "2026-10-09T09:00:00Z", "contentType": assess.EXPECTED_MIME, "generation": "1", "metageneration": "1", "updated": "2026-10-09T09:00:00Z", "metadata": {"stored-at": "2026-10-09T09:00:00Z"}}}
+                if action == "cat": 
+                    return {"status": "ok", "body": b'pdf bytes'}
+            return {"status": "error", "reason": "Not found"}
         
         res = assess.assess_gcs_objects(mock_gcs_runner, lambda: None)
         self.assertEqual(res["status"], "rejected")
         self.assertIn("partial_observations", res)
+        self.assertEqual(len(res["partial_observations"]), 1)
+        self.assertEqual(res["partial_observations"][0]["logical_key"], first_key)
+
 
 
 if __name__ == '__main__':

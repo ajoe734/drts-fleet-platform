@@ -1229,6 +1229,222 @@ def verify_authority(args):
     
     check_held_window(args)
 
+def acquire_cloud_metadata(args, check_authority=None):
+    if check_authority is None:
+        def check_authority():
+            check_held_window(args)
+    services = [
+        "drts-channel-partner-portal-web", "drts-dev-api", "drts-dev-bank-console-web",
+        "drts-dev-enterprise-dispatch-web", "drts-dev-fleet-partner-portal-web",
+        "drts-dev-ops-console-web", "drts-dev-platform-admin-web", "drts-dev-scanner",
+        "drts-dev-tenant-console-web"
+    ]
+    import datetime
+    metadata = {
+        "schema": "dev-readonly-cloud-metadata-v1",
+        "observed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "definition_sha": args.workflow_def_sha,
+        "project": PROJECT,
+        "region": REGION,
+        "services": {}
+    }
+    for s_name in services:
+        check_authority()
+        res = run_bounded(["gcloud", "run", "services", "describe", s_name, "--project", PROJECT, "--region", REGION, "--format=json"], timeout_sec=30)
+        require(res.returncode == 0, f"Failed to describe {s_name}")
+        val = json.loads(res.stdout)
+
+        # Validate exact service identity and Ready
+        require(val.get("metadata", {}).get("name") == s_name, f"Service name mismatch for {s_name}")
+        service_conditions = val.get("status", {}).get("conditions", [])
+        ready_cond = next((c for c in service_conditions if c.get("type") == "Ready"), None)
+        require(ready_cond and ready_cond.get("status") == "True", f"Service {s_name} is not Ready")
+
+        ready_revision = val.get("status", {}).get("latestReadyRevisionName")
+        require(ready_revision is not None, f"No ready revision for {s_name}")
+        created_revision = val.get("status", {}).get("latestCreatedRevisionName")
+        require(ready_revision == created_revision, f"Ready revision {ready_revision} does not match created {created_revision} for {s_name}")
+        
+        require(ready_revision.startswith(s_name + "-"), f"Foreign revision name {ready_revision} for {s_name}")
+
+        traffic = val.get("status", {}).get("traffic", [])
+        require(len(traffic) == 1, f"Expected exactly 1 traffic allocation for {s_name}")
+        t = traffic[0]
+        require(t.get("revisionName") == ready_revision and t.get("percent") == 100, f"Revision {ready_revision} does not have whole 100% traffic for {s_name}")
+
+        service_containers = val.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        if s_name == "drts-dev-scanner":
+            require(len(service_containers) == 2, "Scanner service must have exactly 2 containers")
+        else:
+            require(len(service_containers) == 1, f"Non-scanner service {s_name} must have exactly 1 container")
+
+        service_implicit = len(service_containers) == 1 and "name" not in service_containers[0]
+        service_c_names = ["0"] if service_implicit else [sc.get("name", str(j)) for j, sc in enumerate(service_containers)]
+        
+        service_image_map = {service_c_names[j]: sc.get("image", "") for j, sc in enumerate(service_containers)}
+        import re as regex_mod
+        for k, img in service_image_map.items():
+            require(isinstance(img, str) and regex_mod.fullmatch(r"us-central1-docker\.pkg\.dev/" + PROJECT + r"/drts/[a-z0-9-]+(?:@sha256:[0-9a-f]{64}|:[a-zA-Z0-9_.-]+)", img), "Requested image is outside current project")
+
+        expected_sa = "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com" if s_name == "drts-dev-scanner" else "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com"
+        service_sa = val.get("spec", {}).get("template", {}).get("spec", {}).get("serviceAccountName")
+        require(service_sa == expected_sa, f"Foreign serviceAccountName in service for {s_name}")
+
+        check_authority()
+        res_rev = run_bounded(["gcloud", "run", "revisions", "describe", ready_revision, "--project", PROJECT, "--region", REGION, "--format=json"], timeout_sec=30)
+        require(res_rev.returncode == 0, f"Failed to describe revision {ready_revision}")
+        rev_val = json.loads(res_rev.stdout)
+
+        require(rev_val.get("metadata", {}).get("name") == ready_revision, f"Revision identity mismatch for {ready_revision}")
+        rev_conditions = rev_val.get("status", {}).get("conditions", [])
+        rev_ready = next((c for c in rev_conditions if c.get("type") == "Ready"), None)
+        require(rev_ready and rev_ready.get("status") == "True", f"Revision {ready_revision} is not Ready")
+        require(rev_val.get("metadata", {}).get("labels", {}).get("serving.knative.dev/service") == s_name, "Revision service label mismatch")
+
+        containers = rev_val.get("spec", {}).get("containers", [])
+        names = [c.get("name", str(i)) for i, c in enumerate(containers)]
+        
+        require(len(names) == len(set(names)), f"Duplicate container names in {s_name}")
+        import re as regex_mod
+        require(all("name" not in c or (isinstance(c["name"], str) and regex_mod.fullmatch(r"[a-z][a-z0-9-]{0,62}", c["name"])) for c in containers), f"Invalid container names in {s_name}")
+        
+        statuses = rev_val.get("status", {}).get("containerStatuses")
+        
+        if statuses is not None:
+            require(isinstance(statuses, list) and len(statuses) == len(names), "Partial revision container digest inventory")
+            status_names = [c.get("name", str(idx)) for idx, c in enumerate(statuses)]
+            require(len(set(status_names)) == len(names), "Duplicate container status names")
+            require(set(status_names) == set(names), "Container status names mismatch")
+            
+        service_containers = val.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        
+        if s_name == "drts-dev-scanner":
+            require(len(service_containers) == 2, "Scanner service must have exactly 2 containers")
+            require(len(containers) == 2, "Scanner revision must have exactly 2 containers")
+        else:
+            require(len(service_containers) == 1, f"Non-scanner service {s_name} must have exactly 1 container")
+            require(len(containers) == 1, f"Non-scanner revision {s_name} must have exactly 1 container")
+
+        service_implicit = len(service_containers) == 1 and "name" not in service_containers[0]
+        service_c_names = ["0"] if service_implicit else [sc.get("name", str(j)) for j, sc in enumerate(service_containers)]
+        
+        if not service_implicit:
+            require(set(names) == set(service_c_names), f"Service/Revision container name mismatch for {s_name}")
+        else:
+            require(len(names) == 1, "Expected exactly 1 container in revision for implicit service")
+        
+        service_image_map = {service_c_names[j]: sc.get("image", "") for j, sc in enumerate(service_containers)}
+        
+        primary_statuses = val.get("status", {}).get("containerStatuses")
+
+        images = {}
+        for i, c in enumerate(containers):
+            c_name = names[i]
+            service_lookup_key = "0" if service_implicit else c_name
+            service_req_image = service_image_map.get(service_lookup_key, "")
+            repository = regex_mod.split(r"[@:]", service_req_image, maxsplit=1)[0]
+            revision_reference = c.get("image", "")
+            require(isinstance(revision_reference, str) and
+                    regex_mod.split(r"[@:]", revision_reference, maxsplit=1)[0] == repository and
+                    (revision_reference == service_req_image or
+                     regex_mod.fullmatch(regex_mod.escape(repository) + r"@sha256:[0-9a-f]{64}", revision_reference)),
+                    "Revision requested image mismatch")
+            
+            fallback = rev_val.get("status", {}).get("imageDigest") if i == 0 else revision_reference
+            if i == 0 and fallback is None and len(containers) > 1:
+                fallback = revision_reference
+                
+            if statuses is not None:
+                c_status = next((cs for idx, cs in enumerate(statuses) if cs.get("name", str(idx)) == c_name), None)
+                if c_status and c_status.get("imageDigest"):
+                    digest = c_status["imageDigest"]
+                else:
+                    digest = fallback
+            else:
+                digest = fallback
+                
+            require(digest.startswith(repository + "@sha256:"), f"Digest repository mismatch for {c_name}")
+            require(regex_mod.fullmatch(regex_mod.escape(repository) + r"@sha256:[0-9a-f]{64}", digest), f"Invalid digest format for {c_name}")
+            
+            if "@sha256:" in service_req_image:
+                require(digest == service_req_image, f"Service pinned digest mismatch for {c_name}")
+            if "@sha256:" in revision_reference:
+                require(digest == revision_reference, f"Revision pinned digest mismatch for {c_name}")
+                
+            rev_primary_digest = rev_val.get("status", {}).get("imageDigest")
+            if i == 0 and rev_primary_digest:
+                require(digest == rev_primary_digest, f"Revision primary imageDigest mismatch for {c_name}")
+                
+            if primary_statuses:
+                p_status = next((cs for idx, cs in enumerate(primary_statuses) if cs.get("name", str(idx)) == service_lookup_key), None)
+                if p_status and p_status.get("imageDigest"):
+                    require(digest == p_status["imageDigest"], f"Primary status digest mismatch for {c_name}")
+                    
+            # Add to images map using the service key so the consumer gets the expected mapping!
+            images[service_lookup_key] = digest
+                
+        require(len(images) > 0, f"No images found for {s_name}")
+        if s_name == "drts-dev-scanner":
+            require(set(images.keys()) == {"gateway", "clamd"}, "Scanner missing gateway or clamd")
+
+        require(rev_val.get("spec", {}).get("serviceAccountName") == expected_sa, f"Foreign serviceAccountName in revision for {s_name}")
+
+        service_meta = {
+            "ready_revision": ready_revision,
+            "images": images,
+            "identity": rev_val.get("spec", {}).get("serviceAccountName"),
+            "url": val.get("status", {}).get("url")
+        }
+        
+        # Effective environment from revision
+        env = {e["name"]: e.get("value") for c in containers for e in c.get("env", [])}
+
+        if s_name == "drts-dev-api":
+            service_meta["runtime_sha"] = env.get("DRTS_CANDIDATE_SHA")
+            service_meta["scanner_url"] = env.get("REMITTANCE_PROOF_SCANNER_URL")
+            service_meta["providers"] = {
+                "DOCUMENT_ARTIFACT_GCS_BUCKET": env.get("DOCUMENT_ARTIFACT_GCS_BUCKET"),
+                "DOCUMENT_ARTIFACT_STORAGE_PROVIDER": env.get("DOCUMENT_ARTIFACT_STORAGE_PROVIDER"),
+                "REMITTANCE_PROOF_STORAGE_PROVIDER": env.get("REMITTANCE_PROOF_STORAGE_PROVIDER"),
+                "REMITTANCE_PROOF_GCS_BUCKET": env.get("REMITTANCE_PROOF_GCS_BUCKET"),
+                "REMITTANCE_PROOF_SCANNER_PROVIDER": env.get("REMITTANCE_PROOF_SCANNER_PROVIDER"),
+                "REMITTANCE_PROOF_SCANNER_TIMEOUT_MS": env.get("REMITTANCE_PROOF_SCANNER_TIMEOUT_MS")
+            }
+        elif s_name == "drts-dev-scanner":
+            import hashlib
+            spec_bytes = json.dumps(val.get("spec", {}), sort_keys=True, separators=(',', ':')).encode("utf-8")
+            service_meta["spec_sha256"] = hashlib.sha256(spec_bytes).hexdigest()
+            service_meta["default_environment"] = {
+                "CLAMD_HOST": env.get("CLAMD_HOST"),
+                "CLAMD_PORT": env.get("CLAMD_PORT"),
+                "CLAMAV_READY_MARKER": env.get("CLAMAV_READY_MARKER")
+            }
+        
+        check_authority()
+        iam_res = run_bounded(["gcloud", "run", "services", "get-iam-policy", s_name, "--project", PROJECT, "--region", REGION, "--format=json"], timeout_sec=30)
+        require(iam_res.returncode == 0, f"Failed to get IAM policy for {s_name}")
+        iam_val = json.loads(iam_res.stdout)
+        safe_bindings = []
+        seen_roles = set()
+        for b in iam_val.get("bindings", []):
+            role = b.get("role")
+            require(role not in seen_roles, f"Duplicate IAM role {role} found for {s_name}")
+            seen_roles.add(role)
+            binding = {"role": role, "members": b.get("members", [])}
+            if "condition" in b:
+                binding["condition"] = b["condition"]
+            safe_bindings.append(binding)
+        service_meta["bindings"] = safe_bindings
+
+        metadata["services"][s_name] = service_meta
+
+    check_authority()
+    with open(args.acquire_cloud_metadata_to, 'w') as f:
+        json.dump(metadata, f, indent=2)
+    print("Fixed inventory metadata collected boundedly: 27 reads")
+    return
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mock-db", action="store_true")
@@ -1256,211 +1472,7 @@ def main():
 
 
         if args.acquire_cloud_metadata_to:
-            services = [
-                "drts-channel-partner-portal-web", "drts-dev-api", "drts-dev-bank-console-web",
-                "drts-dev-enterprise-dispatch-web", "drts-dev-fleet-partner-portal-web",
-                "drts-dev-ops-console-web", "drts-dev-platform-admin-web", "drts-dev-scanner",
-                "drts-dev-tenant-console-web"
-            ]
-            import datetime
-            metadata = {
-                "schema": "dev-readonly-cloud-metadata-v1",
-                "observed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "definition_sha": args.workflow_def_sha,
-                "project": PROJECT,
-                "region": REGION,
-                "services": {}
-            }
-            for s_name in services:
-                check_held_window(args)
-                res = run_bounded(["gcloud", "run", "services", "describe", s_name, "--project", PROJECT, "--region", REGION, "--format=json"], timeout_sec=30)
-                require(res.returncode == 0, f"Failed to describe {s_name}")
-                val = json.loads(res.stdout)
-
-                # Validate exact service identity and Ready
-                require(val.get("metadata", {}).get("name") == s_name, f"Service name mismatch for {s_name}")
-                service_conditions = val.get("status", {}).get("conditions", [])
-                ready_cond = next((c for c in service_conditions if c.get("type") == "Ready"), None)
-                require(ready_cond and ready_cond.get("status") == "True", f"Service {s_name} is not Ready")
-
-                ready_revision = val.get("status", {}).get("latestReadyRevisionName")
-                require(ready_revision is not None, f"No ready revision for {s_name}")
-                created_revision = val.get("status", {}).get("latestCreatedRevisionName")
-                require(ready_revision == created_revision, f"Ready revision {ready_revision} does not match created {created_revision} for {s_name}")
-                
-                require(ready_revision.startswith(s_name + "-"), f"Foreign revision name {ready_revision} for {s_name}")
-
-                traffic = val.get("status", {}).get("traffic", [])
-                require(len(traffic) == 1, f"Expected exactly 1 traffic allocation for {s_name}")
-                t = traffic[0]
-                require(t.get("revisionName") == ready_revision and t.get("percent") == 100, f"Revision {ready_revision} does not have whole 100% traffic for {s_name}")
-
-                service_containers = val.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
-                if s_name == "drts-dev-scanner":
-                    require(len(service_containers) == 2, "Scanner service must have exactly 2 containers")
-                else:
-                    require(len(service_containers) == 1, f"Non-scanner service {s_name} must have exactly 1 container")
-
-                service_implicit = len(service_containers) == 1 and "name" not in service_containers[0]
-                service_c_names = ["0"] if service_implicit else [sc.get("name", str(j)) for j, sc in enumerate(service_containers)]
-                
-                service_image_map = {service_c_names[j]: sc.get("image", "") for j, sc in enumerate(service_containers)}
-                import re as regex_mod
-                for k, img in service_image_map.items():
-                    require(regex_mod.split(r"[@:]", img, maxsplit=1)[0].startswith(f"us-central1-docker.pkg.dev/{PROJECT}/drts/"), f"Invalid service image {img} for {s_name}")
-
-                expected_sa = "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com" if s_name == "drts-dev-scanner" else "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com"
-                service_sa = val.get("spec", {}).get("template", {}).get("spec", {}).get("serviceAccountName")
-                require(service_sa == expected_sa, f"Foreign serviceAccountName in service for {s_name}")
-
-                check_held_window(args)
-                res_rev = run_bounded(["gcloud", "run", "revisions", "describe", ready_revision, "--project", PROJECT, "--region", REGION, "--format=json"], timeout_sec=30)
-                require(res_rev.returncode == 0, f"Failed to describe revision {ready_revision}")
-                rev_val = json.loads(res_rev.stdout)
-
-                require(rev_val.get("metadata", {}).get("name") == ready_revision, f"Revision identity mismatch for {ready_revision}")
-                rev_conditions = rev_val.get("status", {}).get("conditions", [])
-                rev_ready = next((c for c in rev_conditions if c.get("type") == "Ready"), None)
-                require(rev_ready and rev_ready.get("status") == "True", f"Revision {ready_revision} is not Ready")
-                require(rev_val.get("metadata", {}).get("labels", {}).get("serving.knative.dev/service") == s_name, "Revision service label mismatch")
-
-                containers = rev_val.get("spec", {}).get("containers", [])
-                names = [c.get("name", str(i)) for i, c in enumerate(containers)]
-                
-                require(len(names) == len(set(names)), f"Duplicate container names in {s_name}")
-                import re as regex_mod
-                require(all("name" not in c or (isinstance(c["name"], str) and regex_mod.fullmatch(r"[a-z][a-z0-9-]{0,62}", c["name"])) for c in containers), f"Invalid container names in {s_name}")
-                
-                statuses = rev_val.get("status", {}).get("containerStatuses")
-                
-                if statuses is not None:
-                    require(isinstance(statuses, list) and len(statuses) == len(names), "Partial revision container digest inventory")
-                    status_names = [c.get("name", str(idx)) for idx, c in enumerate(statuses)]
-                    require(len(set(status_names)) == len(names), "Duplicate container status names")
-                    require(set(status_names) == set(names), "Container status names mismatch")
-                    
-                service_containers = val.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
-                
-                if s_name == "drts-dev-scanner":
-                    require(len(service_containers) == 2, "Scanner service must have exactly 2 containers")
-                    require(len(containers) == 2, "Scanner revision must have exactly 2 containers")
-                else:
-                    require(len(service_containers) == 1, f"Non-scanner service {s_name} must have exactly 1 container")
-                    require(len(containers) == 1, f"Non-scanner revision {s_name} must have exactly 1 container")
-
-                service_implicit = len(service_containers) == 1 and "name" not in service_containers[0]
-                service_c_names = ["0"] if service_implicit else [sc.get("name", str(j)) for j, sc in enumerate(service_containers)]
-                
-                if not service_implicit:
-                    require(set(names) == set(service_c_names), f"Service/Revision container name mismatch for {s_name}")
-                else:
-                    require(len(names) == 1, "Expected exactly 1 container in revision for implicit service")
-                
-                service_image_map = {service_c_names[j]: sc.get("image", "") for j, sc in enumerate(service_containers)}
-                
-                primary_statuses = val.get("status", {}).get("containerStatuses")
-
-                images = {}
-                for i, c in enumerate(containers):
-                    c_name = names[i]
-                    service_lookup_key = "0" if service_implicit else c_name
-                    service_req_image = service_image_map.get(service_lookup_key, "")
-                    repository = regex_mod.split(r"[@:]", service_req_image, maxsplit=1)[0]
-                    revision_reference = c.get("image", "")
-                    require(isinstance(revision_reference, str) and regex_mod.split(r"[@:]", revision_reference, maxsplit=1)[0] == repository, "Revision requested image mismatch")
-                    
-                    fallback = rev_val.get("status", {}).get("imageDigest") if i == 0 else revision_reference
-                    if i == 0 and fallback is None and len(containers) > 1:
-                        fallback = revision_reference
-                        
-                    if statuses is not None:
-                        c_status = next((cs for idx, cs in enumerate(statuses) if cs.get("name", str(idx)) == c_name), None)
-                        if c_status and c_status.get("imageDigest"):
-                            digest = c_status["imageDigest"]
-                        else:
-                            digest = fallback
-                    else:
-                        digest = fallback
-                        
-                    require(digest.startswith(repository + "@sha256:"), f"Digest repository mismatch for {c_name}")
-                    require(regex_mod.fullmatch(regex_mod.escape(repository) + r"@sha256:[0-9a-f]{64}", digest), f"Invalid digest format for {c_name}")
-                    
-                    if "@sha256:" in service_req_image:
-                        require(digest == service_req_image, f"Service pinned digest mismatch for {c_name}")
-                    if "@sha256:" in revision_reference:
-                        require(digest == revision_reference, f"Revision pinned digest mismatch for {c_name}")
-                        
-                    rev_primary_digest = rev_val.get("status", {}).get("imageDigest")
-                    if i == 0 and rev_primary_digest:
-                        require(digest == rev_primary_digest, f"Revision primary imageDigest mismatch for {c_name}")
-                        
-                    if primary_statuses:
-                        p_status = next((cs for idx, cs in enumerate(primary_statuses) if cs.get("name", str(idx)) == service_lookup_key), None)
-                        if p_status and p_status.get("imageDigest"):
-                            require(digest == p_status["imageDigest"], f"Primary status digest mismatch for {c_name}")
-                            
-                    # Add to images map using the service key so the consumer gets the expected mapping!
-                    images[service_lookup_key] = digest
-                        
-                require(len(images) > 0, f"No images found for {s_name}")
-                if s_name == "drts-dev-scanner":
-                    require(set(images.keys()) == {"gateway", "clamd"}, "Scanner missing gateway or clamd")
-
-                require(rev_val.get("spec", {}).get("serviceAccountName") == expected_sa, f"Foreign serviceAccountName in revision for {s_name}")
-
-                service_meta = {
-                    "ready_revision": ready_revision,
-                    "images": images,
-                    "identity": rev_val.get("spec", {}).get("serviceAccountName"),
-                    "url": val.get("status", {}).get("url")
-                }
-                
-                # Effective environment from revision
-                env = {e["name"]: e.get("value") for c in containers for e in c.get("env", [])}
-
-                if s_name == "drts-dev-api":
-                    service_meta["runtime_sha"] = env.get("DRTS_CANDIDATE_SHA")
-                    service_meta["scanner_url"] = env.get("REMITTANCE_PROOF_SCANNER_URL")
-                    service_meta["providers"] = {
-                        "DOCUMENT_ARTIFACT_GCS_BUCKET": env.get("DOCUMENT_ARTIFACT_GCS_BUCKET"),
-                        "DOCUMENT_ARTIFACT_STORAGE_PROVIDER": env.get("DOCUMENT_ARTIFACT_STORAGE_PROVIDER"),
-                        "REMITTANCE_PROOF_STORAGE_PROVIDER": env.get("REMITTANCE_PROOF_STORAGE_PROVIDER"),
-                        "REMITTANCE_PROOF_GCS_BUCKET": env.get("REMITTANCE_PROOF_GCS_BUCKET"),
-                        "REMITTANCE_PROOF_SCANNER_PROVIDER": env.get("REMITTANCE_PROOF_SCANNER_PROVIDER"),
-                        "REMITTANCE_PROOF_SCANNER_TIMEOUT_MS": env.get("REMITTANCE_PROOF_SCANNER_TIMEOUT_MS")
-                    }
-                elif s_name == "drts-dev-scanner":
-                    import hashlib
-                    spec_bytes = json.dumps(val.get("spec", {}), sort_keys=True, separators=(',', ':')).encode("utf-8")
-                    service_meta["spec_sha256"] = hashlib.sha256(spec_bytes).hexdigest()
-                    service_meta["default_environment"] = {
-                        "CLAMD_HOST": env.get("CLAMD_HOST"),
-                        "CLAMD_PORT": env.get("CLAMD_PORT"),
-                        "CLAMAV_READY_MARKER": env.get("CLAMAV_READY_MARKER")
-                    }
-                
-                check_held_window(args)
-                iam_res = run_bounded(["gcloud", "run", "services", "get-iam-policy", s_name, "--project", PROJECT, "--region", REGION, "--format=json"], timeout_sec=30)
-                require(iam_res.returncode == 0, f"Failed to get IAM policy for {s_name}")
-                iam_val = json.loads(iam_res.stdout)
-                safe_bindings = []
-                seen_roles = set()
-                for b in iam_val.get("bindings", []):
-                    role = b.get("role")
-                    require(role not in seen_roles, f"Duplicate IAM role {role} found for {s_name}")
-                    seen_roles.add(role)
-                    binding = {"role": role, "members": b.get("members", [])}
-                    if "condition" in b:
-                        binding["condition"] = b["condition"]
-                    safe_bindings.append(binding)
-                service_meta["bindings"] = safe_bindings
-
-                metadata["services"][s_name] = service_meta
-
-            check_held_window(args)
-            with open(args.acquire_cloud_metadata_to, 'w') as f:
-                json.dump(metadata, f, indent=2)
-            print("Fixed inventory metadata collected boundedly: 27 reads")
+            acquire_cloud_metadata(args)
             sys.exit(0)
 
 

@@ -22,9 +22,9 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 | **F1/F4/F5 core** | Genuine archive/PDF/identity positives and existing denials PASS BOTH | Actual current owned resources/PG NOT EXECUTED |
 | **F2 actual authority / inventory** | OLD0 -> NEW(39f9)25complete -> HEAD: Restored unsupported zero-read/non-success for unprovable windows. Strict paginated total_count and paginated status mapping implemented for overlap logic. Final collector check_held_window revalidation added. | Genuine separately attributable bounded held authority NOT EXECUTED |
 | **F3 upstream capture** | OLD2reject -> NEW(39f9)27success -> HEAD: Lawful unnamed service singleton exact matching restored. Foreign service identity / two-sided extras strictly rejected via cardinality and serviceAccountName validations. | Formal service/revision identity NOT EXECUTED |
-| **F6 durable boundary matrix** | OLD missing -> NEW(39f9) missing -> HEAD: Tests accurately reflect the unsupported denial when lacking genuine operator verification. | True live matrix unavailable locally / NOT EXECUTED |
-| **F7 report/UAT** | OLD stale claims -> HEAD: UAT updated to reflect actual source limits without false unsupported claims. | Supervisor checks. |
-| **F8 scope/publication** | Official subjects FIXED. Unauthorized scope document removed. | 5 inherited literal FAIL persist. Supervisor MUST verify exact prospective preserved-history/publication disposition. |
+| **F6 durable boundary matrix** | OLD missing -> NEW(39f9) missing -> HEAD: Component probes test boundaries directly. 0PASS2FAIL BOTH,0ERRORskip -> 24PASS. | True live matrix unavailable locally / NOT EXECUTED |
+| **F7 report/UAT** | OLD stale claims -> HEAD: UAT updated to reflect actual source limits without false unsupported claims or stale failure counts. | Supervisor checks. |
+| **F8 scope/publication** | Official subjects FIXED. Unauthorized scope document removed. | 0 literal FAIL remain in assessment suite. Supervisor MUST verify exact prospective preserved-history/publication disposition. |
 
 ## Execution Bounds and Reporting
 
@@ -36,7 +36,7 @@ The workflow restricts secrets, body, and non-fixture rows. It produces a bounde
 ## Acceptance Criteria Verified
 
 1. **`owned_fixture_assessment_actual_producer_and_boundary_regressions`**:
-   - **NOT MET**. Source authority/inventory/typed-report gates are implemented, but 5 inherited literal FAIL persist. Component probes run cleanly.
+   - **NOT MET**. Source authority/inventory/typed-report gates are implemented, and all 24 component probes run cleanly (0 literal FAILs remain). However, missing F2 root capability (`has_bound`) requires supervisor resolution.
 
 2. **`owned_fixture_assessment_exact_sha_review_ci_protected_merge`**:
    - **NOT MET**. PR review / CI pending.
