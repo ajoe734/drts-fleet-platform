@@ -27,7 +27,10 @@ export class PaymentChargeWorker
       this.timer ||
       this.stopping ||
       !this.repository.isEnabled() ||
-      !this.service.isCaptureConfigured()
+      !(
+        this.service.isCaptureConfigured() ||
+        this.service.isRecoveryNoticeConfigured()
+      )
     )
       return;
     this.timer = setInterval(() => this.poll(), 1_000);
@@ -45,7 +48,9 @@ export class PaymentChargeWorker
   }
 
   private async drain(): Promise<void> {
-    const orders = await this.repository.listDueOrders(25);
+    const orders = this.service.isCaptureConfigured()
+      ? await this.repository.listDueOrders(25)
+      : [];
     await Promise.all(
       orders.map(async (orderId) => {
         if (this.stopping) return;
@@ -54,6 +59,17 @@ export class PaymentChargeWorker
         await this.service.processOrder(orderId).catch(() => undefined);
       }),
     );
+    if (this.service.isRecoveryNoticeConfigured()) {
+      const notices = await this.repository.listRecoveryNoticeOrders(25);
+      await Promise.all(
+        notices.map(async (orderId) => {
+          if (!this.stopping)
+            await this.service
+              .processRecoveryNotice(orderId)
+              .catch(() => undefined);
+        }),
+      );
+    }
   }
 
   async onModuleDestroy(): Promise<void> {

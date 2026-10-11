@@ -75,6 +75,17 @@ export class PaymentChargeService {
     );
   }
 
+  isRecoveryNoticeConfigured(): boolean {
+    return this.repository.isRecoveryNoticeConfigured();
+  }
+
+  async processRecoveryNotice(orderId: string): Promise<void> {
+    if (!this.isRecoveryNoticeConfigured()) return;
+    await this.repository.withOrder(paymentMethodId(orderId), (session) =>
+      session.enqueueRecoveryNotice(),
+    );
+  }
+
   async beginManualRecovery(
     orderId: string,
     paymentId: string,

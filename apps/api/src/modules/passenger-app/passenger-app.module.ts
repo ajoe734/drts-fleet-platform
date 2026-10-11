@@ -46,6 +46,12 @@ import { PaymentRefundService } from "./payment/payment-refund.service";
 import { PAYMENT_CAPTURE_POLICY } from "./payment/payment-capture.policy";
 import { paymentCapturePolicyFromEnv } from "./payment/payment-capture.config";
 import type { PaymentRuntime } from "./payment/payment-runtime.config";
+import { MultiTaxiRepository } from "../multi-taxi/multi-taxi.repository";
+import {
+  PAYMENT_RECOVERY_NOTICE_EXPIRY,
+  PAYMENT_RECOVERY_NOTICE_OUTBOX,
+  paymentRecoveryNoticeExpiryFromEnv,
+} from "./payment/payment-recovery-notice.config";
 
 @Global()
 @Module({
@@ -90,6 +96,18 @@ import type { PaymentRuntime } from "./payment/payment-runtime.config";
       inject: [PAYMENT_RUNTIME],
       useFactory: (runtime: PaymentRuntime) =>
         paymentCapturePolicyFromEnv(process.env, runtime),
+    },
+    {
+      provide: PAYMENT_RECOVERY_NOTICE_EXPIRY,
+      useFactory: () => paymentRecoveryNoticeExpiryFromEnv(process.env),
+    },
+    {
+      provide: PAYMENT_RECOVERY_NOTICE_OUTBOX,
+      inject: [DatabaseService],
+      // A stateless production repository adapter. MultiTaxiModule exports its
+      // service only; no foreign export or a second worker/claim is introduced.
+      useFactory: (database: DatabaseService) =>
+        new MultiTaxiRepository(database),
     },
     { provide: SMS_PORT, useClass: UnconfiguredSmsPort },
     { provide: OTP_OPTIONS, useFactory: () => otpOptionsFromEnv(process.env) },

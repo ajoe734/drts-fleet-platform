@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import type { PoolClient, QueryResultRow } from "pg";
 import type { PassengerPaymentStatus } from "@drts/contracts";
 import { ApiRequestError } from "../../../common/api-envelope";
@@ -8,6 +8,11 @@ import type { OwnedMobilityMultiTaxiTripCompletedEvent } from "../../owned-mobil
 import type { CaptureDisposition } from "./payment-capture.policy";
 import type { EncryptedPaymentToken } from "./payment-token-cipher";
 import { paymentMethodId } from "./payment-method.service";
+import { MultiTaxiRepository } from "../../multi-taxi/multi-taxi.repository";
+import {
+  PAYMENT_RECOVERY_NOTICE_EXPIRY,
+  PAYMENT_RECOVERY_NOTICE_OUTBOX,
+} from "./payment-recovery-notice.config";
 
 export interface StoredCharge {
   orderId: string;
@@ -103,6 +108,8 @@ export class PaymentChargeSession {
   constructor(
     protected readonly client: PoolClient,
     readonly orderId: string,
+    private readonly notices?: MultiTaxiRepository,
+    private readonly noticeExpiry: string | null = null,
   ) {}
 
   protected async transaction<T>(
@@ -403,17 +410,47 @@ export class PaymentChargeSession {
         ],
       );
       if (journal.rowCount !== 1) conflict();
-      // recovery_notice_requested_at above is the durable request, with owner
-      // and order already on this ledger. ConsumerNotificationOutboxRecord's
-      // closed event contract has no payment event; do not invent one in SQL.
-      // Delivery requires an authorized contract/transport integration scope.
+      if (decision.requestRecoveryNotice && this.notices && this.noticeExpiry)
+        await this.notices.enqueuePaymentRecoveryNotice(
+          this.client,
+          this.orderId,
+          this.noticeExpiry,
+        );
+    });
+  }
+
+  async enqueueRecoveryNotice(): Promise<void> {
+    if (!this.notices || !this.noticeExpiry) return;
+    const charge = await this.load();
+    if (!charge || charge.status !== "manual_recovery") return;
+    await this.transaction(charge.passengerId, async () => {
+      const current = await this.load();
+      if (
+        !current ||
+        current.passengerId !== charge.passengerId ||
+        current.status !== "manual_recovery"
+      )
+        conflict();
+      await this.notices!.enqueuePaymentRecoveryNotice(
+        this.client,
+        this.orderId,
+        this.noticeExpiry!,
+      );
     });
   }
 }
 
 @Injectable()
 export class PaymentChargeRepository {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    @Optional()
+    @Inject(PAYMENT_RECOVERY_NOTICE_OUTBOX)
+    private readonly notices?: MultiTaxiRepository,
+    @Optional()
+    @Inject(PAYMENT_RECOVERY_NOTICE_EXPIRY)
+    private readonly noticeExpiry?: string | null,
+  ) {}
 
   isEnabled(): boolean {
     return this.database.isEnabled();
@@ -423,7 +460,37 @@ export class PaymentChargeRepository {
     client: PoolClient,
     orderId: string,
   ): PaymentChargeSession {
-    return new PaymentChargeSession(client, orderId);
+    return new PaymentChargeSession(
+      client,
+      orderId,
+      this.notices,
+      this.noticeExpiry ?? null,
+    );
+  }
+
+  isRecoveryNoticeConfigured(): boolean {
+    return (
+      !!this.notices?.isEnabled() &&
+      !!this.noticeExpiry &&
+      Date.parse(this.noticeExpiry) > Date.now() &&
+      process.env.PASSENGER_PUSH_FIRST_PARTY_ENABLED === "true"
+    );
+  }
+
+  async listRecoveryNoticeOrders(limit: number): Promise<string[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
+      throw new Error("payment_batch_invalid");
+    try {
+      const result = await this.database.query(
+        `SELECT c.order_id FROM passenger.payment_charge_records c WHERE c.status='manual_recovery' AND c.recovery_notice_requested_at IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM ops.consumer_notification_outbox o WHERE o.outbox_id='pax:payment-recovery:'||c.order_id::text)
+        ORDER BY c.recovery_notice_requested_at,c.order_id LIMIT $1`,
+        [limit],
+      );
+      return result.rows.map((row) => row.order_id);
+    } catch {
+      return unavailable();
+    }
   }
 
   async listDueOrders(limit: number): Promise<string[]> {

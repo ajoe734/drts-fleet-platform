@@ -19,6 +19,7 @@ describe("hosted worker lifecycle with fake clock and mocked processing boundary
     const processOrder = vi.fn().mockResolvedValue(undefined);
     const service = {
       isCaptureConfigured: () => true,
+      isRecoveryNoticeConfigured: () => false,
       processOrder,
     } as unknown as PaymentChargeService;
     const worker = new PaymentChargeWorker(repository, service);

@@ -866,3 +866,59 @@ lifetime is selected.
 Policy evidence: `.local/pax-payment-core-20261011-policy-binding/`, backed up
 to canonical `.local/` before closeout. Broader checks and exact checkpoint
 publication will be recorded there after completion. No candidate handoff.
+
+## 2026-10-11 authorized recovery notice source checkpoint
+
+Continuing from policy checkpoint `c2232213ab97541212cee55679cf5d008d6be9b3`.
+Its completed CI `38144215379` has 13 SUCCESS, integration `38144215382` has
+5 SUCCESS / 12 SKIP; full logs retained in the policy evidence directory.
+Smoke tests used GitHub's PR merge checkout
+`6fab3289ae62bd3a27f25daae03fff3c623d8e37`, with candidate-head metadata c223:
+root 7476 PASS / 51 SKIP (575 files PASS / 9 SKIP), API 1684 PASS / 0 SKIP.
+The merge checkout includes advancing base changes; it is not the owner SHA
+or a protected merge. No candidate or acceptance is inferred.
+
+The newly authorized source unit appends `payment_recovery_required` only to
+the consumer event union and first-party wire event. Partner event aliases
+exclude it; all six partner names/maps/TTLs remain unchanged. Direct partner
+transport refuses it before route/facade IO; consumer dispatch routes it through
+the actual captured first-party channel even if a legacy port is present.
+Completed orders remain eligible only with actual manual-recovery/unpaid
+billing, account, booking and captured owner/route authority. The same relevance
+and device/owner checks repeat after credential IO. Now-paid/refunded/foreign,
+ambiguous or revoked targets cannot become provider-accepted notices.
+
+`PAX_PAYMENT_RECOVERY_NOTICE_EXPIRES_AT` is an optional, explicitly supplied
+absolute deadline. Missing disables producer; invalid/past rejects configuration.
+No business TTL is inferred from existing partner or FCM retry defaults.
+The first outbox payload persists the validated deadline; retries/restarts do
+not extend it. Actual value and lawful captured route/provider authority remain
+open. The existing first-party retry parameter snapshot is retained unchanged.
+
+Actual PaymentChargeSession.finish enqueues via the existing production
+MultiTaxiRepository on the SAME account-first PoolClient before the financial
+transaction's COMMIT. Existing consumer schema, one deterministic outbox ID,
+atomic sequence allocation and CAS checks prevent a second event/sequence on
+replay. No route/device/tenant/receipt is invented. Missing route leaves the
+ledger request marked, with no outbox; the existing hosted Payment worker may
+scan those requests after legitimate configuration/route coordination. That
+worker may process notices with financial capture disabled; it creates no new
+consumer claim/fence/timer or delivery evidence.
+
+MultiTaxiModule exports only its service. To preserve its ungranted module file,
+the owned passenger module wires a stateless instance of the actual repository
+under the notice adapter token. It uses DatabaseService and the passed payment
+PoolClient, not duplicate business SQL, an alternate table or a memory producer.
+The existing consumer dispatcher/claim/FCM transport remains delivery authority.
+
+| Finding / acceptance                                                                                                                                            | Production boundary / old → repaired result                                                                                                                                                                                                | Completed evidence / remaining limit                                                                                                                                                                                                                                                                                                                                           |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Completed unpaid payment notice obsolete under old event relevance                                                                                              | Real FirstPartyNotificationTransport and MultiTaxiRepository: immutable c223 transport **1 FAIL / 10 filter SKIP**, exit 1 → new transport **11 PASS / 0 SKIP**, exit 0                                                                    | `PAX_PAYMENT_FIRST_PARTY_TRANSPORT_SOURCE="$PWD/.local/pax-payment-core-20261011-recovery-notice/first-party-transport-c223.ts" pnpm exec vitest run tests/unit/pax-payment-core-20261009/recovery-notice-transport.test.ts -t 'sends completed unpaid'`, `old-transport-probe.log`; unfiltered `transport-final.log`. Immutable body retained, imports relocated only         |
+| Same-client producer / sequence / finish, dedupe, restart, lost COMMIT acknowledgement, route refusal, owner/journal, CAS/sequence failures and explicit expiry | Actual PaymentChargeService/Repository/Session and MultiTaxiRepository; crypto/clock, PG replies and device/provider boundary mocked as disclosed. Combined new producer, transport and existing worker files **39 PASS / 0 SKIP**, exit 0 | `pnpm exec vitest run tests/unit/pax-payment-core-20261009/recovery-notice-producer.test.ts tests/unit/pax-payment-core-20261009/recovery-notice-transport.test.ts tests/unit/pax-payment-core-20261009/charge-worker.test.ts`, `producer-expanded.log`. PG replies are not a transaction/constraint/race engine. Provider acknowledgement is synthetic, not real FCM delivery |
+| Initial transport assertion error                                                                                                                               | Server context legitimately contains owner; wire must not                                                                                                                                                                                  | `transport-initial.log`: 10 PASS / 1 FAIL; corrected to assert original owner in captured server context and no owner/token in wire; final 11 PASS above                                                                                                                                                                                                                       |
+| Initial partner route fixture error                                                                                                                             | Formal route mapper needs identity_linked_at and all required fields                                                                                                                                                                       | `producer-initial.log`: 31 PASS / 1 FAIL; formal partner row prerequisites repaired, `producer-fixture-fixed.log`: 32 PASS; expanded 39 PASS above. No product guard removed                                                                                                                                                                                                   |
+| Original two acceptance keys                                                                                                                                    | **Not recorded**; engineering progress only                                                                                                                                                                                                | Broader original Payment/Booking/account/Facebook, channel/FCM/partner regressions and final publication pending below/evidence directory. Real PG/HTTP/FCM/PSP/device, independent review/merge and actual policy/expiry remain pending                                                                                                                                       |
+
+Evidence: `.local/pax-payment-core-20261011-recovery-notice/`, backed up to
+canonical `.local/` before closeout. No VM product runtime; no real provider,
+secret, device route enrollment or Booking snapshot producer was taken over.

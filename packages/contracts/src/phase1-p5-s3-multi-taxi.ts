@@ -627,7 +627,8 @@ export interface ConsumerNotificationOutboxRecord {
     | "eta_changed"
     | "driver_arrived"
     | "receipt_ready"
-    | "trip_cancelled";
+    | "trip_cancelled"
+    | "payment_recovery_required";
   assignmentVersion: number | null;
   payload: Record<string, unknown>;
   status: "pending" | "sending" | "delivered" | "failed";
