@@ -33,6 +33,16 @@ function notFound(): never {
   throw new ApiRequestError(404, "not_found", "Payment method not found.");
 }
 
+function persistenceUnavailable(): never {
+  // Connection cleanup errors may also contain token/parameter details.
+  // Never attach the raw exception as the cause of an API error.
+  throw new ApiRequestError(
+    503,
+    "payment_persistence_unavailable",
+    "Payment persistence is unavailable.",
+  );
+}
+
 export async function requireActivePaymentMethod(
   client: Pick<PoolClient, "query">,
   passengerId: string,
@@ -57,13 +67,9 @@ export class PaymentMethodRepository {
     passengerId: string,
     work: (client: PoolClient) => Promise<T>,
   ): Promise<T> {
-    const client = await this.database.connect().catch(() => {
-      throw new ApiRequestError(
-        503,
-        "payment_persistence_unavailable",
-        "Payment persistence is unavailable.",
-      );
-    });
+    const client = await this.database
+      .connect()
+      .catch(() => persistenceUnavailable());
     let committed = false;
     try {
       await client.query("BEGIN");
@@ -85,11 +91,7 @@ export class PaymentMethodRepository {
     } catch (error) {
       if (error instanceof ApiRequestError) throw error;
       // DB errors can contain parameter values; never propagate their causes.
-      throw new ApiRequestError(
-        503,
-        "payment_persistence_unavailable",
-        "Payment persistence is unavailable.",
-      );
+      persistenceUnavailable();
     } finally {
       if (!committed) {
         try {
@@ -97,8 +99,13 @@ export class PaymentMethodRepository {
         } catch {
           /* Evict without exposing raw DB errors. */
         }
-        client.release(true);
-      } else client.release();
+      }
+      try {
+        if (committed) client.release();
+        else client.release(true);
+      } catch {
+        persistenceUnavailable();
+      }
     }
   }
 

@@ -1,10 +1,17 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { PaymentMethodService } from "../../../apps/api/src/modules/passenger-app/payment/payment-method.service";
-import { PaymentMethodRepository } from "../../../apps/api/src/modules/passenger-app/payment/payment-method.repository";
+const repositorySource = process.env.PAX_PAYMENT_METHOD_REPOSITORY_SOURCE;
+const {
+  PaymentMethodRepository,
+}: typeof import("../../../apps/api/src/modules/passenger-app/payment/payment-method.repository") =
+  repositorySource
+    ? await import(repositorySource)
+    : await import("../../../apps/api/src/modules/passenger-app/payment/payment-method.repository");
 import { PaymentTokenCipher } from "../../../apps/api/src/modules/passenger-app/payment/payment-token-cipher";
 import { FakePaymentProvider } from "../../../apps/api/src/modules/passenger-app/payment/fake-payment-provider";
 import type { DatabaseService } from "../../../apps/api/src/common/db/database.service";
+import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
 
 const OWNER = "synthetic_owner";
 const METHOD = "00000000-0000-4000-8000-000000000011";
@@ -232,6 +239,62 @@ const methodRow = () => ({
 });
 
 describe("production repository SQL/transaction orchestration (PG is not mocked as an acceptance engine)", () => {
+  it.each(["committed", "rejected", "rollback_failed"])(
+    "sanitizes connection release errors after %s without retaining private details",
+    async (state) => {
+      const f = dbFixture((sql) =>
+        sql.includes("SELECT drts_passenger_id,entity_id,outcome")
+          ? [
+              {
+                drts_passenger_id: OWNER,
+                entity_id: METHOD,
+                outcome: "pending",
+              },
+            ]
+          : [],
+      );
+      const privateDetail = "synthetic_private_release_token";
+      f.client.release.mockImplementation(() => {
+        throw new Error(privateDetail);
+      });
+      if (state !== "committed") {
+        const query = f.client.query.getMockImplementation()!;
+        f.client.query.mockImplementation(async (sql, params) => {
+          const result = await query(sql, params);
+          if (
+            sql === "COMMIT" ||
+            (state === "rollback_failed" && sql === "ROLLBACK")
+          )
+            throw new Error("synthetic_private_transaction_token");
+          return result;
+        });
+      }
+      const error = await f.repository
+        .claimBinding(OWNER, "fake", "synthetic_private_credential")
+        .catch((value: unknown) => value);
+      expect(error).toMatchObject({
+        code: "payment_persistence_unavailable",
+      });
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "payment_persistence_unavailable",
+          message: "Payment persistence is unavailable.",
+        },
+      });
+      expect((error as Error).message).not.toContain(privateDetail);
+      expect((error as Error).stack).not.toContain(privateDetail);
+      expect(error).not.toHaveProperty("cause");
+      expect(f.calls.filter((call) => call.sql === "COMMIT")).toHaveLength(1);
+      expect(f.calls.some((call) => call.sql === "ROLLBACK")).toBe(
+        state !== "committed",
+      );
+      expect(f.client.release).toHaveBeenCalledOnce();
+      if (state === "committed")
+        expect(f.client.release).toHaveBeenCalledWith();
+      else expect(f.client.release).toHaveBeenCalledWith(true);
+    },
+  );
   it("commits owner claim before returning a key for external exchange, retaining no raw credential", async () => {
     const f = dbFixture((sql) =>
       sql.includes("SELECT drts_passenger_id,entity_id,outcome")
