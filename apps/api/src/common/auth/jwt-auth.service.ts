@@ -942,6 +942,8 @@ export class JwtAuthService {
     if (!payload) {
       return null;
     }
+    // Passenger access tokens are verified exclusively by PassengerJwtService/session storage.
+    if ((payload.realm as string) === "passenger" || (payload.actorType as string) === "first_party_passenger") return null;
 
     const isControlPlaneProxyToken =
       options?.allowControlPlaneProxyToken === true &&

@@ -123,12 +123,25 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
       );
       expect(adapterAlloc.target_schema).toBe("admin");
 
-      // No duplicate versions across the original allocations and the new ones.
-      const allVersions = [
-        ...content.allocations.map((a: any) => a.version),
-        ...additional.map((a: any) => a.version),
+      const allAllocations = [
+        ...(content.allocations || []),
+        ...(content.additional_allocations || []),
+        ...(content.launch_allocations || []),
+        ...(content.partner_notification_allocations || []),
+        ...(content.voice_application_allocations || []),
+        ...(content.passenger_push_channel_allocations || []),
+        ...(content.passenger_app_allocations || []),
       ];
+
+      // No duplicate versions across all allocations
+      const allVersions = allAllocations.map((a: any) => a.version);
       expect(new Set(allVersions).size).toBe(allVersions.length);
+
+      // No duplicate filenames across all allocations
+      const allFilenames = allAllocations
+        .map((a: any) => a.migration_filename)
+        .filter(Boolean);
+      expect(new Set(allFilenames).size).toBe(allFilenames.length);
     });
 
     it("records table/constraint/transaction invariants for each domain, not just filenames", () => {
@@ -139,13 +152,22 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
       }
     });
 
-    it("only permits an allocated V0098-V0100 migration to exist on disk with the exact reserved filename (allocation-only at write time; SR-CONTRACT-001 precedent: a downstream owner consuming its own reservation exactly is expected, not forbidden)", () => {
+    it("only permits an allocated migration to exist on disk with the exact reserved filename", () => {
       const migrationsDir = path.join(repoRoot, "infra/migrations");
       const content = JSON.parse(fs.readFileSync(allocationPath, "utf8"));
+      const allAllocations = [
+        ...(content.allocations || []),
+        ...(content.additional_allocations || []),
+        ...(content.launch_allocations || []),
+        ...(content.partner_notification_allocations || []),
+        ...(content.voice_application_allocations || []),
+        ...(content.passenger_push_channel_allocations || []),
+        ...(content.passenger_app_allocations || []),
+      ];
       const diskFiles = fs.existsSync(migrationsDir)
         ? fs.readdirSync(migrationsDir)
         : [];
-      for (const alloc of content.additional_allocations) {
+      for (const alloc of allAllocations) {
         const prefix = `${alloc.version}_`;
         const matchingFiles = diskFiles.filter((f) => f.startsWith(prefix));
         for (const match of matchingFiles) {
@@ -173,6 +195,7 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         ...(content.partner_notification_allocations || []),
         ...(content.voice_application_allocations || []),
         ...(content.passenger_push_channel_allocations || []),
+        ...(content.passenger_app_allocations || []),
       ];
       const maxAllocated = Math.max(
         100,
@@ -236,7 +259,11 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         driverId: "drv-001",
         uploadedByActorId: null,
         originalFilename: "remittance-2.png",
-        content: { contentHash: "abc123", contentType: "image/png", sizeBytes: 1024 },
+        content: {
+          contentHash: "abc123",
+          contentType: "image/png",
+          sizeBytes: 1024,
+        },
         scanState: "clean",
         scanCompletedAt: "2026-09-11T00:05:00.000Z",
         rejectionReason: null,
@@ -310,9 +337,7 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         "recorded",
         "persistence_unknown",
       ]);
-      expect(PUSH_DELIVERY_ERROR_CODES).toContain(
-        "PUSH_DELIVERY_FENCE_STALE",
-      );
+      expect(PUSH_DELIVERY_ERROR_CODES).toContain("PUSH_DELIVERY_FENCE_STALE");
     });
 
     it("validates PushDeliveryClaim fencing shape and a stale-fence rejection scenario", () => {
@@ -421,7 +446,12 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
     it("keeps the new PlatformAdapter/UpdatePlatformAdapterCommand fields optional so pre-existing producers still type-check (back-compat regression guard)", () => {
       const bareAdapterFields: Pick<
         PlatformAdapter,
-        "id" | "platformCode" | "name" | "description" | "createdAt" | "updatedAt"
+        | "id"
+        | "platformCode"
+        | "name"
+        | "description"
+        | "createdAt"
+        | "updatedAt"
       > = {
         id: "adapter-legacy-001",
         platformCode: "legacy",
@@ -832,9 +862,9 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
           idempotencyKey: "idem-201",
         };
         expect(validatePay(valid)).toBe(true);
-        expect(validatePay({ batchId: "batch-001", proofId: "proof-201" })).toBe(
-          false,
-        );
+        expect(
+          validatePay({ batchId: "batch-001", proofId: "proof-201" }),
+        ).toBe(false);
       });
 
       it("validates RemittanceProofPaymentReceipt with positive and negative fixtures", () => {

@@ -131,6 +131,13 @@ elif kind == "gcloud":
             emit([])
         record = {"insertId": "audit-1", "timestamp": now.isoformat(),
                   "protoPayload": {"methodName": "cloudsql.instances.clone", "request": {"body": {"cloneContext": {"destinationInstanceName": "drts-dev-db-drill-123-1"}}}}}
+        if scenario in ("audit_create", "audit_create_foreign"):
+            record["protoPayload"] = {"methodName": "cloudsql.instances.create", "request": {"body": {"name": "drts-dev-db-drill-123-1"}}}
+            if scenario == "audit_create_foreign":
+                other = json.loads(json.dumps(record))
+                other["insertId"] = "audit-2"
+                other["protoPayload"]["request"]["body"]["name"] = "unexpected-extra-instance"
+                emit([record, other])
         if scenario == "audit_unknown":
             record["protoPayload"]["request"] = {}
         if scenario == "audit_foreign":

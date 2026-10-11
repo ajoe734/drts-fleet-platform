@@ -17,7 +17,9 @@
       "migration_filename": "V0094__sr_driver_leave.sql",
       "domain": "driver_leave",
       "target_schema": "ops",
-      "primary_tables": ["ops.phase1_driver_leave_requests"],
+      "primary_tables": [
+        "ops.phase1_driver_leave_requests"
+      ],
       "referenced_tables": [
         "ops.phase1_driver_shifts",
         "ops.phase1_driver_matching_suppressions"
@@ -77,7 +79,9 @@
       "migration_filename": "V0096__sr_host_vehicle_access.sql",
       "domain": "host_vehicle_access",
       "target_schema": "ops",
-      "primary_views_or_tables": ["ops.phase1_host_vehicle_projections"],
+      "primary_views_or_tables": [
+        "ops.phase1_host_vehicle_projections"
+      ],
       "referenced_tables": [
         "reg.vehicles",
         "ops.phase1_maintenance_logs",
@@ -151,7 +155,9 @@
         "voice.dialogue_snapshot_purge_receipt",
         "voice.dialogue_snapshot_purge_receipt_scan_cursor"
       ],
-      "referenced_tables": ["voice.session"],
+      "referenced_tables": [
+        "voice.session"
+      ],
       "table_invariants": [
         "snapshot_id uuid PRIMARY KEY DEFAULT gen_random_uuid(); voice_session_id uuid NOT NULL REFERENCES voice.session(voice_session_id); UNIQUE (voice_session_id, session_version) identifies the stored revision.",
         "resource_scope_id, route_profile_version, lease_epoch, input_epoch, media_epoch and turn_id are mandatory context fields; this candidate-dialogue record is not a qualified booking draft, confirmation or consent proof.",
@@ -161,7 +167,9 @@
         "voice.dialogue_snapshot_purge_receipt_scan_cursor: a single singleton row (id boolean PRIMARY KEY DEFAULT true, CHECK (id)) persisting only the keyset position (purged_at_text, voice_session_id, session_version) VoiceSessionService.purgeExpiredDialogueSnapshotPurgeReceipts stopped at when a scan hit its page bound mid-backlog, so the next invocation resumes past an already-examined held run instead of re-scanning it forever; cleared to NULL once a scan reaches the real end of the eligible backlog so holds released since can be re-checked. Bounded at exactly one row -- no retention policy needed."
       ],
       "description": "Versioned encrypted candidate-dialogue snapshots for trusted voice persistence/restoration, reserved by the original audit execution scope; no booking-draft or consent authority is introduced. V0106 also carries a bounded, non-content purge-receipt table so a governed purge cannot be mistaken for proof a write never landed, plus a session-level floor so that receipt's own governed metadata retention can age it out without either reopening its key for write reuse or being mistaken for proof the write never landed.",
-      "downstream_tasks": ["AUDIT-SHARED-DEV-VERIFY-20261002"]
+      "downstream_tasks": [
+        "AUDIT-SHARED-DEV-VERIFY-20261002"
+      ]
     }
   ],
   "additional_allocations": [
@@ -171,8 +179,12 @@
       "migration_filename": "V0098__sr_remittance_proof.sql",
       "domain": "remittance_proof",
       "target_schema": "billing",
-      "primary_tables": ["billing.phase1_remittance_proofs"],
-      "referenced_tables": ["billing.phase1_reimbursement_batches"],
+      "primary_tables": [
+        "billing.phase1_remittance_proofs"
+      ],
+      "referenced_tables": [
+        "billing.phase1_reimbursement_batches"
+      ],
       "table_invariants": [
         "billing.phase1_remittance_proofs.proof_id uuid PRIMARY KEY DEFAULT gen_random_uuid() — server-generated only; no client-supplied identity column.",
         "batch_id uuid NOT NULL REFERENCES billing.phase1_reimbursement_batches(batch_id) — fixed at insert, never updated (no UPDATE ... SET batch_id path).",
@@ -184,7 +196,10 @@
         "Application transaction for mark-paid-with-proof: SELECT batch FOR UPDATE, verify approved_at IS NOT NULL AND proof.scan_state = 'clean' AND proof.batch_id = batch.batch_id, INSERT ... ON CONFLICT (batch_id, idempotency_key) DO NOTHING RETURNING *, then UPDATE batch.status='paid' only when the INSERT actually happened (i.e. this was not a replay) — all within one transaction so a crash between steps cannot leave a receipt without a paid batch or vice versa."
       ],
       "description": "匯款證明儲存中繼資料、掃描狀態與冪等付款收據 migration",
-      "downstream_tasks": ["SR-PROOF-001", "SR-QA-NEWFEATURES-001"]
+      "downstream_tasks": [
+        "SR-PROOF-001",
+        "SR-QA-NEWFEATURES-001"
+      ]
     },
     {
       "task_id": "SR-RECOVERY-CONTRACTS-20260911",
@@ -196,7 +211,9 @@
         "ops.phase1_push_delivery_claims",
         "ops.phase1_push_delivery_receipts"
       ],
-      "referenced_tables": ["ops.consumer_notification_outbox"],
+      "referenced_tables": [
+        "ops.consumer_notification_outbox"
+      ],
       "table_invariants": [
         "ops.phase1_push_delivery_claims: outbox_id uuid PRIMARY KEY REFERENCES ops.consumer_notification_outbox(outbox_id) — one live claim row per outbox row (not a history table); fence_token integer NOT NULL DEFAULT 0.",
         "Claim acquisition: UPDATE ... SET worker_id=$new, claim_state='claimed', fence_token = fence_token + 1, lease_expires_at = now() + lease WHERE outbox_id=$1 AND (claim_state != 'claimed' OR lease_expires_at < now()) RETURNING fence_token — an already-live, unexpired lease is never silently reassigned; the caller must observe zero rows updated and back off.",
@@ -207,7 +224,11 @@
         "Persistence-failure handling is an application-transaction concern, not a schema constraint: the service records provider ack results by first executing the fence-checked UPDATE/INSERT inside a transaction; if that transaction itself fails to commit, the caller's return value must be the outcome 'persistence_unknown' (see packages/contracts/src/passenger-push-delivery.ts), never a fabricated 'recorded' outcome — this table design supplies the idempotent target for a retry, it does not itself prevent a caller from mis-reporting a failed commit."
       ],
       "description": "被動推播送達 claim/lease/fence 與冪等收據 migration；provider 回執與真實裝置送達分離記錄",
-      "downstream_tasks": ["SR-PUSH-001", "SR-LIVE-PUSH-001", "SR-QA-NEWFEATURES-001"]
+      "downstream_tasks": [
+        "SR-PUSH-001",
+        "SR-LIVE-PUSH-001",
+        "SR-QA-NEWFEATURES-001"
+      ]
     },
     {
       "task_id": "SR-RECOVERY-CONTRACTS-20260911",
@@ -228,7 +249,10 @@
         "The warning-window policy (packages/contracts/src/platform-adapter-registry.ts AdapterCredentialExpiryWarning) is computed at read time from credential_expiry_expires_at against a server-side configured window; it is not a persisted column, so changing the window does not require a migration or a backfill."
       ],
       "description": "Adapter registry 持久化、憑證到期非機密參照與伺服器端稽核 migration",
-      "downstream_tasks": ["SR-ADMIN-ADAPTER-001", "SR-QA-NEWFEATURES-001"]
+      "downstream_tasks": [
+        "SR-ADMIN-ADAPTER-001",
+        "SR-QA-NEWFEATURES-001"
+      ]
     }
   ],
   "launch_allocations": [
@@ -447,6 +471,136 @@
       "downstream_tasks": [
         "PUSH-FIRST-PARTY-FCM-20261006",
         "PUSH-CHANNEL-PG-QA-20261006"
+      ]
+    }
+  ],
+  "passenger_app_allocations": [
+    {
+      "task_id": "PAX-ACCOUNT-SESSION-20261009",
+      "version": "V0109",
+      "migration_filename": "V0109__passenger_account_session.sql",
+      "domain": "passenger_account_session",
+      "target_schema": "passenger",
+      "primary_tables": [
+        "passenger.accounts",
+        "passenger.logins",
+        "passenger.sessions"
+      ],
+      "referenced_tables": [],
+      "description": "乘客 realm、帳號、登入身分與 session migration",
+      "downstream_tasks": [
+        "PAX-OTP-20261009",
+        "PAX-OIDC-LOGIN-20261009"
+      ]
+    },
+    {
+      "task_id": "PAX-OTP-20261009",
+      "version": "V0110",
+      "migration_filename": "V0110__passenger_otp.sql",
+      "domain": "passenger_otp",
+      "target_schema": "passenger",
+      "primary_tables": [
+        "passenger.otps"
+      ],
+      "referenced_tables": [],
+      "description": "手機與 Email OTP migration",
+      "downstream_tasks": [
+        "PAX-SMS-PROVIDER-20261009"
+      ]
+    },
+    {
+      "task_id": "PAX-OIDC-LOGIN-20261009",
+      "version": "V0111",
+      "migration_filename": "V0111__passenger_oidc_login.sql",
+      "domain": "passenger_oidc_login",
+      "target_schema": "passenger",
+      "primary_tables": [
+        "passenger.oauth_transactions"
+      ],
+      "referenced_tables": [],
+      "description": "OAuth transaction migration",
+      "downstream_tasks": [
+        "PAX-FACEBOOK-LOGIN-20261009"
+      ]
+    },
+    {
+      "task_id": "PAX-FARE-QUOTE-20261009",
+      "version": "V0112",
+      "migration_filename": "V0112__passenger_fare_quote.sql",
+      "domain": "passenger_fare_quote",
+      "target_schema": "passenger",
+      "primary_tables": [
+        "passenger.fare_versions",
+        "passenger.fare_quote_snapshots"
+      ],
+      "referenced_tables": [],
+      "description": "運價版本與試算 migration",
+      "downstream_tasks": [
+        "PAX-BOOKING-HISTORY-20261009"
+      ]
+    },
+    {
+      "task_id": "PAX-BOOKING-HISTORY-20261009",
+      "version": "V0113",
+      "migration_filename": "V0113__passenger_booking_history.sql",
+      "domain": "passenger_booking_history",
+      "target_schema": "passenger",
+      "primary_tables": [
+        "passenger.booking_histories"
+      ],
+      "referenced_tables": [],
+      "description": "帳號行程歸屬 migration",
+      "downstream_tasks": [
+        "PAX-RECEIPT-COMPLAINT-20261009",
+        "PAX-PAYMENT-CORE-20261009"
+      ]
+    },
+    {
+      "task_id": "PAX-RECEIPT-COMPLAINT-20261009",
+      "version": "V0114",
+      "migration_filename": "V0114__passenger_receipt_complaint.sql",
+      "domain": "passenger_receipt_complaint",
+      "target_schema": "passenger",
+      "primary_tables": [
+        "passenger.complaints"
+      ],
+      "referenced_tables": [],
+      "description": "客訴與遺失物入口 migration",
+      "downstream_tasks": []
+    },
+    {
+      "task_id": "PAX-PAYMENT-CORE-20261009",
+      "version": "V0115",
+      "migration_filename": "V0115__passenger_payment_core.sql",
+      "domain": "passenger_payment_core",
+      "target_schema": "passenger",
+      "primary_tables": [
+        "passenger.psp_tokens",
+        "passenger.payment_idempotency_keys",
+        "passenger.payment_charge_records"
+      ],
+      "referenced_tables": [
+        "billing.multi_taxi_passenger_payments"
+      ],
+      "description": "付款 port、綁卡、扣款與狀態 migration",
+      "downstream_tasks": [
+        "PAX-PSP-ADAPTER-20261009"
+      ]
+    },
+    {
+      "task_id": "PAX-PUSH-DEVICE-API-20261009",
+      "version": "V0116",
+      "migration_filename": "V0116__passenger_push_device_api.sql",
+      "domain": "passenger_push_device_api",
+      "target_schema": "iam + mobility",
+      "primary_tables": [],
+      "referenced_tables": [
+        "iam.phase1_passenger_push_devices",
+        "mobility.phase1_order_first_party_notification_routes"
+      ],
+      "description": "裝置登錄與現有裝置表 reuse，並對 mobility.phase1_order_first_party_notification_routes 執行 forward ALTER tenant_id DROP NOT NULL",
+      "downstream_tasks": [
+        "PAX-NATIVE-APP-20261009"
       ]
     }
   ]

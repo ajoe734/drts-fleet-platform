@@ -21,6 +21,7 @@ active_services=(
   "drts-dev-referral-embed-web"
   "drts-dev-enterprise-dispatch-web"
   "drts-channel-partner-portal-web"
+  "drts-dev-passenger-app-web"
 )
 
 inventory_output="$(
@@ -61,7 +62,7 @@ unexpected="$(
 )"
 
 if [[ -n "$missing" || -n "$unexpected" ]]; then
-  echo "Cloud Run inventory does not match the 9 active services plus only optional ${paused_service} and ${tolerated_retired_service}; refusing deletion." >&2
+  echo "Cloud Run inventory does not match the 10 active services plus only optional ${paused_service} and ${tolerated_retired_service}; refusing deletion." >&2
   if [[ -n "$missing" ]]; then
     echo "Missing active services:" >&2
     printf '%s\n' "$missing" >&2
