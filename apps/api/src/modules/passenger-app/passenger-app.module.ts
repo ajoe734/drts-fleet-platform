@@ -37,6 +37,8 @@ import {
   PaymentMethodService,
 } from "./payment/payment-method.service";
 import { paymentRuntimeFromEnv } from "./payment/payment-runtime.config";
+import { PaymentChargeRepository } from "./payment/payment-charge.repository";
+import { PaymentChargeService } from "./payment/payment-charge.service";
 
 @Global()
 @Module({
@@ -66,6 +68,8 @@ import { paymentRuntimeFromEnv } from "./payment/payment-runtime.config";
     PassengerBookingService,
     PaymentMethodRepository,
     PaymentMethodService,
+    PaymentChargeRepository,
+    PaymentChargeService,
     {
       provide: PAYMENT_RUNTIME,
       useFactory: () => paymentRuntimeFromEnv(process.env),

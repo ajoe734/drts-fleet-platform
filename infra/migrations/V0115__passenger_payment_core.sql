@@ -46,8 +46,8 @@ CREATE TABLE passenger.payment_idempotency_keys (
 CREATE UNIQUE INDEX passenger_bind_credential_idx
   ON passenger.payment_idempotency_keys(credential_digest) WHERE operation = 'bind';
 
--- Charge ledger schema is reserved in this allocated migration; workflow and
--- policy integration are pending in the owner checkpoint, not accepted source.
+-- Durable operation state is committed before contacting the PSP. A crashed
+-- capture resumes with readback of the SAME order key, never another capture.
 CREATE TABLE passenger.payment_charge_records (
   order_id uuid PRIMARY KEY REFERENCES passenger.booking_histories(order_id),
   payment_id varchar(255) NOT NULL UNIQUE REFERENCES billing.multi_taxi_passenger_payments(payment_id),
@@ -58,6 +58,9 @@ CREATE TABLE passenger.payment_charge_records (
   currency char(3) NOT NULL CHECK (currency = 'TWD'),
   status text NOT NULL CHECK (status IN ('not_selected', 'authorized', 'captured', 'failed', 'refunded', 'manual_recovery')),
   attempt_count integer NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+  readback_count integer NOT NULL DEFAULT 0 CHECK (readback_count >= 0),
+  next_operation text CHECK (next_operation IN ('capture', 'readback')),
+  operation_id uuid,
   provider_capture_ref text,
   provider_refund_ref text,
   last_error_code text CHECK (last_error_code IN ('card_declined', 'unavailable', 'invalid_method', 'unknown')),
