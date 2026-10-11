@@ -778,9 +778,16 @@ worktree's real `packages/*/dist` directories followed by API typecheck passed.
 
 This dispatch inherited root/API/package node_modules **symlinks** to canonical
 dependencies (timestamps 13:10 UTC), contrary to the prior dispatch's final
-real-directory observation. No install, removal of links, canonical dependency
-write or canonical source change was performed in this dispatch. Commands read
-those dependencies; build output realpaths were checked inside this worker cwd.
+real-directory observation. No install, removal of links or canonical source
+edit was performed in this dispatch; build output realpaths were checked inside
+this worker cwd. The original claim of no canonical dependency write was too
+broad: Vitest also uses shared `node_modules/.vite/vitest/.../results.json`
+through those links. API result-cache mtime 13:15:23 UTC matches this dispatch's
+API tests, while root cache mtime 13:20:39 UTC is later than its last root run
+and can include other workers. There is no before-snapshot to attribute all
+shared-cache changes or claim those directories unchanged. No shared cache or
+dependency restoration/deletion was attempted. This is tooling isolation
+evidence, not product persistence evidence.
 
 First anchor `a243328eaf97d1dbe9d6176bf0f1813957ddce38` passed the Supervisor's
 task message guard, but inspection afterward found `.husky/_` absent. The
