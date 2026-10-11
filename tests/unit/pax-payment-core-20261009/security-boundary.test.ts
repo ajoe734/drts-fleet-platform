@@ -47,7 +47,7 @@ describe("PSP token confidentiality and integrity", () => {
         "synthetic_method",
       );
       const bytes = Buffer.from(envelope[field], "base64");
-      bytes[0] ^= 1;
+      bytes[0] = bytes[0]! ^ 1;
       envelope[field] = bytes.toString("base64");
       expect(() =>
         cipher.decrypt(envelope, "synthetic_owner", "synthetic_method"),

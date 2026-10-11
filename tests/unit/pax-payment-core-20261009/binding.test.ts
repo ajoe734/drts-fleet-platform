@@ -184,7 +184,7 @@ describe("production binding service with mocked persistence boundary", () => {
   });
 });
 
-type Call = { sql: string; params?: readonly unknown[] };
+type Call = { sql: string; params: readonly unknown[] | undefined };
 function dbFixture(
   reply: (
     sql: string,

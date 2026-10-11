@@ -3,7 +3,7 @@ import { PassengerAccountRepository } from "../../../apps/api/src/modules/passen
 import type { DatabaseService } from "../../../apps/api/src/common/db/database.service";
 
 function fixture(unpaid: boolean) {
-  const calls: { sql: string; values?: readonly unknown[] }[] = [];
+  const calls: { sql: string; values: readonly unknown[] | undefined }[] = [];
   const client = {
     query: vi.fn(async (sql: string, values?: readonly unknown[]) => {
       calls.push({ sql, values });

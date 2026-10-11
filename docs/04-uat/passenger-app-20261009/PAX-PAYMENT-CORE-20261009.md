@@ -166,3 +166,44 @@ were read. No review candidate is locked, no `done`/acceptance was written.
 
 The original owner continues this task; these are coordination gaps, not a new
 helper task, external PSP gate waiver, candidate or source completion claim.
+
+## Publication and CI repair checkpoint
+
+Published binding/deletion source checkpoint:
+`f549b8be3c9b95be89059579d9b77278338b667e`.
+Draft PR: <https://github.com/ajoe734/drts-fleet-platform/pull/2555>.
+Local, remote branch and draft head were checked equal before publication;
+base62 → HEAD trailer checker ran with `COMMIT_TRAILER_BYPASS` unset (2 commits
+OK), and the worktree was clean. This remains an incomplete draft, not handoff.
+
+Both automatically started hosted runs for f549b8be finished and were read:
+
+- CI [38127142993](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38127142993):
+  **failure**, 11 SUCCESS / 2 FAILURE. Product smoke root typecheck found three
+  test-only errors in this task (two exactOptionalPropertyTypes call-record
+  fields storing undefined, one unchecked Buffer index). Aggregate Smoke
+  acceptance also failed. Exact log retained in
+  `.local/pax-payment-core-20261009/ci-38127142993-failed.log`.
+- CI integration
+  [38127143023](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38127143023):
+  workflow success, **5 SUCCESS / 12 SKIPPED**. Build/typecheck/unit/integration
+  and individual E2E gates were skipped; `e2e` only ran the aggregate step.
+  This is explicitly **not full CI or runtime acceptance**.
+
+The three test typing errors were corrected without changing product behavior.
+`pnpm exec vitest run tests/unit/pax-payment-core-20261009` passed 4 files / 52
+tests, exit 0 (`type-fix-unit.log`); test lint exit 0 (`type-fix-lint.log`). First
+local `pnpm typecheck:root` retry exited 2 because the earlier API-only filtered
+installation omitted other workspace packages; it contained no remaining errors
+in this task (`root-typecheck-fixed.log`). Installed all workspace dependencies
+from the offline cache with `pnpm install --offline --frozen-lockfile
+--ignore-scripts` (exit 0, no source/lockfile change). Then
+`pnpm typecheck:root` **passed, exit 0** (`root-typecheck-full-install.log`).
+This corrects the earlier omission: API typecheck alone never validated the root
+test files. CI for the newly published typing-fix head must be read separately;
+the failed f549b8be result is retained, not overwritten or reported as success.
+
+The approved retry-policy and Booking test-scope coordination requests above
+remain unresolved; full charge/recovery/refund/booking source is not complete.
+Neither acceptance key, candidate handoff, independent approval nor `done` has
+been recorded.
