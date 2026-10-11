@@ -1,6 +1,9 @@
 import { vi } from "vitest";
 import { NextRequest } from "next/server";
-import { PassengerClient, type FetchOptions } from "@drts/passenger-client";
+import {
+  PassengerClient,
+  type FetchOptions,
+} from "../../../packages/passenger-client/src/index";
 import { PassengerAuthClient } from "../../../apps/passenger-app-web/lib/auth/client";
 import * as bff from "../../../apps/passenger-app-web/app/api/passenger-app/[...path]/route";
 import { PassengerJwtService } from "../../../apps/api/src/common/auth/passenger-jwt.service";

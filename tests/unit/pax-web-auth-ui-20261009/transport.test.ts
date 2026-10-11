@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { PassengerClient } from "@drts/passenger-client";
+import { PassengerClient } from "../../../packages/passenger-client/src/index";
 import { PassengerAuthClient } from "../../../apps/passenger-app-web/lib/auth/client";
 import * as bff from "../../../apps/passenger-app-web/app/api/passenger-app/[...path]/route";
 
@@ -18,7 +18,7 @@ export function browserTransport() {
   const responses: Awaited<ReturnType<typeof bff.POST>>[] = [];
   const fetchFn = async (
     url: string,
-    options?: import("@drts/passenger-client").FetchOptions,
+    options?: import("../../../packages/passenger-client/src/index").FetchOptions,
   ) => {
     const request = new NextRequest(new URL(url, origin), {
       method: options?.method ?? "GET",
