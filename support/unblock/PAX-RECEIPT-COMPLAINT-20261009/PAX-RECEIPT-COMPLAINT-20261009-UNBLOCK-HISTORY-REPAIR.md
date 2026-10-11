@@ -463,7 +463,7 @@ Only the separately dispatched original owner may implement that source work.
 
 The helper's three blocked-floor fields remain present and unchanged, and
 `resolved_parent_at` remains absent. In the actual release,
-`apply_unblock_parent_resolution` returns at lines 1110–1111 if the parent is
+`apply_unblock_parent_resolution` returns at lines 1110–1112 if the parent is
 already outside `blocked`. The new `routing-continuation-probe.py` calls the
 real `transition_after_merge` on copies of the **current** slices: helper
 completion leaves the entire in-progress parent, scopes, next, blocker and
@@ -481,3 +481,13 @@ This helper continues only the original report/commit/push/PR lifecycle.
 No parent source file, parent state, acceptance or publication was changed by
 this dispatch. The new candidate and hosted checks must cover the entire
 additive report, including this later-routing receipt.
+
+Final local report checks at `1c86e23724e7b4e3ccbc51c0a8acf744d7986ddd`
+completed and were read: canonical consistency zero findings, classification
+6,269 files, Prettier, whitespace, generated-file guard, eight helper commit
+trailers and the current-routing probe all PASS / exit 0. The normal hook
+chain completed successfully for the additive `e77f0597` and `1c86e237`
+commits; lint-staged's temporary backup was cleaned in each run. This final
+content closeout retains every preceding commit and is checked again before
+ordinary push. Exact final-SHA hosted results belong in the release-status
+handoff and PR receipt, rather than substituting the prior checkpoint runs.
