@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import {
-  render,
+  render as renderComponent,
   screen,
   fireEvent,
   waitFor,
@@ -8,6 +8,10 @@ import {
   act,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createRequire } from "node:module";
+import { resolve } from "node:path";
+import type { ReactElement } from "react";
+import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import LoginPage from "../../../apps/passenger-app-web/app/login/page";
 import AccountPage from "../../../apps/passenger-app-web/app/account/page";
 import CallbackPage from "../../../apps/passenger-app-web/app/auth/callback/[provider]/page";
@@ -19,12 +23,36 @@ const navigation = vi.hoisted(() => ({
   query: new URLSearchParams(),
   external: vi.fn(),
 }));
-const router = { push: navigation.push };
-vi.mock("next/navigation", () => ({
-  useRouter: () => router,
-  useParams: () => ({ provider: navigation.provider }),
-  useSearchParams: () => navigation.query,
-}));
+// pnpm can install different Next peer instances for root tests and the app.
+// Mount the app's actual contexts instead of mocking only the root module.
+const appRequire = createRequire(
+  resolve("apps/passenger-app-web/package.json"),
+);
+const { AppRouterContext } = appRequire(
+  "next/dist/shared/lib/app-router-context.shared-runtime",
+) as typeof import("next/dist/shared/lib/app-router-context.shared-runtime");
+const { PathParamsContext, SearchParamsContext } = appRequire(
+  "next/dist/shared/lib/hooks-client-context.shared-runtime",
+) as typeof import("next/dist/shared/lib/hooks-client-context.shared-runtime");
+const router: AppRouterInstance = {
+  push: navigation.push,
+  replace: vi.fn(),
+  back: vi.fn(),
+  forward: vi.fn(),
+  refresh: vi.fn(),
+  prefetch: vi.fn(),
+};
+function render(ui: ReactElement) {
+  return renderComponent(
+    <AppRouterContext.Provider value={router}>
+      <PathParamsContext.Provider value={{ provider: navigation.provider }}>
+        <SearchParamsContext.Provider value={navigation.query}>
+          {ui}
+        </SearchParamsContext.Provider>
+      </PathParamsContext.Provider>
+    </AppRouterContext.Provider>,
+  );
+}
 vi.mock("../../../apps/passenger-app-web/lib/auth/navigation", () => ({
   redirectToProvider: navigation.external,
 }));
