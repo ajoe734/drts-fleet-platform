@@ -1080,8 +1080,34 @@ def verify_authority(args):
     require(operator_approved, "Actual Operator approval missing for 'operator' environment")
     
     # No overlap check
+    workflows = []
+    page = 1
+    total_workflows = -1
+    while True:
+        res_wf = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/workflows?per_page=100&page={page}"], timeout_sec=30)
+        require(res_wf.returncode == 0, "Failed to fetch workflows")
+        wf_data = json.loads(res_wf.stdout)
+        if total_workflows == -1:
+            total_workflows = wf_data.get("total_count", -1)
+        page_wfs = wf_data.get("workflows", [])
+        if not page_wfs:
+            break
+        workflows.extend(page_wfs)
+        if len(page_wfs) < 100:
+            break
+        page += 1
+    require(total_workflows >= 0, "Failed to determine total workflows")
+    require(len(workflows) == total_workflows, f"Incomplete pagination for workflows: {len(workflows)} != {total_workflows}")
+
+    for wf in workflows:
+        wf_path = wf.get("path", "")
+        wf_state = wf.get("state")
+        if wf_path == ".github/workflows/dev-owned-operational-fixture-assessment.yml":
+            require(wf_state == "active", f"Assessment workflow is not active (state: {wf_state})")
+        else:
+            require(wf_state in ("disabled_manually", "disabled_inactivity", "disabled_fork"), f"Workflow {wf_path} is not in a disabled state (state: {wf_state})")
+
     active_restricted_runs = []
-    import re as regex_mod
     for status in ["in_progress", "queued", "waiting", "pending", "requested"]:
         page = 1
         status_fetched_runs = 0
@@ -1098,9 +1124,7 @@ def verify_authority(args):
             status_fetched_runs += len(page_runs)
             for r in page_runs:
                 if str(r.get("id")) != args.current_run_id:
-                    path = r.get("path", "")
-                    if regex_mod.search(r"deploy|restore|provision|provider|scanner", path, regex_mod.IGNORECASE):
-                        active_restricted_runs.append(r)
+                    active_restricted_runs.append(r)
             if len(page_runs) < 100:
                 break
             page += 1
@@ -1201,6 +1225,15 @@ def main():
 
                 ready_revision = val.get("status", {}).get("latestReadyRevisionName")
                 require(ready_revision is not None, f"No ready revision for {s_name}")
+                created_revision = val.get("status", {}).get("latestCreatedRevisionName")
+                require(ready_revision == created_revision, f"Ready revision {ready_revision} does not match created {created_revision} for {s_name}")
+                traffic = val.get("status", {}).get("traffic", [])
+                require(len(traffic) > 0, f"No traffic allocation for {s_name}")
+                found_100 = False
+                for t in traffic:
+                    if t.get("revisionName") == ready_revision and t.get("percent") == 100:
+                        found_100 = True
+                require(found_100, f"Revision {ready_revision} does not have 100% traffic for {s_name}")
 
                 res_rev = run_bounded(["gcloud", "run", "revisions", "describe", ready_revision, "--project", PROJECT, "--region", REGION, "--format=json"], timeout_sec=30)
                 require(res_rev.returncode == 0, f"Failed to describe revision {ready_revision}")

@@ -135,6 +135,27 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          PAGE=1
+          HAS_NEXT=true
+          while [ "$HAS_NEXT" = "true" ]; do
+            RES=$(gh api "/repos/${{ github.repository }}/actions/workflows?per_page=100&page=$PAGE")
+            if ! echo "$RES" | jq -e ".workflows" >/dev/null; then
+              echo "::error::Failed to fetch workflows (API error)"
+              exit 1
+            fi
+            ENABLED_OTHER=$(echo "$RES" | jq -r ".workflows[] | select(.path != \".github/workflows/dev-owned-operational-fixture-assessment.yml\" and (.state == \"active\" or .state == \"deleted\" or .state == \"unknown\")) | .path")
+            if [ -n "$ENABLED_OTHER" ]; then
+              echo "::error::Other workflows are not server-disabled: $ENABLED_OTHER"
+              exit 1
+            fi
+            COUNT=$(echo "$RES" | jq ".workflows | length")
+            if [ "$COUNT" -lt 100 ]; then
+              HAS_NEXT=false
+            else
+              PAGE=$((PAGE+1))
+            fi
+          done
+
           ACTIVE_JOBS=""
           for STATUS in requested queued waiting pending in_progress; do
             PAGE=1
@@ -145,7 +166,7 @@ jobs:
                 echo "::error::Failed to fetch workflow_runs (API error): $RES"
                 exit 1
               fi
-              MATCHES=$(echo "$RES" | jq -r '.workflow_runs[] | select(.path | test("deploy|restore|provision|provider|scanner"; "i")) | .id')
+              MATCHES=$(echo "$RES" | jq -r --arg current_run "${{ github.run_id }}" '.workflow_runs[] | select(.id | tostring != $current_run) | .id')
               if [ -n "$MATCHES" ]; then
                 ACTIVE_JOBS="$ACTIVE_JOBS $MATCHES"
               fi
