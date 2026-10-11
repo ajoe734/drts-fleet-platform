@@ -222,3 +222,101 @@ commit/ordinary push preserves the first published helper head and its failed
 CI evidence; the replacement head requires its own hosted results. Original
 parent product failures and the Supervisor transaction prerequisite remain
 open independently of this document correction.
+
+### F-PARENT-DISPOSITION: first review and owner continuation
+
+Codex reopened candidate `eb562d0f469b3492ec5a85896010e7ce437dcf71` at
+`2026-10-11T10:33:01Z`, generation `acf4947f869e48ffbd20431fa68d1a3e`.
+The reviewed artifact hash was
+`4b96ad23034f233c1a84369361c432aec11a5a82c2a18eb947702e2b8f447405`.
+The complete finding is retained in that release-CLI task slice's reviewer
+`reopen` receipt. This is the first review of this finding, not a second
+unchanged submission. The reviewer accepted the history recovery and citation
+correction but rejected completion while the parent disposition is missing.
+
+This owner continuation re-read both task slices after recording `progress`.
+The helper still has no `resolved_parent_status`,
+`resolved_parent_waiting_for` or `resolved_parent_next`. The parent remains
+`blocked` / `Codex`, last updated `2026-10-11T09:53:50Z`, with both original
+required acceptance keys and the original owner/reviewer. Fetch, remote refs,
+PR #2556 / #2558 and the clean locked parent worktree confirm the same
+published SHAs. No new history repair or parent source edit is necessary.
+
+The actual active release, `0fb44e9576d33298ee84588987973d71da2678e5`, has
+this completion path in its status script:
+
+1. `transition_after_merge` marks a helper with no remaining required acceptance
+   `done` and calls `apply_unblock_parent_resolution`.
+2. `apply_unblock_parent_resolution`, lines 1097–1181, reads the parent
+   disposition. At line 1116, absent task metadata defaults to `todo`.
+3. Lines 1143–1149 overwrite the parent's status, next and waiting-for. The
+   resumable branch at lines 1163–1171 resolves original blockers; explicit
+   `blocked` follows lines 1151–1162 and keeps the blocked disposition.
+4. `TaskBoardCommandExecutor._guard_worker_command`, lines 82–98 in the
+   release task-board executor, rejects both cross-task `note` and `assign`
+   from this dispatched worker. Retrying the same rejected writes cannot
+   repair the prerequisite.
+
+The local probe calls the actual release `transition_after_merge` and its
+resolution functions on copies of the two CLI slices. Only `append_log` is
+mocked as an in-memory list, to prevent writing the canonical audit sink.
+The synthetic blocker copies the parent's recorded owner, waiting-for,
+message and timestamp; it is not a read of the entire status file or original
+blocker list. The probe does not execute a real merge or status transaction.
+
+| Finding / acceptance                                        | Actual source / proposed correction                                                                                         | Missing metadata → explicit blocked metadata                                                                                                                                                    | Command, exit, version / evidence                                                                                                                                                                                                  | Remaining limit                                                                                                                       |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| F-PARENT-DISPOSITION / keep unresolved product work blocked | Active-release `transition_after_merge` → `apply_unblock_parent_resolution`; register the existing three disposition fields | Parent `todo`, waiting-for removed, original blocker resolved → parent `blocked` / `Codex`, explicit next retained, original blocker open; roles and both required keys unchanged in both cases | `python3 /home/lupin/workspace/drts-fleet-platform/.local/pax-receipt-history-repair-20261011/parent-disposition-probe.py`, PASS 0, release `0fb44e9576d3`; result in the same directory as `parent-disposition-probe-result.json` | In-memory reproduction only. Its fixed timestamp is synthetic; no `resolved_parent_at` was written to canonical metadata.             |
+| Update parent with concrete next step                       | Authorized operator `note` on parent plus metadata-only `assign` on helper, below                                           | Latest two CLI slices confirm the prerequisite is still OPEN                                                                                                                                    | Active release `show` / helper `progress`, PASS 0; full review receipt remains in the helper slice                                                                                                                                 | Supervisor authority is required. Owner cannot satisfy this acceptance through a report, probe, checkpoint push or unchanged handoff. |
+
+The current function appends a new blocker for explicit `blocked`; the probe
+therefore contains the original open blocker and the new one. With helper and
+parent both owned by Codex2, the default resumable branch does not add a fresh
+owner handoff, but still sets the parent to schedulable `todo`. Neither detail
+changes the finding or authorizes a runtime/control-plane implementation patch
+in this helper's report scope.
+
+### Prepared Supervisor transaction; not executed by this worker
+
+Run from the authorized Supervisor operator context using the specified
+release. Do not change or clear worker dispatch identity to run this recipe.
+Preserve both tasks' existing owner/reviewer, scopes and original acceptance
+keys. The existing assignment gateway accepts metadata without resetting task
+status; `note` changes the parent's next step without resuming it.
+
+```bash
+PAX_HISTORY_STATUS_CLI=/home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh
+export PAX_HISTORY_PARENT_NEXT='History audit confirms local=remote=PR2556 cec585cc397eacbdf78a7d022771e1383e08e56c and restored original isolated worktree. Parent remains blocked for exact audit DTO/mapper, Booking fixture, current-receipt method scopes and lawful actual E04 producer capture. Register same-task boundaries, then resume original Codex2 from published cec585; rerun required checks, same-SHA independent CI/review/merge and both original acceptance keys.'
+PAX_HISTORY_METADATA_JSON=$(python3 -c 'import json, os; print(json.dumps({"resolved_parent_status": "blocked", "resolved_parent_waiting_for": "Codex", "resolved_parent_next": os.environ["PAX_HISTORY_PARENT_NEXT"]}))')
+
+AI_NAME=Supervisor TASK_METADATA_JSON="$PAX_HISTORY_METADATA_JSON" \
+  "$PAX_HISTORY_STATUS_CLI" assign \
+  PAX-RECEIPT-COMPLAINT-20261009-UNBLOCK-HISTORY-REPAIR Codex2 Codex
+AI_NAME=Supervisor "$PAX_HISTORY_STATUS_CLI" note \
+  PAX-RECEIPT-COMPLAINT-20261009 "$PAX_HISTORY_PARENT_NEXT"
+"$PAX_HISTORY_STATUS_CLI" show PAX-RECEIPT-COMPLAINT-20261009-UNBLOCK-HISTORY-REPAIR
+"$PAX_HISTORY_STATUS_CLI" show PAX-RECEIPT-COMPLAINT-20261009
+```
+
+This is a two-command operator sequence, not a claim of an atomic combined
+transaction. Record both successful command results and read both slices;
+partial execution leaves this prerequisite open. Verify all three helper
+fields match the JSON above and `resolved_parent_at` remains absent before
+merge; parent status / waiting-for remain `blocked` / `Codex`, parent `next`
+matches the explicit continuation, and both original acceptance keys and roles
+are preserved. Neither `assign` nor `note` creates a helper candidate or
+resolution timestamp.
+
+After that canonical correction, coordinate owner continuation through the
+existing lifecycle if this helper has been marked blocked. Re-read refs, PR,
+task slices and the new report head; only then hand off the exact normally
+pushed head to Codex. This additive report revision is a checkpoint, not an
+unchanged re-handoff. Keep PR #2558 draft and hold merge while the prerequisite
+is OPEN. CI results on `eb562d0f` remain evidence for that prior candidate:
+[38131249475](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38131249475)
+and
+[38131249450](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38131249450)
+are completed / SUCCESS, re-read in this continuation; integration product
+checks were SKIPPED. They are not CI evidence for the new checkpoint. Parent
+CI failure, product findings and every original acceptance limitation above
+remain open.
