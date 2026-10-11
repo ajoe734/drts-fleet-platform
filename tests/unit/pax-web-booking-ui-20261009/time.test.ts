@@ -81,6 +81,18 @@ describe("formal configured reservation boundary (R5)", () => {
       new Date(now + 60_000).toISOString(),
     );
   });
+  it.each(["2026-11-01T05:55:30Z", "2026-11-01T06:05:00Z"])(
+    "DST fold still initializes a lawful representable minute at %s",
+    (clock) => {
+      const now = Date.parse(clock);
+      const local = earliestBookingTime(settings(30), now);
+      expect(
+        isBookingTimeAllowed(fromLocalDateTime(local), settings(30), now),
+      ).toBe(true);
+      if (process.env.TZ === "America/New_York")
+        expect(local).toBe("2026-11-01T02:00");
+    },
+  );
   it("invalid timestamps cannot be quoted or submitted", () => {
     expect(isBookingTimeAllowed("bad", settings(30))).toBe(false);
   });

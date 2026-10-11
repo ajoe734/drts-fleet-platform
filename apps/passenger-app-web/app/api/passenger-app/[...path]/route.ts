@@ -102,6 +102,16 @@ function isAllowedPassengerPath(path: string[], method: string) {
     return true;
   }
   if (method === "GET" && fullPath === "fares") return true;
+  if (method === "GET" && ["settings", "booking-settings"].includes(fullPath))
+    return true;
+  if (
+    path.length === 2 &&
+    path[0] === "geo" &&
+    ((method === "GET" && path[1] === "search") ||
+      (method === "POST" &&
+        ["resolve", "reverse", "route"].includes(path[1] ?? "")))
+  )
+    return true;
   if (method === "POST" && fullPath === "rides") return true;
   return false;
 }
@@ -112,7 +122,10 @@ function resolveTargetOrigin() {
 
 function buildTargetUrl(request: NextRequest, path: string[]) {
   const targetUrl = new URL(
-    ["api", "passenger-app", ...path].join("/"),
+    (path[0] === "geo"
+      ? ["api", ...path]
+      : ["api", "passenger-app", ...path]
+    ).join("/"),
     `${resolveTargetOrigin()}/`,
   );
   targetUrl.search = request.nextUrl.search;
@@ -253,7 +266,10 @@ async function forward(
     let refreshToken = request.cookies.get("pax_refresh")?.value;
 
     const targetUrl = buildTargetUrl(request, path);
-    if (!targetUrl.pathname.startsWith("/api/passenger-app/")) {
+    if (
+      !targetUrl.pathname.startsWith("/api/passenger-app/") &&
+      !(path[0] === "geo" && targetUrl.pathname.startsWith("/api/geo/"))
+    ) {
       return withSecurityHeaders(
         NextResponse.json(
           { error: "PASSENGER_PROXY_PATH_NOT_ALLOWED" },

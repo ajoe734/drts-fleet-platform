@@ -53,9 +53,13 @@ export function earliestBookingTime(
   const { minLeadTimeMinutes } = validateBookingSettings(settings);
   const earliest = now + minLeadTimeMinutes * 60_000;
   if (!Number.isFinite(earliest)) throw new Error("invalid_booking_time");
-  return toLocalDateTime(
-    new Date(Math.ceil(earliest / 60_000) * 60_000).toISOString(),
-  );
+  // A datetime-local control cannot distinguish the two occurrences of a
+  // DST-fold minute. Skip unrepresentable second occurrences: parsing the
+  // displayed wall minute must satisfy the same actual UTC lead boundary.
+  for (let minute = Math.ceil(earliest / 60_000) * 60_000; ; minute += 60_000) {
+    const local = toLocalDateTime(new Date(minute).toISOString());
+    if (Date.parse(fromLocalDateTime(local)) >= earliest) return local;
+  }
 }
 
 /** Revalidate at every quote and submit boundary, using the current clock. */

@@ -1,3 +1,5 @@
+import { BookingScreen } from "../components/booking/booking-screen";
+
 export default function Home() {
-  return <div>首頁</div>;
+  return <BookingScreen />;
 }
