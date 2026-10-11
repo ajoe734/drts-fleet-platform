@@ -2,7 +2,16 @@
 
 Owner: Codex2. Reviewer: Codex. Evidence collected: 2026-10-11 UTC.
 
-## Finding and disposition
+**Current prerequisite receipt:** Supervisor registered the blocked-parent
+metadata and applied the matching parent note through the active release CLI.
+Fresh slices confirm the three fields, parent `blocked` / `Codex`, unchanged
+roles/scopes/acceptance keys, and no premature `resolved_parent_at`. The
+11:10:51/52 receipt and actual-release probe are recorded in the final section.
+Earlier OPEN/absent-metadata statements below are retained as historical
+observations; the 10:46:29 absence claim was stale. This report is ready for a
+new exact candidate review and CI; parent source repair remains blocked.
+
+## Finding and disposition — original candidate record
 
 The published parent history is intact. No local/remote divergence, foreign
 task commit, stale PR head, or complete-candidate declaration was found in the
@@ -137,7 +146,7 @@ where applicable. Original required keys remain:
 No VM product servers, browser/E2E runners, Docker Compose or new deployment
 are authorized by this recovery.
 
-## Canonical parent update prerequisite
+## Canonical parent update prerequisite — original attempt
 
 Both attempted release-CLI writes were rejected with exit 1 and made no
 canonical mutation:
@@ -171,7 +180,7 @@ The helper's completion must preserve the blocked disposition. A later real
 scope/product resolution requires fresh Supervisor resume evidence; this
 history report alone is not a resumable resolution.
 
-## Acceptance / verification record
+## Acceptance / verification record — original candidate
 
 | Finding / helper acceptance                         | Source / repair                                                          | Old → repaired result                                                                  | Command, exit code, version / evidence                                                                                                                                     | Remaining limit                                                                                                  |
 | --------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
@@ -320,3 +329,81 @@ are completed / SUCCESS, re-read in this continuation; integration product
 checks were SKIPPED. They are not CI evidence for the new checkpoint. Parent
 CI failure, product findings and every original acceptance limitation above
 remain open.
+
+### F-PARENT-DISPOSITION: actual Supervisor receipt and scoped resolution
+
+This continuation starts from normally published checkpoint
+`4d86163900e49d1afe8781305c9150af1b6b90c8`, whose report hash was
+`34aab96e0e195471675c94ad7a230b097f9a8216095613ee6c1744387ad6648d`.
+The reviewed `eb562d0f` candidate/generation, first-review finding, original
+guard denials, reproduction, operator recipe and source findings above remain
+part of the record. There has been no second review of this finding.
+
+The canonical activity slice records genuine `Supervisor` events:
+
+- `2026-10-11T10:39:44Z`: metadata assignment on this existing helper, with
+  Codex2 owner and Codex reviewer. The 11:10:52 Supervisor receipt identifies
+  the metadata as recorded at 10:39:45; the assign activity timestamp is one
+  second earlier. The assign message alone does not expose its payload; the
+  fresh helper slice below establishes the actual fields.
+- `2026-10-11T11:10:51Z`: release-CLI `note` on the original parent with the
+  exact blocked-preservation next step below.
+- `2026-10-11T11:10:52Z`: `blocked_task_resumed` for this helper only, to
+  `in_progress`, directing original-owner continuation on the same artifact.
+
+The 10:46:29 owner blocker message's absent-metadata claim was **stale**, not
+a fresh canonical absence. This receipt supersedes that claim and the prior
+OPEN prerequisite rows. The owner did not rerun denied cross-task writes,
+impersonate Supervisor, edit canonical JSON or create another helper.
+
+Both fresh release-CLI `show` calls exit 0. The helper now contains exactly:
+
+```json
+{
+  "resolved_parent_status": "blocked",
+  "resolved_parent_waiting_for": "Codex",
+  "resolved_parent_next": "History helper preservation/planning only: original receipt parent remains blocked on exact source scope/actor DTO/current receipt version/Book rating fixture and genuine upstream E04 captured facts. Preserve sourcecec585/draftPR2556/all original keys, ownerCodex2/reviewerCodex; no automatic source resume, new recovery route, financial facts/defaults or acceptance. Supervisor will separately coordinate precise same-task source seams; helper approval is not product review."
+}
+```
+
+The parent has the exact same `next`, status `blocked`, waiting-for `Codex`
+and `last_update=2026-10-11T11:10:51Z`. Both tasks retain Codex2/Codex roles;
+the parent retains all registered scopes, its task-spec reference/hash and
+both original required acceptance keys. Parent candidate/review/merge/product
+acceptance evidence is still absent. `resolved_parent_at` is absent from the
+canonical helper; only the real merge-resolution transaction may record it.
+The actual registered next is a preservation/planning disposition and
+supersedes the proposed recipe's wording; the old recipe was not executed by
+this worker and must not be replayed as a new parent-resume authorization.
+
+`prerequisite-receipt-probe.py` calls the actual release
+`transition_after_merge` / `apply_unblock_parent_resolution` on deep copies of
+these fresh CLI slices. Only `append_log` is mocked to an in-memory list.
+Its synthetic blocker represents the parent slice's blocked disposition; its
+synthetic timestamp `2026-10-11T11:20:00Z` is used only inside the copies.
+Removing the three fields in the control copy reproduces parent `todo`, lost
+waiting-for and resolved original blocker. Using the **actual registered
+metadata**, without substituting the old proposed next, preserves parent
+`blocked` / `Codex`, its exact next and original open blocker. All other
+parent fields, scopes, roles and keys remain equal; no pending owner resume is
+created. The full probe exits 0. This tests the genuine disposition logic;
+it is not a real merge, original blocker-list audit or product acceptance.
+
+| Finding / helper acceptance                                                                           | Current evidence and result                                                                                                                                                                    | Command / version / evidence                                                                                                                                                                                                                                         | Remaining limit                                                                                                                                                                                                                 |
+| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F-PARENT-DISPOSITION                                                                                  | Missing-field control reproduces unsafe `todo`; actual canonical metadata preserves `blocked` / `Codex`, original blocker, next, scopes and keys: PASS                                         | `python3` with the absolute receipt probe path below, exit 0; active release `0fb44e9576d33298ee84588987973d71da2678e5`; result JSON and two CLI slices                                                                                                              | Audit sink mocked; synthetic blocker/time; independent candidate review and real merge still pending.                                                                                                                           |
+| Update parent with concrete next step                                                                 | Supervisor parent note matches all three helper disposition fields: prerequisite SATISFIED                                                                                                     | Authorized activity receipts at 10:39:44 and 11:10:51/52; read-only release `show` checks exit 0                                                                                                                                                                     | Parent stays blocked for Supervisor's precise same-task source coordination; helper approval is not product review or source resume.                                                                                            |
+| Identify contamination / non-destructive recovery regression                                          | Parent local=remote=PR #2556 `cec585cc`; clean restored original worktree and preservation lock remain; helper local=remote=PR #2558 `4d861639` before this additive revision                  | `git fetch origin`, ref/count/worktree checks and `gh pr view` exit 0; both local/remote counts `0 0`; `origin/dev` remains `2f6ec0cc`                                                                                                                               | Six original checkpoints and source findings preserved; original ignored dependency/log recovery remains outside this report.                                                                                                   |
+| Task-scoped canonical delivery                                                                        | Same helper branch and existing draft PR #2558; this revision changes only this artifact                                                                                                       | New full commit/push/PR identity and artifact hash are supplied in the exact release-CLI handoff receipt                                                                                                                                                             | New candidate needs its own full hosted CI and independent Codex review before protected merge. Prior green runs cannot stand in for it.                                                                                        |
+| Prior checkpoint checks / citation regression                                                         | CI and ci-integ both completed SUCCESS at `4d861639`; results and job/step conclusions read                                                                                                    | [CI 38132634475](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38132634475), [ci-integ 38132634489](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38132634489)                                                                           | CI product smoke ran lint/typecheck/migrations/root and API units successfully on the helper's trunk-based source; draft ci-integ product jobs SKIPPED. Neither result verifies the unmerged parent source or the new revision. |
+| Local report and preserved-parent checks                                                              | Content/citation check has zero findings; repository classification validates 6,269 files; whitespace and generated-file guards pass; five existing helper and six parent commit trailers pass | `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`, `node tools/ci/check-repo-classification.mjs`, `git diff --check`, existing range generated-file/trailer checks: all exit 0 on the revised report / predecessor `4d861639` | Final formatting, normal commit hooks and new committed range results are supplied in the exact handoff receipt; no product tests added for this documentation change.                                                          |
+| Parent F-AUDIT-ACTOR / F-BOOKING-FIXTURE / F-CURRENT-RECEIPT / F-E04 and both product acceptance keys | All original findings and existing parent CI failure remain OPEN                                                                                                                               | Original `cec585cc` UAT matrix, source seams and failed hosted run retained above; no parent code or acceptance change                                                                                                                                               | Supervisor separately coordinates precise same-task scopes and lawful actual E04 captured facts. No new source recovery/publication route or defaults are authorized.                                                           |
+
+Machine-specific receipts for this continuation are in
+`/home/lupin/workspace/drts-fleet-platform/.local/pax-receipt-history-repair-20261011/receipt-20261011T111056Z/`:
+`prerequisite-receipt-probe.py`, `prerequisite-receipt-result.json`,
+`parent-slice.json`, `helper-slice.json` and
+`supervisor-activity-receipts.json`. Earlier machine receipts remain intact.
+The durable evidence is this task-scoped report plus the exact candidate's
+release-status / PR / hosted run receipts. No product runtime was started on
+this VM, and no deployment, parent source continuation or acceptance was run.
