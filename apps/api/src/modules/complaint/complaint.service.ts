@@ -26,6 +26,10 @@ import {
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { ComplaintRepository } from "./complaint.repository";
+import {
+  normalizePassengerComplaintIntake,
+  type PassengerComplaintIntake,
+} from "./passenger-complaint-intake";
 
 const COMPLAINT_CATEGORY_VALUES = [
   "late_arrival",
@@ -170,6 +174,76 @@ export class ComplaintService implements OnModuleInit {
     );
 
     return this.cloneComplaintCase(complaintCase);
+  }
+
+  async createPassengerComplaintCase(input: PassengerComplaintIntake) {
+    const intake = normalizePassengerComplaintIntake(input);
+    if (!this.complaintRepository?.isEnabled()) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Complaint storage is unavailable.",
+      );
+    }
+    const category: ComplaintCategory = {
+      service: "driver_service" as const,
+      fare: "fare_dispute" as const,
+      lost_item: "lost_and_found" as const,
+      other: "other" as const,
+    }[intake.command.category];
+    const now = new Date();
+    const createdAt = now.toISOString();
+    const caseNo = `PAX-${randomUUID()}`;
+    const description = [
+      "來源：乘客 App",
+      `同意客服聯繫：${intake.command.contactConsent ? "是" : "否"}`,
+      intake.command.content,
+      ...(intake.command.lostItemDescription
+        ? [`遺失物：${intake.command.lostItemDescription}`]
+        : []),
+    ].join("\n");
+    const complaintCase: ComplaintCaseRecord = {
+      caseNo,
+      caseSource: "app",
+      relatedOrderId: intake.orderId,
+      relatedCallId: null,
+      relatedIncidentId: null,
+      category,
+      severity: "normal",
+      description,
+      assigneeId: null,
+      status: "new",
+      slaDueAt: this.calculateSlaDueAt(category, "normal", now),
+      slaBreach: false,
+      reopenCount: 0,
+      resolutionCode: null,
+      closingNote: null,
+      createdAt,
+      updatedAt: createdAt,
+    };
+    const timeline = this.createTimelineEntry(
+      caseNo,
+      TIMELINE_ACTIONS.created,
+      `來源：乘客 App；同意客服聯繫：${intake.command.contactConsent ? "是" : "否"}`,
+      createdAt,
+    );
+    const stored = await this.complaintRepository.persistPassengerIntake(
+      intake,
+      complaintCase,
+      timeline,
+    );
+    // Publish to the existing Ops authority only after the durable transaction.
+    if (
+      !this.complaintCases.some(
+        (item) => item.caseNo === stored.complaintCase.caseNo,
+      )
+    ) {
+      this.complaintCases = [stored.complaintCase, ...this.complaintCases];
+      this.complaintTimelines.set(stored.complaintCase.caseNo, [
+        stored.timeline,
+      ]);
+    }
+    return { complaintId: stored.complaintCase.caseNo };
   }
 
   listComplaintCases() {

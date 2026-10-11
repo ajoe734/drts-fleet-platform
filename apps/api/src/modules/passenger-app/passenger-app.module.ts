@@ -30,10 +30,19 @@ import { PassengerBookingService } from "./booking/passenger-booking.service";
 import { PassengerBookingRepository } from "./booking/passenger-booking.repository";
 import { PassengerBookingSettingsController } from "./booking/passenger-booking-settings.controller";
 import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
+import { ComplaintModule } from "../complaint/complaint.module";
+import { PassengerComplaintController } from "./complaint/passenger-complaint.controller";
+import { PassengerComplaintService } from "./complaint/passenger-complaint.service";
 
 @Global()
 @Module({
-  imports: [DatabaseModule, GeoModule, ServiceAreaModule, MultiTaxiModule],
+  imports: [
+    DatabaseModule,
+    GeoModule,
+    ServiceAreaModule,
+    MultiTaxiModule,
+    ComplaintModule,
+  ],
   controllers: [
     PassengerAccountController,
     PassengerOtpController,
@@ -42,6 +51,7 @@ import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
     FacebookDataDeletionController,
     PassengerBookingController,
     PassengerBookingSettingsController,
+    PassengerComplaintController,
   ],
   providers: [
     PassengerJwtService,
@@ -56,6 +66,7 @@ import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
     PassengerOtpService,
     PassengerBookingRepository,
     PassengerBookingService,
+    PassengerComplaintService,
     { provide: SMS_PORT, useClass: UnconfiguredSmsPort },
     { provide: OTP_OPTIONS, useFactory: () => otpOptionsFromEnv(process.env) },
     {
