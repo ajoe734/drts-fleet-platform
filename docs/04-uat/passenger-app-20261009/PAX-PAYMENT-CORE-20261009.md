@@ -85,3 +85,84 @@ not a full source handoff. No previous Payment candidate/review/PR exists.
 All hosted PG, API/HTTP, browser, notification and contracted PSP acceptance are
 unexecuted. No servers, containers, cloud authentication, external secrets,
 real provider calls or deployments were started on this VM.
+
+## Second checkpoint: persisted binding and defensive deletion guard
+
+First published anchor: `93cf5bb92351543af5db84ced1086be7a8ae25b6`.
+Added V0115, `PaymentMethodRepository`, `PaymentMethodService`,
+`PaymentMethodController` and the append-only module providers/controller.
+GET/POST/DELETE payment-methods and PUT default use `PassengerAccountService.getMe`
+to validate the actual live passenger identity. Repository mutations lock the
+active account in a transaction. The binding claim is committed before provider
+exchange; replay with another owner is refused before contacting the PSP.
+Exchange errors retain the pending claim, and completion atomically writes the
+encrypted method and journal outcome. Responses explicitly project metadata or
+3DS/pending status, never a provider object with extra token fields.
+
+Removal clears the encrypted token only after checking owned noncancelled
+financial obligations; expired cards remain removable. Default mutation requires
+an active unexpired owned card and serializes on the account row. Fake refunds
+now refuse totals above the original capture even with another refund key.
+
+`PostgresPassengerAccountTransaction.anonymize` checks unpaid/active obligations
+inside its existing transaction. This covers both DELETE /me and the existing
+last-identity Facebook deletion caller; refusal rolls back session revocations
+and leaves anonymization/financial retention unchanged. The new helper's booking
+mode is **not wired yet**. No cancellation handler or fee was changed.
+
+### SQL field comparison for binding (PG still unexecuted)
+
+| Formal V0115 column / type                                                                      | Production SQL arguments / projection                                                                                                                                     |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `psp_tokens.payment_method_id uuid`                                                             | claim `entity_id`; INSERT $1; `row.payment_method_id` → `paymentMethodId`                                                                                                 |
+| `drts_passenger_id varchar(100)`                                                                | authenticated owner, INSERT $2; every method lookup/update filters owner; matches V0109 account key                                                                       |
+| `provider text`                                                                                 | INSERT $3; provider name from configured backend; not in public projection                                                                                                |
+| `token_envelope jsonb`                                                                          | INSERT $4::jsonb; AES-GCM envelope only; no plaintext credential/token argument to SQL                                                                                    |
+| `last4 varchar(4), card_type varchar(40)`                                                       | INSERT $5/$6, validated provider display metadata; `last4/cardType` projection                                                                                            |
+| `expiry_month varchar(2), expiry_year varchar(4)`                                               | INSERT $7/$8; string/format and expiry validated; numeric SQL comparison uses these actual columns                                                                        |
+| `is_default boolean`                                                                            | INSERT computed NOT EXISTS under account lock; default change clears then sets; public boolean projection                                                                 |
+| `status text, removed_at timestamptz`                                                           | defaults active; removal sets removed, clears envelope/default, stamps now; constraint enforces removal shape                                                             |
+| `created_at timestamptz`                                                                        | default now; list ordering only; no fabricated API timestamp                                                                                                              |
+| `payment_idempotency_keys.idempotency_key text`                                                 | `pax:bind:` + SHA256(provider/credential); INSERT $1; replay filters operation=bind and locks row                                                                         |
+| `operation text, drts_passenger_id varchar(100), entity_id uuid, credential_digest varchar(64)` | literal bind, owner $2, reserved random method UUID $3, digest $4; global unique credential index; no raw credential stored                                               |
+| `outcome text, error_code text, created_at/updated_at timestamptz`                              | pending default; completed/pending/action_required/failed updates scoped to owner; fixed error classification; concurrent incomplete responses cannot overwrite completed |
+| `payment_charge_records` / existing billing authority                                           | DDL reservation only; **no charge/state writer yet**. Its SQL/row/state acceptance remains pending; do not treat the reservation as financial delivery.                   |
+
+### Additional findings / checks
+
+| Finding / acceptance                         | Source / change                                                        | Old → new                                                                                                                         | Commands / exits / evidence                                                                                                                                                                                                                                                                                                                                                                                                               | Limits                                                                                                                           |
+| -------------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Unpaid account deletion                      | `anonymize`, `assertNoUnpaidPassengerRides`                            | Actual repository at anchor 93cf5bb permits deletion → current repository rejects with pending_payment_block and no anonymization | `PAX_PAYMENT_ACCOUNT_SOURCE="$PWD/.local/pax-payment-core-20261009/account-repository-93cf5bb.ts" pnpm exec vitest run tests/unit/pax-payment-core-20261009/historical-deletion-probe.test.ts`: exit 1, **1 actual failing test**, old promise resolves; `deletion-old-93cf5bb-retry.log`. Current same probe included in regression: pass. Historical source extracted with git show, only imports rewritten; active worktree not reset. | Database replies mocked; no PG engine/constraint/concurrency proof. Both production deletion paths share this repository method. |
+| Binding journal/ownership/confidentiality    | binding repository/service/controller/module                           | Absent at 93cf5bb → real service and production SQL orchestration tested with database/PSP boundaries mocked                      | `pnpm exec vitest run tests/unit/pax-payment-core-20261009 tests/unit/pax-account-session-20261009 tests/unit/pax-facebook-login-20261009 tests/unit/pax-booking-history-20261009`: exit 0, **15 files / 419 tests passed**; `checkpoint-regression.log`                                                                                                                                                                                  | No HTTP server, provider contract, 3DS browser, actual PG or billing capture evidence                                            |
+| Typecheck and lint                           | All second-checkpoint source/test changes                              | First binding typecheck exit 2 (strict indexing of body key) → fixed, final API typecheck exit 0                                  | `pnpm --filter @drts/api typecheck`: exit 0, `checkpoint-typecheck.log`; original failure `binding-typecheck.log`. Scoped `pnpm exec eslint ... --max-warnings=0`: exit 0, `checkpoint-lint.log`                                                                                                                                                                                                                                          | Scoped source + API compiler; no full hosted CI claim                                                                            |
+| Historical probe initial environment failure | Historical extracted repository import                                 | Initial missing Nest package → rewrote import to isolated installed API dependency → actual test executes/fails as above          | `deletion-old-93cf5bb.log`: exit 1, **0 tests**, not a valid behavioral reproduction; retained separately from successful reproduction setup                                                                                                                                                                                                                                                                                              | No canonical-root dependencies linked; no claimed pass from fixture failure                                                      |
+| Repository classification/whitespace         | task-owned files                                                       | Current tracked repository classification validated                                                                               | `node tools/ci/check-repo-classification.mjs`: exit 0, `checkpoint-classification.log`; `git diff --check`: exit 0                                                                                                                                                                                                                                                                                                                        | New files also checked on staged commit via original hooks; not full CI                                                          |
+| `pax-payment_bind_charge_and_states`         | Binding source available; completion/recovery/refund source incomplete | Partial implementation only                                                                                                       | No acceptance recorded                                                                                                                                                                                                                                                                                                                                                                                                                    | Real billing/state writer, retry/manual recovery/notice, platform refund, PG/HTTP/independent same-SHA review/CI remain          |
+| `pax-payment_security_and_recovery`          | Cipher/config/bind ownership/deletion guard verified in scoped tests   | Security source advances; entire recovery incomplete                                                                              | No acceptance recorded                                                                                                                                                                                                                                                                                                                                                                                                                    | Unpaid booking transaction guard and approved retry policy remain, plus hosted tests/external provider gate                      |
+
+All local evidence files above are under this isolated worktree's
+`.local/pax-payment-core-20261009/`; final test/tool versions remain Node 22.23.2,
+pnpm 10.33.0, Vitest 4.1.4. Every launched local check finished and its results
+were read. No review candidate is locked, no `done`/acceptance was written.
+
+### Exact Supervisor coordination requests before remaining shared integration
+
+1. Provide/cite the approved payment retry maximum and delay/backoff, and the
+   treatment of unknown acknowledgement versus definitive decline. Existing
+   original/SD/P5 authority only says retry by policy, so financial defaults are
+   absent. No policy values were fabricated in source or configuration.
+2. Extend the original task's test scope (after overlap check) to
+   `tests/unit/pax-booking-history-20261009/`. Its
+   `production-booking-fixture.ts` creates `paymentMethodId: "payment-unit"`,
+   `booking-history-spec.test.ts` creates `"pm-1"`, and
+   `booking-atomicity.test.ts` assumes no account FOR UPDATE during commit.
+   These are actual callers of the production service/repository that must be
+   updated to supply an owned valid method/account-locked payment transaction
+   when the required unpaid/method guards are wired. Current task scopes permit
+   only `tests/unit/pax-payment-core-20261009/` and API tests, so those predecessor
+   fixtures were read but not edited. Preserve their R2/R9 assertions and add
+   proper positive payment prerequisites; do not relax them or insert fallback
+   payment IDs just to keep old mocks passing.
+
+The original owner continues this task; these are coordination gaps, not a new
+helper task, external PSP gate waiver, candidate or source completion claim.

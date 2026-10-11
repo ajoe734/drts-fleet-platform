@@ -5,8 +5,10 @@ import { FakePaymentProvider } from "../../../apps/api/src/modules/passenger-app
 import { paymentRuntimeFromEnv } from "../../../apps/api/src/modules/passenger-app/payment/payment-runtime.config";
 
 const key = () => randomBytes(32).toString("base64");
-const secret = (activeKeyId = "current", keys = { current: key() }) =>
-  JSON.stringify({ activeKeyId, keys });
+const secret = (
+  activeKeyId = "current",
+  keys: Record<string, string> = { current: key() },
+) => JSON.stringify({ activeKeyId, keys });
 const completeEnv = (): NodeJS.ProcessEnv => ({
   DRTS_ENV: "test",
   NODE_ENV: "production",
@@ -56,7 +58,7 @@ describe("PSP token confidentiality and integrity", () => {
   );
   it("rotates new writes and keeps historical tokens decryptable with retained keys", () => {
     const oldKey = key();
-    const old = new PaymentTokenCipher(secret("old", { old: oldKey } as never));
+    const old = new PaymentTokenCipher(secret("old", { old: oldKey }));
     const previous = old.encrypt(
       "synthetic_old_token",
       "synthetic_owner",
@@ -257,6 +259,12 @@ describe("synthetic provider boundary (no external calls)", () => {
     expect(await fake.readRefund(refundCommand.idempotencyKey)).toEqual(
       refunded,
     );
+    await expect(
+      fake.refund({
+        ...refundCommand,
+        idempotencyKey: "synthetic_second_refund",
+      }),
+    ).rejects.toThrow("Invalid synthetic refund amount.");
     expect(
       await fake.refund({
         ...refundCommand,

@@ -30,6 +30,13 @@ import { PassengerBookingService } from "./booking/passenger-booking.service";
 import { PassengerBookingRepository } from "./booking/passenger-booking.repository";
 import { PassengerBookingSettingsController } from "./booking/passenger-booking-settings.controller";
 import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
+import { PaymentMethodController } from "./payment/payment-method.controller";
+import { PaymentMethodRepository } from "./payment/payment-method.repository";
+import {
+  PAYMENT_RUNTIME,
+  PaymentMethodService,
+} from "./payment/payment-method.service";
+import { paymentRuntimeFromEnv } from "./payment/payment-runtime.config";
 
 @Global()
 @Module({
@@ -42,6 +49,7 @@ import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
     FacebookDataDeletionController,
     PassengerBookingController,
     PassengerBookingSettingsController,
+    PaymentMethodController,
   ],
   providers: [
     PassengerJwtService,
@@ -56,6 +64,12 @@ import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
     PassengerOtpService,
     PassengerBookingRepository,
     PassengerBookingService,
+    PaymentMethodRepository,
+    PaymentMethodService,
+    {
+      provide: PAYMENT_RUNTIME,
+      useFactory: () => paymentRuntimeFromEnv(process.env),
+    },
     { provide: SMS_PORT, useClass: UnconfiguredSmsPort },
     { provide: OTP_OPTIONS, useFactory: () => otpOptionsFromEnv(process.env) },
     {

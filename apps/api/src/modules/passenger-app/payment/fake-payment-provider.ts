@@ -19,7 +19,12 @@ export function assertFakePaymentEnvironment(env: NodeJS.ProcessEnv): void {
   }
 }
 
-type Operation = { fingerprint: string; result: MoneyResult };
+type Operation = {
+  fingerprint: string;
+  amountMinor: number;
+  captureRef: string | null;
+  result: MoneyResult;
+};
 
 /** A simulation only; this map is never a financial ledger. Production
  * persistence must be supplied by the payment repository even with this fake.
@@ -102,6 +107,21 @@ export class FakePaymentProvider implements PaymentProviderPort {
     );
     if (!capture)
       return { status: "failed", error: "invalid_method", retryable: false };
+    const refunded = [...this.refunds.entries()].reduce(
+      (sum, [key, operation]) =>
+        key !== command.idempotencyKey &&
+        operation.captureRef === command.captureRef &&
+        operation.result.status === "completed"
+          ? sum + operation.amountMinor
+          : sum,
+      0,
+    );
+    if (
+      !Number.isSafeInteger(command.amountMinor) ||
+      command.amountMinor < 0 ||
+      command.amountMinor > capture.amountMinor - refunded
+    )
+      throw new Error("Invalid synthetic refund amount.");
     return this.money(this.refunds, command, "refund");
   }
   async readRefund(key: string): Promise<MoneyResult> {
@@ -134,7 +154,12 @@ export class FakePaymentProvider implements PaymentProviderPort {
       status: "completed",
       providerRef: `synthetic_${kind}_${createHash("sha256").update(command.idempotencyKey).digest("hex")}`,
     };
-    operations.set(command.idempotencyKey, { fingerprint, result });
+    operations.set(command.idempotencyKey, {
+      fingerprint,
+      amountMinor: command.amountMinor,
+      captureRef: "captureRef" in command ? command.captureRef : null,
+      result,
+    });
     return structuredClone(result);
   }
 }
