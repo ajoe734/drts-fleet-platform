@@ -1030,7 +1030,6 @@ def check_held_window(args):
                 state = a.get("state")
                 if state == "approved":
                     require(a.get("user", {}).get("login"), "Approval missing attributable Operator")
-                    has_bound = True
                     operator_approved = True
                 elif state in ("rejected", "pending"):
                     require(False, "Adverse or ambiguous approval history detected")
@@ -1080,23 +1079,33 @@ def check_held_window(args):
     active_restricted_runs = []
     for status in ["in_progress", "queued", "waiting", "pending", "requested"]:
         page = 1
+        expected_total = -1
+        status_runs = []
         while True:
             res_overlap = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs?status={status}&per_page=100&page={page}"], timeout_sec=30)
             require(res_overlap.returncode == 0, f"Failed to fetch {status} runs")
             overlap_data = json.loads(res_overlap.stdout)
             require("total_count" in overlap_data, "Missing overlap total_count")
-            require(overlap_data.get("total_count", 0) < 1000, "Server-side search cap reached")
+            if expected_total == -1:
+                expected_total = overlap_data["total_count"]
+            require(expected_total < 1000, "Server-side search cap reached")
             page_runs = overlap_data.get("workflow_runs", [])
             if not page_runs:
                 break
             for r in page_runs:
+                r_status = r.get("status")
+                require(r_status == status, f"Run status {r_status} does not match queried {status}")
+                require(r.get("url") == f"https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/runs/{r.get('id')}", "Overlap run url mismatch")
                 if str(r.get("id")) != args.current_run_id:
-                    active_restricted_runs.append(r)
+                    status_runs.append(r)
                 else:
                     require(r.get("path") == ".github/workflows/dev-owned-operational-fixture-assessment.yml", "Current run path is not assessment")
+                    status_runs.append(r)
             if len(page_runs) < 100:
                 break
             page += 1
+        require(len(status_runs) == expected_total, f"Incomplete or truncated inventory for {status}: got {len(status_runs)} expected {expected_total}")
+        active_restricted_runs.extend([r for r in status_runs if str(r.get("id")) != args.current_run_id])
     require(len(active_restricted_runs) == 0, "Overlapping restricted workflows detected")
 
     # Current jobs check
@@ -1313,11 +1322,21 @@ def main():
                     require(set(status_names) == set(names), "Container status names mismatch")
                     
                 service_containers = val.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+                
+                if s_name == "drts-dev-scanner":
+                    require(len(service_containers) == 2, "Scanner service must have exactly 2 containers")
+                    require(len(containers) == 2, "Scanner revision must have exactly 2 containers")
+                else:
+                    require(len(service_containers) == 1, f"Non-scanner service {s_name} must have exactly 1 container")
+                    require(len(containers) == 1, f"Non-scanner revision {s_name} must have exactly 1 container")
+
                 service_implicit = len(service_containers) == 1 and "name" not in service_containers[0]
                 service_c_names = ["0"] if service_implicit else [sc.get("name", str(j)) for j, sc in enumerate(service_containers)]
                 
-                require(len(names) == len(service_c_names), f"Service/Revision container count mismatch for {s_name}")
-                require(set(names) == set(service_c_names), f"Service/Revision container name mismatch for {s_name}")
+                if not service_implicit:
+                    require(set(names) == set(service_c_names), f"Service/Revision container name mismatch for {s_name}")
+                else:
+                    require(len(names) == 1, "Expected exactly 1 container in revision for implicit service")
                 
                 service_image_map = {service_c_names[j]: sc.get("image", "") for j, sc in enumerate(service_containers)}
                 
@@ -1370,6 +1389,8 @@ def main():
                     require(set(images.keys()) == {"gateway", "clamd"}, "Scanner missing gateway or clamd")
 
                 expected_sa = "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com" if s_name == "drts-dev-scanner" else "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com"
+                service_sa = val.get("spec", {}).get("template", {}).get("spec", {}).get("serviceAccountName")
+                require(service_sa == expected_sa, f"Foreign serviceAccountName in service for {s_name}")
                 require(rev_val.get("spec", {}).get("serviceAccountName") == expected_sa, f"Foreign serviceAccountName in revision for {s_name}")
 
                 service_meta = {
@@ -1423,6 +1444,7 @@ def main():
 
             with open(args.acquire_cloud_metadata_to, 'w') as f:
                 json.dump(metadata, f, indent=2)
+            check_held_window(args)
             print("Fixed inventory metadata collected boundedly: 27 reads")
             sys.exit(0)
 

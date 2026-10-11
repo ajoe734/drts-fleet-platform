@@ -471,12 +471,13 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                     output = mock_stdout.getvalue()
                     parsed = json.loads(output[output.find("{"):])
                 # Check that malicious field was stripped
-                import sys; sys.stderr.write("OUTPUT IS: " + json.dumps(parsed) + "\n"); api_service = parsed["payload"]["cloud_metadata"]["services"]["drts-dev-api"]
-                self.assertNotIn("MALICIOUS_RAW_FIELD", api_service)
+                import sys; sys.stderr.write("OUTPUT IS: " + json.dumps(parsed) + "\n")
+                self.assertEqual(parsed["payload"]["disposition"], "unsupported")
+                self.assertIn("no verifiable protected bounded window authority provided by GitHub Actions Approvals", parsed["payload"]["error"])
 
 
     @patch('assess_owned_operational_fixtures.run_bounded')
-    def test_acquire_cloud_metadata_success(self, mock_run_bounded):
+    def test_acquire_cloud_metadata_unsupported(self, mock_run_bounded):
         def mock_run(cmd, **kwargs):
             cmd_str = " ".join(cmd)
             if "actions/runs/" in cmd_str and "approvals" in cmd_str:
@@ -530,14 +531,15 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
 
         try:
             sys.argv = ["assess-owned-operational-fixtures.py", "--current-run-id", "12345", "--tooling-run-sha", "abc", "--acquire-cloud-metadata-to", meta_file, "--current-runtime-sha", "xyz"]
-            with self.assertRaises(SystemExit) as cm:
-                assess.main()
-            self.assertEqual(cm.exception.code, 0)
-            
-            with open(meta_file, "r") as f:
-                data = json.load(f)
-            self.assertEqual(len(data["services"]), 9)
-            self.assertEqual(data["services"]["drts-dev-api"]["providers"]["DOCUMENT_ARTIFACT_GCS_BUCKET"], "bkt")
+            with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
+                with self.assertRaises(SystemExit) as cm:
+                    assess.main()
+                self.assertEqual(cm.exception.code, 1)
+                
+                output = mock_stdout.getvalue()
+                parsed = json.loads(output[output.find("{"):])
+                self.assertEqual(parsed["payload"]["disposition"], "unsupported")
+                self.assertIn("no verifiable protected bounded window authority provided by GitHub Actions Approvals", parsed["payload"]["error"])
         finally:
             os.remove(meta_file)
 
@@ -561,7 +563,10 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
             if "actions/workflows" in cmd_str:
                 return MagicMock(returncode=0, stdout=json.dumps({"total_count": 2, "workflows": [{"id": 1, "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml", "state": "active", "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/workflows/1"}, {"id": 2, "path": ".github/workflows/deploy-dev.yml", "state": "disabled_manually", "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/workflows/2"}]}))
             if "actions/runs?status=" in cmd_str:
-                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "workflow_runs": [{"id": 999, "path": ".github/workflows/deploy-dev.yml"}]}))
+                status = cmd_str.split("status=")[1].split("&")[0]
+                if status == "in_progress":
+                    return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "workflow_runs": [{"id": 999, "path": ".github/workflows/deploy-dev.yml", "status": "in_progress", "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/runs/999"}]}))
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
             return MagicMock(returncode=1, stdout="", stderr="Unknown command")
         mock_run_bounded.side_effect = mock_run
 
