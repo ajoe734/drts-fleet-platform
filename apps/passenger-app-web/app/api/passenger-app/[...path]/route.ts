@@ -113,6 +113,15 @@ function isAllowedPassengerPath(path: string[], method: string) {
   )
     return true;
   if (method === "POST" && fullPath === "rides") return true;
+  if (["GET", "POST"].includes(method) && fullPath === "payment-methods")
+    return true;
+  if (
+    path[0] === "payment-methods" &&
+    /^[A-Za-z0-9._:-]{1,128}$/.test(path[1] ?? "") &&
+    ((method === "DELETE" && path.length === 2) ||
+      (method === "PUT" && path.length === 3 && path[2] === "default"))
+  )
+    return true;
   return false;
 }
 
@@ -389,7 +398,8 @@ async function forward(
       (isOAuthStart && command!.purpose === "link") ||
       (isOtpRequest && command!.purpose !== "login") ||
       (isOAuthCallback && oauthBinding?.purpose === "link") ||
-      (path[0] === "me" && (method !== "GET" || path.length > 1));
+      (path[0] === "me" && (method !== "GET" || path.length > 1)) ||
+      path[0] === "payment-methods";
     if (requiresPassenger && !token) {
       // Never turn an authenticated link/update into an anonymous bootstrap request.
       return withSecurityHeaders(
@@ -726,6 +736,13 @@ export async function DELETE(
 }
 
 export async function PATCH(
+  request: NextRequest,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  return forward(request, context);
+}
+
+export async function PUT(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
 ) {

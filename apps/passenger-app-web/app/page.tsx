@@ -1,5 +1,5 @@
-import { BookingScreen } from "../components/booking/booking-screen";
+import { PaymentBookingHome } from "../components/payment/payment-booking-home";
 
 export default function Home() {
-  return <BookingScreen />;
+  return <PaymentBookingHome />;
 }
