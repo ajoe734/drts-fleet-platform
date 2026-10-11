@@ -125,7 +125,6 @@ describe("F2/F3 real client to Next BFF transport", () => {
       client.oauthCallback("google", {
         code: "code",
         state: "wrong",
-        transactionId: "",
       }),
     ).rejects.toThrow();
     expect(calls).toHaveLength(1);

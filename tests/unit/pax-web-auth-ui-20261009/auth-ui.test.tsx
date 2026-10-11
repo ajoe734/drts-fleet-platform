@@ -1,287 +1,567 @@
 // @vitest-environment jsdom
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import React from "react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  cleanup,
+  act,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import LoginPage from "../../../apps/passenger-app-web/app/login/page";
 import AccountPage from "../../../apps/passenger-app-web/app/account/page";
+import CallbackPage from "../../../apps/passenger-app-web/app/auth/callback/[provider]/page";
+import { createFixture, origin } from "./fixture";
 
-describe("Auth UI - Extended", () => {
-  let fetchMock: any;
+const navigation = vi.hoisted(() => ({
+  push: vi.fn(),
+  provider: "google",
+  query: new URLSearchParams(),
+  external: vi.fn(),
+}));
+const router = { push: navigation.push };
+vi.mock("next/navigation", () => ({
+  useRouter: () => router,
+  useParams: () => ({ provider: navigation.provider }),
+  useSearchParams: () => navigation.query,
+}));
+vi.mock("../../../apps/passenger-app-web/lib/auth/navigation", () => ({
+  redirectToProvider: navigation.external,
+}));
+let f: ReturnType<typeof createFixture>;
+beforeEach(() => {
+  sessionStorage.clear();
+  navigation.push.mockClear();
+  navigation.external.mockClear();
+  navigation.provider = "google";
+  navigation.query = new URLSearchParams();
+  f = createFixture();
+});
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
+const button = (name: string | RegExp) => screen.getByRole("button", { name });
+const click = (name: string | RegExp) => fireEvent.click(button(name));
+async function enterOtp(provider: "phone" | "email") {
+  await screen.findByRole("button", {
+    name: provider === "phone" ? "手機號碼登入" : "Email 登入",
+  });
+  click(provider === "phone" ? "手機號碼登入" : "Email 登入");
+  fireEvent.change(
+    screen.getByLabelText(
+      provider === "phone" ? "請輸入您的手機號碼" : "請輸入您的 Email",
+    ),
+    {
+      target: {
+        value: provider === "phone" ? "0912345678" : "pax@example.test",
+      },
+    },
+  );
+  click("取得驗證碼");
+  await screen.findByRole("group", { name: "6 位數驗證碼" });
+}
+const fillCode = (code: string) =>
+  fireEvent.change(screen.getByRole("textbox", { name: "6 位數驗證碼 1" }), {
+    target: { value: code },
+  });
+async function finishOtp() {
+  fillCode(f.codes.at(-1)!);
+  click("驗證");
+  await screen.findByText("歡迎加入，請同意服務條款");
+}
+async function signedIn() {
+  const account = await f.signIn();
+  render(<AccountPage />);
+  await screen.findByRole("button", { name: "登入方式管理" });
+  return account;
+}
 
-  beforeEach(() => {
-    fetchMock = vi.fn().mockImplementation((url, options) => {
-      const opts = options || {};
-      const method = opts.method || "GET";
-      const body = opts.body ? JSON.parse(opts.body) : undefined;
-
-      if (url.includes("/api/passenger-app/auth/providers")) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            data: {
-              providers: ["phone", "email", "google", "facebook", "line"],
-            },
-          }),
-        });
-      }
-      if (url.includes("/api/passenger-app/auth/otp/request")) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            data: { success: true, challenge: "chal-123" },
-          }),
-        });
-      }
-      if (url.includes("/api/passenger-app/auth/otp/verify")) {
-        if (body && body.code === "000000") {
-          return Promise.resolve({
-            ok: false,
-            status: 400,
-            json: async () => ({ data: { message: "Wrong code" } }),
-          });
-        }
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ data: { result: "logged_in" } }),
-        });
-      }
-      if (url.includes("/api/passenger-app/auth/oauth/start")) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ data: { authUrl: "http://oauth" } }),
-        });
-      }
-      if (url.includes("/api/passenger-app/me/identities")) {
-        if (method === "DELETE") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({ data: { success: true } }),
-          });
-        }
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            data: {
-              identities: [
-                { identityId: "id1", provider: "phone", subject: "0911" },
-              ],
-            },
-          }),
-        });
-      }
-      if (url.includes("/api/passenger-app/me")) {
-        if (method === "PATCH") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({ data: { success: true } }),
-          });
-        }
-        if (method === "DELETE") {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({ data: { success: true } }),
-          });
-        }
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            data: {
-              account: {
-                drtsPassengerId: "pax-1",
-                displayName: "Tester",
-                contactPhone: "0911",
-                contactPhoneVerified: false,
-                termsVersion: "v1",
-                privacyVersion: "v1",
-              },
-            },
-          }),
-        });
-      }
-      return Promise.reject(new Error("unmocked url: " + url));
+// Every UI request executes the shared PassengerClient, actual Next BFF and real OTP/account producers.
+// Storage/mail/SMS and the OAuth upstream/provider HTTP boundary are injected; no browser or API server.
+describe("login capabilities and actual OTP components", () => {
+  it.each(["phone", "email", "google", "facebook", "line"] as const)(
+    "hides disabled %s while displaying enabled methods",
+    async (disabled) => {
+      f.enabled = f.enabled.filter((provider) => provider !== disabled);
+      render(<LoginPage />);
+      await screen.findByText("歡迎使用智行叫車");
+      expect(
+        screen.queryByRole("button", {
+          name:
+            disabled === "phone"
+              ? "手機號碼登入"
+              : disabled === "email"
+                ? "Email 登入"
+                : disabled === "line"
+                  ? "LINE"
+                  : disabled === "google"
+                    ? "Google"
+                    : "Facebook",
+        }),
+      ).toBeNull();
+    },
+  );
+  it("shows the canonical no-provider screen", async () => {
+    f.enabled = [];
+    render(<LoginPage />);
+    await screen.findByText("系統維護中，目前未開放任何登入方式。");
+  });
+  it.each(["phone", "email"] as const)(
+    "%s completes the real challenge and persists both consent versions",
+    async (provider) => {
+      render(<LoginPage />);
+      await enterOtp(provider);
+      await finishOtp();
+      expect((button("繼續") as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.click(screen.getByRole("checkbox"));
+      click("繼續");
+      await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/"));
+      const account = await f.client.getAccount();
+      expect(account).toMatchObject({
+        termsVersion: "terms-2026",
+        privacyVersion: "privacy-2026",
+      });
+      const verify = f.calls.find((call) => call.path === "auth/otp/verify")!;
+      expect(verify.body).toMatchObject({
+        provider,
+        challenge: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+      });
+      expect(verify.body).not.toHaveProperty("transactionId");
+    },
+  );
+  it.each(["phone", "email"] as const)(
+    "%s invalid_code retains attempts and permits correction",
+    async (provider) => {
+      render(<LoginPage />);
+      await enterOtp(provider);
+      fillCode("not-a-code");
+      expect((button("驗證") as HTMLButtonElement).disabled).toBe(true);
+      fillCode(f.codes.at(-1) === "000000" ? "999999" : "000000");
+      click("驗證");
+      await screen.findByText("驗證碼錯誤");
+      expect(screen.getByText(/本次操作剩餘嘗試次數/).textContent).toContain(
+        "4",
+      );
+      fillCode(f.codes.at(-1)!);
+      click("驗證");
+      await screen.findByText("歡迎加入，請同意服務條款");
+    },
+  );
+  it("enforces actual disabled controls at 60/1/0 seconds and preserves cooldown through back/re-entry", async () => {
+    render(<LoginPage />);
+    await enterOtp("phone");
+    vi.useFakeTimers();
+    const requests = () =>
+      f.calls.filter((call) => call.path === "auth/otp/request").length;
+    expect(
+      (button(/重新發送驗證碼 \(60s\)/) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    click("返回");
+    expect(
+      (button(/重新發送驗證碼 \(60s\)/) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    click("返回");
+    click("手機號碼登入");
+    expect(
+      (button(/重新發送驗證碼 \(60s\)/) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(59000);
     });
-    global.fetch = fetchMock;
-    globalThis.fetch = fetchMock;
-    window.fetch = fetchMock;
-
-    delete (window as any).location;
-    window.location = { href: "", origin: "http://localhost" } as any;
+    expect(
+      (button(/重新發送驗證碼 \(1s\)/) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect((button("重新發送驗證碼") as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    const old = f.calls.find((call) => call.path === "auth/otp/request");
+    await act(async () => {
+      click("重新發送驗證碼");
+      for (let i = 0; i < 60; i++) await Promise.resolve();
+    });
+    expect(requests()).toBe(2);
+    expect(f.codes).toHaveLength(2);
+    expect(old).toBeDefined();
   });
-
-  afterEach(() => {
-    vi.clearAllMocks();
-    sessionStorage.clear();
-    vi.useRealTimers();
-  });
-
-  it("handles successful phone OTP flow", async () => {
+  it("preserves per-target cooldown when a contact input is edited and then restored", async () => {
     render(<LoginPage />);
-    await waitFor(() =>
-      expect(screen.getByPlaceholderText("手機號碼")).toBeDefined(),
-    );
-
-    const phoneInput = screen.getByPlaceholderText("手機號碼");
-    fireEvent.change(phoneInput, { target: { value: "0912345678" } });
-
-    const loginBtn = screen.getByText("使用手機登入");
-    fireEvent.click(loginBtn);
-
-    await waitFor(() =>
-      expect(screen.getByText("已發送驗證碼至 0912345678")).toBeDefined(),
-    );
-
-    const codeInput = screen.getByPlaceholderText("6位數驗證碼");
-    fireEvent.change(codeInput, { target: { value: "123456" } });
-
-    const verifyBtn = screen.getByText("驗證並登入");
-    fireEvent.click(verifyBtn);
-
-    await waitFor(() => expect(window.location.href).toBe("/"));
+    await enterOtp("phone");
+    click("返回");
+    const input = screen.getByLabelText("請輸入您的手機號碼");
+    fireEvent.change(input, { target: { value: "0987654321" } });
+    expect((button("取得驗證碼") as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(input, { target: { value: "0912345678" } });
+    expect((button(/重新發送驗證碼/) as HTMLButtonElement).disabled).toBe(true);
   });
-
-  it("shows error on wrong otp code", async () => {
+  it.each(["phone", "email"] as const)(
+    "%s expiry disables verify and offers a fresh challenge",
+    async (provider) => {
+      render(<LoginPage />);
+      await enterOtp(provider);
+      fillCode(f.codes.at(-1)!);
+      vi.useFakeTimers();
+      click("返回"); click("返回"); click(provider === "phone" ? "手機號碼登入" : "Email 登入");
+      fillCode(f.codes.at(-1)!);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(301000);
+      });
+      expect(screen.getByText("驗證碼已過期，請重新發送")).toBeDefined();
+      expect((button("驗證") as HTMLButtonElement).disabled).toBe(true);
+      expect((button("重新發送驗證碼") as HTMLButtonElement).disabled).toBe(
+        false,
+      );
+    },
+  );
+  it.each(["challenge_locked", "too_many_requests", "not_configured"])(
+    "renders formal %s without losing the actual error code",
+    async (code) => {
+      render(<LoginPage />);
+      await enterOtp("phone");
+      f.otpError = code;
+      fillCode(f.codes.at(-1)!);
+      click("驗證");
+      await screen.findByRole("alert");
+      expect(navigation.push).not.toHaveBeenCalled();
+      if (code === "challenge_locked")
+        expect((button("驗證") as HTMLButtonElement).disabled).toBe(true);
+    },
+  );
+  it("guards a duplicate pending OTP request at the actual button", async () => {
     render(<LoginPage />);
-    await waitFor(() =>
-      expect(screen.getByPlaceholderText("手機號碼")).toBeDefined(),
-    );
-
-    fireEvent.change(screen.getByPlaceholderText("手機號碼"), {
+    await screen.findByRole("button", { name: "手機號碼登入" });
+    click("手機號碼登入");
+    fireEvent.change(screen.getByLabelText("請輸入您的手機號碼"), {
       target: { value: "0912345678" },
     });
-    fireEvent.click(screen.getByText("使用手機登入"));
-
-    await waitFor(() =>
-      expect(screen.getByText("已發送驗證碼至 0912345678")).toBeDefined(),
-    );
-
-    fireEvent.change(screen.getByPlaceholderText("6位數驗證碼"), {
-      target: { value: "000000" },
-    });
-    fireEvent.click(screen.getByText("驗證並登入"));
-
-    await waitFor(() => expect(screen.getByText(/驗證碼錯誤/)).toBeDefined());
+    click("取得驗證碼");
+    click("取得驗證碼");
+    await screen.findByRole("group", { name: "6 位數驗證碼" });
+    expect(
+      f.calls.filter((call) => call.path === "auth/otp/request"),
+    ).toHaveLength(1);
   });
-
-  it("shows contact verification and linking options in account page", async () => {
-    render(<AccountPage />);
-    await waitFor(() => {
-      expect(screen.getByText(/Tester/)).toBeDefined();
-      expect(screen.getByText("去驗證")).toBeDefined();
-      expect(screen.getByText("綁定 Google")).toBeDefined();
-      expect(screen.getByPlaceholderText("綁定 Email")).toBeDefined();
-    });
-  });
-
-  it("handles zero parameter deleteAccount correctly", async () => {
-    render(<AccountPage />);
-    await waitFor(() => expect(screen.getByText("刪除帳號")).toBeDefined());
-    fireEvent.click(screen.getByText("刪除帳號"));
-    await waitFor(() =>
-      expect(screen.getByText("確定要刪除帳號嗎？")).toBeDefined(),
-    );
-    fireEvent.click(screen.getByText("確認刪除"));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/passenger-app/me"),
-        expect.objectContaining({ method: "DELETE" }),
+  it.each(["google", "facebook", "line"] as const)(
+    "%s login start uses real transport and renders redirect progress",
+    async (provider) => {
+      render(<LoginPage />);
+      await screen.findByText("歡迎使用智行叫車");
+      click(
+        provider === "line"
+          ? "LINE"
+          : provider === "google"
+            ? "Google"
+            : "Facebook",
       );
-      const callArgs = fetchMock.mock.calls.find(
-        (c: any) => c[0].includes("me") && c[1]?.method === "DELETE",
+      await waitFor(() => expect(navigation.external).toHaveBeenCalledOnce());
+      expect(f.calls.at(-1)).toMatchObject({
+        path: `auth/oauth/${provider}/start`,
+        body: {
+          provider,
+          purpose: "login",
+          redirectUri: expect.stringContaining(`/auth/callback/${provider}`),
+        },
+      });
+    },
+  );
+  it.each(["google", "facebook", "line"] as const)(
+    "%s start failure recovers to the entry screen",
+    async (provider) => {
+      f.oauthError = "unavailable";
+      render(<LoginPage />);
+      await screen.findByText("歡迎使用智行叫車");
+      click(
+        provider === "line"
+          ? "LINE"
+          : provider === "google"
+            ? "Google"
+            : "Facebook",
       );
-      expect(callArgs[1].body).toBeUndefined();
-    });
-  });
+      await screen.findByRole("alert");
+      expect(navigation.external).not.toHaveBeenCalled();
+    },
+  );
+});
 
-  it("handles consent required flow", async () => {
-    // Override the generic mock for this test
-    const localFetchMock = vi.fn().mockImplementation((url, options) => {
-      const opts = options || {};
-      const method = opts.method || "GET";
-      if (url.includes("/api/passenger-app/auth/providers"))
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ data: { providers: ["phone", "email"] } }),
-        });
-      if (url.includes("/api/passenger-app/auth/otp/request"))
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ data: { success: true, challenge: "chal" } }),
-        });
-      if (url.includes("/api/passenger-app/auth/otp/verify"))
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ data: { result: "logged_in" } }),
-        });
-      if (url.includes("/api/passenger-app/me")) {
-        if (method === "PATCH")
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({ data: { success: true } }),
-          });
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ data: { account: { termsVersion: "v1" } } }),
-        }); // Missing privacyVersion
+describe("callback and recoverable consent", () => {
+  async function callback(
+    provider: "google" | "facebook" | "line",
+    purpose: "login" | "link" = "login",
+    error?: string,
+  ) {
+    const start = await f.client.oauthStart({
+      provider,
+      purpose,
+      redirectUri: `${origin}/auth/callback/${provider}`,
+    });
+    navigation.provider = provider;
+    navigation.query = new URLSearchParams({
+      state: start.state,
+      ...(error ? { error } : { code: "provider-code" }),
+      transactionId: "untrusted-query-id",
+    });
+    render(<CallbackPage />);
+  }
+  it.each(["google", "facebook", "line"] as const)(
+    "%s callback succeeds via binding and requires explicit consent",
+    async (provider) => {
+      await callback(provider);
+      await screen.findByText("歡迎加入，請同意服務條款");
+      expect(navigation.push).not.toHaveBeenCalled();
+      expect(f.jar.has("pax_oauth_txn")).toBe(false);
+    },
+  );
+  it.each(["google", "facebook", "line"] as const)(
+    "%s cancellation clears the transaction and displays canonical refusal",
+    async (provider) => {
+      await callback(provider, "login", "access_denied");
+      await screen.findByText("您已取消社群帳號授權");
+      expect(f.jar.has("pax_oauth_txn")).toBe(false);
+    },
+  );
+  it.each(["google", "facebook", "line"] as const)(
+    "%s callback failure remains recoverable",
+    async (provider) => {
+      const start = await f.client.oauthStart({
+        provider,
+        purpose: "login",
+        redirectUri: `${origin}/auth/callback/${provider}`,
+      });
+      f.oauthError = "invalid_grant";
+      navigation.provider = provider;
+      navigation.query = new URLSearchParams({
+        state: start.state,
+        code: "code",
+      });
+      render(<CallbackPage />);
+      await screen.findByText("第三方登入失敗，請重試或選擇其他登入方式");
+      expect(f.jar.has("pax_oauth_txn")).toBe(false);
+    },
+  );
+  it("keeps an account-read failure in consent and allows retry", async () => {
+    await callback("google");
+    f.accountReadError = true;
+    await screen.findByText("無法讀取同意紀錄，請重試");
+    expect(navigation.push).not.toHaveBeenCalled();
+    f.accountReadError = false;
+    click("重試");
+    await waitFor(() =>
+      expect((screen.getByRole("checkbox") as HTMLInputElement).disabled).toBe(
+        false,
+      ),
+    );
+  });
+  it("keeps a refused consent out of home and revokes the actual session", async () => {
+    await callback("google");
+    await screen.findByText("歡迎加入，請同意服務條款");
+    click("不同意並登出");
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/login"));
+    expect(f.jar.has("pax_session")).toBe(false);
+  });
+  it("write failure stays recoverable and retries the real PATCH", async () => {
+    await callback("google");
+    await screen.findByText("歡迎加入，請同意服務條款");
+    await waitFor(() =>
+      expect((screen.getByRole("checkbox") as HTMLInputElement).disabled).toBe(
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByRole("checkbox"));
+    f.accountWriteError = true;
+    click("繼續");
+    await screen.findByText("儲存失敗，請重試");
+    expect(navigation.push).not.toHaveBeenCalled();
+    f.accountWriteError = false;
+    click("繼續");
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/"));
+  });
+  it("missing legal configuration blocks consent and never invents URLs/versions", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TERMS_URL", "");
+    await callback("google");
+    await screen.findByText("服務條款與隱私權政策目前無法使用，請稍後重試。");
+    expect((button("繼續") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+  it.each(["terms-only", "both", "old-version"])(
+    "%s existing account compares both configured consent versions",
+    async (state) => {
+      const account = await f.accounts.findOrCreateByIdentity(
+        "google",
+        "google-new",
+      );
+      const stored = f.accountStore.accounts.get(account.drtsPassengerId)!;
+      stored.termsVersion = state === "old-version" ? "old" : "terms-2026";
+      if (state !== "terms-only") stored.privacyVersion = "privacy-2026";
+      await callback("google");
+      if (state === "both")
+        await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/"));
+      else {
+        await screen.findByText("歡迎加入，請同意服務條款");
+        expect(navigation.push).not.toHaveBeenCalled();
       }
-      return Promise.reject(new Error("unmocked: " + url));
+    },
+  );
+});
+
+describe("real account controls and mutations", () => {
+  it("edits the profile through the real client/BFF/controller", async () => {
+    await signedIn();
+    click("編輯資料");
+    fireEvent.change(screen.getByLabelText("顯示名稱"), {
+      target: { value: "Passenger" },
     });
-    window.fetch = localFetchMock;
-
-    render(<LoginPage />);
-    await waitFor(() =>
-      expect(screen.getByPlaceholderText("手機號碼")).toBeDefined(),
-    );
-    fireEvent.change(screen.getByPlaceholderText("手機號碼"), {
-      target: { value: "0911" },
+    fireEvent.change(screen.getByLabelText("聯絡手機"), {
+      target: { value: "0912345678" },
     });
-    fireEvent.click(screen.getByText("使用手機登入"));
-    await waitFor(() =>
-      expect(screen.getByPlaceholderText("6位數驗證碼")).toBeDefined(),
-    );
-    fireEvent.change(screen.getByPlaceholderText("6位數驗證碼"), {
-      target: { value: "123456" },
+    click("儲存");
+    await screen.findByText("Passenger");
+    expect(await f.client.getAccount()).toMatchObject({
+      displayName: "Passenger",
+      contactPhone: "0912345678",
+      contactPhoneVerified: false,
     });
-    fireEvent.click(screen.getByText("驗證並登入"));
-    await waitFor(() => expect(screen.getByText(/我同意/)).toBeDefined());
-
-    // Check consent flow
-    fireEvent.click(screen.getByText("同意並繼續"));
-    await waitFor(() =>
-      expect(screen.getByText("請勾選同意條款與隱私權政策")).toBeDefined(),
-    );
-
-    fireEvent.click(screen.getByLabelText(/我同意/));
-    fireEvent.click(screen.getByText("同意並繼續"));
-    await waitFor(() => expect(window.location.href).toBe("/"));
-
-    // Restore global mock
-    window.fetch = fetchMock;
   });
-
-  it("handles OTP cooldown state persistence", async () => {
-    // Initial load with active cooldown
-    sessionStorage.setItem(
-      "otp_login_state",
-      JSON.stringify({
-        challenge: "chal-persist",
-        provider: "phone",
-        target: "0988",
-        timestamp: Date.now() - 59000, // 59s elapsed, 1s left
-      }),
+  it("blocks last-identity unlink and preserves the server identity", async () => {
+    await signedIn();
+    click("登入方式管理");
+    click("解除綁定");
+    await screen.findByText("無法解除綁定。您的帳號必須至少保留一種登入方式。");
+    expect(f.calls.filter((call) => call.method === "DELETE")).toHaveLength(0);
+  });
+  it("unlinks a real additional identity and refreshes the list", async () => {
+    await f.signIn();
+    const token = f.jar.get("pax_session")!;
+    await f.accounts.linkIdentity(
+      await f.accounts.authenticateAccessToken(token),
+      "email",
+      "extra@example.test",
     );
-
-    render(<LoginPage />);
+    render(<AccountPage />);
+    await screen.findByRole("button", { name: "登入方式管理" });
+    click("登入方式管理");
+    const buttons = screen.getAllByRole("button", { name: "解除綁定" });
+    fireEvent.click(buttons[1]!);
     await waitFor(() =>
-      expect(screen.getByText(/已發送驗證碼至 0988/)).toBeDefined(),
+      expect(screen.getAllByRole("button", { name: "解除綁定" })).toHaveLength(
+        1,
+      ),
     );
-
-    // countdown is active
-    expect(screen.getByText(/重送驗證碼/)).toBeDefined();
-
-    // wait for 1+ sec so it expires
-    await new Promise((r) => setTimeout(r, 1500));
-
-    await waitFor(() => expect(screen.getByText("重新發送")).toBeDefined());
+  });
+  it.each(["phone", "email"] as const)(
+    "links %s via real challenge producer and linked result",
+    async (provider) => {
+      await signedIn();
+      click("登入方式管理");
+      click(provider === "phone" ? "綁定 手機號碼" : "綁定 Email");
+      fireEvent.change(
+        screen.getByLabelText(
+          provider === "phone" ? "請輸入您的手機號碼" : "請輸入您的 Email",
+        ),
+        {
+          target: {
+            value: provider === "phone" ? "0912345678" : "extra@example.test",
+          },
+        },
+      );
+      click("取得驗證碼");
+      await screen.findByRole("group", { name: "6 位數驗證碼" });
+      fillCode(f.codes.at(-1)!);
+      click("驗證");
+      await waitFor(async () =>
+        expect(
+          (await f.client.getIdentities()).identities.map(
+            (identity) => identity.provider,
+          ),
+        ).toContain(provider),
+      );
+    },
+  );
+  it("verifies contact phone and refreshes actual verification state", async () => {
+    const account = await f.signIn();
+    f.accountStore.accounts.get(account.drtsPassengerId)!.contactPhone =
+      "0912345678";
+    render(<AccountPage />);
+    await screen.findByRole("button", { name: "驗證聯絡手機" });
+    click("驗證聯絡手機");
+    click("取得驗證碼");
+    await screen.findByRole("group", { name: "6 位數驗證碼" });
+    fillCode(f.codes.at(-1)!);
+    click("驗證");
+    await screen.findByText("(已驗證)");
+    expect((await f.client.getAccount()).contactPhoneVerified).toBe(true);
+  });
+  it("hides unavailable contact verification", async () => {
+    const account = await f.signIn();
+    f.enabled = ["email", "google"];
+    f.accountStore.accounts.get(account.drtsPassengerId)!.contactPhone =
+      "0912345678";
+    render(<AccountPage />);
+    await screen.findByRole("button", { name: "編輯資料" });
+    expect(screen.queryByRole("button", { name: "驗證聯絡手機" })).toBeNull();
+    click("登入方式管理");
+    expect(screen.queryByRole("button", { name: "綁定 手機號碼" })).toBeNull();
+  });
+  it.each(["google", "facebook", "line"] as const)(
+    "%s account linking sends authenticated purpose and callback returns to account",
+    async (provider) => {
+      await f.signIn("email");
+      render(<AccountPage />);
+      await screen.findByRole("button", { name: "登入方式管理" });
+      click("登入方式管理");
+      click(
+        `綁定 ${provider === "google" ? "Google" : provider === "facebook" ? "Facebook" : "LINE"}`,
+      );
+      await waitFor(() => expect(navigation.external).toHaveBeenCalledOnce());
+      const call = f.calls.find(
+        (call) => call.path === `auth/oauth/${provider}/start`,
+      )!;
+      expect(call.body.purpose).toBe("link");
+      expect(call.headers.get("authorization")).toMatch(/^Bearer /);
+      cleanup();
+      navigation.provider = provider;
+      navigation.query = new URLSearchParams({
+        code: "code",
+        state: JSON.parse(f.jar.get("pax_oauth_txn")!).state,
+      });
+      render(<CallbackPage />);
+      await waitFor(() =>
+        expect(navigation.push).toHaveBeenCalledWith("/account"),
+      );
+    },
+  );
+  it("delete cancel sends no mutation; failure preserves confirmation; success clears session and shows A-15", async () => {
+    await signedIn();
+    click("刪除帳號");
+    await screen.findByText(/依法定年限保留/);
+    click("取消");
+    expect(f.calls.filter((call) => call.method === "DELETE")).toHaveLength(0);
+    click("刪除帳號");
+    f.deleteError = true;
+    click("確定刪除帳號");
+    await screen.findByText("您有尚未結清的款項，請先結清後再執行刪除帳號。");
+    expect(f.jar.has("pax_session")).toBe(true);
+    f.deleteError = false;
+    click("確定刪除帳號");
+    await screen.findByText("帳號已成功刪除");
+    expect(f.jar.has("pax_session")).toBe(false);
+    expect(f.calls.find((call) => call.method === "DELETE")!.body).toEqual({});
+  });
+  it("logout requires confirmation and revokes session", async () => {
+    await signedIn();
+    click("登出");
+    await screen.findByText("確定要登出嗎？");
+    click("取消");
+    expect(f.calls.filter((call) => call.path === "auth/logout")).toHaveLength(
+      0,
+    );
+    click("登出");
+    click("登出");
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/login"));
+    expect(f.jar.has("pax_refresh")).toBe(false);
   });
 });
