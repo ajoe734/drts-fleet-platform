@@ -86,6 +86,7 @@ function buildPlan(vars, sha, tag, deployer) {
     if (exposure !== "false") reject(`PROD_${key}_ALLOW_UNAUTHENTICATED (private required)`);
     const probe = smoke[id];
     if (!probe || typeof probe.path !== "string" || (id === "bank-console-web" ? !/^\/api\/statements\/[0-9]{4}-[0-9]{2}\/export$/.test(probe.path) : probe.path !== route) || !probe.expect || typeof probe.expect !== "object" || Array.isArray(probe.expect) || !Object.keys(probe.expect).length || Object.values(probe.expect).some((v) => !["string", "number", "boolean"].includes(typeof v))) reject(`PROD_RELEASE_SMOKE_CONFIG_JSON.${id}`);
+    if (id === "bank-console-web" && (typeof probe.expect.Period !== "string" || typeof probe.expect.StatementNo !== "string" || probe.path !== `/api/statements/${probe.expect.Period}/export` || Object.keys(probe.expect).length !== 2)) reject("PROD_RELEASE_SMOKE_CONFIG_JSON.bank-console-web CSV fixture");
     let env = { NODE_ENV: "production", DRTS_ENV: "production", DRTS_CANDIDATE_SHA: sha, JWT_ISSUER: apiEnv.JWT_ISSUER, JWT_AUDIENCE: apiEnv.JWT_AUDIENCE, DRTS_API_URL: apiOrigin, DRTS_API_AUTH_AUDIENCE: audience, NEXT_PUBLIC_API_URL: "/control-plane-proxy" };
     let secrets = { JWT_SECRET: `${prefix}-jwt-secret` };
     if (id === "api") { env = apiEnv; secrets = secretNames; }
