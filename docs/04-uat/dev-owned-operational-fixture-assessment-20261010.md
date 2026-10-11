@@ -10,7 +10,7 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 
 ## Evidence Source Identity
 - **Task ID**: SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010
-- **Candidate Generation**: `04a772aa4b274097b7107e2b91aedef8`
+- **Candidate Generation**: `4dcc0e8b2afe4fe28450f00ae5268542`
 - **Candidate SHA**: `[External Candidate Artifact]` (to be resolved by orchestrator upon candidate completion, linked via review-verdict.md identity)
 - **Reviewer**: Codex
 - **Workspace**: Isolated review worktree
@@ -20,9 +20,9 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 | Finding | Historical / Current Evidence | Remaining Condition / Actual limit |
 |---------|-----------------------|--------|
 | **F1/F3/F4/F5 core** | Genuine archive/PDF/identity positives and existing denials PASS BOTH | Actual current owned resources/PG not measured |
-| **F2 actual authority / inventory** | NEW `HEAD`: Script strictly enforces bounded held window and explicit deny logic. The test suite correctly patches the `check_held_window` to validate success paths. | Full environment and live authority unmeasured |
-| **F3 upstream capture** | NEW `HEAD`: Producer upgraded to perform strict scanner identity resolution (allowing runtime + deployer), regex matches scanner URL, and strictly matches scanner/clamd container names against expected images. | Actual live cloud metadata acquisition unmeasured |
-| **F6/F7 report/UAT** | NEW `HEAD`: Real regression matrix properly handles errors via try-except, retaining partial observations instead of wiping receipts. Committed actual trigger tests (18 tests passed) and verified real command / exit. | True live matrix unavailable locally. |
+| **F2 actual authority / inventory** | NEW `HEAD`: Script strictly enforces bounded held window, explicit deny logic, numeric ID requirements, and repository URL bindings. `check_authority` explicitly invoked in default DB runner. Test suite accurately reflects these constraints. | Full environment and live authority unmeasured |
+| **F3 upstream capture** | NEW `HEAD`: Producer upgraded to perform strict `gateway` and `clamd` container resolution, exact revision image matching, and exact 64-hex SHA format digest validation. Consumer strictly refuses empty/short images. | Actual live cloud metadata acquisition unmeasured |
+| **F6/F7 report/UAT** | NEW `HEAD`: Main exception handler preserves the `incomplete` state and partial observations on failure without wiping receipts. F7 stale generation and UAT claims accurately synced to the `4dcc0e8b2afe4fe28450f00ae5268542` generation. | True live matrix unavailable locally. |
 | **F8 scope/publication** | Official subjects FIXED (commits PASS, literal own prefix PASS). | Supervisor must verify exact prospective preserved-history/publication disposition. No history rewrite authorized. |
 
 ## Execution Bounds and Reporting

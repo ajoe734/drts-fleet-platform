@@ -425,7 +425,21 @@ def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]], check_
             
         return {"status": "success", "validated_count": len(validated_reads), "receipts": validated_reads}
     except Exception as e:
-        return {"status": "error", "partial_observations": validated_reads, "error": str(e)}
+        partial = []
+        seen_keys = {r.get("logical_key") for r in validated_reads}
+        for l_key, expected in CANONICAL_OWNED_OBJECTS.items():
+            p_key = logical_to_physical_gcs_key(l_key)
+            if l_key not in seen_keys and p_key in validated_meta:
+                meta = validated_meta[p_key]
+                partial.append({
+                    "bucket": BUCKET, "logical_key": l_key, "key": p_key,
+                    "generation": meta.get("generation"), "metageneration": meta.get("metageneration"),
+                    "size": meta.get("size"), "contentType": meta.get("contentType"),
+                    "timeCreated": meta.get("timeCreated"), "updated": meta.get("updated"),
+                    "stored-at": meta.get("metadata", {}).get("stored-at"),
+                    "documentId": expected["documentId"], "confirmSubmissionId": expected["confirmSubmissionId"]
+                })
+        return {"status": "error", "partial_observations": validated_reads + partial, "error": str(e)}
 
 def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]], check_authority=None) -> Dict[str, Any]:
     try:
@@ -516,8 +530,7 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]], check
         );
         COMMIT;
         """
-        if check_authority: check_authority()
-        res = db_runner(query, [])
+        res = db_runner(query, [], check_authority=check_authority)
         if "error" in res or res.get("status") == "error":
             return {"status": "error", "error": res.get("error", "Unknown DB runner error")}
             
@@ -820,11 +833,12 @@ def default_gcs_runner(action: str, bucket: str, key: str) -> Dict[str, Any]:
             return {"status": "error", "stderr": "cat execution error"}
     raise ValueError(f"Unknown action {action}")
 
-def default_db_runner(query: str, params: List[Any]) -> Dict[str, Any]:
+def default_db_runner(query: str, params: List[Any], check_authority=None) -> Dict[str, Any]:
     script_dir = Path(__file__).resolve().parent
     root_dir = script_dir.parent.parent
     cred_helper = root_dir / "infra" / "gcp" / "dev" / "ops-drill" / "db_credentials.mjs"
     
+    if check_authority: check_authority()
     sec_cmd = ["gcloud", "secrets", "versions", "access", "latest", "--secret=drts-dev-db-url", "--project", PROJECT, "--quiet"]
     try:
         sec_res = run_bounded(sec_cmd, timeout_sec=10)
@@ -861,6 +875,7 @@ def default_db_runner(query: str, params: List[Any]) -> Dict[str, Any]:
                    PGPASSFILE=str(pgpass), PGSSLMODE="disable", PGCONNECT_TIMEOUT="5",
                    PGOPTIONS="-c default_transaction_read_only=on -c default_transaction_isolation=repeatable_read -c statement_timeout=10000 -c lock_timeout=5000 -c idle_in_transaction_session_timeout=10000")
         
+        if check_authority: check_authority()
         proxy_path = os.environ.get("RUNNER_TEMP", "/tmp") + "/cloud-sql-proxy"
         proxy_process = None
         if os.path.exists(proxy_path):
@@ -890,6 +905,7 @@ def default_db_runner(query: str, params: List[Any]) -> Dict[str, Any]:
             return {"error": "cloud-sql-proxy not found"}
             
         try:
+            if check_authority: check_authority()
             sql_file = Path(td) / "query.sql"
             sql_file.write_text(query)
             
@@ -1006,6 +1022,8 @@ def check_held_window(args):
             if isinstance(envs, list) and any(e.get("name") == "operator" for e in envs if isinstance(e, dict)):
                 state = a.get("state")
                 if state == "approved":
+                    require(a.get("user", {}).get("login"), "Approval missing attributable Operator")
+                    require(a.get("created_at") and a.get("updated_at"), "Approval missing held start/deadline")
                     operator_approved = True
                 elif state in ("rejected", "pending"):
                     require(False, "Adverse or ambiguous approval history detected")
@@ -1030,15 +1048,23 @@ def check_held_window(args):
         page += 1
     
     assessment_found = False
+    wf_ids = set()
     for wf in workflows:
         wf_path = wf.get("path", "")
         wf_state = wf.get("state")
+        wf_url = wf.get("url", "")
+        wf_id = wf.get("id")
+        require(isinstance(wf_id, int), "Workflow missing numeric ID")
+        require(wf_id not in wf_ids, "Duplicate workflow participant")
+        wf_ids.add(wf_id)
+        require(wf_url and "ajoe734/drts-fleet-platform" in wf_url, "Workflow missing repository URL binding")
         if wf_path == ".github/workflows/dev-owned-operational-fixture-assessment.yml":
             require(wf_state == "active", f"Assessment workflow is not active (state: {wf_state})")
             assessment_found = True
         else:
-            require(wf_state in ("disabled_manually", "disabled_inactivity", "disabled_fork", "deleted"), f"Workflow {wf_path} is not in a disabled state (state: {wf_state})")
+            require(wf_state in ("disabled_manually", "disabled_inactivity", "disabled_fork"), f"Workflow {wf_path} is not in a disabled state (state: {wf_state})")
     require(assessment_found, "Missing assessment workflow in inventory")
+    require(len(workflows) == total_workflows, "Workflow total_count exceeds rows or incomplete pagination")
 
     # No overlap check
     active_restricted_runs = []
@@ -1048,13 +1074,17 @@ def check_held_window(args):
             res_overlap = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs?status={status}&per_page=100&page={page}"], timeout_sec=30)
             require(res_overlap.returncode == 0, f"Failed to fetch {status} runs")
             overlap_data = json.loads(res_overlap.stdout)
+            require("total_count" in overlap_data, "Missing overlap total_count")
             require(overlap_data.get("total_count", 0) < 1000, "Server-side search cap reached")
             page_runs = overlap_data.get("workflow_runs", [])
             if not page_runs:
+                require(overlap_data.get("total_count", 0) == 0, "Nonterminal total_count with empty rows")
                 break
             for r in page_runs:
                 if str(r.get("id")) != args.current_run_id:
                     active_restricted_runs.append(r)
+                else:
+                    require(r.get("path") == ".github/workflows/dev-owned-operational-fixture-assessment.yml", "Current run path is not assessment")
             if len(page_runs) < 100:
                 break
             page += 1
@@ -1268,10 +1298,15 @@ def main():
                     require(len({c.get("name") for c in statuses}) == len(names), "Duplicate container status names")
                     require({c.get("name") for c in statuses} == set(names), "Container status names mismatch")
                     
+                service_containers = val.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+                service_c_names = ["0"] if (len(service_containers) == 1 and "name" not in service_containers[0]) else [sc.get("name", str(j)) for j, sc in enumerate(service_containers)]
+                service_image_map = {service_c_names[j]: sc.get("image", "") for j, sc in enumerate(service_containers)}
+
                 images = {}
                 for i, c in enumerate(containers):
                     c_name = service_names[i]
-                    repository = regex_mod.split(r"[@:]", c.get("image", ""), maxsplit=1)[0]
+                    service_req_image = service_image_map.get(c_name, "")
+                    repository = regex_mod.split(r"[@:]", service_req_image, maxsplit=1)[0]
                     revision_reference = c.get("image", "")
                     require(isinstance(revision_reference, str) and regex_mod.split(r"[@:]", revision_reference, maxsplit=1)[0] == repository, "Revision requested image mismatch")
                     
@@ -1283,17 +1318,18 @@ def main():
                         c_status = next((cs for cs in statuses if cs.get("name") == c_name), None)
                         if c_status and c_status.get("imageDigest"):
                             digest = c_status["imageDigest"]
-                            require(digest.startswith(repository + "@sha256:"), f"Digest repository mismatch for {c_name}")
-                            require(regex_mod.fullmatch(regex_mod.escape(repository) + r"@sha256:[0-9a-f]{64}", digest), f"Invalid digest format for {c_name}")
-                            images[c_name] = digest
                         else:
-                            images[c_name] = fallback
+                            digest = fallback
                     else:
-                        images[c_name] = fallback
+                        digest = fallback
+                        
+                    require(digest.startswith(repository + "@sha256:"), f"Digest repository mismatch for {c_name}")
+                    require(regex_mod.fullmatch(regex_mod.escape(repository) + r"@sha256:[0-9a-f]{64}", digest), f"Invalid digest format for {c_name}")
+                    images[c_name] = digest
                         
                 require(len(images) > 0, f"No images found for {s_name}")
                 if s_name == "drts-dev-scanner":
-                    require(set(images.keys()) == {"scanner", "clamd"}, "Scanner missing scanner or clamd")
+                    require(set(images.keys()) == {"gateway", "clamd"}, "Scanner missing gateway or clamd")
 
                 service_meta = {
                     "ready_revision": ready_revision,
@@ -1389,9 +1425,12 @@ def main():
                     validated_images = {}
                     for c_name, digest in images.items():
                         require(isinstance(c_name, str) and isinstance(digest, str), f"Invalid image entry for {name}")
-                        require(digest.startswith(f"us-central1-docker.pkg.dev/{PROJECT}/drts/"), f"Image not in project for {name}")
-                        require("@sha256:" in digest, f"Image is not a digest for {name}")
+                        require(regex_mod.fullmatch(r"us-central1-docker\.pkg\.dev/" + PROJECT + r"/drts/[a-z0-9-]+@sha256:[0-9a-f]{64}", digest), f"Invalid image digest format for {name}")
                         validated_images[c_name] = digest
+
+                    require(len(validated_images) > 0, f"No images found in consumer for {name}")
+                    if name == "drts-dev-scanner":
+                        require(set(validated_images.keys()) == {"gateway", "clamd"}, "Scanner missing gateway or clamd in consumer")
 
                     bindings = s.get("bindings")
                     require(bindings is not None, f"Service {name} bindings missing/bypass")
@@ -1525,15 +1564,9 @@ def main():
             print(out)
             sys.exit(0)
     except Exception as e:
-        error_report = {
-            "assessment_only": True,
-            "cleanup_not_performed": True,
-            "available_apply_operation": False,
-            "provenance": AUTHORIZED_PROVENANCE,
-            "disposition": "error",
-            "error": str(e)[:128]
-        }
-        out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": error_report}, indent=2)
+        report["disposition"] = "incomplete"
+        report["error"] = str(e)[:128]
+        out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": report}, indent=2)
         print(out)
         sys.exit(1)
 
