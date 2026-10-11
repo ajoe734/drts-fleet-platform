@@ -1030,7 +1030,7 @@ def check_held_window(args):
             require(wf_state == "active", f"Assessment workflow is not active (state: {wf_state})")
             assessment_found = True
         else:
-            require(wf_state in ("disabled_manually", "disabled_inactivity", "disabled_fork"), f"Workflow {wf_path} is not in a disabled state (state: {wf_state})")
+            require(wf_state in ("disabled_manually", "disabled_inactivity", "disabled_fork", "deleted"), f"Workflow {wf_path} is not in a disabled state (state: {wf_state})")
     require(assessment_found, "Missing assessment workflow in inventory")
 
     # No overlap check
@@ -1041,6 +1041,7 @@ def check_held_window(args):
             res_overlap = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs?status={status}&per_page=100&page={page}"], timeout_sec=30)
             require(res_overlap.returncode == 0, f"Failed to fetch {status} runs")
             overlap_data = json.loads(res_overlap.stdout)
+            require(overlap_data.get("total_count", 0) < 1000, "Server-side search cap reached")
             page_runs = overlap_data.get("workflow_runs", [])
             if not page_runs:
                 break
@@ -1254,11 +1255,13 @@ def main():
                     if c_status and c_status.get("imageDigest"):
                         img = c_status["imageDigest"]
                     images[c_name] = img
+                require(len(images) > 0, f"No images found for {s_name}")
 
                 service_meta = {
                     "ready_revision": ready_revision,
                     "images": images,
-                    "identity": val.get("spec", {}).get("template", {}).get("spec", {}).get("serviceAccountName")
+                    "identity": val.get("spec", {}).get("template", {}).get("spec", {}).get("serviceAccountName"),
+                    "url": val.get("status", {}).get("url")
                 }
                 
                 # Effective environment from revision
@@ -1289,8 +1292,12 @@ def main():
                 require(iam_res.returncode == 0, f"Failed to get IAM policy for {s_name}")
                 iam_val = json.loads(iam_res.stdout)
                 safe_bindings = []
+                seen_roles = set()
                 for b in iam_val.get("bindings", []):
-                    binding = {"role": b.get("role"), "members": b.get("members", [])}
+                    role = b.get("role")
+                    require(role not in seen_roles, f"Duplicate IAM role {role} found for {s_name}")
+                    seen_roles.add(role)
+                    binding = {"role": role, "members": b.get("members", [])}
                     if "condition" in b:
                         binding["condition"] = b["condition"]
                     safe_bindings.append(binding)
@@ -1366,7 +1373,10 @@ def main():
                             require("allUsers" not in members and "allAuthenticatedUsers" not in members, f"Scanner {name} is not private")
                             if role == "roles/run.invoker":
                                 require(set(members) == {"serviceAccount:drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com"}, f"Scanner invoker mismatch")
-                        elif name != "drts-dev-api":
+                        elif name == "drts-dev-api":
+                            if role == "roles/run.invoker":
+                                require(set(members) == {"allUsers"}, f"API invoker mismatch")
+                        else:
                             require("allUsers" not in members and "allAuthenticatedUsers" not in members, f"Console {name} is not private")
                         validated_bindings.append({"role": role, "members": members})
 
@@ -1382,7 +1392,8 @@ def main():
                         require(prov.get("REMITTANCE_PROOF_SCANNER_TIMEOUT_MS") == "60000", "API scanner timeout mismatch")
                         
                         scanner_url = s.get("scanner_url")
-                        require(isinstance(scanner_url, str) and regex_mod.fullmatch(r"https://drts-dev-scanner-[a-z0-9-]+\.a\.run\.app", scanner_url), "Invalid scanner URL")
+                        actual_scanner_url = services.get("drts-dev-scanner", {}).get("url")
+                        require(isinstance(scanner_url, str) and scanner_url == actual_scanner_url, "Invalid scanner URL")
                         
                         validated_services[name] = {
                             "ready_revision": ready_revision,
@@ -1391,7 +1402,8 @@ def main():
                             "identity": s.get("identity"),
                             "scanner_url": scanner_url,
                             "bindings": validated_bindings,
-                            "providers": prov
+                            "providers": prov,
+                            "url": s.get("url")
                         }
                     elif name == "drts-dev-scanner":
                         require(s.get("identity") == f"drts-dev-artifact-scanner@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
@@ -1407,7 +1419,8 @@ def main():
                             "identity": s.get("identity"),
                             "spec_sha256": s.get("spec_sha256"),
                             "default_environment": env,
-                            "bindings": validated_bindings
+                            "bindings": validated_bindings,
+                            "url": s.get("url")
                         }
                     else:
                         require(s.get("identity") == f"drts-dev-runtime@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
@@ -1415,7 +1428,8 @@ def main():
                             "ready_revision": ready_revision,
                             "images": validated_images,
                             "identity": s.get("identity"),
-                            "bindings": validated_bindings
+                            "bindings": validated_bindings,
+                            "url": s.get("url")
                         }
 
                 report["cloud_metadata"] = {

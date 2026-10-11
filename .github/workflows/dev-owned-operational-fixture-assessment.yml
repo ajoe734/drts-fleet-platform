@@ -143,7 +143,7 @@ jobs:
               echo "::error::Failed to fetch workflows (API error)"
               exit 1
             fi
-            ENABLED_OTHER=$(echo "$RES" | jq -r ".workflows[] | select(.path != \".github/workflows/dev-owned-operational-fixture-assessment.yml\" and (.state == \"active\" or .state == \"deleted\" or .state == \"unknown\")) | .path")
+            ENABLED_OTHER=$(echo "$RES" | jq -r ".workflows[] | select(.path != \".github/workflows/dev-owned-operational-fixture-assessment.yml\" and (.state == \"active\" or .state == \"unknown\")) | .path")
             if [ -n "$ENABLED_OTHER" ]; then
               echo "::error::Other workflows are not server-disabled: $ENABLED_OTHER"
               exit 1
@@ -164,6 +164,11 @@ jobs:
               RES=$(gh api "/repos/${{ github.repository }}/actions/runs?status=$STATUS&per_page=100&page=$PAGE")
               if ! echo "$RES" | jq -e '.workflow_runs' >/dev/null; then
                 echo "::error::Failed to fetch workflow_runs (API error): $RES"
+                exit 1
+              fi
+              TOTAL_COUNT=$(echo "$RES" | jq '.total_count')
+              if [ "$TOTAL_COUNT" -ge 1000 ]; then
+                echo "::error::Server-side search cap reached"
                 exit 1
               fi
               MATCHES=$(echo "$RES" | jq -r --arg current_run "${{ github.run_id }}" '.workflow_runs[] | select(.id | tostring != $current_run) | .id')
