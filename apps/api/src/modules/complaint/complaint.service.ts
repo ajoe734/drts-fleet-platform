@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
@@ -25,6 +25,9 @@ import {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import type { PoolClient } from "pg";
+import type { PassengerTripRatingRecord } from "@drts/contracts";
+import type { PassengerIntakeResult } from "./complaint.repository";
 import { ComplaintRepository } from "./complaint.repository";
 import {
   normalizePassengerComplaintIntake,
@@ -185,6 +188,17 @@ export class ComplaintService implements OnModuleInit {
         "Complaint storage is unavailable.",
       );
     }
+    const { complaintCase, timeline } = this.preparePassengerCase(intake);
+    const stored = await this.complaintRepository.persistPassengerIntake(
+      intake,
+      complaintCase,
+      timeline,
+    );
+    this.publishPassengerCase(stored, intake.passengerId);
+    return { complaintId: stored.complaintCase.caseNo };
+  }
+
+  private preparePassengerCase(intake: PassengerComplaintIntake) {
     const category: ComplaintCategory = {
       service: "driver_service" as const,
       fare: "fare_dispute" as const,
@@ -227,11 +241,13 @@ export class ComplaintService implements OnModuleInit {
       `來源：乘客 App；同意客服聯繫：${intake.command.contactConsent ? "是" : "否"}`,
       createdAt,
     );
-    const stored = await this.complaintRepository.persistPassengerIntake(
-      intake,
-      complaintCase,
-      timeline,
-    );
+    return { complaintCase, timeline };
+  }
+
+  private publishPassengerCase(
+    stored: PassengerIntakeResult,
+    passengerId: string,
+  ) {
     // Publish to the existing Ops authority only after the durable transaction.
     if (
       !this.complaintCases.some(
@@ -243,7 +259,142 @@ export class ComplaintService implements OnModuleInit {
         stored.timeline,
       ]);
     }
-    return { complaintId: stored.complaintCase.caseNo };
+    if (!stored.replayed) {
+      this.recordAudit({
+        actorId: passengerId,
+        actorType: "first_party_passenger",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: "create_passenger_complaint_case",
+        resourceType: "complaint_case",
+        resourceId: stored.complaintCase.caseNo,
+        newValuesSummary: {
+          source: "passenger_app",
+          relatedOrderId: stored.complaintCase.relatedOrderId,
+          category: stored.complaintCase.category,
+        },
+      });
+    }
+  }
+
+  preparePassengerRatingHook(
+    passengerId: string,
+    orderId: string,
+    contactRequested: boolean,
+    payload: { score: number; tags: string[]; comment: string | null },
+  ) {
+    if (!this.complaintRepository?.isEnabled()) {
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Rating consent storage is unavailable.",
+      );
+    }
+    const intake =
+      payload.score <= 2 && contactRequested
+        ? normalizePassengerComplaintIntake({
+            passengerId,
+            orderId,
+            idempotencyKey: `rating:${orderId}`,
+            origin: "low_rating",
+            command: {
+              rideId: orderId,
+              category: "service",
+              contactConsent: true,
+              content: `乘客評價 ${payload.score} 星，已勾選需要客服聯繫。${payload.comment ? `\n${payload.comment}` : ""}`,
+            },
+          })
+        : null;
+    const draft = intake
+      ? { input: intake, ...this.preparePassengerCase(intake) }
+      : undefined;
+    let stored: PassengerIntakeResult | null = null;
+    return {
+      execute: async (
+        client: PoolClient,
+        rating: PassengerTripRatingRecord,
+        isNew: boolean,
+      ) => {
+        const requestHash = createHash("sha256")
+          .update(
+            JSON.stringify({
+              score: rating.score,
+              tags: rating.tags,
+              comment: rating.comment,
+              contactRequested,
+            }),
+          )
+          .digest("hex");
+        stored = await this.complaintRepository!.persistPassengerRatingConsent(
+          client,
+          rating,
+          contactRequested,
+          requestHash,
+          isNew,
+          draft,
+        );
+      },
+      afterCommit: () => {
+        if (stored) this.publishPassengerCase(stored, passengerId);
+      },
+    };
+  }
+
+  private mergePassengerCase(record: ComplaintCaseRecord) {
+    const local = this.complaintCases.find(
+      (item) => item.caseNo === record.caseNo,
+    );
+    if (!local)
+      this.complaintCases = [
+        this.cloneComplaintCase(record),
+        ...this.complaintCases,
+      ];
+    else if (Date.parse(record.updatedAt) > Date.parse(local.updatedAt))
+      this.replaceComplaintCase(record);
+  }
+
+  async listComplaintCasesForOps() {
+    if (this.complaintRepository?.isEnabled()) {
+      let cursor = "";
+      while (true) {
+        const page = await this.complaintRepository.listPassengerCases(cursor);
+        for (const record of page) this.mergePassengerCase(record);
+        if (page.length < 500) break;
+        cursor = page[page.length - 1]!.caseNo;
+      }
+    }
+    return this.listComplaintCases();
+  }
+
+  async getComplaintCaseForOps(caseNo: string) {
+    if (this.complaintRepository?.isEnabled()) {
+      const record = await this.complaintRepository.getPassengerCase(caseNo);
+      if (record) this.mergePassengerCase(record);
+    }
+    return this.getComplaintCase(caseNo);
+  }
+
+  async getComplaintTimelineForOps(caseNo: string) {
+    await this.getComplaintCaseForOps(caseNo);
+    if (this.complaintRepository?.isEnabled()) {
+      const persisted =
+        await this.complaintRepository.getPassengerTimeline(caseNo);
+      const entries = new Map(
+        (this.complaintTimelines.get(caseNo) ?? []).map((entry) => [
+          entry.entryId,
+          entry,
+        ]),
+      );
+      for (const entry of persisted)
+        if (!entries.has(entry.entryId)) entries.set(entry.entryId, entry);
+      this.complaintTimelines.set(
+        caseNo,
+        [...entries.values()].sort((a, b) =>
+          a.createdAt.localeCompare(b.createdAt),
+        ),
+      );
+    }
+    return this.getComplaintTimeline(caseNo);
   }
 
   listComplaintCases() {

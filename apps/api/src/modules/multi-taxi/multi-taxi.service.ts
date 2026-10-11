@@ -92,6 +92,7 @@ import {
   type PassengerNotificationChannelMetadata,
   type PassengerRatingReviewRepositoryDetail,
   type PassengerRatingReviewRepositoryQuery,
+  type PassengerAccountRatingHook,
 } from "./multi-taxi.repository";
 import { resolveNonPartnerChannelOutcome } from "./passenger-notification-channel-router";
 import {
@@ -658,8 +659,24 @@ export class MultiTaxiService implements OnModuleInit {
     orderId: string,
     command: SubmitPassengerTripRatingCommand,
     passengerSubjectRef: string,
+    accountHook?: PassengerAccountRatingHook,
   ) {
     const order = this.requireMultiTaxiOrder(orderId);
+    if (
+      accountHook &&
+      this.resolvePassengerSubjectRef(order) !== passengerSubjectRef
+    )
+      throw new ApiRequestError(
+        404,
+        "PASSENGER_RIDE_NOT_FOUND",
+        "Ride not found.",
+      );
+    if (accountHook && !this.repository?.isEnabled())
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_RATING_STORAGE_UNAVAILABLE",
+        "Rating storage is unavailable.",
+      );
     if (order.status !== "completed") {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -689,7 +706,7 @@ export class MultiTaxiService implements OnModuleInit {
     );
     if (existing) {
       this.assertIdempotentRating(existing, score, tags, comment);
-      return existing;
+      if (!accountHook) return existing;
     }
 
     const now = new Date().toISOString();
@@ -708,6 +725,7 @@ export class MultiTaxiService implements OnModuleInit {
     };
     const persisted = (await this.repository?.persistPassengerRating(
       rating,
+      accountHook,
     )) ?? { rating, summary: null };
     this.assertIdempotentRating(persisted.rating, score, tags, comment);
     this.ratingsByPassengerOrder.set(

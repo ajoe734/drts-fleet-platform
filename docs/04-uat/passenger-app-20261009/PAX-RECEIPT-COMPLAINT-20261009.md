@@ -328,3 +328,11 @@ change product source. All checks below completed and their results were read.
 - Original PG/HTTP/browser/provider, same-candidate CI/review/merge and both
   required acceptance keys remain unfulfilled. No complete candidate is handed
   off; branch checkpoints/draft PR preserve source for original-owner continuation.
+
+## 2026-10-11 第二份實際接點補充：交易、稽核與 Ops（實作 checkpoint）
+
+完整讀取 `PAX-RECEIPT-EXACT-PERSISTED-RATING-AUDIT-OPS-SEAM-SUPPLEMENT.md`，註冊 SHA256 `0a9fbf8a2ecf16cf9d7bb163ac1be8c5e694f8d7adeab7b265144359ea5440d2`。同一原 task / Codex2 / Codex，原 immutable base62，未 candidate/handoff。補充只准 AuditLogRecord actor union、typed E04 receipt snapshot、原 persistPassengerRating 交易，以及乘客來源 Ops read；未授權 current receipt repository method 或實際上游 issuer/fare/payment/driver command。
+
+此 checkpoint 將 account 評價交給原 MultiTaxi 評分 producer/repository，在同一 PoolClient 鎖實際 booking/account/order、確認實際 completed task 完成時間與 captured payment，保存評分、driver summary、不可變 contact consent、低分 opt-in 的原 CRM case/timeline/intake。交易成功後才發布記憶體。V0114 只追加 rating consent metadata，無改別人 migration。原 token rating / moderation 及 Booking R1–R9 非 rating 路徑維持。Ops 原 GET 路徑只改 async adapter，舊 service sync API 維持，新增乘客來源持久讀取，依 updatedAt 合併且保留尚未落盤的本地 timeline。稽核使用真實 first_party_passenger，未假造 system actor。
+
+測試與逐欄 SQL review 尚在補充，不能聲稱通過或 acceptance。之前的 compiler/source probe 失敗与通過紀錄保留。原 completed producer 仍沒有實際 E04 capture；沒有生成假 issuer、姓氏、0 元 components 或付款方式。

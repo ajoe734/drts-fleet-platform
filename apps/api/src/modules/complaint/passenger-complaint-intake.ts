@@ -7,6 +7,8 @@ export interface PassengerComplaintIntake {
   passengerId: string;
   orderId: string;
   idempotencyKey: string;
+  /** Internal namespace prevents user supplied keys colliding with ratings. */
+  origin?: "low_rating";
   command: CreatePassengerComplaintCommand;
 }
 
@@ -77,6 +79,7 @@ export function normalizePassengerComplaintIntake(
     passengerId: input.passengerId,
     orderId: input.orderId,
     idempotencyKey,
+    ...(input.origin ? { origin: input.origin } : {}),
     command: {
       rideId: input.orderId,
       category: command.category,

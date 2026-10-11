@@ -60,10 +60,10 @@ export class ComplaintController {
   }
 
   @Get()
-  listComplaintCases(@Headers("x-request-id") requestId?: string) {
+  async listComplaintCases(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       {
-        items: this.complaintService.listComplaintCases(),
+        items: await this.complaintService.listComplaintCasesForOps(),
       },
       requestId,
     );
@@ -93,24 +93,24 @@ export class ComplaintController {
   }
 
   @Get(":caseNo")
-  getComplaintCase(
+  async getComplaintCase(
     @Param("caseNo") caseNo: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.complaintService.getComplaintCase(caseNo),
+      await this.complaintService.getComplaintCaseForOps(caseNo),
       requestId,
     );
   }
 
   @Get(":caseNo/timeline")
-  getComplaintTimeline(
+  async getComplaintTimeline(
     @Param("caseNo") caseNo: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       {
-        items: this.complaintService.getComplaintTimeline(caseNo),
+        items: await this.complaintService.getComplaintTimelineForOps(caseNo),
       },
       requestId,
     );

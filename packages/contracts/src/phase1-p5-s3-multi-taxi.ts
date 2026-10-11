@@ -684,6 +684,8 @@ export interface MultiTaxiElectronicReceipt {
 }
 
 export interface MultiTaxiElectronicReceiptRecord {
+  /** Actual captured completion facts; legacy records may be incomplete. */
+  e04Snapshot?: MultiTaxiReceiptE04Snapshot;
   tripId: string;
   plateNo: string;
   pickupAt: string;
@@ -700,6 +702,19 @@ export interface MultiTaxiElectronicReceiptRecord {
   pdfUrl: string;
   supersededByCertificateId?: string;
   generatedFrom: "owned_mobility_completion" | "certificate_regeneration";
+}
+
+export interface MultiTaxiReceiptE04Snapshot {
+  fleetOperatorName: string;
+  driverSurname: string;
+  driverRegistrationMasked: string;
+  fareBreakdown: {
+    startMinor: number;
+    distanceMinor: number;
+    delayMinor: number;
+    nightMinor: number;
+  };
+  paymentMethodDisplay: string;
 }
 
 export interface RegenerateMultiTaxiElectronicReceiptCommand {

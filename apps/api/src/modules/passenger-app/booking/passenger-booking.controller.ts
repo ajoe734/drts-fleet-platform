@@ -195,27 +195,8 @@ export class PassengerBookingController {
         "Not a passenger",
       );
     const passengerId = (identity as PassengerRequestIdentity).drtsPassengerId;
-    await this.service.getRide(passengerId, orderId);
-
-    if (![1, 2, 3, 4, 5].includes(body.rating)) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "PASSENGER_RATING_SCORE_INVALID",
-        "Rating must be between 1 and 5",
-      );
-    }
-
-    const command = {
-      score: body.rating as 1 | 2 | 3 | 4 | 5,
-      tags: body.tags || [],
-      comment: body.comments || null,
-    };
-    await this.multiTaxiService.submitTrustedPassengerRating(
-      orderId,
-      command,
-      passengerId,
-    );
-    return toApiSuccessEnvelope({ success: true });
+    const result = await this.service.rateRide(passengerId, orderId, body);
+    return toApiSuccessEnvelope(result);
   }
 
   @Get(":id/receipt")
