@@ -6,7 +6,13 @@ import {
   AUTH_ALLOWED_REALMS_KEY,
   AUTH_REQUIRED_SCOPES_KEY,
 } from "../../../apps/api/src/common/auth/auth.constants";
-import { PaymentRefundRepository } from "../../../apps/api/src/modules/passenger-app/payment/payment-refund.repository";
+const repositorySource = process.env.PAX_PAYMENT_REFUND_REPOSITORY_SOURCE;
+const {
+  PaymentRefundRepository,
+}: typeof import("../../../apps/api/src/modules/passenger-app/payment/payment-refund.repository") =
+  repositorySource
+    ? await import(repositorySource)
+    : await import("../../../apps/api/src/modules/passenger-app/payment/payment-refund.repository");
 import { PaymentRefundService } from "../../../apps/api/src/modules/passenger-app/payment/payment-refund.service";
 import { PaymentRefundController } from "../../../apps/api/src/modules/passenger-app/payment/payment-refund.controller";
 import { FakePaymentProvider } from "../../../apps/api/src/modules/passenger-app/payment/fake-payment-provider";
@@ -106,7 +112,16 @@ async function fixture() {
                 provider_payment_ref: billing.provider_payment_ref,
               },
             ];
-      else if (sql.startsWith("SELECT refund_idempotency_key")) rows = [charge];
+      else if (sql.startsWith("SELECT refund_idempotency_key"))
+        rows = [
+          {
+            ...charge,
+            refund_journal_operation: journal.operation,
+            refund_journal_owner: journal.drts_passenger_id,
+            refund_journal_entity: journal.entity_id,
+            refund_journal_outcome: journal.outcome,
+          },
+        ];
       else if (sql.includes("INSERT INTO passenger.payment_idempotency_keys")) {
         rowCount = journalExists ? 0 : 1;
         journalExists = true;
@@ -464,6 +479,122 @@ describe("formal full refund service/controller and repository with synthetic PG
       f.service.refund(IDENTITY, ORDER, { reason: "synthetic_changed_reason" }),
     ).rejects.toMatchObject({ code: "invalid_state" });
     expect(f.charge.refund_reason).toBe(BODY.reason);
+  });
+
+  it("refuses completed replay whose refund journal belongs to a foreign owner", async () => {
+    const f = await fixture();
+    const refund = vi.spyOn(f.provider, "refund");
+    await f.refund();
+    f.journal.drts_passenger_id = "synthetic_foreign_owner";
+    await expect(f.refund()).rejects.toMatchObject({ code: "invalid_state" });
+    expect(refund).toHaveBeenCalledOnce();
+  });
+
+  it.each(["key", "operation", "entity", "outcome"])(
+    "refuses a completed replay with mismatched %s journal identity",
+    async (kind) => {
+      const f = await fixture();
+      await f.refund();
+      if (kind === "key")
+        f.charge.refund_idempotency_key = `pax:refund:${METHOD}`;
+      if (kind === "operation") f.journal.operation = "capture";
+      if (kind === "entity") f.journal.entity_id = METHOD;
+      if (kind === "outcome") f.journal.outcome = "unknown";
+      await expect(f.refund()).rejects.toMatchObject({ code: "invalid_state" });
+    },
+  );
+
+  it("final persistence failure retains readback and never presents the PSP refund again", async () => {
+    const f = await fixture();
+    const refund = vi.spyOn(f.provider, "refund");
+    const read = vi.spyOn(f.provider, "readRefund");
+    f.setFault((sql) =>
+      sql.startsWith(
+        "UPDATE passenger.payment_charge_records SET refund_status",
+      ),
+    );
+    await expect(f.refund()).rejects.toMatchObject({
+      code: "payment_persistence_unavailable",
+    });
+    expect(f.charge).toMatchObject({
+      status: "captured",
+      refund_status: "unknown",
+    });
+    expect(f.billing.status).toBe("captured");
+    expect(f.client.release).toHaveBeenCalledWith(true);
+    f.setFault(() => false);
+    await expect(f.refund()).resolves.toMatchObject({ success: true });
+    expect(refund).toHaveBeenCalledOnce();
+    expect(read).toHaveBeenCalledOnce();
+  });
+
+  it("throwing readback keeps the captured obligation and redacts PSP details", async () => {
+    const f = await fixture();
+    const refund = vi
+      .spyOn(f.provider, "refund")
+      .mockResolvedValue({ status: "unknown" });
+    vi.spyOn(f.provider, "readRefund").mockRejectedValue(
+      new Error("synthetic_private_psp_error"),
+    );
+    await expect(f.refund()).rejects.toMatchObject({
+      code: "payment_processing_pending",
+    });
+    const failure = await f.refund().catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: "payment_processing_pending" });
+    expect(String(failure)).not.toContain("synthetic_private_psp_error");
+    expect(refund).toHaveBeenCalledOnce();
+    expect(f.billing.status).toBe("captured");
+  });
+
+  it("unknown readback never switches payment providers", async () => {
+    const f = await fixture();
+    const refund = vi
+      .spyOn(f.provider, "refund")
+      .mockResolvedValue({ status: "unknown" });
+    const read = vi.spyOn(f.provider, "readRefund");
+    await expect(f.refund()).rejects.toMatchObject({
+      code: "payment_processing_pending",
+    });
+    f.charge.provider = "synthetic_other_psp";
+    await expect(f.refund()).rejects.toMatchObject({
+      code: "payment_provider_unavailable",
+    });
+    expect(refund).toHaveBeenCalledOnce();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "BEGIN",
+    "SELECT pg_try_advisory_lock",
+    "UPDATE passenger.payment_charge_records SET refund_idempotency_key",
+  ])(
+    "%s failure prevents PSP money and exposes only a generic persistence error",
+    async (prefix) => {
+      const f = await fixture();
+      f.setFault((sql) => sql.startsWith(prefix));
+      const refund = vi.spyOn(f.provider, "refund");
+      const failure = await f.refund().catch((error: unknown) => error);
+      expect(failure).toMatchObject({
+        code: "payment_persistence_unavailable",
+      });
+      expect(String(failure)).not.toContain("synthetic_private_db_detail");
+      expect(refund).not.toHaveBeenCalled();
+      expect(f.client.release).toHaveBeenCalledWith(true);
+    },
+  );
+
+  it("release failure after success does not permit a duplicate refund", async () => {
+    const f = await fixture();
+    const refund = vi.spyOn(f.provider, "refund");
+    f.client.release.mockImplementation(() => {
+      throw new Error("synthetic_private_release_error");
+    });
+    await expect(f.refund()).rejects.toMatchObject({
+      code: "payment_persistence_unavailable",
+    });
+    f.client.release.mockReset();
+    await expect(f.refund()).resolves.toMatchObject({ success: true });
+    expect(refund).toHaveBeenCalledOnce();
   });
 
   it("late provider response cannot overwrite a newer operation UUID", async () => {

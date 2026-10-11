@@ -535,3 +535,58 @@ allocated, unmerged V0115 charge table; no new migration number/table is invente
 Evidence cwd is the dispatched isolated worktree; Node 22.23.2, pnpm 10.33.0,
 Vitest 4.1.4. This is a recoverable source checkpoint, not handoff/done; final
 source identity, full regression and hosted checks are recorded after publication.
+
+### Adjacent refund checkpoint repair: terminal journal identity
+
+The initial refund checkpoint is
+`a5c5666605b1dcdfb1e4d364aaaf7461b2d0db85`. Further production-path fault
+testing identified that terminal replay checked the charge/refund fields but
+did not revalidate the idempotency journal's operation/account/order/outcome.
+V0115's simple FK proves key existence, not matching ownership. The original
+refund owner fixes this within PaymentRefundSession.loadRefund: LEFT JOIN the
+formal journal and check deterministic order key, operation=refund, account,
+entity and matching outcome before returning any saved receipt or readback.
+The original source history is retained; no active reset/rebase occurred.
+
+| Finding                                              | Actual old source -> repair                                                                                                                                                      | Executed evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Limits                                                                                                                                                                                                                                                                                               |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Completed refund replay with a foreign journal owner | Production service/repository completes a refund, then external SQL replies expose a foreign journal owner; old source incorrectly returns success, repair refuses invalid_state | Immutable a5c5 extracted with git show, import paths only relocated; `PAX_PAYMENT_REFUND_REPOSITORY_SOURCE="$PWD/.local/pax-payment-core-20261009/refund-repository-a5c5.ts" pnpm exec vitest run tests/unit/pax-payment-core-20261009/refund-workflow.test.ts -t 'refuses completed replay'`: **1 executed FAIL / 49 filter SKIP**, exit 1, `refund-replay-old-immutable.log`; same case current source **1 executed PASS / 49 filter SKIP**, exit 0, `refund-replay-fixed.log`. First working-old probe also fails, exit 1, retained in `refund-replay-old-working.log`. | Actual production logic runs; supplied PG row corruption tests ownership checks, not engine constraints. Filter skips do not count as full regression.                                                                                                                                               |
+| Complete refund fault matrix at the mock boundary    | Original 49 tests plus terminal key/operation/entity/outcome refusal, final persistence/readback/provider-switch/pre-request/lock/release failures                               | Expanded real refund suite **61 PASS / 0 SKIP**, exit 0, `refund-unit-expanded.log`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | No DB transaction/race engine or contracted PSP acceptance; unknown refunds await operator readback, with no invented financial refund retry policy.                                                                                                                                                 |
+| Real route guard legal/refusal paths                 | Actual BootstrapAuthGuard, JwtAuthService/PassengerJwtService signing/verification and actual refund controller metadata/policy; development/staging/production                  | `pnpm exec vitest run tests/unit/pax-payment-core-20261009/refund-realm-guard.test.ts`: initial **6 PASS / 24 FAIL**, exit 1, `refund-guard.log`; fixture initially omitted canonical session claims, so failures were JWT_INVALID. Adding sid/jti/version/auth_time/amr/acr/policy claims yields **30 PASS / 0 SKIP**, exit 0, `refund-guard-fixed.log`                                                                                                                                                                                                                   | Auth logic is real; signed claims are synthetic and no IAM repository is supplied. This verifies guard decisions, not persisted IAM/session or HTTP acceptance. Positive platform billing, read-only scope denial, all foreign realms, actual passenger issuer and anonymous rejection are retained. |
+
+Before this adjacent repair, initial checkpoint full affected regression was
+**22 files / 558 PASS / 0 SKIP**, exit 0, `refund-affected-regression.log`;
+the existing API caller suite was **2 files / 16 PASS**, exit 0,
+`refund-api-caller-regression.log`. Initial root/API typecheck, scoped lint,
+classification, canonical consistency and whole source62 range trailers all
+passed, exit 0. `refund-range-audit.json` recorded 42 exact-scope files / 10
+literal owner/reviewer commits / bypass env unset at a5c5. The new repair gets
+its own full affected regression and ordinary published SHA/CI. No candidate,
+approval, merge, acceptance or task completion is inferred from either version.
+
+Final affected regression after the journal repair and complete guard fixtures:
+`pnpm exec vitest run tests/unit/pax-payment-core-20261009 tests/unit/pax-booking-history-20261009 tests/unit/pax-account-session-20261009 tests/unit/pax-facebook-login-20261009 tests/unit/audit-recovery-providers-20261002.test.ts`
+completed/read **23 files / 600 PASS / 0 SKIP**, exit 0,
+`refund-final-affected-regression.log`. Root/API typecheck and final scoped
+Payment/module/policy/refund-test ESLint passed, exit 0,
+`refund-final-root-typecheck.log`, `refund-final-api-typecheck.log`,
+`refund-final-lint.log`. Unchanged API caller fixtures/source retain the 16 PASS.
+
+Publication identity, final source62 range scope/role audit, clean local/remote/
+draft-PR head matching and every completed hosted run/job are bound in
+`.local/pax-payment-core-20261009/refund-published-identity.json`; initial and
+final run evidence are kept separately, with success/failure/skip/cancellation
+as actually returned. This continuation's raw evidence is also copied under
+canonical machine root
+`.local/pax-payment-core-20261011-refund-evidence/` to survive worker-worktree
+replacement. Prior charge logs named above were not present at their worktree
+or canonical-root `.local/pax-payment-core-20261009/` paths in this dispatch;
+the original UAT entries/SHA/run links remain unchanged and no historical logs
+are recreated or substituted. This limitation is not a new historical pass.
+
+Source is still in progress: approved actual capture-policy binding and typed
+payment notice recipient/transport/tests require Supervisor reconciliation of
+the exact previously reported scopes. Optional refund amount units/partial
+semantics also remain unresolved. No PG/HTTP/notification delivery or contracted
+PSP acceptance, independent review, protected merge or either named acceptance
+is claimed; no handoff/done or VM product runtime is started.

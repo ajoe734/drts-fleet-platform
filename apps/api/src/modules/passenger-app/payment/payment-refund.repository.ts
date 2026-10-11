@@ -40,12 +40,26 @@ export class PaymentRefundSession extends PaymentChargeSession {
   async loadRefund(): Promise<StoredRefund | null> {
     const result = await this.client.query(
       `SELECT refund_idempotency_key,refund_reason,refund_actor_id,refund_status,
-              refund_operation_id,provider_refund_ref
-       FROM passenger.payment_charge_records WHERE order_id=$1`,
+              refund_operation_id,provider_refund_ref,c.drts_passenger_id,
+              k.operation AS refund_journal_operation,k.drts_passenger_id AS refund_journal_owner,
+              k.entity_id AS refund_journal_entity,k.outcome AS refund_journal_outcome
+       FROM passenger.payment_charge_records c
+       LEFT JOIN passenger.payment_idempotency_keys k ON k.idempotency_key=c.refund_idempotency_key
+       WHERE c.order_id=$1`,
       [this.orderId],
     );
     const row = result.rows[0];
     if (!row?.refund_idempotency_key) return null;
+    // A simple FK proves only key existence. Replays must verify its refund
+    // operation/account/order/outcome as well, including terminal receipts.
+    if (
+      row.refund_idempotency_key !== `pax:refund:${this.orderId}` ||
+      row.refund_journal_operation !== "refund" ||
+      row.refund_journal_owner !== row.drts_passenger_id ||
+      row.refund_journal_entity !== this.orderId ||
+      row.refund_journal_outcome !== row.refund_status
+    )
+      conflict();
     return {
       key: row.refund_idempotency_key,
       reason: row.refund_reason,
