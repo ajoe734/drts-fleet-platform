@@ -63,6 +63,13 @@ CREATE TABLE passenger.payment_charge_records (
   operation_id uuid,
   provider_capture_ref text,
   provider_refund_ref text,
+  -- One full Ops refund per order. Unknown requests resume by readback only;
+  -- capture/billing remain captured until a definitive successful refund.
+  refund_idempotency_key text UNIQUE REFERENCES passenger.payment_idempotency_keys(idempotency_key),
+  refund_reason varchar(500),
+  refund_actor_id text,
+  refund_status text CHECK (refund_status IN ('unknown', 'completed', 'failed')),
+  refund_operation_id uuid,
   last_error_code text CHECK (last_error_code IN ('card_declined', 'unavailable', 'invalid_method', 'unknown')),
   retry_at timestamptz,
   completed_at timestamptz NOT NULL,
@@ -70,7 +77,15 @@ CREATE TABLE passenger.payment_charge_records (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   FOREIGN KEY (payment_method_id, drts_passenger_id)
-    REFERENCES passenger.psp_tokens(payment_method_id, drts_passenger_id)
+    REFERENCES passenger.psp_tokens(payment_method_id, drts_passenger_id),
+  CHECK ((refund_idempotency_key IS NULL AND refund_reason IS NULL AND refund_actor_id IS NULL
+          AND refund_status IS NULL AND refund_operation_id IS NULL AND provider_refund_ref IS NULL)
+      OR (refund_idempotency_key IS NOT NULL AND refund_reason IS NOT NULL AND refund_actor_id IS NOT NULL
+          AND refund_status IS NOT NULL AND status IN ('captured','refunded')
+          AND provider_capture_ref IS NOT NULL)),
+  CHECK (refund_status IS DISTINCT FROM 'completed' OR
+         (status='refunded' AND provider_refund_ref IS NOT NULL AND refund_operation_id IS NULL)),
+  CHECK (refund_operation_id IS NULL OR refund_status='unknown')
 );
 CREATE INDEX passenger_charge_retry_idx ON passenger.payment_charge_records(retry_at)
   WHERE status = 'failed';

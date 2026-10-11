@@ -489,3 +489,49 @@ Billing/Facebook caller suite's 16 PASS remains applicable; no caller source or
 fixture changed in this notice-only correction. The current final source identity
 will bind these checks, scope/role audit and hosted results in the referenced
 publication evidence and machine-truth progress.
+
+## 2026-10-11 continuation: platform full refund checkpoint
+
+Adjacent source baseline remains `4230964c7c0e64d5b5cf43a12fb3a4f598084f6e`,
+ordinary published draft PR #2555, not a locked candidate. This unit implements
+the previously absent platform refund path required by common A8 and the
+canonical SD API table: `POST /api/passenger-app/platform/rides/:id/refund`.
+It calls the production controller/service/session and original provider port.
+The route and direct service require platform_admin, platform realm, a null
+tenant, an actor ID and billing:write. Guest/partner or missing passenger ledger
+cannot enter this core.
+
+The minimal API accepts only a reason and refunds the full durable captured
+amount in TWD. `RefundPassengerRideCommand.amount` is optional but has no
+canonical unit or partial-refund state rule. Explicit amount/partial requests
+are refused rather than assigning units or calling a partial refund refunded.
+Supervisor must reconcile that exact contract boundary before partial support;
+full refund is implemented, partial refund is not claimed. No financial refund
+retry policy was supplied: definitive failure remains captured and terminal for
+this refund operation; unknown/pending/malformed/thrown results resume by reading
+the original refund key only. No automatic or second-money retry is invented.
+
+`PaymentRefundRepository` reuses PaymentChargeRepository's original order
+advisory lock (`pax:capture:<order>`), account-first transactions, sanitized DB
+failures and session eviction. It commits `pax:refund:<order>`, original actor,
+reason and a refund UUID before PSP I/O. Only completed provider acknowledgement
+with a validated reference atomically changes both charge and Billing authority
+to refunded; original capture reference/amount/attempt counters remain intact.
+Removed card tokens/deleted accounts do not prevent reading or refunding a
+previous capture, and no token decryption is needed. Late response UUIDs and
+foreign/orphan journal claims refuse. Refund metadata is added only to the
+allocated, unmerged V0115 charge table; no new migration number/table is invented.
+
+| Finding / acceptance                      | Source and SQL audit                                                                                                                                                                                                                                                              | Executed evidence                                                                                                                                                                                                                                                                                    | Remaining limit                                                                                                                                                            |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Previously absent Ops refund              | PaymentRefundController/Service/Session; PassengerAppModule appended registration; exact auth route appended                                                                                                                                                                      | `pnpm exec vitest run tests/unit/pax-payment-core-20261009/refund-workflow.test.ts`: **49 PASS / 0 SKIP**, exit 0, `.local/pax-payment-core-20261009/refund-unit-fixed.log`                                                                                                                          | New functionality absent from baseline; no fabricated old dynamic failure. Actual HTTP/PG/provider acceptance not run.                                                     |
+| Full-refund durability and refusal matrix | Real repository beginRefund/finishRefund with mock SQL replies and fake PSP                                                                                                                                                                                                       | Same 49 tests execute pre-PSP commit, duplicate, lost PSP acknowledgement, lost pre/final COMMIT acknowledgement, unknown/pending/malformed/failed outcomes, forbidden realms/scopes/actor/tenant, foreign journal, missing/drifted payment, changed reason, late UUID and zero-row final writes     | SQL/PSP are external boundaries, not a PG engine/rollback/concurrency simulation. Lost-COMMIT fixtures represent committed response loss; no rollback correctness claimed. |
+| SQL columns and constraints               | V0115 c.refund_idempotency_key FK/unique, refund_reason varchar(500), refund_actor_id text, refund_status unknown/completed/failed, refund_operation_id UUID and existing provider_refund_ref; V0056/V0060/V0084 billing status/ref/amount/attempts; idempotency operation=refund | Every inserted/selected/updated column read against the formal migrations and allocation primary_tables; Billing amount/reference compared and capture attempts untouched                                                                                                                            | Independent reviewer must repeat audit; hosted formal schema PG behavior unverified. V0115 requires fresh schema, not applied-schema patching.                             |
+| Dependency/tooling failures retained      | Dispatch restored worktree dependency links into canonical root; absent Nest packages prevented compilation                                                                                                                                                                       | Initial API tsc **exit 2**, `refund-initial-api-typecheck.log`. Removed only worktree node_modules symlinks, preserved targets; `pnpm install --offline --frozen-lockfile` **exit 0**, `refund-dependency-install.log`; contracts/auth builds exit 0; API tsc **exit 0**, `refund-api-typecheck.log` | Tooling setup is not product proof. No lockfile/source/config changes or runtime started.                                                                                  |
+| Test import repair                        | Root package does not declare reflect-metadata; Nest's real decorators already load it                                                                                                                                                                                            | Initial refund suite **0 executed / suite FAIL**, exit 1, `refund-unit-initial.log`; removed direct undeclared root import, final **49 PASS**, exit 0                                                                                                                                                | Initial suite/import failure is not a behavioral reproduction.                                                                                                             |
+| `pax-payment_bind_charge_and_states`      | Full refund added; previous bind/capture/Booking fixes retained                                                                                                                                                                                                                   | **Not recorded**                                                                                                                                                                                                                                                                                     | Full affected regression, same-source CI, independent review, protected merge, hosted HTTP/PG and policy binding still required.                                           |
+| `pax-payment_security_and_recovery`       | Original encryption/fake/unpaid/claim/notice request boundaries preserved                                                                                                                                                                                                         | **Not recorded**                                                                                                                                                                                                                                                                                     | Approved actual capture policy, typed notice recipient/transport scope and actual delivery remain pending; full financial fault matrix not yet complete.                   |
+
+Evidence cwd is the dispatched isolated worktree; Node 22.23.2, pnpm 10.33.0,
+Vitest 4.1.4. This is a recoverable source checkpoint, not handoff/done; final
+source identity, full regression and hosted checks are recorded after publication.

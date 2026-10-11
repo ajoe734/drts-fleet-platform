@@ -25,6 +25,7 @@ export interface StoredCharge {
   provider: string;
   tokenEnvelope: EncryptedPaymentToken | null;
   methodActive: boolean;
+  providerCaptureRef: string | null;
   lastError:
     | "card_declined"
     | "unavailable"
@@ -73,6 +74,7 @@ function mapCharge(row: QueryResultRow): StoredCharge {
     provider: row.provider,
     tokenEnvelope: row.token_envelope,
     methodActive: row.method_status === "active",
+    providerCaptureRef: row.provider_capture_ref ?? null,
     lastError: row.last_error_code ?? null,
   };
 }
@@ -84,11 +86,11 @@ function mapCharge(row: QueryResultRow): StoredCharge {
  */
 export class PaymentChargeSession {
   constructor(
-    private readonly client: PoolClient,
+    protected readonly client: PoolClient,
     readonly orderId: string,
   ) {}
 
-  private async transaction<T>(
+  protected async transaction<T>(
     passengerId: string,
     work: () => Promise<T>,
   ): Promise<T> {
@@ -377,6 +379,13 @@ export class PaymentChargeRepository {
     return this.database.isEnabled();
   }
 
+  protected createSession(
+    client: PoolClient,
+    orderId: string,
+  ): PaymentChargeSession {
+    return new PaymentChargeSession(client, orderId);
+  }
+
   async listDueOrders(limit: number): Promise<string[]> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
       throw new Error("payment_batch_invalid");
@@ -414,7 +423,7 @@ export class PaymentChargeRepository {
           "payment_processing_pending",
           "Payment is being processed.",
         );
-      return await work(new PaymentChargeSession(client, orderId));
+      return await work(this.createSession(client, orderId));
     } catch (error) {
       evict = true;
       if (error instanceof ApiRequestError) throw error;

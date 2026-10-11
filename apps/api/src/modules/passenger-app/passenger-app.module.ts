@@ -40,6 +40,9 @@ import { paymentRuntimeFromEnv } from "./payment/payment-runtime.config";
 import { PaymentChargeRepository } from "./payment/payment-charge.repository";
 import { PaymentChargeService } from "./payment/payment-charge.service";
 import { PaymentChargeWorker } from "./payment/payment-charge.worker";
+import { PaymentRefundController } from "./payment/payment-refund.controller";
+import { PaymentRefundRepository } from "./payment/payment-refund.repository";
+import { PaymentRefundService } from "./payment/payment-refund.service";
 
 @Global()
 @Module({
@@ -53,6 +56,7 @@ import { PaymentChargeWorker } from "./payment/payment-charge.worker";
     PassengerBookingController,
     PassengerBookingSettingsController,
     PaymentMethodController,
+    PaymentRefundController,
   ],
   providers: [
     PassengerJwtService,
@@ -72,6 +76,8 @@ import { PaymentChargeWorker } from "./payment/payment-charge.worker";
     PaymentChargeRepository,
     PaymentChargeService,
     PaymentChargeWorker,
+    PaymentRefundRepository,
+    PaymentRefundService,
     {
       provide: PAYMENT_RUNTIME,
       useFactory: () => paymentRuntimeFromEnv(process.env),

@@ -7,6 +7,9 @@
  * Readback must report the original operation, not infer success from a timeout.
  * A definitive failed capture may be retried under the same order key; adapters
  * that cannot provide this guarantee must remain unavailable.
+ * Refund keys identify the single full refund of an order; readRefund must
+ * resolve that original operation after a lost acknowledgement. Core never
+ * re-presents an unknown refund as another money request.
  */
 export interface ProviderCard {
   token: string;
