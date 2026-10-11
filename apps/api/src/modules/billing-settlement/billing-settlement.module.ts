@@ -15,6 +15,7 @@ import { BillingSettlementService } from "./billing-settlement.service";
 import {
   PAYMENT_RECOVERY_PORT,
   PlatformManualPaymentRecoveryPort,
+  PassengerCoreManualPaymentRecoveryPort,
 } from "./payment-recovery.port";
 import { ReferralSettlementScaffoldService } from "./referral-settlement.scaffold.service";
 import { RemittanceProofService } from "./remittance-proof.service";
@@ -81,11 +82,12 @@ import {
       },
     },
     PlatformManualPaymentRecoveryPort,
-    // retry_capture remains unavailable (no PSP/issuer is integrated); see
-    // PlatformManualPaymentRecoveryPort for the exact confirmed boundary.
+    PassengerCoreManualPaymentRecoveryPort,
+    // Automatic passenger capture/retry lives in its fenced worker. An Ops
+    // re-presentation command remains unavailable until its policy is approved.
     {
       provide: PAYMENT_RECOVERY_PORT,
-      useExisting: PlatformManualPaymentRecoveryPort,
+      useExisting: PassengerCoreManualPaymentRecoveryPort,
     },
     ReferralSettlementScaffoldService,
     RemittanceProofService,

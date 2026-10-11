@@ -324,3 +324,127 @@ the task guard or original Husky chain. Source62 → aff151fb trailer checker th
 passed all five commits with bypass unset. Remaining full financial workflow and
 both acceptance keys from prior rows are still pending, not waived by these
 decision tests or the earlier green binding CI.
+
+## Completion, durable capture/readback, and manual recovery checkpoint
+
+Dispatch resumed from published `1a735f573746d71560d0809ea7c79cc7a32f04d1`.
+The initial completion source anchor is
+`dfc9f7edae89096b5ff4b76b85a7dec2455f2bcd`, ordinarily pushed to the same
+draft PR [#2555](https://github.com/ajoe734/drts-fleet-platform/pull/2555).
+This section records the subsequent tested repair; the final published source
+identity/run results are recorded through the active-release task `progress`
+and `.local/pax-payment-core-20261009/charge-published-identity.json`.
+There is still **no candidate, handoff, acceptance or done**.
+
+`PaymentChargeService.onTripCompleted` subscribes to the actual durable
+`owned-mobility.multi-taxi-trip.completed` event, not the tenant-only settlement
+event. `PaymentChargeSession.initialize` resolves the owner from formal V0113
+Booking history, locks that account first, and reads the completed order/task
+from formal V0011/V0056. The runtime, owner, completed states, task fare/currency
+and completion time must agree. The selected method UUID is taken from the
+server order. The actual task fare is used, matching CertificateSupport's
+receipt total; the quote and separately reported toll are never added to it.
+Guest orders, including legacy non-UUID guest IDs, acquire no first-party
+financial records. Cancellation never enters this writer.
+
+The one-order capture key is `pax:capture:<canonical order UUID>`. Its journal,
+billing authority and charge ledger are committed before PSP execution. Since
+the card is already selected, an unpresented obligation is `failed` with
+`unavailable` and attempt zero, rather than the P5 UI's `not_selected` (which
+means no method selected). No PSP authorization is fabricated. Missing policy,
+provider or cipher leaves that debt unpaid and sends no money request. The
+production module currently has **no approved PAYMENT_CAPTURE_POLICY binding**;
+it remains disabled for money until Supervisor supplies the real policy.
+
+A dedicated PG session holds an order advisory lock across short transactions
+and PSP I/O; there is no open transaction during PSP I/O. Before capture, the
+writer reserves the attempt and commits `failed/unknown`, next operation
+`readback`, and an operation UUID in both relevant ledgers/journal. A lost
+pre-request COMMIT acknowledgement may reserve without sending; the conservative
+recovery still reads the original key and never sends another capture. Readbacks
+increment their separate durable count. UUID fencing rejects late writes after
+another worker advances the operation. Billing/status/amount/currency/method/
+capture-ref/count disagreement refuses processing, not silent reconciliation.
+SQL/crypto/PSP exceptions are scrubbed; tokens appear only in memory at the PSP
+boundary, never in repository SQL, returned objects, errors or logs.
+
+`captureDisposition` now drives real writes: definitive eligible failures retry
+under the same key at the explicitly supplied delays; unknown/pending/invalid
+acknowledgements read back under their own budget; only completed acknowledgement
+with a valid reference writes captured. Exhaustion atomically writes
+`manual_recovery` in both tables and requests one durable
+`payment_recovery_required` consumer outbox notice with only order/status/action.
+The hosted `PaymentChargeWorker` scans due durable state at startup and every
+second (operational polling, not a financial retry default); it requires DB,
+PSP, cipher and explicit validated policy. Unit lifecycle checks use a fake
+clock. No actual API/worker product runtime was started on this VM.
+
+`PassengerCoreManualPaymentRecoveryPort` wires the existing authorized platform
+Billing recovery caller to that same charge writer and notice. Legacy manual
+handoff remains accepted without pretending PSP success. The Billing receipt
+transaction locks the account, verifies matching ledgers and records only the
+recovery receipt for managed passenger payments; it cannot independently rewrite
+their status or increment their attempt count. A legacy port claiming a core
+result is refused. Existing platform `billing:write`, command-idempotency and
+audit checks remain in the actual Billing service. Ops `retry_capture` remains
+unavailable; automatic retries use the fenced worker. Platform refund API and
+durable refund workflow are the next unfinished source unit.
+
+### Field-by-field charge / billing SQL audit (PG unexecuted)
+
+| Formal migration column / type                                                                | Actual writer / argument / read mapping                                                                                                                           |
+| --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| V0115 journal `idempotency_key text, operation text`                                          | initialize $1=`pax:capture:<order UUID>`, literal capture; replay SELECT locks and verifies operation                                                             |
+| Journal `drts_passenger_id varchar(100), entity_id uuid, credential_digest varchar(64)`       | authoritative history owner $2, canonical order $3; capture has NULL credential digest as formal CHECK requires                                                   |
+| Journal `outcome, error_code, created_at, updated_at`                                         | pending default; unknown committed before request; completed only after acknowledged capture; failure enum errors, unknown uses NULL error_code; DB timestamps    |
+| Charge `order_id uuid, payment_id varchar(255)`                                               | initialize $1 order, $2 deterministic `pax-payment:<order>`; formal history/payment FK; load matches billing order text and ID                                    |
+| Charge `drts_passenger_id varchar(100), payment_method_id uuid`                               | initialize $3 history owner, $4 order method UUID; composite method-owner FK; method join has both fields                                                         |
+| Charge `idempotency_key text`                                                                 | initialize $5, references committed journal; immutable one-order provider key                                                                                     |
+| Charge `amount_minor bigint, currency char(3)`                                                | initialize $6 validated safe integer from completed task/event; literal TWD; load bigint converted with safe-integer check and compared to billing                |
+| Charge `status text`                                                                          | initialized failed/unavailable, never artificial authorization; failed/captured/manual_recovery transitions use real validated disposition                        |
+| Charge `attempt_count integer`                                                                | default 0; begin $2 reserves only capture; finish preserves count; readback/manual handoff never adds a capture                                                   |
+| Charge **new** `readback_count integer`                                                       | default 0, nonnegative CHECK; begin $3 increments readback/reset on definitive capture retry; policy uses separate budget                                         |
+| Charge **new** `next_operation text, operation_id uuid`                                       | allowed capture/readback or NULL; initial capture; begin readback + $4 UUID; finish decision operation or NULL and clears UUID; WHERE old UUID fences late writes |
+| Charge `provider_capture_ref text, provider_refund_ref text`                                  | validated completed reference goes to finish $4 and public billing ref; refund reference reserved, not yet written                                                |
+| Charge `last_error_code text, retry_at timestamptz`                                           | initial unavailable; pre-request unknown; finish $5/$7 classified error/explicit-policy deadline; no raw provider error                                           |
+| Charge `completed_at timestamptz`                                                             | initialize $7 matches authoritative completed task; no wall-clock replacement                                                                                     |
+| Charge `recovery_notice_requested_at timestamptz, created_at, updated_at`                     | notice flag finish $8 stamps COALESCE once, DB creation/update timestamps                                                                                         |
+| V0056 billing `payment_id, order_id, payment_method_token_ref`                                | initialize $1/$2/$3; method-token-ref is our method UUID, never PSP token; verified against the charge ledger                                                     |
+| Billing `status, amount_minor, currency, provider_payment_ref`                                | initialize failed/$4/TWD; real disposition status + validated capture ref; dual-table transaction; currency follows V0084                                         |
+| V0060 billing `attempt_count integer, available_actions jsonb`                                | count equals reserved charge captures; available_actions remains formal [] default; managed Billing receipt never increments count again                          |
+| V0056 consumer outbox `outbox_id, order_id, passenger_subject_ref, event_type, payload`       | deterministic recovery ID $1, order $2, actual owner $3, literal payment_recovery_required, safe JSON $4; ON CONFLICT prevents duplicate notice request           |
+| Outbox `status, attempt_count, next_attempt_at, created_at, delivered_at, assignment_version` | pending/0, DB due/created timestamps; nullable delivery/assignment defaults; request only, no delivery claim                                                      |
+
+### Findings, failures and verified scope
+
+All paths below are relative to this isolated task cwd. Versions: Node 22.23.2,
+pnpm 10.33.0, Vitest 4.1.4. Full commands/cwd are the dispatched workspace and
+the named test paths; logs are `.local/pax-payment-core-20261009/`.
+
+| Finding / acceptance                                                                                    | Actual source and result                                                                                                                                                                                                                                                                           | Command / exit / evidence                                                                                                                                                                                                                                                                                                              | Remaining limitation                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Previously absent completion/capture writer                                                             | real completion service, charge session/repository, fake PSP; committed request precedes PSP, actual fare rather than quote/toll, duplicate completion sends once, refusal branches execute                                                                                                        | Initial `pnpm exec vitest run tests/unit/pax-payment-core-20261009/charge-workflow.test.ts`: **17 PASS**, exit 0, `charge-unit-initial.log`; expanded workflow/worker: **33 PASS**, exit 0, `charge-unit-status-final.log`                                                                                                             | New capability absent at 1a735; no invented old behavior reproduction. SQL replies/PSP are external mocks, not PG engine/race/transaction evidence                                         |
+| Unknown / crash / due retry / manual notice                                                             | real repository and policy; lost PSP response, lost pre-send COMMIT response, failed completion write, restarted service, readback budget, future retry deadline, stale operation UUID, foreign owner/provider, billing drift all exercised                                                        | `pnpm exec vitest run tests/unit/pax-payment-core-20261009 tests/unit/audit-recovery-providers-20261002.test.ts`: **10 files / 141 PASS**, exit 0, `charge-core-recovery-regression.log`; final affected suite below covers later source tightening                                                                                    | Dedicated-session locks, replicas, real lost COMMIT and rollback effects still need hosted PG. Fixture supplies potentially committed snapshots; it is explicitly not a rollback simulator |
+| Legacy Billing receipt writer would diverge or double-count core ledger                                 | actual new port invokes real core service; real Billing repository accepts managed matching status/count/amount/currency/ref, rejects drift or unmanaged claim; legacy internal manual adapter retained                                                                                            | Final `pnpm exec vitest run tests/unit/pax-payment-core-20261009/billing-recovery-writer.test.ts`: **8 PASS**, exit 0, `charge-billing-writer-final.log`; no copied SQL implementation or mock core writer in these repository tests                                                                                                   | Provider/auth boundary HTTP acceptance pending; Ops retry command still disabled; platform refund unfinished                                                                               |
+| Existing Billing caller sequence prerequisite                                                           | original API suite preserved; one SELECT for passenger ledger added before the legacy receipt write                                                                                                                                                                                                | Original unchanged assertion: **10 PASS / 1 FAIL**, exit 1, `charge-billing-fixture-original.log` → `pnpm --dir apps/api exec vitest run tests/unit/billing-payment-exception.test.ts tests/unit/facebook-data-deletion.repository.test.ts`: **16 PASS**, exit 0, `charge-final-api-caller-regression.log`                             | Original financial-no-token-write assertions retained; this is fixture sequence repair, not a claimed PG reproduction                                                                      |
+| Original Booking R2/R9, realm/account switch, unpaid/create/delete, binding/cipher/provider regressions | all original suites plus current payment/manual-recovery/worker source                                                                                                                                                                                                                             | `pnpm exec vitest run tests/unit/pax-payment-core-20261009 tests/unit/pax-booking-history-20261009 tests/unit/pax-account-session-20261009 tests/unit/pax-facebook-login-20261009 tests/unit/audit-recovery-providers-20261002.test.ts`: **21 files / 508 PASS**, exit 0, `charge-final-affected-regression.log`; no skips             | No browser/HTTP/server/DB/provider acceptance inferred from unit passes                                                                                                                    |
+| Compiler failures preserved and repaired                                                                | initial canonical-root symlinks supplied at dispatch caused missing dependencies; isolated offline reinstall/build fixed that. dfc9 anchor had TS2366 in withOrder; explicit return fixed it. A new test's explicit undefined optional flag violated exactOptionalPropertyTypes; omission fixes it | initial typecheck exit 2 `charge-initial-api-typecheck.log`; install exit 0 `charge-dependency-install.log`; builds exit 0; TS2366 `charge-initial-api-typecheck-fixed.log`; API final exit 0 `charge-final-api-typecheck.log`; root test failure exit 2 `charge-final-root-typecheck.log`, final root check recorded separately       | No source/lockfile/config alteration for dependency setup; worktree-only symlinks removed, targets untouched                                                                               |
+| First published anchor CI was genuinely red                                                             | dfc9 hosted Typecheck failed on TS2366, no root/workspace pass claimed                                                                                                                                                                                                                             | [CI 38133163242](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38133163242): completed/read **11 SUCCESS / 2 FAILURE**, `charge-ci-first.json`, `charge-ci-first-failed.log`; [integration 38133163172](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38133163172): completed/read **5 SUCCESS / 12 SKIP** | Draft integration is not full runtime acceptance. The repair must obtain new same-SHA CI, recorded with the final published identity                                                       |
+| `pax-payment_bind_charge_and_states`                                                                    | Binding + actual capture/status source now present; whole task still incomplete                                                                                                                                                                                                                    | **Not recorded**; all previous failure/skip/limits retained                                                                                                                                                                                                                                                                            | Durable platform refund, approved deployed policy binding, exact-SHA independent reviewer, full hosted CI/PG/HTTP and protected merge remain                                               |
+| `pax-payment_security_and_recovery`                                                                     | Previous encryption/fake/unpaid fences preserved; durable retry/readback/manual writer and notice request now present                                                                                                                                                                              | **Not recorded**                                                                                                                                                                                                                                                                                                                       | Actual notification delivery/first-party route readiness, full financial crash/concurrency matrix and contracted PSP remain unverified; refund/recovery source and policy gate unfinished  |
+
+Final root typecheck after the test-only omission repair **passed, exit 0**:
+`pnpm typecheck:root`, `charge-final-root-typecheck-fixed.log`. The final
+8-test Billing writer run and its lint also passed, exit 0. Scoped source/test
+ESLint passed, exit 0 (`charge-final-lint.log`), and repository classification
+passed, exit 0 (`charge-final-classification.log`). Every listed check is
+completed/read. Whitespace and full range/individual role+scope checks are
+captured again with final publication identity.
+
+The generic dispatch `wip(...)` anchor subject was rejected by the existing
+literal Task-ID publication guard. Owner then read the exact original-source
+supplement/guard and used its required literal subject with genuine Codex/Codex2
+trailers. The original installed Husky 9.1.7 delegation wrappers were recreated
+in this isolated worktree, preserving core.hooksPath and both tracked hooks;
+the successful commit ran the original staged-file, Prettier, ESLint and trailer
+chain. No HUSKY/hook/task-guard bypass, rebase, amend, force push or reset occurred.

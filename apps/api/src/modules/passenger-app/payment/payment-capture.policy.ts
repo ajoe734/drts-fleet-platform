@@ -52,7 +52,10 @@ export function validatePaymentCapturePolicy(
 
 export interface CaptureAttemptOutcome {
   result: MoneyResult;
-  /** Durable count includes the capture request just sent, never readbacks. */
+  /** Durable count includes the reserved capture request, never readbacks.
+   * A lost pre-request COMMIT acknowledgement may reserve without sending;
+   * that ambiguity resumes only with readback, never another capture.
+   */
   attemptCount: number;
   /** Readbacks completed for this unknown acknowledgement, initially zero. */
   readbackCount: number;

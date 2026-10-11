@@ -1,4 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { PaymentChargeService } from "../passenger-app/payment/payment-charge.service";
 
 import type { PassengerPaymentStatus } from "@drts/contracts";
 
@@ -20,6 +21,8 @@ export type PaymentRecoverySubject = {
 
 export type PaymentRecoveryResult = {
   status: "accepted" | "completed";
+  /** The passenger core already wrote both authorities and attempt counters. */
+  passengerLedgerManaged?: true;
 };
 
 export interface PaymentRecoveryPort {
@@ -72,6 +75,39 @@ export class PlatformManualPaymentRecoveryPort implements PaymentRecoveryPort {
   async recover(action: PaymentRecoveryAction): Promise<PaymentRecoveryResult> {
     if (action !== "begin_manual_recovery") {
       throw new Error("Payment recovery adapter is not provisioned.");
+    }
+    return { status: "accepted" };
+  }
+}
+
+/** First-party manual recovery goes through the same fenced charge writer and
+ * durable notice as automatic exhaustion. Legacy guest/partner payments keep
+ * their existing internal manual handoff; neither path invents a PSP capture.
+ */
+@Injectable()
+export class PassengerCoreManualPaymentRecoveryPort implements PaymentRecoveryPort {
+  constructor(private readonly passengerPayments: PaymentChargeService) {}
+
+  isAvailable(action: PaymentRecoveryAction): boolean {
+    return action === "begin_manual_recovery";
+  }
+
+  async recover(
+    action: PaymentRecoveryAction,
+    payment: PaymentRecoverySubject,
+  ): Promise<PaymentRecoveryResult> {
+    if (action !== "begin_manual_recovery")
+      throw new Error("Payment recovery adapter is not provisioned.");
+    const uuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (
+      uuid.test(payment.orderId) &&
+      (await this.passengerPayments.beginManualRecovery(
+        payment.orderId,
+        payment.paymentId,
+      ))
+    ) {
+      return { status: "accepted", passengerLedgerManaged: true };
     }
     return { status: "accepted" };
   }

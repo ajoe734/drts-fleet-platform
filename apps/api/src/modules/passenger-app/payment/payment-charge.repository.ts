@@ -25,6 +25,12 @@ export interface StoredCharge {
   provider: string;
   tokenEnvelope: EncryptedPaymentToken | null;
   methodActive: boolean;
+  lastError:
+    | "card_declined"
+    | "unavailable"
+    | "invalid_method"
+    | "unknown"
+    | null;
 }
 
 export interface ChargeOperation extends StoredCharge {
@@ -67,6 +73,7 @@ function mapCharge(row: QueryResultRow): StoredCharge {
     provider: row.provider,
     tokenEnvelope: row.token_envelope,
     methodActive: row.method_status === "active",
+    lastError: row.last_error_code ?? null,
   };
 }
 
@@ -110,6 +117,22 @@ export class PaymentChargeSession {
       [this.orderId],
     );
     if (!owner.rows[0]) return null; // Guest/partner trips are outside this core.
+    if (
+      event.runtimeProfileCode !== "multi_taxi_direct" ||
+      event.currency !== "TWD" ||
+      !Number.isSafeInteger(event.fareMinor) ||
+      event.fareMinor < 0 ||
+      typeof event.tripId !== "string" ||
+      !event.tripId ||
+      typeof event.completedAt !== "string" ||
+      !Number.isFinite(Date.parse(event.completedAt))
+    ) {
+      throw new ApiRequestError(
+        400,
+        "payment_completion_invalid",
+        "Completed trip payment fields are invalid.",
+      );
+    }
     const passengerId: string = owner.rows[0].drts_passenger_id;
     return this.transaction(passengerId, async () => {
       const source = await this.client.query(
@@ -158,14 +181,14 @@ export class PaymentChargeSession {
       await this.client.query(
         `INSERT INTO billing.multi_taxi_passenger_payments
            (payment_id,order_id,payment_method_token_ref,status,amount_minor,currency)
-         VALUES ($1,$2,$3,'not_selected',$4,'TWD') ON CONFLICT (order_id) DO NOTHING`,
+         VALUES ($1,$2,$3,'failed',$4,'TWD') ON CONFLICT (order_id) DO NOTHING`,
         [paymentId, this.orderId, methodId, event.fareMinor],
       );
       await this.client.query(
         `INSERT INTO passenger.payment_charge_records
            (order_id,payment_id,drts_passenger_id,payment_method_id,idempotency_key,
-            amount_minor,currency,status,completed_at,next_operation)
-         VALUES ($1,$2,$3,$4,$5,$6,'TWD','not_selected',$7,'capture')
+            amount_minor,currency,status,completed_at,next_operation,last_error_code)
+         VALUES ($1,$2,$3,$4,$5,$6,'TWD','failed',$7,'capture','unavailable')
          ON CONFLICT (order_id) DO NOTHING`,
         [
           this.orderId,
@@ -365,6 +388,27 @@ export class PaymentChargeSession {
 export class PaymentChargeRepository {
   constructor(private readonly database: DatabaseService) {}
 
+  isEnabled(): boolean {
+    return this.database.isEnabled();
+  }
+
+  async listDueOrders(limit: number): Promise<string[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
+      throw new Error("payment_batch_invalid");
+    try {
+      const result = await this.database.query(
+        `SELECT order_id FROM passenger.payment_charge_records
+         WHERE status IN ('not_selected','failed') AND next_operation IS NOT NULL
+           AND (retry_at IS NULL OR retry_at<=now())
+         ORDER BY retry_at NULLS FIRST,created_at,order_id LIMIT $1`,
+        [limit],
+      );
+      return result.rows.map((row) => row.order_id);
+    } catch {
+      return unavailable();
+    }
+  }
+
   async withOrder<T>(
     orderId: string,
     work: (session: PaymentChargeSession) => Promise<T>,
@@ -389,7 +433,7 @@ export class PaymentChargeRepository {
     } catch (error) {
       evict = true;
       if (error instanceof ApiRequestError) throw error;
-      unavailable();
+      return unavailable();
     } finally {
       if (locked) {
         try {
