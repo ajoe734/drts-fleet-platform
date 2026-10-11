@@ -59,7 +59,7 @@ registered path scopes; this is a path-level audit, not a new approval of every
 semantic hunk or an expansion of the supplement's method-level limits.
 
 The original finding/evidence record remains the committed
-[`docs/04-uat/passenger-app-20261009/PAX-RECEIPT-COMPLAINT-20261009.md`](../../../docs/04-uat/passenger-app-20261009/PAX-RECEIPT-COMPLAINT-20261009.md)
+[`docs/04-uat/passenger-app-20261009/PAX-RECEIPT-COMPLAINT-20261009.md`](https://github.com/ajoe734/drts-fleet-platform/blob/cec585cc397eacbdf78a7d022771e1383e08e56c/docs/04-uat/passenger-app-20261009/PAX-RECEIPT-COMPLAINT-20261009.md)
 on the parent branch at `cec585cc`. It is not present on this helper's trunk base.
 Its prior failed and passed checks remain historical evidence; this helper has
 not rerun or upgraded them into acceptance.
@@ -185,3 +185,15 @@ Machine-specific audit receipts for this dispatch are under
 `/home/lupin/workspace/drts-fleet-platform/.local/pax-receipt-history-repair-20261011/`.
 The report and release-status publication message are the durable evidence;
 ignored machine receipts are supplementary and are not commit evidence.
+
+### Publication setup correction
+
+The initial copy of this helper's ignored Husky runtime shims used a
+non-recursive copy and failed. The shell continued, so anchor
+`c9f607407f8521a19ecb2c932f620a0bedfecf20` was created before its hook runtime
+was installed. That anchor did not run the commit hooks; this is a setup
+failure, not a hook pass. The copy was corrected without changing tracked
+hook source or shared Git configuration. The existing range-based generated
+file and commit-message checks, and formatting/classification checks, validate
+the anchor explicitly. The subsequent evidence closeout uses the restored
+normal hook chain. No bypass variable, amend, reset or history rewrite is used.
