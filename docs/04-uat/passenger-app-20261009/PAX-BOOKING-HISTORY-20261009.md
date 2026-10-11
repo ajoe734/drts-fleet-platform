@@ -210,3 +210,21 @@ Mandatory Husky/Prettier 對新增SD設定row所在表格自動調整padding/sep
 新source PR採 `codex2/pax-booking-history-20261009-v2` → dev；old #2506 保留OPEN，不以舊failed/skipped/green jobs冒充新candidate。新PR未開本輪hostedPG時只記pending；最终candidate PR/head與hosted run/job IDs由正式handoff/GitHub bus machine record承接。`ci-integ.yml` draft候選會gate完整CI，source完成後沿normal lifecycle ready/CI，不建立fake acceptance或scope外workflow改動。
 
 指定Codex須逐欄SQL、全findings及相同candidateCI獨立審查；protectedmerge後兩個原keys仍須真acceptance。沒有deploy、localserver、實際provider/PSP/SMS/device/session/liveops；原assessment HOLD、44/134/15及所有operator/native/manual/contracted gate不變。下游booking UI需消費上述canonical設定契約；backend源碼成功不可代替PAX-QA的PG／HTTP/SSE／download／browser驗收。
+
+## 2026-10-11 原 owner 接續 R9 退修：鎖定資料上的乘客取消政策
+
+最新獨立審查來源：正式 task `worker_outcomes.codex-20261011T074508Z-bfc3a842`，Codex 於 07:50:42Z 對 `4d9d5142be67474c8688657f693dc8c151852cf2`／generation `faae0b9d2bb44a19b830d78f7b00405f`／PR #2553 執行 **REOPEN**。審查唯讀；既有 R1–R8 修復與 SQL 逐欄核對 credit 全數保留。R9 是新觸發情境，不是原 R2/R8 同缺陷的第二次退修。
+
+R9 P1／`pax-booking_history_and_ride_actions`：`PassengerBookingController.cancelRide` 經 owner guard → `MultiTaxiService.cancelTrustedPassengerRide` 只在記憶體檢查 `isPassengerCancelable`，卻將 `systemBypassCancelableCheck:true` 傳入 `OwnedMobilityService.cancelOwnedOrder`。後者正式 repository 的 `loadOrderCancellationForUpdate` 讀取鎖定的 on_trip／proof_pending 行程，僅阻擋 completed／cancelled。合法 accepted assignment 與 on_trip／proof_pending driver task 可轉 cancelled，因此 stale ready_for_dispatch 記憶體會導致已開始行程被取消、資源釋放。審查 probe 確認 synchronized 拒絕、stale 兩例失敗、合法 ready 與 terminal 控制正常；最初缺 event stub 的 setup error 不算重現，修正後七個控制執行 Exit0 只證明 bug。
+
+修正邊界：原 owner／原 MultiTaxi、Owned、task tests scope。在同一 cancellation transaction、正式鎖定 bundle 上採獨立 `cancellationPolicy: "account_passenger"`，先保留 terminal fence，再拒絕 on_trip／proof_pending 與非 multi_taxi_direct。帳號乘客預約取消不套舊 reservation cutoff；系統補償保留原專用 bypass，token／referral／callcenter 仍走原政策。未變更 constructor、SQL、migration、寫入順序、pending workflow drain 或推播路由。
+
+本輪 source-only evidence 在本 worktree `.local/pax-booking-history-20261009/r9-20261011/`。`run-check.py` 每次保存實際 argv、cwd、HEAD、起訖 UTC、退出碼與完整 log SHA256。重跑舊候選透過既有 TypeScript replay loader 的 `git show <fullSHA>:<production path>`，不 reset 或 checkout 活躍工作樹。新 fixture 僅替換 DB transport 回應與 audit/event sink；真正 controller、ownership、服務、repository SQL／FOR UPDATE、transaction、workflow writes、resource release 均執行；不是 PG 驗收。
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
+| --- | --- | --- | --- | --- |
+| R9 stale／driver race | `cancelTrustedPassengerRide` → `cancelOwnedOrder.prepare`，新增 `booking-cancellation.test.ts`／`production-cancellation-fixture.ts` | 舊 4d9：28 tests 中 on_trip／proof_pending × stale／race 共4 FAIL、24 PASS；同 replay 四個 unsafe。修正 working tree：28/28 PASS、21 cancellation probes safe，拒絕0寫入／release／outbox／audit／event、無COMMIT、durable及memory不變 | root `pnpm exec vitest run tests/unit/pax-booking-history-20261009/booking-cancellation.test.ts`：`r9-red-controls` Exit1 → `r9-green` Exit0；root `node tests/unit/pax-booking-history-20261009/production-failure-probe.cjs 4d9d5142be67474c8688657f693dc8c151852cf2` `r9-old-replay` Exit1 → 無SHA `r9-fixed-replay` Exit0。Node22.23.2／pnpm10.33.0／Vitest4.1.4 | 新anchor及最終candidate回歸另記；真PG driver race 尚待hosted／PAX-QA |
+| R2／R9 正向與terminal | 正式 creation及locked cancellation；15/20/30/120分鐘 × ready／assigned／driver_accepted；補償、completed／cancelled | 合法12例取消、4例補償皆PASS；terminal三種memory皆拒絕。原 atomic6、contract4、settings在舊／新replay均PASS，不捏造原修復失敗 | 同上28 tests／replay；scoped正式source eslint `source-lint` Exit0 | 原PG／cold-start recovery限制保留 |
+| R1–R8、兩個required keys | 上節完整finding matrix與正式SQL逐欄核對保留；本修正沒有改SQL／schema／wire contract | 審查已肯定metadata、atomic、可信帳號/SMS、DTO、cursor/active、ownership/session與settings；完整受影響回歸待anchor後執行 | 4d9 reviewer：root262、API196、probe、typecheck/lint均已終了讀取；舊hosted draft skip不可算fullPASS | 未record-acceptance；新review、matchingCI、protectedmerge、原兩keys與PG/HTTP/SSE/download/browser gates照常 |
+
+最初本機 vitest 因 `@nestjs/common`／vitest 套件連結缺失 Exit1、0 tests，未算產品重現；`CI=true pnpm install --offline --frozen-lockfile --ignore-scripts` Exit0 後才進入正式案例。首次新增fixture以raw memory與正式 `listOrders` 正規化view比較，造成額外8個fixture assertion failures；改為同一正式view比較後舊版精確只剩R9四例失敗，沒有改預期政策。完整logs保留 `r9-red` 與 `r9-red-controls`，不掩蓋setup與fixture差異。

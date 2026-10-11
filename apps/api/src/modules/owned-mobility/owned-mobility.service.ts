@@ -5532,7 +5532,10 @@ export class OwnedMobilityService
     orderId: string,
     command: CancelOwnedOrderCommand,
     requestId?: string,
-    options?: { systemBypassCancelableCheck?: boolean },
+    options?: {
+      cancellationPolicy?: "account_passenger";
+      systemBypassCancelableCheck?: boolean;
+    },
   ) {
     const now = new Date().toISOString();
     const prepare = (bundle: {
@@ -5555,7 +5558,22 @@ export class OwnedMobilityService
           },
         );
       }
-      if (!options?.systemBypassCancelableCheck) {
+      if (options?.cancellationPolicy === "account_passenger") {
+        // Account passengers may cancel short-lead multi-taxi reservations
+        // before a trip starts. Evaluate that policy on the locked durable
+        // row, independently of the reservation cutoff/system compensation.
+        if (
+          order.runtimeProfileCode !== "multi_taxi_direct" ||
+          ["on_trip", "proof_pending"].includes(order.status)
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "ORDER_NOT_CANCELABLE",
+            "The order can no longer be cancelled.",
+            { orderId: order.orderId, status: order.status },
+          );
+        }
+      } else if (!options?.systemBypassCancelableCheck) {
         this.assertOrderCancelable(order);
       }
       const assignment = bundle.assignment ? { ...bundle.assignment } : null;

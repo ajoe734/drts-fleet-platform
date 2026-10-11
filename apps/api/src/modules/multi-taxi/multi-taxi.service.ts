@@ -628,7 +628,7 @@ export class MultiTaxiService implements OnModuleInit {
       order.orderId,
       { reason: "passenger_requested" },
       requestId,
-      { systemBypassCancelableCheck: true },
+      { cancellationPolicy: "account_passenger" },
     );
   }
 
