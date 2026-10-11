@@ -1,31 +1,21 @@
 # PAX-WEB-RIDE-UI-20261009 Unblock Planning Decision
 
 ## Issue
-The parent task `PAX-WEB-RIDE-UI-20261009` (candidate SHA `ec6cca170e259824e2c6b0342331db49a86e6570`, reopening from Codex2 review) is blocked due to missing upstream actual E-04 receipt fields in the backend contract (`PassengerReceiptResponse` / `MultiTaxiElectronicReceiptRecord`).
-As defined in `docs/02-architecture/passenger-app-20261009/02_content_and_rules.md:24-40` and `105`, 13 E-04 fields are required, including:
-- `driverRegistrationNo` (Masked driver registration)
-- `fareBaseMinor`, `fareDistanceMinor`, etc. (Fare details)
-- `paymentMethod` (Payment method)
-- `driverName`, `fleetName`
-
-Currently, `PassengerReceiptResponse` provides only `receiptUrl`, and `MultiTaxiElectronicReceiptRecord` lacks these E-04 fields. Expanding the interface alone does not establish actual issuer/driver/fare/payment facts.
+The parent task `PAX-WEB-RIDE-UI-20261009` is blocked. The original Ride task remains Gemini/Codex2 blocked, with old source `ec6cca170e259824e2c6b0342331db49a86e6570/generation2703b315fe7d43f18d0e52cb03e6e5bd/PR2538`. The published 37-commit history/CI failure and original QA evidence (R3/R5/R6/R8/R9/R10/R12) are not fixed by this helper. Missing design, contract, history, and scope decisions remain separately attributable.
 
 ## Decision & Coordination Route
-**Decision:** Bounded UI Implementation vs. Full E-04 Acceptance
-1. **No Blanket Scope Cut / No Unconditional Merge:** The parent UI task `PAX-WEB-RIDE-UI-20261009` must carefully handle the unavailable E-04 data (e.g., via placeholders or omitting rows depending on E04 availability), but **this does NOT constitute full E-04 production/download acceptance**. We do NOT waive the formal completion bar or merge the parent task unconditionally. The parent task's full delivery remains blocked on upstream requirements.
-2. **Contract Ownership & Upstream Route:** The official ownership for producing these E-04 fields lies with existing task `PAX-RECEIPT-COMPLAINT-20261009`, not a duplicate task like `PAX-SD-RECEIPT-EXPANSION`. `PAX-RECEIPT-COMPLAINT-20261009` is currently blocked (E04 probes FAIL2) pending actual issuer/driver/four actual fare components/payment facts. We will route the dependency through this existing task instead of fabricating a new one.
+**Decision:** Route Missing E04 Input to Original Receipt Task.
 
-## Evidence & Acceptance
-- **Examined Parent SHA:** `ec6cca170e259824e2c6b0342331db49a86e6570` (last review: Codex2 independent reopen at `2026-10-10T15:08:23Z`, reviewed by this helper: `7e861e0f358f0cf00f9ab85780b7a46fe0776b30`).
-- **Parent Disposition:** Parent `PAX-WEB-RIDE-UI-20261009` retains its `resolved_parent_status=blocked` and `waiting_for=Codex2`. Its UAT findings (R5 account receiptUrl -> rows=[]/no PDF and official record -> error) remain preserved.
-- **Authority:** `docs/02-architecture/passenger-app-20261009/02_content_and_rules.md:105`, `common.md` A9 and `01_system_sa_sd.md:125`. `PAX-RECEIPT-COMPLAINT-20261009` canonical definition.
-- **Outcome:** The frontend mapper gracefully handling missing data is approved as a *bounded UI delivery step*, but full E-04 acceptance remains blocked. No source takeover or contract relaxation is performed.
-
-## Concrete Next Steps
-1. The original owner (Gemini) of `PAX-WEB-RIDE-UI-20261009` must update the UI code to properly handle unavailable data in a bounded manner.
-2. The `PAX-WEB-RIDE-UI-20261009` task will be updated via `ai-status.sh` to explicitly record its concrete next action: waiting for the upstream E-04 fields from `PAX-RECEIPT-COMPLAINT-20261009`, retaining its blocked status and waiting_for as needed, without a blanket resume or merge.
+1. **No Scope Cut or Authorization to Merge:** User requires completion under original standards, not removal of full E04 or another original feature. The draft's suggestion to accept a scope cut, merge the parent task, or create a new replacement backend-task are NOT authorized. A planning helper cannot manufacture independent approval, erase genuine review findings, waive original E04, or remove published-history/CI floors.
+2. **Contract Ownership & Upstream Route:** The missing input (exact typed E04/actual certificate/rating/audit/Ops seams and actual E04 FAIL2) must be routed to the existing Receipt owner Codex2/reviewer Codex task `PAX-RECEIPT-COMPLAINT-20261009` (checkpoint `a81b1842a09fabdb6caffc160cf4edcc564604a2/PR2556`). This includes actual issuer/operator, driver surname/masked credential, four actual fare components, captured payment method, and total convention. We will route to that original task and producers/authorized scope, not a new 'PAX-SD-RECEIPT-EXPANSION' task or an unauthorized contract append.
 
 ## Dependencies & Boundaries
-- **Payment UI:** The original Payment UI is `DONE2/2` (protected merge `6bc`), but its reusable payment-status view is **not mounted actual Ride/Receipt consumer integration**, which remains under this original owner/QA work with legal source/history boundaries.
-- **Payment Core:** Delivered source (approved `bed2`), but `blocked0/2` acceptance pending financial/notice provenance and actual authorized payment-specific PG/HTTP/provider/device/FCM evidence. No guessed 'paid' or real capture.
-- **QA & Release Gates:** Original QA owns genuine PG/HTTP/SSE/browser/download/provider/legal/session/device/SQL↔migration/lostack/expiry and same-release proof. Parallel component amendments never waive those gates.
+- **Payment UI:** The original Payment UI is `DONE2/2` in explicit component/client/BFF scope (`71c/gen112948/Codex2` independent APPROVE/fullCI38159936471+480/protectedmerge`6bc`/19 equal blobs/hosted11710211139 own117 affected545 zero scoped skip). Its reusable payment-status view is **not mounted actual Ride/Receipt consumer integration**, which remains this original owner/QA work with legal source/history boundaries.
+- **Payment Core:** Original Payment Core Codex/Codex2 approved `bed2/gen764/fullreadyCI/protectedfc77/59` equal paths is delivered source, `blocked0/2` acceptance pending financial/notice provenance and actual authorized payment-specific PG/HTTP/provider/device/FCM evidence. No approved policy values/TTL, fail-closed disabled actions; no guessed 'paid' or real capture.
+- **QA & Release Gates:** Original QA owns genuine PG/HTTP/SSE/browser/download/provider/legal/session/device/SQL↔migration/lostack/expiry and same-release proof. Parallel component amendments never waive those gates. Original 44/134/15, C125 supply AND case/composite, lawful roles, Android AND iOS, contracted services/manual/restore/same-release remain intact.
+
+## Parent Disposition
+- **resolved_parent_status:** blocked
+- **resolved_parent_waiting_for:** Gemini
+
+**Concrete Next Step:** The parent task `PAX-WEB-RIDE-UI-20261009` is to remain blocked awaiting the upstream delivery of the genuine E04 fields from the `PAX-RECEIPT-COMPLAINT-20261009` task. Once `PAX-RECEIPT-COMPLAINT-20261009` fulfills the E04 fields (actual issuer/operator, driver surname, four fare components, payment method, etc.), `PAX-WEB-RIDE-UI-20261009` will integrate them under the original standards without scope cut.
