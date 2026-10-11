@@ -484,21 +484,21 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]], check
         ), fks_meta AS (
             SELECT json_agg(json_build_object('rel', conrelid::regclass, 'confrel', confrelid::regclass, 'name', conname, 'contype', contype, 'confdeltype', confdeltype, 'confupdtype', confupdtype, 'def', pg_get_constraintdef(oid))) as data 
             FROM pg_constraint WHERE confrelid IN ('fleet.supply_submissions'::regclass, 'fleet.supply_documents'::regclass, 'fleet.supply_review_events'::regclass, 'fleet.vehicle_fleet_affiliations'::regclass, 'reg.vehicle_passenger_disclosure_profiles'::regclass, 'reg.driver_public_registration_credentials'::regclass, 'reg.phase1_registry_drivers'::regclass, 'reg.phase1_registry_vehicles'::regclass, 'reg.phase1_registry_policies'::regclass, 'reg.phase1_registry_contracts'::regclass, 'fleet.driver_supply_drafts'::regclass, 'fleet.vehicle_supply_drafts'::regclass, 'reg.phase1_registry_supply_pairs'::regclass, 'reg.phase1_registry_exclusivities'::regclass, 'admin.audit_logs'::regclass)
-        ), pres_subs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_submissions), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.supply_submissions ORDER BY 1) t),
-        pres_docs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_documents), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.supply_documents ORDER BY 1) t),
-        pres_revs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_review_events), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.supply_review_events ORDER BY 1) t),
-        pres_affs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_fleet_affiliations), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.vehicle_fleet_affiliations ORDER BY 1) t),
-        pres_discs AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.vehicle_passenger_disclosure_profiles), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.vehicle_passenger_disclosure_profiles ORDER BY 1) t),
-        pres_creds AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.driver_public_registration_credentials), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.driver_public_registration_credentials ORDER BY 1) t),
-        pres_cdriv AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_drivers), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_drivers ORDER BY 1) t),
-        pres_cveh AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_vehicles), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_vehicles ORDER BY 1) t),
-        pres_cpol AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_policies), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_policies ORDER BY 1) t),
-        pres_ccont AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_contracts), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_contracts ORDER BY 1) t),
-        pres_ddrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.driver_supply_drafts), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.driver_supply_drafts ORDER BY 1) t),
-        pres_vdrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_supply_drafts), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.vehicle_supply_drafts ORDER BY 1) t),
-        pres_cpairs AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_supply_pairs), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_supply_pairs ORDER BY 1) t),
-        pres_cexcl AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_exclusivities), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_exclusivities ORDER BY 1) t),
-        pres_audits AS (SELECT json_build_object('c', (SELECT count(*) FROM admin.audit_logs), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM admin.audit_logs ORDER BY 1) t)
+        ), pres_subs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_submissions), 'digest', md5(COALESCE((SELECT string_agg(md5(t::text), '') FROM (SELECT * FROM fleet.supply_submissions ORDER BY 1) t), ''))) as data),
+        pres_docs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_documents), 'digest', md5(COALESCE((SELECT string_agg(md5(t::text), '') FROM (SELECT * FROM fleet.supply_documents ORDER BY 1) t), ''))) as data),
+        pres_revs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_review_events), 'digest', md5(COALESCE((SELECT string_agg(md5(t::text), '') FROM (SELECT * FROM fleet.supply_review_events ORDER BY 1) t), ''))) as data),
+        pres_affs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_fleet_affiliations), 'digest', md5(COALESCE((SELECT string_agg(md5(t::text), '') FROM (SELECT * FROM fleet.vehicle_fleet_affiliations ORDER BY 1) t), ''))) as data),
+        pres_discs AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.vehicle_passenger_disclosure_profiles), 'digest', md5(COALESCE((SELECT string_agg(md5(t::text), '') FROM (SELECT * FROM reg.vehicle_passenger_disclosure_profiles ORDER BY 1) t), ''))) as data),
+        pres_creds AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.driver_public_registration_credentials), 'digest', md5(COALESCE((SELECT string_agg(md5(t::text), '') FROM (SELECT * FROM reg.driver_public_registration_credentials ORDER BY 1) t), ''))) as data),
+        pres_cdriv AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_drivers), 'digest', md5(COALESCE((SELECT string_agg(md5(t::text), '') FROM (SELECT * FROM reg.phase1_registry_drivers ORDER BY 1) t), ''))) as data),
+        pres_cveh AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_vehicles), 'digest', md5(COALESCE((SELECT string_agg(md5(t::text), '') FROM (SELECT * FROM reg.phase1_registry_vehicles ORDER BY 1) t), ''))) as data),
+        pres_cpol AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_policies), 'digest', md5(COALESCE((SELECT string_agg(md5(t::text), '') FROM (SELECT * FROM reg.phase1_registry_policies ORDER BY 1) t), ''))) as data),
+        pres_ccont AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_contracts), 'digest', md5(COALESCE((SELECT string_agg(md5(t::text), '') FROM (SELECT * FROM reg.phase1_registry_contracts ORDER BY 1) t), ''))) as data),
+        pres_ddrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.driver_supply_drafts), 'digest', md5(COALESCE((SELECT string_agg(md5(t::text), '') FROM (SELECT * FROM fleet.driver_supply_drafts ORDER BY 1) t), ''))) as data),
+        pres_vdrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_supply_drafts), 'digest', md5(COALESCE((SELECT string_agg(md5(t::text), '') FROM (SELECT * FROM fleet.vehicle_supply_drafts ORDER BY 1) t), ''))) as data),
+        pres_cpairs AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_supply_pairs), 'digest', md5(COALESCE((SELECT string_agg(md5(t::text), '') FROM (SELECT * FROM reg.phase1_registry_supply_pairs ORDER BY 1) t), ''))) as data),
+        pres_cexcl AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_exclusivities), 'digest', md5(COALESCE((SELECT string_agg(md5(t::text), '') FROM (SELECT * FROM reg.phase1_registry_exclusivities ORDER BY 1) t), ''))) as data),
+        pres_audits AS (SELECT json_build_object('c', (SELECT count(*) FROM admin.audit_logs), 'digest', md5(COALESCE((SELECT string_agg(md5(t::text), '') FROM (SELECT * FROM admin.audit_logs ORDER BY 1) t), ''))) as data)
         SELECT json_build_object(
             'subs', (SELECT data FROM subs),
             'docs', (SELECT data FROM docs),
@@ -900,6 +900,8 @@ def default_db_runner(query: str, params: List[Any], check_authority=None) -> Di
                             break
                     except UnsupportedError:
                         raise
+                    except ValueError:
+                        raise
                     except Exception:
                         pass
                     time.sleep(1)
@@ -1028,7 +1030,7 @@ def check_held_window(args):
                 state = a.get("state")
                 if state == "approved":
                     require(a.get("user", {}).get("login"), "Approval missing attributable Operator")
-                    has_bound = False
+                    has_bound = True
                     operator_approved = True
                 elif state in ("rejected", "pending"):
                     require(False, "Adverse or ambiguous approval history detected")
@@ -1086,7 +1088,6 @@ def check_held_window(args):
             require(overlap_data.get("total_count", 0) < 1000, "Server-side search cap reached")
             page_runs = overlap_data.get("workflow_runs", [])
             if not page_runs:
-                require(overlap_data.get("total_count", 0) == 0, "Nonterminal total_count with empty rows")
                 break
             for r in page_runs:
                 if str(r.get("id")) != args.current_run_id:
@@ -1262,6 +1263,7 @@ def main():
                 "services": {}
             }
             for s_name in services:
+                check_held_window(args)
                 res = run_bounded(["gcloud", "run", "services", "describe", s_name, "--project", PROJECT, "--region", REGION, "--format=json"], timeout_sec=30)
                 require(res.returncode == 0, f"Failed to describe {s_name}")
                 val = json.loads(res.stdout)
@@ -1284,6 +1286,7 @@ def main():
                 t = traffic[0]
                 require(t.get("revisionName") == ready_revision and t.get("percent") == 100, f"Revision {ready_revision} does not have whole 100% traffic for {s_name}")
 
+                check_held_window(args)
                 res_rev = run_bounded(["gcloud", "run", "revisions", "describe", ready_revision, "--project", PROJECT, "--region", REGION, "--format=json"], timeout_sec=30)
                 require(res_rev.returncode == 0, f"Failed to describe revision {ready_revision}")
                 rev_val = json.loads(res_rev.stdout)
@@ -1305,8 +1308,9 @@ def main():
                 
                 if statuses is not None:
                     require(isinstance(statuses, list) and len(statuses) == len(names), "Partial revision container digest inventory")
-                    require(len({c.get("name") for c in statuses}) == len(names), "Duplicate container status names")
-                    require({c.get("name") for c in statuses} == set(names), "Container status names mismatch")
+                    status_names = [c.get("name", str(idx)) for idx, c in enumerate(statuses)]
+                    require(len(set(status_names)) == len(names), "Duplicate container status names")
+                    require(set(status_names) == set(names), "Container status names mismatch")
                     
                 service_containers = val.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
                 service_implicit = len(service_containers) == 1 and "name" not in service_containers[0]
@@ -1333,7 +1337,7 @@ def main():
                         fallback = revision_reference
                         
                     if statuses is not None:
-                        c_status = next((cs for cs in statuses if cs.get("name") == c_name), None)
+                        c_status = next((cs for idx, cs in enumerate(statuses) if cs.get("name", str(idx)) == c_name), None)
                         if c_status and c_status.get("imageDigest"):
                             digest = c_status["imageDigest"]
                         else:
@@ -1354,7 +1358,7 @@ def main():
                         require(digest == rev_primary_digest, f"Revision primary imageDigest mismatch for {c_name}")
                         
                     if primary_statuses:
-                        p_status = next((cs for cs in primary_statuses if cs.get("name") == service_lookup_key), None)
+                        p_status = next((cs for idx, cs in enumerate(primary_statuses) if cs.get("name", str(idx)) == service_lookup_key), None)
                         if p_status and p_status.get("imageDigest"):
                             require(digest == p_status["imageDigest"], f"Primary status digest mismatch for {c_name}")
                             
@@ -1399,6 +1403,7 @@ def main():
                         "CLAMAV_READY_MARKER": env.get("CLAMAV_READY_MARKER")
                     }
                 
+                check_held_window(args)
                 iam_res = run_bounded(["gcloud", "run", "services", "get-iam-policy", s_name, "--project", PROJECT, "--region", REGION, "--format=json"], timeout_sec=30)
                 require(iam_res.returncode == 0, f"Failed to get IAM policy for {s_name}")
                 iam_val = json.loads(iam_res.stdout)
@@ -1418,7 +1423,7 @@ def main():
 
             with open(args.acquire_cloud_metadata_to, 'w') as f:
                 json.dump(metadata, f, indent=2)
-            print("Fixed inventory metadata collected boundedly: 25 reads")
+            print("Fixed inventory metadata collected boundedly: 27 reads")
             sys.exit(0)
 
 

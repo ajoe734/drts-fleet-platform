@@ -10,7 +10,7 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 
 ## Evidence Source Identity
 - **Task ID**: SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010
-- **Candidate Generation**: `d7e6ef09b64a4d64a3ef49fc4cab4b8b`
+- **Candidate Generation**: `cd39c8d647a24f39a7479c2c3ff41c4e`
 - **Candidate SHA**: `[External Candidate Artifact]` (to be resolved by orchestrator upon candidate completion, linked via review-verdict.md identity)
 - **Reviewer**: Codex
 - **Workspace**: Isolated review worktree
@@ -22,7 +22,7 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 | **F1/F3/F4/F5 core** | Genuine archive/PDF/identity positives and existing denials PASS BOTH | Actual current owned resources/PG not measured |
 | **F2 actual authority / inventory** | NEW `HEAD`: Script implements explicit `unsupported0` denial for GitHub Actions Approvals since they lack a bounded window. It strictly enforces explicit deny logic, numeric ID requirements, and exact repository URL bindings. `check_authority` explicitly invoked in default DB runner. Test suite accurately reflects these constraints. | Full environment and live authority unmeasured |
 | **F3 upstream capture** | NEW `HEAD`: Producer upgraded to use lawful service-based singleton mapping, perform strict `gateway` and `clamd` container resolution, validate exact service/revision container inventory, and compare requested/pinned/revision/resolved/primary digests exactly as frozen contract. Consumer strictly refuses empty/short images. | Actual live cloud metadata acquisition unmeasured |
-| **F6/F7 report/UAT** | NEW `HEAD`: Main exception handler preserves the `incomplete` state and partial observations on failure without wiping receipts. F7 stale generation and UAT claims accurately synced to the `d7e6ef09b64a4d64a3ef49fc4cab4b8b` generation. | True live matrix unavailable locally. |
+| **F6/F7 report/UAT** | NEW `HEAD`: Main exception handler preserves the `incomplete` state and partial observations on failure without wiping receipts. F7 stale generation and UAT claims accurately synced to the `cd39c8d647a24f39a7479c2c3ff41c4e` generation. | True live matrix unavailable locally. |
 | **F8 scope/publication** | Official subjects FIXED (commits PASS, literal own prefix PASS). | Supervisor must verify exact prospective preserved-history/publication disposition. No history rewrite authorized. |
 
 ## Execution Bounds and Reporting

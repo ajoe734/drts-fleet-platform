@@ -327,10 +327,8 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
         with patch.object(assess, "run_bounded", side_effect=mock_run), patch("subprocess.Popen", side_effect=mock_popen):
             assess.fetch_and_validate_provenance(args)
 
-    @patch("sys.exit")
-    @patch("builtins.print")
     @patch('assess_owned_operational_fixtures.run_bounded')
-    def test_report_byte_cap_enforcement_and_schema(self, mock_run_bounded, mock_print, mock_exit):
+    def test_report_byte_cap_enforcement_and_schema(self, mock_run_bounded):
         def mock_run(cmd, **kwargs):
             cmd_str = " ".join(cmd)
             if "actions/runs/" in cmd_str and "approvals" in cmd_str:
@@ -355,20 +353,26 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
 
         # Trigger an exception that creates an error report, ensure schema is dev-owned-assessment-report-v1
         with patch("sys.argv", ["script.py"]):
-            assess.main()
-            mock_exit.assert_called_with(1)
-            output = mock_print.call_args[0][0]
-            parsed = json.loads(output)
+            import io
+            with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
+                with self.assertRaises(SystemExit) as cm:
+                    assess.main()
+                self.assertEqual(cm.exception.code, 1)
+                output = mock_stdout.getvalue()
+                
+                # Extract the last valid JSON from output
+                try:
+                    parsed = json.loads(output[output.find("{"):])
+                except:
+                    import sys; sys.stderr.write("OUTPUT: " + output + "\n")
+                    raise
             self.assertEqual(parsed["schema"], "dev-owned-assessment-report-v1")
             self.assertEqual(parsed["payload"]["disposition"], "incomplete")
             self.assertIn("Missing current_run_id", parsed["payload"]["error"])
             self.assertTrue(len(output.encode("utf-8")) <= 512 * 1024)
 
-    @patch('assess_owned_operational_fixtures.check_held_window')
-    @patch("sys.exit")
-    @patch("builtins.print")
     @patch('assess_owned_operational_fixtures.run_bounded')
-    def test_cloud_metadata_unknown_field_rejection(self, mock_run_bounded, mock_print, mock_exit, mock_check_held_window):
+    def test_cloud_metadata_unknown_field_rejection(self, mock_run_bounded):
         def mock_run(cmd, **kwargs):
             cmd_str = " ".join(cmd)
             if "actions/runs/" in cmd_str and "approvals" in cmd_str:
@@ -459,18 +463,20 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
             return MagicMock(returncode=0, stdout="{}")
         with patch("sys.argv", ["script.py", "--mock-db", "--cloud-metadata", path, "--current-runtime-sha", "testsha", "--current-run-id", "37906298090", "--tooling-run-sha", "bb78535193b712f80f2a989cbd03b800ec44c46c"]):
             with patch.object(assess, "run_bounded", side_effect=mock_run):
-                assess.main()
-                mock_exit.assert_called_with(1) # Exits 1 due to mock_db
-                output = mock_print.call_args[0][0]
-                parsed = json.loads(output)
+                import io
+                with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
+                    with self.assertRaises(SystemExit) as cm:
+                        assess.main()
+                    self.assertEqual(cm.exception.code, 1)
+                    output = mock_stdout.getvalue()
+                    parsed = json.loads(output[output.find("{"):])
                 # Check that malicious field was stripped
                 import sys; sys.stderr.write("OUTPUT IS: " + json.dumps(parsed) + "\n"); api_service = parsed["payload"]["cloud_metadata"]["services"]["drts-dev-api"]
                 self.assertNotIn("MALICIOUS_RAW_FIELD", api_service)
 
 
-    @patch('assess_owned_operational_fixtures.check_held_window')
     @patch('assess_owned_operational_fixtures.run_bounded')
-    def test_acquire_cloud_metadata_success(self, mock_run_bounded, mock_check_held_window):
+    def test_acquire_cloud_metadata_success(self, mock_run_bounded):
         def mock_run(cmd, **kwargs):
             cmd_str = " ".join(cmd)
             if "actions/runs/" in cmd_str and "approvals" in cmd_str:
