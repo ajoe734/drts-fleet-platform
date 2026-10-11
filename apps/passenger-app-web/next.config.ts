@@ -13,6 +13,12 @@ const nextConfig: NextConfig = {
     "@drts/passenger-client",
   ],
   webpack(config) {
+    // Workspace packages author ESM .js specifiers and compile to dist for
+    // Node/native consumers; this app bundles their TypeScript source.
+    config.resolve.extensionAlias = {
+      ...(config.resolve.extensionAlias ?? {}),
+      ".js": [".ts", ".tsx", ".js"],
+    };
     config.resolve.alias = {
       ...(config.resolve.alias ?? {}),
       "@drts/contracts": path.join(__dirname, "../../packages/contracts/src"),
@@ -50,8 +56,9 @@ const nextConfig: NextConfig = {
           },
           {
             key: "Content-Security-Policy",
-            value: "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';",
-          }
+            value:
+              "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';",
+          },
         ],
       },
     ];
