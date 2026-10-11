@@ -59,7 +59,7 @@ registered path scopes; this is a path-level audit, not a new approval of every
 semantic hunk or an expansion of the supplement's method-level limits.
 
 The original finding/evidence record remains the committed
-[`docs/04-uat/passenger-app-20261009/PAX-RECEIPT-COMPLAINT-20261009.md`](https://github.com/ajoe734/drts-fleet-platform/blob/cec585cc397eacbdf78a7d022771e1383e08e56c/docs/04-uat/passenger-app-20261009/PAX-RECEIPT-COMPLAINT-20261009.md)
+[parent UAT finding record at cec585cc](https://github.com/ajoe734/drts-fleet-platform/blob/cec585cc397eacbdf78a7d022771e1383e08e56c/docs/04-uat/passenger-app-20261009/PAX-RECEIPT-COMPLAINT-20261009.md)
 on the parent branch at `cec585cc`. It is not present on this helper's trunk base.
 Its prior failed and passed checks remain historical evidence; this helper has
 not rerun or upgraded them into acceptance.
@@ -203,3 +203,22 @@ lint-staged; no design-intent diff was parked in a manual stash. Formatting,
 classification (6,269 files), range whitespace, generated-file and trailer
 checks completed with exit 0. The parent path audit covered all 30 paths and
 six exact task identities; it does not approve out-of-scope methods.
+
+### F-DOC-CITATION: first helper CI and additive correction
+
+Published helper head `8601f201d680b11bbfa360a4e18ac858dd657081` triggered
+[CI 38131128157](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38131128157).
+Its Canonical consistency job failed with exit 1: the immutable parent-UAT
+link's code-formatted label was interpreted as a current-checkout path by
+`check_cited_paths`. The referenced source exists at parent `cec585cc` but is
+absent from the helper's trunk-based tree, as the report already explained.
+The actual checker reproduced that one finding locally (exit 1).
+
+The correction changes the label to describe the parent UAT record while
+retaining the exact same immutable URL. It neither copies parent source into
+the helper nor changes the checker/CI policy. The same production checker
+against the corrected report returned exit 0 with zero findings. An additive
+commit/ordinary push preserves the first published helper head and its failed
+CI evidence; the replacement head requires its own hosted results. Original
+parent product failures and the Supervisor transaction prerequisite remain
+open independently of this document correction.
