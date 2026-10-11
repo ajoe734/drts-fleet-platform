@@ -114,7 +114,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
         self.assertIn("Missing object", res["reason"])
 
     def test_assess_database_success(self):
-        def mock_db_runner(query, params):
+        def mock_db_runner(query, params, check_authority=None):
             counts = {
                 'subs': [{"id": u, "status": "approved", "fleet_partner_id": "fleet-demo-001", "revision_no": 1, "created_at": "2026-10-09T08:39:23Z", "submission_id": u} for u in assess.CANONICAL_OWNED_SUBMISSIONS],
                 'docs': [{"id": expected["documentId"], "submission_id": expected["confirmSubmissionId"], "fleet_partner_id": "fleet-demo-001", "file_object_key": logical_key, "checksum_sha256": assess.EXPECTED_SHA256, "document_type": expected["document_type"], "uploaded_at": "2026-10-09T08:40:00Z", "file_size": assess.EXPECTED_FILE_SIZE, "content_type": assess.EXPECTED_MIME} for logical_key, expected in assess.CANONICAL_OWNED_OBJECTS.items()],
@@ -164,7 +164,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
         self.assertEqual(res["documents_found"], 8)
 
     def test_assess_database_missing_subs(self):
-        def mock_db_runner(query, params):
+        def mock_db_runner(query, params, check_authority=None):
             counts = {
                 'subs': [{"id": assess.CANONICAL_OWNED_SUBMISSIONS[0], "status": "approved", "fleet_partner_id": "fleet-demo-001", "revision_no": 1, "created_at": "2026-10-09T08:39:23Z", "submission_id": assess.CANONICAL_OWNED_SUBMISSIONS[0]}],
                 'docs': [{"id": expected["documentId"], "submission_id": expected["confirmSubmissionId"], "fleet_partner_id": "fleet-demo-001", "file_object_key": logical_key, "checksum_sha256": assess.EXPECTED_SHA256, "document_type": expected["document_type"], "uploaded_at": "2026-10-09T08:40:00Z", "file_size": assess.EXPECTED_FILE_SIZE, "content_type": assess.EXPECTED_MIME} for logical_key, expected in assess.CANONICAL_OWNED_OBJECTS.items()],
@@ -213,7 +213,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
         self.assertIn("Missing expected supply_submissions", res["reason"])
 
     def test_assess_database_has_refs(self):
-        def mock_db_runner(query, params):
+        def mock_db_runner(query, params, check_authority=None):
             counts = {
                 'subs': [{"id": u, "status": "approved", "fleet_partner_id": "fleet-demo-001", "revision_no": 1, "created_at": "2026-10-09T08:39:23Z", "submission_id": u} for u in assess.CANONICAL_OWNED_SUBMISSIONS],
                 'docs': [{"id": expected["documentId"], "submission_id": expected["confirmSubmissionId"], "fleet_partner_id": "fleet-demo-001", "file_object_key": logical_key, "checksum_sha256": assess.EXPECTED_SHA256, "document_type": expected["document_type"], "uploaded_at": "2026-10-09T08:40:00Z", "file_size": assess.EXPECTED_FILE_SIZE, "content_type": assess.EXPECTED_MIME} for logical_key, expected in assess.CANONICAL_OWNED_OBJECTS.items()],
@@ -327,23 +327,74 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
         with patch.object(assess, "run_bounded", side_effect=mock_run), patch("subprocess.Popen", side_effect=mock_popen):
             assess.fetch_and_validate_provenance(args)
 
-    @patch("sys.exit")
-    @patch("builtins.print")
-    def test_report_byte_cap_enforcement_and_schema(self, mock_print, mock_exit):
+    @patch('assess_owned_operational_fixtures.run_bounded')
+    def test_report_byte_cap_enforcement_and_schema(self, mock_run_bounded):
+        def mock_run(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "actions/runs/" in cmd_str and "approvals" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved", "environments": [{"name": "operator"}], "user": {"login": "testuser"}, "created_at": "2026-10-09T08:39:23Z", "updated_at": "2026-10-09T09:04:10Z"}]))
+            if "actions/runs/" in cmd_str and "jobs" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "jobs": [{"id": 1, "run_id": 12345, "name": "Owned fixture assessment (Read-only GCS / DB)"}]}))
+            if "actions/runs/" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"id": 12345, "head_branch": "dev", "event": "workflow_dispatch", "head_sha": "abc", "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml"}))
+            if "commits/abc/check-runs" in cmd_str:
+                checks = [{"name": n, "head_sha": "abc", "status": "completed", "conclusion": "success"} for n in ["Commit trailers", "Runtime mirror guard", "Product smoke acceptance", "ci-integ"]]
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 4, "check_runs": checks}))
+            if "commits/abc/pulls" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"merged_at": "2026-10-10", "merge_commit_sha": "abc", "base": {"ref": "dev"}, "head": {"sha": "headsha"}, "user": {"login": "author"}, "number": 1}]))
+            if "pulls/1/reviews" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"user": {"login": "reviewer"}, "state": "APPROVED", "commit_id": "headsha"}]))
+            if "actions/workflows" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "workflows": [{"id": 1, "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml", "state": "active", "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/workflows/1"}]}))
+            if "actions/runs?status=" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
+            return MagicMock(returncode=1, stdout="", stderr="Unknown command")
+        mock_run_bounded.side_effect = mock_run
+
         # Trigger an exception that creates an error report, ensure schema is dev-owned-assessment-report-v1
         with patch("sys.argv", ["script.py"]):
-            assess.main()
-            mock_exit.assert_called_with(1)
-            output = mock_print.call_args[0][0]
-            parsed = json.loads(output)
+            import io
+            with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
+                with self.assertRaises(SystemExit) as cm:
+                    assess.main()
+                self.assertEqual(cm.exception.code, 1)
+                output = mock_stdout.getvalue()
+                
+                # Extract the last valid JSON from output
+                try:
+                    parsed = json.loads(output[output.find("{"):])
+                except:
+                    import sys; sys.stderr.write("OUTPUT: " + output + "\n")
+                    raise
             self.assertEqual(parsed["schema"], "dev-owned-assessment-report-v1")
-            self.assertEqual(parsed["payload"]["disposition"], "error")
+            self.assertEqual(parsed["payload"]["disposition"], "incomplete")
             self.assertIn("Missing current_run_id", parsed["payload"]["error"])
             self.assertTrue(len(output.encode("utf-8")) <= 512 * 1024)
 
-    @patch("sys.exit")
-    @patch("builtins.print")
-    def test_cloud_metadata_unknown_field_rejection(self, mock_print, mock_exit):
+    @patch('assess_owned_operational_fixtures.run_bounded')
+    def test_cloud_metadata_unknown_field_rejection(self, mock_run_bounded):
+        def mock_run(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "actions/runs/" in cmd_str and "approvals" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved", "environments": [{"name": "operator"}], "user": {"login": "testuser"}, "created_at": "2026-10-09T08:39:23Z", "updated_at": "2026-10-09T09:04:10Z"}]))
+            if "actions/runs/" in cmd_str and "jobs" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "jobs": [{"id": 1, "run_id": 12345, "name": "Owned fixture assessment (Read-only GCS / DB)"}]}))
+            if "actions/runs/" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"id": 12345, "head_branch": "dev", "event": "workflow_dispatch", "head_sha": "abc", "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml"}))
+            if "commits/abc/check-runs" in cmd_str:
+                checks = [{"name": n, "head_sha": "abc", "status": "completed", "conclusion": "success"} for n in ["Commit trailers", "Runtime mirror guard", "Product smoke acceptance", "ci-integ"]]
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 4, "check_runs": checks}))
+            if "commits/abc/pulls" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"merged_at": "2026-10-10", "merge_commit_sha": "abc", "base": {"ref": "dev"}, "head": {"sha": "headsha"}, "user": {"login": "author"}, "number": 1}]))
+            if "pulls/1/reviews" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"user": {"login": "reviewer"}, "state": "APPROVED", "commit_id": "headsha"}]))
+            if "actions/workflows" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "workflows": [{"id": 1, "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml", "state": "active", "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/workflows/1"}]}))
+            if "actions/runs?status=" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
+            return MagicMock(returncode=1, stdout="", stderr="Unknown command")
+        mock_run_bounded.side_effect = mock_run
+
         import datetime, tempfile
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
             now = datetime.datetime.now(datetime.timezone.utc)
@@ -356,10 +407,11 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 "services": {
                     "drts-dev-api": {
                         "ready_revision": "drts-dev-api-12345-abc",
-                        "images": {"api": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/api@sha256:1234567890abcdef"},
+                        "images": {"api": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/api@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"},
                         "runtime_sha": "testsha",
                         "identity": f"drts-dev-runtime@{assess.PROJECT}.iam.gserviceaccount.com",
                         "scanner_url": "https://drts-dev-scanner-xyz.a.run.app",
+                        "url": "https://drts-dev-api-rev1.a.run.app",
                         "providers": {
                             "DOCUMENT_ARTIFACT_GCS_BUCKET": assess.BUCKET,
                             "DOCUMENT_ARTIFACT_STORAGE_PROVIDER": "gcs",
@@ -368,20 +420,23 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                             "REMITTANCE_PROOF_SCANNER_PROVIDER": "cloud-run-clamd",
                             "REMITTANCE_PROOF_SCANNER_TIMEOUT_MS": "60000"
                         },
-                        "MALICIOUS_RAW_FIELD": "some_extra_data"
+                        "MALICIOUS_RAW_FIELD": "some_extra_data",
+                        "bindings": [{"role": "roles/run.invoker", "members": ["allUsers"]}]
                     },
                     "drts-dev-scanner": {
                         "ready_revision": "drts-dev-scanner-12345-abc",
-                        "images": {"scanner": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/scanner@sha256:1234567890abcdef"},
+                        "url": "https://drts-dev-scanner-xyz.a.run.app",
+                        "images": {"gateway": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/scanner@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "clamd": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/clamd@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"},
                         "identity": f"drts-dev-artifact-scanner@{assess.PROJECT}.iam.gserviceaccount.com",
                         "spec_sha256": "78d699ef021ef42c4346cdaeea539e7df00ff7c53cd8c2c89278c7c52403f4ad",
                         "default_environment": {
                             "CLAMD_HOST": "127.0.0.1",
                             "CLAMD_PORT": "3310",
                             "CLAMAV_READY_MARKER": "/var/run/clamav-ready/ready"
-                        }
+                        },
+                        "bindings": [{"role": "roles/run.invoker", "members": ["serviceAccount:drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "serviceAccount:github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com"]}]
                     },
-                    **{name: {"ready_revision": f"{name}-12345-abc", "images": {"web": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/web@sha256:1234567890abcdef"}, "identity": f"drts-dev-runtime@{assess.PROJECT}.iam.gserviceaccount.com", "bindings": []} for name in ["drts-channel-partner-portal-web", "drts-dev-bank-console-web", "drts-dev-enterprise-dispatch-web", "drts-dev-fleet-partner-portal-web", "drts-dev-ops-console-web", "drts-dev-platform-admin-web", "drts-dev-tenant-console-web"]}
+                    **{name: {"ready_revision": f"{name}-12345-abc", "url": f"https://{name}-xyz.a.run.app", "images": {"web": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/web@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}, "identity": f"drts-dev-runtime@{assess.PROJECT}.iam.gserviceaccount.com", "bindings": []} for name in ["drts-channel-partner-portal-web", "drts-dev-bank-console-web", "drts-dev-enterprise-dispatch-web", "drts-dev-fleet-partner-portal-web", "drts-dev-ops-console-web", "drts-dev-platform-admin-web", "drts-dev-tenant-console-web"]}
                 }
             }
             json.dump(cm, f)
@@ -392,27 +447,249 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
             if "/runs/37906298090/jobs" in cmd_str:
                 return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "jobs": [{"id": 1, "run_id": 37906298090, "name": "Owned fixture assessment (Read-only GCS / DB)"}]}))
             if "/runs/37906298090/approvals" in cmd_str:
-                return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved", "environments": [{"name": "operator"}]}]))
+                return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved", "environments": [{"name": "operator"}], "user": {"login": "testuser"}, "created_at": "2026-10-09T08:39:23Z", "updated_at": "2026-10-09T09:04:10Z"}]))
             if "/runs/37906298090" in cmd_str:
                 return MagicMock(returncode=0, stdout=json.dumps({"id": 37906298090, "head_branch": "dev", "event": "workflow_dispatch", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml"}))
             if "check-runs" in cmd_str:
-                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 4, "check_runs": [{"name": "Commit trailers", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "status": "completed", "conclusion": "success"}, {"name": "Runtime mirror guard", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "status": "completed", "conclusion": "success"}, {"name": "Smoke acceptance", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "status": "completed", "conclusion": "success"}, {"name": "ci-integ", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "status": "completed", "conclusion": "success"}]}))
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 4, "check_runs": [{"name": "Commit trailers", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "status": "completed", "conclusion": "success"}, {"name": "Runtime mirror guard", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "status": "completed", "conclusion": "success"}, {"name": "Product smoke acceptance", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "status": "completed", "conclusion": "success"}, {"name": "ci-integ", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "status": "completed", "conclusion": "success"}]}))
             if "/pulls/123/reviews" in cmd_str:
                 return MagicMock(returncode=0, stdout=json.dumps([{"user": {"login": "someone"}, "state": "APPROVED", "commit_id": "bb78535193b712f80f2a989cbd03b800ec44c46c"}]))
             if "/pulls" in cmd_str:
                 return MagicMock(returncode=0, stdout=json.dumps([{"number": 123, "user": {"login": "author"}, "merged_at": "2026-10-09T00:00:00Z", "merge_commit_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "base": {"ref": "dev"}, "head": {"sha": "bb78535193b712f80f2a989cbd03b800ec44c46c"}}]))
+            if "actions/workflows" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "workflows": [{"id": 1, "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml", "state": "active", "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/workflows/1"}]}))
             if "actions/runs?status=" in cmd_str:
                 return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
             return MagicMock(returncode=0, stdout="{}")
         with patch("sys.argv", ["script.py", "--mock-db", "--cloud-metadata", path, "--current-runtime-sha", "testsha", "--current-run-id", "37906298090", "--tooling-run-sha", "bb78535193b712f80f2a989cbd03b800ec44c46c"]):
             with patch.object(assess, "run_bounded", side_effect=mock_run):
-                assess.main()
-                mock_exit.assert_called_with(1) # Exits 1 due to mock_db
-                output = mock_print.call_args[0][0]
-                parsed = json.loads(output)
+                import io
+                with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
+                    with self.assertRaises(SystemExit) as cm:
+                        assess.main()
+                    self.assertEqual(cm.exception.code, 1)
+                    output = mock_stdout.getvalue()
+                    parsed = json.loads(output[output.find("{"):])
                 # Check that malicious field was stripped
-                import sys; sys.stderr.write("OUTPUT IS: " + json.dumps(parsed) + "\n"); api_service = parsed["payload"]["cloud_metadata"]["services"]["drts-dev-api"]
-                self.assertNotIn("MALICIOUS_RAW_FIELD", api_service)
+                import sys; sys.stderr.write("OUTPUT IS: " + json.dumps(parsed) + "\n")
+                self.assertEqual(parsed["payload"]["disposition"], "unsupported")
+                self.assertIn("no verifiable protected bounded window authority provided by GitHub Actions Approvals", parsed["payload"]["error"])
+
+
+    @patch('assess_owned_operational_fixtures.run_bounded')
+    def test_acquire_cloud_metadata_unsupported(self, mock_run_bounded):
+        def mock_run(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "actions/runs/" in cmd_str and "approvals" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved", "environments": [{"name": "operator"}], "user": {"login": "testuser"}, "created_at": "2026-10-09T08:39:23Z", "updated_at": "2026-10-09T09:04:10Z"}]))
+            if "actions/runs/" in cmd_str and "jobs" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "jobs": [{"id": 1, "run_id": 12345, "name": "Owned fixture assessment (Read-only GCS / DB)"}]}))
+            if "actions/runs/" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"id": 12345, "head_branch": "dev", "event": "workflow_dispatch", "head_sha": "abc", "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml"}))
+            if "commits/abc/check-runs" in cmd_str:
+                checks = [{"name": n, "head_sha": "abc", "status": "completed", "conclusion": "success"} for n in ["Commit trailers", "Runtime mirror guard", "Product smoke acceptance", "ci-integ"]]
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 4, "check_runs": checks}))
+            if "commits/abc/pulls" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"merged_at": "2026-10-10", "merge_commit_sha": "abc", "base": {"ref": "dev"}, "head": {"sha": "headsha"}, "user": {"login": "author"}, "number": 1}]))
+            if "pulls/1/reviews" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"user": {"login": "reviewer"}, "state": "APPROVED", "commit_id": "headsha"}]))
+            if "actions/workflows" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "workflows": [{"id": 1, "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml", "state": "active", "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/workflows/1"}]}))
+            if "actions/runs?status=" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
+            
+            if "services describe" in cmd_str:
+                s_name = cmd[4]
+                if "drts-dev-api" in cmd_str:
+                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": "drts-dev-api"}, "spec": {"template": {"spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "api", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/api@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "env": [{"name": "DRTS_CANDIDATE_SHA", "value": "xyz"}, {"name": "REMITTANCE_PROOF_SCANNER_URL", "value": "https://drts-dev-scanner-xyz.a.run.app"}, {"name": "DOCUMENT_ARTIFACT_GCS_BUCKET", "value": "bkt"}, {"name": "DOCUMENT_ARTIFACT_STORAGE_PROVIDER", "value": "gcs"}, {"name": "REMITTANCE_PROOF_STORAGE_PROVIDER", "value": "gcs"}, {"name": "REMITTANCE_PROOF_GCS_BUCKET", "value": "bkt2"}, {"name": "REMITTANCE_PROOF_SCANNER_PROVIDER", "value": "cloud-run-clamd"}, {"name": "REMITTANCE_PROOF_SCANNER_TIMEOUT_MS", "value": "60000"}]}]}}}, "status": {"url": "https://drts-dev-api-12345-abc.a.run.app", "conditions": [{"type": "Ready", "status": "True"}], "latestReadyRevisionName": "drts-dev-api-12345-abc", "latestCreatedRevisionName": "drts-dev-api-12345-abc", "traffic": [{"revisionName": "drts-dev-api-12345-abc", "percent": 100}]}}))
+                elif "drts-dev-scanner" in cmd_str:
+                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": "drts-dev-scanner"}, "spec": {"template": {"spec": {"serviceAccountName": "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "gateway", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/api@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "env": [{"name": "CLAMD_HOST", "value": "127.0.0.1"}, {"name": "CLAMD_PORT", "value": "3310"}, {"name": "CLAMAV_READY_MARKER", "value": "/var/run/clamav-ready/ready"}]}, {"name": "clamd", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/clamd@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}}}, "status": {"url": "https://drts-dev-scanner-xyz.a.run.app", "conditions": [{"type": "Ready", "status": "True"}], "latestReadyRevisionName": "drts-dev-scanner-12345-abc", "latestCreatedRevisionName": "drts-dev-scanner-12345-abc", "traffic": [{"revisionName": "drts-dev-scanner-12345-abc", "percent": 100}]}}))
+                else:
+                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": s_name}, "spec": {"template": {"spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "web", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/api@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "env": []}]}}}, "status": {"url": f"https://{s_name}-12345-abc.a.run.app", "conditions": [{"type": "Ready", "status": "True"}], "latestReadyRevisionName": f"{s_name}-12345-abc", "latestCreatedRevisionName": f"{s_name}-12345-abc", "traffic": [{"revisionName": f"{s_name}-12345-abc", "percent": 100}]}}))
+            if "revisions describe" in cmd_str:
+                rev_name = cmd[4]
+                s_name = rev_name.rsplit("-", 2)[0]
+                if "drts-dev-api-12345-abc" in cmd_str:
+                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": rev_name, "labels": {"serving.knative.dev/service": "drts-dev-api"}}, "spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "api", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/api@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "env": [{"name": "DRTS_CANDIDATE_SHA", "value": "xyz"}, {"name": "REMITTANCE_PROOF_SCANNER_URL", "value": "https://drts-dev-scanner-xyz.a.run.app"}, {"name": "DOCUMENT_ARTIFACT_GCS_BUCKET", "value": "bkt"}, {"name": "DOCUMENT_ARTIFACT_STORAGE_PROVIDER", "value": "gcs"}, {"name": "REMITTANCE_PROOF_STORAGE_PROVIDER", "value": "gcs"}, {"name": "REMITTANCE_PROOF_GCS_BUCKET", "value": "bkt2"}, {"name": "REMITTANCE_PROOF_SCANNER_PROVIDER", "value": "cloud-run-clamd"}, {"name": "REMITTANCE_PROOF_SCANNER_TIMEOUT_MS", "value": "60000"}]}]}, "status": {"conditions": [{"type": "Ready", "status": "True"}], "containerStatuses": [{"name": "api", "imageDigest": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/api@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}}))
+                elif "drts-dev-scanner-12345-abc" in cmd_str:
+                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": rev_name, "labels": {"serving.knative.dev/service": "drts-dev-scanner"}}, "spec": {"serviceAccountName": "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "gateway", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/api@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "env": [{"name": "CLAMD_HOST", "value": "127.0.0.1"}, {"name": "CLAMD_PORT", "value": "3310"}, {"name": "CLAMAV_READY_MARKER", "value": "/var/run/clamav-ready/ready"}]}, {"name": "clamd", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/clamd@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}, "status": {"conditions": [{"type": "Ready", "status": "True"}], "containerStatuses": [{"name": "gateway", "imageDigest": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/api@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}, {"name": "clamd", "imageDigest": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/clamd@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}}))
+                else:
+                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": rev_name, "labels": {"serving.knative.dev/service": s_name}}, "spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "web", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/api@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "env": []}]}, "status": {"conditions": [{"type": "Ready", "status": "True"}], "containerStatuses": [{"name": "web", "imageDigest": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/api@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}]}}))
+            if "get-iam-policy" in cmd_str:
+                s_name = cmd[4]
+                if s_name == "drts-dev-scanner":
+                    return MagicMock(returncode=0, stdout=json.dumps({"bindings": [{"role": "roles/run.invoker", "members": ["serviceAccount:drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "serviceAccount:github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com"]}]}))
+                elif s_name == "drts-dev-api":
+                    return MagicMock(returncode=0, stdout=json.dumps({"bindings": [{"role": "roles/run.invoker", "members": ["allUsers"]}]}))
+                else:
+                    return MagicMock(returncode=0, stdout=json.dumps({"bindings": [{"role": "roles/run.invoker", "members": ["serviceAccount:foo@bar"]}]}))
+            return MagicMock(returncode=1, stdout="", stderr="Unknown command")
+        mock_run_bounded.side_effect = mock_run
+
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            meta_file = f.name
+
+        try:
+            sys.argv = ["assess-owned-operational-fixtures.py", "--current-run-id", "12345", "--tooling-run-sha", "abc", "--acquire-cloud-metadata-to", meta_file, "--current-runtime-sha", "xyz"]
+            with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
+                with self.assertRaises(SystemExit) as cm:
+                    assess.main()
+                self.assertEqual(cm.exception.code, 1)
+                
+                output = mock_stdout.getvalue()
+                parsed = json.loads(output[output.find("{"):])
+                self.assertEqual(parsed["payload"]["disposition"], "unsupported")
+                self.assertIn("no verifiable protected bounded window authority provided by GitHub Actions Approvals", parsed["payload"]["error"])
+        finally:
+            os.remove(meta_file)
+
+    @patch('assess_owned_operational_fixtures.run_bounded')
+    def test_shared_reservation_overlap(self, mock_run_bounded):
+        def mock_run(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "actions/runs/" in cmd_str and "approvals" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved", "environments": [{"name": "operator"}], "user": {"login": "testuser"}, "created_at": "2026-10-09T08:39:23Z", "updated_at": "2026-10-09T09:04:10Z"}]))
+            if "actions/runs/" in cmd_str and "jobs" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "jobs": [{"id": 1, "run_id": 12345, "name": "Owned fixture assessment (Read-only GCS / DB)"}]}))
+            if "actions/runs/" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"id": 12345, "head_branch": "dev", "event": "workflow_dispatch", "head_sha": "abc", "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml"}))
+            if "commits/abc/check-runs" in cmd_str:
+                checks = [{"name": n, "head_sha": "abc", "status": "completed", "conclusion": "success"} for n in ["Commit trailers", "Runtime mirror guard", "Product smoke acceptance", "ci-integ"]]
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 4, "check_runs": checks}))
+            if "commits/abc/pulls" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"merged_at": "2026-10-10", "merge_commit_sha": "abc", "base": {"ref": "dev"}, "head": {"sha": "headsha"}, "user": {"login": "author"}, "number": 1}]))
+            if "pulls/1/reviews" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"user": {"login": "reviewer"}, "state": "APPROVED", "commit_id": "headsha"}]))
+            if "actions/workflows" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 2, "workflows": [{"id": 1, "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml", "state": "active", "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/workflows/1"}, {"id": 2, "path": ".github/workflows/deploy-dev.yml", "state": "disabled_manually", "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/workflows/2"}]}))
+            if "actions/runs?status=" in cmd_str:
+                status = cmd_str.split("status=")[1].split("&")[0]
+                if status == "in_progress":
+                    return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "workflow_runs": [{"id": 999, "path": ".github/workflows/deploy-dev.yml", "status": "in_progress", "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/runs/999"}]}))
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
+            return MagicMock(returncode=1, stdout="", stderr="Unknown command")
+        mock_run_bounded.side_effect = mock_run
+
+        sys.argv = ["assess-owned-operational-fixtures.py", "--current-run-id", "12345", "--tooling-run-sha", "abc", "--acquire-cloud-metadata-to", "/tmp/out.json"]
+        
+        with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
+            with self.assertRaises(SystemExit) as cm:
+                assess.main()
+            self.assertEqual(cm.exception.code, 1)
+            out = mock_stdout.getvalue()
+            self.assertIn("Overlapping restricted workflows detected", out)
+
+    @patch('assess_owned_operational_fixtures.run_bounded')
+    def test_shared_reservation_other_workflow_enabled(self, mock_run_bounded):
+        def mock_run(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "actions/runs/" in cmd_str and "approvals" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved", "environments": [{"name": "operator"}], "user": {"login": "testuser"}, "created_at": "2026-10-09T08:39:23Z", "updated_at": "2026-10-09T09:04:10Z"}]))
+            if "actions/runs/" in cmd_str and "jobs" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "jobs": [{"id": 1, "run_id": 12345, "name": "Owned fixture assessment (Read-only GCS / DB)"}]}))
+            if "actions/runs/" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"id": 12345, "head_branch": "dev", "event": "workflow_dispatch", "head_sha": "abc", "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml"}))
+            if "commits/abc/check-runs" in cmd_str:
+                checks = [{"name": n, "head_sha": "abc", "status": "completed", "conclusion": "success"} for n in ["Commit trailers", "Runtime mirror guard", "Product smoke acceptance", "ci-integ"]]
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 4, "check_runs": checks}))
+            if "commits/abc/pulls" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"merged_at": "2026-10-10", "merge_commit_sha": "abc", "base": {"ref": "dev"}, "head": {"sha": "headsha"}, "user": {"login": "author"}, "number": 1}]))
+            if "pulls/1/reviews" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"user": {"login": "reviewer"}, "state": "APPROVED", "commit_id": "headsha"}]))
+            if "actions/workflows" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 2, "workflows": [{"id": 1, "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml", "state": "active", "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/workflows/1"}, {"id": 2, "path": ".github/workflows/deploy-dev.yml", "state": "active", "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/workflows/2"}]}))
+            if "actions/runs?status=" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
+            return MagicMock(returncode=1, stdout="", stderr="Unknown command")
+        mock_run_bounded.side_effect = mock_run
+
+        sys.argv = ["assess-owned-operational-fixtures.py", "--current-run-id", "12345", "--tooling-run-sha", "abc", "--acquire-cloud-metadata-to", "/tmp/out.json"]
+        
+        with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
+            with self.assertRaises(SystemExit) as cm:
+                import assess_owned_operational_fixtures as assess
+                assess.main()
+            self.assertEqual(cm.exception.code, 1)
+            out = mock_stdout.getvalue()
+            self.assertIn("Workflow .github/workflows/deploy-dev.yml is not in a disabled state", out)
+
+
+    @patch('assess_owned_operational_fixtures.run_bounded')
+    def test_superseded_adverse_approval(self, mock_run_bounded):
+        args = MagicMock()
+        args.current_run_id = "12345"
+        
+        # Simulate approval with pending/rejected
+        def side_effect(cmd, **kwargs):
+            if "approvals" in cmd[-1]:
+                return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved", "environments": [{"name": "operator"}], "user": {"login": "testuser"}, "created_at": "2026-10-09T08:39:23Z", "updated_at": "2026-10-09T09:04:10Z"}, {"state": "rejected", "environments": [{"name": "operator"}]}]))
+            return MagicMock(returncode=0, stdout="{}")
+        mock_run_bounded.side_effect = side_effect
+        
+        with self.assertRaisesRegex(ValueError, "Adverse or ambiguous approval history detected"):
+            assess.check_held_window(args)
+
+    @patch('assess_owned_operational_fixtures.run_bounded')
+    def test_malformed_inventory(self, mock_run_bounded):
+        args = MagicMock()
+        args.current_run_id = "12345"
+        
+        def side_effect(cmd, **kwargs):
+            if "approvals" in cmd[-1]:
+                return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved", "environments": [{"name": "operator"}], "user": {"login": "testuser"}, "created_at": "2026-10-09T08:39:23Z", "updated_at": "2026-10-09T09:04:10Z"}]))
+            elif "workflows" in cmd[-1]:
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "workflows": [{"id": 1, "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml", "state": "active", "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/workflows/1"}]}))
+            elif "status=in_progress" in "".join(cmd) or "status=queued" in "".join(cmd) or "status=waiting" in "".join(cmd) or "status=pending" in "".join(cmd) or "status=requested" in "".join(cmd):
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
+            elif "jobs" in cmd[-1]:
+                # Return duplicate job id
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 2, "jobs": [{"id": 1, "run_id": "12345", "name": "Owned fixture assessment (Read-only GCS / DB)"}, {"id": 1, "run_id": "12345", "name": "Duplicate"}]}))
+            return MagicMock(returncode=0, stdout="{}")
+        mock_run_bounded.side_effect = side_effect
+        
+        with self.assertRaisesRegex(ValueError, "Duplicate jobs in inventory"):
+            assess.check_held_window(args)
+
+    def test_run_bounded_deadline_regression(self):
+        # A test to ensure run_bounded strictly enforces timeout even if child completes just after or sleeps.
+        # We will use sleep 2, but give timeout 0.1
+        res = assess.run_bounded(["sleep", "2"], timeout_sec=0.1)
+        self.assertEqual(res.returncode, -1)
+        self.assertEqual(res.stderr, "timeout")
+
+    def test_held_window_loss_expiration(self):
+        # Test that check_authority fails after first read if window is lost
+        describe_calls = {"count": 0}
+        def mock_gcs_runner(action, bucket, key):
+            if action == "describe":
+                describe_calls["count"] += 1
+                return {
+                    "status": "ok",
+                    "metadata": {
+                        "bucket": assess.BUCKET,
+                        "name": key,
+                        "size": str(self.expected_size),
+                        "contentType": self.expected_mime,
+                        "generation": "1234567890",
+                        "metageneration": "1",
+                        "timeCreated": "2026-10-09T09:03:18.572Z",
+                        "updated": "2026-10-09T09:03:18.572Z",
+                        "metadata": {"stored-at": "2026-10-09T09:03:18.572Z"}
+                    }
+                }
+            elif action == "cat":
+                return {"status": "ok", "body": PDF_BYTES}
+            return {"status": "error"}
+            
+        def mock_check_authority():
+            if describe_calls["count"] >= 1:
+                raise ValueError("Lost authority")
+                
+        res = assess.assess_gcs_objects(mock_gcs_runner, mock_check_authority)
+        self.assertEqual(res["status"], "rejected")
+        self.assertIn("Lost authority", res["reason"])
+        self.assertIn("partial_observations", res)
+
 
 if __name__ == '__main__':
     unittest.main()

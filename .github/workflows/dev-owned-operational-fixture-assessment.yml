@@ -131,6 +131,63 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Verify shared reservation
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PAGE=1
+          HAS_NEXT=true
+          while [ "$HAS_NEXT" = "true" ]; do
+            RES=$(gh api "/repos/${{ github.repository }}/actions/workflows?per_page=100&page=$PAGE")
+            if ! echo "$RES" | jq -e ".workflows" >/dev/null; then
+              echo "::error::Failed to fetch workflows (API error)"
+              exit 1
+            fi
+            ENABLED_OTHER=$(echo "$RES" | jq -r ".workflows[] | select(.path != \".github/workflows/dev-owned-operational-fixture-assessment.yml\" and (.state == \"active\" or .state == \"unknown\")) | .path")
+            if [ -n "$ENABLED_OTHER" ]; then
+              echo "::error::Other workflows are not server-disabled: $ENABLED_OTHER"
+              exit 1
+            fi
+            COUNT=$(echo "$RES" | jq ".workflows | length")
+            if [ "$COUNT" -lt 100 ]; then
+              HAS_NEXT=false
+            else
+              PAGE=$((PAGE+1))
+            fi
+          done
+
+          ACTIVE_JOBS=""
+          for STATUS in requested queued waiting pending in_progress; do
+            PAGE=1
+            HAS_NEXT=true
+            while [ "$HAS_NEXT" = "true" ]; do
+              RES=$(gh api "/repos/${{ github.repository }}/actions/runs?status=$STATUS&per_page=100&page=$PAGE")
+              if ! echo "$RES" | jq -e '.workflow_runs' >/dev/null; then
+                echo "::error::Failed to fetch workflow_runs (API error): $RES"
+                exit 1
+              fi
+              TOTAL_COUNT=$(echo "$RES" | jq '.total_count')
+              if [ "$TOTAL_COUNT" -ge 1000 ]; then
+                echo "::error::Server-side search cap reached"
+                exit 1
+              fi
+              MATCHES=$(echo "$RES" | jq -r --arg current_run "${{ github.run_id }}" '.workflow_runs[] | select(.id | tostring != $current_run) | .id')
+              if [ -n "$MATCHES" ]; then
+                ACTIVE_JOBS="$ACTIVE_JOBS $MATCHES"
+              fi
+              COUNT=$(echo "$RES" | jq '.workflow_runs | length')
+              if [ "$COUNT" -lt 100 ]; then
+                HAS_NEXT=false
+              else
+                PAGE=$((PAGE+1))
+              fi
+            done
+          done
+          if [ -n "$ACTIVE_JOBS" ]; then
+            echo "::error::Overlap detected: $ACTIVE_JOBS"
+            exit 1
+          fi
+
       - name: Fresh Cloud metadata
         env:
           INPUT_WORKFLOW_DEF_SHA: ${{ github.event.inputs.workflow_def_sha || '9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c' }}
@@ -140,7 +197,9 @@ jobs:
           python3 operations/verification/assess-owned-operational-fixtures.py \
             --acquire-cloud-metadata-to .local-cloud-metadata.json \
             --current-runtime-sha "$INPUT_CURRENT_RUNTIME_SHA" \
-            --workflow-def-sha "$INPUT_WORKFLOW_DEF_SHA"
+            --workflow-def-sha "$INPUT_WORKFLOW_DEF_SHA" \
+            --current-run-id "${{ github.run_id }}" \
+            --tooling-run-sha "${{ github.sha }}"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -166,33 +225,6 @@ jobs:
           INPUT_CURRENT_RUNTIME_SHA: ${{ github.event.inputs.current_runtime_sha || github.sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ACTIVE_JOBS=""
-          for STATUS in requested queued waiting pending in_progress; do
-            PAGE=1
-            HAS_NEXT=true
-            while [ "$HAS_NEXT" = "true" ]; do
-              RES=$(gh api "/repos/${{ github.repository }}/actions/runs?status=$STATUS&per_page=100&page=$PAGE")
-              if ! echo "$RES" | jq -e '.workflow_runs' >/dev/null; then
-                echo "::error::Failed to fetch workflow_runs (API error): $RES"
-                exit 1
-              fi
-              MATCHES=$(echo "$RES" | jq -r '.workflow_runs[] | select(.path | test("deploy|restore|provision|provider|scanner"; "i")) | .id')
-              if [ -n "$MATCHES" ]; then
-                ACTIVE_JOBS="$ACTIVE_JOBS $MATCHES"
-              fi
-              COUNT=$(echo "$RES" | jq '.workflow_runs | length')
-              if [ "$COUNT" -lt 100 ]; then
-                HAS_NEXT=false
-              else
-                PAGE=$((PAGE+1))
-              fi
-            done
-          done
-          if [ -n "$ACTIVE_JOBS" ]; then
-            echo "::error::Overlap detected: $ACTIVE_JOBS"
-            exit 1
-          fi
-
           python3 operations/verification/assess-owned-operational-fixtures.py \
             --product-run-id "$INPUT_PRODUCT_RUN_ID" \
             --artifact-id "$INPUT_ARTIFACT_ID" \
