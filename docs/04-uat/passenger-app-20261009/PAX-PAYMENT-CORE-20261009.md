@@ -973,6 +973,9 @@ names selected only the matching tests; those logs are not full caller evidence.
 The final command uses the actual `billing-payment-exception.test.ts`,
 `facebook-data-deletion.repository.test.ts` and
 `passenger-push-devices.repository.test.ts` alongside both module config files.
+It finished/read **66 PASS / 0 SKIP**, 5 files, exit 0
+(`api-actual-callers-final.log`). Notice module configuration is **5 PASS**;
+no application bootstrap or network was used.
 
 Full affected Payment/Booking/Account/Facebook/Billing and existing
 channel/FCM/route/partner/sequence/registry regression finished/read:
