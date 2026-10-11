@@ -1069,3 +1069,44 @@ The Supervisor hooksPath is unchanged; no hook bypass, dependency install or
 canonical dependency mutation was performed. Unit runners may update their
 shared result cache. No product/dev/preview/API/PG/browser/Docker runtime was
 started; the worker lifecycle tests use fake timers and mocked dependencies.
+
+## 2026-10-11 continuation: partner-only harness type boundary
+
+Supervisor registered
+`PAX-PAYMENT-EXACT-PARTNER-ONLY-TEST-HARNESS-TYPE-SUPPLEMENT.md` and added only
+`tests/unit/system-remediation/sr-partner-notify-transport-20260918/transport-harness.ts`
+to the original task's exact scope after checking parallel ownership. Baseline
+`19d41b3a4c628b21c27ced9f4bfed7642857436b` was freshly equal to the local,
+remote and draft PR #2555 heads. An initial evidence audit expected the old
+missing scope and exited 1 when the fresh slice revealed this coordination;
+the initial snapshot is retained, not treated as a product failure.
+
+The existing partner-only helper's row annotation included the first-party-only
+payment event through the consumer union. Actual production
+`PartnerNotificationDispatchFacade.resolveNotificationRoute` correctly accepts
+only `PartnerPassengerEventType`. Fresh `pnpm typecheck:root` on unchanged
+19d41b3 exited 2 with exactly TS2345 at `governance.test.ts:229,427`.
+This is a compiler/fixture failure, not a reproduced runtime payment defect.
+
+The authorized repair adds the authoritative type-only import and intersects
+the row's consumer record type with `{ eventType: PartnerPassengerEventType }`.
+Every fixture value, assertion, caller, facade, external mock, runtime guard,
+six-event partner map and TTL remains unchanged. No payment event becomes a
+partner webhook. No new mirror test is added for this type-only correction.
+
+| Finding / acceptance                 | Actual source / verification boundary                                                                                   | Commands and evidence                                                                                                                                                                                           | Remaining limit                                                                                                                       |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Partner-only caller type mismatch    | Actual root compiler and helper; baseline exit 2, exactly two TS2345 errors                                             | `pnpm typecheck:root`, `root-baseline.log`; repaired compiler, original transport and affected Payment/Booking/account/Billing/channel/FCM checks retained with completed exits in the evidence directory below | Compiler success is not runtime payment or PG acceptance                                                                              |
+| Runtime preservation                 | Type-only import and row intersection; compare baseline and repaired transpilation, retain exact diff and helper hashes | `runtime-equivalence.log`, `source.diff`; whole immutable62 range exact scopes/trailers/bypass/whitespace and publication identity retained with final results                                                  | No facade/caller/contract/TTL runtime change                                                                                          |
+| `pax-payment_bind_charge_and_states` | Original formal SQL/source/fault matrix preserved; not recorded                                                         | Final check results, matching source SHA, remote/PR identity and hosted CI are retained in the same evidence directory                                                                                          | Independent Codex2 review/protected merge and genuine PG/HTTP/PSP remain pending                                                      |
+| `pax-payment_security_and_recovery`  | Original security, unknown-ack readback-only and disabled policy/expiry guards preserved; not recorded                  | Original tests and failures/skips remain visible; this checkpoint does not supply financial policy or expiry values                                                                                             | Approved real policy/explicit expiry, lawful captured first-party route/device/provider and genuine PG/FCM/PSP acceptance remain open |
+
+Evidence: canonical `.local/pax-payment-core-20261011-partner-harness/`, continuing
+the original recovery-notice scope-boundary and notice-scan artifacts. Actual
+completed result counts/exits and published SHA belong to its final sidecar;
+pending checks are not passes. Node 22.23.2, pnpm 10.33.0, TypeScript 5.9.3,
+Vitest 4.1.4. Existing generated Husky wrappers were copied only into the
+worktree; Supervisor hooksPath and original hook chain are preserved. Inherited
+canonical dependency symlinks were not installed/relinked/removed; unit runners
+may write their shared results cache. No VM product/dev/preview/API/PG/browser/
+Docker runtime, real provider, secrets or deployment was started.
