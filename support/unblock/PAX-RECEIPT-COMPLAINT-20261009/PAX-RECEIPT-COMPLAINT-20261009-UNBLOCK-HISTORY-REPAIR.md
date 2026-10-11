@@ -2,14 +2,17 @@
 
 Owner: Codex2. Reviewer: Codex. Evidence collected: 2026-10-11 UTC.
 
-**Current prerequisite receipt:** Supervisor registered the blocked-parent
+**Prerequisite receipt at 11:10:51/52:** Supervisor registered the blocked-parent
 metadata and applied the matching parent note through the active release CLI.
 Fresh slices confirm the three fields, parent `blocked` / `Codex`, unchanged
 roles/scopes/acceptance keys, and no premature `resolved_parent_at`. The
 11:10:51/52 receipt and actual-release probe are recorded in the final section.
 Earlier OPEN/absent-metadata statements below are retained as historical
 observations; the 10:46:29 absence claim was stale. This report is ready for a
-new exact candidate review and CI; parent source repair remains blocked.
+new exact candidate review and CI. A separate Supervisor transaction at
+11:13:41/42 subsequently registered precise parent source seams and resumed the
+original source task; that newer routing receipt is recorded at the end. This
+helper did not resume the parent, and its merge does not approve product work.
 
 ## Finding and disposition — original candidate record
 
@@ -424,3 +427,57 @@ source and shared Git configuration were unchanged. The additional publication
 closeout uses this restored normal hook chain; its actual result and final
 range checks are included in the exact handoff receipt. Both commits are kept
 additively; no amend, rebase or force push is used.
+
+#### Later independent parent source continuation
+
+A final pre-publication reread detected a genuine newer canonical state. The
+original blocked-snapshot probe exited **1** at its first assertion because
+the parent was now `in_progress`; it did not reach the merge simulation or
+make any canonical write. This is a detected external state transition, not a
+new missing-metadata finding or a claimed second regression pass. The initial
+exit-0 `prerequisite-receipt-result.json` retains the validated 11:10 snapshot;
+the two slice files were refreshed by the failed reread and reflect the newer
+state. Both executions and their limits are retained explicitly.
+
+The canonical activity receipts show:
+
+- `11:13:41Z`, Supervisor `assign`: original parent roles preserved and exact
+  DTO/mapper/Booking-fixture scopes registered.
+- `11:13:42Z`, Supervisor `blocked_task_resumed`: explicit **independent**
+  original source continuation, `in_progress`, `helper_task_id=null`.
+- `11:14:06Z`, original parent Codex2 `start`: bounded audit DTO, authoritative
+  current-receipt read and original Booking fixture repair; E04 upstream
+  facts remain open.
+
+The new parent task-spec hash is
+`06d918e055f4ef730423d560767727dcf6f26e4cc60f9a0c27c8f0cb72b3306f`.
+Its actual registered exact-seam supplement was read at
+`/home/lupin/workspace/drts-fleet-platform/.local/pi-direct-booking-ui-20261011T1020Z/PAX-RECEIPT-EXACT-REMAINING-SOURCE-SEAMS.md`.
+It preserves the original six-commit history, both product acceptance keys,
+roles, existing scopes and lawful E04 missing-facts boundary, and explicitly
+keeps this helper report-only. The added grants are the actor DTO literal,
+immediately necessary actual mapper projection, original Booking access-test
+identity/rating fixture seams, and bounded current receipt read; unrelated
+Booking UI/Payment fixtures and upstream financial defaults remain excluded.
+Only the separately dispatched original owner may implement that source work.
+
+The helper's three blocked-floor fields remain present and unchanged, and
+`resolved_parent_at` remains absent. In the actual release,
+`apply_unblock_parent_resolution` returns at lines 1110–1111 if the parent is
+already outside `blocked`. The new `routing-continuation-probe.py` calls the
+real `transition_after_merge` on copies of the **current** slices: helper
+completion leaves the entire in-progress parent, scopes, next, blocker and
+handoff copies unchanged and creates no resolution timestamp. Only the audit
+sink is mocked; the blocker/time are synthetic. The new probe exits **0**.
+Thus this helper neither starts source continuation nor rolls back that
+separately authorized continuation to its earlier blocked-floor disposition.
+
+| Finding / acceptance                   | Result and actual boundary                                                                                                        | Evidence / limitation                                                                                                                                                                                                                                                             |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Preserve later original-parent routing | Actual release early return leaves independently in-progress parent and every parent field/blocker/handoff unchanged: PASS 0      | `python3` with absolute `routing-continuation-probe.py` path in this continuation's receipt directory; `routing-continuation-result.json`, fresh `routing-parent-slice.json` / `routing-helper-slice.json`. In-memory only; no actual helper merge or parent product review.      |
+| Update parent with concrete next step  | Original 11:10 prerequisite SATISFIED; later exact source registration and explicit Supervisor resume are independently evidenced | Authorized 11:13:41/42 and parent owner 11:14:06 receipts. This supersedes the snapshot's current-routing claim, not its historical evidence. Product findings, full regression, review/merge and both original acceptance keys remain the original source task's responsibility. |
+
+This helper continues only the original report/commit/push/PR lifecycle.
+No parent source file, parent state, acceptance or publication was changed by
+this dispatch. The new candidate and hosted checks must cover the entire
+additive report, including this later-routing receipt.
