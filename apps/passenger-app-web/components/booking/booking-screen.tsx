@@ -77,6 +77,7 @@ export function BookingScreen({
     command: CreatePassengerRideCommand;
     requestId: string;
     paymentLabel: string;
+    outcomeUnknown: boolean;
   } | null>(null);
   function report(reason: unknown, fallback: string) {
     if (reason instanceof PassengerApiError && reason.status === 401)
@@ -303,6 +304,7 @@ export function BookingScreen({
         pending.current = {
           requestId: crypto.randomUUID(),
           paymentLabel: paymentSelection.label,
+          outcomeUnknown: false,
           command: {
             scheduledAt: time,
             origin: {
@@ -339,7 +341,23 @@ export function BookingScreen({
           : reason instanceof Error
             ? reason.message
             : "unavailable";
-      if (
+      if (reason instanceof PassengerApiError && reason.status === 401) {
+        pending.current = null;
+        setQuote(undefined);
+        setChecked(false);
+        setDraft(emptyDraft);
+        setAccount(undefined);
+        setSettings(undefined);
+        setFare(undefined);
+        setMode("loading");
+        report(reason, T.noCreate);
+      } else if (pending.current?.outcomeUnknown) {
+        // A retry refusal may precede the backend's idempotency lookup. It
+        // cannot establish that the first sent request never committed.
+        // Only an authoritative success or the identity fence ends recovery.
+        setMode("unavailable");
+        report(reason, T.unknownCreate);
+      } else if (
         [
           "quote_expired",
           "fare_quote_expired",
@@ -357,16 +375,6 @@ export function BookingScreen({
         pending.current = null;
         setMode("form");
         setError(T.shortLead);
-      } else if (reason instanceof PassengerApiError && reason.status === 401) {
-        pending.current = null;
-        setQuote(undefined);
-        setChecked(false);
-        setDraft(emptyDraft);
-        setAccount(undefined);
-        setSettings(undefined);
-        setFare(undefined);
-        setMode("loading");
-        report(reason, T.noCreate);
       } else if (
         reason instanceof PassengerApiError &&
         reason.status >= 400 &&
@@ -376,6 +384,7 @@ export function BookingScreen({
         setMode("confirm");
         report(reason, T.noCreate);
       } else {
+        if (pending.current) pending.current.outcomeUnknown = true;
         setMode("unavailable");
         report(reason, T.unknownCreate);
       }
@@ -394,7 +403,9 @@ export function BookingScreen({
     account && fare && account.feeAcknowledgementVersion === fare.version;
   return (
     <AuthScreen title={T.book}>
-      {error && <AuthAlert>{error}</AuthAlert>}
+      {error && (mode !== "confirm" || !quote) && (
+        <AuthAlert>{error}</AuthAlert>
+      )}
       {!account || !fare || !settings ? (
         <>
           <p>{busy ? T.loadingSettings : T.missingSettings}</p>
@@ -427,6 +438,7 @@ export function BookingScreen({
             setMode("form");
           }}
         >
+          {error && <AuthAlert>{error}</AuthAlert>}
           <dl
             style={{
               border: `1px solid ${P5.line}`,
