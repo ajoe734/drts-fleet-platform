@@ -3,3 +3,7 @@ export * from "./client.js";
 export * from "./booking/client.js";
 export * from "./booking/time.js";
 export * from "./fares/disclosure.js";
+export * from "./payment/client.js";
+export * from "./payment/fields.js";
+export * from "./payment/state.js";
+export * from "./payment/booking.js";
