@@ -91,7 +91,7 @@ export class PaymentMethodRepository {
     } catch (error) {
       if (error instanceof ApiRequestError) throw error;
       // DB errors can contain parameter values; never propagate their causes.
-      persistenceUnavailable();
+      return persistenceUnavailable();
     } finally {
       if (!committed) {
         try {

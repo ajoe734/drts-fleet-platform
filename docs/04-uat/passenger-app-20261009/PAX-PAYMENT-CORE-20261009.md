@@ -700,3 +700,37 @@ pnpm 10.33.0, Vitest 4.1.4. All card/token/error values are synthetic.
 This is an independently verified repair unit and an anchor checkpoint. Full
 affected regression, compiler/lint results and matching publication/hosted
 checks will be appended after completion. No VM product runtime was started.
+
+### Completed local checks and publication follow-up
+
+Checkpoint `b18071e5eac402411947209b9b9d4fc33db5a9ee` was normally pushed.
+The first automatic `wip(...)` message was denied by the installed task-specific
+message guard (exit 1, `anchor-commit.log`), which requires the literal
+`PAX-PAYMENT-CORE-20261009:` subject and actual Codex/Codex2 trailers. The
+corrected task-prefixed checkpoint passed that guard and the original Husky
+chain (exit 0, `anchor-commit-corrected.log`); no bypass was used. The hooks'
+own transient lint-staged backup was cleaned by lint-staged, not used to park
+design intent. Initial root typecheck then reported TS2366 for the helper
+call's explicit return and TS2749 for using a dynamically loaded repository
+value as a type (exit 2, `root-typecheck.log`). `return persistenceUnavailable()`
+and a separate type-only import fix both without changing runtime decisions.
+
+| Check                                                                   | Completed result / evidence                                                                                                                                                                                                                                                                                  | Boundary                                                                                                                                       |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Full affected Payment/Booking/account/Facebook/recovery unit regression | `pnpm exec vitest run tests/unit/pax-payment-core-20261009 tests/unit/pax-booking-history-20261009 tests/unit/pax-account-session-20261009 tests/unit/pax-facebook-login-20261009 tests/unit/audit-recovery-providers-20261002.test.ts`: **23 files / 626 PASS / 0 SKIP**, exit 0, `affected-regression.log` | Preceded the two compile-only corrections above; final real binding suite afterward **26 PASS / 0 SKIP**, exit 0, `binding-compiler-fixed.log` |
+| Existing API callers                                                    | `pnpm --filter @drts/api exec vitest run tests/unit/billing-payment-exception.test.ts tests/unit/facebook-data-deletion.repository.test.ts`: **2 files / 16 PASS / 0 SKIP**, exit 0, `api-callers.log`                                                                                                       | No HTTP server                                                                                                                                 |
+| Root/API compilers                                                      | `pnpm typecheck:root`: exit 0, `root-typecheck-final.log`; worktree-only auth/contracts builds: exit 0, `auth-package-build.log`, `contracts-package-build.log`; `pnpm --filter @drts/api typecheck`: exit 0, `api-typecheck.log`                                                                            | Original exit 2 preserved above, no source/package changes in build dependencies                                                               |
+| Payment source/test lint                                                | `pnpm exec eslint apps/api/src/modules/passenger-app/payment/payment-method.repository.ts tests/unit/pax-payment-core-20261009/binding.test.ts --max-warnings=0`: exit 0 before and after compiler corrections, `lint.log`, `lint-final.log`                                                                 | Actual changed files                                                                                                                           |
+| Repository delivery gates                                               | Whole `62a73710e87c0163c7e82a5956612be558e554bf..HEAD` trailers, canonical consistency and classification passed locally; final per-commit exact scopes/literal message/trailer audit and whitespace results stored with publication identity                                                                | Checkpoints are not candidates; old-SHA gates never substitute for final identity                                                              |
+
+Final local/remote/draft-PR head equality, scope/message audits, all hosted run
+IDs/full completed job results/logs, their hashes and command results are in
+`.local/pax-payment-core-20261011-binding-release/published-identity.json` and
+the same canonical `.local/` directory after closeout. Anchor CI
+`38140718487` and integration `38140718490` belong to **b18071e5e**, not the
+subsequent compiler-corrected source. Every check started during this dispatch
+must finish and be read; canceled/failing/skipped jobs remain separate from
+successful jobs. No local source handoff, independent review, protected merge
+or acceptance is implied by these checks. Original two acceptance keys remain
+unrecorded, with the same approved-policy and notice integration coordination
+requests and hosted PG/HTTP/delivery limits.

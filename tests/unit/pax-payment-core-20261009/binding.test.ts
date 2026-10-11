@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { PaymentMethodService } from "../../../apps/api/src/modules/passenger-app/payment/payment-method.service";
+import type { PaymentMethodRepository as PaymentMethodRepositoryType } from "../../../apps/api/src/modules/passenger-app/payment/payment-method.repository";
 const repositorySource = process.env.PAX_PAYMENT_METHOD_REPOSITORY_SOURCE;
 const {
   PaymentMethodRepository,
@@ -45,7 +46,7 @@ function fixture() {
   );
   const provider = new FakePaymentProvider({ DRTS_ENV: "test" });
   const service = new PaymentMethodService(
-    repository as unknown as PaymentMethodRepository,
+    repository as unknown as PaymentMethodRepositoryType,
     { provider, cipher },
   );
   return { repository, provider, cipher, service };
@@ -168,7 +169,7 @@ describe("production binding service with mocked persistence boundary", () => {
   it("refuses an unconfigured provider before creating claims", async () => {
     const f = fixture();
     const service = new PaymentMethodService(
-      f.repository as unknown as PaymentMethodRepository,
+      f.repository as unknown as PaymentMethodRepositoryType,
       { provider: { ...f.provider, available: false } as never, cipher: null },
     );
     await expect(
