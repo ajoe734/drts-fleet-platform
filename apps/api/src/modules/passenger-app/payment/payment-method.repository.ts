@@ -33,6 +33,22 @@ function notFound(): never {
   throw new ApiRequestError(404, "not_found", "Payment method not found.");
 }
 
+export async function requireActivePaymentMethod(
+  client: Pick<PoolClient, "query">,
+  passengerId: string,
+  id: string,
+  allowExpired = false,
+  lock = false,
+): Promise<void> {
+  const result = await client.query(
+    `SELECT payment_method_id FROM passenger.psp_tokens WHERE payment_method_id=$1 AND drts_passenger_id=$2
+     AND status='active' AND ($3 OR expiry_year::int>EXTRACT(YEAR FROM now()) OR
+      (expiry_year::int=EXTRACT(YEAR FROM now()) AND expiry_month::int>=EXTRACT(MONTH FROM now())))${lock ? " FOR UPDATE" : ""}`,
+    [id, passengerId, allowExpired],
+  );
+  if (!result.rows[0]) notFound();
+}
+
 @Injectable()
 export class PaymentMethodRepository {
   constructor(private readonly database: DatabaseService) {}
@@ -252,12 +268,6 @@ export class PaymentMethodRepository {
     id: string,
     allowExpired = false,
   ): Promise<void> {
-    const result = await client.query(
-      `SELECT payment_method_id FROM passenger.psp_tokens WHERE payment_method_id=$1 AND drts_passenger_id=$2
-       AND status='active' AND ($3 OR expiry_year::int>EXTRACT(YEAR FROM now()) OR
-        (expiry_year::int=EXTRACT(YEAR FROM now()) AND expiry_month::int>=EXTRACT(MONTH FROM now())))`,
-      [id, passengerId, allowExpired],
-    );
-    if (!result.rows[0]) notFound();
+    await requireActivePaymentMethod(client, passengerId, id, allowExpired);
   }
 }

@@ -247,3 +247,43 @@ retry policy during the CI wait; no approved maximum/delay was found. Both
 Supervisor coordination requests remain. These repaired source checkpoints still
 do not implement the pending completion/dual-state/retry/recovery/notice/refund/
 booking work or supply either original acceptance key.
+
+## Exact Booking prerequisite grant and transaction guard
+
+Latest binding checkpoint `ab167c2cad6a789f5c3fd576d6b95e99f275abc4`
+hosted CI [38128935251](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38128935251)
+completed/read **13 SUCCESS / 0 FAILURE**. Integration
+[38128935252](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38128935252)
+completed/read **5 SUCCESS / 12 SKIPPED**, not full integration/runtime acceptance.
+Both JSON results are retained under `.local/pax-payment-core-20261009/` as
+`ci-ab167c2-main.json` and `ci-ab167c2-integration.json`.
+
+Supervisor updated the original task's spec to
+`.local/continue-completion-frontier-20261011T0710Z/PAX-PAYMENT-EXACT-ORIGINAL-BOOKING-FIXTURE-PAYMENT-PREREQUISITE-SUPPLEMENT.md`
+and granted only the three explicitly listed Booking fixture/test files. This
+resolves coordination request 2 above; the broader Booking test directory remains
+outside the write scope. Full supplement was read. The retry-policy gap remains,
+with explicit validated injected policy and synthetic test policy authorized;
+there are no invented real financial default values.
+
+`PassengerBookingService.createRide` requires and canonicalizes a UUID method,
+without constructing a fake/fallback reference. `commitBooking` now rechecks
+active account, unpaid obligations and owned active/unexpired method, under
+account/method locks on the SAME PoolClient before order/token/history writes.
+Method lookup uses the existing production `requireActivePaymentMethod` query
+against formal V0115 fields. Account/default/remove and Booking share the account
+lock order. Cancellation handlers/fees, dispatch and transaction failure cleanup
+are unchanged. Financial completion writers still await implementation, so this
+is not an end-to-end concurrency/charge claim.
+
+| Finding / requirement                               | Real boundary / change                                                                                                                         | Old → new execution                                                                                                                                                                                                                                                                                                                                          | Verification / concrete limits                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unpaid new-booking fence                            | `PassengerBookingRepository.commitBooking`, `assertPassengerCanBook`, existing unpaid authority query                                          | Real ab167c2 repository git-show snapshot, with imports only rewritten, allows unpaid booking and resolves persist callback → current repository rejects debt before callback                                                                                                                                                                                | Old probe exit 1, **1 executed FAIL / 11 filtered SKIP**, `booking-debt-old-ab167c2.log`; initial Nest import setup failure exit 1 / **0 tests** retained separately as `booking-debt-old-ab167c2-setup.log`, not behavioral evidence. Actual PostgreSQL/HTTP unexecuted.                                   |
+| Exact delivered Booking fixtures need valid methods | Three granted test files; genuine Account/Booking/MultiTaxi/Owned/repository paths retained                                                    | Unmodified test files checked equal to immutable source62 before changes; applying new Payment guards executes **62 FAIL / 96 PASS**, `booking-original-prerequisite-failure.log` → first prerequisite repair **157 PASS / 1 FAIL**, `booking-prerequisite-fixed.log` → complete positive account-owner SQL responses **158 Booking PASS**, no skipped cases | Initial remaining account-switch failure came from fixture SQL hardcoding OWNER instead of the configured fixture account. Only granted fixture was repaired; no access/realm/cancellation tests edited. Each exact method lookup remains UUID+owner matched, not unconditional rows.                       |
+| R2/R9 unchanged financial/ownership authority       | Original four lead values, all nine fault groups, lost COMMIT/rollback eviction, pending-history, terminal compensation and cancellation cases | Existing cases pass with owned formal method rows; positive assertions now require account/debt/method reads in order before any insert on same transaction. Failed persistence still has no compensating order lock/write                                                                                                                                   | Payment+Booking **10 files / 224 PASS**, `booking-payment-regression.log`; all affected Payment+Booking+Account+Facebook **16 files / 433 PASS**, `booking-full-affected-regression.log`; exit 0, no skips.                                                                                                 |
+| Required method/account negative paths              | Real service+repository and SQL response boundary                                                                                              | Missing/malformed IDs, foreign/nonmatching/expired/removed method responses, deleted account and unpaid obligations refuse all inserts and publication; valid owned method succeeds                                                                                                                                                                          | New `booking-payment.test.ts`, 12 tests; expiry/status filtering is PG's external boundary (mocked rows), not an engine simulation. Root/API typecheck and scoped ESLint exit 0: `booking-root-typecheck.log`, `booking-api-typecheck.log`, `booking-lint.log`; Node 22.23.2 / pnpm 10.33.0 / Vitest 4.1.4. |
+
+Completion capture, actual dual billing/charge status writes, durable retry,
+unknown acknowledgement, recovery notices, platform refunds, PG/HTTP and full
+same-SHA independent review remain. Neither original acceptance key is recorded;
+this is still an incomplete draft/source checkpoint, not candidate or `done`.
