@@ -10,7 +10,7 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 
 ## Evidence Source Identity
 - **Task ID**: SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010
-- **Candidate Generation**: `4dcc0e8b2afe4fe28450f00ae5268542`
+- **Candidate Generation**: `fd437125b3c3441e9a3652806f980797`
 - **Candidate SHA**: `[External Candidate Artifact]` (to be resolved by orchestrator upon candidate completion, linked via review-verdict.md identity)
 - **Reviewer**: Codex
 - **Workspace**: Isolated review worktree
@@ -20,9 +20,9 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 | Finding | Historical / Current Evidence | Remaining Condition / Actual limit |
 |---------|-----------------------|--------|
 | **F1/F3/F4/F5 core** | Genuine archive/PDF/identity positives and existing denials PASS BOTH | Actual current owned resources/PG not measured |
-| **F2 actual authority / inventory** | NEW `HEAD`: Script strictly enforces bounded held window, explicit deny logic, numeric ID requirements, and repository URL bindings. `check_authority` explicitly invoked in default DB runner. Test suite accurately reflects these constraints. | Full environment and live authority unmeasured |
-| **F3 upstream capture** | NEW `HEAD`: Producer upgraded to perform strict `gateway` and `clamd` container resolution, exact revision image matching, and exact 64-hex SHA format digest validation. Consumer strictly refuses empty/short images. | Actual live cloud metadata acquisition unmeasured |
-| **F6/F7 report/UAT** | NEW `HEAD`: Main exception handler preserves the `incomplete` state and partial observations on failure without wiping receipts. F7 stale generation and UAT claims accurately synced to the `4dcc0e8b2afe4fe28450f00ae5268542` generation. | True live matrix unavailable locally. |
+| **F2 actual authority / inventory** | NEW `HEAD`: Script implements explicit `unsupported0` denial for GitHub Actions Approvals since they lack a bounded window. It strictly enforces explicit deny logic, numeric ID requirements, and exact repository URL bindings. `check_authority` explicitly invoked in default DB runner. Test suite accurately reflects these constraints. | Full environment and live authority unmeasured |
+| **F3 upstream capture** | NEW `HEAD`: Producer upgraded to use lawful service-based singleton mapping, perform strict `gateway` and `clamd` container resolution, validate exact service/revision container inventory, and compare requested/pinned/revision/resolved/primary digests exactly as frozen contract. Consumer strictly refuses empty/short images. | Actual live cloud metadata acquisition unmeasured |
+| **F6/F7 report/UAT** | NEW `HEAD`: Main exception handler preserves the `incomplete` state and partial observations on failure without wiping receipts. F7 stale generation and UAT claims accurately synced to the `fd437125b3c3441e9a3652806f980797` generation. | True live matrix unavailable locally. |
 | **F8 scope/publication** | Official subjects FIXED (commits PASS, literal own prefix PASS). | Supervisor must verify exact prospective preserved-history/publication disposition. No history rewrite authorized. |
 
 ## Execution Bounds and Reporting

@@ -81,6 +81,12 @@ CANONICAL_OWNED_SUBMISSIONS: Tuple[str, ...] = (
     "93430506-d016-4b07-897f-ab9b4d3530df",
 )
 
+class UnsupportedError(Exception):
+    pass
+
+def unsupported(msg: str):
+    raise UnsupportedError(msg)
+
 def require(cond: bool, msg: str):
     if not cond:
         raise ValueError(msg)
@@ -439,7 +445,7 @@ def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]], check_
                     "stored-at": meta.get("metadata", {}).get("stored-at"),
                     "documentId": expected["documentId"], "confirmSubmissionId": expected["confirmSubmissionId"]
                 })
-        return {"status": "error", "partial_observations": validated_reads + partial, "error": str(e)}
+        return {"status": "rejected", "partial_observations": validated_reads + partial, "reason": str(e)}
 
 def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]], check_authority=None) -> Dict[str, Any]:
     try:
@@ -1023,7 +1029,7 @@ def check_held_window(args):
                 state = a.get("state")
                 if state == "approved":
                     require(a.get("user", {}).get("login"), "Approval missing attributable Operator")
-                    require(a.get("created_at") and a.get("updated_at"), "Approval missing held start/deadline")
+                    has_bound = False
                     operator_approved = True
                 elif state in ("rejected", "pending"):
                     require(False, "Adverse or ambiguous approval history detected")
@@ -1049,6 +1055,7 @@ def check_held_window(args):
     
     assessment_found = False
     wf_ids = set()
+    wf_paths = set()
     for wf in workflows:
         wf_path = wf.get("path", "")
         wf_state = wf.get("state")
@@ -1057,7 +1064,9 @@ def check_held_window(args):
         require(isinstance(wf_id, int), "Workflow missing numeric ID")
         require(wf_id not in wf_ids, "Duplicate workflow participant")
         wf_ids.add(wf_id)
-        require(wf_url and "ajoe734/drts-fleet-platform" in wf_url, "Workflow missing repository URL binding")
+        require(wf_path not in wf_paths, "Duplicate workflow path")
+        wf_paths.add(wf_path)
+        require(wf_url == f"https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/workflows/{wf_id}", "Workflow missing repository URL binding")
         if wf_path == ".github/workflows/dev-owned-operational-fixture-assessment.yml":
             require(wf_state == "active", f"Assessment workflow is not active (state: {wf_state})")
             assessment_found = True
@@ -1115,6 +1124,9 @@ def check_held_window(args):
     op_envs = [j for j in curr_jobs if j.get("name") == "Owned fixture assessment (Read-only GCS / DB)"]
     require(len(op_envs) > 0, "No Owned fixture assessment job found in current jobs")
 
+    if not locals().get("has_bound", False):
+        unsupported("unsupported: no verifiable protected bounded window authority provided by GitHub Actions Approvals")
+
 
 def verify_authority(args):
     require(args.current_run_id, "Missing current_run_id")
@@ -1124,6 +1136,7 @@ def verify_authority(args):
     require(curr_run_data.get("head_branch") == "dev", "Current run not on protected dev branch")
     require(curr_run_data.get("event") == "workflow_dispatch", "Current run not authorized trigger")
     require(str(curr_run_data.get("id")) == args.current_run_id, "Current run ID mismatch")
+    require(curr_run_data.get("path") == ".github/workflows/dev-owned-operational-fixture-assessment.yml", "Current run path is not assessment")
     require(curr_run_data.get("head_sha") == args.tooling_run_sha, "Current run SHA mismatch")
     
     # CI check-runs check
@@ -1283,14 +1296,12 @@ def main():
                 require(rev_val.get("metadata", {}).get("labels", {}).get("serving.knative.dev/service") == s_name, "Revision service label mismatch")
 
                 containers = rev_val.get("spec", {}).get("containers", [])
-                implicit = len(containers) == 1 and "name" not in containers[0]
                 names = [c.get("name", str(i)) for i, c in enumerate(containers)]
                 
                 require(len(names) == len(set(names)), f"Duplicate container names in {s_name}")
                 import re as regex_mod
                 require(all("name" not in c or (isinstance(c["name"], str) and regex_mod.fullmatch(r"[a-z][a-z0-9-]{0,62}", c["name"])) for c in containers), f"Invalid container names in {s_name}")
                 
-                service_names = ["0"] if implicit else names
                 statuses = rev_val.get("status", {}).get("containerStatuses")
                 
                 if statuses is not None:
@@ -1299,13 +1310,17 @@ def main():
                     require({c.get("name") for c in statuses} == set(names), "Container status names mismatch")
                     
                 service_containers = val.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
-                service_c_names = ["0"] if (len(service_containers) == 1 and "name" not in service_containers[0]) else [sc.get("name", str(j)) for j, sc in enumerate(service_containers)]
+                service_implicit = len(service_containers) == 1 and "name" not in service_containers[0]
+                service_c_names = ["0"] if service_implicit else [sc.get("name", str(j)) for j, sc in enumerate(service_containers)]
                 service_image_map = {service_c_names[j]: sc.get("image", "") for j, sc in enumerate(service_containers)}
+                
+                primary_statuses = val.get("status", {}).get("containerStatuses")
 
                 images = {}
                 for i, c in enumerate(containers):
-                    c_name = service_names[i]
-                    service_req_image = service_image_map.get(c_name, "")
+                    c_name = names[i]
+                    service_lookup_key = "0" if service_implicit else c_name
+                    service_req_image = service_image_map.get(service_lookup_key, "")
                     repository = regex_mod.split(r"[@:]", service_req_image, maxsplit=1)[0]
                     revision_reference = c.get("image", "")
                     require(isinstance(revision_reference, str) and regex_mod.split(r"[@:]", revision_reference, maxsplit=1)[0] == repository, "Revision requested image mismatch")
@@ -1325,7 +1340,19 @@ def main():
                         
                     require(digest.startswith(repository + "@sha256:"), f"Digest repository mismatch for {c_name}")
                     require(regex_mod.fullmatch(regex_mod.escape(repository) + r"@sha256:[0-9a-f]{64}", digest), f"Invalid digest format for {c_name}")
-                    images[c_name] = digest
+                    
+                    if "@sha256:" in service_req_image:
+                        require(digest == service_req_image, f"Service pinned digest mismatch for {c_name}")
+                    if "@sha256:" in revision_reference:
+                        require(digest == revision_reference, f"Revision pinned digest mismatch for {c_name}")
+                        
+                    if primary_statuses:
+                        p_status = next((cs for cs in primary_statuses if cs.get("name") == service_lookup_key), None)
+                        if p_status and p_status.get("imageDigest"):
+                            require(digest == p_status["imageDigest"], f"Primary status digest mismatch for {c_name}")
+                            
+                    # Add to images map using the service key so the consumer gets the expected mapping!
+                    images[service_lookup_key if service_lookup_key != "0" else c_name] = digest
                         
                 require(len(images) > 0, f"No images found for {s_name}")
                 if s_name == "drts-dev-scanner":
@@ -1563,6 +1590,12 @@ def main():
             require(len(out.encode('utf-8')) <= 512 * 1024, "Report exceeds byte cap")
             print(out)
             sys.exit(0)
+    except UnsupportedError as e:
+        report["disposition"] = "unsupported"
+        report["error"] = str(e)
+        out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": report}, indent=2)
+        print(out)
+        sys.exit(0)
     except Exception as e:
         report["disposition"] = "incomplete"
         report["error"] = str(e)[:128]

@@ -675,8 +675,8 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 raise ValueError("Lost authority")
                 
         res = assess.assess_gcs_objects(mock_gcs_runner, mock_check_authority)
-        self.assertEqual(res["status"], "error")
-        self.assertIn("Lost authority", res["error"])
+        self.assertEqual(res["status"], "rejected")
+        self.assertIn("Lost authority", res["reason"])
         self.assertIn("partial_observations", res)
 
 
