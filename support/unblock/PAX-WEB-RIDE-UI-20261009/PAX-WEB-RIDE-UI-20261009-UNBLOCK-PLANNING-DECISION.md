@@ -24,3 +24,8 @@ Currently, `PassengerReceiptResponse` provides only `receiptUrl`, and `MultiTaxi
 ## Concrete Next Steps
 1. The original owner (Gemini) of `PAX-WEB-RIDE-UI-20261009` must update the UI code to properly handle unavailable data in a bounded manner.
 2. The `PAX-WEB-RIDE-UI-20261009` task will be updated via `ai-status.sh` to explicitly record its concrete next action: waiting for the upstream E-04 fields from `PAX-RECEIPT-COMPLAINT-20261009`, retaining its blocked status and waiting_for as needed, without a blanket resume or merge.
+
+## Dependencies & Boundaries
+- **Payment UI:** The original Payment UI is `DONE2/2` (protected merge `6bc`), but its reusable payment-status view is **not mounted actual Ride/Receipt consumer integration**, which remains under this original owner/QA work with legal source/history boundaries.
+- **Payment Core:** Delivered source (approved `bed2`), but `blocked0/2` acceptance pending financial/notice provenance and actual authorized payment-specific PG/HTTP/provider/device/FCM evidence. No guessed 'paid' or real capture.
+- **QA & Release Gates:** Original QA owns genuine PG/HTTP/SSE/browser/download/provider/legal/session/device/SQL↔migration/lostack/expiry and same-release proof. Parallel component amendments never waive those gates.
