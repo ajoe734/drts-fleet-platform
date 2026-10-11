@@ -333,35 +333,35 @@ def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]], check_
             desc = runner("describe", BUCKET, physical_key)
             if desc.get("status") == "not_found":
                 # Return proper rejection for missing instead of throwing generic ValueError
-                return {"status": "rejected", "reason": f"Missing object gs://{BUCKET}/{physical_key}"}
+                raise RuntimeError(f"Missing object gs://{BUCKET}/{physical_key}")
             if desc.get("status") != "ok":
                 raise RuntimeError(f"GCS error describing gs://{BUCKET}/{physical_key}: {desc.get('stderr', 'unknown_error')}")
             
             meta = desc.get("metadata", {})
             
             if meta.get("bucket") != BUCKET:
-                 return {"status": "rejected", "reason": f"Bucket mismatch for {physical_key}"}
+                 raise RuntimeError(f"Bucket mismatch for {physical_key}")
             if meta.get("name") != physical_key:
-                 return {"status": "rejected", "reason": f"Object name mismatch for {physical_key}"}
+                 raise RuntimeError(f"Object name mismatch for {physical_key}")
                  
             if str(meta.get("size")) != str(EXPECTED_FILE_SIZE):
-                 return {"status": "rejected", "reason": f"Size mismatch for {physical_key}"}
+                 raise RuntimeError(f"Size mismatch for {physical_key}")
             if meta.get("contentType") != EXPECTED_MIME:
-                 return {"status": "rejected", "reason": f"MIME mismatch for {physical_key}"}
+                 raise RuntimeError(f"MIME mismatch for {physical_key}")
             if "generation" not in meta:
-                 return {"status": "rejected", "reason": f"No generation for {physical_key}"}
+                 raise RuntimeError(f"No generation for {physical_key}")
             if not str(meta["generation"]).isdigit():
-                 return {"status": "rejected", "reason": f"Non-numeric generation for {physical_key}"}
+                 raise RuntimeError(f"Non-numeric generation for {physical_key}")
             if "metageneration" not in meta:
-                 return {"status": "rejected", "reason": f"No metageneration for {physical_key}"}
+                 raise RuntimeError(f"No metageneration for {physical_key}")
             if not str(meta["metageneration"]).isdigit():
-                 return {"status": "rejected", "reason": f"Non-numeric metageneration for {physical_key}"}
+                 raise RuntimeError(f"Non-numeric metageneration for {physical_key}")
                  
             time_created = meta.get("timeCreated", "")
             updated = meta.get("updated", "")
             stored_at = meta.get("metadata", {}).get("stored-at", "")
             if not stored_at:
-                 return {"status": "rejected", "reason": f"Missing stored-at for {physical_key}"}
+                 raise RuntimeError(f"Missing stored-at for {physical_key}")
                  
             import datetime
             try:
@@ -371,9 +371,9 @@ def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]], check_
                 start = datetime.datetime.fromisoformat("2026-10-09T08:39:23+00:00")
                 end = datetime.datetime.fromisoformat("2026-10-09T09:04:10+00:00")
                 if not (start <= tc <= end) or not (start <= up <= end) or not (start <= sa <= end):
-                    return {"status": "rejected", "reason": f"Timestamps outside allowed window for {physical_key}"}
+                    raise RuntimeError(f"Timestamps outside allowed window for {physical_key}")
             except Exception:
-                return {"status": "rejected", "reason": f"Missing or invalid time boundaries for {physical_key}"}
+                raise RuntimeError(f"Missing or invalid time boundaries for {physical_key}")
                  
             validated_meta[physical_key] = meta
 
@@ -384,34 +384,34 @@ def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]], check_
             if check_authority: check_authority()
             body_res = runner("cat", BUCKET, f"{physical_key}#{meta['generation']}")
             if body_res.get("status") != "ok":
-                 return {"status": "rejected", "reason": f"Failed to read body for {physical_key}: {body_res.get('stderr')}"}
+                 raise RuntimeError(f"Failed to read body for {physical_key}: {body_res.get('stderr')}")
                  
             body_bytes = body_res.get("body", b"")
             hasher = hashlib.sha256()
             hasher.update(body_bytes)
             actual_sha256 = hasher.hexdigest()
             if actual_sha256 != EXPECTED_SHA256:
-                 return {"status": "rejected", "reason": f"Hash mismatch for {physical_key}"}
+                 raise RuntimeError(f"Hash mismatch for {physical_key}")
             
             if check_authority: check_authority()
             re_desc = runner("describe", BUCKET, physical_key)
             if re_desc.get("status") != "ok":
-                 return {"status": "rejected", "reason": f"Failed to describe on recheck for {physical_key}"}
+                 raise RuntimeError(f"Failed to describe on recheck for {physical_key}")
             re_meta = re_desc.get("metadata", {})
             if re_meta.get("bucket") != BUCKET:
-                 return {"status": "rejected", "reason": f"Bucket mismatch on recheck for {physical_key}"}
+                 raise RuntimeError(f"Bucket mismatch on recheck for {physical_key}")
             if re_meta.get("name") != physical_key:
-                 return {"status": "rejected", "reason": f"Object name mismatch on recheck for {physical_key}"}
+                 raise RuntimeError(f"Object name mismatch on recheck for {physical_key}")
             if str(re_meta.get("generation")) != str(meta["generation"]):
-                 return {"status": "rejected", "reason": f"Generation drift for {physical_key}"}
+                 raise RuntimeError(f"Generation drift for {physical_key}")
             if str(re_meta.get("metageneration")) != str(meta["metageneration"]):
-                 return {"status": "rejected", "reason": f"Metageneration drift for {physical_key}"}
+                 raise RuntimeError(f"Metageneration drift for {physical_key}")
             if re_meta.get("contentType") != EXPECTED_MIME or str(re_meta.get("size")) != str(EXPECTED_FILE_SIZE):
-                 return {"status": "rejected", "reason": f"Identity/type/size drift for {physical_key}"}
+                 raise RuntimeError(f"Identity/type/size drift for {physical_key}")
             if re_meta.get("timeCreated") != meta.get("timeCreated") or re_meta.get("updated") != meta.get("updated"):
-                 return {"status": "rejected", "reason": f"Timestamp drift for {physical_key}"}
+                 raise RuntimeError(f"Timestamp drift for {physical_key}")
             if re_meta.get("metadata", {}).get("stored-at") != meta.get("metadata", {}).get("stored-at"):
-                 return {"status": "rejected", "reason": f"Stored-at drift for {physical_key}"}
+                 raise RuntimeError(f"Stored-at drift for {physical_key}")
                  
             validated_reads.append({
                 "bucket": BUCKET,
@@ -887,54 +887,53 @@ def default_db_runner(query: str, params: List[Any], check_authority=None) -> Di
         if os.path.exists(proxy_path):
             proxy_process = subprocess.Popen([proxy_path, "--address=127.0.0.1", "--port=5432",
                                         f"{PROJECT}:{REGION}:{INSTANCE}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            # bounded readiness probe
-            import time
-            ready = False
-            for _ in range(15):
-                try:
-                    c = run_bounded(["psql", "-X", "-q", "-A", "-t", "--no-password", "-c", "SELECT 1"], env=env, timeout_sec=2)
-                    if c.returncode == 0:
-                        ready = True
-                        break
-                except Exception:
-                    pass
-                time.sleep(1)
-            if not ready:
-                proxy_process.terminate()
-                try:
-                    proxy_process.wait(timeout=5)
-                except Exception:
-                    proxy_process.kill()
-                    proxy_process.wait()
-                return {"error": "proxy readiness timeout"}
+            try:
+                # bounded readiness probe
+                import time
+                ready = False
+                for _ in range(15):
+                    try:
+                        if check_authority: check_authority()
+                        c = run_bounded(["psql", "-X", "-q", "-A", "-t", "--no-password", "-c", "SELECT 1"], env=env, timeout_sec=2)
+                        if c.returncode == 0:
+                            ready = True
+                            break
+                    except UnsupportedError:
+                        raise
+                    except Exception:
+                        pass
+                    time.sleep(1)
+                if not ready:
+                    return {"error": "proxy readiness timeout"}
+                    
+                if check_authority: check_authority()
+                sql_file = Path(td) / "query.sql"
+                sql_file.write_text(query)
+                
+                psql_cmd = ["psql", "-X", "-q", "-A", "-t", "--no-password", "--set=ON_ERROR_STOP=1", "--file=" + str(sql_file)]
+                res = run_bounded(psql_cmd, env=env, timeout_sec=30)
+                if res.returncode != 0:
+                    return {"error": f"psql failed"}
+                    
+                rows = []
+                for line in res.stdout.strip().split("\n"):
+                    if line:
+                        rows.append(line.split("|"))
+                return {"rows": rows}
+            except UnsupportedError:
+                raise
+            except Exception:
+                return {"error": "psql timeout"}
+            finally:
+                if proxy_process and proxy_process.poll() is None:
+                    proxy_process.terminate()
+                    try:
+                        proxy_process.wait(timeout=5)
+                    except Exception:
+                        proxy_process.kill()
+                        proxy_process.wait()
         else:
             return {"error": "cloud-sql-proxy not found"}
-            
-        try:
-            if check_authority: check_authority()
-            sql_file = Path(td) / "query.sql"
-            sql_file.write_text(query)
-            
-            psql_cmd = ["psql", "-X", "-q", "-A", "-t", "--no-password", "--set=ON_ERROR_STOP=1", "--file=" + str(sql_file)]
-            res = run_bounded(psql_cmd, env=env, timeout_sec=30)
-            if res.returncode != 0:
-                return {"error": f"psql failed"}
-                
-            rows = []
-            for line in res.stdout.strip().split("\n"):
-                if line:
-                    rows.append(line.split("|"))
-            return {"rows": rows}
-        except Exception:
-            return {"error": "psql timeout"}
-        finally:
-            if proxy_process and proxy_process.poll() is None:
-                proxy_process.terminate()
-                try:
-                    proxy_process.wait(timeout=5)
-                except Exception:
-                    proxy_process.kill()
-                    proxy_process.wait()
 
 
 def run_bounded(cmd, input_str=None, timeout_sec=30, max_stdout=512*1024, max_stderr=128*1024, env=None):
@@ -1312,6 +1311,10 @@ def main():
                 service_containers = val.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
                 service_implicit = len(service_containers) == 1 and "name" not in service_containers[0]
                 service_c_names = ["0"] if service_implicit else [sc.get("name", str(j)) for j, sc in enumerate(service_containers)]
+                
+                require(len(names) == len(service_c_names), f"Service/Revision container count mismatch for {s_name}")
+                require(set(names) == set(service_c_names), f"Service/Revision container name mismatch for {s_name}")
+                
                 service_image_map = {service_c_names[j]: sc.get("image", "") for j, sc in enumerate(service_containers)}
                 
                 primary_statuses = val.get("status", {}).get("containerStatuses")
@@ -1346,6 +1349,10 @@ def main():
                     if "@sha256:" in revision_reference:
                         require(digest == revision_reference, f"Revision pinned digest mismatch for {c_name}")
                         
+                    rev_primary_digest = rev_val.get("status", {}).get("imageDigest")
+                    if i == 0 and rev_primary_digest:
+                        require(digest == rev_primary_digest, f"Revision primary imageDigest mismatch for {c_name}")
+                        
                     if primary_statuses:
                         p_status = next((cs for cs in primary_statuses if cs.get("name") == service_lookup_key), None)
                         if p_status and p_status.get("imageDigest"):
@@ -1357,6 +1364,9 @@ def main():
                 require(len(images) > 0, f"No images found for {s_name}")
                 if s_name == "drts-dev-scanner":
                     require(set(images.keys()) == {"gateway", "clamd"}, "Scanner missing gateway or clamd")
+
+                expected_sa = "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com" if s_name == "drts-dev-scanner" else "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com"
+                require(rev_val.get("spec", {}).get("serviceAccountName") == expected_sa, f"Foreign serviceAccountName in revision for {s_name}")
 
                 service_meta = {
                     "ready_revision": ready_revision,
@@ -1595,7 +1605,7 @@ def main():
         report["error"] = str(e)
         out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": report}, indent=2)
         print(out)
-        sys.exit(0)
+        sys.exit(1)
     except Exception as e:
         report["disposition"] = "incomplete"
         report["error"] = str(e)[:128]
