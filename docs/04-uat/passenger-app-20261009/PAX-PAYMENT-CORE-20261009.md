@@ -993,3 +993,43 @@ Actual policy/expiry, lawful captured route/device/provider authority, real PG
 payment transaction/concurrency, HTTP/FCM/PSP acceptance and independent
 review/merge remain open. The original two acceptance keys remain unrecorded;
 no handoff, candidate, done or VM product hosting is claimed.
+
+## 2026-10-11 continuation: incompatible policy deadline validation
+
+Adjacent baseline is `d3b6742aa28b457e1d1c988673045518583b780a`, freshly
+equal to local HEAD, live remote branch and draft PR #2555. This dispatch
+does not have the requested foreign partner harness scope; its two root
+TS2345 errors remain open. The original scope-boundary probe and exact two-hunk
+request remain under canonical `.local/pax-payment-core-20261011-recovery-notice/`.
+
+Within already-owned Payment source, the actual policy validator accepted safe
+integer delays that cannot produce a finite JavaScript Date deadline. The
+registered supplement requires incompatible enabled policy to fail configuration
+before PSP execution. The real PassengerAppModule factories/Nest injector
+accepted both `Number.MAX_SAFE_INTEGER` and Date's maximum timestamp magnitude
+as a delay in either schedule. Adding a positive current epoch to either exceeds
+the date range. This is a representation defect, not an approved financial
+schedule or a change to retry counts, unknown-only readback or business policy.
+
+`validatePaymentCapturePolicy` now verifies that each explicit delay produces a
+finite Date deadline from the validation clock, before copying/freezing the
+schedule. The existing per-outcome deadline check remains in place. Actual module
+factory and service injection use that same validator; configuration errors stay
+sanitized and disabled configuration remains null.
+
+Evidence directory: `.local/pax-payment-core-20261011-policy-date-range/`, copied
+to canonical `.local/` before closeout. All commands use the assigned worker cwd,
+Node 22.23.2 / pnpm 10.33.0 / Vitest 4.1.4.
+
+| Finding / acceptance                                       | Actual source and old → repaired result                                                                                                                                                                                                | Completed command / result / evidence                                                                                                                                                                                                                                                                                                                                                   | Unverified limits                                                                                                                          |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Incompatible capture/readback deadline accepted at startup | Actual PassengerAppModule factories, configuration, validator and Nest injector; unchanged d3 product source **4 FAIL / 17 filter SKIP**, resolves configuration instead of rejecting → repaired full config file **21 PASS / 0 SKIP** | `pnpm --filter @drts/api exec vitest run tests/unit/payment-capture-config.test.ts -t 'rejects an unrepresentable'`, exit 1, `old-head-module-projected.log`; unfiltered same command, exit 0, `module-fixed.log`. Test body/prod diff and SHA retained; no active tree reset. Provider/session persistence are disclosed synthetic boundaries, not startup of an application or server | No actual policy values, deployment or PSP evidence supplied                                                                               |
+| Original policy and financial decision controls            | Production validator/disposition and charge workflow, including legal synthetic capture, retry, readback and manual recovery                                                                                                           | `pnpm exec vitest run tests/unit/pax-payment-core-20261009/capture-policy.test.ts tests/unit/pax-payment-core-20261009/charge-workflow.test.ts`: **72 PASS / 0 SKIP**, exit 0, `policy-charge-fixed.log`                                                                                                                                                                                | Database and fake PSP replies remain external mocks                                                                                        |
+| Initial assertion exposed synthetic fixture internals      | Vitest printed the resolved test runtime's synthetic cipher key bytes in its failed promise diff                                                                                                                                       | Initial identical **4 FAIL / 17 filter SKIP**, exit 1, `old-head-module.log`, retained. Assertion now projects success to undefined before comparing rejection; corrected old result rerun above no longer prints runtime/key objects                                                                                                                                                   | Synthetic fixture only, no real secret retrieved; initial log is not hidden or replaced                                                    |
+| Tooling / original hook chain                              | Dispatch again supplied root/API node*modules symlinks to canonical dependencies and omitted generated `.husky/*`                                                                                                                      | No install, relink or deletion performed; Vitest may write shared result cache. Existing canonical generated Husky wrappers copied into worktree only; `h` equals installed Husky script SHA256 `70200b200ca709b0622784f93839a5b2872333a917a09afddefd7dc2d8cdc680`; original Supervisor hooksPath preserved                                                                             | No claim that shared cache is unchanged; tooling is not product acceptance                                                                 |
+| pax-payment_bind_charge_and_states                         | Existing original bind/charge/refund/dual-state matrix retained; configuration defect repaired                                                                                                                                         | **Not recorded**; broader checks/publication results retained in this evidence bundle after completion                                                                                                                                                                                                                                                                                  | Foreign harness exact scope/root green CI, independent Codex2 review/protected merge and genuine PG/HTTP/PSP acceptance remain             |
+| pax-payment_security_and_recovery                          | Enabled incompatible policy now refused; original guards/token/claim/route matrix retained                                                                                                                                             | **Not recorded**                                                                                                                                                                                                                                                                                                                                                                        | Approved actual capture policy, explicit expiry, lawful persisted route/provider/device authority and real PG/FCM/PSP evidence remain open |
+
+This is a source checkpoint, not a candidate or handoff. All newly started
+checks must finish and be read before closeout; their final results and published
+identity are recorded in the evidence bundle. No VM product runtime was started.

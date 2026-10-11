@@ -11,6 +11,7 @@ import { PAYMENT_RUNTIME } from "../../src/modules/passenger-app/payment/payment
 import { PAYMENT_CAPTURE_POLICY } from "../../src/modules/passenger-app/payment/payment-capture.policy";
 import type { StoredCharge } from "../../src/modules/passenger-app/payment/payment-charge.repository";
 import type { PaymentRuntime } from "../../src/modules/passenger-app/payment/payment-runtime.config";
+import { FakePaymentProvider } from "../../src/modules/passenger-app/payment/fake-payment-provider";
 
 const source = process.env.PAX_PAYMENT_PASSENGER_MODULE_SOURCE;
 const {
@@ -38,7 +39,10 @@ const providerEnv = {
   }),
 };
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
 
 async function resolve(env: Record<string, string | undefined>) {
   for (const name of [
@@ -198,6 +202,34 @@ describe("actual PassengerAppModule payment policy factory and service injection
           PAX_PAYMENT_CAPTURE_POLICY: input,
         }),
       ).rejects.toThrow("payment_capture_configuration_invalid");
+    },
+  );
+
+  it.each([
+    ["retryDelaysMs", Number.MAX_SAFE_INTEGER],
+    ["unknownReadbackDelaysMs", Number.MAX_SAFE_INTEGER],
+    ["retryDelaysMs", 8_640_000_000_000_000],
+    ["unknownReadbackDelaysMs", 8_640_000_000_000_000],
+  ])(
+    "rejects an unrepresentable %s deadline (%s) in the actual module before money operations",
+    async (field, delay) => {
+      const capture = vi.spyOn(FakePaymentProvider.prototype, "capture");
+      const readCapture = vi.spyOn(
+        FakePaymentProvider.prototype,
+        "readCapture",
+      );
+      await expect(
+        resolve({
+          ...providerEnv,
+          PAX_PAYMENT_CAPTURE_ENABLED: "true",
+          PAX_PAYMENT_CAPTURE_POLICY: JSON.stringify({
+            ...policy,
+            [field]: [delay],
+          }),
+        }).then(() => undefined),
+      ).rejects.toThrow("payment_capture_configuration_invalid");
+      expect(capture).not.toHaveBeenCalled();
+      expect(readCapture).not.toHaveBeenCalled();
     },
   );
 

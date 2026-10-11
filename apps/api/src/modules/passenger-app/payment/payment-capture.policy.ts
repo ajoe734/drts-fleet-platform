@@ -33,11 +33,18 @@ export function validatePaymentCapturePolicy(
   )
     invalidPolicy();
   if (typeof policy.retryDefinitiveDeclines !== "boolean") invalidPolicy();
+  const now = Date.now();
   const delays = (input: unknown): readonly number[] => {
     if (
       !Array.isArray(input) ||
       Array.from(input).some(
-        (delay) => !Number.isSafeInteger(delay) || delay < 0,
+        (delay) =>
+          !Number.isSafeInteger(delay) ||
+          delay < 0 ||
+          // A safe integer can still overflow Date's narrower timestamp range.
+          // Reject incompatible configuration before any monetary operation;
+          // this is a representation limit, not a financial retry default.
+          !Number.isFinite(new Date(now + delay).getTime()),
       )
     )
       invalidPolicy();
