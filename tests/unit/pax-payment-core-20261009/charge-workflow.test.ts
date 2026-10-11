@@ -277,6 +277,123 @@ function fixture(policy: PaymentCapturePolicy | undefined = POLICY) {
 }
 
 describe("real completion/capture/retry service and SQL repository, synthetic PG replies", () => {
+  it.each([
+    "key",
+    "payment",
+    "owner",
+    "operation",
+    "entity",
+    "outcome",
+    "booking",
+  ])(
+    "refuses %s capture authority drift in retry, manual recovery and duplicate completion",
+    async (kind) => {
+      const f = fixture();
+      const disabled = new PaymentChargeService(f.repository, f.runtime);
+      await disabled.onTripCompleted(EVENT);
+      if (kind === "key") f.charge!.idempotency_key = `pax:capture:${METHOD}`;
+      if (kind === "payment") f.charge!.payment_id = `pax-payment:${METHOD}`;
+      if (kind === "owner") f.journal.drts_passenger_id = "synthetic_foreign";
+      if (kind === "operation") f.journal.operation = "refund";
+      if (kind === "entity") f.journal.entity_id = METHOD;
+      if (kind === "outcome") f.journal.outcome = "completed";
+      if (kind === "booking") f.source.drts_passenger_id = "synthetic_foreign";
+      const capture = vi.spyOn(f.provider, "capture");
+      const callsBefore = f.calls.length;
+      await expect(f.service.processOrder(ORDER, NOW)).rejects.toMatchObject({
+        code: "payment_state_conflict",
+      });
+      await expect(
+        f.service.beginManualRecovery(ORDER, `pax-payment:${ORDER}`),
+      ).rejects.toMatchObject({ code: "payment_state_conflict" });
+      await expect(disabled.onTripCompleted(EVENT)).rejects.toMatchObject({
+        code: "payment_state_conflict",
+      });
+      expect(capture).not.toHaveBeenCalled();
+      expect(f.charge?.attempt_count).toBe(0);
+      expect(
+        f.calls
+          .slice(callsBefore)
+          .some((call) => call.sql.startsWith("UPDATE ")),
+      ).toBe(false);
+    },
+  );
+
+  it.each(["readback", "captured", "manual_recovery"])(
+    "refuses a foreign capture journal in %s without PSP or ledger mutation",
+    async (state) => {
+      const f = fixture();
+      const capture = vi.spyOn(f.provider, "capture");
+      if (state !== "captured")
+        capture.mockResolvedValue({ status: "unknown" });
+      await f.service.onTripCompleted(EVENT);
+      if (state === "manual_recovery")
+        await f.service.beginManualRecovery(ORDER, `pax-payment:${ORDER}`);
+      f.journal.drts_passenger_id = "synthetic_foreign";
+      const read = vi.spyOn(f.provider, "readCapture");
+      const callsBefore = f.calls.length;
+      await expect(
+        f.service.processOrder(ORDER, new Date("2100-01-01T00:00:00Z")),
+      ).rejects.toMatchObject({ code: "payment_state_conflict" });
+      expect(capture).toHaveBeenCalledOnce();
+      expect(read).not.toHaveBeenCalled();
+      expect(
+        f.calls
+          .slice(callsBefore)
+          .some((call) => call.sql.startsWith("UPDATE ")),
+      ).toBe(false);
+    },
+  );
+
+  it.each(["charge", "billing", "journal"])(
+    "refuses %s zero-row begin write before PSP",
+    async (kind) => {
+      const f = fixture();
+      await new PaymentChargeService(f.repository, f.runtime).onTripCompleted(
+        EVENT,
+      );
+      f.setCountFault((sql) =>
+        sql.startsWith(
+          kind === "charge"
+            ? "UPDATE passenger.payment_charge_records SET status='failed'"
+            : kind === "billing"
+              ? "UPDATE billing.multi_taxi_passenger_payments SET status='failed'"
+              : "UPDATE passenger.payment_idempotency_keys SET outcome='unknown'",
+        ),
+      );
+      const capture = vi.spyOn(f.provider, "capture");
+      await expect(f.service.processOrder(ORDER, NOW)).rejects.toMatchObject({
+        code: "payment_state_conflict",
+      });
+      expect(capture).not.toHaveBeenCalled();
+      expect(f.calls.at(-2)?.sql).toBe("ROLLBACK");
+    },
+  );
+
+  it.each(["charge", "billing", "journal"])(
+    "refuses %s zero-row final write and never acknowledges capture",
+    async (kind) => {
+      const f = fixture();
+      f.setCountFault((sql) =>
+        sql.startsWith(
+          kind === "charge"
+            ? "UPDATE passenger.payment_charge_records SET status=$3"
+            : kind === "billing"
+              ? "UPDATE billing.multi_taxi_passenger_payments SET status=$2"
+              : "UPDATE passenger.payment_idempotency_keys SET outcome=$2",
+        ),
+      );
+      const capture = vi.spyOn(f.provider, "capture");
+      await expect(f.service.onTripCompleted(EVENT)).rejects.toMatchObject({
+        code: "payment_state_conflict",
+      });
+      expect(capture).toHaveBeenCalledOnce();
+      expect(f.calls.at(-2)?.sql).toBe("ROLLBACK");
+      // Row snapshots do not simulate rollback; assert the real transaction's
+      // refusal instead of claiming restored durable state.
+    },
+  );
+
   it("refuses retry whose capture journal belongs to a foreign owner", async () => {
     const f = fixture();
     await new PaymentChargeService(f.repository, f.runtime).onTripCompleted(

@@ -130,10 +130,12 @@ export class PaymentRefundSession extends PaymentChargeSession {
         [this.orderId, key, reason, actorId, operationId],
       );
       if (update.rowCount !== 1) conflict();
-      await this.client.query(
-        "UPDATE passenger.payment_idempotency_keys SET outcome='unknown',error_code=NULL,updated_at=now() WHERE idempotency_key=$1 AND operation='refund'",
-        [key],
+      const journalUpdate = await this.client.query(
+        `UPDATE passenger.payment_idempotency_keys SET outcome='unknown',error_code=NULL,updated_at=now()
+         WHERE idempotency_key=$1 AND operation='refund' AND drts_passenger_id=$2 AND entity_id=$3 AND outcome=$4`,
+        [key, current.passengerId, this.orderId, prior ? "unknown" : "pending"],
       );
+      if (journalUpdate.rowCount !== 1) conflict();
       return {
         charge: current,
         refund: {
@@ -198,11 +200,18 @@ export class PaymentRefundSession extends PaymentChargeSession {
         );
         if (billing.rowCount !== 1) conflict();
       }
-      await this.client.query(
+      const journal = await this.client.query(
         `UPDATE passenger.payment_idempotency_keys SET outcome=$2,error_code=$3,updated_at=now()
-         WHERE idempotency_key=$1 AND operation='refund'`,
-        [claim.refund.key, result.state, result.error],
+         WHERE idempotency_key=$1 AND operation='refund' AND drts_passenger_id=$4 AND entity_id=$5 AND outcome='unknown'`,
+        [
+          claim.refund.key,
+          result.state,
+          result.error,
+          current.passengerId,
+          this.orderId,
+        ],
       );
+      if (journal.rowCount !== 1) conflict();
     });
   }
 }

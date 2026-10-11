@@ -221,6 +221,41 @@ async function fixture() {
 }
 
 describe("formal full refund service/controller and repository with synthetic PG replies", () => {
+  it.each(["operation", "drts_passenger_id", "entity_id", "outcome"])(
+    "refuses refund whose capture journal has mismatched %s",
+    async (field) => {
+      const f = await fixture();
+      f.captureJournal[field] = "synthetic_foreign";
+      const refund = vi.spyOn(f.provider, "refund");
+      await expect(f.refund()).rejects.toMatchObject({
+        code: "payment_state_conflict",
+      });
+      expect(refund).not.toHaveBeenCalled();
+      expect(f.calls.some((call) => call.sql.startsWith("UPDATE "))).toBe(
+        false,
+      );
+    },
+  );
+
+  it.each(["begin", "final"])(
+    "refuses a %s zero-row refund journal write",
+    async (stage) => {
+      const f = await fixture();
+      const refund = vi.spyOn(f.provider, "refund");
+      f.setCountFault((sql) =>
+        sql.startsWith(
+          stage === "begin"
+            ? "UPDATE passenger.payment_idempotency_keys SET outcome='unknown'"
+            : "UPDATE passenger.payment_idempotency_keys SET outcome=$2",
+        ),
+      );
+      await expect(f.refund()).rejects.toMatchObject({ code: "invalid_state" });
+      if (stage === "begin") expect(refund).not.toHaveBeenCalled();
+      else expect(refund).toHaveBeenCalledOnce();
+      expect(f.calls.at(-2)?.sql).toBe("ROLLBACK");
+    },
+  );
+
   it("commits the single full refund claim before PSP and writes both authorities only after success", async () => {
     const f = await fixture();
     const original = f.provider.refund.bind(f.provider);
