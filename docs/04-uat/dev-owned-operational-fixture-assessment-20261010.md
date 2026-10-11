@@ -47,12 +47,12 @@ The workflow restricts secrets, body, and non-fixture rows. It produces a bounde
 ## Local Execution Evidence
 
 ```
-Command: python3 -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_assessment.py -v
+Command: python3 -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_assessment.py
 CWD: /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-dev-owned-operational-fixture-assessment-20261010
 Version: Python 3.12
 Exit: 0
 Log:
-Ran 18 tests in 0.140s
+Ran 24 tests in 0.130s
 OK
 ```
 

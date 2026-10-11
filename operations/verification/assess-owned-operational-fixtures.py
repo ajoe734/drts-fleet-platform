@@ -1309,6 +1309,10 @@ def main():
                 for k, img in service_image_map.items():
                     require(regex_mod.split(r"[@:]", img, maxsplit=1)[0].startswith(f"us-central1-docker.pkg.dev/{PROJECT}/drts/"), f"Invalid service image {img} for {s_name}")
 
+                expected_sa = "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com" if s_name == "drts-dev-scanner" else "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com"
+                service_sa = val.get("spec", {}).get("template", {}).get("spec", {}).get("serviceAccountName")
+                require(service_sa == expected_sa, f"Foreign serviceAccountName in service for {s_name}")
+
                 check_held_window(args)
                 res_rev = run_bounded(["gcloud", "run", "revisions", "describe", ready_revision, "--project", PROJECT, "--region", REGION, "--format=json"], timeout_sec=30)
                 require(res_rev.returncode == 0, f"Failed to describe revision {ready_revision}")
@@ -1402,9 +1406,6 @@ def main():
                 if s_name == "drts-dev-scanner":
                     require(set(images.keys()) == {"gateway", "clamd"}, "Scanner missing gateway or clamd")
 
-                expected_sa = "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com" if s_name == "drts-dev-scanner" else "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com"
-                service_sa = val.get("spec", {}).get("template", {}).get("spec", {}).get("serviceAccountName")
-                require(service_sa == expected_sa, f"Foreign serviceAccountName in service for {s_name}")
                 require(rev_val.get("spec", {}).get("serviceAccountName") == expected_sa, f"Foreign serviceAccountName in revision for {s_name}")
 
                 service_meta = {
@@ -1456,9 +1457,9 @@ def main():
 
                 metadata["services"][s_name] = service_meta
 
+            check_held_window(args)
             with open(args.acquire_cloud_metadata_to, 'w') as f:
                 json.dump(metadata, f, indent=2)
-            check_held_window(args)
             print("Fixed inventory metadata collected boundedly: 27 reads")
             sys.exit(0)
 
