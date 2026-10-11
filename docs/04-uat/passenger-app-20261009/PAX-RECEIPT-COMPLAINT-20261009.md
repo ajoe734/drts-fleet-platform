@@ -6,7 +6,7 @@ Owner: Codex2. Independent reviewer: Codex. Updated: 2026-10-11 UTC.
 The original task and both acceptance keys remain. This artifact is the original
 task's finding/evidence record, not a replacement task or acceptance waiver.
 
-## Authority and execution identity
+## Initial intake checkpoint: authority and execution identity
 
 - Read `AI_COLLABORATION_GUIDE.md`, including §0.7, the full original
   `.local/passenger-app-20261009/{common.md,PAX-RECEIPT-COMPLAINT-20261009.md}`
@@ -40,7 +40,7 @@ task's finding/evidence record, not a replacement task or acceptance waiver.
   Husky installation while preserving the configured task guard path. Root
   dependency links were not changed. This setup is not product evidence.
 
-## Implemented independently verifiable unit
+## Initial intake checkpoint: independently verifiable unit
 
 `PassengerComplaintController.create` publishes
 `POST /api/passenger-app/rides/:id/complaints` with passenger realm metadata.
@@ -94,7 +94,7 @@ module only appends the complaint module import, controller and provider.
 This is a static column/type/predicate/argument comparison. SQL mocks do not
 prove migration application, actual PG locking, constraints or concurrent retries.
 
-## Findings and original acceptance evidence
+## Initial intake checkpoint: findings and original acceptance evidence
 
 | Finding / acceptance                                    | Source and modification                                                                                                                                                                     | Old → checkpoint result                                                                                                                                                                                                                                        | Command/version/evidence                                                                                                                                                                                           | Unverified / limit                                                                                                                                                                                                                  |
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -106,7 +106,7 @@ prove migration application, actual PG locking, constraints or concurrent retrie
 | F-AUDIT-ACTOR                                           | `packages/contracts/src/index.ts:AuditLogRecord.actorType`                                                                                                                                  | Adding honest first_party_passenger central audit exposed an actual type mismatch; removed the unsupported central-audit call so source compiles. Original actor is durably retained in V0114, but central audit integration is **pending**.                   | Initial API typecheck exit 2; corrected checkpoint API typecheck/build exit 0. No cast/any or forged system/tenant identity used.                                                                                  | Supervisor must coordinate append-only actor contract scope before central passenger audit integration.                                                                                                                             |
 | Prior paths and integrated regression                   | Existing certificate service and Booking/complaint production paths                                                                                                                         | Source/API regression checks pass; backend platform certificate route metadata and source remain unchanged.                                                                                                                                                    | Root affected suite 208 passed (includes first 37 intake cases), API suite 44 passed; exits 0 and finished/read. See command table below.                                                                          | Scoped tests are not full CI, platform HTTP/browser or external acceptance.                                                                                                                                                         |
 
-### E-04 thirteen-field mapping (still incomplete)
+### E-04 thirteen-field mapping at the initial intake checkpoint
 
 | Canonical E-04 field                   | Existing actual source / current gap                                                                                                                                         |
 | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -124,7 +124,7 @@ prove migration application, actual PG locking, constraints or concurrent retrie
 | 12 Service phone                       | Actual producer default is still 0800-090-000; canonical content requires 02-2944-0985.                                                                                      |
 | 13 Authority complaint phone           | Actual event configurable authorityComplaintPhone; preserve lawful configured value, not a guessed regulator.                                                                |
 
-## Exact Supervisor scope/seam request
+## Initial Supervisor scope/seam request (resolution below)
 
 The specified `apps/api/src/modules/multi-taxi/certificate-support.*` files do
 not exist. Do not copy a second generator into that path. Under Guide §0.7,
@@ -163,7 +163,7 @@ coordinate original task leases and append-only contracts for these actual layer
 No Supervisor/tooling/CI/deploy source change, extra task/helper, manual worker,
 VM runtime, real provider call, external account or secret operation is requested.
 
-## Completed commands and evidence limits
+## Initial intake checkpoint commands and evidence limits
 
 All commands ran in the assigned worktree; Node v22.23.2, pnpm 10.33.0,
 TypeScript 5.9.3, Vitest 4.1.4. Product source version is the full checkpoint
@@ -189,3 +189,142 @@ Machine-specific command logs are under this worktree's `.local/pax-receipt-comp
 The probe and test are tracked, so the checks can be rerun without those logs.
 No earlier Booking green CI or platform-only renderer test is treated as receipt
 CI, passenger download acceptance or complete E-04 coverage.
+
+## Same original task: registered certificate scope supplement
+
+While this owner was still running, Supervisor registered
+`.local/continue-completion-frontier-20261011T0710Z/PAX-RECEIPT-EXACT-ACTUAL-CERTIFICATE-PRODUCER-SEAM-SUPPLEMENT.md`
+(SHA-256 `1c7233ec54f95280223eba69645f4365b3b8f1fa47a18c2bf345d457ea791c87`)
+and appended the actual certificate/event/token adapter files and
+`packages/contracts/src/passenger-app.ts` to this task. The full supplement was
+read before changing those files. The original owner/reviewer, task/branch,
+thirteen fields, keys and environment/actual-source restrictions remain binding.
+
+Published source checkpoint:
+`abf5e684cf4464fa0f36d0dcf534d53a651f060a`. Retains both earlier checkpoints;
+no rebase/amend/reset/force. Remote dev advanced only with unrelated web auth
+PR #2554 (`2f6ec0ccbb7f102a99052fc7a08995056ebb1ea4`); fetch/PR/source-diff inspection
+showed no overlap in these receipt source files. No candidate was locked or
+rewritten because trunk advanced.
+
+### Implemented within the supplement
+
+- `OwnedMobilityMultiTaxiTripCompletedEvent` now has an optional typed captured
+  `CertificateE04Snapshot`. `writeCompletedTrip` persists only a validated supplied
+  snapshot and rejects incomplete/unmasked capture before SQL. Missing upstream
+  capture is still missing; the producer does not synthesize one from quotes,
+  driver display names, current authorization identity or payment token intent.
+- The private service phone default used only by
+  `buildMultiTaxiCertificateEvent` changes from 0800-090-000 to 02-2944-0985.
+  The actual producer/event/fare/toll/time/currency/fixed-fare/emission logic is
+  otherwise unchanged. A conflicting configured phone makes passenger E-04
+  unavailable rather than silently rewriting saved history.
+- `CertificateSupportService.getPassengerView/getPassengerArtifact` validate the
+  authorized order against the canonical certificate row and require all original
+  artifact blockers plus captured operator/surname/masked registration/four actual
+  fare components/payment method and canonical service phone. Missing numeric
+  fields return blockers; no zero default is saved or rendered as a captured fact.
+- The existing HTML/PDF renderer emits all thirteen-field labels/values for a
+  complete capture, escapes HTML/XML and preserves masked credentials. Minor
+  units display with two decimal places for captured E-04; legacy output retains
+  its original rows/format. No new renderer or format/provider dependency is added.
+- `CertificateSupportModule` exports the existing service; `MultiTaxiModule`
+  imports that same module. Its existing platform controller, writer listener,
+  repository, regeneration, versions/supersession, audit and currency/state rules
+  remain. The passenger module only appends the receipt controller.
+- Account APIs: `GET /api/passenger-app/rides/:id/receipt/downloads` and
+  `/receipt/artifacts/{html,pdf}`. Account adapters run actual Booking ownership
+  first; the MultiTaxi receipt resolver also verifies the order's passenger
+  subject. Existing `/receipt` metadata's receiptUrl now points to the authorized
+  HTML adapter through the scoped MultiTaxi mapping; the Booking controller's
+  existing receipt handler is unchanged.
+- Token APIs: `GET /api/passenger-rides/:accessToken/receipt/downloads` and
+  `/receipt/artifacts/{html,pdf}`. Downloads use the original digest/scope guard,
+  refresh a durable token lookup to observe revocation after prior reads, and
+  validate the token's subject against its own order. No certificate/order ID from
+  the requester can substitute the authorized token order. Existing token metadata
+  now maps to the authorized artifact URLs; existing platform URLs stay unchanged.
+- Descriptors preserve `PassengerReceiptResponse.receiptUrl` and append readonly
+  htmlUrl/pdfUrl/certificateId/orderId. Actual JSON is snake_case through the existing
+  serializer; StreamableFile is already exempt from JSON conversion. New download
+  adapters set private/no-store, no-referrer, nosniff, restrictive CSP and safe
+  attachment filenames. No BFF/browser transport success is claimed.
+
+### Updated finding-level results (previous findings retained)
+
+| Finding / original key                                  | Previous → source checkpoint result                                                                                                                                                                                                                                                                            | Finished checks / evidence                                                                                                                                                                                                                                                                                                                                                                                                                                   | Remaining exact gate                                                                                                                                                           |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| F-E04 / `pax-receipt_e04_fields_and_passenger_download` | Original real producer still has no captured operator/surname/actual four-component fare/payment facts. Phone default is fixed. Downstream actual writer/repository/view/HTML/PDF/authorized account-token adapters map a supplied unit capture correctly and fail closed when it is absent. **Not accepted.** | `receipt-download.test.ts`: 20 pass, exit 0, SQL/captured-event fixtures explicitly labeled; positive HTML/PDF bytes, field mapping, escaping, MIME/filename/headers, foreign ownership, unknown certificate, scope, expiry, revocation after cached read, wrong subject and DB outage negatives. `e04-source-probe.mjs`: actual producer→writer→both renders still exits 2 with E04_REQUIREMENTS_UNMET, and passenger readiness is PASSENGER_E04_NOT_READY. | A typed lawful immutable upstream capture remains unavailable. Fixtures do not satisfy the actual producer acceptance, PG, HTTP/BFF/browser or lawful issuer/provider witness. |
+| New account session/download guards                     | Real production guard accepts new receipt controller routes in development/staging/production, rejects the same token after logout and rejects valid platform or missing credentials.                                                                                                                          | `receipt-auth.test.ts`: 12 pass using real JWT/account/session/BootstrapAuthGuard plus in-memory account persistence; no API server.                                                                                                                                                                                                                                                                                                                         | Deleted-account/HTTP/browser behavior still needs original hosted QA.                                                                                                          |
+| Prior platform path positives                           | Existing platform rows without E-04 capture still yield original HTML/PDF bytes and route URLs; passenger downloads refuse that incomplete row.                                                                                                                                                                | Existing certificate suite 20 pass, plus new platform positive case. Same original controller/scopes are unchanged.                                                                                                                                                                                                                                                                                                                                          | Platform HTTP/backend role witness remains hosted QA.                                                                                                                          |
+| F-LOW-RATING / `pax-complaint_intake_and_low_rating`    | Direct intake/lost item 38 pass. Rating hook remains unfixed: controller drops contactRequested; canonical rating transaction cannot bind consent and CRM intake atomically.                                                                                                                                   | Full affected regression after supplement: 11 files / 246 cases pass (includes 38 intake, 20 downloads, 12 new guard cases and prior Booking/CRM/certificate tests).                                                                                                                                                                                                                                                                                         | Exact MultiTaxiRepository transaction seam and original E-18 invariants; no acceptance claim.                                                                                  |
+| F-OPS-REPLICA                                           | Same-process/restart CRM visibility remains verified. Live peer replicas still read startup caches.                                                                                                                                                                                                            | Actual existing retrieval/source inspection; no new fake cache witness.                                                                                                                                                                                                                                                                                                                                                                                      | Authorize narrow passenger-source Ops read refresh/repository read integration in existing module.                                                                             |
+| F-AUDIT-ACTOR                                           | Passenger actor/consent remain durably attributable through V0114. Central audit integration still lacks a supported first_party_passenger actor in shared contract.                                                                                                                                           | Source typecheck/build pass without forged actor or type cast.                                                                                                                                                                                                                                                                                                                                                                                               | Append-only AuditLogRecord.actorType scope/caller coordination, not included in the ten-file supplement.                                                                       |
+
+The supplied positive capture in the downstream unit suite is an **external unit
+fixture**, not output from the actual completion producer or evidence of a real
+issuer/fare/payment capture. It is deliberately separate from the actual producer
+probe that remains failing. No known finding or acceptance requirement is removed.
+
+### Exact remaining boundaries for Supervisor coordination
+
+1. `OwnedMobilityService.buildMultiTaxiCertificateEvent` has order/task/completion
+   command/proof facts only. `DriverCompleteTaskCommand` supplies aggregate fare,
+   distance/duration/proof; no actual start/distance/delay/night charge capture.
+   `PassengerDispatchDisclosureSnapshot` supplies displayName and a masked
+   credential, without a dedicated surname or captured lawful fleet issuer name.
+   The order's opaque paymentMethodTokenRef does not prove the actual settled
+   payment method. Resolve the precise authoritative capture contract with the
+   existing completion/registry/payment owners before extending the producer.
+   Further schema/driver completion/public contracts/BFF/billing changes remain
+   outside the supplement. Do not derive surname or issuer arbitrarily or split
+   aggregate/quote amounts into invented actual components.
+2. `apps/api/src/modules/multi-taxi/multi-taxi.repository.ts`:
+   `persistPassengerRating` owns its independent BEGIN/COMMIT and lacks a consent/
+   complaint transaction callback. This file is still outside scopes.
+   Also `findElectronicReceipt` selects the first order row without is_current or
+   deterministic version ordering, unlike the canonical certificate repository.
+   A regenerated order can therefore resolve an older receipt; coordinate the
+   precise current-version read hunk, preserving existing platform/history paths.
+3. Original Booking edits are still limited to the rating hook. No new code has
+   dropped completed/paid/24-hour/score/comment/immutability requirements; those
+   original E-18 behaviors remain unresolved and must be implemented with the
+   coordinated durable rating-intake seam, including explicit opt-out retry state.
+4. Existing complaint scope only covers passenger creation. The actual Ops
+   `listComplaintCases/getComplaintCase/getComplaintTimeline` reads process memory
+   loaded onModuleInit. Approve the narrow passenger-source fresh retrieval layer
+   so a live peer Cloud Run instance sees newly created canonical CRM cases.
+5. `packages/contracts/src/index.ts:AuditLogRecord.actorType` still excludes
+   first_party_passenger. Resolve append-only actor contract scope and affected
+   consumers before central passenger audit integration.
+
+No product runtime, DB, HTTP/browser server, real provider, cloud metadata/secret,
+deployment or external acceptance workflow was started on this VM.
+
+### Final supplement command receipts
+
+Source execution version:
+`abf5e684cf4464fa0f36d0dcf534d53a651f060a`; subsequent test/evidence edits do not
+change product source. All checks below completed and their results were read.
+
+- API build including contracts/control-plane-auth prebuilds: PASS 0.
+- Existing API certificate suite: 20 PASS, exit 0;
+  `.local/pax-receipt-complaint-20261009/certificate-regression-final.log`.
+- Root affected regression command adds
+  `tests/unit/system-remediation/sr-qa-reports-001/c098-electronic-ride-certificate.test.ts`
+  to the initial affected-suite command: 246 PASS / 11 files, exit 0;
+  `regression-after-supplement.log`.
+- First download fixture run and root typecheck failed because the test attempted
+  nonexistent StreamableFile.getBuffer. Corrected the fixture to consume the real
+  getStream transport; final 20 PASS / exit 0 and root typecheck PASS 0;
+  `download-final.log`, `root-typecheck-download-final.log`. This initial fixture
+  failure is not a reproduced product defect or acceptance evidence.
+- New scopes pass original Husky lint/format/message gates. Additional final
+  scoped lint, formatting, classification, whitespace and immutable-base range
+  trailer/identity/scope checks run before ordinary push/PR checkpoint publication.
+- Actual producer probe remains FAIL 2. Final log:
+  `e04-source-gap-after-supplement.log`; default phone now 02-2944-0985, captured
+  E-04 facts still absent. Probe is a source-gap witness, not a passing test.
+- Original PG/HTTP/browser/provider, same-candidate CI/review/merge and both
+  required acceptance keys remain unfulfilled. No complete candidate is handed
+  off; branch checkpoints/draft PR preserve source for original-owner continuation.

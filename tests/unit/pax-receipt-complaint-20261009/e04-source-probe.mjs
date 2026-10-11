@@ -74,6 +74,13 @@ async function main() {
     ...missingHtml.map((field) => `html:${field}`),
     ...missingPdf.map((field) => `pdf:${field}`),
   ];
+  let passengerReadiness;
+  try {
+    await certificates.getPassengerView(row.receiptId, event.orderId);
+    passengerReadiness = "ready";
+  } catch (error) {
+    passengerReadiness = error.code;
+  }
   if (event.consumerServicePhone !== "02-2944-0985")
     gaps.push("default_service_phone");
   console.log(
@@ -90,6 +97,7 @@ async function main() {
         missingHtml,
         missingPdf,
         gaps,
+        passengerReadiness,
         conclusion: gaps.length
           ? "E04_REQUIREMENTS_UNMET"
           : "source_mapping_present_only_not_acceptance",

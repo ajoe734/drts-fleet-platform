@@ -1,0 +1,425 @@
+import { createHash } from "node:crypto";
+import type { StreamableFile } from "../../../apps/api/node_modules/@nestjs/common";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CertificateSupportRepository } from "../../../apps/api/src/modules/certificate-support/certificate-support.repository";
+import { CertificateSupportService } from "../../../apps/api/src/modules/certificate-support/certificate-support.service";
+import { CertificateSupportController } from "../../../apps/api/src/modules/certificate-support/certificate-support.controller";
+import { MultiTaxiRepository } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
+import { MultiTaxiService } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
+import { MultiTaxiController } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.controller";
+import { PassengerReceiptController } from "../../../apps/api/src/modules/passenger-app/receipt/passenger-receipt.controller";
+import type { RequestIdentity } from "../../../apps/api/src/common/auth/auth.types";
+import type { CertificateE04Snapshot } from "../../../apps/api/src/modules/certificate-support/certificate-support.types";
+import type { OwnedMobilityMultiTaxiTripCompletedEvent } from "../../../apps/api/src/modules/owned-mobility/owned-mobility-events";
+import type { PassthroughResponseLike } from "../../../apps/api/src/common/idempotency-http";
+import {
+  createProductionBookingFixture,
+  NOW,
+} from "../pax-booking-history-20261009/production-booking-fixture";
+
+const OWNER = "drts_passenger_11111111-1111-4111-8111-111111111111";
+const OTHER = "drts_passenger_22222222-2222-4222-8222-222222222222";
+const identity = {
+  realm: "passenger",
+  actorType: "first_party_passenger",
+  drtsPassengerId: OWNER,
+} as RequestIdentity;
+async function readBytes(file: StreamableFile): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of file.getStream())
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
+
+const capture: CertificateE04Snapshot = {
+  fleetOperatorName: "unit-operator <escaped>",
+  driverSurname: "測",
+  driverRegistrationMasked: "••••1234",
+  fareBreakdown: {
+    startMinor: 8500,
+    distanceMinor: 1000,
+    delayMinor: 500,
+    nightMinor: 0,
+  },
+  paymentMethodDisplay: "unit-card",
+};
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW);
+  vi.stubEnv("REQUIRE_SMS_VERIFICATION", "false");
+  vi.stubEnv("SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES", "15");
+  vi.stubEnv("MULTI_TAXI_DEFAULT_AUTHORIZATION_ID", "");
+  vi.stubEnv("PASSENGER_RIDE_TOKEN_PEPPER", "");
+});
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
+
+async function fixture(complete = true) {
+  const booking = createProductionBookingFixture();
+  const created = await booking.service.createRide(OWNER, booking.command);
+  const orderId = created.ride.order.orderId;
+  const tokenValue = "unit-receipt-token";
+  const tokenHash = createHash("sha256")
+    .update(`\0${tokenValue}`)
+    .digest("hex");
+  const token = {
+    token_id: "11111111-1111-4111-8111-111111111111",
+    order_id: orderId,
+    passenger_subject_ref: OWNER,
+    scopes: ["receipt:read"],
+    expires_at: new Date(NOW + 3600000).toISOString(),
+    revoked_at: null as string | null,
+  };
+  const transport = {
+    tokenKnown: true,
+    row: undefined as Record<string, unknown> | undefined,
+    failLookup: false,
+  };
+  const queries: { sql: string; values: readonly unknown[] }[] = [];
+  const originalQuery = booking.database.query.bind(booking.database);
+  vi.spyOn(booking.database, "query").mockImplementation(
+    async (sql, values = []) => {
+      queries.push({ sql, values });
+      if (sql.includes("FROM ops.passenger_ride_access_tokens")) {
+        if (transport.failLookup) throw new Error("token storage failure");
+        return {
+          rows:
+            transport.tokenKnown && values[0] === tokenHash
+              ? [structuredClone(token)]
+              : [],
+        } as never;
+      }
+      if (
+        sql.includes("INSERT INTO reporting.multi_taxi_electronic_receipts")
+      ) {
+        transport.row = {
+          receipt_id: values[0],
+          order_id: values[1],
+          receipt_no: values[2],
+          receipt_version: 1,
+          is_current: true,
+          supersedes_receipt_id: null,
+          regeneration_idempotency_key: null,
+          regenerated_by_actor_id: null,
+          regeneration_reason: null,
+          regeneration_audit_id: null,
+          amount_minor: values[3],
+          currency: values[4],
+          issued_at: values[5],
+          record: JSON.parse(values[6] as string),
+        };
+        return { rows: [] } as never;
+      }
+      if (sql.includes("FROM reporting.multi_taxi_electronic_receipts")) {
+        const matches =
+          transport.row &&
+          [
+            transport.row.order_id,
+            transport.row.receipt_id,
+            transport.row.receipt_no,
+          ].includes(values[0]);
+        return { rows: matches ? [transport.row] : [] } as never;
+      }
+      return originalQuery(sql, values);
+    },
+  );
+  const certificates = new CertificateSupportService(
+    new CertificateSupportRepository(booking.database),
+  );
+  // External immutable capture is a unit fixture. The actual production emitter
+  // cannot yet supply it; e04-source-probe.mjs separately proves that blocker.
+  const event: OwnedMobilityMultiTaxiTripCompletedEvent = {
+    runtimeProfileCode: "multi_taxi_direct",
+    orderId,
+    tripId: "unit-trip",
+    plateNo: "UNIT-01",
+    pickupAt: new Date(NOW - 600000).toISOString(),
+    dropoffAt: new Date(NOW).toISOString(),
+    travelDurationSeconds: 600,
+    routeSummary: "unit-origin → unit-destination",
+    distanceMeters: 2000,
+    fareMinor: 10000,
+    tollMinor: 0,
+    currency: "TWD",
+    consumerServicePhone: "02-2944-0985",
+    authorityComplaintPhone: "unit-authority",
+    completedAt: new Date(NOW).toISOString(),
+    ...(complete ? { e04Snapshot: structuredClone(capture) } : {}),
+  };
+  await certificates.writeCompletedTrip(event);
+  const multi = new MultiTaxiService(
+    booking.owned,
+    new MultiTaxiRepository(booking.database),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    certificates,
+  );
+  const headers: Record<string, string> = {};
+  const response: PassthroughResponseLike = {
+    status() {},
+    setHeader(name, value) {
+      headers[name] = value;
+    },
+  };
+  return {
+    booking,
+    orderId,
+    tokenValue,
+    token,
+    transport,
+    queries,
+    certificates,
+    multi,
+    event,
+    headers,
+    response,
+    account: new PassengerReceiptController(booking.service, multi),
+    tokenController: new MultiTaxiController(multi),
+    platform: new CertificateSupportController(certificates),
+    row: () => transport.row!,
+  };
+}
+
+describe("captured E04 downstream mapping and authorized downloads (SQL fixtures, not acceptance)", () => {
+  it.each(["html", "pdf"] as const)(
+    "serves own account and token %s bytes through the actual writer/repositories/renderer",
+    async (format) => {
+      const f = await fixture();
+      const account = await f.account[format](identity, f.orderId, f.response);
+      const token =
+        format === "html"
+          ? await f.tokenController.getPassengerReceiptHtml(
+              f.tokenValue,
+              f.response,
+            )
+          : await f.tokenController.getPassengerReceiptPdf(
+              f.tokenValue,
+              f.response,
+            );
+      const content = await readBytes(account);
+      expect(content).toEqual(await readBytes(token));
+      expect(account.getHeaders().type).toBe(
+        format === "html" ? "text/html; charset=utf-8" : "application/pdf",
+      );
+      expect(account.getHeaders().disposition).toMatch(
+        /^attachment; filename="MTX-/,
+      );
+      const bytes = content.toString("utf8");
+      const text =
+        format === "html"
+          ? bytes
+          : [...bytes.matchAll(/<([A-F0-9]+)> Tj/g)]
+              .map((m) =>
+                Buffer.from(m[1]!, "hex").swap16().toString("utf16le"),
+              )
+              .join("\n");
+      for (const label of [
+        "車隊／派遣業者",
+        "車牌",
+        "駕駛",
+        "上車時間",
+        "下車時間",
+        "路線",
+        "里程",
+        "行駛時間",
+        "起程",
+        "續程",
+        "延滯計時",
+        "夜間加成",
+        "通行費",
+        "車資合計",
+        "支付方式",
+        "客服電話",
+        "主管機關申訴電話",
+      ])
+        expect(text).toContain(label);
+      expect(text).toContain("••••1234");
+      expect(text).toContain("02-2944-0985");
+      expect(text).toContain("TWD 85.00");
+      expect(text).toContain("TWD 100.00");
+      if (format === "html") {
+        expect(text).toContain("unit-operator &lt;escaped&gt;");
+        expect(text).not.toContain("unit-operator <escaped>");
+      }
+      expect(f.headers["Cache-Control"]).toBe("private, no-store");
+      expect(f.headers["Referrer-Policy"]).toBe("no-referrer");
+      expect(f.headers["X-Content-Type-Options"]).toBe("nosniff");
+      expect(
+        f.queries.some((q) =>
+          q.sql.includes("FROM passenger.booking_histories"),
+        ),
+      ).toBe(true);
+      expect(
+        f.queries.some((q) => q.sql.includes("WHERE token_digest = $1")),
+      ).toBe(true);
+    },
+  );
+
+  it("returns only authorized descriptors and preserves the existing receiptUrl field", async () => {
+    const f = await fixture();
+    const account = (await f.account.downloads(identity, f.orderId, f.response))
+      .data;
+    const token = (
+      await f.tokenController.getPassengerReceiptDownloads(
+        f.tokenValue,
+        f.response,
+      )
+    ).data;
+    expect(account.receiptUrl).toBe(account.htmlUrl);
+    expect(account.pdfUrl).toBe(
+      `/api/passenger-app/rides/${f.orderId}/receipt/artifacts/pdf`,
+    );
+    expect(token.receiptUrl).toBe(token.htmlUrl);
+    expect(token.pdfUrl).toBe(
+      `/api/passenger-rides/${f.tokenValue}/receipt/artifacts/pdf`,
+    );
+    expect(
+      (await f.multi.getTrustedPassengerReceipt(f.orderId, OWNER)).record
+        .htmlUrl,
+    ).toBe(account.htmlUrl);
+    expect(
+      (await f.multi.getPassengerReceipt(f.tokenValue)).record.pdfUrl,
+    ).toBe(token.pdfUrl);
+    const platform = await f.certificates.get(f.row().receipt_id as string);
+    expect(platform.htmlUrl).toContain(
+      "/control-plane-proxy/platform-admin/multi-taxi/certificates/",
+    );
+  });
+
+  it.each(["foreign", "unknown", "malformed"])(
+    "rejects %s account ownership before rendering",
+    async (scenario) => {
+      const f = await fixture();
+      const id =
+        scenario === "foreign"
+          ? f.orderId
+          : scenario === "unknown"
+            ? "33333333-3333-4333-8333-333333333333"
+            : "bad";
+      const actor =
+        scenario === "foreign"
+          ? ({ ...identity, drtsPassengerId: OTHER } as RequestIdentity)
+          : identity;
+      for (const format of ["html", "pdf"] as const)
+        await expect(
+          f.account[format](actor, id, f.response),
+        ).rejects.toMatchObject({ code: "PASSENGER_RIDE_NOT_FOUND" });
+      await expect(
+        f.multi.getTrustedPassengerReceiptArtifact(f.orderId, OTHER, "html"),
+      ).rejects.toMatchObject({ code: "PASSENGER_RIDE_NOT_FOUND" });
+    },
+  );
+
+  it.each([
+    "revoked",
+    "expired",
+    "invalid_expiry",
+    "wrong_scope",
+    "wrong_subject",
+    "unknown",
+  ])(
+    "denies %s tokens even after a prior successful receipt download",
+    async (scenario) => {
+      const f = await fixture();
+      await f.multi.getPassengerReceiptArtifact(f.tokenValue, "html");
+      if (scenario === "revoked")
+        f.token.revoked_at = new Date(NOW).toISOString();
+      if (scenario === "expired")
+        f.token.expires_at = new Date(NOW).toISOString();
+      if (scenario === "invalid_expiry") f.token.expires_at = "invalid";
+      if (scenario === "wrong_scope") f.token.scopes = ["ride:read"];
+      if (scenario === "wrong_subject") f.token.passenger_subject_ref = OTHER;
+      if (scenario === "unknown") f.transport.tokenKnown = false;
+      for (const format of ["html", "pdf"] as const)
+        await expect(
+          f.multi.getPassengerReceiptArtifact(f.tokenValue, format),
+        ).rejects.toBeInstanceOf(Error);
+    },
+  );
+
+  it("fails closed on a live token storage outage", async () => {
+    const f = await fixture();
+    await f.multi.getPassengerReceiptArtifact(f.tokenValue, "html");
+    f.transport.failLookup = true;
+    await expect(
+      f.multi.getPassengerReceiptArtifact(f.tokenValue, "pdf"),
+    ).rejects.toThrow("token storage failure");
+  });
+
+  it("refuses a mismatched certificate row even with a valid owner/token", async () => {
+    const f = await fixture();
+    f.row().order_id = "33333333-3333-4333-8333-333333333333";
+    // A poisoned SQL metadata link cannot bypass the canonical certificate order check.
+    await expect(
+      f.certificates.getPassengerArtifact(
+        f.row().receipt_id as string,
+        f.orderId,
+        "html",
+      ),
+    ).rejects.toMatchObject({ code: "CERTIFICATE_NOT_FOUND" });
+  });
+
+  it("legacy complete platform artifacts remain downloadable while passenger E04 is unavailable", async () => {
+    const f = await fixture(false);
+    expect(
+      (
+        await readBytes(
+          await f.platform.getHtmlArtifact(f.row().receipt_id as string),
+        )
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(
+      (
+        await readBytes(
+          await f.platform.getPdfArtifact(f.row().receipt_id as string),
+        )
+      ).toString("ascii", 0, 5),
+    ).toBe("%PDF-");
+    for (const format of ["html", "pdf"] as const) {
+      await expect(
+        f.account[format](identity, f.orderId, f.response),
+      ).rejects.toMatchObject({ code: "PASSENGER_E04_NOT_READY" });
+      await expect(
+        f.multi.getPassengerReceiptArtifact(f.tokenValue, format),
+      ).rejects.toMatchObject({ code: "PASSENGER_E04_NOT_READY" });
+    }
+  });
+
+  it.each(["startMinor", "distanceMinor", "delayMinor", "nightMinor"] as const)(
+    "rejects missing captured fare %s without inventing zero",
+    async (field) => {
+      const f = await fixture();
+      const record = f.row().record as { e04Snapshot: CertificateE04Snapshot };
+      delete (
+        record.e04Snapshot.fareBreakdown as Partial<
+          CertificateE04Snapshot["fareBreakdown"]
+        >
+      )[field];
+      await expect(
+        f.multi.getPassengerReceiptArtifact(f.tokenValue, "html"),
+      ).rejects.toMatchObject({ code: "PASSENGER_E04_NOT_READY" });
+    },
+  );
+
+  it("rejects an unmasked driver registration before persisting a captured completion", async () => {
+    const f = await fixture();
+    const calls = f.queries.length;
+    await expect(
+      f.certificates.writeCompletedTrip({
+        ...f.event,
+        e04Snapshot: { ...capture, driverRegistrationMasked: "12345678" },
+      }),
+    ).rejects.toMatchObject({ code: "CERTIFICATE_E04_SNAPSHOT_INVALID" });
+    expect(f.queries.length).toBe(calls);
+  });
+});
