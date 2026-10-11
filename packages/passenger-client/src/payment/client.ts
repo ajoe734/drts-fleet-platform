@@ -209,23 +209,3 @@ export class PassengerPaymentClient {
     return encodeURIComponent(id);
   }
 }
-
-/** No inferred same-origin or arbitrary merchant URL is sufficient for 3DS. */
-export function approvedPaymentActionUrl(
-  value: string,
-  approvedOrigins: readonly string[],
-): string | null {
-  try {
-    const url = new URL(value);
-    if (
-      url.protocol !== "https:" ||
-      url.username ||
-      url.password ||
-      !approvedOrigins.includes(url.origin)
-    )
-      return null;
-    return url.href;
-  } catch {
-    return null;
-  }
-}

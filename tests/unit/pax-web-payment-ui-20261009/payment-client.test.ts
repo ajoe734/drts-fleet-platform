@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import {
-  PassengerPaymentClient,
-  approvedPaymentActionUrl,
-} from "../../../packages/passenger-client/src/payment/client";
+import { PassengerPaymentClient } from "../../../packages/passenger-client/src/payment/client";
+import { approvedPaymentActionUrl } from "../../../apps/passenger-app-web/lib/payment/action-url";
 import { createSyntheticPaymentFields } from "../../../apps/passenger-app-web/lib/payment/synthetic-fields";
 import type { FetchFn } from "../../../packages/passenger-client/src/client";
 

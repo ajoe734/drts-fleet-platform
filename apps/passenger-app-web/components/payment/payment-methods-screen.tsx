@@ -10,8 +10,8 @@ import {
   PassengerClient,
   PassengerPaymentClient,
   PassengerApiError,
-  approvedPaymentActionUrl,
 } from "@drts/passenger-client";
+import { approvedPaymentActionUrl } from "../../lib/payment/action-url";
 import {
   paymentMethodExpired,
   paymentMethodLabel,
