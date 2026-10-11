@@ -361,25 +361,10 @@ export class PaymentChargeSession {
           decision.error === "unknown" ? null : decision.error,
         ],
       );
-      if (decision.requestRecoveryNotice) {
-        // Durable notification request, no token/provider reference in payload.
-        await this.client.query(
-          `INSERT INTO ops.consumer_notification_outbox
-             (outbox_id,order_id,passenger_subject_ref,event_type,payload,status,next_attempt_at,created_at)
-           VALUES ($1,$2,$3,'payment_recovery_required',$4::jsonb,'pending',now(),now())
-           ON CONFLICT (outbox_id) DO NOTHING`,
-          [
-            `pax-payment-recovery:${this.orderId}`,
-            this.orderId,
-            claim.passengerId,
-            JSON.stringify({
-              orderId: this.orderId,
-              status: "manual_recovery",
-              action: "update_payment_method",
-            }),
-          ],
-        );
-      }
+      // recovery_notice_requested_at above is the durable request, with owner
+      // and order already on this ledger. ConsumerNotificationOutboxRecord's
+      // closed event contract has no payment event; do not invent one in SQL.
+      // Delivery requires an authorized contract/transport integration scope.
     });
   }
 }

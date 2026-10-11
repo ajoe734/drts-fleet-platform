@@ -372,15 +372,18 @@ boundary, never in repository SQL, returned objects, errors or logs.
 under the same key at the explicitly supplied delays; unknown/pending/invalid
 acknowledgements read back under their own budget; only completed acknowledgement
 with a valid reference writes captured. Exhaustion atomically writes
-`manual_recovery` in both tables and requests one durable
-`payment_recovery_required` consumer outbox notice with only order/status/action.
+`manual_recovery` in both tables and stamps `recovery_notice_requested_at` once
+on the owned charge ledger. The owner and order are already recorded there.
+The first a985 publication incorrectly inserted a new consumer outbox event;
+the contract correction below removes that unsupported shared-transport write.
+This is a durable notice request, **not completed notification delivery**.
 The hosted `PaymentChargeWorker` scans due durable state at startup and every
 second (operational polling, not a financial retry default); it requires DB,
 PSP, cipher and explicit validated policy. Unit lifecycle checks use a fake
 clock. No actual API/worker product runtime was started on this VM.
 
 `PassengerCoreManualPaymentRecoveryPort` wires the existing authorized platform
-Billing recovery caller to that same charge writer and notice. Legacy manual
+Billing recovery caller to that same charge writer and notice request. Legacy manual
 handoff remains accepted without pretending PSP success. The Billing receipt
 transaction locks the account, verifies matching ledgers and records only the
 recovery receipt for managed passenger payments; it cannot independently rewrite
@@ -392,28 +395,27 @@ durable refund workflow are the next unfinished source unit.
 
 ### Field-by-field charge / billing SQL audit (PG unexecuted)
 
-| Formal migration column / type                                                                | Actual writer / argument / read mapping                                                                                                                           |
-| --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| V0115 journal `idempotency_key text, operation text`                                          | initialize $1=`pax:capture:<order UUID>`, literal capture; replay SELECT locks and verifies operation                                                             |
-| Journal `drts_passenger_id varchar(100), entity_id uuid, credential_digest varchar(64)`       | authoritative history owner $2, canonical order $3; capture has NULL credential digest as formal CHECK requires                                                   |
-| Journal `outcome, error_code, created_at, updated_at`                                         | pending default; unknown committed before request; completed only after acknowledged capture; failure enum errors, unknown uses NULL error_code; DB timestamps    |
-| Charge `order_id uuid, payment_id varchar(255)`                                               | initialize $1 order, $2 deterministic `pax-payment:<order>`; formal history/payment FK; load matches billing order text and ID                                    |
-| Charge `drts_passenger_id varchar(100), payment_method_id uuid`                               | initialize $3 history owner, $4 order method UUID; composite method-owner FK; method join has both fields                                                         |
-| Charge `idempotency_key text`                                                                 | initialize $5, references committed journal; immutable one-order provider key                                                                                     |
-| Charge `amount_minor bigint, currency char(3)`                                                | initialize $6 validated safe integer from completed task/event; literal TWD; load bigint converted with safe-integer check and compared to billing                |
-| Charge `status text`                                                                          | initialized failed/unavailable, never artificial authorization; failed/captured/manual_recovery transitions use real validated disposition                        |
-| Charge `attempt_count integer`                                                                | default 0; begin $2 reserves only capture; finish preserves count; readback/manual handoff never adds a capture                                                   |
-| Charge **new** `readback_count integer`                                                       | default 0, nonnegative CHECK; begin $3 increments readback/reset on definitive capture retry; policy uses separate budget                                         |
-| Charge **new** `next_operation text, operation_id uuid`                                       | allowed capture/readback or NULL; initial capture; begin readback + $4 UUID; finish decision operation or NULL and clears UUID; WHERE old UUID fences late writes |
-| Charge `provider_capture_ref text, provider_refund_ref text`                                  | validated completed reference goes to finish $4 and public billing ref; refund reference reserved, not yet written                                                |
-| Charge `last_error_code text, retry_at timestamptz`                                           | initial unavailable; pre-request unknown; finish $5/$7 classified error/explicit-policy deadline; no raw provider error                                           |
-| Charge `completed_at timestamptz`                                                             | initialize $7 matches authoritative completed task; no wall-clock replacement                                                                                     |
-| Charge `recovery_notice_requested_at timestamptz, created_at, updated_at`                     | notice flag finish $8 stamps COALESCE once, DB creation/update timestamps                                                                                         |
-| V0056 billing `payment_id, order_id, payment_method_token_ref`                                | initialize $1/$2/$3; method-token-ref is our method UUID, never PSP token; verified against the charge ledger                                                     |
-| Billing `status, amount_minor, currency, provider_payment_ref`                                | initialize failed/$4/TWD; real disposition status + validated capture ref; dual-table transaction; currency follows V0084                                         |
-| V0060 billing `attempt_count integer, available_actions jsonb`                                | count equals reserved charge captures; available_actions remains formal [] default; managed Billing receipt never increments count again                          |
-| V0056 consumer outbox `outbox_id, order_id, passenger_subject_ref, event_type, payload`       | deterministic recovery ID $1, order $2, actual owner $3, literal payment_recovery_required, safe JSON $4; ON CONFLICT prevents duplicate notice request           |
-| Outbox `status, attempt_count, next_attempt_at, created_at, delivered_at, assignment_version` | pending/0, DB due/created timestamps; nullable delivery/assignment defaults; request only, no delivery claim                                                      |
+| Formal migration column / type                                                          | Actual writer / argument / read mapping                                                                                                                                                          |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| V0115 journal `idempotency_key text, operation text`                                    | initialize $1=`pax:capture:<order UUID>`, literal capture; replay SELECT locks and verifies operation                                                                                            |
+| Journal `drts_passenger_id varchar(100), entity_id uuid, credential_digest varchar(64)` | authoritative history owner $2, canonical order $3; capture has NULL credential digest as formal CHECK requires                                                                                  |
+| Journal `outcome, error_code, created_at, updated_at`                                   | pending default; unknown committed before request; completed only after acknowledged capture; failure enum errors, unknown uses NULL error_code; DB timestamps                                   |
+| Charge `order_id uuid, payment_id varchar(255)`                                         | initialize $1 order, $2 deterministic `pax-payment:<order>`; formal history/payment FK; load matches billing order text and ID                                                                   |
+| Charge `drts_passenger_id varchar(100), payment_method_id uuid`                         | initialize $3 history owner, $4 order method UUID; composite method-owner FK; method join has both fields                                                                                        |
+| Charge `idempotency_key text`                                                           | initialize $5, references committed journal; immutable one-order provider key                                                                                                                    |
+| Charge `amount_minor bigint, currency char(3)`                                          | initialize $6 validated safe integer from completed task/event; literal TWD; load bigint converted with safe-integer check and compared to billing                                               |
+| Charge `status text`                                                                    | initialized failed/unavailable, never artificial authorization; failed/captured/manual_recovery transitions use real validated disposition                                                       |
+| Charge `attempt_count integer`                                                          | default 0; begin $2 reserves only capture; finish preserves count; readback/manual handoff never adds a capture                                                                                  |
+| Charge **new** `readback_count integer`                                                 | default 0, nonnegative CHECK; begin $3 increments readback/reset on definitive capture retry; policy uses separate budget                                                                        |
+| Charge **new** `next_operation text, operation_id uuid`                                 | allowed capture/readback or NULL; initial capture; begin readback + $4 UUID; finish decision operation or NULL and clears UUID; WHERE old UUID fences late writes                                |
+| Charge `provider_capture_ref text, provider_refund_ref text`                            | validated completed reference goes to finish $4 and public billing ref; refund reference reserved, not yet written                                                                               |
+| Charge `last_error_code text, retry_at timestamptz`                                     | initial unavailable; pre-request unknown; finish $5/$7 classified error/explicit-policy deadline; no raw provider error                                                                          |
+| Charge `completed_at timestamptz`                                                       | initialize $7 matches authoritative completed task; no wall-clock replacement                                                                                                                    |
+| Charge `recovery_notice_requested_at timestamptz, created_at, updated_at`               | notice flag finish $8 stamps COALESCE once, DB creation/update timestamps                                                                                                                        |
+| V0056 billing `payment_id, order_id, payment_method_token_ref`                          | initialize $1/$2/$3; method-token-ref is our method UUID, never PSP token; verified against the charge ledger                                                                                    |
+| Billing `status, amount_minor, currency, provider_payment_ref`                          | initialize failed/$4/TWD; real disposition status + validated capture ref; dual-table transaction; currency follows V0084                                                                        |
+| V0060 billing `attempt_count integer, available_actions jsonb`                          | count equals reserved charge captures; available_actions remains formal [] default; managed Billing receipt never increments count again                                                         |
+| V0056 consumer outbox                                                                   | a985's invented event INSERT removed after contract verification; no current payment write to the shared consumer transport. A typed payment event/transport needs Supervisor scope coordination |
 
 ### Findings, failures and verified scope
 
@@ -448,3 +450,42 @@ trailers. The original installed Husky 9.1.7 delegation wrappers were recreated
 in this isolated worktree, preserving core.hooksPath and both tracked hooks;
 the successful commit ran the original staged-file, Prettier, ESLint and trailer
 chain. No HUSKY/hook/task-guard bypass, rebase, amend, force push or reset occurred.
+
+## Adjacent checkpoint correction: closed notification contract
+
+Further actual caller/contract reading found that
+`packages/contracts/src/phase1-p5-s3-multi-taxi.ts::ConsumerNotificationOutboxRecord.eventType`
+admits only assignment/disclosure/ETA/arrival/receipt/cancellation events. The
+new `payment_recovery_required` event in a985 was unsupported and outside this
+task's shared-contract authority. It is removed from the production SQL; the
+original V0115 `recovery_notice_requested_at` field remains an atomic, once-only
+request record with authoritative owner/order on the same ledger. Manual
+recovery/status/attempt behavior remains, and no delivery success is claimed.
+
+Exact Supervisor coordination boundary: adding a typed payment recovery notice
+to `packages/contracts/src/phase1-p5-s3-multi-taxi.ts`, the real notification
+event mapper/transport under `apps/api/src/modules/multi-taxi/`, and its formal
+recipient/channel/delivery tests requires scope reconciliation with the owning
+notification tasks. Those paths are not in this Payment dispatch. Do not relabel
+a payment notice as receipt_ready or edit that foreign contract without the
+Supervisor grant. Approved real capture-policy binding is still separately
+missing. Neither gap waives either original acceptance key.
+
+| Finding                                             | Real old source → repair                                                                                                                                                                           | Repro command / exit / evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Limits                                                                                                                                                                                                       |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| a985 emits an unsupported shared notification event | immutable `a985f951359bbabf908ec323a9036924f7ba6737` real `PaymentChargeRepository` calls the shared outbox INSERT; repaired real repository retains ledger request and emits no unsupported event | Source extracted with git show, only imports relocated, no active reset. `PAX_PAYMENT_CHARGE_REPOSITORY_SOURCE="$PWD/.local/pax-payment-core-20261009/charge-repository-a985.ts" pnpm exec vitest run tests/unit/pax-payment-core-20261009/charge-workflow.test.ts -t 'keeps recovery notice requests'`: **1 executed FAIL / 29 filter SKIP**, exit 1, `charge-notice-old-a985.log` → same probe current source **1 executed PASS / 29 filter SKIP**, exit 0, `charge-notice-fixed.log` | Narrow filter skips are not full regression. Both probes call the real repository/service/policy and synthetic PSP/SQL replies; no missing-package or 0-test reproduction, no claimed PG/delivery acceptance |
+
+The earlier 508-test and hosted a985 results remain evidence for their actual
+version; the contract repair receives a new full affected regression and new
+ordinary published SHA/CI before the final progress report. No acceptance or
+candidate is inferred from either version's scoped passes.
+
+After the contract repair, the same full affected command completed/read:
+**21 files / 509 PASS / 0 SKIP**, exit 0,
+`charge-notice-affected-regression.log`. Root/API typecheck both passed, exit 0
+(`charge-notice-root-typecheck.log`, `charge-notice-api-typecheck.log`), and scoped
+Payment ESLint passed, exit 0 (`charge-notice-lint.log`). The unchanged API
+Billing/Facebook caller suite's 16 PASS remains applicable; no caller source or
+fixture changed in this notice-only correction. The current final source identity
+will bind these checks, scope/role audit and hosted results in the referenced
+publication evidence and machine-truth progress.

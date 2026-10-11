@@ -1,7 +1,13 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { DatabaseService } from "../../../apps/api/src/common/db/database.service";
-import { PaymentChargeRepository } from "../../../apps/api/src/modules/passenger-app/payment/payment-charge.repository";
+const repositorySource = process.env.PAX_PAYMENT_CHARGE_REPOSITORY_SOURCE;
+const {
+  PaymentChargeRepository,
+}: typeof import("../../../apps/api/src/modules/passenger-app/payment/payment-charge.repository") =
+  repositorySource
+    ? await import(repositorySource)
+    : await import("../../../apps/api/src/modules/passenger-app/payment/payment-charge.repository");
 import { PaymentChargeService } from "../../../apps/api/src/modules/passenger-app/payment/payment-charge.service";
 import { PaymentTokenCipher } from "../../../apps/api/src/modules/passenger-app/payment/payment-token-cipher";
 import { FakePaymentProvider } from "../../../apps/api/src/modules/passenger-app/payment/fake-payment-provider";
@@ -79,7 +85,6 @@ function fixture(policy: PaymentCapturePolicy | undefined = POLICY) {
   let guest = false;
   let fault: ((sql: string) => boolean) | null = null;
   let lockAvailable = true;
-  const notices: unknown[][] = [];
   const client = {
     query: vi.fn(async (sql: string, raw?: readonly unknown[]) => {
       const params = raw ?? [];
@@ -180,6 +185,8 @@ function fixture(policy: PaymentCapturePolicy | undefined = POLICY) {
           retry_at: params[6],
           operation_id: null,
         });
+        if (params[7] === true && !charge!.recovery_notice_requested_at)
+          charge!.recovery_notice_requested_at = NOW.toISOString();
       } else if (
         sql.startsWith(
           "UPDATE billing.multi_taxi_passenger_payments SET status='failed'",
@@ -196,8 +203,6 @@ function fixture(policy: PaymentCapturePolicy | undefined = POLICY) {
           provider_payment_ref: params[2],
           attempt_count: params[3],
         });
-      else if (sql.includes("INSERT INTO ops.consumer_notification_outbox"))
-        notices.push([...params]);
       return { rows, rowCount: 1 };
     }),
     release: vi.fn(),
@@ -219,7 +224,14 @@ function fixture(policy: PaymentCapturePolicy | undefined = POLICY) {
     runtime,
     service,
     method,
-    notices,
+    get notices() {
+      return calls.filter(
+        (call) =>
+          call.sql.startsWith(
+            "UPDATE passenger.payment_charge_records SET status=$3",
+          ) && call.params[7] === true,
+      );
+    },
     get charge() {
       return charge;
     },
@@ -349,11 +361,7 @@ describe("real completion/capture/retry service and SQL repository, synthetic PG
       attempt_count: 2,
     });
     expect(f.notices).toHaveLength(1);
-    expect(JSON.parse(String(f.notices[0]![3]))).toEqual({
-      orderId: ORDER,
-      status: "manual_recovery",
-      action: "update_payment_method",
-    });
+    expect(f.charge?.recovery_notice_requested_at).toBe(NOW.toISOString());
     await f.service.processOrder(ORDER, due);
     expect(f.notices).toHaveLength(1);
     expect(capture).toHaveBeenCalledTimes(2);
@@ -556,6 +564,23 @@ describe("real completion/capture/retry service and SQL repository, synthetic PG
     await f.service.onTripCompleted(EVENT);
     expect(f.charge?.status).toBe("manual_recovery");
     expect(f.notices).toHaveLength(1);
+  });
+
+  it("keeps recovery notice requests on the owned ledger until the consumer event contract is authorized", async () => {
+    const f = fixture({ ...POLICY, retryDefinitiveDeclines: false });
+    vi.spyOn(f.provider, "capture").mockResolvedValue({
+      status: "failed",
+      error: "card_declined",
+      retryable: true,
+    });
+    await f.service.onTripCompleted(EVENT);
+    expect(f.charge?.status).toBe("manual_recovery");
+    expect(f.charge?.recovery_notice_requested_at).toBe(NOW.toISOString());
+    expect(
+      f.calls.some((call) =>
+        call.sql.includes("INSERT INTO ops.consumer_notification_outbox"),
+      ),
+    ).toBe(false);
   });
 
   it.each(["guest", "lock", "owner", "fare", "status", "subject", "task"])(
