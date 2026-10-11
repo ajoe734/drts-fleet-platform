@@ -376,6 +376,13 @@ change product source. All checks below completed and their results were read.
 
 ## 2026-10-11 exact remaining source seams（第三份補充）
 
+本輪前兩個修復單元完成紀錄：
+
+- Audit actor checkpoint `2d2df480e` 已普通 push；API typecheck 在 control-plane-auth dependency build 後 PASS0 (`audit-api-typecheck-final.log`)，原 mapper 不需要 runtime 修改。最終 root compiler 尚待整體回歸。
+- Receipt source 唯一變更：原 `findElectronicReceipt` 增加 `AND is_current = true ORDER BY receipt_version DESC`。V0062 partial unique 決定每個 order 至多一個 current；版本排序與 formal certificate reader 一致。既有 mapElectronicReceipt 原樣回傳實際 receipt ID/record，後續正式 certificate authority 再驗證 order/state/E04 readiness；不需要新的版本或資料 fallback。
+- 舊 query（product 與 cec585 完全相同）+ 最小三個追加案例：FAIL1，20 PASS / 3 FAIL (`old-current-receipt-regression-final.log`)。舊版本回傳歷史 ID，current unavailable 或無 current 時仍成功；新 query 下原 20 + 新 3 全部 PASS0 (`current-receipt-regression-final.log`)。實際 account/token resolvers、writer/repositories/HTML/PDF 與 platform history 皆執行。SQL 回應與 immutable E04 capture 是明列的外部 fixtures，未執行 PostgreSQL，不作 PG/versioning/concurrency acceptance。
+- 修正版初次結果 22 PASS / 1 FAIL (`current-receipt-regression.log`)：query assertion fixture 把 Booking ownership query 也納入 receipt query 清單；限縮到 actual reporting table 後 PASS。初始 current-negative fixture 使用未知 state pending，已改正式 `unavailable` 再重跑舊 query；PDF fixture property 使用實際 `fileName`。這些 fixture 修正不能當產品缺陷消除證據；舊版三個產品行為失敗皆發生於上述後續 assertion 之前。最終案例可直接對 immutable cec585 rerun，不 reset 活躍 worktree。
+
 本輪完整讀取 `/home/lupin/workspace/drts-fleet-platform/.local/pi-direct-booking-ui-20261011T1020Z/PAX-RECEIPT-EXACT-REMAINING-SOURCE-SEAMS.md` 及前兩份補充。起點 local、remote、draft PR #2556 head 都是 `cec585cc397eacbdf78a7d022771e1383e08e56c`；原六個 commit 與 immutable base `62a73710e87c0163c7e82a5956612be558e554bf` 保留，未重寫或同步已發布歷史。`origin/dev` 為 `2f6ec0ccbb7f102a99052fc7a08995056ebb1ea4`，沒有 receipt source overlap。
 
 本輪機器 evidence 仍在 assigned worktree 的 `.local/pax-receipt-complaint-20261009/`。restore 後 ignored dependencies/logs 不在該樹；重新執行 isolated `pnpm install --offline --frozen-lockfile --ignore-scripts` PASS0，並沿用前輪方式複製 canonical 已有 `.husky/_` runtime shims。既有 task message guard、Husky chain、hook configuration 都保留；未設 bypass。

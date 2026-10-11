@@ -1940,7 +1940,8 @@ export class MultiTaxiRepository {
       `
         SELECT *
         FROM reporting.multi_taxi_electronic_receipts
-        WHERE order_id = $1
+        WHERE order_id = $1 AND is_current = true
+        ORDER BY receipt_version DESC
         LIMIT 1
       `,
       [orderId],

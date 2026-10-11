@@ -77,6 +77,7 @@ async function fixture(complete = true) {
   const transport = {
     tokenKnown: true,
     row: undefined as Record<string, unknown> | undefined,
+    historicalRows: [] as Record<string, unknown>[],
     failLookup: false,
   };
   const queries: { sql: string; values: readonly unknown[] }[] = [];
@@ -115,14 +116,19 @@ async function fixture(complete = true) {
         return { rows: [] } as never;
       }
       if (sql.includes("FROM reporting.multi_taxi_electronic_receipts")) {
-        const matches =
-          transport.row &&
-          [
-            transport.row.order_id,
-            transport.row.receipt_id,
-            transport.row.receipt_no,
-          ].includes(values[0]);
-        return { rows: matches ? [transport.row] : [] } as never;
+        // SQL transport fixtures, not a PostgreSQL/versioning simulator.
+        // An unqualified order lookup may return the historical row first.
+        const rows = [
+          ...transport.historicalRows,
+          ...(transport.row ? [transport.row] : []),
+        ];
+        const matching = rows.filter((row) =>
+          [row.order_id, row.receipt_id, row.receipt_no].includes(values[0]),
+        );
+        const selected = sql.includes("is_current = true")
+          ? matching.find((row) => row.is_current === true)
+          : matching[0];
+        return { rows: selected ? [selected] : [] } as never;
       }
       return originalQuery(sql, values);
     },
@@ -295,6 +301,115 @@ describe("captured E04 downstream mapping and authorized downloads (SQL fixtures
       "/control-plane-proxy/platform-admin/multi-taxi/certificates/",
     );
   });
+
+  it("downloads the current regenerated receipt through account and token paths, preserving platform history", async () => {
+    const f = await fixture();
+    const historical = structuredClone(f.row());
+    historical.is_current = false;
+    const currentId = `${historical.receipt_id}-v2`;
+    f.transport.historicalRows.push(historical);
+    f.transport.row = {
+      ...structuredClone(historical),
+      receipt_id: currentId,
+      receipt_no: `${historical.receipt_no}-v2`,
+      receipt_version: 2,
+      is_current: true,
+      supersedes_receipt_id: historical.receipt_id,
+      record: {
+        ...(historical.record as Record<string, unknown>),
+        certificateVersion: "v2",
+        generatedFrom: "certificate_regeneration",
+      },
+    };
+    const before = f.queries.length;
+    expect(
+      (await f.account.downloads(identity, f.orderId, f.response)).data
+        .certificateId,
+    ).toBe(currentId);
+    expect(
+      (await f.multi.getPassengerReceiptDownloads(f.tokenValue)).certificateId,
+    ).toBe(currentId);
+    for (const format of ["html", "pdf"] as const) {
+      const account = await f.account[format](identity, f.orderId, f.response);
+      const token = await f.multi.getPassengerReceiptArtifact(
+        f.tokenValue,
+        format,
+      );
+      const content = await readBytes(account);
+      expect(content).toEqual(token.buffer);
+      expect(token.fileName).toBe(`${f.row().receipt_no}.${format}`);
+      expect(
+        (
+          await f.certificates.getArtifact(
+            historical.receipt_id as string,
+            format,
+          )
+        ).buffer.length,
+      ).toBeGreaterThan(0);
+    }
+    const lookups = f.queries
+      .slice(before)
+      .filter(
+        (query) =>
+          query.sql.includes("FROM reporting.multi_taxi_electronic_receipts") &&
+          query.sql.includes("WHERE order_id = $1"),
+      );
+    expect(lookups.length).toBeGreaterThan(0);
+    for (const lookup of lookups) {
+      expect(lookup.sql).toContain("AND is_current = true");
+      expect(lookup.sql).toContain("ORDER BY receipt_version DESC");
+      expect(lookup.values).toEqual([f.orderId]);
+    }
+  });
+
+  it.each(["current unavailable", "no current"])(
+    "refuses passenger downloads when %s without returning historical success",
+    async (scenario) => {
+      const f = await fixture();
+      const historical = structuredClone(f.row());
+      historical.is_current = false;
+      f.transport.historicalRows.push(historical);
+      f.transport.row = {
+        ...structuredClone(historical),
+        receipt_id: `${historical.receipt_id}-v2`,
+        receipt_no: `${historical.receipt_no}-v2`,
+        receipt_version: 2,
+        is_current: scenario === "current unavailable",
+        supersedes_receipt_id: historical.receipt_id,
+        record: {
+          ...(historical.record as Record<string, unknown>),
+          certificateVersion: "v2",
+          certificateState: "unavailable",
+        },
+      };
+      const code =
+        scenario === "current unavailable"
+          ? "PASSENGER_E04_NOT_READY"
+          : "PASSENGER_RECEIPT_NOT_READY";
+      await expect(
+        f.account.downloads(identity, f.orderId, f.response),
+      ).rejects.toMatchObject({ code });
+      await expect(
+        f.multi.getPassengerReceiptDownloads(f.tokenValue),
+      ).rejects.toMatchObject({ code });
+      for (const format of ["html", "pdf"] as const) {
+        await expect(
+          f.account[format](identity, f.orderId, f.response),
+        ).rejects.toMatchObject({ code });
+        await expect(
+          f.multi.getPassengerReceiptArtifact(f.tokenValue, format),
+        ).rejects.toMatchObject({ code });
+      }
+      expect(
+        (
+          await f.certificates.getArtifact(
+            historical.receipt_id as string,
+            "html",
+          )
+        ).buffer.length,
+      ).toBeGreaterThan(0);
+    },
+  );
 
   it.each(["foreign", "unknown", "malformed"])(
     "rejects %s account ownership before rendering",
