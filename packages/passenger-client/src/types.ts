@@ -27,6 +27,24 @@ export type {
   FaresResponse,
 };
 
+export type {
+  RequestOtpCommand,
+  RequestOtpResponse,
+  OAuthStartCommand,
+  OAuthStartResponse,
+  UpdatePassengerMeCommand,
+  PassengerLoginIdentity,
+  PassengerIdentitiesResponse,
+  UnlinkPassengerIdentityCommand,
+  UnlinkPassengerIdentityResponse,
+  DeletePassengerAccountResponse,
+} from "@drts/contracts";
+
+/** The web BFF removes session credentials before exposing the formal result. */
+export type BrowserOAuthCallbackResponse =
+  | { result: "logged_in"; drtsPassengerId: string }
+  | { result: "linked" };
+
 export interface SessionStatus {
   isActive: boolean;
   account?: PassengerAccount;

@@ -3,6 +3,8 @@ import {
   SessionStatus,
   PassengerAccount,
 } from "./types.js";
+import { PassengerApiError } from "./auth/errors.js";
+export { PassengerApiError } from "./auth/errors.js";
 
 export interface FetchOptions {
   method?: string;
@@ -81,7 +83,20 @@ export class PassengerClient implements PassengerViewModel {
         this.sessionStatus.isActive = false;
         delete this.sessionStatus.account;
       }
-      throw new Error(`API error: ${response.status}`);
+      let payload;
+      try {
+        payload = await response.json();
+      } catch {
+        /* Non-JSON failures still retain status. */
+      }
+      const error = payload?.error;
+      throw new PassengerApiError(
+        response.status,
+        typeof error === "string" ? error : (error?.code ?? "unavailable"),
+        error?.message ?? `API error: ${response.status}`,
+        error?.details ?? {},
+        error?.retryable === true,
+      );
     }
 
     const payload = await response.json();
@@ -105,6 +120,69 @@ export class PassengerClient implements PassengerViewModel {
     return this.request<import("./types.js").AuthProvidersResponse>(
       "/api/passenger-app/auth/providers",
     );
+  }
+
+  async requestOtp(
+    command: import("./types.js").RequestOtpCommand,
+  ): Promise<import("./types.js").RequestOtpResponse> {
+    return this.request("/api/passenger-app/auth/otp/request", {
+      method: "POST",
+      body: JSON.stringify(command),
+    });
+  }
+
+  async oauthStart(
+    command: import("./types.js").OAuthStartCommand,
+  ): Promise<import("./types.js").OAuthStartResponse> {
+    return this.request(
+      `/api/passenger-app/auth/oauth/${command.provider}/start`,
+      { method: "POST", body: JSON.stringify(command) },
+    );
+  }
+
+  // BFF restores transactionId from its HttpOnly binding; it is never read from callback query parameters.
+  async oauthCallback(
+    provider: import("./types.js").OAuthStartCommand["provider"],
+    command: { code?: string; state: string; error?: string },
+  ): Promise<import("./types.js").BrowserOAuthCallbackResponse> {
+    return this.request(`/api/passenger-app/auth/oauth/${provider}/callback`, {
+      method: "POST",
+      body: JSON.stringify({ provider, ...command }),
+    });
+  }
+
+  async updateAccount(
+    command: import("./types.js").UpdatePassengerMeCommand,
+  ): Promise<import("./types.js").PassengerMeResponse> {
+    return this.request("/api/passenger-app/me", {
+      method: "PATCH",
+      body: JSON.stringify(command),
+    });
+  }
+
+  async getIdentities(): Promise<
+    import("./types.js").PassengerIdentitiesResponse
+  > {
+    return this.request("/api/passenger-app/me/identities");
+  }
+
+  async unlinkIdentity(
+    command: import("./types.js").UnlinkPassengerIdentityCommand,
+  ): Promise<import("./types.js").UnlinkPassengerIdentityResponse> {
+    return this.request(
+      `/api/passenger-app/me/identities/${encodeURIComponent(command.identityId)}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async deleteAccount(): Promise<
+    import("./types.js").DeletePassengerAccountResponse
+  > {
+    const result = await this.request<
+      import("./types.js").DeletePassengerAccountResponse
+    >("/api/passenger-app/me", { method: "DELETE" });
+    this.sessionStatus = { isActive: false };
+    return result;
   }
 
   async getFares(): Promise<import("./types.js").FaresResponse> {
