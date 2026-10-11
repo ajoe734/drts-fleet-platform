@@ -213,6 +213,11 @@ export interface CreatePassengerRideCommand {
   passengerConfirmedAt: string;
 }
 
+export interface PassengerBookingSettingsResponse {
+  minLeadTimeMinutes: number;
+  requireSmsVerification: boolean;
+}
+
 export interface PassengerRideResponse {
   ride: PassengerRideAuthorityView;
 }

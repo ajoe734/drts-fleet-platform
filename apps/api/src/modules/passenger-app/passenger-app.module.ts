@@ -25,16 +25,23 @@ import {
 import { SMS_PORT, UnconfiguredSmsPort } from "./otp/sms.port";
 import { FacebookDataDeletionController } from "./oauth/facebook-data-deletion.controller";
 import { FacebookDataDeletionService } from "./oauth/facebook-data-deletion.service";
+import { PassengerBookingController } from "./booking/passenger-booking.controller";
+import { PassengerBookingService } from "./booking/passenger-booking.service";
+import { PassengerBookingRepository } from "./booking/passenger-booking.repository";
+import { PassengerBookingSettingsController } from "./booking/passenger-booking-settings.controller";
+import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
 
 @Global()
 @Module({
-  imports: [DatabaseModule, GeoModule, ServiceAreaModule],
+  imports: [DatabaseModule, GeoModule, ServiceAreaModule, MultiTaxiModule],
   controllers: [
     PassengerAccountController,
     PassengerOtpController,
     PassengerFareController,
     PassengerOAuthController,
     FacebookDataDeletionController,
+    PassengerBookingController,
+    PassengerBookingSettingsController,
   ],
   providers: [
     PassengerJwtService,
@@ -47,6 +54,8 @@ import { FacebookDataDeletionService } from "./oauth/facebook-data-deletion.serv
     FacebookDataDeletionService,
     PassengerOtpRepository,
     PassengerOtpService,
+    PassengerBookingRepository,
+    PassengerBookingService,
     { provide: SMS_PORT, useClass: UnconfiguredSmsPort },
     { provide: OTP_OPTIONS, useFactory: () => otpOptionsFromEnv(process.env) },
     {
@@ -61,6 +70,7 @@ import { FacebookDataDeletionService } from "./oauth/facebook-data-deletion.serv
     PassengerJwtService,
     PassengerFareRepository,
     PassengerFareService,
+    PassengerBookingService,
   ],
 })
 export class PassengerAppModule {}
