@@ -33,6 +33,7 @@ import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
 import { ComplaintModule } from "../complaint/complaint.module";
 import { PassengerComplaintController } from "./complaint/passenger-complaint.controller";
 import { PassengerComplaintService } from "./complaint/passenger-complaint.service";
+import { PassengerReceiptController } from "./receipt/passenger-receipt.controller";
 
 @Global()
 @Module({
@@ -52,6 +53,7 @@ import { PassengerComplaintService } from "./complaint/passenger-complaint.servi
     PassengerBookingController,
     PassengerBookingSettingsController,
     PassengerComplaintController,
+    PassengerReceiptController,
   ],
   providers: [
     PassengerJwtService,

@@ -269,6 +269,11 @@ export interface GetPassengerReceiptQuery {
 
 export interface PassengerReceiptResponse {
   receiptUrl: string;
+  /** Authorized URLs resolve the caller's own ride/token, never a certificate ID. */
+  readonly htmlUrl?: string;
+  readonly pdfUrl?: string;
+  readonly certificateId?: string;
+  readonly orderId?: string;
 }
 
 export interface RefundPassengerRideCommand {

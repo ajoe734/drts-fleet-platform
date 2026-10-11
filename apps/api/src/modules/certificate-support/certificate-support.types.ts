@@ -64,6 +64,21 @@ export interface CertificateSupportView {
     enabled: boolean;
     reasonCode: string | null;
   };
+  /** Captured completion facts, absent for legacy/incomplete certificates. */
+  e04Snapshot?: CertificateE04Snapshot;
+}
+
+export interface CertificateE04Snapshot {
+  fleetOperatorName: string;
+  driverSurname: string;
+  driverRegistrationMasked: string;
+  fareBreakdown: {
+    startMinor: number;
+    distanceMinor: number;
+    delayMinor: number;
+    nightMinor: number;
+  };
+  paymentMethodDisplay: string;
 }
 
 export interface CertificateArtifactBlocker {
