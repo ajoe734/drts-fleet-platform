@@ -8,7 +8,7 @@ import {
 
 const pTokens = REALM_COLORS.passenger.light;
 
-const P5 = {
+export const P5 = {
   bg: STATUS_TONES.neutral.light.bg,
   surface: CORE_SURFACES.surface,
   ink: STATUS_TONES.neutral.dark.bg,
@@ -768,12 +768,14 @@ export function P5Btn({
   children,
   danger,
   onClick,
+  disabled,
 }: {
   kind?: "primary" | "secondary" | "ghost";
   icon?: string;
   children: ReactNode;
   danger?: boolean;
   onClick?: (() => void) | undefined;
+  disabled?: boolean;
 }) {
   const s: CSSProperties = {
     display: "flex",
@@ -785,7 +787,8 @@ export function P5Btn({
     borderRadius: 12,
     fontSize: 14,
     fontWeight: 700,
-    cursor: "pointer",
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.5 : 1,
     fontFamily: "inherit",
     border: "1px solid transparent",
   };
@@ -809,7 +812,11 @@ export function P5Btn({
             borderColor: danger ? P5.dangerBd : P5.line,
           };
   return (
-    <button style={v} onClick={onClick}>
+    <button
+      style={v}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+    >
       {icon && <P5Icon name={icon} size={15} />}
       {children}
     </button>
