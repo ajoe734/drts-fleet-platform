@@ -407,3 +407,20 @@ Machine-specific receipts for this continuation are in
 The durable evidence is this task-scoped report plus the exact candidate's
 release-status / PR / hosted run receipts. No product runtime was started on
 this VM, and no deployment, parent source continuation or acceptance was run.
+
+#### Hook runtime receipt for this continuation
+
+After the receipt commit
+`b3090e65deb4c6514715c0121f5227e1dab273c1`, inspection found `.husky/_`
+absent from this worktree despite the shared `core.hooksPath=.husky/_`.
+No hook bypass environment variable was set, but this commit did **not** run
+hooks. Its actual six-helper-commit range, generated-file guard, whitespace,
+canonical consistency (zero findings) and report formatting were subsequently
+checked and all exited 0. This is range validation, not a claimed hook pass.
+The ignored runtime was restored with recursive `cp -a` from the canonical
+checkout's existing `.husky/_`; executable pre-commit/commit-msg shims and the
+installed Husky 9.1.7 dispatcher match were checked with exit 0. Tracked hook
+source and shared Git configuration were unchanged. The additional publication
+closeout uses this restored normal hook chain; its actual result and final
+range checks are included in the exact handoff receipt. Both commits are kept
+additively; no amend, rebase or force push is used.
