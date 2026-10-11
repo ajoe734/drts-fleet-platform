@@ -1,5 +1,8 @@
 import type { OwnedOrderRecord } from "@drts/contracts";
-import { createProductionBookingFixture, OWNER } from "./production-booking-fixture";
+import {
+  createProductionBookingFixture,
+  OWNER,
+} from "./production-booking-fixture";
 
 // Only database transport responses and audit/event sinks are replaced. The
 // real controller, ownership guard, services, cancellation repository, locked
@@ -20,11 +23,14 @@ export async function observeTrustedCancellation(
     ownedMobilityTaskEventsService: { publishTaskCancelled(): void };
     opsDispatchEventsService: { publishOrderUpdated(): void };
   };
-  internals.auditNotificationService = { recordAuditLog: () => effects.audit++ };
+  internals.auditNotificationService = {
+    recordAuditLog: () => effects.audit++,
+  };
   internals.ownedMobilityTaskEventsService = {
     publishTaskCancelled: () => effects.taskEvents++,
   };
-  internals.opsDispatchEventsService.publishOrderUpdated = () => effects.orderEvents++;
+  internals.opsDispatchEventsService.publishOrderUpdated = () =>
+    effects.orderEvents++;
   if (memory !== "race") f.state.order!.status = status;
   if (memory === "synchronized") internals.orders[0]!.status = status;
   const durableBefore = structuredClone(f.state.order);
@@ -38,11 +44,17 @@ export async function observeTrustedCancellation(
     vehicleId: "vehicle-race",
   };
   const hasAssignment = () =>
-    ["assigned", "driver_accepted", "on_trip", "proof_pending"].includes(f.state.order!.status);
+    ["assigned", "driver_accepted", "on_trip", "proof_pending"].includes(
+      f.state.order!.status,
+    );
   let signalEntered!: () => void;
-  const entered = new Promise<void>((resolve) => { signalEntered = resolve; });
+  const entered = new Promise<void>((resolve) => {
+    signalEntered = resolve;
+  });
   let releaseGate!: () => void;
-  const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+  const gate = new Promise<void>((resolve) => {
+    releaseGate = resolve;
+  });
   const connect = f.database.connect.bind(f.database);
   f.database.connect = async () => {
     if (memory === "race") {
@@ -52,15 +64,46 @@ export async function observeTrustedCancellation(
     const client = await connect();
     const query = client.query.bind(client);
     client.query = (async (sql: string, values?: readonly unknown[]) => {
-      const result = await query(sql, values);
+      const result = await query(sql, values ? [...values] : []);
       const text = sql.trim().replace(/\s+/g, " ");
       const current = f.state.order!.status;
       if (hasAssignment()) {
-        if (text.startsWith("SELECT record FROM ops.phase1_dispatch_assignments"))
-          return { rows: [{ record: { ...links, status: current === "assigned" ? "assigned" : "accepted" } }], rowCount: 1 };
+        if (
+          text.startsWith("SELECT record FROM ops.phase1_dispatch_assignments")
+        )
+          return {
+            rows: [
+              {
+                record: {
+                  ...links,
+                  status: current === "assigned" ? "assigned" : "accepted",
+                },
+              },
+            ],
+            rowCount: 1,
+          };
         if (text.startsWith("SELECT record FROM ops.phase1_driver_tasks"))
-          return { rows: [{ record: { ...links, status: current === "assigned" ? "pending_acceptance" : current === "driver_accepted" ? "accepted" : current } }], rowCount: 1 };
-        if (text.startsWith("SELECT assignment_id FROM ops.phase1_dispatch_assignments"))
+          return {
+            rows: [
+              {
+                record: {
+                  ...links,
+                  status:
+                    current === "assigned"
+                      ? "pending_acceptance"
+                      : current === "driver_accepted"
+                        ? "accepted"
+                        : current,
+                },
+              },
+            ],
+            rowCount: 1,
+          };
+        if (
+          text.startsWith(
+            "SELECT assignment_id FROM ops.phase1_dispatch_assignments",
+          )
+        )
           return { rows: [{ assignment_id: links.assignmentId }], rowCount: 1 };
       }
       return result;
@@ -71,11 +114,22 @@ export async function observeTrustedCancellation(
   const cancel = async () => {
     try {
       const result = compensation
-        ? await f.multi.compensateFailedTrustedPassengerRide(orderId, "creation_failed", "r9-request")
-        : await f.controller.cancelRide({ realm: "passenger", drtsPassengerId: OWNER } as never, orderId, "r9-request");
+        ? await f.multi.compensateFailedTrustedPassengerRide(
+            orderId,
+            "creation_failed",
+            "r9-request",
+          )
+        : await f.controller.cancelRide(
+            { realm: "passenger", drtsPassengerId: OWNER } as never,
+            orderId,
+            "r9-request",
+          );
       return { result, error: null };
     } catch (error) {
-      return { result: null, error: error as { code?: string; message?: string } };
+      return {
+        result: null,
+        error: error as { code?: string; message?: string },
+      };
     }
   };
   const cancelling = cancel();
@@ -86,5 +140,12 @@ export async function observeTrustedCancellation(
     releaseGate();
   }
   const outcome = await cancelling;
-  return { ...outcome, f, effects, durableBefore, memoryBefore, cancellationCalls: f.calls.slice(callStart) };
+  return {
+    ...outcome,
+    f,
+    effects,
+    durableBefore,
+    memoryBefore,
+    cancellationCalls: f.calls.slice(callStart),
+  };
 }

@@ -1,4 +1,8 @@
-import { FirstPartyNotificationTransport, FirstPartyPushFailure, type FirstPartyDeliveryMetadata } from "./first-party-notification.transport";
+import {
+  FirstPartyNotificationTransport,
+  FirstPartyPushFailure,
+  type FirstPartyDeliveryMetadata,
+} from "./first-party-notification.transport";
 import { resolveOrderPartnerNotificationRoute } from "../tenant-partner/order-partner-notification-route";
 import {
   PartnerNotificationFailure,
@@ -1643,7 +1647,10 @@ export class MultiTaxiService implements OnModuleInit {
         ...metadata,
         outboxId,
         status: "failed",
-        result: retryDisposition === "configuration_blocked" ? "provider_not_configured" : "provider_error",
+        result:
+          retryDisposition === "configuration_blocked"
+            ? "provider_not_configured"
+            : "provider_error",
         attemptCount: record.attemptCount,
         nextAttemptAt: nextAttemptAt ?? new Date().toISOString(),
         deliveredAt: null,
@@ -1717,7 +1724,9 @@ export class MultiTaxiService implements OnModuleInit {
   private async deliverNonPartnerChannelOutcome(
     outboxId: string,
     channel: "first_party_app" | "ambiguous" | "none",
-  ): Promise<PassengerPushDeliveryOutcome & PassengerNotificationChannelMetadata> {
+  ): Promise<
+    PassengerPushDeliveryOutcome & PassengerNotificationChannelMetadata
+  > {
     const claim = await this.repository!.claimPartnerNotification(
       outboxId,
       this.pushDeliveryWorkerId,

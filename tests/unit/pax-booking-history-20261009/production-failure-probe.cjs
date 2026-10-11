@@ -57,7 +57,9 @@ const {
   NOW,
   OWNER,
 } = require("./production-booking-fixture.ts");
-const { observeTrustedCancellation } = require("./production-cancellation-fixture.ts");
+const {
+  observeTrustedCancellation,
+} = require("./production-cancellation-fixture.ts");
 const RealDate = Date;
 global.Date = class extends RealDate {
   constructor(...args) {
@@ -189,18 +191,46 @@ async function main() {
     );
   }
   console.log(`PRODUCTION_CONTRACT_PROBE total_failures=${failures}`);
-  for (const status of ["ready_for_dispatch", "assigned", "driver_accepted", "on_trip", "proof_pending", "completed", "cancelled"]) {
+  for (const status of [
+    "ready_for_dispatch",
+    "assigned",
+    "driver_accepted",
+    "on_trip",
+    "proof_pending",
+    "completed",
+    "cancelled",
+  ]) {
     for (const memory of ["synchronized", "stale", "race"]) {
       const o = await observeTrustedCancellation(status, memory);
-      const denied = ["on_trip", "proof_pending", "completed", "cancelled"].includes(status);
-      const writes = o.cancellationCalls.filter(c => /^(INSERT|UPDATE|DELETE)/.test(c.sql));
+      const denied = [
+        "on_trip",
+        "proof_pending",
+        "completed",
+        "cancelled",
+      ].includes(status);
+      const writes = o.cancellationCalls.filter((c) =>
+        /^(INSERT|UPDATE|DELETE)/.test(c.sql),
+      );
       const safe = denied
         ? o.error?.code === "ORDER_NOT_CANCELABLE" &&
           JSON.stringify(o.f.state.order) === JSON.stringify(o.durableBefore) &&
-          writes.length === 0 && Object.values(o.effects).every(n => n === 0)
+          writes.length === 0 &&
+          Object.values(o.effects).every((n) => n === 0)
         : o.error === null && o.f.state.order.status === "cancelled";
       if (!safe) failures++;
-      console.log(JSON.stringify({ sha: reference || "working-tree", scenario: "trusted_cancel", status, memory, error: o.error?.code || o.error?.message || null, durableAfter: o.f.state.order.status, writes: writes.length, effects: o.effects, safe }));
+      console.log(
+        JSON.stringify({
+          sha: reference || "working-tree",
+          scenario: "trusted_cancel",
+          status,
+          memory,
+          error: o.error?.code || o.error?.message || null,
+          durableAfter: o.f.state.order.status,
+          writes: writes.length,
+          effects: o.effects,
+          safe,
+        }),
+      );
     }
   }
   console.log(`PRODUCTION_CANCELLATION_PROBE total_failures=${failures}`);
