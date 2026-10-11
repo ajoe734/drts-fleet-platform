@@ -79,6 +79,21 @@ function mapCharge(row: QueryResultRow): StoredCharge {
   };
 }
 
+function captureOutcome(
+  charge: StoredCharge,
+): "pending" | "unknown" | "completed" | "failed" {
+  if (["captured", "refunded"].includes(charge.status)) return "completed";
+  if (["not_selected", "authorized"].includes(charge.status)) return "pending";
+  if (charge.lastError === "unknown") return "unknown";
+  if (
+    charge.attemptCount === 0 &&
+    charge.nextOperation === "capture" &&
+    charge.lastError === "unavailable"
+  )
+    return "pending";
+  return "failed";
+}
+
 /** A single dedicated PG session holds an order advisory lock across short
  * transactions and PSP I/O. There is NO open transaction during PSP I/O.
  * Session loss releases the advisory lock; durable readback state and the
@@ -221,16 +236,27 @@ export class PaymentChargeSession {
       `SELECT c.*,m.provider,m.token_envelope,m.status AS method_status,
               p.status AS billing_status,p.amount_minor AS billing_amount,
               p.currency AS billing_currency,p.attempt_count AS billing_attempts,
-              p.payment_method_token_ref,p.provider_payment_ref
+              p.payment_method_token_ref,p.provider_payment_ref,h.drts_passenger_id AS booking_owner,
+              k.operation AS capture_journal_operation,k.drts_passenger_id AS capture_journal_owner,
+              k.entity_id AS capture_journal_entity,k.outcome AS capture_journal_outcome
        FROM passenger.payment_charge_records c
        JOIN passenger.psp_tokens m ON m.payment_method_id=c.payment_method_id AND m.drts_passenger_id=c.drts_passenger_id
        JOIN billing.multi_taxi_passenger_payments p ON p.payment_id=c.payment_id AND p.order_id=c.order_id::text
+       LEFT JOIN passenger.booking_histories h ON h.order_id=c.order_id
+       LEFT JOIN passenger.payment_idempotency_keys k ON k.idempotency_key=c.idempotency_key
        WHERE c.order_id=$1`,
       [this.orderId],
     );
     const row = result.rows[0];
     if (!row) return null;
     if (
+      row.order_id !== this.orderId ||
+      row.payment_id !== `pax-payment:${this.orderId}` ||
+      row.idempotency_key !== `pax:capture:${this.orderId}` ||
+      row.booking_owner !== row.drts_passenger_id ||
+      row.capture_journal_operation !== "capture" ||
+      row.capture_journal_owner !== row.drts_passenger_id ||
+      row.capture_journal_entity !== this.orderId ||
       row.status !== row.billing_status ||
       String(row.amount_minor) !== String(row.billing_amount) ||
       row.currency !== "TWD" ||
@@ -240,7 +266,9 @@ export class PaymentChargeSession {
       (row.provider_capture_ref ?? null) !== (row.provider_payment_ref ?? null)
     )
       conflict();
-    return mapCharge(row);
+    const charge = mapCharge(row);
+    if (row.capture_journal_outcome !== captureOutcome(charge)) conflict();
+    return charge;
   }
 
   async begin(
@@ -273,21 +301,30 @@ export class PaymentChargeSession {
         operation === "capture"
           ? 0
           : current.readbackCount + (operation === "readback" ? 1 : 0);
-      await this.client.query(
+      const update = await this.client.query(
         `UPDATE passenger.payment_charge_records SET status='failed',attempt_count=$2,readback_count=$3,
           next_operation='readback',operation_id=$4,last_error_code='unknown',retry_at=NULL,updated_at=now()
          WHERE order_id=$1`,
         [this.orderId, attemptCount, readbackCount, operationId],
       );
-      await this.client.query(
+      if (update.rowCount !== 1) conflict();
+      const billing = await this.client.query(
         `UPDATE billing.multi_taxi_passenger_payments SET status='failed',attempt_count=$2,updated_at=now()
          WHERE payment_id=$1`,
         [charge.paymentId, attemptCount],
       );
-      await this.client.query(
-        "UPDATE passenger.payment_idempotency_keys SET outcome='unknown',error_code=NULL,updated_at=now() WHERE idempotency_key=$1 AND operation='capture'",
-        [charge.key],
+      if (billing.rowCount !== 1) conflict();
+      const journal = await this.client.query(
+        `UPDATE passenger.payment_idempotency_keys SET outcome='unknown',error_code=NULL,updated_at=now()
+         WHERE idempotency_key=$1 AND operation='capture' AND drts_passenger_id=$2 AND entity_id=$3 AND outcome=$4`,
+        [
+          current.key,
+          current.passengerId,
+          this.orderId,
+          captureOutcome(current),
+        ],
       );
+      if (journal.rowCount !== 1) conflict();
       return {
         ...current,
         status: "failed",
@@ -350,9 +387,9 @@ export class PaymentChargeSession {
         ],
       );
       if (billing.rowCount !== 1) conflict();
-      await this.client.query(
+      const journal = await this.client.query(
         `UPDATE passenger.payment_idempotency_keys SET outcome=$2,error_code=$3,updated_at=now()
-         WHERE idempotency_key=$1 AND operation='capture'`,
+         WHERE idempotency_key=$1 AND operation='capture' AND drts_passenger_id=$4 AND entity_id=$5 AND outcome='unknown'`,
         [
           claim.key,
           decision.status === "captured"
@@ -361,8 +398,11 @@ export class PaymentChargeSession {
               ? "unknown"
               : "failed",
           decision.error === "unknown" ? null : decision.error,
+          current.passengerId,
+          this.orderId,
         ],
       );
+      if (journal.rowCount !== 1) conflict();
       // recovery_notice_requested_at above is the durable request, with owner
       // and order already on this ledger. ConsumerNotificationOutboxRecord's
       // closed event contract has no payment event; do not invent one in SQL.

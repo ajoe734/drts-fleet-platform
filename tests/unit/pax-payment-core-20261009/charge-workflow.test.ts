@@ -81,15 +81,22 @@ function fixture(policy: PaymentCapturePolicy | undefined = POLICY) {
   };
   let charge: Row | null = null;
   let billing: Row | null = null;
-  let journalOwner = OWNER;
+  const journal: Row = {
+    operation: "capture",
+    drts_passenger_id: OWNER,
+    entity_id: ORDER,
+    outcome: "pending",
+  };
   let guest = false;
   let fault: ((sql: string) => boolean) | null = null;
+  let countFault: ((sql: string) => boolean) | null = null;
   let lockAvailable = true;
   const client = {
     query: vi.fn(async (sql: string, raw?: readonly unknown[]) => {
       const params = raw ?? [];
       calls.push({ sql, params });
       if (fault?.(sql)) throw new Error("synthetic_private_db_detail");
+      if (countFault?.(sql)) return { rows: [], rowCount: 0 };
       let rows: Row[] = [];
       if (sql.includes("pg_try_advisory_lock"))
         rows = [{ locked: lockAvailable }];
@@ -104,13 +111,7 @@ function fixture(policy: PaymentCapturePolicy | undefined = POLICY) {
         rows = guest ? [] : [{ drts_passenger_id: OWNER }];
       else if (sql.startsWith("SELECT o.status")) rows = [source];
       else if (sql.startsWith("SELECT operation,drts_passenger_id"))
-        rows = [
-          {
-            operation: "capture",
-            drts_passenger_id: journalOwner,
-            entity_id: ORDER,
-          },
-        ];
+        rows = [journal];
       else if (
         sql.includes("INSERT INTO billing.multi_taxi_passenger_payments")
       )
@@ -141,6 +142,7 @@ function fixture(policy: PaymentCapturePolicy | undefined = POLICY) {
           operation_id: null,
           retry_at: null,
           provider_capture_ref: null,
+          last_error_code: "unavailable",
         };
       else if (sql.startsWith("SELECT c.*"))
         rows =
@@ -155,6 +157,11 @@ function fixture(policy: PaymentCapturePolicy | undefined = POLICY) {
                   billing_attempts: billing.attempt_count,
                   payment_method_token_ref: billing.payment_method_token_ref,
                   provider_payment_ref: billing.provider_payment_ref,
+                  booking_owner: source.drts_passenger_id,
+                  capture_journal_operation: journal.operation,
+                  capture_journal_owner: journal.drts_passenger_id,
+                  capture_journal_entity: journal.entity_id,
+                  capture_journal_outcome: journal.outcome,
                 },
               ]
             : [];
@@ -203,6 +210,18 @@ function fixture(policy: PaymentCapturePolicy | undefined = POLICY) {
           provider_payment_ref: params[2],
           attempt_count: params[3],
         });
+      else if (
+        sql.startsWith(
+          "UPDATE passenger.payment_idempotency_keys SET outcome='unknown'",
+        )
+      )
+        journal.outcome = "unknown";
+      else if (
+        sql.startsWith(
+          "UPDATE passenger.payment_idempotency_keys SET outcome=$2",
+        )
+      )
+        Object.assign(journal, { outcome: params[1], error_code: params[2] });
       return { rows, rowCount: 1 };
     }),
     release: vi.fn(),
@@ -224,6 +243,7 @@ function fixture(policy: PaymentCapturePolicy | undefined = POLICY) {
     runtime,
     service,
     method,
+    journal,
     get notices() {
       return calls.filter(
         (call) =>
@@ -242,10 +262,13 @@ function fixture(policy: PaymentCapturePolicy | undefined = POLICY) {
       guest = true;
     },
     setJournalOwner: (owner: string) => {
-      journalOwner = owner;
+      journal.drts_passenger_id = owner;
     },
     setFault: (fn: (sql: string) => boolean) => {
       fault = fn;
+    },
+    setCountFault: (fn: (sql: string) => boolean) => {
+      countFault = fn;
     },
     setLockUnavailable: () => {
       lockAvailable = false;
@@ -254,6 +277,20 @@ function fixture(policy: PaymentCapturePolicy | undefined = POLICY) {
 }
 
 describe("real completion/capture/retry service and SQL repository, synthetic PG replies", () => {
+  it("refuses retry whose capture journal belongs to a foreign owner", async () => {
+    const f = fixture();
+    await new PaymentChargeService(f.repository, f.runtime).onTripCompleted(
+      EVENT,
+    );
+    f.setJournalOwner("synthetic_foreign_owner");
+    const capture = vi.spyOn(f.provider, "capture");
+    await expect(f.service.processOrder(ORDER, NOW)).rejects.toMatchObject({
+      code: "payment_state_conflict",
+    });
+    expect(capture).not.toHaveBeenCalled();
+    expect(f.charge?.attempt_count).toBe(0);
+  });
+
   it("commits claim and attempt before PSP, captures actual completed fare and writes both authorities", async () => {
     const f = fixture();
     const original = f.provider.capture.bind(f.provider);

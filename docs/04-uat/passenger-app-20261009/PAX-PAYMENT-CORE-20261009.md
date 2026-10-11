@@ -590,3 +590,34 @@ the exact previously reported scopes. Optional refund amount units/partial
 semantics also remain unresolved. No PG/HTTP/notification delivery or contracted
 PSP acceptance, independent review, protected merge or either named acceptance
 is claimed; no handoff/done or VM product runtime is started.
+
+## 2026-10-11 continuation: capture journal and durable write fences
+
+Adjacent source checkpoint `b6a06bb018982ee5ea91076e6ba3e76c1cafe460`
+checked capture journal ownership only during completion initialization. Actual
+`PaymentChargeService.processOrder` and `beginManualRecovery` load persisted
+charges directly, and the inherited load also serves refunds. A V0115 FK proves
+key existence but does not prove operation/account/order identity. The real
+retry probe first initializes an unpaid obligation with policy disabled, then
+supplies a foreign journal owner at the SQL boundary and runs the actual service,
+repository, cipher and fake PSP. Immutable b6a06bb incorrectly completes it.
+
+Repair in `PaymentChargeSession.load` checks the deterministic order/payment/key,
+booking-history owner and capture journal operation/owner/entity/outcome before
+returning either pending or terminal state. Account-first short transactions and
+the existing order advisory lock remain in place. Critical capture begin writes
+and capture journal finish now require exactly one affected row, with journal
+updates additionally fenced by owner/order/previous outcome.
+
+| Finding / acceptance                     | Source and old -> repaired evidence                                                                                                                                      | Commands/results and evidence                                                                                                                                                                                                                                                                                                                                                                   | Limits                                                                                                                  |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Retry with foreign capture journal owner | Immutable b6a06bb production repository resolves success; repaired repository refuses `payment_state_conflict` before PSP                                                | `PAX_PAYMENT_CHARGE_REPOSITORY_SOURCE="$PWD/.local/pax-payment-core-20261011-capture-fences/charge-repository-b6a06bb.ts" pnpm exec vitest run tests/unit/pax-payment-core-20261009/charge-workflow.test.ts -t 'refuses retry whose capture journal'`: **1 FAIL / 30 filter SKIP**, exit 1, `foreign-journal-old-executed.log`. Snapshot uses original source with import paths only relocated. | SQL replies/PSP are mocked boundaries; no PG corruption, transaction or concurrency acceptance claimed.                 |
+| Initial tooling failures                 | Dispatch restored dependency symlinks to canonical root, where Nest was missing; extracted snapshot additionally required resolving the Nest import from the API package | Initial/ready probes **0 executed / suite FAIL**, exit 1, `foreign-journal-old.log`, `foreign-journal-old-ready.log`; worktree symlinks only unlinked, targets preserved; offline frozen install exit 0, `dependency-install.log`.                                                                                                                                                              | Tooling/import failures are not behavioral reproductions. No tracked dependency changes, root edits or runtime startup. |
+| Initial repaired regression              | Real charge/refund tests preserve terminal/refusal paths; refund fixtures supply the existing valid capture journal prerequisite                                         | Two intermediate fixture runs exit 1 (**4 FAIL / 88 PASS**, then **1 FAIL / 91 PASS**) in `journal-repair-unit.log`, `journal-repair-unit-fixed.log`; valid journal state for ineligible refunds fixed without changing expected errors; final **2 files / 92 PASS / 0 SKIP**, exit 0, `journal-repair-unit-final.log`.                                                                         | Full affected regression and expanded write-fault matrix follow this checkpoint.                                        |
+| `pax-payment_bind_charge_and_states`     | Source advances, not recorded                                                                                                                                            | Existing binding/completion/retry/refund evidence retained                                                                                                                                                                                                                                                                                                                                      | Approved policy binding, hosted PG/HTTP, exact-SHA independent review and protected merge remain.                       |
+| `pax-payment_security_and_recovery`      | Source advances, not recorded                                                                                                                                            | Existing encryption/fake/unpaid guards and once-only ledger notice request retained                                                                                                                                                                                                                                                                                                             | Typed notice contract/recipient/transport scope and delivery, approved policy and external PSP acceptance remain.       |
+
+Evidence directory is worktree `.local/pax-payment-core-20261011-capture-fences/`;
+the final evidence bundle will also be copied to canonical `.local/`. This is a
+source checkpoint, not a candidate or handoff. No policy values or notification
+events are invented.

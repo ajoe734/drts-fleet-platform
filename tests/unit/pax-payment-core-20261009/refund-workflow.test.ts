@@ -80,6 +80,12 @@ async function fixture() {
     entity_id: ORDER,
     outcome: "pending",
   };
+  const captureJournal: Row = {
+    operation: "capture",
+    drts_passenger_id: OWNER,
+    entity_id: ORDER,
+    outcome: "completed",
+  };
   const calls: { sql: string; params: readonly unknown[] }[] = [];
   let journalExists = false;
   let absent = false;
@@ -110,6 +116,11 @@ async function fixture() {
                 billing_attempts: billing.attempt_count,
                 payment_method_token_ref: METHOD,
                 provider_payment_ref: billing.provider_payment_ref,
+                booking_owner: OWNER,
+                capture_journal_operation: captureJournal.operation,
+                capture_journal_owner: captureJournal.drts_passenger_id,
+                capture_journal_entity: captureJournal.entity_id,
+                capture_journal_outcome: captureJournal.outcome,
               },
             ];
       else if (sql.startsWith("SELECT refund_idempotency_key"))
@@ -183,6 +194,7 @@ async function fixture() {
     charge,
     billing,
     journal,
+    captureJournal,
     calls,
     client,
     repository,
@@ -426,6 +438,12 @@ describe("formal full refund service/controller and repository with synthetic PG
     const f = await fixture();
     f.charge.status = status;
     f.billing.status = status;
+    f.captureJournal.outcome =
+      status === "refunded"
+        ? "completed"
+        : ["authorized", "not_selected"].includes(status)
+          ? "pending"
+          : "failed";
     const refund = vi.spyOn(f.provider, "refund");
     await expect(f.refund()).rejects.toMatchObject({ code: "invalid_state" });
     expect(refund).not.toHaveBeenCalled();
