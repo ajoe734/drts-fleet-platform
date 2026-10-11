@@ -86,6 +86,17 @@ export function resolveRouteAuthPolicy(
           "Meta signed_request deletion webhook and signed anonymous completion receipt",
       };
     }
+    if (
+      upperMethod === "POST" &&
+      /^passenger-app\/platform\/rides\/[^/]+\/refund$/.test(routePath)
+    ) {
+      return {
+        routeKey: "passenger-app:platform:refund",
+        requiredScopes: ["billing:write"],
+        allowedRealms: ["platform"],
+        description: "Platform full passenger ride refund",
+      };
+    }
     if (routePath.startsWith("passenger-app/platform/")) {
       return {
         routeKey: "passenger-app:platform",

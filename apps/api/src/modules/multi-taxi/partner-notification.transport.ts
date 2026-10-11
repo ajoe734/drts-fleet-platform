@@ -34,6 +34,16 @@ const messages = {
 export function notificationExpiresAt(message: PassengerPushMessage): string {
   const createdAt = Date.parse(message.createdAt ?? "");
   if (!Number.isFinite(createdAt)) throw partnerFailure("route_missing");
+  if (message.eventType === "payment_recovery_required") {
+    // First-party payment notices have no partner TTL/default authority.
+    const expiry =
+      typeof message.payload.expiresAt === "string"
+        ? Date.parse(message.payload.expiresAt)
+        : NaN;
+    if (!Number.isFinite(expiry) || expiry <= createdAt)
+      throw partnerFailure("notification_expired");
+    return new Date(expiry).toISOString();
+  }
   const ttlEnd =
     createdAt +
     PARTNER_PASSENGER_EVENT_DEFAULT_TTL_SECONDS[message.eventType] * 1000;
@@ -73,6 +83,8 @@ export class PartnerNotificationTransport implements PassengerPushTransport {
     message: PassengerPushMessage,
     existing: StoredPartnerNotificationContext | null,
   ) {
+    if (message.eventType === "payment_recovery_required")
+      throw partnerFailure("configuration_blocked", existing);
     const route = await this.repository.findOrderPartnerNotificationRoute(
       message.orderId,
     );
@@ -142,6 +154,8 @@ export class PartnerNotificationTransport implements PassengerPushTransport {
     if (!this.repository.isEnabled())
       throw partnerFailure("configuration_blocked");
     const { message } = request;
+    if (message.eventType === "payment_recovery_required")
+      throw partnerFailure("configuration_blocked");
     let context = await this.repository.findPartnerNotificationContext(
       message.outboxId,
     );

@@ -4,6 +4,7 @@ import { MultiTaxiService } from "../../multi-taxi/multi-taxi.service";
 import { PassengerFareRepository } from "../fare/passenger-fare.repository";
 import { PassengerAccountRepository } from "../account/passenger-account.repository";
 import { ApiRequestError } from "../../../common/api-envelope";
+import { bookingPaymentMethodId } from "../payment/booking-payment.guard";
 import type { CreateMultiTaxiRideCommand } from "@drts/contracts";
 import {
   CreatePassengerRideCommand,
@@ -131,6 +132,7 @@ export class PassengerBookingService {
       );
     }
 
+    const paymentMethodId = bookingPaymentMethodId(req.paymentMethodId);
     const command: CreateMultiTaxiRideCommand = {
       pickup: {
         lat: req.origin.lat,
@@ -149,7 +151,7 @@ export class PassengerBookingService {
       },
       requestedPickupAt: snapshot.scheduledAt,
       timingMode: "scheduled",
-      paymentMethodTokenRef: req.paymentMethodId || null,
+      paymentMethodTokenRef: paymentMethodId,
     };
 
     const result = await this.multiTaxiService.createTrustedPassengerRide(
@@ -162,6 +164,7 @@ export class PassengerBookingService {
           orderId,
           req.fareSnapshotId,
           new Date(req.passengerConfirmedAt).toISOString(),
+          paymentMethodId,
           persistRide,
         ),
     );
