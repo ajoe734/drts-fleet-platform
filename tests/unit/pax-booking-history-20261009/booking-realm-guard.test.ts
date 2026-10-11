@@ -189,30 +189,33 @@ describe.each(["development", "staging", "production"])(
       }
     });
 
-    it("permits public booking settings through the BFF's verified metadata boundary", async () => {
-      const f = await sessions();
-      vi.stubEnv("APP_ENV", environment);
-      const req = request(
-        "GET",
-        "/api/passenger-app/booking-settings",
-        "metadata-stub",
-      );
-      const ctx = {
-        switchToHttp: () => ({ getRequest: () => req }),
-        getClass: () => PassengerBookingSettingsController,
-        getHandler: () =>
-          PassengerBookingSettingsController.prototype.getSettings,
-      } as never;
-      expect(await f.guard.canActivate(ctx)).toBe(true);
-      expect(req.identity).toBeUndefined();
-      if (environment !== "development") {
-        expect(f.google.verifyServicePrincipal).toHaveBeenCalledOnce();
-        req.headers = { authorization: "Bearer forged" };
-        await expect(f.guard.canActivate(ctx)).rejects.toMatchObject({
-          code: "GOOGLE_ASSERTION_INVALID",
-        });
-      }
-    });
+    it.each(["settings", "booking-settings"])(
+      "permits public %s through the BFF's verified metadata boundary",
+      async (path) => {
+        const f = await sessions();
+        vi.stubEnv("APP_ENV", environment);
+        const req = request(
+          "GET",
+          `/api/passenger-app/${path}`,
+          "metadata-stub",
+        );
+        const ctx = {
+          switchToHttp: () => ({ getRequest: () => req }),
+          getClass: () => PassengerBookingSettingsController,
+          getHandler: () =>
+            PassengerBookingSettingsController.prototype.getSettings,
+        } as never;
+        expect(await f.guard.canActivate(ctx)).toBe(true);
+        expect(req.identity).toBeUndefined();
+        if (environment !== "development") {
+          expect(f.google.verifyServicePrincipal).toHaveBeenCalledOnce();
+          req.headers = { authorization: "Bearer forged" };
+          await expect(f.guard.canActivate(ctx)).rejects.toMatchObject({
+            code: "GOOGLE_ASSERTION_INVALID",
+          });
+        }
+      },
+    );
   },
 );
 

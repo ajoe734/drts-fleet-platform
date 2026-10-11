@@ -8,7 +8,7 @@ import { PassengerBookingService } from "./passenger-booking.service";
 export class PassengerBookingSettingsController {
   constructor(private readonly service: PassengerBookingService) {}
 
-  @Get("booking-settings")
+  @Get(["settings", "booking-settings"])
   @OpenRoute()
   getSettings(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(this.service.getBookingSettings(), requestId);

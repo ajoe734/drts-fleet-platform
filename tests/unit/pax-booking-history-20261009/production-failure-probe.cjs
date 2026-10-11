@@ -14,6 +14,7 @@ const previousFiles = new Set([
   "apps/api/src/modules/passenger-app/booking/passenger-booking.service.ts",
   "apps/api/src/modules/passenger-app/booking/passenger-booking.repository.ts",
   "apps/api/src/modules/passenger-app/booking/passenger-booking.controller.ts",
+  "apps/api/src/modules/passenger-app/booking/passenger-booking-settings.controller.ts",
   "apps/api/src/modules/multi-taxi/multi-taxi.service.ts",
   "apps/api/src/modules/owned-mobility/owned-mobility.service.ts",
 ]);
@@ -70,6 +71,31 @@ process.env.SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES = "15";
 delete process.env.MULTI_TAXI_DEFAULT_AUTHORIZATION_ID;
 async function main() {
   let failures = 0;
+  const { PassengerBookingSettingsController } = require(
+    path.join(
+      root,
+      "apps/api/src/modules/passenger-app/booking/passenger-booking-settings.controller.ts",
+    ),
+  );
+  const settingsPaths = Reflect.getMetadata(
+    "path",
+    PassengerBookingSettingsController.prototype.getSettings,
+  );
+  const normalizedPaths = Array.isArray(settingsPaths)
+    ? settingsPaths
+    : [settingsPaths];
+  const canonicalSettings =
+    normalizedPaths.includes("settings") &&
+    normalizedPaths.includes("booking-settings");
+  if (!canonicalSettings) failures++;
+  console.log(
+    JSON.stringify({
+      sha: reference || "working-tree",
+      scenario: "canonical_settings_route",
+      paths: settingsPaths,
+      safe: canonicalSettings,
+    }),
+  );
   for (const faults of [
     [],
     ["order"],

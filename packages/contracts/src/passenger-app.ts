@@ -213,6 +213,8 @@ export interface CreatePassengerRideCommand {
   passengerConfirmedAt: string;
 }
 
+export type GetPassengerBookingSettingsQuery = Record<string, never>;
+
 export interface PassengerBookingSettingsResponse {
   minLeadTimeMinutes: number;
   requireSmsVerification: boolean;

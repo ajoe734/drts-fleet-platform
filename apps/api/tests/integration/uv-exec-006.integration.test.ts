@@ -2539,12 +2539,17 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
             .catch((error: unknown) => error);
         }
         if (scenario === "token_failure") {
+          // Creation awaits the initial durable write before token persistence
+          // can fail and enter cancellation. Observe the pending gate first.
+          await vi.waitFor(() => expect(writes.length).toBeGreaterThan(0));
+          expect(cancelSpy).not.toHaveBeenCalled();
+          expect(readSpy).not.toHaveBeenCalled();
           release();
-        }
-        await vi.waitFor(() => expect(cancelSpy).toHaveBeenCalledOnce());
-        expect(writes.length).toBeGreaterThan(0);
-        expect(readSpy).not.toHaveBeenCalled();
-        if (scenario !== "token_failure") {
+          await vi.waitFor(() => expect(cancelSpy).toHaveBeenCalledOnce());
+        } else {
+          await vi.waitFor(() => expect(cancelSpy).toHaveBeenCalledOnce());
+          expect(writes.length).toBeGreaterThan(0);
+          expect(readSpy).not.toHaveBeenCalled();
           release();
         }
         const outcome = await result;

@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { firstValueFrom } from "../../../apps/api/node_modules/rxjs";
+import { firstValueFrom, of } from "../../../apps/api/node_modules/rxjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OwnedOrderRecord } from "@drts/contracts";
 import { PassengerBookingService } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.service";
 import { PassengerBookingSettingsController } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking-settings.controller";
+import { SnakeCaseInterceptor } from "../../../apps/api/src/common/snake-case.interceptor";
 import {
   createProductionBookingFixture,
   NOW,
@@ -32,6 +33,35 @@ afterEach(() => {
 });
 
 describe("pax-booking_trusted_create_and_ownership: production validation", () => {
+  it.each(["settings", "booking-settings"])(
+    "serves %s with shared authority and the production wire serializer",
+    async (path) => {
+      vi.stubEnv("SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES", "45");
+      vi.stubEnv("REQUIRE_SMS_VERIFICATION", "true");
+      const f = createProductionBookingFixture();
+      const controller = new PassengerBookingSettingsController(f.service);
+      expect(Reflect.getMetadata("path", controller.getSettings)).toContain(
+        path,
+      );
+      expect(Reflect.getMetadata("method", controller.getSettings)).toBe(0);
+      const response = await firstValueFrom(
+        new SnakeCaseInterceptor().intercept({} as never, {
+          handle: () => of(controller.getSettings("settings-request")),
+        }),
+      );
+      expect(response).toMatchObject({
+        data: { min_lead_time_minutes: 45, require_sms_verification: true },
+        meta: { request_id: "settings-request" },
+      });
+      expect(Object.keys((response as { data: object }).data)).toEqual([
+        "min_lead_time_minutes",
+        "require_sms_verification",
+      ]);
+      expect(f.calls).toEqual([]);
+      expect(f.published).toEqual([]);
+    },
+  );
+
   it.each(["foreign", "unknown"])(
     "uses the owner-filtered production fare repository for a %s quote",
     async () => {
