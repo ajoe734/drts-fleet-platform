@@ -125,10 +125,20 @@ describe("Passenger BFF Route", () => {
         method: "POST",
         path: ["auth", "oauth", "google", "start"],
         expectedStatus: 200,
-        mockResponse: new Response("{}", {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
+        mockResponse: Response.json(
+          {
+            data: {
+              authUrl: "https://provider.example.test/authorize",
+              transactionId: "12345678-1234-4234-8234-123456789abc",
+              state: "oauth-state",
+              expiresAt: new Date(Date.now() + 600000).toISOString(),
+            },
+          },
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       },
       {
         method: "POST",
@@ -178,7 +188,27 @@ describe("Passenger BFF Route", () => {
       });
       const req = new NextRequest(
         `http://localhost/api/passenger-app/${v.path.join("/")}`,
-        { method: v.method, headers: { Origin: "http://localhost" } },
+        {
+          method: v.method,
+          headers: { Origin: "http://localhost" },
+          ...(v.path.join("/") === "auth/otp/request"
+            ? {
+                body: JSON.stringify({
+                  provider: "email",
+                  target: "pax@example.test",
+                  purpose: "login",
+                }),
+              }
+            : v.path.join("/") === "auth/oauth/google/start"
+              ? {
+                  body: JSON.stringify({
+                    provider: "google",
+                    purpose: "login",
+                    redirectUri: "http://localhost/auth/callback/google",
+                  }),
+                }
+              : {}),
+        },
       );
       const handler = v.method === "POST" ? POST : GET;
       const res = await handler(req, {
@@ -304,8 +334,8 @@ describe("Passenger BFF Route", () => {
             }
           : {
               authUrl: "https://provider.example.test/authorize",
-              transactionId: "oauth-transaction",
-              expiresAt: "2026-10-10T01:05:00Z",
+              transactionId: "12345678-1234-4234-8234-123456789abc",
+              expiresAt: new Date(Date.now() + 600000).toISOString(),
               state: "oauth-state",
             };
       const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
@@ -323,10 +353,11 @@ describe("Passenger BFF Route", () => {
           ? {
               code: "test-code",
               state: "oauth-state",
-              transaction_id: "oauth-transaction",
+              provider,
             }
           : {
-              redirect_uri: `https://ride.smarttransport.tw/auth/callback/${provider}`,
+              provider,
+              redirectUri: `https://ride.smarttransport.tw/auth/callback/${provider}`,
               purpose: "login",
             };
       const req = new NextRequest(
@@ -336,6 +367,11 @@ describe("Passenger BFF Route", () => {
           headers: {
             Origin: "https://ride.smarttransport.tw",
             "Content-Type": "application/json",
+            ...(action === "callback"
+              ? {
+                  Cookie: `pax_oauth_txn=${JSON.stringify({ provider, transactionId: "12345678-1234-4234-8234-123456789abc", state: "oauth-state", purpose: "login", session: "anonymous", expiresAt: Date.now() + 600000 })}`,
+                }
+              : {}),
           },
           body: JSON.stringify(command),
         },
@@ -360,9 +396,18 @@ describe("Passenger BFF Route", () => {
       ).toBeNull();
       expect(
         JSON.parse(
-          new TextDecoder().decode(upstream?.init?.body as ArrayBuffer),
+          typeof upstream?.init?.body === "string"
+            ? upstream.init.body
+            : new TextDecoder().decode(upstream?.init?.body as ArrayBuffer),
         ),
-      ).toEqual(command);
+      ).toEqual(
+        action === "callback"
+          ? {
+              ...command,
+              transactionId: "12345678-1234-4234-8234-123456789abc",
+            }
+          : command,
+      );
       const body = await res.json();
       expect(body.meta.request_id).toBe("pax-web-shell-regression");
       expect(body.data).not.toHaveProperty("access_token");
@@ -389,7 +434,7 @@ describe("Passenger BFF Route", () => {
       } else {
         expect(body.data).toMatchObject({
           auth_url: "https://provider.example.test/authorize",
-          transaction_id: "oauth-transaction",
+          transaction_id: "12345678-1234-4234-8234-123456789abc",
         });
         expect(res.cookies.get("pax_session")).toBeUndefined();
         expect(res.cookies.get("pax_refresh")).toBeUndefined();
@@ -595,7 +640,11 @@ describe("Passenger BFF Route", () => {
       {
         method: "POST",
         headers: { Origin: "https://ride.smarttransport.tw" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          provider: "email",
+          target: "pax@example.test",
+          purpose: "login",
+        }),
       },
     );
     const res = await POST(req, {

@@ -397,6 +397,7 @@ describe("MultiTaxiService passenger ride authority", () => {
       "order-001",
       { reason: "passenger_access_token_persistence_failed" },
       "req-production-token",
+      { systemBypassCancelableCheck: true },
     );
   });
 
