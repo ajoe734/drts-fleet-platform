@@ -91,7 +91,7 @@ SHA, `git -C <parent-cwd> status --short` was empty, and `git worktree list
 local and published refs were unchanged. The helper stayed on its assigned
 branch; the canonical root checkout was not switched.
 
-No reset, rebase, amend, stash, force push, parent source edit, branch deletion,
+No manual reset, rebase, amend, stash, force push, parent source edit, branch deletion,
 or product runtime/deployment was performed. Supervisor should retain the
 parent worktree lock until original source continuation is safely anchored.
 The new worktree needs its own dependency/hook preparation by the resumed
@@ -197,3 +197,9 @@ hook source or shared Git configuration. The existing range-based generated
 file and commit-message checks, and formatting/classification checks, validate
 the anchor explicitly. The subsequent evidence closeout uses the restored
 normal hook chain. No bypass variable, amend, reset or history rewrite is used.
+The normal pre-commit hook passed its generated-file guard and lint-staged
+formatting. Its stock temporary backup stash was created and cleaned by
+lint-staged; no design-intent diff was parked in a manual stash. Formatting,
+classification (6,269 files), range whitespace, generated-file and trailer
+checks completed with exit 0. The parent path audit covered all 30 paths and
+six exact task identities; it does not approve out-of-scope methods.
