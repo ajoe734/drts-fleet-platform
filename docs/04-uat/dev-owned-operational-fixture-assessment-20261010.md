@@ -20,8 +20,8 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 | Finding | Historical / Current Evidence | Remaining Condition / Actual limit |
 |---------|-----------------------|--------|
 | **F1/F3/F4/F5 core** | Genuine archive/PDF/identity positives and existing denials PASS BOTH | Actual current owned resources/PG not measured |
-| **F2 actual authority / inventory** | NEW `HEAD`: Script parses GitHub API boolean values properly (not as comments) and restricts bounded held window. Authority runs *before* metadata acquisition. | Full environment and live authority unmeasured |
-| **F3 upstream capture** | NEW `HEAD`: Producer upgraded to perform strict scanner identity resolution (allowing runtime + deployer), regex matches scanner URL, and strictly matches scanner gateway/clamd containers. | Actual live cloud metadata acquisition unmeasured |
+| **F2 actual authority / inventory** | NEW `HEAD`: Script strictly enforces bounded held window and explicit deny logic. The test suite correctly patches the `check_held_window` to validate success paths. | Full environment and live authority unmeasured |
+| **F3 upstream capture** | NEW `HEAD`: Producer upgraded to perform strict scanner identity resolution (allowing runtime + deployer), regex matches scanner URL, and strictly matches scanner/clamd container names against expected images. | Actual live cloud metadata acquisition unmeasured |
 | **F6/F7 report/UAT** | NEW `HEAD`: Real regression matrix properly handles errors via try-except, retaining partial observations instead of wiping receipts. Committed actual trigger tests (18 tests passed) and verified real command / exit. | True live matrix unavailable locally. |
 | **F8 scope/publication** | Official subjects FIXED (commits PASS, literal own prefix PASS). | Supervisor must verify exact prospective preserved-history/publication disposition. No history rewrite authorized. |
 
@@ -29,9 +29,9 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 
 The workflow restricts secrets, body, and non-fixture rows. It produces a bounded JSON report uploaded as a durable artifact.
 - **Provider & IAM validation**: The script validates providers for `drts-dev-api` and strictly typed IAM bindings.
-- **Scanner hash and metadata**: Enforces caller-supplied metadata presence of `scanner_url` on `drts-dev-api`, and validates that `default_environment` on `drts-dev-scanner` strictly matches the `SCANNER_ENV` dictionary contract.
+- **Scanner hash and metadata**: Enforces caller-supplied metadata presence of `scanner_url` on `drts-dev-api`, and validates that `default_environment` on `drts-dev-scanner` strictly matches the `SCANNER_ENV` dictionary contract. Strict container name matching is also verified.
 - **Cloud Metadata Bounds**: Replaced the uncapped frozen python helper with an inline `run_bounded` wrapper inside `assess-owned-operational-fixtures.py`, successfully retaining containment against memory bloat.
-- **Active-run Inventory Check**: Completely enumerates paginated active jobs for restricted workflow paths across non-terminal states.
+- **Active-run Inventory Check**: Completely enumerates paginated active jobs for restricted workflow paths across non-terminal states. Explicit deny logic correctly identifies overlaps.
 - **Required Check-runs Check**: Strictly requires independent `APPROVED` review on the PR HEAD by checking the correct GitHub API array schema, and verifies exact names of required GitHub checks.
 
 ## Acceptance Criteria Verified
@@ -49,20 +49,20 @@ The workflow restricts secrets, body, and non-fixture rows. It produces a bounde
 
 ```
 Command: python3 -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_assessment.py -v
-CWD: /home/lupin/workspace/drts-fleet-platform
+CWD: /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-dev-owned-operational-fixture-assessment-20261010
 Version: Python 3.12
 Exit: 0
 Log:
-Ran 18 tests in 0.134s
+Ran 18 tests in 0.140s
 OK
 ```
 
 ```
 Command: python3 -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py -v
-CWD: /home/lupin/workspace/drts-fleet-platform
+CWD: /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-dev-owned-operational-fixture-assessment-20261010
 Version: Python 3.12
 Exit: 0
 Log:
-Ran 63 tests in 0.038s
+Ran 63 tests in 0.040s
 OK
 ```
