@@ -1293,7 +1293,7 @@ def main():
                         
                 require(len(images) > 0, f"No images found for {s_name}")
                 if s_name == "drts-dev-scanner":
-                    require(set(images.keys()) == {"gateway", "clamd"}, "Scanner missing gateway or clamd")
+                    require(set(images.keys()) == {"scanner", "clamd"}, "Scanner missing scanner or clamd")
 
                 service_meta = {
                     "ready_revision": ready_revision,
