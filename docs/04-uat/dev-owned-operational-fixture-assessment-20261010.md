@@ -10,7 +10,7 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 
 ## Evidence Source Identity
 - **Task ID**: SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010
-- **Candidate Generation**: `fb1e537d96914ad6b083c839fb08101b`
+- **Candidate Generation**: `04a772aa4b274097b7107e2b91aedef8`
 - **Candidate SHA**: `[External Candidate Artifact]` (to be resolved by orchestrator upon candidate completion, linked via review-verdict.md identity)
 - **Reviewer**: Codex
 - **Workspace**: Isolated review worktree
@@ -20,9 +20,9 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 | Finding | Historical / Current Evidence | Remaining Condition / Actual limit |
 |---------|-----------------------|--------|
 | **F1/F3/F4/F5 core** | Genuine archive/PDF/identity positives and existing denials PASS BOTH | Actual current owned resources/PG not measured |
-| **F2 actual authority / inventory** | NEW `HEAD`: Shared reservation overlap check explicitly permits `deleted` workflows, and both script and workflow enforce the 1000 search limit on the GitHub API for workflow runs. Authority and reservation verification runs *before* metadata acquisition. `--current-run-id` and `--tooling-run-sha` supplied to enforce current authority. | Full environment and live authority unmeasured |
-| **F3 upstream capture** | NEW `HEAD`: Producer upgraded to perform exactly 25 bounded reads: fetches `identity`, 7 `providers`, exact `scanner_url` match, scanner `spec_sha256` / `default_environment`. Enforces strict IAM role uniqueness and non-empty image digests. | Actual live cloud metadata acquisition unmeasured |
-| **F6/F7 report/UAT** | Committed actual trigger tests (18 tests passed in test_owned_operational_fixture_assessment.py) and verified real command / cwd / version / exit / log / matrix. | True live matrix unavailable locally. |
+| **F2 actual authority / inventory** | NEW `HEAD`: Script parses GitHub API boolean values properly (not as comments) and restricts bounded held window. Authority runs *before* metadata acquisition. | Full environment and live authority unmeasured |
+| **F3 upstream capture** | NEW `HEAD`: Producer upgraded to perform strict scanner identity resolution (allowing runtime + deployer), regex matches scanner URL, and strictly matches scanner gateway/clamd containers. | Actual live cloud metadata acquisition unmeasured |
+| **F6/F7 report/UAT** | NEW `HEAD`: Real regression matrix properly handles errors via try-except, retaining partial observations instead of wiping receipts. Committed actual trigger tests (18 tests passed) and verified real command / exit. | True live matrix unavailable locally. |
 | **F8 scope/publication** | Official subjects FIXED (commits PASS, literal own prefix PASS). | Supervisor must verify exact prospective preserved-history/publication disposition. No history rewrite authorized. |
 
 ## Execution Bounds and Reporting

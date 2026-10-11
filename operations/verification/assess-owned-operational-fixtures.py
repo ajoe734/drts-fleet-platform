@@ -317,415 +317,422 @@ def fetch_and_validate_provenance(args) -> None:
                 require(key in seen_keys, f"Missing canonical object in evidence: {key}")
 
 def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]], check_authority=None) -> Dict[str, Any]:
-    validated_meta = {}
-    
-    for logical_key in CANONICAL_OWNED_OBJECTS.keys():
-        physical_key = logical_to_physical_gcs_key(logical_key)
-        if check_authority: check_authority()
-        desc = runner("describe", BUCKET, physical_key)
-        if desc.get("status") == "not_found":
-            # Return proper rejection for missing instead of throwing generic ValueError
-            return {"status": "rejected", "reason": f"Missing object gs://{BUCKET}/{physical_key}"}
-        if desc.get("status") != "ok":
-            raise RuntimeError(f"GCS error describing gs://{BUCKET}/{physical_key}: {desc.get('stderr', 'unknown_error')}")
+    try:
+        validated_meta = {}
+        validated_reads = []
         
-        meta = desc.get("metadata", {})
-        
-        if meta.get("bucket") != BUCKET:
-             return {"status": "rejected", "reason": f"Bucket mismatch for {physical_key}"}
-        if meta.get("name") != physical_key:
-             return {"status": "rejected", "reason": f"Object name mismatch for {physical_key}"}
-             
-        if str(meta.get("size")) != str(EXPECTED_FILE_SIZE):
-             return {"status": "rejected", "reason": f"Size mismatch for {physical_key}"}
-        if meta.get("contentType") != EXPECTED_MIME:
-             return {"status": "rejected", "reason": f"MIME mismatch for {physical_key}"}
-        if "generation" not in meta:
-             return {"status": "rejected", "reason": f"No generation for {physical_key}"}
-        if not str(meta["generation"]).isdigit():
-             return {"status": "rejected", "reason": f"Non-numeric generation for {physical_key}"}
-        if "metageneration" not in meta:
-             return {"status": "rejected", "reason": f"No metageneration for {physical_key}"}
-        if not str(meta["metageneration"]).isdigit():
-             return {"status": "rejected", "reason": f"Non-numeric metageneration for {physical_key}"}
-             
-        time_created = meta.get("timeCreated", "")
-        updated = meta.get("updated", "")
-        stored_at = meta.get("metadata", {}).get("stored-at", "")
-        if not stored_at:
-             return {"status": "rejected", "reason": f"Missing stored-at for {physical_key}"}
-             
-        import datetime
-        try:
-            tc = datetime.datetime.fromisoformat(time_created.replace("Z", "+00:00"))
-            up = datetime.datetime.fromisoformat(updated.replace("Z", "+00:00"))
-            sa = datetime.datetime.fromisoformat(stored_at.replace("Z", "+00:00"))
-            start = datetime.datetime.fromisoformat("2026-10-09T08:39:23+00:00")
-            end = datetime.datetime.fromisoformat("2026-10-09T09:04:10+00:00")
-            if not (start <= tc <= end) or not (start <= up <= end) or not (start <= sa <= end):
-                return {"status": "rejected", "reason": f"Timestamps outside allowed window for {physical_key}"}
-        except Exception:
-            return {"status": "rejected", "reason": f"Missing or invalid time boundaries for {physical_key}"}
-             
-        validated_meta[physical_key] = meta
+        for logical_key in CANONICAL_OWNED_OBJECTS.keys():
+            physical_key = logical_to_physical_gcs_key(logical_key)
+            if check_authority: check_authority()
+            desc = runner("describe", BUCKET, physical_key)
+            if desc.get("status") == "not_found":
+                # Return proper rejection for missing instead of throwing generic ValueError
+                return {"status": "rejected", "reason": f"Missing object gs://{BUCKET}/{physical_key}"}
+            if desc.get("status") != "ok":
+                raise RuntimeError(f"GCS error describing gs://{BUCKET}/{physical_key}: {desc.get('stderr', 'unknown_error')}")
+            
+            meta = desc.get("metadata", {})
+            
+            if meta.get("bucket") != BUCKET:
+                 return {"status": "rejected", "reason": f"Bucket mismatch for {physical_key}"}
+            if meta.get("name") != physical_key:
+                 return {"status": "rejected", "reason": f"Object name mismatch for {physical_key}"}
+                 
+            if str(meta.get("size")) != str(EXPECTED_FILE_SIZE):
+                 return {"status": "rejected", "reason": f"Size mismatch for {physical_key}"}
+            if meta.get("contentType") != EXPECTED_MIME:
+                 return {"status": "rejected", "reason": f"MIME mismatch for {physical_key}"}
+            if "generation" not in meta:
+                 return {"status": "rejected", "reason": f"No generation for {physical_key}"}
+            if not str(meta["generation"]).isdigit():
+                 return {"status": "rejected", "reason": f"Non-numeric generation for {physical_key}"}
+            if "metageneration" not in meta:
+                 return {"status": "rejected", "reason": f"No metageneration for {physical_key}"}
+            if not str(meta["metageneration"]).isdigit():
+                 return {"status": "rejected", "reason": f"Non-numeric metageneration for {physical_key}"}
+                 
+            time_created = meta.get("timeCreated", "")
+            updated = meta.get("updated", "")
+            stored_at = meta.get("metadata", {}).get("stored-at", "")
+            if not stored_at:
+                 return {"status": "rejected", "reason": f"Missing stored-at for {physical_key}"}
+                 
+            import datetime
+            try:
+                tc = datetime.datetime.fromisoformat(time_created.replace("Z", "+00:00"))
+                up = datetime.datetime.fromisoformat(updated.replace("Z", "+00:00"))
+                sa = datetime.datetime.fromisoformat(stored_at.replace("Z", "+00:00"))
+                start = datetime.datetime.fromisoformat("2026-10-09T08:39:23+00:00")
+                end = datetime.datetime.fromisoformat("2026-10-09T09:04:10+00:00")
+                if not (start <= tc <= end) or not (start <= up <= end) or not (start <= sa <= end):
+                    return {"status": "rejected", "reason": f"Timestamps outside allowed window for {physical_key}"}
+            except Exception:
+                return {"status": "rejected", "reason": f"Missing or invalid time boundaries for {physical_key}"}
+                 
+            validated_meta[physical_key] = meta
 
-    validated_reads = []
-    for logical_key in CANONICAL_OWNED_OBJECTS.keys():
-        physical_key = logical_to_physical_gcs_key(logical_key)
-        meta = validated_meta[physical_key]
-        if check_authority: check_authority()
-        body_res = runner("cat", BUCKET, f"{physical_key}#{meta['generation']}")
-        if body_res.get("status") != "ok":
-             return {"status": "rejected", "reason": f"Failed to read body for {physical_key}: {body_res.get('stderr')}"}
-             
-        body_bytes = body_res.get("body", b"")
-        hasher = hashlib.sha256()
-        hasher.update(body_bytes)
-        actual_sha256 = hasher.hexdigest()
-        if actual_sha256 != EXPECTED_SHA256:
-             return {"status": "rejected", "reason": f"Hash mismatch for {physical_key}"}
-        
-        if check_authority: check_authority()
-        re_desc = runner("describe", BUCKET, physical_key)
-        if re_desc.get("status") != "ok":
-             return {"status": "rejected", "reason": f"Failed to describe on recheck for {physical_key}"}
-        re_meta = re_desc.get("metadata", {})
-        if re_meta.get("bucket") != BUCKET:
-             return {"status": "rejected", "reason": f"Bucket mismatch on recheck for {physical_key}"}
-        if re_meta.get("name") != physical_key:
-             return {"status": "rejected", "reason": f"Object name mismatch on recheck for {physical_key}"}
-        if str(re_meta.get("generation")) != str(meta["generation"]):
-             return {"status": "rejected", "reason": f"Generation drift for {physical_key}"}
-        if str(re_meta.get("metageneration")) != str(meta["metageneration"]):
-             return {"status": "rejected", "reason": f"Metageneration drift for {physical_key}"}
-        if re_meta.get("contentType") != EXPECTED_MIME or str(re_meta.get("size")) != str(EXPECTED_FILE_SIZE):
-             return {"status": "rejected", "reason": f"Identity/type/size drift for {physical_key}"}
-        if re_meta.get("timeCreated") != meta.get("timeCreated") or re_meta.get("updated") != meta.get("updated"):
-             return {"status": "rejected", "reason": f"Timestamp drift for {physical_key}"}
-        if re_meta.get("metadata", {}).get("stored-at") != meta.get("metadata", {}).get("stored-at"):
-             return {"status": "rejected", "reason": f"Stored-at drift for {physical_key}"}
-             
-        validated_reads.append({
-            "bucket": BUCKET,
-            "logical_key": logical_key,
-            "key": physical_key, 
-            "generation": meta["generation"],
-            "metageneration": meta["metageneration"],
-            "size": meta["size"],
-            "contentType": meta["contentType"],
-            "timeCreated": meta["timeCreated"],
-            "updated": meta["updated"],
-            "stored-at": meta.get("metadata", {}).get("stored-at"),
-            "hash": EXPECTED_SHA256,
-            "documentId": CANONICAL_OWNED_OBJECTS[logical_key]["documentId"],
-            "confirmSubmissionId": CANONICAL_OWNED_OBJECTS[logical_key]["confirmSubmissionId"]
-        })
-        
-    return {"status": "success", "validated_count": len(validated_reads), "receipts": validated_reads}
+        validated_reads = []
+        for logical_key in CANONICAL_OWNED_OBJECTS.keys():
+            physical_key = logical_to_physical_gcs_key(logical_key)
+            meta = validated_meta[physical_key]
+            if check_authority: check_authority()
+            body_res = runner("cat", BUCKET, f"{physical_key}#{meta['generation']}")
+            if body_res.get("status") != "ok":
+                 return {"status": "rejected", "reason": f"Failed to read body for {physical_key}: {body_res.get('stderr')}"}
+                 
+            body_bytes = body_res.get("body", b"")
+            hasher = hashlib.sha256()
+            hasher.update(body_bytes)
+            actual_sha256 = hasher.hexdigest()
+            if actual_sha256 != EXPECTED_SHA256:
+                 return {"status": "rejected", "reason": f"Hash mismatch for {physical_key}"}
+            
+            if check_authority: check_authority()
+            re_desc = runner("describe", BUCKET, physical_key)
+            if re_desc.get("status") != "ok":
+                 return {"status": "rejected", "reason": f"Failed to describe on recheck for {physical_key}"}
+            re_meta = re_desc.get("metadata", {})
+            if re_meta.get("bucket") != BUCKET:
+                 return {"status": "rejected", "reason": f"Bucket mismatch on recheck for {physical_key}"}
+            if re_meta.get("name") != physical_key:
+                 return {"status": "rejected", "reason": f"Object name mismatch on recheck for {physical_key}"}
+            if str(re_meta.get("generation")) != str(meta["generation"]):
+                 return {"status": "rejected", "reason": f"Generation drift for {physical_key}"}
+            if str(re_meta.get("metageneration")) != str(meta["metageneration"]):
+                 return {"status": "rejected", "reason": f"Metageneration drift for {physical_key}"}
+            if re_meta.get("contentType") != EXPECTED_MIME or str(re_meta.get("size")) != str(EXPECTED_FILE_SIZE):
+                 return {"status": "rejected", "reason": f"Identity/type/size drift for {physical_key}"}
+            if re_meta.get("timeCreated") != meta.get("timeCreated") or re_meta.get("updated") != meta.get("updated"):
+                 return {"status": "rejected", "reason": f"Timestamp drift for {physical_key}"}
+            if re_meta.get("metadata", {}).get("stored-at") != meta.get("metadata", {}).get("stored-at"):
+                 return {"status": "rejected", "reason": f"Stored-at drift for {physical_key}"}
+                 
+            validated_reads.append({
+                "bucket": BUCKET,
+                "logical_key": logical_key,
+                "key": physical_key, 
+                "generation": meta["generation"],
+                "metageneration": meta["metageneration"],
+                "size": meta["size"],
+                "contentType": meta["contentType"],
+                "timeCreated": meta["timeCreated"],
+                "updated": meta["updated"],
+                "stored-at": meta.get("metadata", {}).get("stored-at"),
+                "hash": EXPECTED_SHA256,
+                "documentId": CANONICAL_OWNED_OBJECTS[logical_key]["documentId"],
+                "confirmSubmissionId": CANONICAL_OWNED_OBJECTS[logical_key]["confirmSubmissionId"]
+            })
+            
+        return {"status": "success", "validated_count": len(validated_reads), "receipts": validated_reads}
+    except Exception as e:
+        return {"status": "error", "partial_observations": validated_reads, "error": str(e)}
 
 def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]], check_authority=None) -> Dict[str, Any]:
-    safe_subs = ",".join(f"'{u}'" for u in CANONICAL_OWNED_SUBMISSIONS)
-    query = f"""
-    BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
-    WITH subs AS (
-        SELECT COALESCE(json_agg(s.*), '[]'::json) as data FROM fleet.supply_submissions s WHERE submission_id IN ({safe_subs})
-    ), docs AS (
-        SELECT COALESCE(json_agg(d.*), '[]'::json) as data FROM fleet.supply_documents d WHERE submission_id IN ({safe_subs})
-    ), revs AS (
-        SELECT count(*) as c FROM fleet.supply_review_events WHERE submission_id IN ({safe_subs})
-    ), affs AS (
-        SELECT count(*) as c FROM fleet.vehicle_fleet_affiliations WHERE source_submission_id IN ({safe_subs})
-    ), discs AS (
-        SELECT count(*) as c FROM reg.vehicle_passenger_disclosure_profiles WHERE source_submission_id IN ({safe_subs})
-    ), creds AS (
-        SELECT count(*) as c FROM reg.driver_public_registration_credentials WHERE source_submission_id IN ({safe_subs})
-    ), cdriv AS (
-        SELECT count(*) as c FROM reg.phase1_registry_drivers WHERE driver_id IN (SELECT canonical_driver_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_driver_id IS NOT NULL)
-    ), cveh AS (
-        SELECT count(*) as c FROM reg.phase1_registry_vehicles WHERE vehicle_id IN (SELECT canonical_vehicle_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_vehicle_id IS NOT NULL)
-    ), cpol AS (
-        SELECT count(*) as c FROM reg.phase1_registry_policies WHERE policy_id IN (SELECT canonical_policy_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_policy_id IS NOT NULL)
-    ), ccont AS (
-        SELECT count(*) as c FROM reg.phase1_registry_contracts WHERE contract_id IN (SELECT canonical_contract_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_contract_id IS NOT NULL)
-    ), ddrafts AS (
-        SELECT count(*) as c FROM fleet.driver_supply_drafts WHERE preferred_vehicle_submission_id IN ({safe_subs}) OR submission_id IN ({safe_subs})
-    ), vdrafts AS (
-        SELECT count(*) as c FROM fleet.vehicle_supply_drafts WHERE current_driver_submission_id IN ({safe_subs}) OR submission_id IN ({safe_subs})    ), cpairs AS (
-        SELECT count(*) as c FROM reg.phase1_registry_supply_pairs WHERE vehicle_id IN (SELECT canonical_vehicle_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_vehicle_id IS NOT NULL) OR driver_id IN (SELECT canonical_driver_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_driver_id IS NOT NULL)
-    ), cexcl AS (
-        SELECT count(*) as c FROM reg.phase1_registry_exclusivities WHERE vehicle_id IN (SELECT canonical_vehicle_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_vehicle_id IS NOT NULL)
-    ), audits AS (
-        SELECT count(*) as c FROM admin.audit_logs WHERE resource_id IN ({safe_subs})
-    ), fks_meta AS (
-        SELECT json_agg(json_build_object('rel', conrelid::regclass, 'confrel', confrelid::regclass, 'name', conname, 'contype', contype, 'confdeltype', confdeltype, 'confupdtype', confupdtype, 'def', pg_get_constraintdef(oid))) as data 
-        FROM pg_constraint WHERE confrelid IN ('fleet.supply_submissions'::regclass, 'fleet.supply_documents'::regclass, 'fleet.supply_review_events'::regclass, 'fleet.vehicle_fleet_affiliations'::regclass, 'reg.vehicle_passenger_disclosure_profiles'::regclass, 'reg.driver_public_registration_credentials'::regclass, 'reg.phase1_registry_drivers'::regclass, 'reg.phase1_registry_vehicles'::regclass, 'reg.phase1_registry_policies'::regclass, 'reg.phase1_registry_contracts'::regclass, 'fleet.driver_supply_drafts'::regclass, 'fleet.vehicle_supply_drafts'::regclass, 'reg.phase1_registry_supply_pairs'::regclass, 'reg.phase1_registry_exclusivities'::regclass, 'admin.audit_logs'::regclass)
-    ), pres_subs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_submissions), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.supply_submissions ORDER BY 1) t),
-    pres_docs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_documents), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.supply_documents ORDER BY 1) t),
-    pres_revs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_review_events), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.supply_review_events ORDER BY 1) t),
-    pres_affs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_fleet_affiliations), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.vehicle_fleet_affiliations ORDER BY 1) t),
-    pres_discs AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.vehicle_passenger_disclosure_profiles), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.vehicle_passenger_disclosure_profiles ORDER BY 1) t),
-    pres_creds AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.driver_public_registration_credentials), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.driver_public_registration_credentials ORDER BY 1) t),
-    pres_cdriv AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_drivers), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_drivers ORDER BY 1) t),
-    pres_cveh AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_vehicles), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_vehicles ORDER BY 1) t),
-    pres_cpol AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_policies), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_policies ORDER BY 1) t),
-    pres_ccont AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_contracts), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_contracts ORDER BY 1) t),
-    pres_ddrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.driver_supply_drafts), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.driver_supply_drafts ORDER BY 1) t),
-    pres_vdrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_supply_drafts), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.vehicle_supply_drafts ORDER BY 1) t),
-    pres_cpairs AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_supply_pairs), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_supply_pairs ORDER BY 1) t),
-    pres_cexcl AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_exclusivities), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_exclusivities ORDER BY 1) t),
-    pres_audits AS (SELECT json_build_object('c', (SELECT count(*) FROM admin.audit_logs), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM admin.audit_logs ORDER BY 1) t)
-    SELECT json_build_object(
-        'subs', (SELECT data FROM subs),
-        'docs', (SELECT data FROM docs),
-        'revs', (SELECT c FROM revs),
-        'affs', (SELECT c FROM affs),
-        'discs', (SELECT c FROM discs),
-        'creds', (SELECT c FROM creds),
-        'cdriv', (SELECT c FROM cdriv),
-        'cveh', (SELECT c FROM cveh),
-        'cpol', (SELECT c FROM cpol),
-        'ccont', (SELECT c FROM ccont),
-        'ddrafts', (SELECT c FROM ddrafts),
-        'vdrafts', (SELECT c FROM vdrafts),
-        'cpairs', (SELECT c FROM cpairs),
-        'cexcl', (SELECT c FROM cexcl),
-        'audits', (SELECT c FROM audits),
-        'fks_meta', (SELECT data FROM fks_meta),
-        'pres_subs', (SELECT data FROM pres_subs),
-        'pres_docs', (SELECT data FROM pres_docs),
-        'pres_revs', (SELECT data FROM pres_revs),
-        'pres_affs', (SELECT data FROM pres_affs),
-        'pres_discs', (SELECT data FROM pres_discs),
-        'pres_creds', (SELECT data FROM pres_creds),
-        'pres_cdriv', (SELECT data FROM pres_cdriv),
-        'pres_cveh', (SELECT data FROM pres_cveh),
-        'pres_cpol', (SELECT data FROM pres_cpol),
-        'pres_ccont', (SELECT data FROM pres_ccont),
-        'pres_ddrafts', (SELECT data FROM pres_ddrafts),
-        'pres_vdrafts', (SELECT data FROM pres_vdrafts),
-        'pres_cpairs', (SELECT data FROM pres_cpairs),
-        'pres_cexcl', (SELECT data FROM pres_cexcl),
-        'pres_audits', (SELECT data FROM pres_audits),
-        'tx_ro', current_setting('transaction_read_only'),
-        'tx_iso', current_setting('transaction_isolation')
-    );
-    COMMIT;
-    """
-    if check_authority: check_authority()
-    res = db_runner(query, [])
-    if "error" in res or res.get("status") == "error":
-        return {"status": "error", "error": res.get("error", "Unknown DB runner error")}
-        
     try:
-        counts = json.loads(res["rows"][0][0])
-    except (IndexError, json.JSONDecodeError, TypeError, KeyError) as e:
-        return {"status": "error", "error": f"Failed to parse DB results: {e}"}
-        
-    if counts.get('tx_ro') != 'on' or counts.get('tx_iso') != 'repeatable read':
-        return {"status": "rejected", "reason": "Transaction mode not verified"}
-        
-    for k in ['revs', 'affs', 'discs', 'creds', 'cdriv', 'cveh', 'cpol', 'ccont', 'ddrafts', 'vdrafts', 'cpairs', 'cexcl', 'audits']:
-        if counts.get(k) is None:
-            return {"status": "error", "error": f"Missing count for {k}"}
-        if type(counts.get(k)) is not int:
-             return {"status": "error", "error": f"Non-integer count for {k}"}
-        if counts.get(k, 0) < 0:
-            return {"status": "rejected", "reason": f"Negative reference counts for {k}"}
-    for k in ['pres_subs', 'pres_docs', 'pres_revs', 'pres_affs', 'pres_discs', 'pres_creds', 'pres_cdriv', 'pres_cveh', 'pres_cpol', 'pres_ccont', 'pres_ddrafts', 'pres_vdrafts', 'pres_cpairs', 'pres_cexcl', 'pres_audits']:
-        obj = counts.get(k)
-        if obj is None or type(obj) is not dict or 'c' not in obj or 'digest' not in obj:
-            return {"status": "error", "error": f"Missing or invalid preservation inventory for {k}"}
-        if type(obj['c']) is not int or obj['c'] < 0:
-            return {"status": "error", "error": f"Invalid preservation count for {k}"}
-        if not obj['digest'] or len(obj['digest']) != 32 or not all(c in '0123456789abcdef' for c in obj['digest']):
-            return {"status": "error", "error": f"Invalid preservation digest for {k}"}
+        safe_subs = ",".join(f"'{u}'" for u in CANONICAL_OWNED_SUBMISSIONS)
+        query = f"""
+        BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
+        WITH subs AS (
+            SELECT COALESCE(json_agg(s.*), '[]'::json) as data FROM fleet.supply_submissions s WHERE submission_id IN ({safe_subs})
+        ), docs AS (
+            SELECT COALESCE(json_agg(d.*), '[]'::json) as data FROM fleet.supply_documents d WHERE submission_id IN ({safe_subs})
+        ), revs AS (
+            SELECT count(*) as c FROM fleet.supply_review_events WHERE submission_id IN ({safe_subs})
+        ), affs AS (
+            SELECT count(*) as c FROM fleet.vehicle_fleet_affiliations WHERE source_submission_id IN ({safe_subs})
+        ), discs AS (
+            SELECT count(*) as c FROM reg.vehicle_passenger_disclosure_profiles WHERE source_submission_id IN ({safe_subs})
+        ), creds AS (
+            SELECT count(*) as c FROM reg.driver_public_registration_credentials WHERE source_submission_id IN ({safe_subs})
+        ), cdriv AS (
+            SELECT count(*) as c FROM reg.phase1_registry_drivers WHERE driver_id IN (SELECT canonical_driver_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_driver_id IS NOT NULL)
+        ), cveh AS (
+            SELECT count(*) as c FROM reg.phase1_registry_vehicles WHERE vehicle_id IN (SELECT canonical_vehicle_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_vehicle_id IS NOT NULL)
+        ), cpol AS (
+            SELECT count(*) as c FROM reg.phase1_registry_policies WHERE policy_id IN (SELECT canonical_policy_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_policy_id IS NOT NULL)
+        ), ccont AS (
+            SELECT count(*) as c FROM reg.phase1_registry_contracts WHERE contract_id IN (SELECT canonical_contract_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_contract_id IS NOT NULL)
+        ), ddrafts AS (
+            SELECT count(*) as c FROM fleet.driver_supply_drafts WHERE preferred_vehicle_submission_id IN ({safe_subs}) OR submission_id IN ({safe_subs})
+        ), vdrafts AS (
+            SELECT count(*) as c FROM fleet.vehicle_supply_drafts WHERE current_driver_submission_id IN ({safe_subs}) OR submission_id IN ({safe_subs})    ), cpairs AS (
+            SELECT count(*) as c FROM reg.phase1_registry_supply_pairs WHERE vehicle_id IN (SELECT canonical_vehicle_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_vehicle_id IS NOT NULL) OR driver_id IN (SELECT canonical_driver_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_driver_id IS NOT NULL)
+        ), cexcl AS (
+            SELECT count(*) as c FROM reg.phase1_registry_exclusivities WHERE vehicle_id IN (SELECT canonical_vehicle_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_vehicle_id IS NOT NULL)
+        ), audits AS (
+            SELECT count(*) as c FROM admin.audit_logs WHERE resource_id IN ({safe_subs})
+        ), fks_meta AS (
+            SELECT json_agg(json_build_object('rel', conrelid::regclass, 'confrel', confrelid::regclass, 'name', conname, 'contype', contype, 'confdeltype', confdeltype, 'confupdtype', confupdtype, 'def', pg_get_constraintdef(oid))) as data 
+            FROM pg_constraint WHERE confrelid IN ('fleet.supply_submissions'::regclass, 'fleet.supply_documents'::regclass, 'fleet.supply_review_events'::regclass, 'fleet.vehicle_fleet_affiliations'::regclass, 'reg.vehicle_passenger_disclosure_profiles'::regclass, 'reg.driver_public_registration_credentials'::regclass, 'reg.phase1_registry_drivers'::regclass, 'reg.phase1_registry_vehicles'::regclass, 'reg.phase1_registry_policies'::regclass, 'reg.phase1_registry_contracts'::regclass, 'fleet.driver_supply_drafts'::regclass, 'fleet.vehicle_supply_drafts'::regclass, 'reg.phase1_registry_supply_pairs'::regclass, 'reg.phase1_registry_exclusivities'::regclass, 'admin.audit_logs'::regclass)
+        ), pres_subs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_submissions), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.supply_submissions ORDER BY 1) t),
+        pres_docs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_documents), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.supply_documents ORDER BY 1) t),
+        pres_revs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.supply_review_events), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.supply_review_events ORDER BY 1) t),
+        pres_affs AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_fleet_affiliations), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.vehicle_fleet_affiliations ORDER BY 1) t),
+        pres_discs AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.vehicle_passenger_disclosure_profiles), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.vehicle_passenger_disclosure_profiles ORDER BY 1) t),
+        pres_creds AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.driver_public_registration_credentials), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.driver_public_registration_credentials ORDER BY 1) t),
+        pres_cdriv AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_drivers), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_drivers ORDER BY 1) t),
+        pres_cveh AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_vehicles), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_vehicles ORDER BY 1) t),
+        pres_cpol AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_policies), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_policies ORDER BY 1) t),
+        pres_ccont AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_contracts), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_contracts ORDER BY 1) t),
+        pres_ddrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.driver_supply_drafts), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.driver_supply_drafts ORDER BY 1) t),
+        pres_vdrafts AS (SELECT json_build_object('c', (SELECT count(*) FROM fleet.vehicle_supply_drafts), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM fleet.vehicle_supply_drafts ORDER BY 1) t),
+        pres_cpairs AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_supply_pairs), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_supply_pairs ORDER BY 1) t),
+        pres_cexcl AS (SELECT json_build_object('c', (SELECT count(*) FROM reg.phase1_registry_exclusivities), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM reg.phase1_registry_exclusivities ORDER BY 1) t),
+        pres_audits AS (SELECT json_build_object('c', (SELECT count(*) FROM admin.audit_logs), 'digest', md5(COALESCE(string_agg(md5(t::text), ''), ''))) as data FROM (SELECT * FROM admin.audit_logs ORDER BY 1) t)
+        SELECT json_build_object(
+            'subs', (SELECT data FROM subs),
+            'docs', (SELECT data FROM docs),
+            'revs', (SELECT c FROM revs),
+            'affs', (SELECT c FROM affs),
+            'discs', (SELECT c FROM discs),
+            'creds', (SELECT c FROM creds),
+            'cdriv', (SELECT c FROM cdriv),
+            'cveh', (SELECT c FROM cveh),
+            'cpol', (SELECT c FROM cpol),
+            'ccont', (SELECT c FROM ccont),
+            'ddrafts', (SELECT c FROM ddrafts),
+            'vdrafts', (SELECT c FROM vdrafts),
+            'cpairs', (SELECT c FROM cpairs),
+            'cexcl', (SELECT c FROM cexcl),
+            'audits', (SELECT c FROM audits),
+            'fks_meta', (SELECT data FROM fks_meta),
+            'pres_subs', (SELECT data FROM pres_subs),
+            'pres_docs', (SELECT data FROM pres_docs),
+            'pres_revs', (SELECT data FROM pres_revs),
+            'pres_affs', (SELECT data FROM pres_affs),
+            'pres_discs', (SELECT data FROM pres_discs),
+            'pres_creds', (SELECT data FROM pres_creds),
+            'pres_cdriv', (SELECT data FROM pres_cdriv),
+            'pres_cveh', (SELECT data FROM pres_cveh),
+            'pres_cpol', (SELECT data FROM pres_cpol),
+            'pres_ccont', (SELECT data FROM pres_ccont),
+            'pres_ddrafts', (SELECT data FROM pres_ddrafts),
+            'pres_vdrafts', (SELECT data FROM pres_vdrafts),
+            'pres_cpairs', (SELECT data FROM pres_cpairs),
+            'pres_cexcl', (SELECT data FROM pres_cexcl),
+            'pres_audits', (SELECT data FROM pres_audits),
+            'tx_ro', current_setting('transaction_read_only'),
+            'tx_iso', current_setting('transaction_isolation')
+        );
+        COMMIT;
+        """
+        if check_authority: check_authority()
+        res = db_runner(query, [])
+        if "error" in res or res.get("status") == "error":
+            return {"status": "error", "error": res.get("error", "Unknown DB runner error")}
             
-    if counts['pres_subs']['c'] < 4:
-        return {"status": "rejected", "reason": "Preservation subs count less than expected 4"}
-    if counts['pres_docs']['c'] < 8:
-        return {"status": "rejected", "reason": "Preservation docs count less than expected 8"}
-            
-    fks_meta = counts.get('fks_meta', [])
-    if not fks_meta or len(fks_meta) == 0:
-        return {"status": "rejected", "reason": "No incoming foreign keys detected"}
-    
-    expected_fks = {
-        ('fleet.supply_documents', 'fleet.supply_submissions'): ('supply_documents_submission_id_fkey', 'FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE', 'c'),
-        ('fleet.supply_review_events', 'fleet.supply_submissions'): ('supply_review_events_submission_id_fkey', 'FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id)', 'a'),
-        ('fleet.vehicle_fleet_affiliations', 'fleet.supply_submissions'): ('vehicle_fleet_affiliations_source_submission_id_fkey', 'FOREIGN KEY (source_submission_id) REFERENCES fleet.supply_submissions(submission_id)', 'a'),
-        ('fleet.driver_supply_drafts', 'fleet.supply_submissions'): ('driver_supply_drafts_submission_id_fkey', 'FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE', 'c'),
-        ('fleet.vehicle_supply_drafts', 'fleet.supply_submissions'): ('vehicle_supply_drafts_submission_id_fkey', 'FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE', 'c'),
-    }
-    
-    if len(fks_meta) != len(expected_fks):
-        return {"status": "rejected", "reason": "Duplicate or missing foreign keys"}
-    
-    seen_fks = set()
-    for fk in fks_meta:
-        if fk.get('contype') != 'f':
-            return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has invalid contype"}
-        rel = fk.get('rel')
-        confrel = fk.get('confrel')
-        deltype = fk.get('confdeltype')
-        updtype = fk.get('confupdtype')
-        if (rel, confrel) in expected_fks:
-            expected_name, expected_def, expected_deltype = expected_fks[(rel, confrel)]
-            if fk.get('name') != expected_name:
-                return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} wrong name, expected {expected_name}"}
-            if fk.get('def') != expected_def:
-                return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} wrong def"}
-            if deltype != expected_deltype:
-                return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has wrong confdeltype"}
-            if updtype != 'a':
-                return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has wrong confupdtype"}
-            seen_fks.add((rel, confrel))
-        else:
-            return {"status": "rejected", "reason": f"Unexpected foreign key {fk.get('name')} from {rel} to {confrel}"}
-            
-    if seen_fks != set(expected_fks.keys()):
-        return {"status": "rejected", "reason": "Missing expected foreign key relationships"}
-        
-    subs = counts.get('subs', [])
-    docs = counts.get('docs', [])
-    
-    if len(subs) != 4:
-        return {"status": "rejected", "reason": "Missing expected supply_submissions"}
-    if len(docs) != 8:
-        return {"status": "rejected", "reason": "Missing expected supply_documents"}
-        
-    seen_subs = set()
-    for s in subs:
-        if s.get("status") not in ("draft", "submitted", "in_review", "needs_revision", "approved", "rejected", "withdrawn"):
-            return {"status": "rejected", "reason": "Submission has arbitrary/error status"}
-        if s.get("fleet_partner_id") != "fleet-demo-001":
-            return {"status": "rejected", "reason": "Submission has foreign fleet partner"}
-        if "revision_no" not in s or "created_at" not in s or s.get("revision_no") is None:
-            return {"status": "rejected", "reason": "Submission missing revision_no/created_at"}
-        if int(s.get("revision_no", -1)) < 0:
-            return {"status": "rejected", "reason": "Negative revision_no"}
-        sub_id = s.get("submission_id") or s.get("id")
-        if sub_id not in CANONICAL_OWNED_SUBMISSIONS:
-            return {"status": "rejected", "reason": "Submission has unowned submission_id"}
-        if not s.get("created_at"):
-            return {"status": "rejected", "reason": "Submission missing valid created_at"}
-        
-        # F4/F5: Missing canonical/draft/audit relationships. "canonical_driver_id with otherwise zero inventory counts returns success".
-        # Ensure we actually check if it has a canonical driver ID, it should be in the canonical tables!
-        if s.get("canonical_driver_id") and counts.get('cdriv') == 0:
-             return {"status": "rejected", "reason": "Has canonical_driver_id but no cdriv rows"}
-        if s.get("canonical_vehicle_id") and counts.get('cveh') == 0:
-             return {"status": "rejected", "reason": "Has canonical_vehicle_id but no cveh rows"}
-        if s.get("canonical_policy_id") and counts.get('cpol') == 0:
-             return {"status": "rejected", "reason": "Has canonical_policy_id but no cpol rows"}
-        if s.get("canonical_contract_id") and counts.get('ccont') == 0:
-             return {"status": "rejected", "reason": "Has canonical_contract_id but no ccont rows"}
-        
-        import datetime
         try:
-            ca = datetime.datetime.fromisoformat(s.get("created_at").replace("Z", "+00:00"))
-            start = datetime.datetime.fromisoformat("2026-10-09T08:39:23+00:00")
-            end = datetime.datetime.fromisoformat("2026-10-09T09:04:10+00:00")
-            if not (start <= ca <= end):
-                return {"status": "rejected", "reason": f"Submission {sub_id} created_at out of window"}
-        except Exception:
-            return {"status": "rejected", "reason": f"Submission {sub_id} invalid created_at"}
-        seen_subs.add(sub_id)
-        
-    if seen_subs != set(CANONICAL_OWNED_SUBMISSIONS):
-        return {"status": "rejected", "reason": "Exact unique submission set mismatch"}
+            counts = json.loads(res["rows"][0][0])
+        except (IndexError, json.JSONDecodeError, TypeError, KeyError) as e:
+            return {"status": "error", "error": f"Failed to parse DB results: {e}"}
             
-    for logical_key, expected in CANONICAL_OWNED_OBJECTS.items():
-        doc_id = expected["documentId"]
-        matched_doc = next((d for d in docs if (d.get("document_id") or d.get("id") or d.get("documentId")) == doc_id), None)
-        if not matched_doc:
-            return {"status": "rejected", "reason": f"Missing document {doc_id}"}
-        if matched_doc.get("submission_id") != expected["confirmSubmissionId"]:
-            return {"status": "rejected", "reason": f"Document {doc_id} wrong submission_id"}
-        if matched_doc.get("fleet_partner_id") != "fleet-demo-001":
-            return {"status": "rejected", "reason": f"Document {doc_id} wrong fleet_partner_id"}
-        if matched_doc.get("file_object_key") != logical_key:
-            return {"status": "rejected", "reason": f"Document {doc_id} wrong file_object_key"}
-        if matched_doc.get("checksum_sha256") != EXPECTED_SHA256:
-            return {"status": "rejected", "reason": f"Document {doc_id} wrong checksum_sha256"}
-        if matched_doc.get("document_type") != expected["document_type"]:
-            return {"status": "rejected", "reason": f"Document {doc_id} wrong document_type"}
-        
-        # F4/F5 says: "null document NOT NULL size/MIME returns success... skip missing/null fields". We must require them.
-        if matched_doc.get("file_size") is None or matched_doc.get("file_size") != EXPECTED_FILE_SIZE:
-            return {"status": "rejected", "reason": f"Document {doc_id} missing or wrong file_size"}
-        if matched_doc.get("content_type") is None or matched_doc.get("content_type") != EXPECTED_MIME:
-            return {"status": "rejected", "reason": f"Document {doc_id} missing or wrong content_type"}
+        if counts.get('tx_ro') != 'on' or counts.get('tx_iso') != 'repeatable read':
+            return {"status": "rejected", "reason": "Transaction mode not verified"}
             
-        uploaded = matched_doc.get("uploaded_at")
-        if not uploaded:
-            return {"status": "rejected", "reason": f"Document {doc_id} missing uploaded_at"}
+        for k in ['revs', 'affs', 'discs', 'creds', 'cdriv', 'cveh', 'cpol', 'ccont', 'ddrafts', 'vdrafts', 'cpairs', 'cexcl', 'audits']:
+            if counts.get(k) is None:
+                return {"status": "error", "error": f"Missing count for {k}"}
+            if type(counts.get(k)) is not int:
+                 return {"status": "error", "error": f"Non-integer count for {k}"}
+            if counts.get(k, 0) < 0:
+                return {"status": "rejected", "reason": f"Negative reference counts for {k}"}
+        for k in ['pres_subs', 'pres_docs', 'pres_revs', 'pres_affs', 'pres_discs', 'pres_creds', 'pres_cdriv', 'pres_cveh', 'pres_cpol', 'pres_ccont', 'pres_ddrafts', 'pres_vdrafts', 'pres_cpairs', 'pres_cexcl', 'pres_audits']:
+            obj = counts.get(k)
+            if obj is None or type(obj) is not dict or 'c' not in obj or 'digest' not in obj:
+                return {"status": "error", "error": f"Missing or invalid preservation inventory for {k}"}
+            if type(obj['c']) is not int or obj['c'] < 0:
+                return {"status": "error", "error": f"Invalid preservation count for {k}"}
+            if not obj['digest'] or len(obj['digest']) != 32 or not all(c in '0123456789abcdef' for c in obj['digest']):
+                return {"status": "error", "error": f"Invalid preservation digest for {k}"}
+                
+        if counts['pres_subs']['c'] < 4:
+            return {"status": "rejected", "reason": "Preservation subs count less than expected 4"}
+        if counts['pres_docs']['c'] < 8:
+            return {"status": "rejected", "reason": "Preservation docs count less than expected 8"}
+                
+        fks_meta = counts.get('fks_meta', [])
+        if not fks_meta or len(fks_meta) == 0:
+            return {"status": "rejected", "reason": "No incoming foreign keys detected"}
         
-        import datetime
-        try:
-            up = datetime.datetime.fromisoformat(uploaded.replace("Z", "+00:00"))
-            start = datetime.datetime.fromisoformat("2026-10-09T08:39:23+00:00")
-            end = datetime.datetime.fromisoformat("2026-10-09T09:04:10+00:00")
-            if not (start <= up <= end):
-                return {"status": "rejected", "reason": f"Document {doc_id} uploaded_at out of window"}
-        except Exception:
-            return {"status": "rejected", "reason": f"Document {doc_id} invalid uploaded_at"}
-            
-    if counts.get('revs', 0) > 0:
-        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['revs']} review_events exist", "reason": "review_events found"}
-    if counts.get('affs', 0) > 0:
-        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['affs']} vehicle_fleet_affiliations exist", "reason": "vehicle_fleet_affiliations found"}
-    if counts.get('discs', 0) > 0:
-        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['discs']} disclosure_profiles exist", "reason": "disclosure_profiles found"}
-    if counts.get('creds', 0) > 0:
-        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['creds']} credentials exist", "reason": "credentials found"}
-    if counts.get('cdriv', 0) > 0:
-        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['cdriv']} phase1_registry_drivers exist", "reason": "phase1_registry_drivers found"}
-    if counts.get('cveh', 0) > 0:
-        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['cveh']} phase1_registry_vehicles exist", "reason": "phase1_registry_vehicles found"}
-    if counts.get('cpol', 0) > 0:
-        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['cpol']} phase1_registry_policies exist", "reason": "phase1_registry_policies found"}
-    if counts.get('ccont', 0) > 0:
-        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['ccont']} phase1_registry_contracts exist", "reason": "phase1_registry_contracts found"}
-    if counts.get('ddrafts', 0) > 0:
-        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['ddrafts']} driver_supply_drafts exist", "reason": "driver_supply_drafts found"}
-    if counts.get('vdrafts', 0) > 0:
-        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['vdrafts']} vehicle_supply_drafts exist", "reason": "vehicle_supply_drafts found"}
-        
-
-    if counts.get('cpairs', 0) > 0:
-        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['cpairs']} phase1_registry_supply_pairs exist", "reason": "phase1_registry_supply_pairs found"}
-    if counts.get('cexcl', 0) > 0:
-        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['cexcl']} phase1_registry_exclusivities exist", "reason": "phase1_registry_exclusivities found"}
-    if counts.get('audits', 0) > 0:
-        return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['audits']} audit_logs exist", "reason": "audit_logs found"}
-        
-    return {
-        "status": "success", 
-        "submissions_found": len(subs),
-        "documents_found": len(docs),
-        "review_events_count": counts.get('revs', 0), 
-        "affiliations_count": counts.get('affs', 0),
-        "disclosure_count": counts.get('discs', 0),
-        "credential_count": counts.get('creds', 0),
-        "preservation_inventory": {
-            "incoming_fks": [{"name": f.get("name"), "rel": f.get("rel"), "confrel": f.get("confrel"), "contype": f.get("contype"), "confdeltype": f.get("confdeltype"), "confupdtype": f.get("confupdtype"), "def": f.get("def")} for f in fks_meta],
-            "submissions": {"c": counts.get('pres_subs', {}).get('c'), "digest": counts.get('pres_subs', {}).get('digest')},
-            "documents": {"c": counts.get('pres_docs', {}).get('c'), "digest": counts.get('pres_docs', {}).get('digest')},
-            "review_events": {"c": counts.get('pres_revs', {}).get('c'), "digest": counts.get('pres_revs', {}).get('digest')},
-            "affiliations": {"c": counts.get('pres_affs', {}).get('c'), "digest": counts.get('pres_affs', {}).get('digest')},
-            "disclosures": {"c": counts.get('pres_discs', {}).get('c'), "digest": counts.get('pres_discs', {}).get('digest')},
-            "credentials": {"c": counts.get('pres_creds', {}).get('c'), "digest": counts.get('pres_creds', {}).get('digest')},
-            "drivers": {"c": counts.get('pres_cdriv', {}).get('c'), "digest": counts.get('pres_cdriv', {}).get('digest')},
-            "vehicles": {"c": counts.get('pres_cveh', {}).get('c'), "digest": counts.get('pres_cveh', {}).get('digest')},
-            "policies": {"c": counts.get('pres_cpol', {}).get('c'), "digest": counts.get('pres_cpol', {}).get('digest')},
-            "contracts": {"c": counts.get('pres_ccont', {}).get('c'), "digest": counts.get('pres_ccont', {}).get('digest')},
-            "driver_drafts": {"c": counts.get('pres_ddrafts', {}).get('c'), "digest": counts.get('pres_ddrafts', {}).get('digest')},
-            "vehicle_drafts": {"c": counts.get('pres_vdrafts', {}).get('c'), "digest": counts.get('pres_vdrafts', {}).get('digest')},
-            "supply_pairs": {"c": counts.get('pres_cpairs', {}).get('c'), "digest": counts.get('pres_cpairs', {}).get('digest')},
-            "exclusivities": {"c": counts.get('pres_cexcl', {}).get('c'), "digest": counts.get('pres_cexcl', {}).get('digest')},
-            "audits": {"c": counts.get('pres_audits', {}).get('c'), "digest": counts.get('pres_audits', {}).get('digest')}
+        expected_fks = {
+            ('fleet.supply_documents', 'fleet.supply_submissions'): ('supply_documents_submission_id_fkey', 'FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE', 'c'),
+            ('fleet.supply_review_events', 'fleet.supply_submissions'): ('supply_review_events_submission_id_fkey', 'FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id)', 'a'),
+            ('fleet.vehicle_fleet_affiliations', 'fleet.supply_submissions'): ('vehicle_fleet_affiliations_source_submission_id_fkey', 'FOREIGN KEY (source_submission_id) REFERENCES fleet.supply_submissions(submission_id)', 'a'),
+            ('fleet.driver_supply_drafts', 'fleet.supply_submissions'): ('driver_supply_drafts_submission_id_fkey', 'FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE', 'c'),
+            ('fleet.vehicle_supply_drafts', 'fleet.supply_submissions'): ('vehicle_supply_drafts_submission_id_fkey', 'FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE', 'c'),
         }
-    }
+        
+        if len(fks_meta) != len(expected_fks):
+            return {"status": "rejected", "reason": "Duplicate or missing foreign keys"}
+        
+        seen_fks = set()
+        for fk in fks_meta:
+            if fk.get('contype') != 'f':
+                return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has invalid contype"}
+            rel = fk.get('rel')
+            confrel = fk.get('confrel')
+            deltype = fk.get('confdeltype')
+            updtype = fk.get('confupdtype')
+            if (rel, confrel) in expected_fks:
+                expected_name, expected_def, expected_deltype = expected_fks[(rel, confrel)]
+                if fk.get('name') != expected_name:
+                    return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} wrong name, expected {expected_name}"}
+                if fk.get('def') != expected_def:
+                    return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} wrong def"}
+                if deltype != expected_deltype:
+                    return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has wrong confdeltype"}
+                if updtype != 'a':
+                    return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has wrong confupdtype"}
+                seen_fks.add((rel, confrel))
+            else:
+                return {"status": "rejected", "reason": f"Unexpected foreign key {fk.get('name')} from {rel} to {confrel}"}
+                
+        if seen_fks != set(expected_fks.keys()):
+            return {"status": "rejected", "reason": "Missing expected foreign key relationships"}
+            
+        subs = counts.get('subs', [])
+        docs = counts.get('docs', [])
+        
+        if len(subs) != 4:
+            return {"status": "rejected", "reason": "Missing expected supply_submissions"}
+        if len(docs) != 8:
+            return {"status": "rejected", "reason": "Missing expected supply_documents"}
+            
+        seen_subs = set()
+        for s in subs:
+            if s.get("status") not in ("draft", "submitted", "in_review", "needs_revision", "approved", "rejected", "withdrawn"):
+                return {"status": "rejected", "reason": "Submission has arbitrary/error status"}
+            if s.get("fleet_partner_id") != "fleet-demo-001":
+                return {"status": "rejected", "reason": "Submission has foreign fleet partner"}
+            if "revision_no" not in s or "created_at" not in s or s.get("revision_no") is None:
+                return {"status": "rejected", "reason": "Submission missing revision_no/created_at"}
+            if int(s.get("revision_no", -1)) < 0:
+                return {"status": "rejected", "reason": "Negative revision_no"}
+            sub_id = s.get("submission_id") or s.get("id")
+            if sub_id not in CANONICAL_OWNED_SUBMISSIONS:
+                return {"status": "rejected", "reason": "Submission has unowned submission_id"}
+            if not s.get("created_at"):
+                return {"status": "rejected", "reason": "Submission missing valid created_at"}
+            
+            # F4/F5: Missing canonical/draft/audit relationships. "canonical_driver_id with otherwise zero inventory counts returns success".
+            # Ensure we actually check if it has a canonical driver ID, it should be in the canonical tables!
+            if s.get("canonical_driver_id") and counts.get('cdriv') == 0:
+                 return {"status": "rejected", "reason": "Has canonical_driver_id but no cdriv rows"}
+            if s.get("canonical_vehicle_id") and counts.get('cveh') == 0:
+                 return {"status": "rejected", "reason": "Has canonical_vehicle_id but no cveh rows"}
+            if s.get("canonical_policy_id") and counts.get('cpol') == 0:
+                 return {"status": "rejected", "reason": "Has canonical_policy_id but no cpol rows"}
+            if s.get("canonical_contract_id") and counts.get('ccont') == 0:
+                 return {"status": "rejected", "reason": "Has canonical_contract_id but no ccont rows"}
+            
+            import datetime
+            try:
+                ca = datetime.datetime.fromisoformat(s.get("created_at").replace("Z", "+00:00"))
+                start = datetime.datetime.fromisoformat("2026-10-09T08:39:23+00:00")
+                end = datetime.datetime.fromisoformat("2026-10-09T09:04:10+00:00")
+                if not (start <= ca <= end):
+                    return {"status": "rejected", "reason": f"Submission {sub_id} created_at out of window"}
+            except Exception:
+                return {"status": "rejected", "reason": f"Submission {sub_id} invalid created_at"}
+            seen_subs.add(sub_id)
+            
+        if seen_subs != set(CANONICAL_OWNED_SUBMISSIONS):
+            return {"status": "rejected", "reason": "Exact unique submission set mismatch"}
+                
+        for logical_key, expected in CANONICAL_OWNED_OBJECTS.items():
+            doc_id = expected["documentId"]
+            matched_doc = next((d for d in docs if (d.get("document_id") or d.get("id") or d.get("documentId")) == doc_id), None)
+            if not matched_doc:
+                return {"status": "rejected", "reason": f"Missing document {doc_id}"}
+            if matched_doc.get("submission_id") != expected["confirmSubmissionId"]:
+                return {"status": "rejected", "reason": f"Document {doc_id} wrong submission_id"}
+            if matched_doc.get("fleet_partner_id") != "fleet-demo-001":
+                return {"status": "rejected", "reason": f"Document {doc_id} wrong fleet_partner_id"}
+            if matched_doc.get("file_object_key") != logical_key:
+                return {"status": "rejected", "reason": f"Document {doc_id} wrong file_object_key"}
+            if matched_doc.get("checksum_sha256") != EXPECTED_SHA256:
+                return {"status": "rejected", "reason": f"Document {doc_id} wrong checksum_sha256"}
+            if matched_doc.get("document_type") != expected["document_type"]:
+                return {"status": "rejected", "reason": f"Document {doc_id} wrong document_type"}
+            
+            # F4/F5 says: "null document NOT NULL size/MIME returns success... skip missing/null fields". We must require them.
+            if matched_doc.get("file_size") is None or matched_doc.get("file_size") != EXPECTED_FILE_SIZE:
+                return {"status": "rejected", "reason": f"Document {doc_id} missing or wrong file_size"}
+            if matched_doc.get("content_type") is None or matched_doc.get("content_type") != EXPECTED_MIME:
+                return {"status": "rejected", "reason": f"Document {doc_id} missing or wrong content_type"}
+                
+            uploaded = matched_doc.get("uploaded_at")
+            if not uploaded:
+                return {"status": "rejected", "reason": f"Document {doc_id} missing uploaded_at"}
+            
+            import datetime
+            try:
+                up = datetime.datetime.fromisoformat(uploaded.replace("Z", "+00:00"))
+                start = datetime.datetime.fromisoformat("2026-10-09T08:39:23+00:00")
+                end = datetime.datetime.fromisoformat("2026-10-09T09:04:10+00:00")
+                if not (start <= up <= end):
+                    return {"status": "rejected", "reason": f"Document {doc_id} uploaded_at out of window"}
+            except Exception:
+                return {"status": "rejected", "reason": f"Document {doc_id} invalid uploaded_at"}
+                
+        if counts.get('revs', 0) > 0:
+            return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['revs']} review_events exist", "reason": "review_events found"}
+        if counts.get('affs', 0) > 0:
+            return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['affs']} vehicle_fleet_affiliations exist", "reason": "vehicle_fleet_affiliations found"}
+        if counts.get('discs', 0) > 0:
+            return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['discs']} disclosure_profiles exist", "reason": "disclosure_profiles found"}
+        if counts.get('creds', 0) > 0:
+            return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['creds']} credentials exist", "reason": "credentials found"}
+        if counts.get('cdriv', 0) > 0:
+            return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['cdriv']} phase1_registry_drivers exist", "reason": "phase1_registry_drivers found"}
+        if counts.get('cveh', 0) > 0:
+            return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['cveh']} phase1_registry_vehicles exist", "reason": "phase1_registry_vehicles found"}
+        if counts.get('cpol', 0) > 0:
+            return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['cpol']} phase1_registry_policies exist", "reason": "phase1_registry_policies found"}
+        if counts.get('ccont', 0) > 0:
+            return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['ccont']} phase1_registry_contracts exist", "reason": "phase1_registry_contracts found"}
+        if counts.get('ddrafts', 0) > 0:
+            return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['ddrafts']} driver_supply_drafts exist", "reason": "driver_supply_drafts found"}
+        if counts.get('vdrafts', 0) > 0:
+            return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['vdrafts']} vehicle_supply_drafts exist", "reason": "vehicle_supply_drafts found"}
+            
+
+        if counts.get('cpairs', 0) > 0:
+            return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['cpairs']} phase1_registry_supply_pairs exist", "reason": "phase1_registry_supply_pairs found"}
+        if counts.get('cexcl', 0) > 0:
+            return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['cexcl']} phase1_registry_exclusivities exist", "reason": "phase1_registry_exclusivities found"}
+        if counts.get('audits', 0) > 0:
+            return {"status": "rejected", "concrete_blocker": f"Missing retention/relationship blocker: {counts['audits']} audit_logs exist", "reason": "audit_logs found"}
+            
+        return {
+            "status": "success", 
+            "submissions_found": len(subs),
+            "documents_found": len(docs),
+            "review_events_count": counts.get('revs', 0), 
+            "affiliations_count": counts.get('affs', 0),
+            "disclosure_count": counts.get('discs', 0),
+            "credential_count": counts.get('creds', 0),
+            "preservation_inventory": {
+                "incoming_fks": [{"name": f.get("name"), "rel": f.get("rel"), "confrel": f.get("confrel"), "contype": f.get("contype"), "confdeltype": f.get("confdeltype"), "confupdtype": f.get("confupdtype"), "def": f.get("def")} for f in fks_meta],
+                "submissions": {"c": counts.get('pres_subs', {}).get('c'), "digest": counts.get('pres_subs', {}).get('digest')},
+                "documents": {"c": counts.get('pres_docs', {}).get('c'), "digest": counts.get('pres_docs', {}).get('digest')},
+                "review_events": {"c": counts.get('pres_revs', {}).get('c'), "digest": counts.get('pres_revs', {}).get('digest')},
+                "affiliations": {"c": counts.get('pres_affs', {}).get('c'), "digest": counts.get('pres_affs', {}).get('digest')},
+                "disclosures": {"c": counts.get('pres_discs', {}).get('c'), "digest": counts.get('pres_discs', {}).get('digest')},
+                "credentials": {"c": counts.get('pres_creds', {}).get('c'), "digest": counts.get('pres_creds', {}).get('digest')},
+                "drivers": {"c": counts.get('pres_cdriv', {}).get('c'), "digest": counts.get('pres_cdriv', {}).get('digest')},
+                "vehicles": {"c": counts.get('pres_cveh', {}).get('c'), "digest": counts.get('pres_cveh', {}).get('digest')},
+                "policies": {"c": counts.get('pres_cpol', {}).get('c'), "digest": counts.get('pres_cpol', {}).get('digest')},
+                "contracts": {"c": counts.get('pres_ccont', {}).get('c'), "digest": counts.get('pres_ccont', {}).get('digest')},
+                "driver_drafts": {"c": counts.get('pres_ddrafts', {}).get('c'), "digest": counts.get('pres_ddrafts', {}).get('digest')},
+                "vehicle_drafts": {"c": counts.get('pres_vdrafts', {}).get('c'), "digest": counts.get('pres_vdrafts', {}).get('digest')},
+                "supply_pairs": {"c": counts.get('pres_cpairs', {}).get('c'), "digest": counts.get('pres_cpairs', {}).get('digest')},
+                "exclusivities": {"c": counts.get('pres_cexcl', {}).get('c'), "digest": counts.get('pres_cexcl', {}).get('digest')},
+                "audits": {"c": counts.get('pres_audits', {}).get('c'), "digest": counts.get('pres_audits', {}).get('digest')}
+            }
+        }
+    except Exception as e:
+        return {"status": "error", "partial_observations": locals().get("subs", []), "error": str(e)}
 
 def default_gcs_runner(action: str, bucket: str, key: str) -> Dict[str, Any]:
     if action == "describe":
@@ -1246,21 +1253,52 @@ def main():
                 require(rev_val.get("metadata", {}).get("labels", {}).get("serving.knative.dev/service") == s_name, "Revision service label mismatch")
 
                 containers = rev_val.get("spec", {}).get("containers", [])
+                implicit = len(containers) == 1 and "name" not in containers[0]
+                names = [c.get("name", str(i)) for i, c in enumerate(containers)]
+                
+                require(len(names) == len(set(names)), f"Duplicate container names in {s_name}")
+                import re as regex_mod
+                require(all("name" not in c or (isinstance(c["name"], str) and regex_mod.fullmatch(r"[a-z][a-z0-9-]{0,62}", c["name"])) for c in containers), f"Invalid container names in {s_name}")
+                
+                service_names = ["0"] if implicit else names
+                statuses = rev_val.get("status", {}).get("containerStatuses")
+                
+                if statuses is not None:
+                    require(isinstance(statuses, list) and len(statuses) == len(names), "Partial revision container digest inventory")
+                    require(len({c.get("name") for c in statuses}) == len(names), "Duplicate container status names")
+                    require({c.get("name") for c in statuses} == set(names), "Container status names mismatch")
+                    
                 images = {}
-                for c in containers:
-                    c_name = c.get("name", "")
-                    img = c.get("image", "")
-                    c_statuses = rev_val.get("status", {}).get("containerStatuses", [])
-                    c_status = next((cs for cs in c_statuses if cs.get("name") == c_name), None)
-                    if c_status and c_status.get("imageDigest"):
-                        img = c_status["imageDigest"]
-                    images[c_name] = img
+                for i, c in enumerate(containers):
+                    c_name = service_names[i]
+                    repository = regex_mod.split(r"[@:]", c.get("image", ""), maxsplit=1)[0]
+                    revision_reference = c.get("image", "")
+                    require(isinstance(revision_reference, str) and regex_mod.split(r"[@:]", revision_reference, maxsplit=1)[0] == repository, "Revision requested image mismatch")
+                    
+                    fallback = rev_val.get("status", {}).get("imageDigest") if i == 0 else revision_reference
+                    if i == 0 and fallback is None and len(containers) > 1:
+                        fallback = revision_reference
+                        
+                    if statuses is not None:
+                        c_status = next((cs for cs in statuses if cs.get("name") == c_name), None)
+                        if c_status and c_status.get("imageDigest"):
+                            digest = c_status["imageDigest"]
+                            require(digest.startswith(repository + "@sha256:"), f"Digest repository mismatch for {c_name}")
+                            require(regex_mod.fullmatch(regex_mod.escape(repository) + r"@sha256:[0-9a-f]{64}", digest), f"Invalid digest format for {c_name}")
+                            images[c_name] = digest
+                        else:
+                            images[c_name] = fallback
+                    else:
+                        images[c_name] = fallback
+                        
                 require(len(images) > 0, f"No images found for {s_name}")
+                if s_name == "drts-dev-scanner":
+                    require(set(images.keys()) == {"gateway", "clamd"}, "Scanner missing gateway or clamd")
 
                 service_meta = {
                     "ready_revision": ready_revision,
                     "images": images,
-                    "identity": val.get("spec", {}).get("template", {}).get("spec", {}).get("serviceAccountName"),
+                    "identity": rev_val.get("spec", {}).get("serviceAccountName"),
                     "url": val.get("status", {}).get("url")
                 }
                 
@@ -1369,16 +1407,16 @@ def main():
                         if "condition" in b:
                             require(False, f"Service {name} binding has unsupported condition")
                         
-                        if name == "drts-dev-scanner":
-                            require("allUsers" not in members and "allAuthenticatedUsers" not in members, f"Scanner {name} is not private")
-                            if role == "roles/run.invoker":
-                                require(set(members) == {"serviceAccount:drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com"}, f"Scanner invoker mismatch")
-                        elif name == "drts-dev-api":
-                            if role == "roles/run.invoker":
-                                require(set(members) == {"allUsers"}, f"API invoker mismatch")
-                        else:
+                        if name not in ("drts-dev-api", "drts-dev-scanner"):
                             require("allUsers" not in members and "allAuthenticatedUsers" not in members, f"Console {name} is not private")
-                        validated_bindings.append({"role": role, "members": members})
+                        validated_bindings.append({"role": role, "members": sorted(members)})
+                        
+                    validated_bindings = sorted(validated_bindings, key=lambda x: (x["role"], "".join(x["members"])))
+                    if name == "drts-dev-api":
+                        require(validated_bindings == [{"role": "roles/run.invoker", "members": ["allUsers"]}], "API public binding changed")
+                    elif name == "drts-dev-scanner":
+                        expected = sorted(["serviceAccount:drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "serviceAccount:github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com"])
+                        require(validated_bindings == [{"role": "roles/run.invoker", "members": expected}], "Scanner invokers changed")
 
                     if name == "drts-dev-api":
                         require(s.get("runtime_sha") == args.current_runtime_sha, f"Runtime SHA mismatch for {name}")
@@ -1394,6 +1432,7 @@ def main():
                         scanner_url = s.get("scanner_url")
                         actual_scanner_url = services.get("drts-dev-scanner", {}).get("url")
                         require(isinstance(scanner_url, str) and scanner_url == actual_scanner_url, "Invalid scanner URL")
+                        require(regex_mod.fullmatch(r"https://drts-dev-scanner-[a-z0-9-]+\.a\.run\.app", scanner_url), "Invalid scanner URL format")
                         
                         validated_services[name] = {
                             "ready_revision": ready_revision,
@@ -1461,7 +1500,7 @@ def main():
             report["gcs_assessment"] = gcs_res
             
             if gcs_res.get("status") != "success":
-                report["disposition"] = "rejected"
+                report["disposition"] = "incomplete"
                 out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": report}, indent=2)
                 require(len(out.encode('utf-8')) <= 512 * 1024, "Report exceeds byte cap")
                 print(out)
@@ -1470,7 +1509,7 @@ def main():
             db_res = assess_database(default_db_runner, lambda: check_held_window(args))
             report["db_assessment"] = db_res
             if db_res.get("status") != "success":
-                report["disposition"] = "rejected"
+                report["disposition"] = "incomplete"
                 if "concrete_blocker" in db_res:
                      report["concrete_blocker"] = db_res["concrete_blocker"]
                 out = json.dumps({"schema": "dev-owned-assessment-report-v1", "payload": report}, indent=2)
