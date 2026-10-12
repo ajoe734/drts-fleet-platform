@@ -205,6 +205,14 @@
       "cpuIdle": "boolean",
       "instanceCounts": "nonnegative int32 (0..2147483647)",
       "scalingMode": ["SCALING_MODE_UNSPECIFIED", "AUTOMATIC", "MANUAL"]
+    },
+    "independentPublicRecheck": {
+      "at": "2026-10-12T12:04:28.012Z",
+      "revision": "20261002",
+      "rawResponseSha256": "9320189fc2a36683668705b50e6a967ee5551e0b238fbf6108ef5986e6b8dc21",
+      "publicDocumentOnly": true,
+      "authenticated": false,
+      "result": "all selected paths and background types verified"
     }
   }
 }
