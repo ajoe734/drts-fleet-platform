@@ -44,6 +44,27 @@ const poolFor = (row: Record<string, unknown>) => ({
 });
 
 describe("capacity durable authority mapper", () => {
+  it("measures qualified voice creation only with the correlated committed command/audit evidence", async () => {
+    const raw = order({
+      orderSource: "phone",
+      voiceIntentId: "voice-1",
+      recordingId: "rec-1",
+      recordingEvidenceRef: "checkpoint-1",
+      customerConfirmationId: "confirmation-1",
+    });
+    const [verified] = await readBackOwnedOrders(
+      poolFor({ ...raw, voice_creation_verified: true }),
+      ["order-1"],
+    );
+    expect(verified?.readySource).toBe("voice.booking.created");
+    expect(verified?.lagMs).toBe(1000);
+    const [unknown] = await readBackOwnedOrders(
+      poolFor({ ...raw, voice_creation_verified: false }),
+      ["order-1"],
+    );
+    expect(unknown?.readyAt).toBeNull();
+    expect(unknown?.hasAttempt).toBe(true);
+  });
   it("measures a phone order created ready with its bound recording", async () => {
     const pool = poolFor(
       order(

@@ -14,12 +14,9 @@ vi.mock("node:http", () => ({ request: boundary.request }));
 vi.mock("node:perf_hooks", () => ({
   performance: { now: () => Date.now() + boundary.offset },
 }));
-// @ts-expect-error -- owned allocation is this exact .mjs file; no shared declaration scope
-import {
-  runPlan,
-  measure,
-  prepareDispatchItem,
-} from "../../../../tools/system-remediation/ops-proof/capacity.mjs";
+// prettier-ignore
+// @ts-expect-error -- TS7016: no declaration file for the allocated exact producer
+import { runPlan, measure, prepareDispatchItem } from "../../../../tools/system-remediation/ops-proof/capacity.mjs";
 
 // The real scheduler/measure functions run. Only external HTTP and clock/timer
 // boundaries are controlled; no server is created and no scheduler is copied.

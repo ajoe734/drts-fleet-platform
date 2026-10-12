@@ -12,6 +12,60 @@ const instant = (value) =>
     ? new Date(value).toISOString()
     : null;
 
+function findReadyAuthority(record, traces, createdAt, voiceCreationVerified) {
+  traces = traces.filter(
+    (t) =>
+      t.orderId === record.orderId &&
+      nonblank(t.traceId) &&
+      instant(t.createdAt) &&
+      new Date(t.createdAt) >= new Date(createdAt),
+  );
+  let ready = null;
+  if (record.voiceIntentId) {
+    // prepareVoiceOrder is creation-ready only after the confirmed voice
+    // command transaction commits. A generic recording callback is not it.
+    if (
+      voiceCreationVerified === true &&
+      nonblank(record.recordingId) &&
+      nonblank(record.recordingEvidenceRef) &&
+      nonblank(record.customerConfirmationId)
+    ) {
+      ready = {
+        createdAt: createdAt,
+        eventType: "voice.booking.created",
+      };
+    }
+  } else {
+    ready = traces.find(
+      (t) =>
+        (t.eventType === "order.ready_for_dispatch" &&
+          record.orderSource === "app") ||
+        (t.eventType === "multi_taxi.order.ready_for_dispatch" &&
+          record.orderSource === "app") ||
+        (t.eventType === "callcenter.order_created" &&
+          t.details?.recordingPending === false &&
+          nonblank(t.details?.recordingId) &&
+          t.details?.callId === record.callId) ||
+        (t.eventType === "callcenter.recording_bound" &&
+          nonblank(t.details?.recordingId) &&
+          t.details?.callId === record.callId),
+    );
+  }
+  if (
+    ready &&
+    [
+      "order.ready_for_dispatch",
+      "multi_taxi.order.ready_for_dispatch",
+      "callcenter.order_created",
+    ].includes(ready.eventType)
+  ) {
+    // These production creation paths are born ready. The trace confirms that
+    // path; its later append time must not replace the actual creation time.
+    return { ...ready, createdAt };
+  }
+  return ready ?? null;
+}
+
 // Read evidence, not a derived queue projection. V0011 stores exact production
 // records; jobs, attempts and traces must all belong to the same order.
 export async function readBackOwnedOrders(pool, orderIds) {
@@ -67,39 +121,14 @@ export async function readBackOwnedOrders(pool, orderIds) {
             new Date(t.createdAt) >= new Date(row.order_created_at),
         )
       : [];
-    let ready = null;
-    if (authorityKnown) {
-      if (record.voiceIntentId) {
-        // prepareVoiceOrder is creation-ready only after the confirmed voice
-        // command transaction commits. A generic recording callback is not it.
-        if (
-          row.voice_creation_verified === true &&
-          nonblank(record.recordingId) &&
-          nonblank(record.recordingEvidenceRef) &&
-          nonblank(record.customerConfirmationId)
-        ) {
-          ready = {
-            createdAt: row.order_created_at,
-            eventType: "voice.booking.created",
-          };
-        }
-      } else {
-        ready = relevantTraces.find(
-          (t) =>
-            (t.eventType === "order.ready_for_dispatch" &&
-              record.orderSource === "app") ||
-            (t.eventType === "multi_taxi.order.ready_for_dispatch" &&
-              record.orderSource === "app") ||
-            (t.eventType === "callcenter.order_created" &&
-              t.details?.recordingPending === false &&
-              nonblank(t.details?.recordingId) &&
-              t.details?.callId === record.callId) ||
-            (t.eventType === "callcenter.recording_bound" &&
-              nonblank(t.details?.recordingId) &&
-              t.details?.callId === record.callId),
-        );
-      }
-    }
+    const ready = authorityKnown
+      ? findReadyAuthority(
+          record,
+          relevantTraces,
+          row.order_created_at,
+          row.voice_creation_verified,
+        )
+      : null;
     const readyAt = instant(ready?.createdAt);
     const firstAttemptAt = instant(row.first_attempt_at);
     const hasAttempt =
@@ -113,6 +142,7 @@ export async function readBackOwnedOrders(pool, orderIds) {
       status: row.status,
       createdAt: instant(row.order_created_at),
       authorityKnown,
+      voiceCreationVerified: row.voice_creation_verified === true,
       readyAt,
       readySource: ready?.eventType ?? null,
       hasAttempt,
@@ -240,7 +270,7 @@ export function lawfulReasonForOrder(row) {
     row.readyAt &&
     row.assignmentCount === 0 &&
     order.reservationHoldStatus === "exception_hold" &&
-    order.exceptionHold?.resolvedAt == null
+    order.exceptionHold?.resolution === null
   ) {
     const hold = order.exceptionHold;
     const trace = row.traces.find(
@@ -282,6 +312,20 @@ export function summarizeDispatchEvidence(rows) {
   const unsafeOrderIds = [];
   for (const row of rows) {
     distribution[row.status] = (distribution[row.status] ?? 0) + 1;
+    const ready =
+      row.authorityKnown && Array.isArray(row.traces)
+        ? findReadyAuthority(
+            row.record,
+            row.traces,
+            row.createdAt,
+            row.voiceCreationVerified,
+          )
+        : null;
+    const expectedLag =
+      row.hasAttempt && instant(ready?.createdAt) && instant(row.firstAttemptAt)
+        ? new Date(row.firstAttemptAt).getTime() -
+          new Date(ready.createdAt).getTime()
+        : null;
     const reason = lawfulReasonForOrder(row);
     if (row.hasAttempt) coverage.attempted++;
     else if (reason) {
@@ -293,6 +337,11 @@ export function summarizeDispatchEvidence(rows) {
       !row.authorityKnown ||
       row.record?.orderId !== row.orderId ||
       row.record?.status !== row.status ||
+      instant(row.record?.createdAt) !== instant(row.createdAt) ||
+      !instant(row.createdAt) ||
+      instant(row.readyAt) !== instant(ready?.createdAt) ||
+      row.readySource !== (ready?.eventType ?? null) ||
+      row.lagMs !== expectedLag ||
       row.hasAttempt !==
         (nonblank(row.firstAttemptId) && nonblank(row.firstAttemptJobId)) ||
       (!row.hasAttempt && row.firstAttemptAt != null) ||
