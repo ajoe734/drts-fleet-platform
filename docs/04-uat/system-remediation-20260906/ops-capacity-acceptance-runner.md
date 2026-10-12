@@ -504,3 +504,20 @@ still forbids push, handoff, history rewrite/recovery/transplant/checker bypass
 and hosted capacity dispatch. Both acceptance keys remain OPEN. No task is
 declared done and no production, provider, financial, schema or hosting authority
 was inferred.
+
+### Dedicated report claim connection loss (Codex2 continuation)
+
+Actual source `0a327db0f1395fc658a537b1a23fdd68f8d3db09` creates a dedicated
+`pg.Client` in `ReportingFilingRepository.withReportJobClaim` without an error
+listener. The installed driver's `_handleErrorEvent` emits a client error when
+the socket dies, including between queries while the real report builder awaits
+its external data provider. The actual worker regression injects that transport
+event after a committed running state: the original source throws an unhandled
+EventEmitter error instead of containing the lost claim. Production code was
+unchanged for reproduction; only SQL/socket and external provider boundaries
+were modeled, with no server or PostgreSQL process.
+
+| Finding / acceptance            | Formal source / original result                                                                                                         | Command / evidence                                                                                                                                                                                                                                                                                               | Remaining                                                                                                                                              |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Lost dedicated claim connection | Actual repository, worker and builder at `0a327db0` throw `claim socket lost during builder`; the second pre-start refusal case passes. | `pnpm exec vitest run tests/unit/system-remediation/sr-ops-capacity-20260911/reporting-claim-connection.test.ts --maxWorkers=2`: exit1, 1 pass/1 fail. Canonical `.local/c123-report-worker-20261012/claim-connection-loss/old-0a327-reproduction.log`; exact production/probe hashes and probe copies retained. | Contain the driver event, refuse all writes after lost ownership, close the dedicated session and verify actual worker recovery preserves first start. |
+| Both required acceptance keys   | Remain OPEN; this is an additional actual lifecycle defect, not a capacity result.                                                      | No push/handoff, candidate CI/merge or hosted900s execution.                                                                                                                                                                                                                                                     | Immutable publication HOLD and original managed-runtime/PG/SLO evidence remain required.                                                               |

@@ -156,9 +156,11 @@ export function queueFixture(jobs: StoredReportJobRecord[] = []) {
   const query = session().query;
   vi.stubEnv("DATABASE_URL", "postgresql://sql-boundary.invalid/unit");
   const sessions = new WeakMap<InstanceType<typeof Client>, SqlSession>();
+  const claimClients: InstanceType<typeof Client>[] = [];
   vi.spyOn(Client.prototype, "connect").mockImplementation(async function (
     this: InstanceType<typeof Client>,
   ) {
+    claimClients.push(this);
     sessions.set(this, session());
   });
   vi.spyOn(Client.prototype, "query").mockImplementation(function (
@@ -194,5 +196,6 @@ export function queueFixture(jobs: StoredReportJobRecord[] = []) {
     locks,
     releases,
     control,
+    claimClients,
   };
 }
