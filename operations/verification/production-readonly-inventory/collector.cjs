@@ -1278,7 +1278,16 @@ async function main({
       try {
         write(
           "guard-diagnostic",
-          serializeDiagnostic(diagnostic(env, head, error?.code, preAuth)),
+          serializeDiagnostic(
+            diagnostic(
+              env,
+              head,
+              error?.code === "GUARD_PASSED"
+                ? "UNKNOWN_GUARD_FAILURE"
+                : error?.code,
+              preAuth,
+            ),
+          ),
         );
       } catch {
         // Even a filesystem failure must not expose an error message or stack.

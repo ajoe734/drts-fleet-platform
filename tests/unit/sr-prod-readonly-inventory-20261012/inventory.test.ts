@@ -326,6 +326,20 @@ describe("actual parsed workflow protection", () => {
       auth = steps.find((s: any) => s.id === "auth"),
       guardIndex = steps.findIndex((s: any) => s.id === "guard");
     expect(guardIndex).toBeLessThan(steps.indexOf(auth));
+    const diagnostic = steps.find((s: any) =>
+      s.with?.path?.endsWith("guard-diagnostic.json"),
+    );
+    expect(guardIndex).toBeLessThan(steps.indexOf(diagnostic));
+    expect(steps.indexOf(diagnostic)).toBeLessThan(steps.indexOf(auth));
+    expect(diagnostic.if).toBe(
+      "always() && (steps.guard.outcome == 'success' || steps.guard.outcome == 'failure')",
+    );
+    expect(diagnostic.with["if-no-files-found"]).toBe("error");
+    expect(auth.if).toBe("success() && steps.guard.outcome == 'success'");
+    const collection = steps.find((s: any) =>
+      s.run?.endsWith("collector.cjs collect"),
+    );
+    expect(collection.if).toBe("always() && steps.guard.outcome == 'success'");
     expect(auth.with.workload_identity_provider).toBe(
       "${{ secrets.PROD_WIF_PROVIDER }}",
     );

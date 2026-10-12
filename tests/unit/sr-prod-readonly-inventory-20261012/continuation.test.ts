@@ -1,6 +1,8 @@
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import {
+  cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -11,10 +13,11 @@ import {
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 const require = createRequire(import.meta.url);
-const c = require(
+const collectorPath = require.resolve(
   process.env.INVENTORY_COLLECTOR_UNDER_TEST ||
     "../../../operations/verification/production-readonly-inventory/collector.cjs",
 );
+const c = require(collectorPath);
 const { fixture, SHA, SENTINEL } = require("./fixture.cjs");
 const shared = {
   PROD_ARTIFACT_REGISTRY:
@@ -205,6 +208,28 @@ describe("actual configured shared registry continuation", () => {
 });
 
 describe("safe real main guard diagnostic", () => {
+  it.each(["same-project", "shared"])(
+    "runs actual main %s collection with bounded external GET fixtures",
+    async (mode) => {
+      const f = fixture(mode === "shared" ? shared : {});
+      const run = await invoke(
+        { ...f.env, PROD_INVENTORY_ACCESS_TOKEN: SENTINEL },
+        { args: ["collect"], transport: f.transport },
+      );
+      const report = JSON.parse(run.artifacts.get("metadata")!);
+      expect(run.status).toBe(mode === "shared" ? 1 : 0);
+      expect(report.collection).toBe(
+        mode === "shared" ? "incomplete" : "complete",
+      );
+      expect(report.requests).toBe(mode === "shared" ? 62 : 64);
+      expect(
+        f.calls.every(
+          (d: any) => d.method === "GET" && d.url.includes(c.TARGET.project),
+        ),
+      ).toBe(true);
+      expect(run.artifacts.get("metadata")).not.toContain(SENTINEL);
+    },
+  );
   it("persists filtered success before authentication with no Google requests", async () => {
     const f = fixture(shared);
     const run = await invoke({
@@ -336,6 +361,19 @@ describe("safe real main guard diagnostic", () => {
     });
     expect(run.status).toBe(1);
   });
+  it("never treats a thrown success code as a passed guard", async () => {
+    const run = await invoke(fixture().env, {
+      git: () => {
+        throw Object.assign(new Error(SENTINEL), { code: "GUARD_PASSED" });
+      },
+    });
+    expect(JSON.parse(run.artifacts.get("guard-diagnostic")!)).toMatchObject({
+      result: "blocked",
+      code: "UNKNOWN_GUARD_FAILURE",
+    });
+    expect(run.status).toBe(1);
+    expect(run.transport).not.toHaveBeenCalled();
+  });
   it("retains AUTH_REQUIRED and shared blocked evidence without a fallback identity", async () => {
     const f = fixture(shared);
     const run = await invoke(
@@ -381,7 +419,7 @@ describe("safe real main guard diagnostic", () => {
 });
 
 describe("spawned actual CLI diagnostics", () => {
-  it.each(["pass", "identity", "source", "unknown"])(
+  it.each(["pass", "identity", "source", "unknown", "rail"])(
     "writes only allowlisted diagnostic for %s without auth",
     (mode) => {
       const parent = resolve(".local/prod-inventory-continuation");
@@ -394,31 +432,47 @@ describe("spawned actual CLI diagnostics", () => {
           { mode: 0o700 },
         );
         const f = fixture(shared);
-        const result = spawnSync(
-          process.execPath,
-          [
-            require.resolve("../../../operations/verification/production-readonly-inventory/collector.cjs"),
-            "guard",
-          ],
-          {
-            cwd,
-            encoding: "utf8",
-            timeout: 5000,
-            env: {
-              ...process.env,
-              ...f.env,
-              PROD_DEPLOYER_IDENTITY:
-                mode === "identity" ? SENTINEL : f.env.PROD_DEPLOYER_IDENTITY,
-              TEST_GIT_ERROR: mode,
-              TEST_GIT_SHA: SHA,
-              TEST_SENTINEL: SENTINEL,
-              PROD_INVENTORY_ACCESS_TOKEN: SENTINEL,
-              PATH: `${cwd}:${process.env.PATH}`,
-            },
+        let cliPath = collectorPath;
+        if (mode === "rail") {
+          cpSync(
+            resolve("operations/verification/production-release-rail"),
+            `${cwd}/production-release-rail`,
+            { recursive: true },
+          );
+          mkdirSync(`${cwd}/production-readonly-inventory`);
+          cpSync(
+            collectorPath,
+            `${cwd}/production-readonly-inventory/collector.cjs`,
+          );
+          cliPath = `${cwd}/production-readonly-inventory/collector.cjs`;
+          const rail = `${cwd}/production-release-rail/rail.cjs`;
+          writeFileSync(
+            rail,
+            readFileSync(rail, "utf8") + "\n// changed lineage\n",
+          );
+        }
+        const result = spawnSync(process.execPath, [cliPath, "guard"], {
+          cwd,
+          encoding: "utf8",
+          timeout: 5000,
+          env: {
+            ...process.env,
+            ...f.env,
+            PROD_DEPLOYER_IDENTITY:
+              mode === "identity" ? SENTINEL : f.env.PROD_DEPLOYER_IDENTITY,
+            TEST_GIT_ERROR: mode,
+            TEST_GIT_SHA: SHA,
+            TEST_SENTINEL: SENTINEL,
+            PROD_INVENTORY_ACCESS_TOKEN: SENTINEL,
+            PATH: `${cwd}:${process.env.PATH}`,
           },
-        );
+        });
         expect(result.status).toBe(mode === "pass" ? 0 : 1);
         const file = `${cwd}/.artifacts/production-readonly-inventory/guard-diagnostic.json`;
+        expect(
+          existsSync(file),
+          "failed guard must persist diagnostic evidence",
+        ).toBe(true);
         const saved = readFileSync(file, "utf8");
         const report = JSON.parse(saved);
         expect(report.code).toBe(
@@ -427,6 +481,7 @@ describe("spawned actual CLI diagnostics", () => {
             identity: "PROD_IDENTITY_REQUIRED",
             source: "SOURCE_PROVENANCE_REJECTED",
             unknown: "UNKNOWN_GUARD_FAILURE",
+            rail: "RAIL_LINEAGE_CHANGED",
           }[mode],
         );
         expect(report).toMatchObject({
