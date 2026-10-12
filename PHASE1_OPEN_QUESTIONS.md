@@ -4,6 +4,48 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
+### Q-SR-OPS-CAPACITY-FAILCLOSED-20261012 — publication disposition and background-worker evidence
+
+Planning triage confirms the existing C123 workload and report contracts; no
+product waiver or acceptance scope cut is approved. The accepted operational
+baseline requires the full 900-second 900/4500/450 workload, 50 concurrent intake
+requests, 50 running-or-queued report jobs, 500 dispatchable orders and genuine
+SLO/security/degradation/SQL evidence. Supervisor already allocated the exact
+planner, collector, durable report producer and affected caller/fixture repairs
+on the original parent. Those grants do not resolve publication or live runtime
+acceptance, and this helper adds no product-source or deployment scope.
+
+Supervisor/Claude must obtain a cited lawful publication/provenance disposition
+for the four malformed published ancestors retained in PR #2575. Preserve all
+published refs and source credit; appending a compliant commit does not repair
+an ancestor. No rewrite, replacement source branch, transplant, checker waiver
+or inferred reviewer approval is authorized. Parent owner/reviewer remain
+Codex2/Codex; its publication HOLD and both original acceptance keys stay OPEN.
+
+Supervisor must also coordinate the original deployment/runtime owner to bind
+effective CPU allocation, billing/scaling and any existing managed trigger to
+the actual API revision, then establish durable idle/recovery processing, export
+start within five minutes and completion within thirty minutes. In-process
+worker source and continuously loaded hosted tests do not establish that
+runtime contract. If configuration or a managed trigger is needed, record its
+precise scope, owner/reviewer, environment/release and applicable approval
+before implementation. Missing observations remain unknown. This entry does
+not choose billing values or authorize cloud mutation, production execution or
+VM hosting; existing read-only production approval remains limited to its run.
+
+The dispatched helper's earlier parent-note and disposition-metadata writes
+were both rejected by the release guard. On 2026-10-12 genuine Supervisor
+persisted `resolved_parent_status: blocked`,
+`resolved_parent_waiting_for: Claude` and the packet's exact
+`resolved_parent_next`, plus the matching parent note. The operator receipt and
+fresh release-CLI readback confirm this delivery prerequisite is satisfied;
+`resolved_parent_at` is absent until the helper merge transaction. Only this
+existing documentation helper resumes its independent delivery lifecycle.
+Keep the parent blocked and publication on HOLD until its actual remaining
+conditions change; both original acceptance keys remain OPEN. See the [decision
+packet, operator receipt, acceptance mapping and exact routing
+request](support/unblock/SR-OPS-CAPACITY-FAILCLOSED-20261012/SR-OPS-CAPACITY-FAILCLOSED-20261012-UNBLOCK-PLANNING-DECISION.md).
+
 ### Q-PAX-PAYMENT-CORE-20261009 — approved financial policy and notice expiry
 
 Status: `human_required` for actual financial policy values and notice deadline
