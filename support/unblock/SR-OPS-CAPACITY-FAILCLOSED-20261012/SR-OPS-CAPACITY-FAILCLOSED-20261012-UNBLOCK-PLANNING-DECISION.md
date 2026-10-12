@@ -202,3 +202,29 @@ Scoped document/provenance checks and final local/remote/PR identity will be
 recorded before exact-SHA handoff. Independent Codex review, same-SHA CI and
 protected merge remain pending. No runtime/PG/HTTP/browser/cloud/900s check is
 run by this documentation helper; all original parent acceptance remains OPEN.
+
+### Resumed scoped verification
+
+Receipt anchor `d9d1f573e731baf1151b5e715a5f4aa684825fb8` was normally pushed
+onto the existing published helper branch. PR #2586 still targets `dev`; its
+receipt-anchor head matches local and remote exactly and is mergeable. Trunk
+advance alone required no synchronization or history rewrite.
+
+| Documentation check           | Completed result at the receipt anchor                                                                                                                                            | Evidence / limit                                                                                                                                                    |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Canonical consistency         | `python3 tools/ci/git/check_canonical_consistency.py --ci --base 8a7d254a137c8d49d36ba51f284733b13c4216e1 --head HEAD`: exit0; all four categories zero findings                  | `anchor-canonical-consistency.log`; original PRD §9.5.6, service-contract background-job rules and accepted workload/SLA tables rechecked; no product-contract edit |
+| Markdown format               | `pnpm exec prettier --check PHASE1_OPEN_QUESTIONS.md support/unblock/SR-OPS-CAPACITY-FAILCLOSED-20261012/SR-OPS-CAPACITY-FAILCLOSED-20261012-UNBLOCK-PLANNING-DECISION.md`: exit0 | `anchor-prettier.log`; both checks completed, not a background pass claim                                                                                           |
+| Helper provenance             | `python3 tools/ci/git/check_commit_trailers.py --base 8a7d254a137c8d49d36ba51f284733b13c4216e1 --head HEAD`: exit0, all three helper commits valid                                | `anchor-helper-trailers.log`; separate four-ancestor parent HOLD remains unchanged                                                                                  |
+| Whitespace / write scope      | `git diff --check 8a7d254a137c8d49d36ba51f284733b13c4216e1 HEAD`: exit0; same-range `git diff --name-only`: exit0, exactly the two assigned documentation paths                   | `anchor-whitespace.log`, `anchor-scope.log`; original published helper history retained, no parent-source files carried                                             |
+| Runtime / original acceptance | NOT RUN; not applicable to this documentation receipt change                                                                                                                      | No runtime/typecheck/unit/PG/HTTP/browser/cloud/900s pass claimed; both parent keys remain OPEN                                                                     |
+
+Execution tools: Python3.12.3, Node22.23.2 and pnpm10.33.0. This evidence-only
+closeout appends the completed anchor results. Before handoff, repeat these
+applicable checks at the final full SHA, save `final-*.log` and task/file hashes
+in the resume evidence root, and verify local/remote/PR head identity. Fresh
+`verify_parent_hold.py pre-handoff` must again confirm the exact route,
+absent `resolved_parent_at`, blocked parent and unchanged original
+roles/scopes/candidate/keys. The handoff references this report and final
+results; only same-candidate independent review/CI/protected merge can complete
+the helper. Repeat the live disposition check before merge and verify the parent
+stays blocked/HOLD afterward; the merge transaction owns `resolved_parent_at`.
