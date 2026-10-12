@@ -36,11 +36,31 @@ type TransportFailure = {
     | "continue-request-failed"
     | "navigation-failed"
     | "interception-setup-failed"
-    | "interception-cleanup-failed";
+    | "interception-cleanup-failed"
+    | "interception-cleanup-timeout"
+    | "interception-drain-timeout";
   resource_type: (typeof RESOURCE_TYPES)[number] | "Unknown";
-  block_result: "blocked" | "block-failed" | "not-attempted";
+  block_result: "blocked" | "block-failed" | "pending" | "not-attempted";
   target_kind?: ReturnType<typeof classifyRequestTarget>;
 };
+
+// These are harness wait budgets, not Google readiness/freshness thresholds.
+const INTERCEPTION_DRAIN_BUDGET_MS = 5_000;
+const INTERCEPTION_DETACH_TIMEOUT_MS = 1_000;
+
+async function finishesWithin(operation: Promise<unknown>, limitMs: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), limitMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
 
 // Diagnostic only: headersFor remains the sole target/credential authority.
 // Fixed scheme/origin classes locate a rejection without retaining its URL.
@@ -149,12 +169,33 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
     }>,
     failures,
     transport_failures: [] as TransportFailure[],
+    pending_interceptions: 0,
   };
   let cdp: CDPSession | undefined;
   const pendingInterceptions = new Set<Promise<void>>();
+  let drainBudgetMs = INTERCEPTION_DRAIN_BUDGET_MS;
+  let drainExpired = false;
   const settleInterceptions = async () => {
     while (pendingInterceptions.size > 0) {
-      await Promise.all([...pendingInterceptions]);
+      if (drainExpired) return;
+      const started = Date.now();
+      const settled = await finishesWithin(
+        Promise.all([...pendingInterceptions]),
+        drainBudgetMs,
+      );
+      // Share one cumulative wait budget across batches and page/final drains.
+      // New callbacks must not renew the deadline indefinitely.
+      drainBudgetMs = Math.max(0, drainBudgetMs - (Date.now() - started));
+      if (!settled || (drainBudgetMs === 0 && pendingInterceptions.size > 0)) {
+        drainExpired = true;
+        failures.push("Browser interception drain deadline expired");
+        evidence.transport_failures.push({
+          category: "interception-drain-timeout",
+          resource_type: "Unknown",
+          block_result: "not-attempted",
+        });
+        return;
+      }
     }
   };
   try {
@@ -199,7 +240,7 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
               resource_type:
                 RESOURCE_TYPES.find((value) => value === resourceType) ??
                 "Unknown",
-              block_result: "not-attempted",
+              block_result: "pending",
             };
             // One entry per failed request, including duplicates; recovery status
             // is separate so a failed failRequest cannot disappear or double count.
@@ -304,18 +345,34 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
       `Map rendering failed at ${evidence.stage}; only sanitized evidence is retained`,
     );
   } finally {
-    await cdp?.detach().catch(() => {
-      failures.push("Browser interception cleanup failed");
-      evidence.transport_failures.push({
-        category: "interception-cleanup-failed",
-        resource_type: "Unknown",
-        block_result: "not-attempted",
-      });
-      evidence.status = "failed";
-    });
+    if (cdp) {
+      try {
+        const detached = await finishesWithin(
+          cdp.detach(),
+          INTERCEPTION_DETACH_TIMEOUT_MS,
+        );
+        if (!detached) {
+          failures.push("Browser interception cleanup deadline expired");
+          evidence.transport_failures.push({
+            category: "interception-cleanup-timeout",
+            resource_type: "Unknown",
+            block_result: "not-attempted",
+          });
+        }
+      } catch {
+        failures.push("Browser interception cleanup failed");
+        evidence.transport_failures.push({
+          category: "interception-cleanup-failed",
+          resource_type: "Unknown",
+          block_result: "not-attempted",
+        });
+      }
+    }
     // Detach ends new interception events; settle the callbacks already started
     // before taking the durable snapshot, including their failRequest results.
     await settleInterceptions();
+    // An unresolved callback is unknown, not a successful request/recovery.
+    evidence.pending_interceptions = pendingInterceptions.size;
     if (failures.length > 0) evidence.status = "failed";
     writeEvidence(
       ".artifacts/live-map-acceptance/evidence-browser.json",

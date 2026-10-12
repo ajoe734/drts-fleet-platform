@@ -106,36 +106,54 @@ describe("private ops map browser transport", () => {
       vi.useFakeTimers();
       const mock = transport();
       let release: (() => void) | undefined;
-      const stalled = new Promise<void>((resolve) => { release = resolve; });
+      const stalled = new Promise<void>((resolve) => {
+        release = resolve;
+      });
       let paused: Promise<void> | undefined;
       mock.cdp.send.mockImplementation(async (method) => {
-        if (operation === "continue" && method === "Fetch.continueRequest") return stalled;
-        if (operation === "block" && method === "Fetch.failRequest") return stalled;
+        if (operation === "continue" && method === "Fetch.continueRequest")
+          return stalled;
+        if (operation === "block" && method === "Fetch.failRequest")
+          return stalled;
         return {};
       });
       if (operation === "detach") mock.cdp.detach.mockReturnValue(stalled);
       mock.request.get.mockImplementation(async () => {
-        if (operation !== "detach") paused = mock.pause(
-          operation === "block" ? "https://forbidden.example.test/" : "https://ops.example.test/dispatch",
-        );
+        if (operation !== "detach")
+          paused = mock.pause(
+            operation === "block"
+              ? "https://forbidden.example.test/"
+              : "https://ops.example.test/dispatch",
+          );
         return { ok: () => false, status: () => 403 };
       });
-      const verdict = expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+      const verdict = expect(mock.run()).rejects.toThrow(
+        "Hosted map rendering failed",
+      );
       try {
         await vi.advanceTimersByTimeAsync(6_000);
         expect(save).toHaveBeenCalledOnce();
         expect(save.mock.calls[0]?.[1]).toMatchObject({
           status: "failed",
           pending_interceptions: operation === "detach" ? 0 : 1,
-          transport_failures: expect.arrayContaining([{
-            category: operation === "detach" ? "interception-cleanup-timeout" : "interception-drain-timeout",
-            resource_type: "Unknown",
-            block_result: "not-attempted",
-          }]),
+          transport_failures: expect.arrayContaining([
+            {
+              category:
+                operation === "detach"
+                  ? "interception-cleanup-timeout"
+                  : "interception-drain-timeout",
+              resource_type: "Unknown",
+              block_result: "not-attempted",
+            },
+          ]),
         });
-        if (operation === "block") expect(save.mock.calls[0]?.[1].transport_failures).toContainEqual(
-          expect.objectContaining({ category: "target-policy-rejected", block_result: "pending" }),
-        );
+        if (operation === "block")
+          expect(save.mock.calls[0]?.[1].transport_failures).toContainEqual(
+            expect.objectContaining({
+              category: "target-policy-rejected",
+              block_result: "pending",
+            }),
+          );
         expect(mock.cdp.detach).toHaveBeenCalledOnce();
         expect(JSON.stringify(save.mock.calls)).not.toContain(token);
       } finally {
@@ -152,22 +170,33 @@ describe("private ops map browser transport", () => {
     const mock = transport();
     const paused: Array<Promise<void>> = [];
     mock.cdp.send.mockImplementation(async (method) => {
-      if (method === "Fetch.continueRequest") await new Promise<void>((resolve) => setTimeout(resolve, 100));
+      if (method === "Fetch.continueRequest")
+        await new Promise<void>((resolve) => setTimeout(resolve, 100));
       return {};
     });
     let arrivals: ReturnType<typeof setInterval> | undefined;
     mock.request.get.mockImplementation(async () => {
       paused.push(mock.pause("https://ops.example.test/dispatch"));
-      arrivals = setInterval(() => { paused.push(mock.pause("https://ops.example.test/dispatch")); }, 25);
+      arrivals = setInterval(() => {
+        paused.push(mock.pause("https://ops.example.test/dispatch"));
+      }, 25);
       return { ok: () => false, status: () => 403 };
     });
-    const verdict = expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+    const verdict = expect(mock.run()).rejects.toThrow(
+      "Hosted map rendering failed",
+    );
     try {
       await vi.advanceTimersByTimeAsync(6_000);
       expect(save).toHaveBeenCalledOnce();
       expect(save.mock.calls[0]?.[1]).toMatchObject({
         status: "failed",
-        transport_failures: [ { category: "interception-drain-timeout", resource_type: "Unknown", block_result: "not-attempted" } ],
+        transport_failures: [
+          {
+            category: "interception-drain-timeout",
+            resource_type: "Unknown",
+            block_result: "not-attempted",
+          },
+        ],
       });
       expect(save.mock.calls[0]?.[1].pending_interceptions).toBeGreaterThan(0);
     } finally {
