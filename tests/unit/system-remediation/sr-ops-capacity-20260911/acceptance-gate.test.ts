@@ -255,7 +255,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
     const invalid = structuredClone(validAcceptance);
     (invalid.queueLag.report as any).avgMs = null;
     expect(() => assertAcceptancePassed(invalid)).toThrowError(
-      /invalid report queueLag measurements/,
+      /invalid or missing report queueLag measurements/,
     );
   });
 
