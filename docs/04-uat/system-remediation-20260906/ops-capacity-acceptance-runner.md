@@ -376,3 +376,15 @@ The existing executor bounds active sessions to one per service. The new
 regression runs the actual report builder and `ReportingRepository` with an
 external single-slot SQL pool boundary, rather than copying its SQL or mocking
 the queue logic. Real PG behavior still requires the original hosted workflow.
+
+Independent-session check at `0a391e8b7` initially failed11worker cases because
+the unit PG module mock missed the API's installed transport class. A diagnostic
+probe recorded `SASL ... client password must be a string`: the missed boundary
+attempted the driver's default connection and authentication failed. No service
+was started and no successful PG query or PG acceptance is claimed. The fixture
+now resolves the API's actual installed driver and intercepts its connect/query/
+end transport methods, with a non-routable unit URI and environment restoration.
+The production worker also rejects missing existing `DATABASE_URL` rather than
+falling back to an implicit database. Corrected size1 test passes, exit0 with
+11non-selected cases skipped; this narrow probe is not the full regression.
+Failure/probe logs remain under canonical `.local/c123-report-worker-20261012`.

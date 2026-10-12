@@ -160,7 +160,12 @@ export class ReportingFilingRepository {
     // A builder can itself query DatabaseService. Borrowing its last pooled
     // connection for ownership would deadlock a pool of size1. This bounded
     // session uses the existing database URI, with no new hosting/config flag.
-    const client = new Client({ connectionString: process.env.DATABASE_URL });
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString)
+      throw new Error(
+        "Durable report worker requires the existing DATABASE_URL",
+      );
+    const client = new Client({ connectionString });
     try {
       await client.connect();
     } catch (error) {

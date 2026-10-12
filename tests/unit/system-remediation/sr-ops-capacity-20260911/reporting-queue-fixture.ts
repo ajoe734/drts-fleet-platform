@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { vi } from "vitest";
 import type { DatabaseService } from "../../../../apps/api/src/common/db";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -14,25 +15,12 @@ type SqlSession = {
   ) => Promise<{ rows: unknown[]; rowCount?: number }>;
   release: (discard?: boolean) => void;
 };
-const pgBoundary = vi.hoisted(() => ({
-  open: null as (() => SqlSession) | null,
-}));
-vi.mock("pg", async (importOriginal) => {
-  const original = await importOriginal<typeof import("pg")>();
-  return {
-    ...original,
-    Client: class {
-      private readonly session = pgBoundary.open!();
-      async connect() {}
-      query(sql: string, params?: unknown[]) {
-        return this.session.query(sql, params);
-      }
-      async end() {
-        this.session.release();
-      }
-    },
-  };
-});
+// Resolve the same installed driver as the API. Prototype spies intercept the
+// actual transport class; no bare-specifier mock can miss this workspace's
+// distinct package resolution and accidentally open a network connection.
+const { Client } = createRequire(
+  new URL("../../../../apps/api/package.json", import.meta.url),
+)("pg") as typeof import("pg");
 
 // SQL/session/transaction boundary model only, not a PostgreSQL proof. Every
 // producer, repository statement, worker, builder and lifecycle hook is real.
@@ -132,7 +120,25 @@ export function queueFixture(jobs: StoredReportJobRecord[] = []) {
     };
   }
   const query = session().query;
-  pgBoundary.open = session;
+  vi.stubEnv("DATABASE_URL", "postgresql://sql-boundary.invalid/unit");
+  const sessions = new WeakMap<InstanceType<typeof Client>, SqlSession>();
+  vi.spyOn(Client.prototype, "connect").mockImplementation(async function (
+    this: InstanceType<typeof Client>,
+  ) {
+    sessions.set(this, session());
+  });
+  vi.spyOn(Client.prototype, "query").mockImplementation(function (
+    this: InstanceType<typeof Client>,
+    sql: string,
+    params?: unknown[],
+  ) {
+    return sessions.get(this)!.query(sql, params);
+  } as typeof Client.prototype.query);
+  vi.spyOn(Client.prototype, "end").mockImplementation(async function (
+    this: InstanceType<typeof Client>,
+  ) {
+    sessions.get(this)?.release();
+  });
   const database = {
     isEnabled: () => true,
     query,

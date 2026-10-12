@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ReportingFilingController } from "../../../../apps/api/src/modules/reporting-filing/reporting-filing.controller";
 import { ReportingFilingService } from "../../../../apps/api/src/modules/reporting-filing/reporting-filing.service";
 import { ReportingFilingRepository } from "../../../../apps/api/src/modules/reporting-filing/reporting-filing.repository";
@@ -8,6 +8,11 @@ import { AuditNotificationService } from "../../../../apps/api/src/modules/audit
 import type { DatabaseService } from "../../../../apps/api/src/common/db";
 import { queueFixture } from "./reporting-queue-fixture";
 import { ReportingRepository } from "../../../../apps/api/src/modules/reporting/reporting.repository";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 
 function deferred() {
   let resolve!: () => void;
@@ -66,6 +71,19 @@ describe("report durable HTTP acknowledgement", () => {
 });
 
 describe("actual bounded durable reporting worker", () => {
+  it("rejects a missing existing database URI before opening a default claim connection", async () => {
+    const f = queueFixture();
+    vi.stubEnv("DATABASE_URL", "");
+    const run = vi.fn();
+    await expect(f.repository.withReportJobClaim("job-1", run)).rejects.toThrow(
+      "requires the existing DATABASE_URL",
+    );
+    expect(run).not.toHaveBeenCalled();
+    expect(f.releases).not.toHaveBeenCalled();
+    expect(f.locks.size).toBe(0);
+    await f.service.onModuleDestroy();
+  });
+
   it("lets the actual SQL-backed report repository query a size1 shared pool while the worker owns its separate session", async () => {
     const f = queueFixture();
     const connect = f.database.connect;
@@ -103,9 +121,12 @@ describe("actual bounded durable reporting worker", () => {
     });
     f.service.onApplicationBootstrap();
     try {
-      await vi.waitFor(() =>
-        expect(f.stored.get(accepted.jobId)?.status).toBe("completed"),
-      );
+      await vi.waitFor(() => {
+        const error = vi.mocked(f.repository.reportPersistenceFailure).mock
+          .calls[0]?.[0];
+        if (error) throw error;
+        expect(f.stored.get(accepted.jobId)?.status).toBe("completed");
+      });
       expect(builderQueries).toBe(1);
       expect(borrowed).toBe(0);
       expect(f.locks.size).toBe(0);
