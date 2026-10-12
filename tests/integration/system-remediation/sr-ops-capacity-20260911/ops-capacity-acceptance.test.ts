@@ -360,9 +360,25 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         const pollDb = async () => {
           while (isPolling) {
             try {
-              const { rows: reportRows } = await pool.query(`SELECT count(*) FROM admin.phase1_report_jobs WHERE status IN ('queued', 'running') AND record->'filters'->>'runTag' = $1`, [runTag]);
-              const currentReport = parseInt(String(reportRows[0]?.count || "0"), 10);
-              if (currentReport > peakReport) peakReport = currentReport;
+              let currentJobIds: string[] = [];
+              try {
+                const content = readFileSync(recordsPath, "utf8");
+                currentJobIds = content
+                  .trim()
+                  .split("\n")
+                  .filter((line) => line)
+                  .map((line) => JSON.parse(line))
+                  .filter((row) => row.workload === "report" && !row.error && row.resourceIds?.jobId)
+                  .map((row) => row.resourceIds!.jobId);
+              } catch (e) {
+                // Ignore if file is missing or JSON is mid-write
+              }
+
+              if (currentJobIds.length > 0) {
+                const { rows: reportRows } = await pool.query(`SELECT count(*) FROM admin.phase1_report_jobs WHERE status IN ('queued', 'running') AND job_id = ANY($1::text[])`, [currentJobIds]);
+                const currentReport = parseInt(String(reportRows[0]?.count || "0"), 10);
+                if (currentReport > peakReport) peakReport = currentReport;
+              }
 
               const { rows: dispatchRows } = await pool.query(`SELECT count(*) FROM ops.phase1_owned_orders WHERE status IN ('ready_for_dispatch', 'delayed_queue', 'no_supply', 'preassigned') AND order_id = ANY($1::text[])`, [orderIds]);
               const currentDispatchable = parseInt(String(dispatchRows[0]?.count || "0"), 10);
@@ -503,19 +519,20 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
             {} as Record<string, number>,
           ),
           dispatchAttemptCoverage: dispatchReadback.reduce(
-            (acc: { attempted: number; unattemptedLawful: number; unattemptedUnlawful: number }, row: { status: string; lagMs: number | null }) => {
+            (acc: { attempted: number; unattemptedLawful: number; unattemptedUnlawful: number; unattemptedLawfulReasons: string[] }, row: { orderId: string; status: string; lagMs: number | null }) => {
               if (row.lagMs !== null) {
                 acc.attempted++;
               } else {
                 if (row.status === "no_supply" || row.status === "delayed_queue") {
                   acc.unattemptedLawful++;
+                  acc.unattemptedLawfulReasons.push(row.orderId);
                 } else {
                   acc.unattemptedUnlawful++;
                 }
               }
               return acc;
             },
-            { attempted: 0, unattemptedLawful: 0, unattemptedUnlawful: 0 },
+            { attempted: 0, unattemptedLawful: 0, unattemptedUnlawful: 0, unattemptedLawfulReasons: [] },
           ),
         };
         writeFileSync(

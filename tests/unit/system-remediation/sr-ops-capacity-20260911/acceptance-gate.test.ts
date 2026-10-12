@@ -124,6 +124,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
       attempted: 4500,
       unattemptedLawful: 0,
       unattemptedUnlawful: 0,
+      unattemptedLawfulReasons: [],
     },
     readback: {
       booking: {
