@@ -78,6 +78,11 @@ production execution still needs the existing fresh approval path.
 
 ## Canonical state request and dispatch boundary
 
+This section records the initial worker attempts and delivery hold at published
+`07731499dbe395619573aff1f0f83db57ca17e16`. The later genuine Supervisor receipt
+and current readback are appended below; the initial rejected attempts remain
+part of the delivery history.
+
 Using the supplied release CLI with `AI_NAME=Codex2`, this worker attempted
 each supported state write once:
 
@@ -152,3 +157,48 @@ the blocked-parent state receipt exists, following the repository
 record `resolved_parent_status: blocked` before helper merge. The dispatch guard
 cannot be bypassed by adopting Supervisor's identity. No direct `done`, empty
 commit, self-referential commit SHA or parent source transplantation is used.
+
+## Genuine Supervisor receipt and resumed documentation delivery
+
+The 2026-10-12T17:58:37.295671+00:00 operator receipt at canonical
+`.local/continue-full-completion-20261012T0528/helper-parent-hold-disposition/verified-two-existing-helper-parent-hold-receipts.json`
+records genuine **Supervisor** helper `assign` exit0 and parent `note` exit0.
+Receipt SHA256:
+`6ba53039f655e4e3994ec5134bd04a664e1c8f5d0b8851aba9185ef829048edb`.
+This supersedes the initial missing-receipt delivery hold, preserving both
+rejected worker attempts above. The worker did not repeat either forbidden
+write or adopt Supervisor identity.
+
+Fresh actual helper/parent slices from the supplied release CLI, observed
+2026-10-12T18:01:27.384453+00:00, confirm:
+
+- helper owner/reviewer remain Codex2/Codex; only this existing helper is
+  `in_progress`;
+- all three `resolved_parent_*` values exactly match the JSON request above;
+  `resolved_parent_at` is **absent**;
+- parent status is **blocked**, and its `next` exactly matches
+  `resolved_parent_next`;
+- both original C123 acceptance keys remain **OPEN**; no parent publication,
+  handoff, new source allocation or hosted capacity dispatch follows.
+
+The receipt also records unchanged scopes/roles/dependencies/acceptance/candidate
+and no history exception or product/cloud change. Existing published
+`07731499dbe395619573aff1f0f83db57ca17e16`, anchor/source credits and PR #2586
+are retained. This continuation appends only documentation on the same branch;
+no rewrite, transplant or new child is used. The existing
+Q-SR-OPS-CAPACITY-FAILCLOSED entry now reflects the verified receipt.
+
+| Finding / acceptance                                        | Before → current evidence                                                                               | Command, execution version and evidence                                                                                                                                                                                                                                                                        | Remaining limit                                                                                                                  |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Update parent with concrete next step                       | Initial worker writes rejected; genuine Supervisor assign/note both exit0 and exact live route verified | `python3 /home/lupin/workspace/drts-fleet-platform/.local/sr-ops-capacity-planning-decision-20261012/resume-20261012/verify_parent_hold.py initial`: exit0; supplied release `orchestrator-0fb44e9576d3` `show` on each actual task; `initial-helper.json`, `initial-parent.json`, `initial-verification.json` | Actual publication/provenance and runtime blockers remain; repeat live readback before handoff and merge                         |
+| Preserve blocked-parent disposition and original acceptance | Parent blocked, exact route and both keys OPEN; `resolved_parent_at` absent                             | Same actual release-CLI slices and operator receipt; no direct machine-file mutation                                                                                                                                                                                                                           | Helper merge must preserve parent blocked/HOLD and record the merge-time resolution timestamp; no parent acceptance is satisfied |
+| Canonical planning route / scope cut                        | Existing publication/runtime routes retained, question status reconciled with operator receipt          | Same assigned report and Q-SR-OPS-CAPACITY-FAILCLOSED entry; original contract/baseline citations rechecked                                                                                                                                                                                                    | No scope cut or E04/source/history/cloud/VM grant; governance disposition and effective background execution remain OPEN         |
+
+Resume evidence root:
+`/home/lupin/workspace/drts-fleet-platform/.local/sr-ops-capacity-planning-decision-20261012/resume-20261012/`.
+The local probe calls the actual release CLI read-only and saves task slices;
+it is a state/content check, not a product regression or capacity measurement.
+Scoped document/provenance checks and final local/remote/PR identity will be
+recorded before exact-SHA handoff. Independent Codex review, same-SHA CI and
+protected merge remain pending. No runtime/PG/HTTP/browser/cloud/900s check is
+run by this documentation helper; all original parent acceptance remains OPEN.

@@ -33,13 +33,18 @@ before implementation. Missing observations remain unknown. This entry does
 not choose billing values or authorize cloud mutation, production execution or
 VM hosting; existing read-only production approval remains limited to its run.
 
-The dispatched helper's parent-note and disposition-metadata writes were both
-rejected by the release guard. Genuine Supervisor must record
-`resolved_parent_status: blocked`, `resolved_parent_waiting_for: Claude` and
-the packet's concrete `resolved_parent_next`, plus a matching parent note,
-before helper handoff/merge. Keep the parent blocked until its actual remaining
-conditions change. See the [decision packet, source evidence, acceptance mapping
-and exact routing request](support/unblock/SR-OPS-CAPACITY-FAILCLOSED-20261012/SR-OPS-CAPACITY-FAILCLOSED-20261012-UNBLOCK-PLANNING-DECISION.md).
+The dispatched helper's earlier parent-note and disposition-metadata writes
+were both rejected by the release guard. On 2026-10-12 genuine Supervisor
+persisted `resolved_parent_status: blocked`,
+`resolved_parent_waiting_for: Claude` and the packet's exact
+`resolved_parent_next`, plus the matching parent note. The operator receipt and
+fresh release-CLI readback confirm this delivery prerequisite is satisfied;
+`resolved_parent_at` is absent until the helper merge transaction. Only this
+existing documentation helper resumes its independent delivery lifecycle.
+Keep the parent blocked and publication on HOLD until its actual remaining
+conditions change; both original acceptance keys remain OPEN. See the [decision
+packet, operator receipt, acceptance mapping and exact routing
+request](support/unblock/SR-OPS-CAPACITY-FAILCLOSED-20261012/SR-OPS-CAPACITY-FAILCLOSED-20261012-UNBLOCK-PLANNING-DECISION.md).
 
 ### Q-PAX-PAYMENT-CORE-20261009 — approved financial policy and notice expiry
 
