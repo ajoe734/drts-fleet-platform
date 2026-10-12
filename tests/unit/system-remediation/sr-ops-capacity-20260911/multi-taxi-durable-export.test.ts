@@ -97,23 +97,24 @@ describe("multi-taxi export durable acknowledgement", () => {
         ).toBe(false);
       } finally {
         release();
-        const accepted = await response;
-        expect(accepted.data).toMatchObject({
-          status: "pending",
-          idempotentReplay: false,
-        });
-        expect(f.stored.get(accepted.data.jobId)).toMatchObject({
-          status: "queued",
-          rows,
-          filters: command.scope,
-          multiTaxiTripExport: {
-            ...command,
-            requestedByActorId: identity.actorId,
-            recordCount: rows.length,
-          },
-        });
+        await response;
         await f.service.onModuleDestroy();
       }
+      const accepted = await response;
+      expect(accepted.data).toMatchObject({
+        status: "pending",
+        idempotentReplay: false,
+      });
+      expect(f.stored.get(accepted.data.jobId)).toMatchObject({
+        status: "queued",
+        rows,
+        filters: command.scope,
+        multiTaxiTripExport: {
+          ...command,
+          requestedByActorId: identity.actorId,
+          recordCount: rows.length,
+        },
+      });
     },
   );
 
