@@ -100,6 +100,48 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("private ops map browser transport", () => {
+  it("settles outstanding interception recovery before writing final evidence", async () => {
+    const mock = transport();
+    let rejectContinue: ((reason: Error) => void) | undefined;
+    let finishBlock: (() => void) | undefined;
+    const continuation = new Promise<void>((_resolve, reject) => {
+      rejectContinue = reject;
+    });
+    const blocking = new Promise<void>((resolve) => {
+      finishBlock = resolve;
+    });
+    mock.cdp.send.mockImplementation(async (method) => {
+      if (method === "Fetch.continueRequest") return continuation;
+      if (method === "Fetch.failRequest") return blocking;
+      return {};
+    });
+    let paused: Promise<void> | undefined;
+    mock.request.get.mockImplementation(async () => {
+      // EventEmitter does not wait for an async requestPaused callback.
+      paused = mock.pause("https://ops.example.test/dispatch");
+      return { ok: () => false, status: () => 403 };
+    });
+    const run = expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+    try {
+      await vi.waitFor(() => expect(mock.cdp.detach).toHaveBeenCalledOnce());
+      expect(save).not.toHaveBeenCalled();
+      rejectContinue!(new Error(`late protocol failure ${token}`));
+      await vi.waitFor(() =>
+        expect(mock.cdp.send).toHaveBeenCalledWith("Fetch.failRequest", expect.anything()),
+      );
+      expect(save).not.toHaveBeenCalled();
+    } finally {
+      rejectContinue!(new Error(`late protocol failure ${token}`));
+      finishBlock!();
+      await run;
+      await paused;
+    }
+    expect(save.mock.calls[0]?.[1].transport_failures).toEqual([
+      { category: "continue-request-failed", resource_type: "Document", block_result: "blocked" },
+    ]);
+    expect(JSON.stringify(save.mock.calls)).not.toContain(token);
+  });
+
   it.each([
     ["target-policy-rejected", "https://unapproved.example.test/", "Image"],
     [

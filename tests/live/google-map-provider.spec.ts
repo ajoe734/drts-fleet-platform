@@ -8,6 +8,39 @@ import { createOpsConsoleAuthentication } from "../e2e/system-remediation/sr-liv
 const GOOGLE_MAP_ERROR =
   /InvalidKeyMapError|RefererNotAllowedMapError|ApiNotActivatedMapError|Google Maps JavaScript API error/i;
 
+// Return our own literals, never CDP source text (which may contain secrets).
+const RESOURCE_TYPES = [
+  "Document",
+  "Stylesheet",
+  "Image",
+  "Media",
+  "Font",
+  "Script",
+  "TextTrack",
+  "XHR",
+  "Fetch",
+  "Prefetch",
+  "EventSource",
+  "WebSocket",
+  "Manifest",
+  "SignedExchange",
+  "Ping",
+  "CSPViolationReport",
+  "Preflight",
+  "Other",
+] as const;
+
+type TransportFailure = {
+  category:
+    | "target-policy-rejected"
+    | "continue-request-failed"
+    | "navigation-failed"
+    | "interception-setup-failed"
+    | "interception-cleanup-failed";
+  resource_type: (typeof RESOURCE_TYPES)[number] | "Unknown";
+  block_result: "blocked" | "block-failed" | "not-attempted";
+};
+
 function watchGoogleMapErrors(page: Page) {
   const failures: string[] = [];
   page.on("console", (message) => {
@@ -75,6 +108,7 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
       screenshot: string;
     }>,
     failures,
+    transport_failures: [] as TransportFailure[],
   };
   let cdp: CDPSession | undefined;
   try {
@@ -89,12 +123,14 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
     });
     interception.on(
       "Fetch.requestPaused",
-      async ({ requestId, request: intercepted }) => {
+      async ({ requestId, request: intercepted, resourceType }) => {
+        let category: TransportFailure["category"] = "target-policy-rejected";
         try {
           const headers = authentication.headersFor(
             intercepted.url,
             intercepted.headers,
           );
+          category = "continue-request-failed";
           await interception.send("Fetch.continueRequest", {
             requestId,
             headers: Object.entries(headers).map(([name, value]) => ({
@@ -103,17 +139,27 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
             })),
           });
         } catch {
-          // Protocol errors can contain the request/headers. Retain a fixed code
-          // only, and fail closed on forbidden targets or interception failures.
+          // Classify by the operation that failed, never by parsing an exception.
+          // A continue failure does not prove cancellation or a harmless request.
           failures.push("Browser request blocked or interception failed");
-          await interception
-            .send("Fetch.failRequest", {
+          const failure: TransportFailure = {
+            category,
+            resource_type:
+              RESOURCE_TYPES.find((value) => value === resourceType) ?? "Unknown",
+            block_result: "not-attempted",
+          };
+          // One entry per failed request, including duplicates; recovery status
+          // is separate so a failed failRequest cannot disappear or double count.
+          evidence.transport_failures.push(failure);
+          try {
+            await interception.send("Fetch.failRequest", {
               requestId,
               errorReason: "BlockedByClient",
-            })
-            .catch(() => {
-              /* The page may already have closed. */
             });
+            failure.block_result = "blocked";
+          } catch {
+            failure.block_result = "block-failed";
+          }
         }
       },
     );
@@ -143,9 +189,18 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
     ).toBe(true);
     for (const path of ["/dispatch", "/callcenter"]) {
       evidence.stage = `page:${path}:http`;
-      const response = await page.goto(`${config.opsOrigin}${path}`, {
-        waitUntil: "domcontentloaded",
-      });
+      const response = await page
+        .goto(`${config.opsOrigin}${path}`, {
+          waitUntil: "domcontentloaded",
+        })
+        .catch(() => {
+          evidence.transport_failures.push({
+            category: "navigation-failed",
+            resource_type: "Document",
+            block_result: "not-attempted",
+          });
+          throw new Error("Browser navigation failed");
+        });
       evidence.last_http_status = response?.status() ?? null;
       expect(response?.ok()).toBe(true);
       evidence.stage = `page:${path}:sha`;
@@ -180,6 +235,13 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
     evidence.stage = "complete";
     evidence.status = "passed";
   } catch {
+    if (evidence.stage === "network-interception") {
+      evidence.transport_failures.push({
+        category: "interception-setup-failed",
+        resource_type: "Unknown",
+        block_result: "not-attempted",
+      });
+    }
     failures.push(
       `Map rendering failed at ${evidence.stage}; only sanitized evidence is retained`,
     );
@@ -187,6 +249,11 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
   } finally {
     await cdp?.detach().catch(() => {
       failures.push("Browser interception cleanup failed");
+      evidence.transport_failures.push({
+        category: "interception-cleanup-failed",
+        resource_type: "Unknown",
+        block_result: "not-attempted",
+      });
       evidence.status = "failed";
     });
     writeEvidence(
