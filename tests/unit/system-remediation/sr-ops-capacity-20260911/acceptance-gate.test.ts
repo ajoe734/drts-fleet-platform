@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { assertAcceptancePassed } from "../../../../tools/system-remediation/ops-capacity/durable-readback.mjs";
+import {
+  assertAcceptancePassed,
+  summarizeDispatchEvidence,
+} from "../../../../tools/system-remediation/ops-capacity/durable-readback.mjs";
 
 describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
   it("rejects a genuine 900s baseline payload that failed due to 112 HTTP 429s (24/74/14 error summary)", () => {
@@ -112,14 +115,45 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
     },
     degradation: {
       isLawful: true,
+      reasons: [],
+      unsafeOrderIds: [],
     },
     queueLag: {
       report: { count: 450, minMs: 10, maxMs: 100, avgMs: 45, p95Ms: 90 },
-      dispatchOrderQueueLag: { count: 4500, minMs: 5, maxMs: 50, avgMs: 20, p95Ms: 45 },
+      dispatchOrderQueueLag: {
+        count: 4500,
+        minMs: 1000,
+        maxMs: 1000,
+        avgMs: 1000,
+        p95Ms: 1000,
+      },
     },
-    dispatchOrderStatusDistribution: {
-      completed: 4500,
-    },
+    dispatchOrderIds: Array.from({ length: 4500 }, (_, i) => `order-${i}`),
+    dispatchEvidence: Array.from({ length: 4500 }, (_, i) => ({
+      orderId: `order-${i}`,
+      status: "completed",
+      createdAt: "2026-10-12T00:00:00.000Z",
+      authorityKnown: true,
+      readyAt: "2026-10-12T00:00:00.000Z",
+      readySource: "order.ready_for_dispatch",
+      hasAttempt: true,
+      firstAttemptAt: "2026-10-12T00:00:01.000Z",
+      firstAttemptId: `attempt-${i}`,
+      firstAttemptJobId: `job-${i}`,
+      assignmentCount: 1,
+      lagMs: 1000,
+      record: {
+        orderId: `order-${i}`,
+        status: "completed",
+        orderSource: "app",
+      },
+      traces: [],
+      attempts: [],
+    })),
+    dispatchOrderStatusDistribution: { completed: 4500 } as Record<
+      string,
+      number
+    >,
     dispatchAttemptCoverage: {
       attempted: 4500,
       unattemptedLawful: 0,
@@ -279,19 +313,172 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
     expect(() => assertAcceptancePassed(invalid)).toThrowError(/invalid/);
   });
 
-  it("passes when degraded with attempt coverage", () => {
-    const degraded = structuredClone(validAcceptance);
-    degraded.dispatchOrderStatusDistribution.completed = 4499;
-    degraded.dispatchOrderStatusDistribution.delayed_queue = 1;
-    degraded.dispatchAttemptCoverage.attempted = 4500;
-    degraded.queueLag.dispatchOrderQueueLag.count = 4500;
+  it("rejects invented empty or unrelated lawful reasons from adjacent rejected candidates", () => {
+    for (const reasons of [
+      Array(4499).fill(""),
+      Array(4499).fill("unrelated-id"),
+    ]) {
+      const degraded = structuredClone(validAcceptance);
+      degraded.dispatchOrderStatusDistribution = {
+        completed: 1,
+        delayed_queue: 4499,
+      };
+      degraded.dispatchAttemptCoverage = {
+        attempted: 1,
+        unattemptedLawful: 4499,
+        unattemptedUnlawful: 0,
+        unattemptedLawfulReasons: reasons,
+      };
+      degraded.queueLag.dispatchOrderQueueLag = {
+        count: 1,
+        minMs: 0,
+        maxMs: 0,
+        avgMs: 0,
+        p95Ms: 0,
+      };
+      expect(() => assertAcceptancePassed(degraded)).toThrow(/resource|reason/);
+    }
+  });
+
+  it("rejects a duplicate or unrelated resource even when all aggregate counts agree", () => {
+    const invalid = structuredClone(validAcceptance);
+    invalid.dispatchEvidence[1]!.orderId = invalid.dispatchEvidence[0]!.orderId;
+    expect(() => assertAcceptancePassed(invalid)).toThrow(
+      /duplicate or unrelated/,
+    );
+    invalid.dispatchEvidence[1]!.orderId = "outside-this-run";
+    expect(() => assertAcceptancePassed(invalid)).toThrow(
+      /duplicate or unrelated/,
+    );
+  });
+
+  it("rejects missing readiness without relabeling an actual attempt as lawful unattempted", () => {
+    const invalid = structuredClone(validAcceptance);
+    Object.assign(invalid.dispatchEvidence[0]!, { readyAt: null, lagMs: null });
+    expect(() => assertAcceptancePassed(invalid)).toThrow(/readiness/);
+  });
+
+  it("accepts a correlated recording-gated remainder and rejects unsafe assignment or missing reason trace", () => {
+    const evidence = structuredClone(validAcceptance.dispatchEvidence);
+    Object.assign(evidence[0]!, {
+      status: "recording_pending",
+      hasAttempt: false,
+      firstAttemptAt: null,
+      firstAttemptId: null,
+      firstAttemptJobId: null,
+      readyAt: null,
+      readySource: null,
+      lagMs: null,
+      assignmentCount: 0,
+      record: {
+        orderId: "order-0",
+        status: "recording_pending",
+        orderSource: "phone",
+        callId: "call-0",
+        recordingId: null,
+        complianceFlags: ["recording_pending"],
+      },
+      traces: [
+        {
+          orderId: "order-0",
+          traceId: "gate-trace",
+          eventType: "callcenter.order_created",
+          createdAt: "2026-10-12T00:00:00.000Z",
+          details: { callId: "call-0", recordingPending: true },
+        },
+      ],
+    });
+    const facts = summarizeDispatchEvidence(evidence);
+    const degraded = {
+      ...structuredClone(validAcceptance),
+      dispatchEvidence: evidence,
+      dispatchOrderStatusDistribution: facts.distribution,
+      dispatchAttemptCoverage: facts.coverage,
+      degradation: facts.degradation,
+      queueLag: {
+        ...validAcceptance.queueLag,
+        dispatchOrderQueueLag: {
+          count: 4499,
+          minMs: 1000,
+          maxMs: 1000,
+          avgMs: 1000,
+          p95Ms: 1000,
+        },
+      },
+    };
     expect(() => assertAcceptancePassed(degraded)).not.toThrow();
+    evidence[0]!.assignmentCount = 1;
+    expect(() => assertAcceptancePassed(degraded)).toThrow(/reason|safety/);
+    evidence[0]!.assignmentCount = 0;
+    evidence[0]!.traces = [];
+    expect(() => assertAcceptancePassed(degraded)).toThrow(/reason|safety/);
+  });
+
+  it("requires the no-supply trace, escalation, and actual attempt to describe the same resource", () => {
+    const evidence = structuredClone(validAcceptance.dispatchEvidence);
+    Object.assign(evidence[0]!, {
+      status: "delayed_queue",
+      assignmentCount: 0,
+      record: {
+        orderId: "order-0",
+        status: "delayed_queue",
+        orderSource: "app",
+        queueFamily: "delayed_retry_queue",
+        queueEntryReason: "no_supply_delayed_retry",
+        dispatchAttemptCount: 1,
+        lastDispatchFailureReason: "no_eligible_supply",
+        noSupplyEscalation: {
+          orderId: "order-0",
+          dispatchJobId: "job-0",
+          attemptCount: 1,
+          lastAttemptAt: "2026-10-12T00:00:01.000Z",
+          escalationAction: "move_to_delayed_queue",
+          resolvedAt: null,
+        },
+      },
+      attempts: [
+        {
+          orderId: "order-0",
+          dispatchJobId: "job-0",
+          outcome: "failed",
+          reasonCode: "no_eligible_supply",
+          createdAt: "2026-10-12T00:00:01.000Z",
+        },
+      ],
+      traces: [
+        {
+          orderId: "order-0",
+          traceId: "delayed-trace",
+          eventType: "dispatch.no_supply_delayed",
+          createdAt: "2026-10-12T00:00:01.001Z",
+          details: {
+            dispatchJobId: "job-0",
+            reasonCode: "no_eligible_supply",
+            escalationAction: "move_to_delayed_queue",
+            attemptCount: 1,
+          },
+        },
+      ],
+    });
+    const facts = summarizeDispatchEvidence(evidence);
+    const degraded = {
+      ...structuredClone(validAcceptance),
+      dispatchEvidence: evidence,
+      dispatchOrderStatusDistribution: facts.distribution,
+      dispatchAttemptCoverage: facts.coverage,
+      degradation: facts.degradation,
+    };
+    expect(() => assertAcceptancePassed(degraded)).not.toThrow();
+    evidence[0]!.attempts = [];
+    expect(() => assertAcceptancePassed(degraded)).toThrow(/safety/);
   });
 
   it("rejects when attempt coverage is missing or inconsistent", () => {
     const invalid = structuredClone(validAcceptance);
     invalid.dispatchAttemptCoverage.attempted = 4499;
     invalid.dispatchAttemptCoverage.unattemptedUnlawful = 1;
-    expect(() => assertAcceptancePassed(invalid)).toThrowError(/Workload failed: 1 items missing attempts without lawful status/);
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(
+      /Workload failed: 1 items missing attempts without lawful status/,
+    );
   });
 });

@@ -12,8 +12,19 @@ type PgPoolLike = {
 export type OwnedOrderReadbackRow = {
   orderId: string;
   status: string;
-  createdAt: string;
+  createdAt: string | null;
   lagMs: number | null;
+  authorityKnown: boolean;
+  readyAt: string | null;
+  readySource: string | null;
+  hasAttempt: boolean;
+  firstAttemptAt: string | null;
+  firstAttemptId: string | null;
+  firstAttemptJobId: string | null;
+  assignmentCount: number;
+  attempts: Record<string, unknown>[];
+  record: Record<string, unknown>;
+  traces: Record<string, unknown>[];
 };
 
 export type ReportJobReadbackRow = {
@@ -35,6 +46,7 @@ export type LagSummary = {
   minMs: number | null;
   maxMs: number | null;
   avgMs: number | null;
+  p95Ms: number | null;
 };
 
 export function readBackOwnedOrders(
@@ -58,4 +70,31 @@ export function summarizeLag<T extends Record<string, unknown>>(
   lagKey: keyof T,
 ): LagSummary;
 
-export function assertAcceptancePassed(acceptance: any): void;
+export type LawfulReason = {
+  orderId: string;
+  status: string;
+  reasonCode: string;
+  traceId: string;
+  source: string;
+  observedAt: string;
+  dispatchJobId?: string;
+};
+
+export function lawfulReasonForOrder(
+  row: OwnedOrderReadbackRow,
+): LawfulReason | null;
+export function summarizeDispatchEvidence(rows: OwnedOrderReadbackRow[]): {
+  coverage: {
+    attempted: number;
+    unattemptedLawful: number;
+    unattemptedUnlawful: number;
+    unattemptedLawfulReasons: LawfulReason[];
+  };
+  distribution: Record<string, number>;
+  degradation: {
+    isLawful: boolean;
+    reasons: LawfulReason[];
+    unsafeOrderIds: string[];
+  };
+};
+export function assertAcceptancePassed(acceptance: unknown): void;
