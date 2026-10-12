@@ -323,7 +323,7 @@ describe("F-ARTIFACT-PROVIDERS actual preflight and production factories", () =>
       );
       expect(
         f.calls.every((call: string[]) =>
-          ["public-policy", "actAs", "read"].includes(call[0]),
+          ["public-policy", "actAs", "read"].includes(call[0] ?? ""),
         ),
       ).toBe(true);
     },

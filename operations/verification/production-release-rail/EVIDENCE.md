@@ -138,3 +138,55 @@ and typecheck output: `public-entry-regressions.log` and
 `public-entry-typecheck.log` in the same canonical directory. All public HTTP/cloud
 boundaries in these checks are mocked; no local product server, browser test
 server, Compose, PG, actual production request or cloud mutation was performed.
+
+## F-ARTIFACT-PROVIDERS repeated-rework repair (2026-10-12)
+
+Review source: canonical
+`.local/sr-prod-full-surface-rail-20261012/review-gemini2-012215320817.md`.
+Rejected adjacent candidates are `d4dcd9d4acadf6dc8bb5fdda9a36c354047596da`
+and `012215320817c4cfb8ca442d5b46755e9e03cff3`. Gemini2 confirms that the latter
+fixed F-PUBLIC-ENTRY; its independent artifact-provider finding remains here
+rather than being overwritten by that earlier success.
+
+Before editing, the owner reran the operator's exact d4 probe (exit 0) against
+the preserved frozen worktree. All seven supplied provider settings were absent
+from API env; actual factories selected unprovisioned document/proof/scanner
+adapters and the document read rejected without object/network access.
+Receipt: canonical `.local/sr-prod-full-surface-rail-20261012/provider-repro-d4.json`.
+The new regression also loads the exact **012** preflight/rail/public-entry
+sources via `git show`, calls the real unchanged production factories and proves
+the same field loss/unavailable result. It then executes the repaired preflight
+with the same seven explicit inputs and selects native durable adapters.
+
+Repair boundary: only this rail's helper, fixture/tests and production runbook.
+Product constructors, authorization, factories and their callers are unchanged.
+Read actual `document-artifact-runtime.config.ts:createDocumentArtifactStore`,
+`remittance-proof-runtime.config.ts:createRemittanceProofStorage/createRemittanceProofScanner`,
+native/S3 clients and both scanner constructors, plus ControlledDownloadModule,
+BillingSettlementModule and FleetDocumentStorageService factory consumers.
+`artifact-config.cjs:artifactConfig`, called by real `rail.cjs:buildPlan`, now
+requires explicit selected-provider fields and managed S3 credential pairs,
+rejecting absent/test/unprovisioned/partial/unknown/stale/raw-credential inputs.
+`preflight.cjs:validators/validateArtifactRuntime/validateRuntime` executes real
+factories with resolved secret values before a plan can be emitted. API deploy
+arguments retain every selected field and enabled numeric secret mount.
+
+| Finding / required acceptance                                                                               | Source and repair                                                                                                | Old reproduction → repaired result                                                                                                                                                                                                                                                                                                                                                                                              | Commands, results and evidence                                                                                                                                                                                                                                                  | Unverified limits                                                                                                                                                     |
+| ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F-ARTIFACT-PROVIDERS seven-field loss                                                                       | Actual `buildPlan -> preflight -> validateRuntime`; new `artifactConfig` and real storage/scanner factories      | Exact d4 operator probe and exact 012 preflight select all three unprovisioned adapters. Repaired same seven-field fixture selects GcsDocumentArtifactStoreAdapter, GcsRemittanceProofStorageAdapter and CloudRunRemittanceProofScannerAdapter; actual `deployArgs` contains all seven settings.                                                                                                                                | Operator probe exit 0; task Vitest suite 142 tests exit 0. `provider-repro-d4.json`, `provider-regressions.log` under canonical task `.local/`.                                                                                                                                 | No real object read, scanner call or production policy verified.                                                                                                      |
+| F-ARTIFACT-PROVIDERS selected-provider completeness; `production_strict_auth_config_fail_closed_regression` | `artifactConfig`, `validators`, `validateArtifactRuntime`, pinned API secrets                                    | All eight GCS/S3 document/proof × Cloud Run/native clamd combinations select real supported adapters. Every required GCS/scanner field, S3 field/credential pair and native scanner field must exist. Invalid buckets, raw credentials, unsafe endpoint, test/unavailable provider and stale scanner fields fail. Actual factories reject invalid native bucket names; removing emitted providers rejects unavailable adapters. | Real preflight and factory regressions; SDK secret/IAM boundaries alone stubbed. No factory/validator logic is mocked. S3 secret refs pinned to `:7`; values absent from plan and deploy args. Same final-SHA check log below.                                                  | Factory availability asserts configuration only, not live credentials/IAM/objects/scanner health. Production bucket/scanner settings and live evidence still missing. |
+| F-PUBLIC-ENTRY retained; `production_complete_topology_regression`                                          | Existing public-entry policy checks, all ten deployment/verification commands and protected API/private consoles | Prior public-entry/anonymous denial/strict auth/registry regressions remain passing with mandatory artifact config. Ten active services and eleven immutable builds remain required; no retired/paused surface added.                                                                                                                                                                                                           | Ten affected VM-safe suites pass 328 tests, including all 142 rail cases, native providers, proof closure, C125 upload/proxy and previous public-boundary suites. `provider-affected-suites.log` (304/8) and `provider-public-boundary.log` (24/2); final combined check below. | Real public IAM/OAuth entry evidence, passenger provider delivery and full production topology acceptance remain pending. No private-only substitute.                 |
+| Full C125 live gates retained                                                                               | Runbook durable-provider section and unchanged C125 source/live acceptance                                       | Explicitly retain supply AND case/reply/composite binary uploads, genuine correlated scan, durable cross-instance/restart readback, legal fleet/platform roles and cross-identity/public denials. Offline upload/proxy/native-provider suites pass; no live gate declared closed.                                                                                                                                               | Content/reference review and affected existing production-function tests. [Original C125 evidence](../../../tests/unit/C125-REAL-UPLOAD-STORAGE-20261005.md) retains its own outstanding limits.                                                                                | Genuine hosted supply AND case/composite and legal-role evidence still required. Configuration alone cannot close C125/full system.                                   |
+| `production_exact_sha_review_ci_protected_merge`                                                            | Protected immutable workflow graph unchanged; new commit normally pushed on same PR #2569                        | Exact tag/SHA/digest/secret-version checks remain passing; final local/remote/PR identity is checked before owner handoff.                                                                                                                                                                                                                                                                                                      | Final full SHA from machine handoff; canonical `.local/sr-prod-full-surface-rail-20261012/checks-<CANDIDATE_SHA>.log` records versions, argv and exit codes.                                                                                                                    | New exact-candidate Gemini2 review, hosted CI, protected merge and named external acceptance pending; owner does not call done or deploy.                             |
+
+Node 22.23.2 / pnpm 10.33.0 / TypeScript 5.9.3 / Vitest 4.1.4.
+Completed root typecheck, scoped ESLint/Prettier, workflow timeout checks,
+test discovery, repository classification, trailer and whitespace checks are
+retained in the final-SHA log before handoff. Earlier missing `nodemailer`
+and test-only TypeScript annotations were corrected and are not behavioral
+reproduction evidence. This dispatch had inherited shared dependency symlinks:
+the first offline install aborted without removal (exit 1); detached only this
+worker's symlinks, preserving targets, then locked offline `--ignore-scripts`
+installation completed (exit 0). Logs: `provider-dependencies.log` and
+`provider-dependencies-isolated.log`. No product/browser/PG/Compose servers,
+cloud mutation, actual provider or object requests were started.
