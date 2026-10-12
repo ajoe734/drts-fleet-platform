@@ -151,7 +151,23 @@ export class FirstPartyNotificationTransport {
       message.orderId,
     );
     if (!relevance) throw firstPartyFailure("route_missing", context);
-    if (
+    if (message.eventType === "payment_recovery_required") {
+      if (
+        !(await this.repository.isPaymentRecoveryNoticeRelevant(
+          message.orderId,
+          message.passengerSubjectRef,
+        ))
+      )
+        throw firstPartyFailure("notification_obsolete", context);
+      let expiresAt: string;
+      try {
+        expiresAt = notificationExpiresAt(message);
+      } catch {
+        throw firstPartyFailure("notification_expired", context);
+      }
+      if (context && context.expiresAt !== expiresAt)
+        throw firstPartyFailure("notification_expired", context);
+    } else if (
       message.eventType !== "receipt_ready" &&
       message.eventType !== "trip_cancelled"
     ) {
@@ -196,7 +212,10 @@ export class FirstPartyNotificationTransport {
     const route = await this.checkRelevance(request, context);
     if (!context) {
       const eventSequence = message.payload.eventSequence;
-      const event = PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME[message.eventType];
+      const event =
+        message.eventType === "payment_recovery_required"
+          ? "passenger.payment_recovery_required.v1"
+          : PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME[message.eventType];
       if (
         typeof eventSequence !== "number" ||
         !Number.isSafeInteger(eventSequence) ||
@@ -209,7 +228,10 @@ export class FirstPartyNotificationTransport {
       );
       const expiresAt = notificationExpiresAt(message);
       const wireMessage: FirstPartyPushMessage = {
-        notification: { title: "乘車通知", body: "請查看最新乘車資訊" },
+        notification:
+          message.eventType === "payment_recovery_required"
+            ? { title: "付款通知", body: "此行程付款需要處理，請查看行程" }
+            : { title: "乘車通知", body: "請查看最新乘車資訊" },
         data: {
           notification_id: message.outboxId,
           event,

@@ -15,6 +15,7 @@ import type { DatabaseService } from "../../../apps/api/src/common/db/database.s
 export const NOW = Date.parse("2026-10-10T13:00:00Z");
 export const QUOTE_ID = "22222222-2222-4222-8222-222222222222";
 export const OWNER = "pax-booking-test";
+export const PAYMENT_METHOD_ID = "33333333-3333-4333-8333-333333333333";
 export type Fault =
   | "order"
   | "token"
@@ -45,6 +46,13 @@ export function createProductionBookingFixture(
     transactional: boolean;
   }[] = [];
   const published: OwnedOrderRecord[] = [];
+  // External SQL response boundary, not a PostgreSQL engine simulation. These
+  // are the owned active/unexpired V0115 lookup rows; negative tests can model
+  // the database returning no matching row or an unsettled obligation.
+  const paymentPrerequisites = {
+    activeMethodRows: [{ payment_method_id: PAYMENT_METHOD_ID }],
+    unpaidRows: [] as { unpaid: number }[],
+  };
   const release: boolean[] = [];
   const historyObservations: {
     memory: number;
@@ -72,6 +80,31 @@ export function createProductionBookingFixture(
       if (faults.includes("rollback"))
         throw new Error("injected rollback failure");
     }
+    if (text.startsWith("SELECT status FROM passenger.accounts"))
+      return {
+        rows:
+          values[0] === account.drtsPassengerId
+            ? [{ status: account.status }]
+            : [],
+        rowCount: 1,
+      };
+    if (text.startsWith("SELECT payment_method_id FROM passenger.psp_tokens"))
+      return {
+        rows:
+          values[0] === PAYMENT_METHOD_ID &&
+          values[1] === account.drtsPassengerId
+            ? paymentPrerequisites.activeMethodRows
+            : [],
+        rowCount: paymentPrerequisites.activeMethodRows.length,
+      };
+    if (text.startsWith("SELECT 1 FROM passenger.booking_histories h"))
+      return {
+        rows:
+          values[0] === account.drtsPassengerId && values[1] === "booking"
+            ? paymentPrerequisites.unpaidRows
+            : [],
+        rowCount: paymentPrerequisites.unpaidRows.length,
+      };
     const target = transactional && pending ? pending : state;
     if (text.startsWith("INSERT INTO ops.phase1_owned_orders")) {
       const order = JSON.parse(values[14] as string);
@@ -180,6 +213,7 @@ export function createProductionBookingFixture(
   ];
   const account = {
     drtsPassengerId: OWNER,
+    status: "active",
     displayName: "Account Name",
     contactPhone: "0912345678",
     contactPhoneVerified: false,
@@ -189,7 +223,7 @@ export function createProductionBookingFixture(
     scheduledAt: new Date(NOW + leadMinutes * 60000).toISOString(),
     origin: { lat: 25.04, lng: 121.51, address: "Origin Address" },
     destination: { lat: 25.06, lng: 121.55, address: "Destination Address" },
-    paymentMethodId: "payment-unit",
+    paymentMethodId: PAYMENT_METHOD_ID,
     fareSnapshotId: QUOTE_ID,
     passengerConfirmedAt: new Date(NOW - 1000).toISOString(),
   };
@@ -220,6 +254,7 @@ export function createProductionBookingFixture(
     owned,
     multi,
     account,
+    paymentPrerequisites,
     accountRepository,
     snapshot,
     bookingRepository,
