@@ -444,7 +444,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
 
         const events: { time: number; delta: number }[] = [];
         for (const record of records) {
-          if (typeof record.latencyMs === "number") {
+          if (record.workload === "booking" && typeof record.latencyMs === "number") {
              events.push({ time: record.launchedMs, delta: 1 });
              events.push({ time: record.launchedMs + record.latencyMs, delta: -1 });
           }

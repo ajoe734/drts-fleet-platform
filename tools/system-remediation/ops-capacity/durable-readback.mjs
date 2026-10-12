@@ -179,12 +179,12 @@ export function assertAcceptancePassed(acceptance) {
            lag.avgMs >= lag.minMs && lag.avgMs <= lag.maxMs;
   };
 
-  // Report queue lag MUST be measurable and consistent.
+  // Report queue lag MUST be measurable and consistent for all reports.
   if (
-    acceptance.queueLag.report.count <= 0 ||
+    acceptance.queueLag.report.count !== requiredCounts.report ||
     !checkLagConsistency(acceptance.queueLag.report)
   ) {
-    throw new Error(`Workload failed: invalid or missing report queueLag measurements`);
+    throw new Error(`Workload failed: invalid or missing report queueLag measurements (expected ${requiredCounts.report}, got ${acceptance.queueLag.report.count})`);
   }
 
   // Dispatch queue lag must have at least some samples, but may not be 4500 if some remain unassigned/queued lawfuly.
