@@ -464,3 +464,43 @@ billing/minimum instances and genuine idle recovery need their original runtime
 owner/evidence. No cloud setting, provider, schema, financial policy, production
 approval or VM hosting authority was inferred. Both acceptance keys remain OPEN;
 these local source repairs do not close review, CI/merge or external acceptance.
+
+### Exact existing export fixture continuation, publication still held
+
+Supervisor's `report-worker-exact-allocation/MULTI-TAXI-EXISTING-FIXTURE-EXACT-EXTENSION.md`
+now grants only the existing controlled export case in
+`apps/api/tests/unit/multi-taxi.controller.test.ts`. The prior fixture-scope
+request above is superseded by this exact allocation. Current Codex2/Codex and
+archived Claude/Claude2/Gemini credit and all other held-task reservations remain.
+
+Old source `692f5e317529f2359654e6d7c172457e1857d413` was rerun unchanged:
+the actual API regression again exits1 with15 pass/1 fail because the service
+double lacks `createMultiTaxiTripExportJobDurably`. Tested corrected source is
+local unpublished `010f52467df6c606740908032de83963e40693e2`. Exactly two lines
+change: the external service-port mock uses that durable method with
+`mockResolvedValue`, and the existing expected-call assertion names it. All10
+controller cases, payloads, rows, actor, purpose, scope, key, request ID,
+preview/status/download and envelope assertions remain. Production code and
+the existing actual controller/service/repository durability tests are unchanged.
+This service-port mock checks routing; it does not replace the actual producer
+regressions or establish SQL commit/runtime behavior.
+
+Evidence, exact commands, versions and source/log hashes are in canonical
+`.local/c123-report-worker-20261012/multi-taxi-fixture-extension/check-manifest.json`.
+Node22.23.2 / pnpm10.33.0 / Vitest4.1.4. All started checks ended and were read;
+earlier manifests and failed logs remain intact.
+
+| Finding / acceptance                               | Source / old → corrected result                                                                                                                                                                                                | Finished checks / evidence                                                                                                                                                                                                                                                   | Remaining requirement                                                                                             |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Existing export service-port fixture               | Actual controller awaits the durable producer. Old synchronous double fails; corrected promise-returning double preserves the original expected arguments and succeeds.                                                        | API regression:2 files/16 tests, exit0, `api-regression.log`; unchanged old run:15 pass/1 fail, exit1, `old-api-regression.log`. `scope-and-results-audit.json` confirms the exact two-line change and unchanged case count.                                                 | Real migrated PG/HTTP acceptance remains separate. No production fallback or synchronous async typing was added.  |
+| Affected report/export/security regressions        | Same production source as prior277-test checkpoint; the granted fixture is the only test-source change. Original assertions, counts, deadlines and worker limits remain.                                                       | Root affected regression:26 files/277 tests, exit0, `affected-regression.log`, two Vitest workers. Scoped lint including the newly granted API fixture exits0, `scoped-lint.log`.                                                                                            | Repository checks do not prove hosted capacity, real cross-instance locks or idle/recovery processing.            |
+| Root types / publication metadata                  | Root typecheck exits2 with68 diagnostics outside task-owned source and0 task-owned diagnostics. Full original history range73ba..010f524 exits1 with307 failed commits, including all four malformed published task ancestors. | `root-typecheck.log`, `history.log`, `scope-and-results-audit.json`; whitespace check exits0, `whitespace.log`. These failures are retained without checker narrowing. Root typecheck covers its existing configured sources, not a new standalone API-fixture type project. | Outside-scope dependencies/types and lawful publication/provenance disposition remain unresolved.                 |
+| `capacity_failed_summary_rejected`                 | Current actual gate still rejects the original failed payload with booking24/dispatch74/report14 errors; all112 raw429 remain retained.                                                                                        | `exact-red-payload.log`:expected uncaught exit1. Actual formal gate contract:25/25 decisions, exit0, `contract.json`. Original ZIP SHA256 remains `6e00c860e840ed0fd988a9a639e739b96fba2f4949ed68b3e028a57c4c109236`.                                                        | Key remains OPEN pending independent same-candidate lifecycle; actual server-arrival causality remains unproved.  |
+| `capacity_same_candidate_full_900s_valid_baseline` | NOT RUN; no publication/handoff, new candidate CI/merge or hosted900s result.                                                                                                                                                  | Original900s/900booking/4500dispatch/450report/5850 requests and all security/SLO/concurrency/backlog/degradation/SQL requirements remain.                                                                                                                                   | Publication HOLD must receive lawful disposition before Supervisor's original immutable hosted workflow dispatch. |
+| Managed runtime report-worker contract             | NOT RUN; source/fixture checks cannot establish effective Cloud Run CPU/billing/minimum instances or actual idle/recovery SLOs.                                                                                                | Original separately recorded runtime contract gap remains, with no cloud or VM product runtime mutation.                                                                                                                                                                     | Original runtime-owner allocation and genuine hosted runtime evidence remain required.                            |
+
+The fixture blocker alone is resolved by this local checkpoint. Publication HOLD
+still forbids push, handoff, history rewrite/recovery/transplant/checker bypass
+and hosted capacity dispatch. Both acceptance keys remain OPEN. No task is
+declared done and no production, provider, financial, schema or hosting authority
+was inferred.
