@@ -78,6 +78,14 @@ function validateRuntime(plan, values, checks = validators()) {
   if (
     !Array.isArray(customRegistry) ||
     !customRegistry.length ||
+    customRegistry.some(
+      (entry) =>
+        entry.allowedTokenAudiences !== undefined &&
+        (!Array.isArray(entry.allowedTokenAudiences) ||
+          entry.allowedTokenAudiences.some(
+            (audience) => typeof audience !== "string",
+          )),
+    ) ||
     !customRegistry.some(
       (entry) =>
         entry.issuer === env.WORKLOAD_IDENTITY_ISSUER &&

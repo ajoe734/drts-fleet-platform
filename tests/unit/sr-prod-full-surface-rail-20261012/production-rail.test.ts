@@ -225,6 +225,23 @@ describe("production complete topology and strict startup rail", () => {
       );
     }
   });
+  it("rejects a string masquerading as the custom registry audience array", () => {
+    const f = fixture();
+    f.vars.PROD_WORKLOAD_IDENTITY_AUDIENCE = "a";
+    f.values["drts-prod-workload-identity-service-principals"] = JSON.stringify(
+      [
+        {
+          principalId: "runtime",
+          subject: "runtime",
+          issuer: f.vars.PROD_WORKLOAD_IDENTITY_ISSUER,
+          allowedTokenAudiences: "a",
+        },
+      ],
+    );
+    expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
+      "WORKLOAD_IDENTITY_SERVICE_PRINCIPALS",
+    );
+  });
   it.each([
     "workload-identity-service-principals",
     "bank-iap-jwt-public-key",

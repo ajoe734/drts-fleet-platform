@@ -25,6 +25,20 @@ not review candidates. Final full candidate SHA, branch and PR are recorded by
 | F4: surface-specific ownership/auth defaults could drift                                           | Actual `fleet-partner-portal-web/lib/api-client.server.ts`, Channel Partner `referral-bootstrap-identity.ts`, Enterprise session/BFF routes, Bank session/artifact signer, Referral cookie secret, Passenger BFF route                                                                                 | Required real ownership settings reject absence; no development IDs are supplied by the rail. IAP OAuth transport audience and assertion resource audience are separate. Real Bank signer is exercised and its RSA signature checked; Bank IAP key must be ES256. Passenger inherits no console JWT/tenant secrets.       | Caller-specific setting regressions, actual Bank signer and source inspection.                                                                                                                                      | Production canonical ownership/memberships, IAP key rotation and Bank statement/session fixtures require operator verification.                                                                                                         |
 | F5: health/HTTP 200 alone could falsely pass deployment smoke                                      | Actual identity context is `OpenRoute`; real Bank export is CSV; Enterprise tenant bookings, Referral active-trip and Passenger account BFFs have separate routes. `rail.cjs` constrains paths/predicates, `run.cjs:assertProbe/verify` executes all ten                                               | Anonymous identity-context expectations, redirects, HTML login pages, wrong JSON/CSV fixtures and forbidden fabricated actor headers reject. Positive tests produce one ten-service SHA artifact without credentials or response bodies. Identity context requires an approved principal and `jwt_bearer`.                | Actual verifier with read-only SDK and fetch boundary stubs; positive and rejection regressions.                                                                                                                    | Real signed private fixture credentials and actual protected frontend/backend routing not tested on this VM. No browser, product server, Docker/Compose, local PG, device, restore, legal/manual or full end-to-end acceptance claimed. |
 
+## Additional pre-handoff registry finding
+
+A targeted real preflight probe against published checkpoint
+`5cd26b13286546b1eb212afe893726cf6bd168ed` confirmed that a one-character
+custom workload audience supplied as a JSON string instead of an array could
+be accepted through JavaScript spread. The new regression failed with exit 1
+(`expected function to throw`, not a dependency/fixture failure). The repaired
+preflight rejects non-array audience bindings before emitting a plan; the same
+regression then passes. No application validator or authorization code was
+weakened. Original reproduction log: canonical
+`.local/sr-prod-full-surface-rail-20261012/registry-reproduction-5cd26b13286546b1eb212afe893726cf6bd168ed.log`.
+This was an owner finding before handoff, not an independent review rejection.
+Published history is preserved through a normal follow-up commit/push.
+
 ## Completed repository checks
 
 Node `v22.23.2`; pnpm `10.33.0`; locked TypeScript `5.9.3`, Vitest `4.1.4`.
@@ -32,7 +46,7 @@ Dependencies were installed offline with scripts disabled into this isolated
 worktree after stale shared dependency symlinks were unlinked locally. No
 canonical dependency directories were removed or changed.
 
-- Three scoped Vitest suites pass (132 cases): new production rail regression,
+- Three scoped Vitest suites pass (133 cases): new production rail regression,
   existing `sec-wif-registry-staging-prod-wiring-20261002.test.ts`, and existing
   `auth-startup-config.test.ts`. All checks complete before handoff.
 - `pnpm exec tsc -p tsconfig.json --noEmit`: pass.
