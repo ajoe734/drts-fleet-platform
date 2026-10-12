@@ -149,7 +149,8 @@ export async function runPlan(plan, output, provenance) {
       if (wait > 1) {
         await new Promise((resolve) => setTimeout(resolve, wait));
       } else if (wait > 0) {
-        while (performance.now() - start < targetMs) {}
+        // eslint-disable-next-line no-empty
+        while (performance.now() - start < targetMs) { /* busy wait */ }
       } else {
         break;
       }

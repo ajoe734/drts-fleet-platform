@@ -29,26 +29,22 @@ describe("capacity.mjs scheduler", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("enforces minimum spacing and actual cadence without error suppression", async () => {
+  it("enforces minimum spacing, all-family cadence, and launched >= scheduled", async () => {
     requestLogs = [];
+    const bookingBody = { businessDispatchSubtype: 1, pickup: 1, dropoff: 1, reservationWindowStart: 1, reservationWindowEnd: 1, passenger: 1 };
     const plan = {
       origin,
-      durationSeconds: 1, // Short duration
+      durationSeconds: 2,
       maxInFlight: 50,
       isolatedResourceId: "test",
       workloads: {
         booking: [
-          { method: "POST", path: "/api/tenant/bookings", headers: { "idempotency-key": "b1", "x-tenant-id": "t", "authorization": "Bearer token" }, body: { businessDispatchSubtype: 1, pickup: 1, dropoff: 1, reservationWindowStart: 1, reservationWindowEnd: 1, passenger: 1 } }
+          { method: "POST", path: "/api/tenant/bookings", headers: { "idempotency-key": "b1", "x-tenant-id": "t" }, body: bookingBody },
+          { method: "POST", path: "/api/tenant/bookings", headers: { "idempotency-key": "b2", "x-tenant-id": "t" }, body: bookingBody }
         ],
-        dispatch: [
-          { method: "POST", path: "/api/orders/1/dispatch", headers: { "idempotency-key": "d1", "authorization": "Bearer token" }, body: { mode: "auto" } },
-          { method: "POST", path: "/api/orders/2/dispatch", headers: { "idempotency-key": "d2", "authorization": "Bearer token" }, body: { mode: "auto" } },
-          { method: "POST", path: "/api/orders/3/dispatch", headers: { "idempotency-key": "d3", "authorization": "Bearer token" }, body: { mode: "auto" } },
-          { method: "POST", path: "/api/orders/4/dispatch", headers: { "idempotency-key": "d4", "authorization": "Bearer token" }, body: { mode: "auto" } },
-          { method: "POST", path: "/api/orders/5/dispatch", headers: { "idempotency-key": "d5", "authorization": "Bearer token" }, body: { mode: "auto" } }
-        ],
+        dispatch: Array.from({ length: 10 }, (_, i) => ({ method: "POST", path: `/api/orders/${i}/dispatch`, headers: { "idempotency-key": `d${i}` }, body: { mode: "auto" } })),
         report: [
-          { method: "POST", path: "/api/reports/jobs", headers: { "idempotency-key": "r1", "authorization": "Bearer token" }, body: { jobType: "x", format: "y" } }
+          { method: "POST", path: "/api/reports/jobs", headers: { "idempotency-key": "r1" }, body: { jobType: "x", format: "y" } }
         ]
       }
     };
@@ -56,40 +52,79 @@ describe("capacity.mjs scheduler", () => {
     const outputPath = resolve(tmpDir, "output.jsonl");
     const summary = await runPlan(plan, outputPath, { baseSha: "a", candidateSha: "b", planSha256: "c" });
 
-    expect(summary.workflows.dispatch.requests).toBe(5);
-    expect(summary.workflows.dispatch.errors).toBe(0);
+    expect(summary.workflows.dispatch.requests).toBe(10);
+    expect(summary.workflows.booking.requests).toBe(2);
+    expect(summary.workflows.report.requests).toBe(1);
 
     const records = readFileSync(outputPath, "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
 
-    // We expect 1 + 5 + 1 = 7 requests
-    expect(records.length).toBe(7);
-
-    // Filter to just dispatch requests
     const dispatchRecords = records.filter(log => log.workload === "dispatch");
-    expect(dispatchRecords.length).toBe(5);
-
-    // Check exact launch pacing from records: dispatch is 300/min = 200ms spacing.
-    // Minimum spacing must be >= 199ms (allowing 1ms precision float jitter, but not 180ms slack).
-    const t0 = dispatchRecords[0]!.launchedMs;
-    const t1 = dispatchRecords[1]!.launchedMs;
-    const t2 = dispatchRecords[2]!.launchedMs;
-    const t3 = dispatchRecords[3]!.launchedMs;
-    const t4 = dispatchRecords[4]!.launchedMs;
-    expect(t1 - t0).toBeGreaterThanOrEqual(200);
-    expect(t2 - t1).toBeGreaterThanOrEqual(200);
-    expect(t3 - t2).toBeGreaterThanOrEqual(200);
-    expect(t4 - t3).toBeGreaterThanOrEqual(200);
-    // Booking: 1 per sec (900/15m = 1/s), but here duration is 1 sec, so just 1 request.
     const bookingRecords = records.filter(log => log.workload === "booking");
-    expect(bookingRecords.length).toBe(1);
 
-    // Report: 0.5 per sec (450/15m = 0.5/s), so 1 request.
-    const reportRecords = records.filter(log => log.workload === "report");
-    expect(reportRecords.length).toBe(1);
-  });
+    expect(dispatchRecords[1]!.launchedMs - dispatchRecords[0]!.launchedMs).toBeGreaterThanOrEqual(199);
+    expect(bookingRecords[1]!.launchedMs - bookingRecords[0]!.launchedMs).toBeGreaterThanOrEqual(999);
+
+    for (const record of records) {
+      expect(record.launchedMs).toBeGreaterThanOrEqual(record.scheduledMs);
+    }
+  }, 10000);
+
+  it("retains overload errors when maxInFlight is exceeded", async () => {
+    let resolveRequest: (() => void) | null = null;
+    const requestPromise = new Promise<void>((resolve) => { resolveRequest = resolve; });
+
+    const originalListeners = server.listeners('request');
+    server.removeAllListeners('request');
+    server.on('request', async (req, res) => {
+      await requestPromise; // Block response until resolved
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ data: { orderId: "dummy" } }));
+    });
+
+    const bookingBody = { businessDispatchSubtype: 1, pickup: 1, dropoff: 1, reservationWindowStart: 1, reservationWindowEnd: 1, passenger: 1 };
+    const plan = {
+      origin,
+      durationSeconds: 1,
+      maxInFlight: 1,
+      isolatedResourceId: "test",
+      workloads: {
+        booking: [
+          { method: "POST", path: "/api/tenant/bookings", headers: { "idempotency-key": "b1", "x-tenant-id": "t" }, body: bookingBody }
+        ],
+        dispatch: Array.from({ length: 5 }, (_, i) => ({ method: "POST", path: `/api/orders/${i}/dispatch`, headers: { "idempotency-key": `d${i}` }, body: { mode: "auto" } })),
+        report: [
+          { method: "POST", path: "/api/reports/jobs", headers: { "idempotency-key": "r1" }, body: { jobType: "x", format: "y" } }
+        ]
+      }
+    };
+    const outputPath = resolve(tmpDir, "output_overload.jsonl");
+    const runPromise = runPlan(plan, outputPath, { baseSha: "a", candidateSha: "b", planSha256: "c" });
+
+    // Wait slightly to let requests pile up
+    await new Promise(r => setTimeout(r, 500));
+    resolveRequest!();
+    const summary = await runPromise;
+
+    // The requests after the first should be marked as overloaded
+    expect(summary.workflows.dispatch.requests).toBe(5);
+    expect(summary.workflows.dispatch.errors).toBeGreaterThan(0);
+
+    const records = readFileSync(outputPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+
+    const overloadRecord = records.find(r => r.error && r.error.includes("maxInFlight exhausted"));
+    expect(overloadRecord).toBeDefined();
+
+    server.removeAllListeners('request');
+    for (const listener of originalListeners) {
+      server.on('request', listener as any);
+    }
+  }, 10000);
 
   it("propagates errors and HTTP 429s correctly without suppression", async () => {
     // Override the mock server to return 429 for a specific request

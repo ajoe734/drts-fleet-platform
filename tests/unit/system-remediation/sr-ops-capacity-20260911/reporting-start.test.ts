@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ReportingFilingService } from "../../../../apps/api/src/modules/reporting-filing/reporting-filing.service";
 import { ReportingFilingRepository } from "../../../../apps/api/src/modules/reporting-filing/reporting-filing.repository";
-import { ConfigService } from "@nestjs/config";
-import { EventPublisher } from "../../../../apps/api/src/common/events/event-publisher";
-import { Logger } from "@nestjs/common";
 
 describe("reporting-filing actual-path start regressions", () => {
   it("first start sets startedAt, restart preserves startedAt, JSON persistence matches", async () => {
@@ -18,7 +15,6 @@ describe("reporting-filing actual-path start regressions", () => {
     };
     const repo = new ReportingFilingRepository(mockDb as any);
     const publisher = { publish: vi.fn() };
-    const config = { get: vi.fn().mockReturnValue(false) };
 
     const service = new ReportingFilingService(
       publisher as any,
