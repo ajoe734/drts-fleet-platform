@@ -190,3 +190,51 @@ worker's symlinks, preserving targets, then locked offline `--ignore-scripts`
 installation completed (exit 0). Logs: `provider-dependencies.log` and
 `provider-dependencies-isolated.log`. No product/browser/PG/Compose servers,
 cloud mutation, actual provider or object requests were started.
+
+## Hosted CI repair: shallow history and stale governance assertions
+
+Independent Gemini2 approval of `742317648e9ef88c5aa9864471fee5db1a943614`
+was followed by completed integration CI
+[run 38189683552](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38189683552),
+which failed in unit and cross-surface E2E. The unit result was **3 failed,
+7,754 passed, 75 skipped**. Its only failed file was this task's regression
+suite: three `git show <old-commit>:<path>` calls cannot resolve historical
+objects in the runner's shallow checkout. Lint, typecheck, build, integration,
+IAM negative matrix and UI-route E2E passed. The separate prior product-smoke
+job was cancelled after the repair checkpoint push; it is not a pass.
+
+The owner reopened the original task for this concrete CI repair. Checkpoint
+`3cfcba689aa4cb012b7c0938c7651d2bd4e356b5` preserves the exact five original
+git blobs in `tests/unit/sr-prod-full-surface-rail-20261012/historical-sources.json`,
+with each full source commit, path and SHA-256. `historicalSource` verifies the
+content hash before executing the unchanged historical function or workflow
+shell step. All five stored strings were separately compared byte-for-byte
+against their recorded git blobs. No factory, validator or previous defective
+implementation is replaced by a fabricated replica, and no network fetch of
+old source is needed during tests.
+
+| Finding / acceptance                                          | Actual source and repair                                                                                                                                                                                                                         | Old reproduction → repaired result                                                                                                                                                                                                                                                           | Commands / execution version / evidence                                                                                                                                                                                                                                                                                                                                   | Remaining limits                                                                                                                                                                                                    |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F-CI-SHALLOW; topology / strict-auth regressions              | `production-rail.test.ts:historicalSource` and the exact-source fixture replace only old git-object lookup                                                                                                                                       | Real depth-1 clones: old `742317648e9ef88c5aa9864471fee5db1a943614` yields 3 failed / 139 passed (exit 1); checkpoint `3cfcba689aa4cb012b7c0938c7651d2bd4e356b5` yields 142 passed (exit 0). Original topology, F-PUBLIC-ENTRY and F-ARTIFACT-PROVIDERS defects still execute and reproduce. | `git clone --depth 1 --no-local --branch codex/sr-prod-full-surface-rail-20261012 file://<assigned-worktree> <canonical-.local-clone>`; `pnpm exec vitest run tests/unit/sr-prod-full-surface-rail-20261012/production-rail.test.ts`; canonical task `.local/shallow-old-742317648.log` / `shallow-new-3cfcba689.log`. Both clones report `--is-shallow-repository=true`. | New exact-candidate hosted CI remains required; checkpoint is not a review candidate.                                                                                                                               |
+| F-CI-E2E009; `production_exact_sha_review_ci_protected_merge` | `tests/e2e/E2E-009-prod-rail-dry-run.sh` requires ten obsolete workflow-layout literals. The actual workflow uses explicit remote tag fetch → full commit SHA, `toJSON(vars)` → `buildPlan`, and the preflight's validated registry-host output. | Running the unchanged standalone static scenario at `742317648` reproduces the hosted missing `git ls-remote ... "$tag"` assertion (exit 1), without API/PG/browser servers. A read-only literal audit finds ten obsolete assertions.                                                        | `bash tests/e2e/E2E-009-prod-rail-dry-run.sh`; `e2e009-repro-742317648.log`, `e2e009-literal-audit-742317648.log` and hosted `ci-742317648-cross-surface-e2e.log` under canonical task `.local/`.                                                                                                                                                                         | E2E file is outside dispatched write scopes. Supervisor must check conflicts and extend the original task scope before applying its repair; no inert workflow strings or security-gate removal to hide the failure. |
+
+A concrete E2E-009 patch is retained for Supervisor scope coordination at
+canonical `.local/sr-prod-full-surface-rail-20261012/E2E-009-proposal.patch`.
+It checks the current immutable workflow wiring, the actual config builder and
+validated registry output, and executes the existing 142-case offline
+production-function suite. Its machine-specific draft invocation passes
+(exit 0; `E2E-009-proposal-local.log`), but **the tracked E2E scenario remains
+unchanged and failing**. This draft result is not hosted or merged acceptance.
+No handoff is issued while the required governance gate is unresolved.
+
+The worker inherited canonical dependency symlinks again at dispatch; only
+worker symlinks were detached, preserving all targets, and a locked offline
+`--ignore-scripts` install restored an isolated dependency tree (exit 0;
+`ci-repair-isolated-dependencies.log`). An initial clone invocation without
+Vitest and a subsequent run with missing nodemailer are setup failures,
+not reproduction evidence; the old/new results above were rerun with complete
+locked dependencies. Affected whole-suite checks use the existing final-SHA
+check runner and retain each command and exit code in `checks-3cfcba689aa4cb012b7c0938c7651d2bd4e356b5.log` / `.json`.
+The production provider/public-policy settings and all C125 live gates remain
+pending exactly as recorded above. No production or provider request, cloud
+mutation, VM product/preview/browser/PG server or Compose infrastructure ran.
