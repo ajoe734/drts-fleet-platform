@@ -266,8 +266,19 @@ export class ReportingFilingRepository {
         "Durable report worker requires the existing DATABASE_URL",
       );
     const client = new Client({ connectionString });
+    let connectionFailure: Error | null = null;
+    // pg emits socket errors even between queries, while a builder is awaiting
+    // another provider. Contain that event and invalidate this session's claim;
+    // a lost connection releases its advisory lock and cannot publish results.
+    client.on("error", (error: Error) => {
+      connectionFailure ??= error;
+    });
+    const assertClaimConnection = () => {
+      if (connectionFailure) throw connectionFailure;
+    };
     try {
       await client.connect();
+      assertClaimConnection();
     } catch (error) {
       await client.end().catch(() => undefined);
       throw error;
@@ -279,12 +290,14 @@ export class ReportingFilingRepository {
         [jobId],
       );
       locked = result.rows[0]?.locked === true;
+      assertClaimConnection();
       if (!locked) return false;
       const current = await client.query<JsonRecordRow>(
         `SELECT record FROM admin.phase1_report_jobs
          WHERE job_id = $1 AND status IN ('pending', 'queued', 'running')`,
         [jobId],
       );
+      assertClaimConnection();
       if (!current.rows[0]) return false;
       const job = this.parseRecord<StoredReportJobRecord>(
         current.rows[0].record,
@@ -293,6 +306,7 @@ export class ReportingFilingRepository {
       if (job.jobId !== jobId) throw new Error("Report claim ID mismatch");
       let previousStatus = job.status;
       await run(job, async (next) => {
+        assertClaimConnection();
         if (next.jobId !== jobId) throw new Error("Report write ID mismatch");
         const saved = await client.query(
           `UPDATE admin.phase1_report_jobs SET
@@ -306,13 +320,15 @@ export class ReportingFilingRepository {
             previousStatus,
           ],
         );
+        assertClaimConnection();
         if (saved.rowCount !== 1)
           throw new Error("Report state changed during claim");
         previousStatus = next.status;
       });
+      assertClaimConnection();
       return true;
     } finally {
-      if (locked) {
+      if (locked && !connectionFailure) {
         try {
           await client.query(
             "SELECT pg_advisory_unlock(hashtextextended($1, 123))",
