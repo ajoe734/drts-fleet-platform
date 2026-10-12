@@ -1544,3 +1544,143 @@ gh workflow run live-entry-map-acceptance.yml \
 
 The owner does not dispatch, record acceptance or call done. All four
 acceptance keys require the new candidate's verified evidence.
+
+## SR-LIVE-MAP-BROWSER-TRANSPORT-20261012: actual v4 continuation
+
+Owner **Codex**, independent reviewer **Claude2**. This section continues the
+original C114 component evidence and credits; it does not reopen its completed
+source task or replace any original acceptance obligations. Source base:
+`17a2fb499908965acc7062c42f2214eb68547f4d`.
+
+### Verified hosted trigger and unresolved finding
+
+[Run 38266987714](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38266987714)
+used `publish/v2026.10.12.4`, with both harness and deployed business SHA `17a2fb4`.
+Supervisor verified artifact `11755915009`, ZIP SHA256
+`8ccb84f9937c7d8320b107ac2487cb5a59a115a48c1b542421fecf6b6dc3a4a1`.
+The owner read the complete browser, deployment, provider, session, coverage,
+cleanup, execution-log and final-status records under canonical
+`.local/continue-full-completion-20261012T0528/v4-live-map-acceptance/evidence/`.
+
+Actual Google geocoding/routes/provider, all five real service-area cases,
+fresh/stale/low-accuracy/restored location, offline `drv-demo-002` isolation,
+runtime SHA/backend checks and revoked cleanup passed. The stale observation
+waited **95005 ms**. Both `/dispatch` and `/callcenter` produced screenshots
+with `ready=true` and `imagery_decoded=true`. Browser and overall run nevertheless
+**failed**: five identical `Browser request blocked or interception failed`
+entries were retained. Their actual target/operation remains **unknown**.
+Neither this run nor earlier failed run `37711593938` is a positive acceptance.
+There is no evidence yet that these were inline images, missing IAM, an extra
+Google origin, or harmless cancellation.
+
+### Source repair boundaries and diagnostic interpretation
+
+The actual `Fetch.requestPaused` handler now records `transport_failures` using
+fixed operation categories: `target-policy-rejected`, `continue-request-failed`,
+`navigation-failed`, `interception-setup-failed`, `interception-cleanup-failed`.
+Request failures additionally carry a fixed `target_kind` from
+`classifyRequestTarget` and a resource type selected from our literal CDP enum
+(unrecognized input becomes `Unknown`). Target kinds are only `ops-https`,
+`allowed-https`, `unapproved-https`, `credential-bearing`, `insecure-http`,
+`data`, `blob`, `other-scheme`, `invalid-url`. Classification is diagnostic;
+`createOpsConsoleAuthentication::headersFor` and `assertAllowedUrl` remain the
+unchanged credential/target authority. Data/blob images still fail closed.
+
+One entry is retained for every failed paused request, including duplicates.
+Its `block_result` records `blocked` or `block-failed`; recovery failure is not
+silently discarded or counted as another failed request. Navigation/setup/
+cleanup are separate operation entries with `not-attempted`. A CDP continue
+failure deliberately makes no claim about protocol subtype or cancellation.
+New diagnostic fields contain no source URLs, origins, paths, queries, request
+IDs, headers, tokens, keys, hashes, arbitrary exception strings or source text.
+Existing approved candidate/deployment identity fields remain unchanged.
+
+The EventEmitter does not await async callbacks. The old implementation could
+write evidence before a pending continuation/recovery finished. The spec now
+tracks callback promises, settles them before each page's failure assertion,
+detaches interception and settles already-started callbacks before writing the
+final snapshot. Late errors and cleanup failures set status failed and cause
+the test to reject, including after a previously successful page path.
+
+No allowlist, invoker policy, workflow, identity, app, provider setting, cloud
+secret, root compiler/configuration, expected source ID or stale interval was
+changed. Both real map assertions, exact runtime SHA, redirect reauthorization,
+WebSocket rejection, strict failure gates and mandatory cleanup remain.
+
+### Finding and acceptance ledger (Guide §0.7)
+
+Repair source anchor **`b364ce10f3816bc99404c4412669438ec55208e8`** contains the
+final spec/tests. The handoff candidate is its evidence-only descendant;
+reviewer must verify the spec/tests are byte-identical and use the full SHA
+recorded by `handoff`, not an anchor or the deployed runtime SHA.
+
+| Finding / required acceptance                                          | Actual source and modification                                                                                                                  | Frozen old → repair result                                                                                                                                                                                                                                                                   | Command, exit, version, evidence                                                                                                                                      | Remaining limitation                                                                                                                             |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| F-TRANSPORT-OPAQUE-FIVE-ERRORS                                         | `google-map-provider.spec.ts` actual `Fetch.requestPaused`, `TransportFailure`, `classifyRequestTarget`, narrow `page.goto` catch               | Probe anchor `7fca0609a43325c8c5294b41df93ba2a89d35ec7` has byte-identical frozen17a spec/auth/gate: 9 diagnostic tests failed, original 28 passed → final transport suite 62 passed, zero skips                                                                                             | `pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001/browser-transport.test.ts`; old exit 1, repair exit 0; `frozen17a-repro.log`, `repaired-unit.log` | **Open actual hosted trigger**: classifications need real Chromium readback; no speculative target or cancellation fix                           |
+| F-TRANSPORT-UNSETTLED-EVIDENCE                                         | Spec `pendingInterceptions`, `settleInterceptions`, finalization; actual-spec deferred external-CDP probe                                       | Adjacent anchor `19a95e3a8575e0e70a9371a9238fe64e41da483e` wrote evidence while continue/recovery were pending: 1 failed / 37 passed → repaired probe waits for both operations before evidence, 62-test suite passes                                                                        | Same transport command; repro exit 1, repair exit 0; `unsettled-handler-repro.log`, `repaired-unit.log`                                                               | Source race is reproduced/fixed; not asserted to explain the five hosted failures                                                                |
+| Credential, target, redirect, privacy and error accounting regressions | Unchanged `browser-auth.ts::createOpsConsoleAuthentication/headersFor`, `live-map-config.ts::assertAllowedUrl`; real spec handler and lifecycle | All original ops auth, cross-origin withholding, redirect hops, invalid token/gate/SHA/provider rejection cases pass; extra data-image/blob/HTTP/credential/scheme/invalid URL/Google lookalike/port negatives, hostile resource metadata, five duplicate failures and recovery failure pass | 62 transport tests; full map unit regression **12 files / 275 tests**, zero skips, exit 0; `map-regression-isolated.log`                                              | Mocked external CDP/Playwright only; not remote/Google/DOM acceptance                                                                            |
+| `map_browser_transport_owned_failure_and_security_regression`          | All preceding findings, actual spec plus unchanged auth/gate                                                                                    | Frozen-old failures and repaired source/security regressions verified                                                                                                                                                                                                                        | Transport exit 0; map regression exit 0; scoped ESLint exit 0; root strict TypeScript exit 0 after worktree dependency isolation                                      | Supervisor/reviewer must evaluate this key; owner has not recorded acceptance                                                                    |
+| `map_browser_transport_exact_sha_review_ci_merge`                      | Final handoff SHA/branch/PR, this ledger                                                                                                        | **Pending**: source checks/anchors are not independent review or matching CI/merge                                                                                                                                                                                                           | Handoff supplies exact candidate; Claude2 reviews it; existing GitHub bus captures CI/protected merge                                                                 | No review/CI/merge pass claimed in this owner artifact                                                                                           |
+| `map_browser_transport_deployed_chromium_positive_evidence`            | Unchanged hosted map-only workflow and real spec; exact harness SHA and pinned business runtime SHA                                             | **Pending**: run38266987714 failed despite both decoded maps                                                                                                                                                                                                                                 | Supervisor only: original authorized hosted profile on independently reviewed exact candidate; full real provider/service-area/freshness/cleanup checks               | Requires both decoded maps and zero Google/target/interception errors, runtime identity and revoked cleanup; source checks cannot close this key |
+
+### Reproduction, versions, hashes and checks
+
+Transport probes import the **actual live spec** under Vitest. Only external
+Playwright test registration/transport and evidence-file I/O are substituted.
+Real gate, header policy, error watcher, interception handler, classification
+and finalization execute. Config HTTP fixtures stop before rendering except a
+successful provider fixture used to exercise a rejecting navigation. Deferred
+CDP promises model EventEmitter callbacks and their late continuation/recovery.
+The tests neither start a browser/server nor contact a network target or mint
+an identity. They do not certify real DOM, decoded Google imagery or cloud IAM.
+No active worktree was reset to reproduce old behavior.
+
+Machine evidence directory:
+`/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-live-map-browser-transport-20261012/.local/browser-transport/`.
+Node **22.23.2**, pnpm **10.33.0**, Vitest **4.1.4**, TypeScript **5.9.3**.
+
+| Check                                                                                                                                              | Result / evidence                                                                                                                                                                                  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frozen17a diagnostic repro, same actual spec as probe anchor 7fca0609a                                                                             | Exit **1**, 9 failed / 28 passed; `frozen17a-repro.log` SHA256 `bb824ef927b8242871ae2e1290f513c6c92f1599523d888a72cc5a60d6639cef`                                                                  |
+| Adjacent safe-diagnostic anchor 19a95e3a8 pending-handler repro                                                                                    | Exit **1**, 1 failed / 37 passed; `unsettled-handler-repro.log` SHA256 `5c0db470bd490e8571f19ce59a3bc45da597050c8fc65695c8ca383477d4cad6`                                                          |
+| Final actual-spec transport suite                                                                                                                  | Exit **0**, 62 passed / zero skips; `repaired-unit.log` SHA256 `a9331fedab05112b33893f1f6fc45a41be4bf08aef891dd7b14af1a2951f7df3`                                                                  |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001 --exclude '**/fixture-provisioning.postgres.test.ts'`                          | Exit **0**, 12 files / 275 passed / zero skips; `map-regression-isolated.log` SHA256 `93a6eba12307483d8a83c0514bb14f2918dfd5ce8cc3ad114c8a2607f97cc845`; PostgreSQL deliberately **not run** on VM |
+| `pnpm exec eslint tests/live/google-map-provider.spec.ts tests/unit/system-remediation/sr-live-map-001/browser-transport.test.ts --max-warnings=0` | Exit **0**, `lint.log`                                                                                                                                                                             |
+| `pnpm exec tsc -p tsconfig.json --noEmit`                                                                                                          | Initial shared-dependency run exit **2**, `typecheck.log`; isolated rerun exit **0**, `typecheck-isolated.log`; root `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` preserved  |
+
+Initial typecheck failed on missing modules and duplicate private `ApiClient`
+types from canonical/worker paths. All 22 worktree `node_modules` symlinks
+pointed into shared canonical dependencies. Only those symlinks were detached;
+their targets were preserved. `pnpm install --offline --frozen-lockfile
+--ignore-scripts` passed, exit 0 (`install.log`, `dependency-links.txt`), then
+map/lint/root-type checks passed. No manifests, lockfile, root source or shared
+dependency directory were edited. The initial dependency failure is not counted
+as source failure, reproduction or sandbox failure.
+
+Source SHA256 at repair anchor:
+
+- Spec: `6cd3f7a7c175dc61028a66fe6aed5f66aa968092ff7f6f6bf9fea02a167992cd`.
+- Transport tests: `a3a93d879cbf090b9aae63758e8bb1a9ef61f45d323f52986d8dabb7b5386ee0`.
+- Unchanged auth: `f7a5b609f8d4fab7719b985804cfe4dba9979db913997c9f8ee8db196d9cd1d6`.
+- Unchanged gate: `d777ab7678c0704ccfb25af922aa67b6fe5c1b6b3f9e411fbdf4cead968e74a7`.
+
+### Exact candidate handoff and next authorized boundary
+
+The owner commits/pushes this ledger normally, verifies local/remote/PR head
+identity and hands off to Claude2 using the full `CANDIDATE_SHA` and
+`CANDIDATE_BRANCH=codex/sr-live-map-browser-transport-20261012`. Required hosted
+CI may be pending at handoff. Published anchors and historical C114/r2 branches
+are preserved; no rebase/amend/force push or owner `done` is used.
+
+After independent review, Supervisor may use the unchanged authorized hosted
+map workflow **once** with the exact reviewed harness candidate and a freshly
+verified, pinned already-deployed business SHA. The owner does not dispatch,
+mint credentials, deploy or record cloud acceptance. If the diagnostic run
+still fails, retain its full artifact and safe classifications, return the
+same task to Codex with the actual trigger, and reproduce/fix that behavior;
+no unchanged retry, egress/provider change, new helper task or weakened gate.
+
+The actual browser transport repair/positive evidence remains outstanding.
+Original 44 issues / 134 capabilities / 15 independent scope groups, PAX,
+both Android and iOS, original 47 pending obligations, provider/manual/legal/
+financial/Operator restoration requirements and C123 ancestor HOLD stay intact.
