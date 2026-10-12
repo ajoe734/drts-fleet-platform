@@ -178,9 +178,66 @@ listed production settings/fixtures remain outstanding.
 
 ## Secret Manager and IAM
 
+### Durable document/proof providers: F-ARTIFACT-PROVIDERS
+
+These inputs are mandatory, including on rollback. The rail calls the actual
+`createDocumentArtifactStore`, `createRemittanceProofStorage` and
+`createRemittanceProofScanner` factories before publishing a plan or starting
+any build/migration/deploy. It requires configured durable adapters and a
+supported scanner; `unprovisioned`, memory and test scanners cannot pass.
+`--set-env-vars` carries every selected setting below; unknown, raw-credential
+and stale settings for a different provider are rejected rather than discarded.
+
+- `PROD_DOCUMENT_ARTIFACT_STORAGE_PROVIDER` and
+  `PROD_REMITTANCE_PROOF_STORAGE_PROVIDER`: each explicitly `gcs` or `s3`.
+  Configure them independently; there is no implied provider/bucket default.
+- For `gcs`, supply respectively `PROD_DOCUMENT_ARTIFACT_GCS_BUCKET` and
+  `PROD_REMITTANCE_PROOF_GCS_BUCKET`, naming approved private durable buckets.
+  The actual native client validates its supported bucket-name contract.
+- For `s3`, use each prefix `PROD_DOCUMENT_ARTIFACT_S3_` and/or
+  `PROD_REMITTANCE_PROOF_S3_`: required `BUCKET`, `REGION` and explicit
+  `FORCE_PATH_STYLE=true|false`; optional `ENDPOINT` must be HTTPS without
+  embedded credentials, query or fragment. Required `ACCESS_KEY_ID_SECRET`
+  and `SECRET_ACCESS_KEY_SECRET` name a complete managed credential pair;
+  optional `SESSION_TOKEN_SECRET` names its managed session token. The GCP
+  runtime has no approved ambient AWS credential configuration in this rail.
+  All three secret inputs mount their actual runtime names with enabled numeric
+  Secret Manager versions; values stay in preflight memory, outside artifacts.
+- `PROD_REMITTANCE_PROOF_SCANNER_PROVIDER`: explicitly `cloud-run-clamd` or
+  `clamd`. Cloud Run requires `PROD_REMITTANCE_PROOF_SCANNER_URL`, an exact HTTPS
+  `.run.app` origin, and explicit `PROD_REMITTANCE_PROOF_SCANNER_TIMEOUT_MS`
+  (integer 100–60000). The actual adapter validates the origin/deadline and
+  obtains audience-bound metadata identity tokens when scanning.
+- Native clamd requires explicit `PROD_REMITTANCE_PROOF_CLAMD_HOST`,
+  `PROD_REMITTANCE_PROOF_CLAMD_PORT` (integer 1–65535),
+  `PROD_REMITTANCE_PROOF_CLAMD_TIMEOUT_MS` (integer 100–60000), and
+  `PROD_REMITTANCE_PROOF_CLAMD_TLS=true|false`. The operator must verify private
+  network isolation and certificate trust; disabling TLS is an explicit
+  private-network decision, matching the existing factory contract.
+
+**Outstanding production evidence:** no approved production bucket/scanner
+settings, private bucket access/versioning/retention evidence, runtime object
+permissions, scanner deployment/image provenance, scanner invoker IAM or native
+connectivity/certificate evidence have been supplied or verified by this worker.
+Construction/`availability()` means configuration is complete; it does not prove
+that live object reads or genuine malware scans work. The operator must supply
+these settings and collect real private storage and genuine clean/infected scan
+receipts through the authorized hosted acceptance route before claiming readiness.
+
+Preserve the full original C125 live gates: **supply documents AND case/reply
+attachments and their composite manifests**, real binary upload, hash-correlated
+clean scan, durable cross-instance/restart readback, and actual legal-role access.
+Both lawful fleet-partner and platform-reviewer read paths plus cross-partner,
+cross-case/reply, wrong-realm, forged-header and public-download denial evidence
+remain required. Provider configuration, release smoke, or the supply path alone
+cannot close C125, document/proof or whole-system acceptance. The existing
+[C125 delivery evidence](../../tests/unit/C125-REAL-UPLOAD-STORAGE-20261005.md)
+retains its independent live/hosted limits; this rail does not reduce those gates.
+
 Before build, preflight resolves enabled numeric versions, reads values only
 into runner memory, and executes the **production** auth startup, passenger
-payment/capture/recovery/OTP/SMTP validators. Error output includes configuration
+payment/capture/recovery/OTP/SMTP validators and document/proof/scanner factories.
+Error output includes configuration
 names only. Plans contain secret names/versions, never values. It does not mint
 credentials or create secrets. No deployment uses `:latest`.
 

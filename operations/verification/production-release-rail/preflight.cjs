@@ -293,7 +293,7 @@ function validateArtifactRuntime(env, checks = validators()) {
     );
   if (
     scanner.availability().state !== "available" ||
-    !["clamd", "cloud-run-clamd"].includes(scanner.providerName)
+    !["clamd-instream", "cloud-run-clamd"].includes(scanner.providerName)
   )
     reject(
       "PROD_REMITTANCE_PROOF_SCANNER_PROVIDER real scanner adapter unavailable",

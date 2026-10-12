@@ -17,6 +17,8 @@ const {
 const {
   preflight,
   validators,
+  validateArtifactRuntime,
+  validateRuntime,
   validateSmokeHeaders,
 } = require("../../../operations/verification/production-release-rail/preflight.cjs");
 const {
@@ -82,6 +84,274 @@ function publicResponse(service: any, pathname: string) {
         }),
       };
 }
+describe("F-ARTIFACT-PROVIDERS actual preflight and production factories", () => {
+  it("reproduces seven discarded fields on the rejected 012 candidate and selects durable adapters after repair", async () => {
+    // Keep the old helper's relative production-source loader rooted in this
+    // repo. Product factories are unchanged between the two candidates.
+    const dir = mkdtempSync(
+      path.resolve("operations/verification/old-artifact-"),
+    );
+    try {
+      for (const file of ["rail.cjs", "preflight.cjs", "public-entry.cjs"])
+        writeFileSync(
+          path.join(dir, file),
+          execFileSync("git", [
+            "show",
+            `012215320817c4cfb8ca442d5b46755e9e03cff3:operations/verification/production-release-rail/${file}`,
+          ]),
+        );
+      const old = require(path.join(dir, "preflight.cjs")),
+        f = fixture();
+      const oldPlan = old.preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud);
+      const oldEnv = oldPlan.services[0].env,
+        checks = validators();
+      const fields = Object.keys(f.vars).filter((key) =>
+        /^PROD_(DOCUMENT_|REMITTANCE_)/.test(key),
+      );
+      expect(fields).toHaveLength(7);
+      for (const key of fields) expect(oldEnv[key.slice(5)]).toBeUndefined();
+      const oldDocument = checks.document(oldEnv),
+        oldStorage = checks.proofStorage(oldEnv);
+      expect(oldDocument.constructor.name).toBe(
+        "UnprovisionedDocumentArtifactStore",
+      );
+      await expect(
+        oldDocument.get("diagnostic-no-real-object"),
+      ).rejects.toThrow("Durable document artifact storage is not configured");
+      expect(oldStorage.availability().state).toBe("unavailable");
+      expect(checks.proofScanner(oldStorage, oldEnv).constructor.name).toBe(
+        "UnprovisionedRemittanceProofScannerAdapter",
+      );
+      const plan = preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud),
+        env = plan.services[0].env;
+      for (const key of fields) expect(env[key.slice(5)]).toBe(f.vars[key]);
+      const adapters = validateArtifactRuntime(env);
+      expect(adapters.document.constructor.name).toBe(
+        "GcsDocumentArtifactStoreAdapter",
+      );
+      expect(adapters.storage.constructor.name).toBe(
+        "GcsRemittanceProofStorageAdapter",
+      );
+      expect(adapters.scanner.constructor.name).toBe(
+        "CloudRunRemittanceProofScannerAdapter",
+      );
+      const args = deployArgs(plan, plan.services[0], imagesFor(plan).api);
+      for (const key of fields)
+        expect(args.join(" ")).toContain(`${key.slice(5)}=${f.vars[key]}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  const combinations = ["gcs", "s3"].flatMap((document) =>
+    ["gcs", "s3"].flatMap((proof) =>
+      ["cloud-run-clamd", "clamd"].map((scanner) => [document, proof, scanner]),
+    ),
+  );
+  it.each(combinations)(
+    "preserves actual %s document / %s proof / %s scanner settings and pinned secret mounts",
+    (document, proof, scanner) => {
+      const f = fixture();
+      for (const key of Object.keys(f.vars))
+        if (/^PROD_(DOCUMENT_|REMITTANCE_)/.test(key)) delete f.vars[key];
+      for (const [prefix, provider] of [
+        ["DOCUMENT_ARTIFACT", document],
+        ["REMITTANCE_PROOF", proof],
+      ] as const) {
+        f.vars[`PROD_${prefix}_STORAGE_PROVIDER`] = provider;
+        f.vars[`PROD_${prefix}_${provider.toUpperCase()}_BUCKET`] =
+          "fixture-durable-bucket";
+        if (provider === "s3") {
+          f.vars[`PROD_${prefix}_S3_REGION`] = "us-east-1";
+          f.vars[`PROD_${prefix}_S3_ENDPOINT`] = "https://storage.drts.invalid";
+          f.vars[`PROD_${prefix}_S3_FORCE_PATH_STYLE`] = "true";
+          for (const key of [
+            "ACCESS_KEY_ID",
+            "SECRET_ACCESS_KEY",
+            "SESSION_TOKEN",
+          ]) {
+            const name = `${prefix.toLowerCase()}-${key.toLowerCase()}`;
+            f.vars[`PROD_${prefix}_S3_${key}_SECRET`] = name;
+            f.values[name] = `ephemeral-only-${name}-credential`;
+          }
+        }
+      }
+      f.vars.PROD_REMITTANCE_PROOF_SCANNER_PROVIDER = scanner;
+      if (scanner === "cloud-run-clamd") {
+        f.vars.PROD_REMITTANCE_PROOF_SCANNER_URL =
+          "https://fixture-scanner.run.app";
+        f.vars.PROD_REMITTANCE_PROOF_SCANNER_TIMEOUT_MS = "20000";
+      } else {
+        f.vars.PROD_REMITTANCE_PROOF_CLAMD_HOST = "scanner.internal";
+        f.vars.PROD_REMITTANCE_PROOF_CLAMD_PORT = "3310";
+        f.vars.PROD_REMITTANCE_PROOF_CLAMD_TIMEOUT_MS = "15000";
+        f.vars.PROD_REMITTANCE_PROOF_CLAMD_TLS = "true";
+      }
+      const plan = preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud),
+        api = plan.services[0];
+      const env = {
+        ...api.env,
+        ...Object.fromEntries(
+          Object.entries(api.secrets).map(([key, ref]) => [
+            key,
+            f.values[String(ref).replace(/:7$/, "")],
+          ]),
+        ),
+      };
+      const adapters = validateArtifactRuntime(env);
+      expect(adapters.document.constructor.name).toBe(
+        document === "gcs"
+          ? "GcsDocumentArtifactStoreAdapter"
+          : "S3DocumentArtifactStoreAdapter",
+      );
+      expect(adapters.storage.providerName).toBe(`${proof}-remittance-proof`);
+      expect(adapters.scanner.providerName).toBe(
+        scanner === "clamd" ? "clamd-instream" : scanner,
+      );
+      expect(adapters.storage.availability().state).toBe("available");
+      expect(adapters.scanner.availability().state).toBe("available");
+      const args = deployArgs(plan, api, imagesFor(plan).api).join(" ");
+      for (const [key, value] of Object.entries(f.vars).filter(([key]) =>
+        /^PROD_(DOCUMENT_|REMITTANCE_)/.test(key),
+      )) {
+        const field = key.slice(5);
+        if (field.endsWith("_SECRET")) {
+          expect(args).toContain(`${field.slice(0, -7)}=${value}:7`);
+          expect(JSON.stringify(plan)).not.toContain(f.values[String(value)]);
+        } else expect(args).toContain(`${field}=${value}`);
+      }
+    },
+  );
+  it.each([
+    "PROD_DOCUMENT_ARTIFACT_STORAGE_PROVIDER",
+    "PROD_DOCUMENT_ARTIFACT_GCS_BUCKET",
+    "PROD_REMITTANCE_PROOF_STORAGE_PROVIDER",
+    "PROD_REMITTANCE_PROOF_GCS_BUCKET",
+    "PROD_REMITTANCE_PROOF_SCANNER_PROVIDER",
+    "PROD_REMITTANCE_PROOF_SCANNER_URL",
+    "PROD_REMITTANCE_PROOF_SCANNER_TIMEOUT_MS",
+  ])(
+    "rejects missing required artifact field %s before any cloud boundary",
+    (key) => {
+      const f = fixture();
+      delete f.vars[key];
+      expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(key);
+      expect(f.calls).toEqual([]);
+    },
+  );
+  it.each([
+    ["PROD_DOCUMENT_ARTIFACT_STORAGE_PROVIDER", "memory"],
+    ["PROD_DOCUMENT_ARTIFACT_STORAGE_PROVIDER", "unprovisioned"],
+    ["PROD_REMITTANCE_PROOF_STORAGE_PROVIDER", "memory"],
+    ["PROD_REMITTANCE_PROOF_STORAGE_PROVIDER", "unprovisioned"],
+    ["PROD_REMITTANCE_PROOF_SCANNER_PROVIDER", "unprovisioned"],
+    ["PROD_REMITTANCE_PROOF_SCANNER_PROVIDER", "eicar-signature"],
+    ["PROD_REMITTANCE_PROOF_SCANNER_URL", "https://not-cloud-run.drts.invalid"],
+    ["PROD_REMITTANCE_PROOF_SCANNER_TIMEOUT_MS", "60001"],
+    ["PROD_REMITTANCE_PROOF_SCANNER_TIMEOUT_MS", "NaN"],
+    ["PROD_DOCUMENT_ARTIFACT_GCS_BUCKET", "invalid/bucket"],
+    [
+      "PROD_DOCUMENT_ARTIFACT_S3_ACCESS_KEY_ID",
+      "raw-credential-must-not-be-persisted",
+    ],
+    ["PROD_REMITTANCE_PROOF_CLAMD_HOST", "stale-unselected-scanner"],
+  ])(
+    "rejects unsafe or silently discarded artifact setting %s",
+    (key, value) => {
+      const f = fixture();
+      f.vars[key] = value;
+      expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(key);
+      expect(f.calls).toEqual([]);
+    },
+  );
+  it.each(["DOCUMENT_ARTIFACT", "REMITTANCE_PROOF"])(
+    "rejects partial S3 %s settings including missing managed credential pairs",
+    (prefix) => {
+      const f = fixture();
+      delete f.vars[`PROD_${prefix}_GCS_BUCKET`];
+      const settings = {
+        [`PROD_${prefix}_STORAGE_PROVIDER`]: "s3",
+        [`PROD_${prefix}_S3_BUCKET`]: "durable-fixture",
+        [`PROD_${prefix}_S3_REGION`]: "us-east-1",
+        [`PROD_${prefix}_S3_FORCE_PATH_STYLE`]: "false",
+        [`PROD_${prefix}_S3_ACCESS_KEY_ID_SECRET`]: "managed-access-key",
+        [`PROD_${prefix}_S3_SECRET_ACCESS_KEY_SECRET`]: "managed-secret-key",
+      };
+      Object.assign(f.vars, settings);
+      for (const key of Object.keys(settings).filter(
+        (key) => !key.endsWith("STORAGE_PROVIDER"),
+      )) {
+        delete f.vars[key];
+        expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
+          key,
+        );
+        expect(f.calls).toEqual([]);
+        f.vars[key] = settings[key];
+      }
+      f.vars[`PROD_${prefix}_S3_ENDPOINT`] = "http://insecure.drts.invalid";
+      expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
+        `${prefix}_S3_ENDPOINT`,
+      );
+      expect(f.calls).toEqual([]);
+    },
+  );
+  it.each(["HOST", "PORT", "TIMEOUT_MS", "TLS"])(
+    "rejects a partial native scanner missing %s before external reads",
+    (suffix) => {
+      const f = fixture();
+      delete f.vars.PROD_REMITTANCE_PROOF_SCANNER_URL;
+      delete f.vars.PROD_REMITTANCE_PROOF_SCANNER_TIMEOUT_MS;
+      Object.assign(f.vars, {
+        PROD_REMITTANCE_PROOF_SCANNER_PROVIDER: "clamd",
+        PROD_REMITTANCE_PROOF_CLAMD_HOST: "scanner.internal",
+        PROD_REMITTANCE_PROOF_CLAMD_PORT: "3310",
+        PROD_REMITTANCE_PROOF_CLAMD_TIMEOUT_MS: "15000",
+        PROD_REMITTANCE_PROOF_CLAMD_TLS: "true",
+      });
+      const key = `PROD_REMITTANCE_PROOF_CLAMD_${suffix}`;
+      delete f.vars[key];
+      expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(key);
+      expect(f.calls).toEqual([]);
+    },
+  );
+  it.each(["DOCUMENT_ARTIFACT", "REMITTANCE_PROOF"])(
+    "executes the real %s factory in preflight to reject invalid GCS config beyond the rail's generic bucket shape",
+    (prefix) => {
+      const f = fixture();
+      f.vars[`PROD_${prefix}_GCS_BUCKET`] = "gcs.dot.bucket";
+      expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
+        `${prefix}_ storage factory`,
+      );
+      expect(
+        f.calls.every((call: string[]) =>
+          ["public-policy", "actAs", "read"].includes(call[0]),
+        ),
+      ).toBe(true);
+    },
+  );
+  it.each([
+    "DOCUMENT_ARTIFACT_STORAGE_PROVIDER",
+    "REMITTANCE_PROOF_STORAGE_PROVIDER",
+    "REMITTANCE_PROOF_SCANNER_PROVIDER",
+  ])(
+    "rejects unavailable real factory after removal of %s from a generated plan",
+    (key) => {
+      const f = candidate();
+      delete f.plan.services[0].env[key];
+      const values = Object.fromEntries(
+        Object.entries(f.values).map(([name, value]) => [`${name}:7`, value]),
+      );
+      // Default values are cryptographic fixture inputs, not mocks of validators.
+      for (const ref of Object.values(f.plan.services[0].secrets))
+        values[String(ref)] ??= f.cloud.readSecret(
+          String(ref).replace(/:7$/, ""),
+          f.plan.project,
+        ).value;
+      expect(() => validateRuntime(f.plan, values)).toThrow(
+        "adapter unavailable",
+      );
+    },
+  );
+});
 describe("F-PUBLIC-ENTRY public customer boundary", () => {
   it("reproduces the rejected candidate's staff-only requirement using its actual builder", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "old-public-entry-"));
