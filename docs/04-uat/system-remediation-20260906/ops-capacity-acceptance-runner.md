@@ -199,3 +199,24 @@ run. No VM product, PostgreSQL, Docker, preview or browser service was started.
 No checkpoint waives original counts, error/rate/auth/security/SLO policies,
 archived source credit, live/full-system/provider/native/legal/manual gates,
 HOLD/F2 or cleanup ZEROremoved. No partial all-fixed handoff is authorized.
+
+Checkpoint B/C (after `ddcd6a463`): `ReportingFilingRepository.loadState` and
+`ReportingFilingService.onModuleInit` now have actual recovery-path tests,
+including queued jobs retaining first start, completed legacy jobs retaining
+absence, and legacy running jobs observing a start only when the real worker
+runs. `observations.mjs` extracts the existing exact-ID SQL polling/producer
+join so real query errors, in-flight poll cleanup after a producer throw, and
+combined producer/SQL failures are tested through the function used by the
+harness. No query error is swallowed; only initial JSONL ENOENT is expected.
+`unit-b.log`: 2 files / 7 tests passed, exit 0. Production SQL, HTTP and PG
+behavior still require hosted verification.
+
+F4 regression coverage now controls external HTTP/clock/timer boundaries and
+runs the actual `runPlan` and `measure`; it starts no server. Each ordinary
+family has at least three launches with exact >=1000/200/2000ms intervals,
+early wakeups and oversleep, all-family 30000ms deadlines, overload preserving
+all unsent records, and raw429 retention without retry. The scheduler rounds
+positive waits up and rechecks its clock after wakeup, replacing a busy loop.
+No product quota or request deadline was changed. An initial unit fixture
+failure was due to accumulated mock call history, then corrected by resetting
+the HTTP boundary between cases; it is not product acceptance evidence.

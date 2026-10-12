@@ -363,75 +363,53 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         const recordsPath = resolve(evidenceDir, `${runTag}.jsonl`);
         let peakReport = 0;
         let peakDispatchable = 0;
-        let isPolling = true;
-        let pollError: Error | null = null;
-
+        const { pollCapacityResources, runWithCapacityPolling } =
+          await import("../../../../tools/system-remediation/ops-capacity/observations.mjs");
         const pollDb = async () => {
-          while (isPolling) {
-            try {
-              let currentJobIds: string[] = [];
-              try {
-                const content = readFileSync(recordsPath, "utf8");
-                currentJobIds = content
-                  .trim()
-                  .split("\n")
-                  .filter((line) => line)
-                  .map((line) => JSON.parse(line))
-                  .filter(
-                    (row) =>
-                      row.workload === "report" &&
-                      !row.error &&
-                      row.resourceIds?.jobId,
-                  )
-                  .map((row) => row.resourceIds!.jobId);
-              } catch {
-                // The file does not exist before the first producer write.
-              }
-
-              if (currentJobIds.length > 0) {
-                const { rows: reportRows } = await pool.query(
-                  `SELECT count(*) FROM admin.phase1_report_jobs WHERE status IN ('queued', 'running') AND job_id = ANY($1::text[])`,
-                  [currentJobIds],
-                );
-                const currentReport = parseInt(
-                  String(reportRows[0]?.count || "0"),
-                  10,
-                );
-                if (currentReport > peakReport) peakReport = currentReport;
-              }
-
-              const { rows: dispatchRows } = await pool.query(
-                `SELECT count(*) FROM ops.phase1_owned_orders WHERE status IN ('ready_for_dispatch', 'delayed_queue', 'no_supply', 'preassigned') AND order_id = ANY($1::text[])`,
-                [orderIds],
-              );
-              const currentDispatchable = parseInt(
-                String(dispatchRows[0]?.count || "0"),
-                10,
-              );
-              if (currentDispatchable > peakDispatchable)
-                peakDispatchable = currentDispatchable;
-            } catch (e) {
-              pollError = e instanceof Error ? e : new Error(String(e));
-              isPolling = false;
-            }
-            if (isPolling) {
-              await new Promise((resolve) => setTimeout(resolve, 2000));
-            }
+          let currentJobIds: string[] = [];
+          try {
+            // appendFileSync writes complete records on the same JS thread;
+            // parse errors are failures, not a normal partially-written line.
+            const content = readFileSync(recordsPath, "utf8");
+            currentJobIds = content
+              .trim()
+              .split("\n")
+              .filter(Boolean)
+              .map((line) => JSON.parse(line))
+              .filter(
+                (row) =>
+                  row.workload === "report" &&
+                  !row.error &&
+                  row.resourceIds?.jobId,
+              )
+              .map((row) => row.resourceIds.jobId);
+          } catch (error) {
+            if (
+              !(error instanceof Error) ||
+              !("code" in error) ||
+              error.code !== "ENOENT"
+            )
+              throw error;
           }
+          const observation = await pollCapacityResources(
+            pool,
+            orderIds,
+            currentJobIds,
+          );
+          peakReport = Math.max(peakReport, observation.report);
+          peakDispatchable = Math.max(
+            peakDispatchable,
+            observation.dispatchable,
+          );
         };
-
-        const pollPromise = pollDb();
-        let summary;
-        try {
-          summary = await runPlan(plan, recordsPath, {
-            baseSha: process.env.WORKFLOW_SHA ?? "local",
-            candidateSha: process.env.CANDIDATE_SHA ?? "local",
-          });
-        } finally {
-          isPolling = false;
-          await pollPromise;
-        }
-        if (pollError) throw pollError;
+        const summary = await runWithCapacityPolling(
+          () =>
+            runPlan(plan, recordsPath, {
+              baseSha: process.env.WORKFLOW_SHA ?? "local",
+              candidateSha: process.env.CANDIDATE_SHA ?? "local",
+            }),
+          pollDb,
+        );
 
         // The run must be the full accepted 15-minute baseline burst, never
         // a short/mock/skipped stand-in.
