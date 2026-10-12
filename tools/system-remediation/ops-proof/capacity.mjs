@@ -517,6 +517,16 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
           : null;
       const p95Ms = percentile(0.95),
         p99Ms = percentile(0.99);
+      const launches = rows.map((row) => row.launchedMs);
+      const arrivals = {
+        count: launches.filter(Number.isFinite).length,
+        firstMs: launches.length ? Math.min(...launches) : null,
+        lastMs: launches.length ? Math.max(...launches) : null,
+        early: rows.filter((row) => row.launchedMs < row.scheduledMs).length,
+        late: rows.filter(
+          (row) => row.launchedMs >= plan.durationSeconds * 1000,
+        ).length,
+      };
       return [
         family,
         {
@@ -524,6 +534,7 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
           errors: rows.filter((row) => row.error).length,
           p95Ms,
           p99Ms,
+          arrivals,
           targets,
           latencyTargetsMet:
             p95Ms !== null &&
@@ -541,7 +552,14 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
     baselinePath,
     baselineSha256,
     durationSeconds: plan.durationSeconds,
-    fullBurstSchedule: plan.durationSeconds === 900,
+    fullBurstSchedule:
+      plan.durationSeconds === 900 &&
+      Object.values(workflows).every(
+        (row) =>
+          row.arrivals.count === row.requests &&
+          row.arrivals.early === 0 &&
+          row.arrivals.late === 0,
+      ),
     elapsedMs: performance.now() - start,
     startedAt,
     endedAt: new Date().toISOString(),
@@ -549,7 +567,12 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
     profile,
     workflows,
     result: Object.values(workflows).every(
-      (row) => row.errors === 0 && row.latencyTargetsMet,
+      (row) =>
+        row.errors === 0 &&
+        row.latencyTargetsMet &&
+        row.arrivals.count === row.requests &&
+        row.arrivals.early === 0 &&
+        row.arrivals.late === 0,
     )
       ? "measurements_within_targets"
       : "failed",

@@ -89,6 +89,13 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
         booking: {
           requests: 900,
           errors: 0,
+          arrivals: {
+            count: 900,
+            firstMs: 0,
+            lastMs: 899000,
+            early: 0,
+            late: 0,
+          },
           p95Ms: 15.2,
           p99Ms: 22.4,
           latencyTargetsMet: true,
@@ -96,6 +103,13 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
         dispatch: {
           requests: 4500,
           errors: 0,
+          arrivals: {
+            count: 4500,
+            firstMs: 0,
+            lastMs: 899800,
+            early: 0,
+            late: 0,
+          },
           p95Ms: 18.5,
           p99Ms: 25.1,
           latencyTargetsMet: true,
@@ -103,6 +117,13 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
         report: {
           requests: 450,
           errors: 0,
+          arrivals: {
+            count: 450,
+            firstMs: 0,
+            lastMs: 898000,
+            early: 0,
+            late: 0,
+          },
           p95Ms: 21.3,
           p99Ms: 28.7,
           latencyTargetsMet: true,
@@ -269,6 +290,44 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
   it("passes a valid full schedule summary with zero errors and perfect readback", () => {
     expect(() => assertAcceptancePassed(validAcceptance)).not.toThrow();
   });
+
+  it.each(["booking", "dispatch", "report"] as const)(
+    "%s requires complete finite actual arrival measurements inside900s even with a green summary",
+    (family) => {
+      const valid = validAcceptance.summary.workflows[family].arrivals;
+      for (const arrivals of [
+        undefined,
+        {},
+        { ...valid, count: valid.count - 1 },
+        { ...valid, firstMs: NaN },
+        { ...valid, firstMs: -1 },
+        { ...valid, firstMs: valid.lastMs + 1 },
+        { ...valid, lastMs: Infinity },
+        { ...valid, lastMs: 900000 },
+        { ...valid, lastMs: 1800000 },
+        { ...valid, early: 1 },
+        { ...valid, late: 1 },
+        { ...valid, late: NaN },
+      ]) {
+        const payload = {
+          ...validAcceptance,
+          summary: {
+            ...validAcceptance.summary,
+            workflows: {
+              ...validAcceptance.summary.workflows,
+              [family]: {
+                ...validAcceptance.summary.workflows[family],
+                arrivals,
+              },
+            },
+          },
+        };
+        expect(() => assertAcceptancePassed(payload)).toThrow(
+          /arrival measurements/,
+        );
+      }
+    },
+  );
 
   it("accepts lawful async processing after the900s arrival window within5min/30min job SLOs", () => {
     const valid = structuredClone(validAcceptance);

@@ -616,3 +616,21 @@ arrival requirement despite preserving nominal schedule/counts.
 | Actual arrivals outside the configured900s window | `ops-proof/capacity.mjs:runPlan`; actual production function, external HTTP/clock boundaries controlled. Expected failed, actual measurements_within_targets at4aae, last launch900800ms, all5850 rows retained. | `pnpm exec vitest run tests/unit/system-remediation/sr-ops-capacity-20260911/capacity-scheduler.test.ts --testNamePattern 'rejects actual arrivals beyond 900s' --maxWorkers=2`, exit1, one actual failing reproduction; twelve unrelated cases skipped by this narrow selector. Canonical `.local/c123-report-worker-20261012/arrival-window-continuation/old-4aae-reproduction.log`. | Compute actual per-family arrival observations and require them in producer/gate; retain ordinary response deadlines and every raw request. |
 | capacity_failed_summary_rejected | Original112HTTP429 payload and its expected rejection remain preserved. | Previous original-artifact checks remain separate. | New exact-candidate independent review/evidence; no acceptance key recorded here. |
 | capacity_same_candidate_full_900s_valid_baseline | OPEN. No new hosted900s result. | NOT RUN on this VM. | Original Supervisor-dispatched immutable workflow, actual HTTP/PG/counts/SLO/security/concurrency/backlog/degradation/readback. Managed CPU/billing/scaling/idle recovery and genuine PG connection-loss/recovery remain unverified and block acceptance/production. |
+
+The producer now derives each family's arrival count, first/last launch and
+early/late counts from the retained actual request records. Late or early
+arrivals make the summary failed and prevent a full-burst claim. The existing
+formal gate independently requires complete, finite, in-window measurements
+even if a payload asserts a green result. This changes no count, schedule,
+quota,30s request deadline or accepted latency/error/SLO requirement. All raw
+5850 requests and extra preparation records remain retained.
+
+Narrow verification completed: the two affected test files pass55/55, exit0,
+`arrival-regression.log` in the same canonical evidence directory. The actual
+1000ms-preparation counterexample now fails with one late booking and five late
+dispatches. A legal positive retains5850 in-window arrivals with the last at
+899800ms and final response at900050ms; completion after900s remains valid.
+Each family's missing/nonfinite/inconsistent/early/late measurements is rejected
+by the real gate. These are controlled-boundary regressions, not a hosted
+capacity result. Required affected regression,25-case contract, exact source
+types/lint/history and fresh candidate review/CI remain pending.

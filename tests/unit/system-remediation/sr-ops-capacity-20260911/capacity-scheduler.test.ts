@@ -131,9 +131,15 @@ afterEach(() => {
 describe("actual capacity scheduler boundaries across all families", () => {
   it("rejects actual arrivals beyond 900s even when all 5850 responses meet their targets", async () => {
     const output = resolve(directory, "late-baseline-arrivals.jsonl");
-    const run = runPlan(plan(900), output, {}, {
-      initialize: () => new Promise<void>((resolve) => setTimeout(resolve, 1000)),
-    });
+    const run = runPlan(
+      plan(900),
+      output,
+      {},
+      {
+        initialize: () =>
+          new Promise<void>((resolve) => setTimeout(resolve, 1000)),
+      },
+    );
     await vi.advanceTimersByTimeAsync(910000);
     const summary = await run;
     const rows = read(output);
@@ -146,6 +152,54 @@ describe("actual capacity scheduler boundaries across all families", () => {
     }
     expect(summary.result).toBe("failed");
     expect(summary.fullBurstSchedule).toBe(false);
+    expect(summary.workflows.booking.arrivals).toEqual({
+      count: 900,
+      firstMs: 1000,
+      lastMs: 900000,
+      early: 0,
+      late: 1,
+    });
+    expect(summary.workflows.dispatch.arrivals).toEqual({
+      count: 4500,
+      firstMs: 1000,
+      lastMs: 900800,
+      early: 0,
+      late: 5,
+    });
+    expect(summary.workflows.report.arrivals).toEqual({
+      count: 450,
+      firstMs: 1000,
+      lastMs: 899000,
+      early: 0,
+      late: 0,
+    });
+  });
+
+  it("allows responses after900s when all actual arrivals stay inside the original window", async () => {
+    responseDelay = 250;
+    const output = resolve(directory, "valid-arrivals-later-responses.jsonl");
+    const run = runPlan(plan(900), output, {});
+    await vi.advanceTimersByTimeAsync(910000);
+    const summary = await run;
+    const rows = read(output);
+    expect(rows).toHaveLength(5850);
+    expect(rows.every((row) => row.error === null)).toBe(true);
+    expect(Math.max(...rows.map((row) => row.launchedMs))).toBe(899800);
+    expect(summary.elapsedMs).toBe(900050);
+    expect(summary.result).toBe("measurements_within_targets");
+    expect(summary.fullBurstSchedule).toBe(true);
+    for (const family of ["booking", "dispatch", "report"] as const) {
+      const launches = rows
+        .filter((row) => row.workload === family)
+        .map((row) => row.launchedMs);
+      expect(summary.workflows[family].arrivals).toEqual({
+        count: launches.length,
+        firstMs: Math.min(...launches),
+        lastMs: Math.max(...launches),
+        early: 0,
+        late: 0,
+      });
+    }
   });
 
   it("includes actual preparation time in the original window and preserves every measured request", async () => {

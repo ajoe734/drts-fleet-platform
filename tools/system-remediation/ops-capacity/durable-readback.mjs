@@ -748,6 +748,27 @@ export function assertAcceptancePassed(acceptance) {
       );
     }
 
+    // The nominal schedule and elapsed response time do not prove actual
+    // arrivals fit the burst window. Response completion may legitimately
+    // follow900s; every request must launch inside the unchanged window.
+    const arrivals = workload.arrivals;
+    if (
+      !arrivals ||
+      arrivals.count !== requiredCounts[family] ||
+      !Number.isFinite(arrivals.firstMs) ||
+      !Number.isFinite(arrivals.lastMs) ||
+      arrivals.firstMs < 0 ||
+      arrivals.lastMs < arrivals.firstMs ||
+      arrivals.lastMs >= summary.durationSeconds * 1000 ||
+      arrivals.lastMs > summary.elapsedMs ||
+      arrivals.early !== 0 ||
+      arrivals.late !== 0
+    ) {
+      throw new Error(
+        `Workload failed: ${family} missing or invalid actual burst arrival measurements`,
+      );
+    }
+
     if (workload.errors !== 0) {
       throw new Error(
         `Workload failed: ${family} requires zero errors, got ${workload.errors}`,

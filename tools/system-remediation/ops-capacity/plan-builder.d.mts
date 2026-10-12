@@ -102,6 +102,13 @@ export type CapacitySummary = {
       errors: number;
       p95Ms: number | null;
       p99Ms: number | null;
+      arrivals: {
+        count: number;
+        firstMs: number | null;
+        lastMs: number | null;
+        early: number;
+        late: number;
+      };
       latencyTargetsMet: boolean;
     }
   >;
