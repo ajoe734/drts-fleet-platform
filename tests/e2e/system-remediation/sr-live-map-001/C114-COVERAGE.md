@@ -1547,7 +1547,9 @@ acceptance keys require the new candidate's verified evidence.
 
 ## SR-LIVE-MAP-BROWSER-TRANSPORT-20261012: actual v4 continuation
 
-Owner **Codex**, independent reviewer **Claude2**. This section continues the
+Owner **Codex**, current independent reviewer **Codex2** (chair reassignment
+at 2026-10-12T15:25:41Z). Original C114 Claude2 review/source credits remain.
+This section continues the
 original C114 component evidence and credits; it does not reopen its completed
 source task or replace any original acceptance obligations. Source base:
 `17a2fb499908965acc7062c42f2214eb68547f4d`.
@@ -1610,9 +1612,9 @@ WebSocket rejection, strict failure gates and mandatory cleanup remain.
 ### Finding and acceptance ledger (Guide §0.7)
 
 Repair source anchor **`b364ce10f3816bc99404c4412669438ec55208e8`** contains the
-final spec/tests. The handoff candidate is its evidence-only descendant;
-reviewer must verify the spec/tests are byte-identical and use the full SHA
-recorded by `handoff`, not an anchor or the deployed runtime SHA.
+initial 62-test diagnostic spec/tests. It predates the bounded-drain repair
+below, which supplies the final source identity and superseding check results.
+Use the full SHA recorded by `handoff`, not an anchor or deployed runtime SHA.
 
 | Finding / required acceptance                                          | Actual source and modification                                                                                                                  | Frozen old → repair result                                                                                                                                                                                                                                                                   | Command, exit, version, evidence                                                                                                                                      | Remaining limitation                                                                                                                             |
 | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1620,7 +1622,7 @@ recorded by `handoff`, not an anchor or the deployed runtime SHA.
 | F-TRANSPORT-UNSETTLED-EVIDENCE                                         | Spec `pendingInterceptions`, `settleInterceptions`, finalization; actual-spec deferred external-CDP probe                                       | Adjacent anchor `19a95e3a8575e0e70a9371a9238fe64e41da483e` wrote evidence while continue/recovery were pending: 1 failed / 37 passed → repaired probe waits for both operations before evidence, 62-test suite passes                                                                        | Same transport command; repro exit 1, repair exit 0; `unsettled-handler-repro.log`, `repaired-unit.log`                                                               | Source race is reproduced/fixed; not asserted to explain the five hosted failures                                                                |
 | Credential, target, redirect, privacy and error accounting regressions | Unchanged `browser-auth.ts::createOpsConsoleAuthentication/headersFor`, `live-map-config.ts::assertAllowedUrl`; real spec handler and lifecycle | All original ops auth, cross-origin withholding, redirect hops, invalid token/gate/SHA/provider rejection cases pass; extra data-image/blob/HTTP/credential/scheme/invalid URL/Google lookalike/port negatives, hostile resource metadata, five duplicate failures and recovery failure pass | 62 transport tests; full map unit regression **12 files / 275 tests**, zero skips, exit 0; `map-regression-isolated.log`                                              | Mocked external CDP/Playwright only; not remote/Google/DOM acceptance                                                                            |
 | `map_browser_transport_owned_failure_and_security_regression`          | All preceding findings, actual spec plus unchanged auth/gate                                                                                    | Frozen-old failures and repaired source/security regressions verified                                                                                                                                                                                                                        | Transport exit 0; map regression exit 0; scoped ESLint exit 0; root strict TypeScript exit 0 after worktree dependency isolation                                      | Supervisor/reviewer must evaluate this key; owner has not recorded acceptance                                                                    |
-| `map_browser_transport_exact_sha_review_ci_merge`                      | Final handoff SHA/branch/PR, this ledger                                                                                                        | **Pending**: source checks/anchors are not independent review or matching CI/merge                                                                                                                                                                                                           | Handoff supplies exact candidate; Claude2 reviews it; existing GitHub bus captures CI/protected merge                                                                 | No review/CI/merge pass claimed in this owner artifact                                                                                           |
+| `map_browser_transport_exact_sha_review_ci_merge`                      | Final handoff SHA/branch/PR, this ledger                                                                                                        | **Pending**: source checks/anchors are not independent review or matching CI/merge                                                                                                                                                                                                           | Handoff supplies exact candidate; Current assigned reviewer Codex2 reviews it; existing GitHub bus captures CI/protected merge                                        | No review/CI/merge pass claimed in this owner artifact                                                                                           |
 | `map_browser_transport_deployed_chromium_positive_evidence`            | Unchanged hosted map-only workflow and real spec; exact harness SHA and pinned business runtime SHA                                             | **Pending**: run38266987714 failed despite both decoded maps                                                                                                                                                                                                                                 | Supervisor only: original authorized hosted profile on independently reviewed exact candidate; full real provider/service-area/freshness/cleanup checks               | Requires both decoded maps and zero Google/target/interception errors, runtime identity and revoked cleanup; source checks cannot close this key |
 
 ### Reproduction, versions, hashes and checks
@@ -1667,7 +1669,7 @@ Source SHA256 at repair anchor:
 ### Exact candidate handoff and next authorized boundary
 
 The owner commits/pushes this ledger normally, verifies local/remote/PR head
-identity and hands off to Claude2 using the full `CANDIDATE_SHA` and
+identity and hands off to the current assigned reviewer Codex2 using the full `CANDIDATE_SHA` and
 `CANDIDATE_BRANCH=codex/sr-live-map-browser-transport-20261012`. Required hosted
 CI may be pending at handoff. Published anchors and historical C114/r2 branches
 are preserved; no rebase/amend/force push or owner `done` is used.
@@ -1684,3 +1686,77 @@ The actual browser transport repair/positive evidence remains outstanding.
 Original 44 issues / 134 capabilities / 15 independent scope groups, PAX,
 both Android and iOS, original 47 pending obligations, provider/manual/legal/
 financial/Operator restoration requirements and C123 ancestor HOLD stay intact.
+
+### Pre-handoff callback deadline finding and final source (2026-10-12)
+
+The first handoff to dispatch-time reviewer Claude2 was rejected because the
+chair had reassigned this task to **Codex2** at `2026-10-12T15:25:41Z`. No candidate
+was locked. The owner then read the new canonical dependency
+`.local/continue-full-completion-20261012T0528/v4-live-map-acceptance/PRE-HANDOFF-CALLBACK-DRAIN-READBACK.md`.
+This was Supervisor's **pre-handoff source readback**, not formal independent
+candidate review. It identifies an unbounded `settleInterceptions` wait in the
+first diagnostic implementation. Existing published history and Claude2's
+original C114 credits are preserved; the new final trailer/review target is
+the current assigned Codex2 lane.
+
+The actual-spec probe models a never-settling continue, failRequest, or detach,
+and continuous batches of new CDP callbacks. Fake timers affect only external
+waiting; the real spec's handler and drain run. At frozen first diagnostic
+source `b8f85b2413abff8e7421ed78e7bd0795671333a2`, **four probes failed** because
+no evidence had been written after 6000 ms of simulated time; the other
+62 cases passed. Probe anchor `c4634094c3d51f41e4f8db3e68589cf15b324ff4` changes
+only the tests and has byte-identical spec source. Release of external mock
+promises in test cleanup lets the failing probe terminate; this is not reliance
+on a test/job kill to produce the result.
+
+Repair anchor **`cf5405607f83ec1d992e0755863da34716d0bbda`** is the final
+spec/test identity. It supersedes the earlier 62-test source/check totals above.
+The final handoff commit changes evidence only; reviewer verifies no spec/test
+diff from this anchor before checking the full handoff SHA.
+
+`settleInterceptions` now shares a **5000 ms cumulative wait budget** across
+batches and both page/final drains. New callbacks do not renew it. CDP detach
+has a separate **1000 ms deadline**, so stalled cleanup plus draining cannot
+add more than 6000 ms of protocol waiting. Readiness timeouts, real stale wait
+and hosted authorization settings are unchanged. Expiry records only fixed
+`interception-drain-timeout` / `interception-cleanup-timeout` categories and
+fixed failure text, sets status failed, still attempts detach, and writes a
+durable snapshot. It does not turn an unknown request into a successful one.
+
+`pending_interceptions` retains the numeric unfinished callback count at the
+snapshot. A failRequest that was sent but has not settled has
+`block_result=pending`, rather than incorrectly claiming `not-attempted` or
+`blocked`. Completed/rejected blocking still records `blocked` / `block-failed`.
+Known request failures are retained with duplicates; unresolved operations are
+reported separately. Timeout promises have their timers cleared when completed;
+late CDP rejections remain handled by the original callback. Deadline expiry
+cannot produce a pass even if the source of a pending operation remains unknown.
+
+| Finding / acceptance                                                                                     | Source / frozen old → repair                                                                                                                                                                                        | Commands, results and evidence                                                                                                                                  | Remaining limitation                                                                      |
+| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| F-TRANSPORT-UNBOUNDED-DRAIN (Supervisor pre-handoff readback)                                            | Actual spec `finishesWithin`, `settleInterceptions`, final detach/snapshot; b8f85b/c4634094c: no snapshot for stalled continue/block/detach or continuous pending → cf5405607: bounded failed evidence for all four | Actual transport command above; repro exit **1**, 4 failed / 62 passed; repair exit **0**, **66 passed**, zero skips                                            | Does not identify the original five hosted errors                                         |
+| All original auth/target/redirect/privacy/positive continuation and earlier diagnostics/race regressions | Unchanged auth/gate; all 62 earlier probes retained alongside four deadline probes                                                                                                                                  | Final map unit command above: exit **0**, **12 files / 279 passed**, zero skips; scoped lint exit **0**; root strict `tsc -p tsconfig.json --noEmit` exit **0** | No VM browser, server, PostgreSQL or live endpoint checks                                 |
+| `map_browser_transport_owned_failure_and_security_regression`                                            | Frozen17a, adjacent race and pre-handoff deadline probes plus final source hashes                                                                                                                                   | Final 66/279/lint/strict-type results below supersede preliminary 62/275 totals                                                                                 | Current independent reviewer/Supervisor evaluates gate; owner has not recorded acceptance |
+| `map_browser_transport_exact_sha_review_ci_merge`                                                        | PR **#2590** final head supplied by handoff, current assigned reviewer **Codex2**                                                                                                                                   | **Pending** exact-SHA independent review, hosted CI and protected merge                                                                                         | Failed first handoff did not lock b8f85b; old CI cannot certify new source                |
+| `map_browser_transport_deployed_chromium_positive_evidence`                                              | Unchanged authorized hosted profile, reviewed exact harness and freshly verified pinned business runtime SHA                                                                                                        | **Pending**, Supervisor-only diagnostic run and positive acceptance                                                                                             | Five-error cause remains **UNKNOWN**; no unchanged retry or positive acceptance claim     |
+
+Final evidence under the same `.local/browser-transport/` directory and same
+Node/pnpm/Vitest/TypeScript versions:
+
+- `unbounded-drain-repro.log`: exit 1, SHA256
+  `ab2508158a260a1149244250cf277e3b26aa529eccbe96f28d95760af8fe50bb`.
+- `bounded-unit.log`: exit 0, 66 passed, SHA256
+  `f8cda5de8be010db9fbb38fac3ab00cf65effb648076895391d5aaec26bf7c19`.
+- `bounded-map-regression.log`: exit 0, 279 passed, SHA256
+  `23e4c40997cc13a3b8f29fc9a0f961d8706b0f1111e454f0a088f657023ee164`.
+- `bounded-lint.log` and `bounded-typecheck.log`: exit 0, no diagnostics.
+- Final spec SHA256:
+  `5830703522f770cb13df561f7db250cdc086d7df36ebf1e9468f92d41bf99eaa`.
+- Final transport-test SHA256:
+  `6e723503c2ec43faab0a97c0efa61c38a1a96886a568e0ea761658a6a2adc240`.
+
+Supervisor's linked [Google Maps CSP guide](https://developers.google.com/maps/documentation/javascript/content-security-policy)
+is general compatibility guidance, and the [CDP Fetch reference](https://chromedevtools.github.io/devtools-protocol/tot/Fetch/)
+describes the external protocol. Neither is runtime proof of these five failures
+or authority to widen the exact allowlist. No such widening was made. The
+owner does not alter scheduled promotion/production gates or issue #2589.
