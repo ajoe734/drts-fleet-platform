@@ -56,6 +56,7 @@ export type StoredReportJobRecord = ReportJobRecord & {
   partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
   settlementMatrix?: SettlementMatrixRecord[];
   multiTaxiTripExport?: MultiTaxiTripExportJobMetadata;
+  startedAt?: string | null;
 };
 
 export type StoredFilingPackageRecord = FilingPackageRecord & {

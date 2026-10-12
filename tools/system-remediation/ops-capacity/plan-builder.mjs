@@ -89,6 +89,7 @@ export function buildReportItems({ count, reportJwt, runTag }) {
       body: {
         jobType: "trip_summary",
         format: "csv",
+        filters: { runTag },
       },
     });
   }

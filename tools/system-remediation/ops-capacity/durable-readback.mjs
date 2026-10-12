@@ -57,17 +57,21 @@ export async function readBackReportJobs(pool, jobIds) {
   // For now, if the job has a non-null updated_at and status is not pending, we use it, 
   // but this is a known limitation. We'll extract 'startedAt' from record JSON if possible.
   const { rows } = await pool.query(
-    `SELECT job_id, status, created_at, updated_at
+    `SELECT job_id, status, created_at, updated_at, record->>'startedAt' as started_at
        FROM admin.phase1_report_jobs
       WHERE job_id = ANY($1::text[])`,
     [unique],
   );
   return rows.map((row) => {
+    let queueLagMs = null;
+    if (row.started_at) {
+      queueLagMs = new Date(row.started_at).getTime() - new Date(row.created_at).getTime();
+    }
     return {
       jobId: row.job_id,
       status: row.status,
       createdAt: row.created_at,
-      queueLagMs: null,
+      queueLagMs,
     };
   });
 }
@@ -175,12 +179,12 @@ export function assertAcceptancePassed(acceptance) {
            lag.avgMs >= lag.minMs && lag.avgMs <= lag.maxMs;
   };
 
-  // Report queue lag may not be measurable if startedAt is absent.
+  // Report queue lag MUST be measurable and consistent.
   if (
-    acceptance.queueLag.report.count > 0 &&
+    acceptance.queueLag.report.count <= 0 ||
     !checkLagConsistency(acceptance.queueLag.report)
   ) {
-    throw new Error(`Workload failed: invalid report queueLag measurements`);
+    throw new Error(`Workload failed: invalid or missing report queueLag measurements`);
   }
 
   // Dispatch queue lag must have at least some samples, but may not be 4500 if some remain unassigned/queued lawfuly.

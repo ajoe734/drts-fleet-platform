@@ -132,6 +132,7 @@ type StoredReportJob = ReportJobRecord & {
   partnerRevenueRows: PartnerRevenueSummaryRowRecord[];
   settlementMatrix: SettlementMatrixRecord[];
   multiTaxiTripExport?: MultiTaxiTripExportJobMetadata;
+  startedAt?: string | null;
 };
 
 type StoredFilingPackage = FilingPackageRecord & {
@@ -1309,6 +1310,9 @@ export class ReportingFilingService implements OnModuleInit {
     const updatedAt = new Date().toISOString();
     job.status = "running";
     job.updatedAt = updatedAt;
+    if (!job.startedAt) {
+      job.startedAt = updatedAt;
+    }
     this.persistChanges(
       {
         reportJobs: [this.cloneStoredReportJob(job)],
