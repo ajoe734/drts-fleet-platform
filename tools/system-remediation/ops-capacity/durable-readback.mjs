@@ -30,11 +30,8 @@ export async function readBackOwnedOrders(pool, orderIds) {
   );
   return rows.map((row) => {
     let lagMs = null;
-    if (row.first_attempt_at && row.job_created_at) {
-      lagMs = new Date(row.first_attempt_at).getTime() - new Date(row.job_created_at).getTime();
-    } else if (row.job_created_at && row.job_updated_at && row.job_status !== 'queued' && row.job_status !== 'matching') {
-      // Unassigned but finished (e.g., no_supply, delayed_queue equivalent)
-      lagMs = new Date(row.job_updated_at).getTime() - new Date(row.job_created_at).getTime();
+    if (row.first_attempt_at && row.order_created_at) {
+      lagMs = new Date(row.first_attempt_at).getTime() - new Date(row.order_created_at).getTime();
     }
     
     return {
@@ -97,14 +94,16 @@ export function summarizeLag(rows, lagKey) {
     .filter((value) => Number.isFinite(value))
     .sort((a, b) => a - b);
   if (values.length === 0) {
-    return { count: 0, minMs: null, maxMs: null, avgMs: null };
+    return { count: 0, minMs: null, maxMs: null, avgMs: null, p95Ms: null };
   }
   const sum = values.reduce((acc, value) => acc + value, 0);
+  const p95Index = Math.max(0, Math.ceil(values.length * 0.95) - 1);
   return {
     count: values.length,
     minMs: values[0],
     maxMs: values[values.length - 1],
     avgMs: sum / values.length,
+    p95Ms: values[p95Index],
   };
 }
 
@@ -171,30 +170,25 @@ export function assertAcceptancePassed(acceptance) {
     throw new Error(`Workload failed: missing queueLag evidence`);
   }
 
-  const checkLagConsistency = (lag) => {
+  const checkLagConsistency = (lag, exactCount) => {
+    if (!Number.isInteger(lag.count) || lag.count < 0) return false;
+    if (exactCount !== undefined && lag.count !== exactCount) return false;
+    if (lag.count === 0) return true;
     return Number.isFinite(lag.minMs) && lag.minMs >= 0 &&
            Number.isFinite(lag.maxMs) && lag.maxMs >= 0 &&
            Number.isFinite(lag.avgMs) && lag.avgMs >= 0 &&
+           Number.isFinite(lag.p95Ms) && lag.p95Ms >= 0 &&
            lag.minMs <= lag.maxMs &&
-           lag.avgMs >= lag.minMs && lag.avgMs <= lag.maxMs;
+           lag.avgMs >= lag.minMs && lag.avgMs <= lag.maxMs &&
+           lag.p95Ms >= lag.minMs && lag.p95Ms <= lag.maxMs;
   };
 
   // Report queue lag MUST be measurable and consistent for all reports.
-  if (
-    acceptance.queueLag.report.count !== requiredCounts.report ||
-    !checkLagConsistency(acceptance.queueLag.report)
-  ) {
+  if (!checkLagConsistency(acceptance.queueLag.report, requiredCounts.report)) {
     throw new Error(`Workload failed: invalid or missing report queueLag measurements (expected ${requiredCounts.report}, got ${acceptance.queueLag.report.count})`);
   }
-
-  // Dispatch queue lag must have at least some samples, but may not be 4500 if some remain unassigned/queued lawfuly.
-  if (
-    acceptance.queueLag.dispatchOrderQueueLag.count <= 0 ||
-    !checkLagConsistency(acceptance.queueLag.dispatchOrderQueueLag)
-  ) {
-    throw new Error(
-      `Workload failed: invalid or missing dispatch queueLag measurements`,
-    );
+  if (acceptance.queueLag.report.maxMs > 300000) {
+    throw new Error(`Workload failed: report queueLag maxMs exceeded 5m target, got ${acceptance.queueLag.report.maxMs}`);
   }
 
   if (!acceptance.dispatchOrderStatusDistribution) {
@@ -229,17 +223,37 @@ export function assertAcceptancePassed(acceptance) {
     "exception_hold"
   ]);
   let totalStatusCount = 0;
+  let unattemptedLawfulCount = 0;
   for (const [status, count] of Object.entries(acceptance.dispatchOrderStatusDistribution)) {
     if (!validStatuses.has(status)) {
       throw new Error(`Workload failed: unlawful status in distribution: ${status}`);
     }
-    if (!Number.isFinite(count) || count < 0) {
+    if (!Number.isInteger(count) || count < 0) {
       throw new Error(`Workload failed: invalid count for status ${status}`);
     }
     totalStatusCount += count;
+    if (status === "no_supply" || status === "delayed_queue") {
+      unattemptedLawfulCount += count;
+    }
   }
   if (totalStatusCount !== requiredCounts.dispatch) {
     throw new Error(`Workload failed: dispatchOrderStatusDistribution total count must be ${requiredCounts.dispatch}, got ${totalStatusCount}`);
+  }
+
+  const expectedDispatchLagCount = totalStatusCount - unattemptedLawfulCount;
+
+  // Dispatch queue lag must have at least some samples, but may not be 4500 if some remain unassigned/queued lawfuly.
+  if (
+    acceptance.queueLag.dispatchOrderQueueLag.count <= 0 ||
+    !checkLagConsistency(acceptance.queueLag.dispatchOrderQueueLag, expectedDispatchLagCount)
+  ) {
+    throw new Error(
+      `Workload failed: invalid or missing dispatch queueLag measurements (expected ${expectedDispatchLagCount}, got ${acceptance.queueLag.dispatchOrderQueueLag.count})`,
+    );
+  }
+
+  if (acceptance.queueLag.dispatchOrderQueueLag.p95Ms > 60000) {
+    throw new Error(`Workload failed: dispatch queueLag p95Ms exceeded 60s target, got ${acceptance.queueLag.dispatchOrderQueueLag.p95Ms}`);
   }
 
   for (const family of ["booking", "dispatch", "report"]) {

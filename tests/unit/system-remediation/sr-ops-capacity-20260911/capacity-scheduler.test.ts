@@ -78,10 +78,10 @@ describe("capacity.mjs scheduler", () => {
     const t2 = dispatchRecords[2]!.launchedMs;
     const t3 = dispatchRecords[3]!.launchedMs;
     const t4 = dispatchRecords[4]!.launchedMs;
-    expect(t1 - t0).toBeGreaterThanOrEqual(199);
-    expect(t2 - t1).toBeGreaterThanOrEqual(199);
-    expect(t3 - t2).toBeGreaterThanOrEqual(199);
-    expect(t4 - t3).toBeGreaterThanOrEqual(199);
+    expect(t1 - t0).toBeGreaterThanOrEqual(200);
+    expect(t2 - t1).toBeGreaterThanOrEqual(200);
+    expect(t3 - t2).toBeGreaterThanOrEqual(200);
+    expect(t4 - t3).toBeGreaterThanOrEqual(200);
     // Booking: 1 per sec (900/15m = 1/s), but here duration is 1 sec, so just 1 request.
     const bookingRecords = records.filter(log => log.workload === "booking");
     expect(bookingRecords.length).toBe(1);
