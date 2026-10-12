@@ -29,8 +29,8 @@ describe("protected production inventory actual exported boundaries", () => {
       10,
     );
     expect(
-      report.records.find((r: any) => r.id === "runtime-policy").data
-        .unconditionalDeployerActAs,
+      report.records.find((r: any) => r.id === "api-policy").data
+        .unconditionalDeployerInvoker,
     ).toBe(true);
     expect(saved).not.toContain(SENTINEL);
     expect(saved).not.toContain(f.env.PROD_DEPLOYER_IDENTITY);
@@ -287,13 +287,30 @@ describe("protected production inventory actual exported boundaries", () => {
       expect(await c.hostedTransport(descriptor, "MASKED_TOKEN")).toEqual({
         status: 403,
       });
-      expect(spy.mock.calls[0][1].redirect).toBe("error");
+      expect(spy.mock.calls[0]?.[1]?.redirect).toBe("error");
       await expect(
         c.hostedTransport({ ...descriptor, method: "POST" }, "MASKED_TOKEN"),
       ).rejects.toThrow();
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+describe("official Google HTTP method boundary", () => {
+  it("never issues a GET for POST-only service-account getIamPolicy", () => {
+    const f = fixture();
+    // iam discovery v1 revision 20261002 explicitly declares POST for this
+    // method; Cloud Run v2 revision 20261002 declares GET on services policies.
+    expect(
+      f.plan.operations.some(
+        (op: any) =>
+          new URL(op.url).hostname === "iam.googleapis.com" &&
+          new URL(op.url).pathname.endsWith(":getIamPolicy"),
+      ),
+    ).toBe(false);
+    expect(
+      f.plan.operations.filter((op: any) => op.kind === "policy"),
+    ).toHaveLength(10);
   });
 });
 describe("actual parsed workflow protection", () => {
@@ -330,5 +347,221 @@ describe("actual parsed workflow protection", () => {
       ".artifacts/production-readonly-inventory/metadata.json",
     );
     expect(steps.at(-1).if).toContain("always()");
+  });
+});
+
+describe("bounded failure cases", () => {
+  it("rejects fallback dev/user identity even if ambient credentials exist", async () => {
+    const f = fixture();
+    f.env.GOOGLE_APPLICATION_CREDENTIALS = "/tmp/ambient.json";
+    f.env.DEV_WIF_SERVICE_ACCOUNT = "dev@other.iam.gserviceaccount.com";
+    delete f.env.PROD_DEPLOYER_IDENTITY;
+    await expect(c.collect(f.env, SHA, f.transport)).rejects.toThrow(
+      "PROD_IDENTITY_REQUIRED",
+    );
+    expect(f.calls).toHaveLength(0);
+  });
+  it("bounds pagination at five distinct pages and serializes 500 selected version items", async () => {
+    const f = fixture(),
+      op = f.plan.operations.find((o: any) => o.kind === "versions"),
+      path = new URL(op.url).pathname;
+    const report = await c.collect(f.env, SHA, async (d: any) => {
+      if (new URL(d.url).pathname !== path) return f.transport(d);
+      const page = Number(new URL(d.url).searchParams.get("pageToken") || 1);
+      return {
+        status: 200,
+        body: {
+          versions: Array.from({ length: 100 }, (_, i) => ({
+            name: `projects/${c.TARGET.project}/secrets/${op.id}/versions/${(page - 1) * 100 + i + 1}`,
+            state: "ENABLED",
+          })),
+          ...(page < 5 ? { nextPageToken: String(page + 1) } : {}),
+        },
+      };
+    });
+    expect(report.collection).toBe("complete");
+    expect(
+      report.records.find((r: any) => r.id === op.id).data.items,
+    ).toHaveLength(500);
+    expect(() => c.serialize(report)).not.toThrow();
+  });
+  it("stops at the request budget and preserves a serializable incomplete report", async () => {
+    const f = fixture();
+    f.env.PROD_REMITTANCE_PROOF_STORAGE_PROVIDER = "s3";
+    for (const key of [...c.OPTIONAL_SECRETS, ...c.ARTIFACT_SECRETS])
+      f.env[`PROD_${key}_SECRET`] = `selected-${key.toLowerCase()}`;
+    const report = await c.collect(f.env, SHA, async (d: any) => {
+      const u = new URL(d.url);
+      if (u.pathname.endsWith("/versions")) {
+        const page = Number(u.searchParams.get("pageToken") || 1),
+          name = u.pathname.slice(4);
+        return {
+          status: 200,
+          body: {
+            versions: [{ name: `${name}/1`, state: "ENABLED" }],
+            ...(page < 5 ? { nextPageToken: String(page + 1) } : {}),
+          },
+        };
+      }
+      if (u.pathname.includes("/revisions/")) {
+        const service = f.plan.services.find((v: any) =>
+          u.pathname.includes(`/services/${v.name}/`),
+        );
+        return {
+          status: 200,
+          body: {
+            name: u.pathname.slice(4),
+            containers: [
+              {
+                image: `${f.plan.registry}/${service.id}@sha256:${"c".repeat(64)}`,
+              },
+            ],
+            serviceAccount: c.TARGET.runtime,
+          },
+        };
+      }
+      const response = await f.transport(d);
+      if (
+        u.pathname.includes("/services/") &&
+        !u.pathname.endsWith(":getIamPolicy")
+      ) {
+        const name = response.body.name;
+        response.body.trafficStatuses = Array.from({ length: 10 }, (_, i) => ({
+          revision:
+            i === 0
+              ? response.body.latestReadyRevision
+              : `${name}/revisions/prod-rev-${i}`,
+          percent: 10,
+        }));
+      }
+      return response;
+    });
+    expect(report.collection).toBe("incomplete");
+    expect(report.requests).toBe(c.LIMITS.requests);
+    expect(
+      report.records.some((r: any) => r.code === "REQUEST_BOUND_EXCEEDED"),
+    ).toBe(true);
+    expect(() => c.serialize(report)).not.toThrow();
+  });
+  it("enforces the collection deadline and keeps earlier filtered observations", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture();
+      let first = true;
+      const report = await c.collect(f.env, SHA, async (d: any) => {
+        const result = await f.transport(d);
+        if (first) {
+          first = false;
+          vi.setSystemTime(Date.now() + c.LIMITS.collectionMs);
+        }
+        return result;
+      });
+      expect(report.requests).toBe(1);
+      expect(report.collection).toBe("incomplete");
+      expect(
+        report.records.some((r: any) => r.code === "COLLECTION_TIMEOUT"),
+      ).toBe(true);
+      expect(() => c.serialize(report)).not.toThrow();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("rejects an arbitrary GET at the hosted boundary and caps response bytes", async () => {
+    const spy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: (async function* () {
+        yield Buffer.alloc(c.LIMITS.bytes + 1);
+      })(),
+    });
+    vi.stubGlobal("fetch", spy);
+    try {
+      await expect(
+        c.hostedTransport(
+          { method: "GET", url: "https://provider.example.invalid" },
+          "MASKED",
+        ),
+      ).rejects.toThrow();
+      expect(spy).not.toHaveBeenCalled();
+      const f = fixture();
+      await expect(
+        c.hostedTransport(
+          c.requestDescriptor(f.plan, f.plan.operations[0]),
+          "MASKED",
+        ),
+      ).rejects.toThrow("RESPONSE_BOUND_EXCEEDED");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it("marks a foreign runtime, secret version owner or missing IAP identity unverified", async () => {
+    for (const kind of ["service", "versions", "backends"]) {
+      const f = fixture(),
+        op = f.plan.operations.find((o: any) => o.kind === kind),
+        body = f.responses.get(new URL(op.url).pathname).body;
+      if (kind === "service")
+        body.template.serviceAccount = "dev@other.iam.gserviceaccount.com";
+      if (kind === "versions")
+        body.versions[0].name =
+          "projects/" + c.TARGET.project + "/secrets/foreign/versions/1";
+      if (kind === "backends") delete body.items[0].iap.oauth2ClientId;
+      const report = await c.collect(f.env, SHA, f.transport);
+      expect(report.collection).toBe("incomplete");
+      expect(() => c.serialize(report)).not.toThrow();
+    }
+  });
+});
+
+describe("verified Google discovery contract snapshot", () => {
+  it("uses GET paths and selectors checked against the official selected API versions", async () => {
+    const contracts = JSON.parse(
+      readFileSync(
+        "operations/verification/production-readonly-inventory/api-contracts.json",
+        "utf8",
+      ),
+    ).methods;
+    const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const f = fixture();
+    await c.collect(f.env, SHA, f.transport);
+    for (const request of f.calls) {
+      const u = new URL(request.url),
+        url = u.origin + u.pathname;
+      const matches = contracts.filter(
+        (m: any) =>
+          new RegExp(
+            "^" +
+              (m.baseUrl + m.path)
+                .split(/(\{[^}]+\})/)
+                .map((p: string) =>
+                  p.startsWith("{")
+                    ? p.startsWith("{+")
+                      ? "[^?]+"
+                      : "[^/?]+"
+                    : escape(p),
+                )
+                .join("") +
+              "$",
+          ).test(url) && m.verifiedSelector === u.searchParams.get("fields"),
+      );
+      expect(matches.length).toBeGreaterThan(0);
+      expect(matches.every((m: any) => m.httpMethod === request.method)).toBe(
+        true,
+      );
+    }
+  });
+});
+
+describe("secret version canonical project identity", () => {
+  it("rejects foreign numeric projects and accepts only the observed project number", async () => {
+    for (const project of ["123456789", "999999999"]) {
+      const f = fixture(),
+        op = f.plan.operations.find((o: any) => o.kind === "versions");
+      const response = f.responses.get(new URL(op.url).pathname);
+      response.body.versions[0].name = `projects/${project}/secrets/${op.id}/versions/1`;
+      const report = await c.collect(f.env, SHA, f.transport);
+      expect(report.collection).toBe(
+        project === "123456789" ? "complete" : "incomplete",
+      );
+    }
   });
 });

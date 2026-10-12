@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- pure CommonJS boundary fixture */
 const {
   TOPOLOGY,
 } = require("../../../operations/verification/production-release-rail/rail.cjs");
@@ -157,7 +158,7 @@ function fixture() {
       body = {
         bindings: [
           {
-            role: "roles/iam.serviceAccountUser",
+            role: "roles/run.invoker",
             members: [
               `serviceAccount:${env.PROD_DEPLOYER_IDENTITY}`,
               `user:${SENTINEL}@example.invalid`,

@@ -18,9 +18,10 @@ const SECRET_NAME = /^[a-zA-Z0-9_-]{1,255}$/;
 const LIMITS = Object.freeze({
   pages: 5,
   pageSize: 100,
-  requests: 320,
+  requests: 256,
   bytes: 1048576,
   requestMs: 15000,
+  collectionMs: 480000,
 });
 function fail(code = "MALFORMED_METADATA") {
   const e = new Error(code);
@@ -126,7 +127,7 @@ const enumOf =
 const bool = (v) => typeof v === "boolean";
 const integer = (v) => Number.isSafeInteger(v) && v >= 0 && v <= 1000000;
 const numeric = str(/^\d{1,30}$/);
-const tokenType = str(/^[a-zA-Z0-9_+/=.-]{1,1024}$/);
+const tokenType = str(/^[a-zA-Z0-9_+/=.-]{0,1024}$/);
 const resourceName = str(
   /^projects\/(?:drts-prod-devcc-20260825|\d+)\/[a-zA-Z0-9_@./%-]{1,300}$/,
 );
@@ -322,6 +323,7 @@ const ARTIFACT_SECRETS = [
   "REMITTANCE_PROOF_S3_SESSION_TOKEN",
 ];
 const authorizedOperations = new WeakMap();
+const authorizedDescriptors = new WeakSet();
 function inventory(env) {
   const operations = [],
     gaps = [];
@@ -364,6 +366,11 @@ function inventory(env) {
         "service",
         `https://run.googleapis.com/v2/${runRoot}/services/${actual}`,
       );
+      add(
+        `${id}-policy`,
+        "policy",
+        `https://run.googleapis.com/v2/${runRoot}/services/${actual}:getIamPolicy`,
+      );
     }
   }
   if (new Set(services.map((s) => s.name)).size !== services.length)
@@ -390,7 +397,15 @@ function inventory(env) {
       "release-smoke-headers",
     ].map((s) => `${prefix}-${s}`),
   );
-  for (const key of [...OPTIONAL_SECRETS, ...ARTIFACT_SECRETS]) {
+  for (const key of [
+    ...OPTIONAL_SECRETS,
+    ...ARTIFACT_SECRETS.filter(
+      (key) =>
+        env[
+          `PROD_${key.startsWith("DOCUMENT_") ? "DOCUMENT_ARTIFACT" : "REMITTANCE_PROOF"}_STORAGE_PROVIDER`
+        ] === "s3",
+    ),
+  ]) {
     const actual = env[`PROD_${key}_SECRET`];
     if (actual) {
       if (!SECRET_NAME.test(actual)) fail("CONFIG_REJECTED");
@@ -452,7 +467,8 @@ function inventory(env) {
       }[provider])
         if (!env[`PROD_${key}_SECRET`]) gap(key, "secret-selection");
   } else gap("public-entry-config", "iap-selection");
-  for (const secret of [...secrets].sort())
+  for (const secret of [...secrets].sort()) {
+    if (!SECRET_NAME.test(secret)) fail("CONFIG_REJECTED");
     add(
       secret,
       "versions",
@@ -460,6 +476,7 @@ function inventory(env) {
       "versions",
       "versions",
     );
+  }
   const registry =
     env.PROD_ARTIFACT_REGISTRY ||
     `${env.PROD_ARTIFACT_REGION || TARGET.region}-docker.pkg.dev/${env.PROD_ARTIFACT_PROJECT_ID || TARGET.project}/${env.PROD_ARTIFACT_REPOSITORY || "drts"}`;
@@ -510,7 +527,6 @@ function inventory(env) {
   ]) {
     const url = `https://iam.googleapis.com/v1/${root}/serviceAccounts/${email}`;
     add(id, "account", url);
-    add(`${id}-policy`, "policy", `${url}:getIamPolicy`);
   }
   const plan = Object.freeze({
     operations: Object.freeze(operations.map(Object.freeze)),
@@ -544,10 +560,15 @@ function requestDescriptor(plan, operation, pageToken) {
       url.searchParams.set("pageToken", pageToken);
     }
   } else if (pageToken !== undefined) fail("OPERATION_REJECTED");
-  return { method: "GET", url: url.toString() };
+  if (operation.kind === "policy")
+    url.searchParams.set("options.requestedPolicyVersion", "3");
+  const descriptor = Object.freeze({ method: "GET", url: url.toString() });
+  authorizedDescriptors.add(descriptor);
+  return descriptor;
 }
 async function hostedTransport(descriptor, accessToken) {
   if (
+    !authorizedDescriptors.has(descriptor) ||
     descriptor.method !== "GET" ||
     typeof accessToken !== "string" ||
     !accessToken
@@ -587,13 +608,28 @@ const SAFE_CODES = [
   "REQUEST_FAILED",
   "IDENTITY_MISMATCH",
   "AUTH_REQUIRED",
+  "COLLECTION_TIMEOUT",
 ];
 function errorRecord(op, error) {
+  const resource =
+    op.kind === "account"
+      ? op.id
+      : op.kind === "sql"
+        ? "drts-prod-db"
+        : new URL(op.url).pathname
+            .replace(/^\/(?:v[123]|compute\/v1)\//, "")
+            .replace(":getIamPolicy", "");
   return {
     id: op.id,
     kind: op.kind,
+    resource,
     status: "blocked",
     code: SAFE_CODES.includes(error?.code) ? error.code : "REQUEST_FAILED",
+    ...(Number.isInteger(error?.httpStatus) &&
+    error.httpStatus >= 100 &&
+    error.httpStatus <= 599
+      ? { httpStatus: error.httpStatus }
+      : {}),
   };
 }
 async function collect(env, head, transport) {
@@ -602,7 +638,9 @@ async function collect(env, head, transport) {
   const plan = inventory(env),
     identity = guard(env, head);
   const records = [...plan.gaps];
+  const deadline = Date.now() + LIMITS.collectionMs;
   let requests = 0;
+  let projectNumber;
   const rawLists = {},
     revisionsToRead = [];
   const partialRecord = (op, e) => {
@@ -612,9 +650,15 @@ async function collect(env, head, transport) {
       items = e.partialItems
         .filter(
           (v) =>
-            v.name?.endsWith("/" + v.name.split("/").pop()) &&
+            v.name &&
             /^[1-9][0-9]*$/.test(v.name.split("/").pop()) &&
-            v.name.includes(`/secrets/${op.id}/versions/`) &&
+            (v.name.startsWith(
+              `projects/${TARGET.project}/secrets/${op.id}/versions/`,
+            ) ||
+              (projectNumber &&
+                v.name.startsWith(
+                  `projects/${projectNumber}/secrets/${op.id}/versions/`,
+                ))) &&
             v.state,
         )
         .map((v) => ({ version: v.name.split("/").pop(), state: v.state }));
@@ -637,19 +681,26 @@ async function collect(env, head, transport) {
       seen = new Set();
     try {
       do {
-        if (++requests > LIMITS.requests) fail("REQUEST_BOUND_EXCEEDED");
-        if (pages++ >= LIMITS.pages || (next && seen.has(next)))
+        if (Date.now() >= deadline) fail("COLLECTION_TIMEOUT");
+        if (pages >= LIMITS.pages || (next && seen.has(next)))
           fail("PAGINATION_TRUNCATED");
+        if (requests >= LIMITS.requests) fail("REQUEST_BOUND_EXCEEDED");
+        pages++;
         if (next) seen.add(next);
-        const result = await transport(requestDescriptor(plan, op, next));
-        if (result.status !== 200)
-          fail(
+        const descriptor = requestDescriptor(plan, op, next);
+        requests++;
+        const result = await transport(descriptor);
+        if (result.status !== 200) {
+          const e = new Error("Google control-plane HTTP error");
+          e.code =
             result.status === 403
               ? "PERMISSION_DENIED"
               : result.status === 404
                 ? "MISSING"
-                : "HTTP_ERROR",
-          );
+                : "HTTP_ERROR";
+          e.httpStatus = result.status;
+          throw e;
+        }
         const body = validate(result.body, schemas[op.schemaKey]);
         if (!op.listKey) return body;
         values.push(...(body[op.listKey] || []));
@@ -671,8 +722,10 @@ async function collect(env, head, transport) {
         rawLists[op.kind] = data.items;
         continue;
       }
-      if (op.kind === "project")
+      if (op.kind === "project") {
         requireFields(data, ["name", "projectId", "state"]);
+        projectNumber = data.name.split("/")[1];
+      }
       if (op.kind === "sql") {
         requireFields(data, ["name", "region", "state", "settings"]);
         requireFields(data.settings, ["backupConfiguration"]);
@@ -747,8 +800,11 @@ async function collect(env, head, transport) {
               (!v.name.startsWith(
                 `projects/${TARGET.project}/secrets/${op.id}/versions/`,
               ) &&
-                !new RegExp(`^projects/[0-9]+/secrets/${op.id}/versions/`).test(
-                  v.name,
+                !(
+                  projectNumber &&
+                  v.name.startsWith(
+                    `projects/${projectNumber}/secrets/${op.id}/versions/`,
+                  )
                 )) ||
               !v.state,
           )
@@ -785,11 +841,24 @@ async function collect(env, head, transport) {
             (n, b) => n + (b.members?.length || 0),
             0,
           ),
-          unconditionalDeployerActAs: bindings.some(
+          unconditionalRuntimeInvoker: bindings.some(
             (b) =>
-              b.role === "roles/iam.serviceAccountUser" &&
+              b.role === "roles/run.invoker" &&
+              !b.condition &&
+              b.members?.includes(`serviceAccount:${TARGET.runtime}`),
+          ),
+          unconditionalDeployerInvoker: bindings.some(
+            (b) =>
+              b.role === "roles/run.invoker" &&
               !b.condition &&
               b.members?.includes(`serviceAccount:${plan.deployer}`),
+          ),
+          publicInvoker: bindings.some(
+            (b) =>
+              b.role === "roles/run.invoker" &&
+              b.members?.some((m) =>
+                ["allUsers", "allAuthenticatedUsers"].includes(m),
+              ),
           ),
         };
         records.push({
@@ -901,7 +970,9 @@ const outputSchemas = {
   policy: {
     bindingCount: integer,
     memberCount: integer,
-    unconditionalDeployerActAs: bool,
+    unconditionalRuntimeInvoker: bool,
+    unconditionalDeployerInvoker: bool,
+    publicInvoker: bool,
   },
   versions: {
     items: [{ version: numeric, state: schemas.versions.versions[0].state }],
@@ -952,12 +1023,12 @@ function serialize(report) {
   if (
     !Array.isArray(report.records) ||
     report.records.length > 500 ||
-    report.requests > LIMITS.requests + 1
+    report.requests > LIMITS.requests
   )
     fail();
   for (const record of report.records) {
     validate(record, {
-      id: str(/^[a-zA-Z0-9_:-]{1,255}$/),
+      id: str(/^[a-zA-Z0-9_:-]{1,320}$/),
       kind: enumOf(
         ...Object.keys(outputSchemas),
         "secret-selection",
@@ -965,6 +1036,8 @@ function serialize(report) {
         "auth",
       ),
       status: enumOf("observed", "blocked", "unverified"),
+      resource: str(/^[a-zA-Z0-9_:/-]{1,400}$/),
+      httpStatus: (v) => Number.isInteger(v) && v >= 100 && v <= 599,
       code: enumOf(...SAFE_CODES),
       data: () => true,
     });
@@ -986,6 +1059,23 @@ function serialize(report) {
       : "incomplete")
   )
     fail();
+  if (report.collection === "complete") {
+    for (const [kind, count] of Object.entries({
+      project: 1,
+      sql: 1,
+      service: 10,
+      revision: 10,
+      job: 1,
+      repository: 1,
+      images: 1,
+      versions: 19,
+      account: 2,
+      policy: 10,
+      iap: 10,
+    }))
+      if (report.records.filter((r) => r.kind === kind).length < count)
+        fail("INSUFFICIENT_OBSERVATION");
+  }
   return JSON.stringify(report, null, 2) + "\n";
 }
 async function main() {
