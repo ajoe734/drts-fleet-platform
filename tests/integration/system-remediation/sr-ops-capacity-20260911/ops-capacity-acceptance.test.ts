@@ -355,6 +355,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         let peakDispatchable = 0;
         let isLawful = false;
         let isPolling = true;
+        let pollError: Error | null = null;
 
         const pollDb = async () => {
           while (isPolling) {
@@ -367,21 +368,31 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
               const currentDispatchable = parseInt(String(dispatchRows[0]?.count || "0"), 10);
               if (currentDispatchable > peakDispatchable) peakDispatchable = currentDispatchable;
 
-              const { rows: lawfulRows } = await pool.query(`SELECT 1 FROM ops.phase1_owned_orders WHERE status IN ('delayed_queue', 'no_supply') AND order_id = ANY($1::text[]) LIMIT 1`, [orderIds]);
-              if (lawfulRows.length > 0) isLawful = true;
-            } catch {
-              // ignore transient polling errors
+              const { rows: lawfulRows } = await pool.query(`SELECT count(*) FROM ops.phase1_owned_orders WHERE status IN ('delayed_queue', 'no_supply') AND order_id = ANY($1::text[])`, [orderIds]);
+              const currentLawful = parseInt(String(lawfulRows[0]?.count || "0"), 10);
+              if (currentLawful >= 50) isLawful = true;
+            } catch (e) {
+              pollError = e instanceof Error ? e : new Error(String(e));
+              isPolling = false;
+            }
+            if (isPolling) {
+              await new Promise(resolve => setTimeout(resolve, 2000));
             }
           }
         };
 
         const pollPromise = pollDb();
-        const summary = await runPlan(plan, recordsPath, {
-          baseSha: process.env.WORKFLOW_SHA ?? "local",
-          candidateSha: process.env.CANDIDATE_SHA ?? "local",
-        });
-        isPolling = false;
-        await pollPromise;
+        let summary;
+        try {
+          summary = await runPlan(plan, recordsPath, {
+            baseSha: process.env.WORKFLOW_SHA ?? "local",
+            candidateSha: process.env.CANDIDATE_SHA ?? "local",
+          });
+        } finally {
+          isPolling = false;
+          await pollPromise;
+        }
+        if (pollError) throw pollError;
 
         // The run must be the full accepted 15-minute baseline burst, never
         // a short/mock/skipped stand-in.
