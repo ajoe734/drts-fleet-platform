@@ -43,7 +43,7 @@
       "baseUrl": "https://run.googleapis.com/",
       "path": "v2/{+name}",
       "responseSchema": "GoogleCloudRunV2Service",
-      "verifiedSelector": "name,ingress,latestReadyRevision,latestCreatedRevision,trafficStatuses(revision,percent),template(containers(image),serviceAccount)",
+      "verifiedSelector": "name,ingress,latestReadyRevision,latestCreatedRevision,trafficStatuses(revision,percent),template(containers(image,resources(cpuIdle)),serviceAccount,scaling(minInstanceCount,maxInstanceCount)),scaling(minInstanceCount,maxInstanceCount,manualInstanceCount,scalingMode)",
       "partialResponseParameter": {
         "location": "query",
         "description": "Selector specifying which fields to include in a partial response.",
@@ -59,7 +59,7 @@
       "baseUrl": "https://run.googleapis.com/",
       "path": "v2/{+name}",
       "responseSchema": "GoogleCloudRunV2Revision",
-      "verifiedSelector": "name,containers(image),serviceAccount",
+      "verifiedSelector": "name,containers(image,resources(cpuIdle)),scaling(minInstanceCount,maxInstanceCount),serviceAccount",
       "partialResponseParameter": {
         "location": "query",
         "description": "Selector specifying which fields to include in a partial response.",
@@ -194,5 +194,25 @@
         "type": "string"
       }
     }
-  ]
+  ],
+  "backgroundFieldsSource": {
+    "observedAt": "2026-10-12T11:51:29.439782+00:00",
+    "discoveryUrl": "https://run.googleapis.com/$discovery/rest?version=v2",
+    "revision": "20261002",
+    "discoverySha256": "ba796aea80bbff79b00d04ef30dd49457b2f531394d381e92db5a79d410c9f1a",
+    "source": "Supervisor unauthenticated public definition receipt; not live resource observations",
+    "selectedTypes": {
+      "cpuIdle": "boolean",
+      "instanceCounts": "nonnegative int32 (0..2147483647)",
+      "scalingMode": ["SCALING_MODE_UNSPECIFIED", "AUTOMATIC", "MANUAL"]
+    },
+    "independentPublicRecheck": {
+      "at": "2026-10-12T12:04:28.012Z",
+      "revision": "20261002",
+      "rawResponseSha256": "9320189fc2a36683668705b50e6a967ee5551e0b238fbf6108ef5986e6b8dc21",
+      "publicDocumentOnly": true,
+      "authenticated": false,
+      "result": "all selected paths and background types verified"
+    }
+  }
 }
