@@ -173,10 +173,10 @@ export function assertAcceptancePassed(acceptance) {
   };
 
   if (!acceptance.concurrency ||
-      !Number.isFinite(acceptance.concurrency.intake) || acceptance.concurrency.intake < 50 ||
-      !Number.isFinite(acceptance.concurrency.report) || acceptance.concurrency.report < 50 ||
+      !Number.isInteger(acceptance.concurrency.intake) || acceptance.concurrency.intake < 50 ||
+      !Number.isInteger(acceptance.concurrency.report) || acceptance.concurrency.report < 50 ||
       !acceptance.backlog ||
-      !Number.isFinite(acceptance.backlog.dispatchable) || acceptance.backlog.dispatchable < 500 ||
+      !Number.isInteger(acceptance.backlog.dispatchable) || acceptance.backlog.dispatchable < 500 ||
       !acceptance.degradation || acceptance.degradation.isLawful !== true) {
     throw new Error(`Workload failed: missing genuine concurrency/backlog/degradation measurements or values insufficient`);
   }
@@ -190,9 +190,8 @@ export function assertAcceptancePassed(acceptance) {
   }
 
   const checkLagConsistency = (lag, exactCount) => {
-    if (!Number.isInteger(lag.count) || lag.count < 0) return false;
+    if (!Number.isInteger(lag.count) || lag.count <= 0) return false;
     if (exactCount !== undefined && lag.count !== exactCount) return false;
-    if (lag.count === 0) return true;
     return Number.isFinite(lag.minMs) && lag.minMs >= 0 &&
            Number.isFinite(lag.maxMs) && lag.maxMs >= 0 &&
            Number.isFinite(lag.avgMs) && lag.avgMs >= 0 &&
@@ -258,14 +257,43 @@ export function assertAcceptancePassed(acceptance) {
   if (!acceptance.dispatchAttemptCoverage) {
     throw new Error(`Workload failed: missing dispatchAttemptCoverage`);
   }
-  if (acceptance.dispatchAttemptCoverage.unattemptedUnlawful > 0) {
-    throw new Error(`Workload failed: ${acceptance.dispatchAttemptCoverage.unattemptedUnlawful} items missing attempts without lawful status`);
+  const { attempted, unattemptedLawful, unattemptedUnlawful, unattemptedLawfulReasons } = acceptance.dispatchAttemptCoverage;
+
+  if (!Number.isInteger(unattemptedUnlawful) || unattemptedUnlawful < 0) {
+    throw new Error(`Workload failed: invalid unattemptedUnlawful count`);
   }
-  if (acceptance.dispatchAttemptCoverage.attempted + acceptance.dispatchAttemptCoverage.unattemptedLawful !== totalStatusCount) {
+  if (!Number.isInteger(unattemptedLawful) || unattemptedLawful < 0) {
+    throw new Error(`Workload failed: invalid unattemptedLawful count`);
+  }
+  if (!Number.isInteger(attempted) || attempted < 0) {
+    throw new Error(`Workload failed: invalid attempted count`);
+  }
+  
+  if (unattemptedUnlawful > 0) {
+    throw new Error(`Workload failed: ${unattemptedUnlawful} items missing attempts without lawful status`);
+  }
+  if (attempted + unattemptedLawful !== totalStatusCount) {
     throw new Error(`Workload failed: attempt coverage does not match total status count`);
   }
 
-  const expectedDispatchLagCount = acceptance.dispatchAttemptCoverage.attempted;
+  const allowedUnattemptedStatuses = new Set(["created", "recording_pending", "ready_for_dispatch", "delayed_queue", "exception_hold", "no_supply"]);
+  let possibleUnattemptedCount = 0;
+  for (const [status, count] of Object.entries(acceptance.dispatchOrderStatusDistribution)) {
+    if (allowedUnattemptedStatuses.has(status)) {
+      possibleUnattemptedCount += count;
+    }
+  }
+  if (unattemptedLawful > possibleUnattemptedCount) {
+    throw new Error(`Workload failed: purported lawful remainders conflict with actual unattempted statuses`);
+  }
+
+  if (unattemptedLawful > 0) {
+    if (!Array.isArray(unattemptedLawfulReasons) || unattemptedLawfulReasons.length !== unattemptedLawful) {
+      throw new Error(`Workload failed: purported lawful remainders lack resource reason evidence`);
+    }
+  }
+
+  const expectedDispatchLagCount = attempted;
 
   // Dispatch queue lag must have at least some samples, but may not be 4500 if some remain unassigned/queued lawfully.
   if (
