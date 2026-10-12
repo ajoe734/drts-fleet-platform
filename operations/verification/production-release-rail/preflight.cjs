@@ -30,6 +30,15 @@ function validators() {
   const root = path.resolve(__dirname, "../../..");
   const load = (file) => require(path.join(root, "apps/api/src", file));
   return {
+    document: load(
+      "common/document-artifacts/document-artifact-runtime.config.ts",
+    ).createDocumentArtifactStore,
+    proofStorage: load(
+      "modules/billing-settlement/remittance-proof-runtime.config.ts",
+    ).createRemittanceProofStorage,
+    proofScanner: load(
+      "modules/billing-settlement/remittance-proof-runtime.config.ts",
+    ).createRemittanceProofScanner,
     auth: load("config/auth-startup-config.ts").buildAuthStartupConfigReport,
     payment: load("modules/passenger-app/payment/payment-runtime.config.ts")
       .paymentRuntimeFromEnv,
@@ -64,6 +73,7 @@ function validateRuntime(plan, values, checks = validators()) {
   };
   const report = checks.auth(env);
   if (!report.valid) reject(report.issues.map((i) => i.control).join(", "));
+  validateArtifactRuntime(env, checks);
   const providers = plan.services.find((s) => s.id === "passenger-app-web")
     .publicEntry.expectedProviders;
   // Match PassengerAppModule's actual SMS_PORT binding, rather than treating
@@ -248,6 +258,47 @@ function validateRuntime(plan, values, checks = validators()) {
   } catch {
     reject("bank IAP/artifact signing configuration");
   }
+}
+function validateArtifactRuntime(env, checks = validators()) {
+  let document, storage, scanner;
+  try {
+    document = checks.document(env);
+  } catch {
+    reject("PROD_DOCUMENT_ARTIFACT_ storage factory configuration");
+  }
+  try {
+    storage = checks.proofStorage(env);
+  } catch {
+    reject("PROD_REMITTANCE_PROOF_ storage factory configuration");
+  }
+  try {
+    scanner = checks.proofScanner(storage, env);
+  } catch {
+    reject("PROD_REMITTANCE_PROOF_ scanner factory configuration");
+  }
+  // These availability reports describe configured adapters only. They do not
+  // prove live bucket IAM, bytes, scanner health or C125 legal-role acceptance.
+  if (
+    ![
+      "GcsDocumentArtifactStoreAdapter",
+      "S3DocumentArtifactStoreAdapter",
+    ].includes(document.constructor.name)
+  )
+    reject(
+      "PROD_DOCUMENT_ARTIFACT_STORAGE_PROVIDER durable adapter unavailable",
+    );
+  if (storage.availability().state !== "available")
+    reject(
+      "PROD_REMITTANCE_PROOF_STORAGE_PROVIDER durable adapter unavailable",
+    );
+  if (
+    scanner.availability().state !== "available" ||
+    !["clamd", "cloud-run-clamd"].includes(scanner.providerName)
+  )
+    reject(
+      "PROD_REMITTANCE_PROOF_SCANNER_PROVIDER real scanner adapter unavailable",
+    );
+  return { document, storage, scanner };
 }
 function validateSmokeHeaders(plan, raw) {
   let headers;
@@ -462,6 +513,7 @@ if (require.main === module) {
 module.exports = {
   validators,
   validateRuntime,
+  validateArtifactRuntime,
   validateSmokeHeaders,
   preflight,
 };

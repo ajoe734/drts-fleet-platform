@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- executable CommonJS deployment rail */
 const { publicEntryConfig } = require("./public-entry.cjs");
+const { artifactConfig } = require("./artifact-config.cjs");
 // This is the configuration/argument builder used by deploy-prod.yml.
 // It performs no cloud calls. Plans contain names and pinned versions, never values.
 const TOPOLOGY = [
@@ -245,6 +246,7 @@ function buildPlan(vars, sha, tag, deployer) {
       if (!/^[a-zA-Z0-9_-]+$/.test(name)) reject(`PROD_${field}_SECRET`);
       secretNames[field] = name;
     }
+  artifactConfig(vars, apiEnv, secretNames, need, reject, https);
   const backend = need("PROD_MAP_PROVIDER_BACKEND");
   if (!["mock", "google"].includes(backend))
     reject("PROD_MAP_PROVIDER_BACKEND");
