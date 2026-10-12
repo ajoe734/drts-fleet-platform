@@ -67,7 +67,7 @@ export class ReportingFilingController {
       required: true,
       payload: command,
       execute: async () => {
-        const data = this.reportingFilingService.createReportJob(
+        const data = await this.reportingFilingService.createReportJobDurably(
           command,
           requestId,
         );
@@ -99,7 +99,7 @@ export class ReportingFilingController {
       required: true,
       payload: { ...command, tenantId: normalizedTenantId },
       execute: async () => {
-        const data = this.reportingFilingService.createReportJob(
+        const data = await this.reportingFilingService.createReportJobDurably(
           command,
           requestId,
           normalizedTenantId,

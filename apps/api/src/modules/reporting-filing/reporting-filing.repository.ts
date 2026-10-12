@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
+import type { PoolClient } from "pg";
 
 import type {
   FilingPackageRecord,
@@ -59,6 +60,8 @@ export type StoredReportJobRecord = ReportJobRecord & {
   startedAt?: string | null;
 };
 
+export type ReportJobWriter = (job: StoredReportJobRecord) => Promise<void>;
+
 export type StoredFilingPackageRecord = FilingPackageRecord & {
   manifest: FilingPackageManifest | null;
   downloadMetadata: FilingPackageDownloadMetadata | null;
@@ -82,6 +85,97 @@ export class ReportingFilingRepository {
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  // The same producer path supports an atomic, real recovery backlog. No
+  // accepted response or worker scheduling may precede COMMIT.
+  async enqueueReportJobs(jobs: readonly StoredReportJobRecord[]) {
+    if (!this.isEnabled()) return;
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      for (const job of jobs) {
+        if (job.status !== "queued") throw new Error("Expected queued report");
+        await client.query(
+          `INSERT INTO admin.phase1_report_jobs
+           (job_id, job_type, status, created_at, updated_at, record)
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+          [job.jobId, job.jobType, job.status, job.createdAt, job.updatedAt,
+            JSON.stringify(job)],
+        );
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      try { await client.query("ROLLBACK"); } catch { /* discard below */ }
+      // A connection with uncertain transaction/commit state is never pooled.
+      client.release(true);
+      throw error;
+    }
+    client.release();
+  }
+
+  async listRunnableReportJobIds(): Promise<string[]> {
+    if (!this.isEnabled()) return [];
+    const result = await this.databaseService!.query<{ job_id: string }>(
+      `SELECT job_id FROM admin.phase1_report_jobs
+       WHERE status IN ('pending', 'queued', 'running')
+       ORDER BY created_at, job_id`,
+    );
+    return result.rows.map((row) => row.job_id);
+  }
+
+  // Hold a session lock on a dedicated connection through the entire build.
+  // Another process cannot recover a live job; process/connection loss releases
+  // ownership without an expiring lease permitting two concurrent builders.
+  async withReportJobClaim(
+    jobId: string,
+    run: (job: StoredReportJobRecord, write: ReportJobWriter) => Promise<void>,
+  ): Promise<boolean> {
+    if (!this.isEnabled()) throw new Error("Durable report storage is disabled");
+    const client: PoolClient = await this.databaseService!.connect();
+    let locked = false;
+    let discard = false;
+    try {
+      const result = await client.query<{ locked: boolean }>(
+        "SELECT pg_try_advisory_lock(hashtextextended($1, 123)) AS locked",
+        [jobId],
+      );
+      locked = result.rows[0]?.locked === true;
+      if (!locked) return false;
+      const current = await client.query<JsonRecordRow>(
+        `SELECT record FROM admin.phase1_report_jobs
+         WHERE job_id = $1 AND status IN ('pending', 'queued', 'running')`,
+        [jobId],
+      );
+      if (!current.rows[0]) return false;
+      const job = this.parseRecord<StoredReportJobRecord>(
+        current.rows[0].record, "admin.phase1_report_jobs",
+      );
+      if (job.jobId !== jobId) throw new Error("Report claim ID mismatch");
+      let previousStatus = job.status;
+      await run(job, async (next) => {
+        if (next.jobId !== jobId) throw new Error("Report write ID mismatch");
+        const saved = await client.query(
+          `UPDATE admin.phase1_report_jobs SET
+             status = $2, updated_at = $3, record = $4::jsonb
+           WHERE job_id = $1 AND status = $5 RETURNING job_id`,
+          [jobId, next.status, next.updatedAt, JSON.stringify(next), previousStatus],
+        );
+        if (saved.rowCount !== 1) throw new Error("Report state changed during claim");
+        previousStatus = next.status;
+      });
+      return true;
+    } finally {
+      if (locked) {
+        try {
+          await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 123))", [jobId]);
+        } catch (error) {
+          discard = true;
+          this.reportPersistenceFailure(error, "release_report_claim");
+        }
+      }
+      client.release(discard);
+    }
   }
 
   async loadState(): Promise<ReportingFilingState> {

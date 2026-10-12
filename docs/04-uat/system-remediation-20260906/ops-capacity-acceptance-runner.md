@@ -278,3 +278,20 @@ green alone cannot establish workload acceptance. Local evidence is under
 hashes, commands and distinct pass/fail/not-run outcomes. No runtime, deploy,
 provider operation, original-held-task resumption, acceptance waiver or partial
 all-fixed handoff was performed. Both required keys remain OPEN.
+
+### Exact report-worker continuation (Codex2, 2026-10-12)
+
+Supervisor's `REPORT-WORKER-TECHNICAL-CONTINUATION.md` expands the original
+service/repository grant to the durable worker and the two report-create
+controller callers. This supersedes the F6 allocation limitation above only;
+all historical findings, source credit, 112 raw HTTP429 errors and required
+900s/900/4500/450/SLO/security/SQL evidence remain. Four malformed published
+ancestors still impose publication/provenance HOLD. These are unpublished
+local checkpoints; neither acceptance key is closed and no push, handoff or
+hosted dispatch is authorized yet.
+
+| Finding / key | Formal source / adjacent result | Check and evidence | Remaining |
+| --- | --- | --- | --- |
+| Durable acknowledgement | Original266b controller + `createReportJob` returned201 before the repository INSERT finished. Actual controller/service/repository test with only SQL write boundary blocked reproduced expected-false/actual-true. New two callers await `createReportJobDurably` and COMMIT. | `pnpm exec vitest run tests/unit/system-remediation/sr-ops-capacity-20260911/reporting-queue.test.ts`; old266b exit1, new working-source exit0. Logs in canonical `.local/c123-report-worker-20261012/old-266b-durable-ack.log` and `durable-ack-new.log`. First attempt lacked restored worktree dependency links, exit254, and is not reproduction evidence; links restored before exit1 run. | Full recovery/failure/shutdown/cross-worker regressions and migrated-PG verification still pending. |
+| F6 report executor / initial backlog | Bounded single FIFO worker uses existing JSON rows and a dedicated session advisory lock; state writes are awaited before publication. Yielding between jobs follows the accepted lower-priority async report model; no artificial service delay or quota/SLO change. | Implementation checkpoint, not throughput evidence. | Genuine run-owned50 persisted backlog, actual processing, SQL start/completion/error evidence still to implement and verify. |
+| Both required acceptance keys | Remain OPEN. Prior negative-payload evidence is retained. | No new candidate/CI/merge/900s result. | Publication HOLD, independent exact-candidate review/CI and original immutable hosted workflow remain required. |
