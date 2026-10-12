@@ -165,6 +165,12 @@ pnpm exec vitest run tests/unit/system-remediation/sr-auth-session-supersede-202
 
 Only run with the documented external-runtime prohibition guard and no DB configuration; do not run repository-wide local unit sweeps or any browser/E2E/HTTP/DB/Compose server. CI/deployment/runtime evidence is collected through the authorized hosted routes, not a VM substitute.
 
+### Started static checks — inherited failures are retained
+
+The complete historical reconciliation range `cf263f02… → 70a8e431…` was also checked, not silently replaced by an own-change range. Trailer validation **failed on 37 already-protected trunk commits**; broad `git diff --check` also failed on pre-existing source whitespace. Running the same complete checks at the untouched incoming `6bc5f4af…` basis reproduces **byte-for-byte identical failure output**, SHA-256 `f420ecff0f30a3b12e8f862c36521a8b8747039127c9cfc5b529602d6034e165` and `3040df75906beb3ed27536ffc3c079c80d738e1c6e2c8e050cd52cfbb607b6d2`, respectively. These are genuine retained inherited failures, not waived or repaired by this document.
+
+Separately, the actual own PR range from the authorized incoming `6bc5f4af…` passes the unmodified trailer and whitespace validators. New owner commits retain the literal original Task-ID subject and Pi/Codex trailers. Canonical consistency has zero findings, classification validates 6,338 files, and the one UAT document passes formatting. These scoped results do **not** claim the historical range is green, authorize editing other owners' source/history, alter the formal hosted checker base or replace independent review/mandatory CI. All original range inputs and exits remain available to that review.
+
 ## 10. Original acceptance contract — not recorded by prose
 
 The unchanged keys are `reviewed_bundle_provenance`, `authorized_shared_dev_candidate_or_concrete_blocker`, `same_sha_hosted_results`, `remaining_live_gates_not_fabricated`. Their applicability is assessed only through the supported lifecycle after exact independent review/mandatory CI/protected merge. Product runtime SHA, hosted test-merge SHA, protected source SHA and new document candidate SHA must be explicitly distinguished.
