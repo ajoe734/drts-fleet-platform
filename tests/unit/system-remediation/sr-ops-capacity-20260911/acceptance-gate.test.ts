@@ -77,8 +77,8 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
       result: "measurements_within_targets",
       durationSeconds: 900,
       fullBurstSchedule: true,
-      elapsedMs: 899000,
-      maxInFlight: 50,
+      elapsedMs: 899800, // elapsedMs must be at least 899800 for a 900s run
+      maxInFlight: 500, // Valid configuration value
       workflows: {
         booking: {
           requests: 900,
@@ -103,12 +103,22 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
         },
       },
     },
+    concurrency: {
+      intake: 50,
+      report: 50,
+    },
+    backlog: {
+      dispatchable: 500,
+    },
+    degradation: {
+      isLawful: true,
+    },
     queueLag: {
       report: { count: 450, minMs: 10, maxMs: 100, avgMs: 45 },
-      dispatchOrderWriteLag: { count: 4500, minMs: 5, maxMs: 50, avgMs: 20 },
+      dispatchOrderQueueLag: { count: 4500, minMs: 5, maxMs: 50, avgMs: 20 },
     },
     dispatchOrderStatusDistribution: {
-      COMPLETED: 4500,
+      completed: 4500,
     },
     readback: {
       booking: {
@@ -251,7 +261,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
 
   it("rejects when dispatchOrderStatusDistribution is empty", () => {
     const invalid = structuredClone(validAcceptance);
-    invalid.dispatchOrderStatusDistribution = {};
+    invalid.dispatchOrderStatusDistribution = {} as any;
     expect(() => assertAcceptancePassed(invalid)).toThrowError(
       /dispatchOrderStatusDistribution is empty/,
     );

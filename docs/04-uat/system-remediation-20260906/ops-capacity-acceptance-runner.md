@@ -166,3 +166,10 @@ While timer jitter in Node.js \`setTimeout\` exists, it is insufficient to estab
 - Runtime proof must only be gathered in the authorized existing isolated hosted workflow, and never by spinning up VM servers/PG/Docker instances here.
 - The 112 HTTP 429 errors and the missing acceptance gate checks remain genuine regressions. The original acceptance gate thresholds must not be relaxed.
 - Any product limiter changes or producer fixes require proper Supervisor registered scope/dependencies. Uncertainty is recorded until proven.
+
+## SR-OPS-CAPACITY-FAILCLOSED-20261012 Finding and Evidence Table
+
+| Role / Lineage | Unresolved Finding | Old SHA | New SHA | Constraints | Acceptance Key | Command | Exit Code | Result |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Claude/Claude2 (Historical), Gemini (Owner), Codex (Reviewer) | Gate incorrectly accepts missing/invalid/NaN measurements | `e0b841067eb46698f668529e1f19ab2a23f74d01` | Pending (CANDIDATE_SHA) | Restore `Number.isFinite`, enforce elapsed >= 899800, strict status distribution, true queue lag checks | `capacity_failed_summary_rejected` | `pnpm exec vitest run tests/unit/system-remediation/sr-ops-capacity-20260911/acceptance-gate.test.ts` | 0 | pass |
+| Claude/Claude2 (Historical), Gemini (Owner), Codex (Reviewer) | No genuine same-candidate full 900s HTTP/PG baseline with explicit queue/concurrency/degradation metrics | `e0b841067eb46698f668529e1f19ab2a23f74d01` | Pending (CANDIDATE_SHA) | Requires real hosted workflow run (no VM emulation), metrics must be genuinely retrieved, fail closed | `capacity_same_candidate_full_900s_valid_baseline` | Workflow Run | - | not-run |

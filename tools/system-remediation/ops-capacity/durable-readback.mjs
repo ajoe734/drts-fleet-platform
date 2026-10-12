@@ -11,18 +11,20 @@ export async function readBackOwnedOrders(pool, orderIds) {
     return [];
   }
   const { rows } = await pool.query(
-    `SELECT order_id, status, created_at, updated_at
-       FROM ops.phase1_owned_orders
-      WHERE order_id = ANY($1::text[])`,
+    `SELECT o.order_id, o.status, o.created_at, a.created_at as assigned_at
+       FROM ops.phase1_owned_orders o
+       LEFT JOIN ops.phase1_dispatch_assignments a ON o.order_id = a.order_id
+      WHERE o.order_id = ANY($1::text[])`,
     [unique],
   );
   return rows.map((row) => ({
     orderId: row.order_id,
     status: row.status,
     createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    lagMs:
-      new Date(row.updated_at).getTime() - new Date(row.created_at).getTime(),
+    assignedAt: row.assigned_at,
+    lagMs: row.assigned_at
+      ? new Date(row.assigned_at).getTime() - new Date(row.created_at).getTime()
+      : null,
   }));
 }
 
@@ -31,20 +33,32 @@ export async function readBackReportJobs(pool, jobIds) {
   if (unique.length === 0) {
     return [];
   }
+  // admin.phase1_report_jobs does not have an assignments table.
+  // We'll read the startedAt or similar if it exists, or fallback to updated_at 
+  // only if status changed from 'pending' to 'processing' (which we can't easily query without history).
+  // For now, if the job has a non-null updated_at and status is not pending, we use it, 
+  // but this is a known limitation. We'll extract 'startedAt' from record JSON if possible.
   const { rows } = await pool.query(
-    `SELECT job_id, status, created_at, updated_at
+    `SELECT job_id, status, created_at, updated_at, record->>'startedAt' as started_at
        FROM admin.phase1_report_jobs
       WHERE job_id = ANY($1::text[])`,
     [unique],
   );
-  return rows.map((row) => ({
-    jobId: row.job_id,
-    status: row.status,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    queueLagMs:
-      new Date(row.updated_at).getTime() - new Date(row.created_at).getTime(),
-  }));
+  return rows.map((row) => {
+    let queueLagMs = null;
+    if (row.started_at) {
+      queueLagMs = new Date(row.started_at).getTime() - new Date(row.created_at).getTime();
+    } else if (row.status !== 'pending') {
+       // fallback if startedAt is not implemented yet
+       queueLagMs = new Date(row.updated_at).getTime() - new Date(row.created_at).getTime();
+    }
+    return {
+      jobId: row.job_id,
+      status: row.status,
+      createdAt: row.created_at,
+      queueLagMs,
+    };
+  });
 }
 
 // Compares the resource IDs an HTTP response claimed as successfully created
@@ -102,13 +116,14 @@ export function assertAcceptancePassed(acceptance) {
     throw new Error(`Workload failed: must be full burst schedule`);
   }
 
-  if (typeof summary.elapsedMs !== "number" || summary.elapsedMs < 890000) {
+  // 4499 dispatches * 200ms spacing = 899800ms
+  if (!Number.isFinite(summary.elapsedMs) || summary.elapsedMs < 899800) {
     throw new Error(
-      `Workload failed: invalid elapsedMs, must be at least 890000 for a 900s run, got ${summary.elapsedMs}`,
+      `Workload failed: invalid elapsedMs, must be at least 899800 for a 900s run, got ${summary.elapsedMs}`,
     );
   }
 
-  if (typeof summary.maxInFlight !== "number" || summary.maxInFlight <= 0) {
+  if (!Number.isFinite(summary.maxInFlight) || summary.maxInFlight <= 0) {
     throw new Error(`Workload failed: invalid maxInFlight`);
   }
 
@@ -124,19 +139,27 @@ export function assertAcceptancePassed(acceptance) {
     report: { p95Ms: 5000 },
   };
 
+  if (!acceptance.concurrency || !Number.isFinite(acceptance.concurrency.intake) || !Number.isFinite(acceptance.concurrency.report) ||
+      !acceptance.backlog || !Number.isFinite(acceptance.backlog.dispatchable) ||
+      !acceptance.degradation || acceptance.degradation.isLawful !== true) {
+    throw new Error(`Workload failed: missing genuine concurrency/backlog/degradation measurements`);
+  }
+
   if (
     !acceptance.queueLag ||
     !acceptance.queueLag.report ||
-    !acceptance.queueLag.dispatchOrderWriteLag
+    !acceptance.queueLag.dispatchOrderQueueLag
   ) {
     throw new Error(`Workload failed: missing queueLag evidence`);
   }
 
   if (
-    typeof acceptance.queueLag.report.avgMs !== "number" ||
+    !Number.isFinite(acceptance.queueLag.report.avgMs) ||
     acceptance.queueLag.report.avgMs < 0 ||
-    typeof acceptance.queueLag.dispatchOrderWriteLag.avgMs !== "number" ||
-    acceptance.queueLag.dispatchOrderWriteLag.avgMs < 0
+    !Number.isFinite(acceptance.queueLag.dispatchOrderQueueLag.avgMs) ||
+    acceptance.queueLag.dispatchOrderQueueLag.avgMs < 0 ||
+    acceptance.queueLag.report.count !== requiredCounts.report ||
+    acceptance.queueLag.dispatchOrderQueueLag.count !== requiredCounts.dispatch
   ) {
     throw new Error(
       `Workload failed: invalid or missing queueLag measurements`,
@@ -152,6 +175,21 @@ export function assertAcceptancePassed(acceptance) {
     throw new Error(
       `Workload failed: dispatchOrderStatusDistribution is empty`,
     );
+  }
+  
+  const validStatuses = new Set(["completed", "assigned", "unassigned", "cancelled"]);
+  let totalStatusCount = 0;
+  for (const [status, count] of Object.entries(acceptance.dispatchOrderStatusDistribution)) {
+    if (!validStatuses.has(status)) {
+      throw new Error(`Workload failed: unlawful status in distribution: ${status}`);
+    }
+    if (!Number.isFinite(count) || count < 0) {
+      throw new Error(`Workload failed: invalid count for status ${status}`);
+    }
+    totalStatusCount += count;
+  }
+  if (totalStatusCount !== requiredCounts.dispatch) {
+    throw new Error(`Workload failed: dispatchOrderStatusDistribution total count must be ${requiredCounts.dispatch}, got ${totalStatusCount}`);
   }
 
   for (const family of ["booking", "dispatch", "report"]) {
@@ -179,7 +217,7 @@ export function assertAcceptancePassed(acceptance) {
     }
 
     if (
-      typeof workload.p95Ms !== "number" ||
+      !Number.isFinite(workload.p95Ms) ||
       workload.p95Ms <= 0 ||
       workload.p95Ms > expectedTargets[family].p95Ms
     ) {
@@ -188,14 +226,17 @@ export function assertAcceptancePassed(acceptance) {
       );
     }
 
+    // p99 presence must be verified as finite/valid regardless of whether it's an SLO
+    if (!Number.isFinite(workload.p99Ms) || workload.p99Ms <= 0) {
+      throw new Error(
+        `Workload failed: ${family} p99 latency missing or invalid`,
+      );
+    }
+
     if (expectedTargets[family].p99Ms !== undefined) {
-      if (
-        typeof workload.p99Ms !== "number" ||
-        workload.p99Ms <= 0 ||
-        workload.p99Ms > expectedTargets[family].p99Ms
-      ) {
+      if (workload.p99Ms > expectedTargets[family].p99Ms) {
         throw new Error(
-          `Workload failed: ${family} p99 latency missing, invalid, or exceeded target`,
+          `Workload failed: ${family} p99 latency exceeded target`,
         );
       }
     }

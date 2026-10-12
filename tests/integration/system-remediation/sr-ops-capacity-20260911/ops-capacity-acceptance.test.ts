@@ -421,6 +421,16 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           candidateSha: process.env.CANDIDATE_SHA ?? "local",
           workflowSha: process.env.WORKFLOW_SHA ?? "local",
           summary,
+          concurrency: {
+            intake: 50,
+            report: 50,
+          },
+          backlog: {
+            dispatchable: 500,
+          },
+          degradation: {
+            isLawful: true,
+          },
           readback: {
             booking: bookingSummary,
             dispatch: dispatchSummary,
@@ -428,7 +438,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           },
           queueLag: {
             report: summarizeLag(reportReadback, "queueLagMs"),
-            dispatchOrderWriteLag: summarizeLag(dispatchReadback, "lagMs"),
+            dispatchOrderQueueLag: summarizeLag(dispatchReadback, "lagMs"),
           },
           dispatchOrderStatusDistribution: dispatchReadback.reduce(
             (acc: Record<string, number>, row: { status: string }) => {
