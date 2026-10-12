@@ -35,6 +35,7 @@ const { PathParamsContext, SearchParamsContext } = appRequire(
   "next/dist/shared/lib/hooks-client-context.shared-runtime",
 ) as typeof import("next/dist/shared/lib/hooks-client-context.shared-runtime");
 const router: AppRouterInstance = {
+  bfcacheId: "auth-ui-unit-segment",
   push: navigation.push,
   replace: vi.fn(),
   back: vi.fn(),
