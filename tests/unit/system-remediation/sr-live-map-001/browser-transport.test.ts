@@ -100,6 +100,43 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("private ops map browser transport", () => {
+  it.each([
+    [`data:image/png;base64,${token}`, "data"],
+    [`blob:https://ops.example.test/${token}`, "blob"],
+    [`http://ops.example.test/?key=${token}`, "insecure-http"],
+    [`https://user:${token}@ops.example.test/`, "credential-bearing"],
+    [`https://unapproved.example.test/?key=${token}`, "unapproved-https"],
+    [`javascript:${token}`, "other-scheme"],
+    [`file:///${token}`, "other-scheme"],
+    ["about:blank", "other-scheme"],
+    [token, "invalid-url"],
+  ])(
+    "reports only fixed target classes and still rejects %s",
+    async (url, targetKind) => {
+      const mock = transport();
+      mock.request.get.mockImplementation(async () => {
+        await mock.pause(url!, { Authorization: `Bearer ${token}` });
+        return { ok: () => false, status: () => 403 };
+      });
+      await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+      expect(save.mock.calls[0]?.[1].transport_failures).toEqual([
+        {
+          category: "target-policy-rejected",
+          target_kind: targetKind,
+          resource_type: "Document",
+          block_result: "blocked",
+        },
+      ]);
+      expect(
+        mock.cdp.send.mock.calls.some(
+          ([method]) => method === "Fetch.continueRequest",
+        ),
+      ).toBe(false);
+      expect(JSON.stringify(save.mock.calls)).not.toContain(token);
+      expect(JSON.stringify(save.mock.calls)).not.toContain(url!);
+    },
+  );
+
   it("does not classify successful allowed continuations as failures", async () => {
     const mock = transport();
     mock.request.get.mockImplementation(async () => {
@@ -199,6 +236,7 @@ describe("private ops map browser transport", () => {
     expect(save.mock.calls[0]?.[1].transport_failures).toEqual([
       {
         category: "continue-request-failed",
+        target_kind: "ops-https",
         resource_type: "Document",
         block_result: "blocked",
       },
@@ -207,15 +245,27 @@ describe("private ops map browser transport", () => {
   });
 
   it.each([
-    ["target-policy-rejected", "https://unapproved.example.test/", "Image"],
+    [
+      "target-policy-rejected",
+      "https://unapproved.example.test/",
+      "Image",
+      "unapproved-https",
+    ],
     [
       "continue-request-failed",
       "https://ops.example.test/dispatch",
       "Document",
+      "ops-https",
+    ],
+    [
+      "continue-request-failed",
+      "https://maps.googleapis.com/?key=unit-key",
+      "Image",
+      "allowed-https",
     ],
   ])(
     "diagnoses %s without retaining source strings",
-    async (category, url, resourceType) => {
+    async (category, url, resourceType, targetKind) => {
       const mock = transport();
       mock.cdp.send.mockImplementation(async (method) => {
         if (method === "Fetch.continueRequest")
@@ -233,7 +283,12 @@ describe("private ops map browser transport", () => {
       });
       await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
       expect(save.mock.calls[0]?.[1].transport_failures).toEqual([
-        { category, resource_type: resourceType, block_result: "blocked" },
+        {
+          category,
+          target_kind: targetKind,
+          resource_type: resourceType,
+          block_result: "blocked",
+        },
       ]);
       const retained = JSON.stringify(save.mock.calls);
       for (const secret of [
@@ -263,6 +318,7 @@ describe("private ops map browser transport", () => {
       expect(save.mock.calls[0]?.[1].transport_failures).toEqual([
         {
           category: "target-policy-rejected",
+          target_kind: "data",
           resource_type: "Unknown",
           block_result: "blocked",
         },
@@ -291,6 +347,7 @@ describe("private ops map browser transport", () => {
     expect(save.mock.calls[0]?.[1].transport_failures).toEqual(
       Array.from({ length: 5 }, () => ({
         category: "target-policy-rejected",
+        target_kind: "unapproved-https",
         resource_type: "Image",
         block_result: "block-failed",
       })),

@@ -39,7 +39,47 @@ type TransportFailure = {
     | "interception-cleanup-failed";
   resource_type: (typeof RESOURCE_TYPES)[number] | "Unknown";
   block_result: "blocked" | "block-failed" | "not-attempted";
+  target_kind?: ReturnType<typeof classifyRequestTarget>;
 };
+
+// Diagnostic only: headersFor remains the sole target/credential authority.
+// Fixed scheme/origin classes locate a rejection without retaining its URL.
+function classifyRequestTarget(
+  url: string,
+  opsOrigin: string,
+  allowedTargets: string[],
+):
+  | "credential-bearing"
+  | "ops-https"
+  | "allowed-https"
+  | "unapproved-https"
+  | "insecure-http"
+  | "data"
+  | "blob"
+  | "other-scheme"
+  | "invalid-url" {
+  try {
+    const parsed = new URL(url);
+    if (parsed.username || parsed.password) return "credential-bearing";
+    switch (parsed.protocol) {
+      case "https:":
+        if (parsed.origin === opsOrigin) return "ops-https";
+        return allowedTargets.includes(parsed.origin)
+          ? "allowed-https"
+          : "unapproved-https";
+      case "http:":
+        return "insecure-http";
+      case "data:":
+        return "data";
+      case "blob:":
+        return "blob";
+      default:
+        return "other-scheme";
+    }
+  } catch {
+    return "invalid-url";
+  }
+}
 
 function watchGoogleMapErrors(page: Page) {
   const failures: string[] = [];
@@ -151,6 +191,11 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
             failures.push("Browser request blocked or interception failed");
             const failure: TransportFailure = {
               category,
+              target_kind: classifyRequestTarget(
+                intercepted.url,
+                config.opsOrigin,
+                config.allowedTargets,
+              ),
               resource_type:
                 RESOURCE_TYPES.find((value) => value === resourceType) ??
                 "Unknown",
