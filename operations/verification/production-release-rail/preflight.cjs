@@ -69,6 +69,25 @@ function validateRuntime(plan, values, checks = validators()) {
   } catch {
     reject("DATABASE_URL durable PostgreSQL database");
   }
+  let customRegistry;
+  try {
+    customRegistry = JSON.parse(env.WORKLOAD_IDENTITY_SERVICE_PRINCIPALS);
+  } catch {
+    reject("WORKLOAD_IDENTITY_SERVICE_PRINCIPALS");
+  }
+  if (
+    !Array.isArray(customRegistry) ||
+    !customRegistry.length ||
+    !customRegistry.some(
+      (entry) =>
+        entry.issuer === env.WORKLOAD_IDENTITY_ISSUER &&
+        [
+          ...(entry.allowedTokenAudiences || []),
+          entry.defaultTokenAudience,
+        ].includes(env.WORKLOAD_IDENTITY_AUDIENCE),
+    )
+  )
+    reject("WORKLOAD_IDENTITY_SERVICE_PRINCIPALS issuer/audience binding");
   const registryName = api.secrets.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS;
   let registry;
   try {
@@ -137,13 +156,32 @@ function validateRuntime(plan, values, checks = validators()) {
     if (group.some((k) => env[k]) && !group.every((k) => env[k]))
       reject(`partial ${group.join("/")}`);
   }
+  let runtime;
   try {
-    checks.capture(env, checks.payment(env));
-    checks.expiry(env);
-    checks.otp(env);
-    checks.mail(env);
+    runtime = checks.payment(env);
   } catch {
-    reject("passenger payment/capture/recovery/OTP/SMTP startup contract");
+    reject("PSP_PROVIDER/PSP_SANDBOX payment startup contract");
+  }
+  for (const [control, check] of [
+    [
+      "PAX_PAYMENT_CAPTURE_ENABLED/PAX_PAYMENT_CAPTURE_POLICY/available PSP adapter",
+      () => checks.capture(env, runtime),
+    ],
+    ["PAX_PAYMENT_RECOVERY_NOTICE_EXPIRES_AT", () => checks.expiry(env)],
+    [
+      "PASSENGER_OTP_IP_HOURLY_LIMIT/PASSENGER_OTP_TRUSTED_PROXY_HOPS",
+      () => checks.otp(env),
+    ],
+    [
+      "REMOTE_SMTP_HOST/PORT/USERNAME/PASSWORD/FROM_EMAIL",
+      () => checks.mail(env),
+    ],
+  ]) {
+    try {
+      check();
+    } catch {
+      reject(control);
+    }
   }
   for (const s of plan.services)
     for (const [key, ref] of Object.entries(s.secrets)) {

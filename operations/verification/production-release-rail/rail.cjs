@@ -140,6 +140,7 @@ function buildPlan(vars, sha, tag, deployer) {
   if (!/^[a-f0-9]{40}$/.test(sha)) reject("source SHA");
   if (!/^prod\/v\d{4}\.\d{2}\.\d{2}\.\d+$/.test(tag)) reject("prod/v tag");
   for (const key of [
+    "PROD_PRODUCT_WEB_ALLOW_UNAUTHENTICATED",
     "PROD_ALLOW_INSECURE_DEV_AUTH",
     "PROD_DRTS_DEV_MFA_WAIVED",
     "PROD_OIDC_MOCK_MODE",
@@ -150,7 +151,12 @@ function buildPlan(vars, sha, tag, deployer) {
     if (vars[key] && vars[key] !== "false") reject(key);
   const need = (key) => {
     const value = vars[key]?.trim();
-    if (!value || /[\r\n\0]/.test(value)) reject(key);
+    if (
+      !value ||
+      value.includes("\0") ||
+      (!key.endsWith("_JSON") && /[\r\n]/.test(value))
+    )
+      reject(key);
     return value;
   };
   const project = need("PROD_GCP_PROJECT_ID"),

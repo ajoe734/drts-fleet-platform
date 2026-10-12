@@ -226,6 +226,53 @@ describe("production complete topology and strict startup rail", () => {
     }
   });
   it.each([
+    "workload-identity-service-principals",
+    "bank-iap-jwt-public-key",
+    "bank-artifact-signing-private-key",
+    "bank-artifact-signing-public-key",
+    "bank-artifact-signing-key-id",
+    "bank-session-secret",
+    "bff-state-secret",
+    "referral-embed-session-secret",
+  ])("rejects incomplete or unusable managed %s before mutation", (suffix) => {
+    const f = fixture();
+    f.values[`drts-prod-${suffix}`] = "";
+    expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow();
+    if (suffix !== "bank-artifact-signing-key-id") {
+      f.values[`drts-prod-${suffix}`] = "invalid-configured-value";
+      expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow();
+    }
+  });
+  it.each([
+    "PROD_DRTS_FLEET_PARTNER_ID",
+    "PROD_DRTS_PARTNER_ID",
+    "PROD_DRTS_TENANT_ID",
+    "PROD_DRTS_PARTNER_PROGRAM_ID",
+    "PROD_DRTS_PARTNER_ENTRY_SLUG",
+    "PROD_DRTS_ENTERPRISE_DISPATCH_TENANT_ID",
+    "PROD_DRTS_ENTERPRISE_DISPATCH_ACTOR_ID",
+    "PROD_IAP_EXPECTED_AUDIENCE",
+    "PROD_BANK_IAP_AUDIENCE",
+  ])("rejects missing actual caller setting %s", (key) => {
+    const f = fixture();
+    delete f.vars[key];
+    expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(key);
+    expect(f.calls).toEqual([]);
+  });
+  it("does not confuse IAP assertion audiences or anonymous context with authenticated smoke", () => {
+    const f = fixture();
+    f.vars.PROD_IAP_EXPECTED_AUDIENCE = f.vars.PROD_IAP_CLIENT_ID;
+    expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
+      "IAP_EXPECTED_AUDIENCE",
+    );
+    const g = fixture();
+    g.smoke.api.expect = { "data.authMode": "bootstrap_headers" };
+    g.vars.PROD_RELEASE_SMOKE_CONFIG_JSON = JSON.stringify(g.smoke);
+    expect(() => preflight(g.vars, SHA, TAG, DEPLOYER, g.cloud)).toThrow(
+      "authenticated principal predicate",
+    );
+  });
+  it.each([
     { PROD_PSP_PROVIDER: "fake" },
     { PROD_PAX_PAYMENT_CAPTURE_ENABLED: "true" },
     { PROD_PAX_PAYMENT_CAPTURE_ENABLED: "arbitrary" },
@@ -290,6 +337,21 @@ describe("production complete topology and strict startup rail", () => {
     expect(() =>
       deployArgs(c.plan, c.plan.services[0], imagesFor(c.plan).api),
     ).toThrow("pinned secret");
+  });
+  it("stops before deploying any web surface when the API runtime IAM binding fails", () => {
+    const { plan } = candidate();
+    const commands: string[][] = [];
+    expect(() =>
+      deploy(plan, imagesFor(plan), (args: string[]) => {
+        commands.push(args);
+        if (args.includes("add-iam-policy-binding"))
+          throw new Error("IAM denied");
+        return "";
+      }),
+    ).toThrow("IAM denied");
+    expect(
+      commands.filter((args) => args[1] === "deploy").map((args) => args[2]),
+    ).toEqual([plan.services[0].name]);
   });
 });
 

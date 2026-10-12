@@ -91,40 +91,42 @@ function migrate(plan, images, cloud = sdk) {
   ]);
 }
 function deploy(plan, images, cloud = sdk) {
-  for (const service of plan.services)
+  for (const service of plan.services) {
     cloud(deployArgs(plan, service, images[service.id]));
-  // Preserve invoker and IAP gates, with failures visible instead of waived.
-  cloud([
-    "run",
-    "services",
-    "add-iam-policy-binding",
-    plan.services[0].name,
-    "--region",
-    plan.region,
-    "--project",
-    plan.project,
-    "--member",
-    `serviceAccount:${plan.runtime}`,
-    "--role",
-    "roles/run.invoker",
-    "--quiet",
-  ]);
-  cloud([
-    "iap",
-    "web",
-    "add-iam-policy-binding",
-    "--resource-type=cloud-run",
-    `--service=${plan.services[0].name}`,
-    "--region",
-    plan.region,
-    "--project",
-    plan.project,
-    "--member",
-    `serviceAccount:${plan.runtime}`,
-    "--role",
-    "roles/iap.httpsResourceAccessor",
-    "--quiet",
-  ]);
+    if (service.id !== "api") continue;
+    // Preserve invoker and IAP gates, with failures visible instead of waived.
+    cloud([
+      "run",
+      "services",
+      "add-iam-policy-binding",
+      plan.services[0].name,
+      "--region",
+      plan.region,
+      "--project",
+      plan.project,
+      "--member",
+      `serviceAccount:${plan.runtime}`,
+      "--role",
+      "roles/run.invoker",
+      "--quiet",
+    ]);
+    cloud([
+      "iap",
+      "web",
+      "add-iam-policy-binding",
+      "--resource-type=cloud-run",
+      `--service=${plan.services[0].name}`,
+      "--region",
+      plan.region,
+      "--project",
+      plan.project,
+      "--member",
+      `serviceAccount:${plan.runtime}`,
+      "--role",
+      "roles/iap.httpsResourceAccessor",
+      "--quiet",
+    ]);
+  }
 }
 function assertRevision(plan, service, image, description, revision) {
   const status = description.status;

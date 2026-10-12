@@ -97,7 +97,7 @@ The derived defaults are the target region/project and repository `drts`.
 defaults do not supply missing identity/provider/product settings.
 
 Exposure flags `PROD_<suffix>_ALLOW_UNAUTHENTICATED` default to `false` and must
-remain exactly `false`. Insecure auth, MFA waiver, mock OIDC, CI tenant-actor,
+remain exactly `false`; the older umbrella `PROD_PRODUCT_WEB_ALLOW_UNAUTHENTICATED` must also be absent or `false`. Insecure auth, MFA waiver, mock OIDC, CI tenant-actor,
 Bank demo-login and Referral demo switches are rejected if enabled.
 
 ## Secret Manager and IAM
