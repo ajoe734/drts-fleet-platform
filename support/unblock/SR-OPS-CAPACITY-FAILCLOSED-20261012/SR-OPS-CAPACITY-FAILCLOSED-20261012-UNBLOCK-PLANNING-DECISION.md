@@ -123,7 +123,32 @@ gates remain intact. Documentation checks cannot establish these gates.
 
 ## Documentation delivery
 
-Publication/check results will be appended before the final evidence commit.
-The final local/remote/PR SHA is recorded through release `progress` (or
-`CANDIDATE_SHA`/`CANDIDATE_BRANCH` handoff only after the blocked-parent state
-receipt). No self-referential commit SHA or source-WIP transplantation is used.
+Anchor `d71e3551f2dc03bc3548446a7c50f47d34003504` was committed with the actual
+task ID, Codex2 lane and assigned Codex reviewer, then normally pushed to
+`codex2/sr-ops-capacity-failclosed-20261012-unblock-planning-decision`.
+Draft [PR #2586](https://github.com/ajoe734/drts-fleet-platform/pull/2586) targets
+`dev` and contains only this packet and `PHASE1_OPEN_QUESTIONS.md`.
+
+| Documentation check              | Completed result at the anchor                                                                                                                                    | Evidence / limit                                                                                                              |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Canonical consistency            | `python3 tools/ci/git/check_canonical_consistency.py --ci --base 8a7d254a137c8d49d36ba51f284733b13c4216e1 --head HEAD`: exit0, four categories have zero findings | canonical-consistency.log; canonical source and question references manually checked, including corrected PRD §9.5.6 citation |
+| Markdown format                  | `pnpm exec prettier --check` on the two changed files: exit0                                                                                                      | prettier.log; an initial formatting-only failure was corrected before the anchor                                              |
+| Helper commit provenance         | `python3 tools/ci/git/check_commit_trailers.py --base 8a7d254a137c8d49d36ba51f284733b13c4216e1 --head HEAD`: exit0, one helper commit                             | helper-trailers.log; validates helper history only and does not relabel or waive the separate parent-history failures         |
+| Whitespace and write scope       | Full helper-range `git diff --check`: exit0; `git diff --name-only` contains exactly the two documentation files                                                  | whitespace.log; no product/orchestrator/workflow/runtime source or machine-truth files in the diff                            |
+| Runtime / original acceptance    | NOT RUN; not applicable to a documentation-only helper                                                                                                            | No unit/PG/HTTP/browser/cloud/900s result claimed; all original acceptance gates stay OPEN                                    |
+| Parent disposition and next step | Release readback still lacks the requested metadata; both rejected writes remain recorded                                                                         | Supervisor receipt, matching parent note and fresh readback still required; handoff/merge held                                |
+
+Local evidence root:
+`/home/lupin/workspace/drts-fleet-platform/.local/sr-ops-capacity-planning-decision-20261012/`.
+Tools used: Python3, Node22.23.2, pnpm10.33.0. Every local check started by this
+helper finished and its output was read. Hosted PR checks are recorded separately
+and cannot establish parent acceptance.
+
+The evidence-only final commit repeats the applicable document/provenance checks;
+its exact local/remote/PR SHA, hashes and results are recorded through release
+`progress`/`blocker`. `CANDIDATE_SHA`/`CANDIDATE_BRANCH` handoff is reserved until
+the blocked-parent state receipt exists, following the repository
+`tools/development-orchestrator/skills/candidate-lifecycle.md` requirement to
+record `resolved_parent_status: blocked` before helper merge. The dispatch guard
+cannot be bypassed by adopting Supervisor's identity. No direct `done`, empty
+commit, self-referential commit SHA or parent source transplantation is used.
