@@ -105,6 +105,23 @@ export function createFixture() {
     settings,
   );
   const otp = new PassengerOtpController(otpService, settings);
+  let nextAccountRead:
+    | { started: () => void; wait: Promise<void> }
+    | undefined;
+  // Hold only the injected upstream GET boundary; the real controller/service
+  // still authenticates, reads and produces the response after release.
+  const holdNextAccountRead = () => {
+    let started!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    nextAccountRead = { started, wait };
+    return { started: entered, release };
+  };
   const upstream = async (url: string, init?: RequestInit) => {
     const path = new URL(url).pathname.slice("/api/passenger-app/".length);
     const body = init?.body
@@ -154,6 +171,12 @@ export function createFixture() {
           return fixture.accountWriteError
             ? fail("unavailable", 503)
             : Response.json(await accountController.update(identity, body));
+        const held = nextAccountRead;
+        nextAccountRead = undefined;
+        if (held) {
+          held.started();
+          await held.wait;
+        }
         return fixture.accountReadError
           ? fail("unavailable", 503)
           : Response.json(await accountController.me(identity));
@@ -298,6 +321,7 @@ export function createFixture() {
     client,
     signIn,
     browserFetch,
+    holdNextAccountRead,
     requestOtp: (command: RequestOtpCommand) => client.requestOtp(command),
   });
 }
