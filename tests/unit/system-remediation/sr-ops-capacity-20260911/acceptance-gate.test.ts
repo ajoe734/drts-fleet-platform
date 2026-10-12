@@ -114,8 +114,8 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
       isLawful: true,
     },
     queueLag: {
-      report: { count: 450, minMs: 10, maxMs: 100, avgMs: 45 },
-      dispatchOrderQueueLag: { count: 4500, minMs: 5, maxMs: 50, avgMs: 20 },
+      report: { count: 450, minMs: 10, maxMs: 100, avgMs: 45, p95Ms: 90 },
+      dispatchOrderQueueLag: { count: 4500, minMs: 5, maxMs: 50, avgMs: 20, p95Ms: 45 },
     },
     dispatchOrderStatusDistribution: {
       completed: 4500,
