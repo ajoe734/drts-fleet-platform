@@ -360,11 +360,11 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           while (isPolling) {
             try {
               const { rows: reportRows } = await pool.query(`SELECT count(*) FROM admin.phase1_report_jobs WHERE status IN ('pending', 'processing', 'queued')`);
-              const currentReport = parseInt(reportRows[0].count, 10);
+              const currentReport = parseInt(String(reportRows[0]?.count || "0"), 10);
               if (currentReport > peakReport) peakReport = currentReport;
               
               const { rows: dispatchRows } = await pool.query(`SELECT count(*) FROM ops.phase1_owned_orders WHERE status IN ('ready_for_dispatch', 'delayed_queue', 'no_supply', 'preassigned')`);
-              const currentDispatchable = parseInt(dispatchRows[0].count, 10);
+              const currentDispatchable = parseInt(String(dispatchRows[0]?.count || "0"), 10);
               if (currentDispatchable > peakDispatchable) peakDispatchable = currentDispatchable;
 
               const { rows: lawfulRows } = await pool.query(`SELECT 1 FROM ops.phase1_owned_orders WHERE status IN ('delayed_queue', 'no_supply') LIMIT 1`);
@@ -398,6 +398,8 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           path: string;
           error: string | null;
           resourceIds?: Record<string, string>;
+          latencyMs?: number | null;
+          launchedMs: number;
         };
         const records: CapacityRecord[] = readFileSync(recordsPath, "utf8")
           .trim()
