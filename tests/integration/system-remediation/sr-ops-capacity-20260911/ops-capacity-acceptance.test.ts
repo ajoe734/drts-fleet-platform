@@ -363,7 +363,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
               const { rows: reportRows } = await pool.query(`SELECT count(*) FROM admin.phase1_report_jobs WHERE status IN ('queued', 'running') AND record->'filters'->>'runTag' = $1`, [runTag]);
               const currentReport = parseInt(String(reportRows[0]?.count || "0"), 10);
               if (currentReport > peakReport) peakReport = currentReport;
-              
+
               const { rows: dispatchRows } = await pool.query(`SELECT count(*) FROM ops.phase1_owned_orders WHERE status IN ('ready_for_dispatch', 'delayed_queue', 'no_supply', 'preassigned') AND order_id = ANY($1::text[])`, [orderIds]);
               const currentDispatchable = parseInt(String(dispatchRows[0]?.count || "0"), 10);
               if (currentDispatchable > peakDispatchable) peakDispatchable = currentDispatchable;

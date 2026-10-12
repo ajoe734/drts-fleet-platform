@@ -52,25 +52,25 @@ describe("capacity.mjs scheduler", () => {
         ]
       }
     };
-    
+
     const outputPath = resolve(tmpDir, "output.jsonl");
     const summary = await runPlan(plan, outputPath, { baseSha: "a", candidateSha: "b", planSha256: "c" });
-    
+
     expect(summary.workflows.dispatch.requests).toBe(5);
     expect(summary.workflows.dispatch.errors).toBe(0);
-    
+
     const records = readFileSync(outputPath, "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    
+
     // We expect 1 + 5 + 1 = 7 requests
     expect(records.length).toBe(7);
-    
+
     // Filter to just dispatch requests
     const dispatchRecords = records.filter(log => log.workload === "dispatch");
     expect(dispatchRecords.length).toBe(5);
-    
+
     // Check exact launch pacing from records: dispatch is 300/min = 200ms spacing.
     // Minimum spacing must be >= 199ms (allowing 1ms precision float jitter, but not 180ms slack).
     const t0 = dispatchRecords[0]!.launchedMs;
@@ -126,10 +126,10 @@ describe("capacity.mjs scheduler", () => {
         ]
       }
     };
-    
+
     const outputPath = resolve(tmpDir, "output_fail.jsonl");
     const summary = await runPlan(plan, outputPath, { baseSha: "a", candidateSha: "b", planSha256: "c" });
-    
+
     // The runPlan returns "failed" if there are errors
     expect(summary.result).toBe("failed");
     expect(summary.workflows.dispatch.requests).toBe(5);
@@ -141,7 +141,7 @@ describe("capacity.mjs scheduler", () => {
       .map((line) => JSON.parse(line));
     const dispatchRecord = records.find(r => r.workload === "dispatch");
     expect(dispatchRecord.error).toContain("429"); // Should contain the HTTP status or error message
-    
+
     // Restore server
     server.removeAllListeners('request');
     for (const listener of originalListeners) {

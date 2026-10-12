@@ -67,14 +67,14 @@ describe("reporting-filing actual-path start regressions", () => {
     // 2. Restart/recovery start: preserves startedAt
     await new Promise(r => setTimeout(r, 10)); // wait a bit so time changes
     (service as any).startReportJob(recoveredJob);
-    
+
     expect(savedJob.status).toBe("running");
     expect(savedJob.startedAt).toBe(firstStartedAt);
     expect(savedJob.updatedAt).not.toBe(firstStartedAt);
 
     // 3. JSON persistence check in repository
     await repo.persistChanges({ reportJobs: [savedJob], filingPackages: [] });
-    
+
     const queryArgs = (mockDb.query as any).mock.calls[0];
     expect(queryArgs[0]).toContain("INSERT INTO admin.phase1_report_jobs");
     const jsonStr = queryArgs[1][5]; // The 6th parameter is JSON.stringify(job)
