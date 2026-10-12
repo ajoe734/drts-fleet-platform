@@ -302,15 +302,15 @@ describe("background fields reject malformed and sensitive metadata", () => {
       path: ["service", "scaling", "scalingMode"] as const,
       value,
     })),
-    ...([
-      ["service", "scaling"],
-      ["service", "template", "scaling"],
-      ["service", "template", "containers", "0", "resources"],
-      ["revision", "scaling"],
-      ["revision", "containers", "0", "resources"],
-    ] as const).flatMap((path) =>
-      [null, [], SENTINEL].map((value) => ({ path, value })),
-    ),
+    ...(
+      [
+        ["service", "scaling"],
+        ["service", "template", "scaling"],
+        ["service", "template", "containers", "0", "resources"],
+        ["revision", "scaling"],
+        ["revision", "containers", "0", "resources"],
+      ] as const
+    ).flatMap((path) => [null, [], SENTINEL].map((value) => ({ path, value }))),
   ];
   it.each(invalidFields)(
     "rejects typed field $path=$value at both boundaries",
