@@ -7,8 +7,8 @@ const c = require(
 );
 const { fixture, SHA, SENTINEL } = require("./fixture.cjs");
 const NUMBER = "405416046689";
-function ownedNumeric() {
-  const f = fixture({}, c);
+function ownedNumeric(overrides = {}) {
+  const f = fixture(overrides, c);
   for (const [path, response] of f.responses) {
     if (path.startsWith("/v3/projects/"))
       response.body.name = `projects/${NUMBER}`;
@@ -446,4 +446,221 @@ describe("literal legacy field old-to-new exported-function regressions", () => 
     });
     expect(c.serialize(report)).not.toContain(SENTINEL);
   });
+});
+
+describe("all resource consumers retain ownership and request authority", () => {
+  it.each(["job", "revision"])(
+    "rejects wrong %s name independently of service success",
+    async (kind) => {
+      for (const mutation of [
+        "foreign-project",
+        "wrong-region",
+        "wrong-resource",
+        "wrong-kind",
+        "extra-segment",
+      ] as const) {
+        const f = ownedNumeric();
+        const path =
+          kind === "job"
+            ? new URL(f.plan.operations.find((o: any) => o.kind === "job").url)
+                .pathname
+            : `/v2/projects/${c.TARGET.project}/locations/us-central1/services/prod-api/revisions/prod-api-00001`;
+        const body = f.responses.get(path).body;
+        if (mutation === "foreign-project")
+          body.name = body.name.replace(NUMBER, "999999999");
+        if (mutation === "wrong-region")
+          body.name = body.name.replace("us-central1", "europe-west1");
+        if (mutation === "wrong-resource")
+          body.name = body.name.replace(
+            kind === "job" ? "drts-prod-migrate" : "prod-api-00001",
+            "other",
+          );
+        if (mutation === "wrong-kind")
+          body.name = body.name.replace(
+            kind === "job" ? "/jobs/" : "/services/",
+            kind === "job" ? "/services/" : "/jobs/",
+          );
+        if (mutation === "extra-segment") body.name += "/extra";
+        const report = await c.collect(f.env, SHA, f.transport);
+        expect(
+          record(report, kind === "job" ? "migration" : "api:prod-api-00001")
+            .status,
+        ).toBe("blocked");
+        expect(report.collection).toBe("incomplete");
+        expect(() => c.serialize(report)).not.toThrow();
+      }
+    },
+  );
+  it.each(["latestReadyRevision", "latestCreatedRevision", "traffic"])(
+    "rejects unanchored numeric %s before revision GET",
+    async (field) => {
+      const f = ownedNumeric();
+      const foreign = service(f).latestReadyRevision.replace(
+        NUMBER,
+        "999999999",
+      );
+      if (field === "traffic") service(f).trafficStatuses[0].revision = foreign;
+      else service(f)[field] = foreign;
+      const report = await c.collect(f.env, SHA, f.transport);
+      expect(record(report)).toMatchObject({
+        status: "blocked",
+        diagnosis: "RESOURCE_IDENTITY",
+      });
+      expect(f.calls.every((d: any) => !d.url.includes("999999999"))).toBe(
+        true,
+      );
+      expect(
+        f.calls.some((d: any) =>
+          d.url.includes("/services/prod-api/revisions/"),
+        ),
+      ).toBe(false);
+    },
+  );
+  it.each(["missing-anchor", "failed-anchor", "foreign-anchor"])(
+    "rejects numeric partial observations with %s even on image failure",
+    async (mode) => {
+      const f = ownedNumeric();
+      const project = f.responses.get(`/v3/projects/${c.TARGET.project}`);
+      if (mode === "missing-anchor") delete project.body.name;
+      if (mode === "failed-anchor") project.status = 403;
+      if (mode === "foreign-anchor") project.body.projectId = "foreign";
+      service(f).template.containers[0].image = SENTINEL;
+      service(f).template.containers[0].resources = { cpuIdle: true };
+      const report = await c.collect(f.env, SHA, f.transport);
+      expect(record(report).status).toBe("blocked");
+      expect(record(report, "api:partial")).toBeUndefined();
+      expect(record(report).observedResource).toBeUndefined();
+      expect(c.serialize(report)).not.toContain(SENTINEL);
+    },
+  );
+  it("does not grant shared registry GETs for numeric resource responses", async () => {
+    const f = ownedNumeric({
+      PROD_ARTIFACT_REGISTRY:
+        "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts",
+      PROD_ARTIFACT_PROJECT_ID: "drts-dev-devcc-20260825",
+      PROD_ARTIFACT_REGION: "us-central1",
+      PROD_ARTIFACT_REPOSITORY: "drts",
+    });
+    const report = await c.collect(f.env, SHA, f.transport);
+    expect(report.collection).toBe("incomplete");
+    expect(report.requests).toBe(62);
+    expect(record(report, "artifact-images").code).toBe(
+      "SHARED_REGISTRY_NOT_AUTHORIZED",
+    );
+    expect(record(report).status).toBe("observed");
+    expect(
+      f.calls.every(
+        (d: any) =>
+          !d.url.includes("drts-dev-devcc-20260825") &&
+          !d.url.includes("artifactregistry.googleapis.com"),
+      ),
+    ).toBe(true);
+    expect(() => c.serialize(report)).not.toThrow();
+  });
+  it("deduplicates aliases for the same revision without substituting observed spelling", async () => {
+    const f = ownedNumeric();
+    service(f).latestCreatedRevision = service(f).latestReadyRevision.replace(
+      NUMBER,
+      c.TARGET.project,
+    );
+    const report = await c.collect(f.env, SHA, f.transport);
+    expect(report.requests).toBe(64);
+    expect(record(report).data.latestCreatedRevision).toContain(
+      c.TARGET.project,
+    );
+    expect(record(report).data.latestReadyRevision).toContain(NUMBER);
+    expect(
+      report.records.filter((r: any) => r.id === "api:prod-api-00001"),
+    ).toHaveLength(1);
+    expect(() => c.serialize(report)).not.toThrow();
+  });
+  it("does not accept a transport-provided observedResource as trusted diagnosis", async () => {
+    const f = ownedNumeric();
+    const report = await c.collect(f.env, SHA, async (d: any) => {
+      if (new URL(d.url).pathname.endsWith("/services/prod-api"))
+        throw Object.assign(Error(SENTINEL), {
+          observedResource: service(f).name,
+          diagnosis: SENTINEL,
+        });
+      return f.transport(d);
+    });
+    expect(record(report)).toMatchObject({
+      status: "blocked",
+      code: "REQUEST_FAILED",
+      diagnosis: "UNKNOWN",
+    });
+    expect(record(report).observedResource).toBeUndefined();
+    expect(c.serialize(report)).not.toContain(SENTINEL);
+  });
+});
+
+describe("required identity versus absent optional observations", () => {
+  it.each(["service", "revision", "job"])(
+    "distinguishes absent %s identity from malformed spelling",
+    async (kind) => {
+      const f = ownedNumeric();
+      const path =
+        kind === "revision"
+          ? `/v2/projects/${c.TARGET.project}/locations/us-central1/services/prod-api/revisions/prod-api-00001`
+          : new URL(f.plan.operations.find((o: any) => o.kind === kind).url)
+              .pathname;
+      delete f.responses.get(path).body.name;
+      const report = await c.collect(f.env, SHA, f.transport);
+      expect(
+        record(
+          report,
+          kind === "service"
+            ? "api"
+            : kind === "job"
+              ? "migration"
+              : "api:prod-api-00001",
+        ),
+      ).toMatchObject({
+        status: "blocked",
+        code: "INSUFFICIENT_OBSERVATION",
+        diagnosis: "MISSING_REQUIRED_FIELDS",
+      });
+      expect(() => c.serialize(report)).not.toThrow();
+    },
+  );
+});
+
+describe("unknown transport and diagnostic consistency", () => {
+  it.each([null, "IMAGE_CONTRACT"])(
+    "classifies primitive throw %s as unknown without output",
+    async (thrown) => {
+      const f = ownedNumeric();
+      const report = await c.collect(f.env, SHA, async (d: any) => {
+        if (new URL(d.url).pathname.endsWith("/services/prod-api"))
+          throw thrown;
+        return f.transport(d);
+      });
+      expect(record(report)).toMatchObject({
+        status: "blocked",
+        code: "REQUEST_FAILED",
+        diagnosis: "UNKNOWN",
+      });
+      expect(record(report, "api:partial")).toBeUndefined();
+      expect(() => c.serialize(report)).not.toThrow();
+    },
+  );
+  it.each(["http", "code", "observed-spelling"])(
+    "rejects inconsistent partial %s at serializer",
+    async (mode) => {
+      const f = ownedNumeric();
+      service(f).template.containers[0].image = SENTINEL;
+      const report = await c.collect(f.env, SHA, f.transport);
+      const partial = record(report, "api:partial");
+      if (mode === "http") partial.httpStatus = 403;
+      if (mode === "code") {
+        partial.code = "PERMISSION_DENIED";
+        record(report).code = "PERMISSION_DENIED";
+      }
+      if (mode === "observed-spelling")
+        record(report).observedResource = record(
+          report,
+        ).observedResource.replace(NUMBER, c.TARGET.project);
+      expect(() => c.serialize(report)).toThrow();
+    },
+  );
 });

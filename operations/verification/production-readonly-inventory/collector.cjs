@@ -31,10 +31,11 @@ const LIMITS = Object.freeze({
   requestMs: 15000,
   collectionMs: 480000,
 });
+const failureDiagnoses = new WeakMap();
 function fail(code = "MALFORMED_METADATA", diagnosis = "UNKNOWN") {
   const e = new Error(code);
   e.code = code;
-  e.diagnosis = diagnosis;
+  failureDiagnoses.set(e, diagnosis);
   throw e;
 }
 function guard(env, head) {
@@ -159,6 +160,7 @@ function canonicalRunName(value, projectNumber) {
   return value.replace(`projects/${project}/`, `projects/${TARGET.project}/`);
 }
 function runIdentity(data, expected, kind, projectNumber) {
+  requireFields(data, ["name"]);
   const suffix = kind === "job" ? "jobs" : "services";
   const shape = new RegExp(
     `^projects/${TARGET.project}/locations/${TARGET.region}/${suffix}/[a-z][a-z0-9-]{0,62}${kind === "revision" ? "/revisions/[a-z][a-z0-9-]{0,62}" : ""}$`,
@@ -784,9 +786,7 @@ function errorRecord(op, error) {
     resource,
     status: "blocked",
     ...(failureObservations.get(error) || {}),
-    diagnosis: SAFE_DIAGNOSES.includes(error?.diagnosis)
-      ? error.diagnosis
-      : "UNKNOWN",
+    diagnosis: failureDiagnoses.get(error) || "UNKNOWN",
     code: SAFE_CODES.includes(error?.code) ? error.code : "REQUEST_FAILED",
     ...(Number.isInteger(error?.httpStatus) &&
     error.httpStatus >= 100 &&
@@ -807,7 +807,7 @@ async function collect(env, head, transport) {
   const rawLists = {},
     revisionsToRead = [];
   const partialRecord = (op, e) => {
-    if (!e.partialItems?.length) return;
+    if (!e?.partialItems?.length) return;
     let items;
     if (op.kind === "versions")
       items = e.partialItems
@@ -847,7 +847,7 @@ async function collect(env, head, transport) {
     }
     if (
       !partialSchemas[op.kind] ||
-      !PARTIAL_DIAGNOSES.includes(error?.diagnosis)
+      !PARTIAL_DIAGNOSES.includes(failureDiagnoses.get(error))
     )
       return;
     try {
@@ -912,6 +912,7 @@ async function collect(env, head, transport) {
       } while (next);
       return { items: values, pages };
     } catch (e) {
+      if (!e || typeof e !== "object") e = new Error("REQUEST_FAILED");
       if (values.length) {
         e.partialItems = values;
         e.pages = Math.min(pages, LIMITS.pages);
@@ -1292,7 +1293,14 @@ function serialize(report) {
       if (
         !partialSchemas[record.kind] ||
         !record.code ||
-        !PARTIAL_DIAGNOSES.includes(record.diagnosis)
+        !PARTIAL_DIAGNOSES.includes(record.diagnosis) ||
+        record.httpStatus !== undefined ||
+        (record.diagnosis === "EXPECTED_IMAGE"
+          ? record.code !==
+            (record.kind === "revision"
+              ? "IDENTITY_MISMATCH"
+              : "INSUFFICIENT_OBSERVATION")
+          : record.code !== "MALFORMED_METADATA")
       )
         fail();
       requireFields(record, ["resource", "data", "observedResource"]);
@@ -1316,7 +1324,8 @@ function serialize(report) {
           r.status === "blocked" &&
           r.resource === record.resource &&
           r.code === record.code &&
-          r.diagnosis === record.diagnosis,
+          r.diagnosis === record.diagnosis &&
+          r.observedResource === record.observedResource,
       );
       if (!record.id.endsWith(":partial") || !blocked) fail();
     } else if (record.status === "observed") {
@@ -1336,6 +1345,15 @@ function serialize(report) {
         requireFields(record, ["resource"]);
         const expected = canonicalRunName(record.resource);
         runIdentity(record.data, expected, record.kind, projectNumber);
+        if (record.kind === "service") {
+          requireFields(record.data, [
+            "ingress",
+            "latestReadyRevision",
+            "latestCreatedRevision",
+            "trafficStatuses",
+          ]);
+          trafficIdentity(record.data);
+        }
       }
     } else if (!record.code || record.data !== undefined) fail();
   }
