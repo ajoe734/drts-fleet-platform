@@ -256,3 +256,43 @@ an explicit source resume. All original parent acceptance remains **OPEN**.
 The helper proceeds through fresh scoped checks, ordinary publication and
 exact-SHA independent Codex review/CI/protected merge; none of those steps is
 parent acceptance.
+
+### Resumed scoped checks and candidate closeout
+
+Resumed anchor `4534be749285f0281d97780084bdac133083decf` preserves the
+published history and was normally pushed to the existing helper branch.
+Node v22.23.2 / pnpm 10.33.0; real release source hash is unchanged from the
+original probe. These completed checks were read before preparing this receipt:
+
+| Finding / helper acceptance        | Source and change                                                                              | Verification / result                                                                                                                                                | Evidence and remaining limits                                                                                                                                               |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Diagnose dependency-ready parent   | Original source findings above; fresh canonical parent/helper slices                           | PASS 0: dependency list remains empty, explicit source HOLD and E04 producer gap remain; parent draft PR #2556 head still `a81b1842a09fabdb6caffc160cf4edcc564604a2` | `parent-current.json`, `helper-current.json`; historical product checks are not rerun or accepted here                                                                      |
+| F-PARENT-DISPOSITION / parent next | Genuine operator metadata-only assign and matching note; additive receipt in this owned report | Both operator commands PASS 0; read-only current-slice and actual-release-copy probe PASS 0                                                                          | `verified-current-receipts.json`; exact blocked route and absent resolution timestamp must be rechecked before handoff/merge; parent HOLD must survive merge                |
+| Task-scoped document / citations   | Only the existing designated report; operator recipe unchanged                                 | Canonical consistency PASS 0 / zero findings; classification PASS 0 / 6,357 files; recipe syntax/text and report-only scope PASS 0                                   | `canonical-consistency.log`, `repo-classification.log`, `recipe-and-scope.log`; no source, scope or product execution grant                                                 |
+| Formatting / publication guards    | Resumed anchor range from immutable helper base `cf58d49053993c760a7f5491d79465912609c46f`     | Prettier PASS 0; shared trailer checker PASS 0 / 3 commits; generated-file guard and whitespace PASS 0                                                               | `formatting.log`, `trailers.log`, `generated-range.log`, `whitespace.log`; final closeout range checks are recorded alongside the candidate publication receipt             |
+| Commit / push / existing PR        | Original `c816265` and resumed anchor remain ancestors; PR #2583 is reused                     | Ordinary non-force anchor push completed; final candidate identity must agree across local HEAD, remote branch and PR before handoff                                 | Exact final SHA/branch/PR are recorded by owner handoff and `publication-receipt.json`; independent Codex review, new same-SHA hosted CI and protected merge remain pending |
+
+Commands for the repository checks are unchanged from the original receipt:
+`python3 tools/ci/git/check_canonical_consistency.py --ci --base cf58d49053993c760a7f5491d79465912609c46f --head HEAD`,
+`node tools/ci/check-repo-classification.mjs`, the existing `check-report.py`,
+`pnpm exec prettier --check` on this report,
+`python3 tools/ci/git/check_commit_trailers.py --base cf58d49053993c760a7f5491d79465912609c46f --head HEAD`,
+`python3 tools/ci/git/check_staged_generated_files.py --range cf58d49053993c760a7f5491d79465912609c46f HEAD`,
+and `git diff --check cf58d49053993c760a7f5491d79465912609c46f HEAD`.
+New logs and final publication evidence are in the resumed owner evidence
+directory above; the recipe checker is the original local script and executes
+only `bash -n`, not its prepared operator commands.
+
+This dispatch's ignored `.husky/_` shims were absent when the resumed anchor
+was created, so no automatic hook execution is claimed for that anchor.
+The corresponding manual guards completed successfully. The existing
+canonical checkout's ignored shims were copied into this worktree before the
+final closeout commit to restore normal generated-file, lint-staged and
+commit-message hooks, without changing tracked hook source or shared Git
+configuration. Published commits and author credits remain intact, with
+Codex2 / task ID / Codex trailers.
+
+No product runtime, PG/browser test, deployment or external acceptance was
+performed. Both original parent acceptance keys remain OPEN. Owner handoff
+locks only this documentation candidate; GitHub bus/reviewer lifecycle owns
+its review, CI, protected merge and derived completion.
