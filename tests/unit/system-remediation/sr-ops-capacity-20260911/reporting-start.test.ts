@@ -1,81 +1,135 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ReportingFilingService } from "../../../../apps/api/src/modules/reporting-filing/reporting-filing.service";
-import { ReportingFilingRepository } from "../../../../apps/api/src/modules/reporting-filing/reporting-filing.repository";
+import {
+  ReportingFilingRepository,
+  type StoredReportJobRecord,
+} from "../../../../apps/api/src/modules/reporting-filing/reporting-filing.repository";
+import type { DatabaseService } from "../../../../apps/api/src/common/db";
+import type { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 
-describe("reporting-filing actual-path start regressions", () => {
-  it("first start sets startedAt, restart preserves startedAt, JSON persistence matches", async () => {
-    // Mock the external database/repository
-    const mockDb = {
-      isEnabled: () => true,
-      query: vi.fn(),
-      transaction: vi.fn(async (cb) => {
-        const client = { query: vi.fn().mockResolvedValue({ rows: [] }) };
-        return cb(client);
-      }),
-    };
-    const repo = new ReportingFilingRepository(mockDb as any);
-    const publisher = { publish: vi.fn() };
+// Only the database and clock/microtask boundaries are mocked. loadState,
+// onModuleInit, recovery scheduling, actual start/completion, and persistence run.
+const legacyJob = (
+  jobId: string,
+  status: StoredReportJobRecord["status"],
+): StoredReportJobRecord => ({
+  jobId,
+  jobType: "trip_summary",
+  format: "csv",
+  status,
+  filters: {},
+  createdAt: "2026-10-12T00:00:00.000Z",
+  updatedAt: "2026-10-12T00:00:05.000Z",
+  artifact: null,
+  rows: [],
+});
+function fixture(jobs: StoredReportJobRecord[]) {
+  const stored = new Map(jobs.map((job) => [job.jobId, structuredClone(job)]));
+  const writes: StoredReportJobRecord[] = [];
+  const query = vi.fn(async (sql: string, params?: unknown[]) => {
+    if (
+      sql.includes("SELECT record") &&
+      sql.includes("admin.phase1_report_jobs")
+    ) {
+      return {
+        rows: [...stored.values()].map((record) => ({
+          record: structuredClone(record),
+        })),
+      };
+    }
+    if (sql.includes("INSERT INTO admin.phase1_report_jobs")) {
+      const job = JSON.parse(String(params?.[5])) as StoredReportJobRecord;
+      writes.push(job);
+      stored.set(job.jobId, job);
+    }
+    return { rows: [] };
+  });
+  const database = { isEnabled: () => true, query };
+  const repo = new ReportingFilingRepository(
+    database as unknown as DatabaseService,
+  );
+  const audit = { recordAuditLog: vi.fn() };
+  const service = new ReportingFilingService(
+    audit as unknown as AuditNotificationService,
+    repo,
+  );
+  return { repo, service, writes, stored, query };
+}
+afterEach(() => vi.restoreAllMocks());
 
-    const service = new ReportingFilingService(
-      publisher as any,
-      repo
+describe("reporting first actual start and rehydration", () => {
+  it("actual repository load and service init retain old start and leave completed legacy absence missing", async () => {
+    const oldStart = "2026-10-12T00:00:01.000Z";
+    const queued = { ...legacyJob("recover-1", "queued"), startedAt: oldStart };
+    const legacy = legacyJob("legacy-completed", "completed");
+    const { repo, service, stored, writes } = fixture([queued, legacy]);
+    const callbacks: VoidFunction[] = [];
+    vi.spyOn(globalThis, "queueMicrotask").mockImplementation((callback) => {
+      callbacks.push(callback);
+    });
+    const loaded = await repo.loadState();
+    expect(
+      loaded.reportJobs.find((j) => j.jobId === "recover-1")?.startedAt,
+    ).toBe(oldStart);
+    expect(
+      loaded.reportJobs.find((j) => j.jobId === "legacy-completed"),
+    ).not.toHaveProperty("startedAt");
+    await service.onModuleInit();
+    expect(callbacks).toHaveLength(1);
+    callbacks[0]!();
+    await vi.waitFor(() =>
+      expect(
+        writes.filter((j) => j.jobId === "recover-1").map((j) => j.status),
+      ).toEqual(["running", "completed"]),
     );
+    expect(writes.every((j) => j.startedAt === oldStart)).toBe(true);
+    expect(stored.get("legacy-completed")).not.toHaveProperty("startedAt");
+    const reloaded = await repo.loadState();
+    expect(
+      reloaded.reportJobs.find((j) => j.jobId === "recover-1")?.startedAt,
+    ).toBe(oldStart);
+  });
 
-    // Provide a mocked reportJob
-    const job = {
-      jobId: "test-job-1",
-      jobType: "daily_dispatch",
-      status: "queued",
-      createdAt: "2026-10-12T00:00:00Z",
-      updatedAt: "2026-10-12T00:00:00Z",
-      filters: {},
-      resultUrl: null,
-      errorDetails: null,
-      rows: [],
-      partnerRevenueRows: [],
-      // startedAt is absent initially (legacy timestamp absent)
-    };
+  it("missing legacy start is first observed at the actual recovered worker start", async () => {
+    const { service, writes, stored } = fixture([
+      legacyJob("legacy-running", "running"),
+    ]);
+    const callbacks: VoidFunction[] = [];
+    vi.spyOn(globalThis, "queueMicrotask").mockImplementation((callback) => {
+      callbacks.push(callback);
+    });
+    await service.onModuleInit();
+    expect(stored.get("legacy-running")).not.toHaveProperty("startedAt");
+    const before = Date.now();
+    callbacks[0]!();
+    await vi.waitFor(() => expect(writes).toHaveLength(2));
+    const startedAt = writes[0]!.startedAt;
+    expect(Date.parse(startedAt!)).toBeGreaterThanOrEqual(before);
+    expect(startedAt).not.toBe(writes[0]!.createdAt);
+    expect(writes[1]!.startedAt).toBe(startedAt);
+  });
 
-    // Override the private persistChanges to capture the job being saved
-    let savedJob: any;
-    const originalPersist = (service as any).persistChanges.bind(service);
-    (service as any).persistChanges = (changes: any, reason: string) => {
-      if (changes.reportJobs?.[0]) {
-        savedJob = changes.reportJobs[0];
-      }
-      return originalPersist(changes, reason);
-    };
-
-    // 1. First start: sets startedAt
-    (service as any).startReportJob(job);
-    expect(savedJob.status).toBe("running");
-    expect(savedJob.startedAt).toBeDefined();
-    expect(savedJob.startedAt).toEqual(savedJob.updatedAt); // updated to current time
-
-    const firstStartedAt = savedJob.startedAt;
-
-    // Simulate recovery/restart: status is running but we start again (or requeued then started)
-    const recoveredJob = {
-      ...savedJob,
-      status: "queued", // maybe recovered from crash
-    };
-
-    // 2. Restart/recovery start: preserves startedAt
-    await new Promise(r => setTimeout(r, 10)); // wait a bit so time changes
-    (service as any).startReportJob(recoveredJob);
-
-    expect(savedJob.status).toBe("running");
-    expect(savedJob.startedAt).toBe(firstStartedAt);
-    expect(savedJob.updatedAt).not.toBe(firstStartedAt);
-
-    // 3. JSON persistence check in repository
-    await repo.persistChanges({ reportJobs: [savedJob], filingPackages: [] });
-
-    const queryArgs = (mockDb.query as any).mock.calls[0];
-    expect(queryArgs[0]).toContain("INSERT INTO admin.phase1_report_jobs");
-    const jsonStr = queryArgs[1][5]; // The 6th parameter is JSON.stringify(job)
-    const parsed = JSON.parse(jsonStr);
-    expect(parsed.jobId).toBe("test-job-1");
-    expect(parsed.startedAt).toBe(firstStartedAt);
+  it("new public job creation writes queued, running and completed records with first start only on running", async () => {
+    const { service, writes } = fixture([]);
+    const callbacks: VoidFunction[] = [];
+    vi.spyOn(globalThis, "queueMicrotask").mockImplementation((callback) => {
+      callbacks.push(callback);
+    });
+    const accepted = service.createReportJob({
+      jobType: "trip_summary",
+      format: "csv",
+    });
+    expect(accepted.status).toBe("queued");
+    expect(writes[0]!.status).toBe("queued");
+    expect(writes[0]).not.toHaveProperty("startedAt");
+    callbacks[0]!();
+    await vi.waitFor(() => expect(writes).toHaveLength(3));
+    expect(writes.map((j) => j.status)).toEqual([
+      "queued",
+      "running",
+      "completed",
+    ]);
+    expect(writes[1]!.startedAt).toBe(writes[1]!.updatedAt);
+    expect(writes[2]!.startedAt).toBe(writes[1]!.startedAt);
   });
 });
