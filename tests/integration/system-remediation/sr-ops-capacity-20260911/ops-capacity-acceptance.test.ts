@@ -369,8 +369,9 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
 
               const { rows: lawfulRows } = await pool.query(`SELECT 1 FROM ops.phase1_owned_orders WHERE status IN ('delayed_queue', 'no_supply') AND order_id = ANY($1::text[]) LIMIT 1`, [orderIds]);
               if (lawfulRows.length > 0) isLawful = true;
-            } catch (e) {}
-            await new Promise((resolve) => setTimeout(resolve, 2000));
+            } catch {
+              // ignore transient polling errors
+            }
           }
         };
 
