@@ -29,12 +29,15 @@ or by giving this helper device/provider implementation scope. Preserve both
 Core acceptance keys and its reviewed/merged candidate. Resume acceptance only
 when approved inputs and retrievable authorized evidence actually change.
 
-The dispatched helper's parent-note and metadata commands were rejected by the
-release guard. Before helper handoff/merge, genuine Supervisor must record
+The dispatched helper's earlier parent-note and metadata commands were rejected
+by the release guard. On 2026-10-12 genuine Supervisor persisted
 `resolved_parent_status: blocked`, `resolved_parent_waiting_for: Claude`
-and the packet's concrete `resolved_parent_next`, then update the parent's
-next step without resuming it. This prerequisite is OPEN until readback proves
-it was written. See the [decision request, source evidence, routing matrix and
+and the packet's concrete `resolved_parent_next`, plus the matching parent note.
+Operator receipt and fresh release-CLI readback confirm this state prerequisite
+is satisfied; only the existing helper resumes its independent delivery
+lifecycle. Actual human policy approval and Payment-specific external evidence
+remain OPEN; parent acceptance does not resume. See the [decision request,
+source evidence, routing matrix and
 delivery limits](support/unblock/PAX-PAYMENT-CORE-20261009/PAX-PAYMENT-CORE-20261009-UNBLOCK-PLANNING-DECISION.md).
 
 ### Q-PAX-WEB-BOOKING-UI-20261009 — reservation settings contract and booking canvas routing

@@ -1,10 +1,13 @@
 # PAX-PAYMENT-CORE-20261009 planning decision routing
 
-Date: 2026-10-11 UTC. Helper owner: Codex; reviewer: Codex2.
+Date: 2026-10-11 UTC; routing receipt updated 2026-10-12 UTC.
+Helper owner: Codex; reviewer: Codex2.
 Canonical question: `PHASE1_OPEN_QUESTIONS.md`, Q-PAX-PAYMENT-CORE-20261009.
 Disposition: explicit follow-up routed; no financial policy values approved,
-no acceptance scope cut. Parent remains blocked. Helper handoff is held until
-Supervisor records the blocked-parent disposition and parent next step.
+no acceptance scope cut. Parent remains blocked. Supervisor has now recorded
+the blocked-parent disposition and parent next step; the existing helper can
+proceed to exact-SHA independent review. The historical held checks below are
+retained and superseded only by the dated receipt at the end.
 
 ## Actual authority and candidate boundary
 
@@ -164,3 +167,35 @@ this additive closeout; the report cannot embed its own eventual commit SHA.
 All local commands above completed and their outputs were read. Exact final
 committed-range checks are rerun after this closeout and recorded in release
 progress; hosted checks, if present, are separate from Payment acceptance.
+
+### 2026-10-12 Supervisor receipt and owner continuation
+
+The actual operator packet
+`.local/continue-full-completion-20261012T0528/PAYMENT-HELPER-SAFE-ROUTING-DISPOSITION.md`
+authorizes an ordinary append/push to the existing question/report and its
+original Codex/Codex2 lifecycle. Its readback
+`supported-helper-and-parent-before-resume-readback.json` confirms the exact
+three requested helper metadata fields and matching parent note, with
+`parent_protected_fields_unchanged=true`. Helper-only resume removes the
+state-transaction blocker. It supplies no policy values or activation approval.
+
+Fresh release `0fb44e9576d3` `show` for both tasks, after successful owner
+`start`, confirms the helper is in progress with the same blocked-parent
+metadata; the parent remains blocked, Codex/Codex2, no dependencies, original
+candidate `bed2fa8baafefeaa243283a68915eb36374165f7`, generation
+`764b3e32d40248f892938258fbf24eda`, matching reviewed/CI SHA and protected merge
+`fc77f579d087c019660128d85c6ec4a8644a989e`. Both original required acceptance keys
+remain unfilled. `resolved_parent_at` is still reserved for actual helper merge.
+
+| Finding / acceptance | Old → current result | Command / evidence | Remaining limit |
+| --- | --- | --- | --- |
+| Parent disposition and concrete next step | Earlier worker writes rejected → genuine Supervisor metadata and parent note persisted; receipt verified | Operator readback above and fresh release `show` snapshots, exit 0, in canonical `.local/pax-payment-planning-decision-20261012/` | Parent remains blocked; no acceptance resume |
+| Missing policy / scope cut / explicit follow-up | Canonical human-required question and existing-task route retained; no scope cut | Read policy/config source; only this packet and Q-PAX-PAYMENT-CORE-20261009 receipt updated | Actual policy/expiry approval and Payment-specific PG/HTTP/device/PSP evidence still missing |
+| Published history and prior checks | Existing local/remote/PR head `eb229938185493d59b549f6b848e8461dbd696d6` matched; ordinary additive receipt follows | `git fetch origin`, `git ls-remote`, `gh pr view 2564`, exits 0; regular CI 38160245900 terminal 13 SUCCESS; draft integration 38160245964 terminal 5 SUCCESS / 12 SKIP, read via `gh run view`, exit 0 | Prior CI belongs to eb229938; final receipt SHA requires fresh review/CI. Draft skips are not runtime acceptance |
+
+Final document/range/trailer checks, local/remote/PR candidate identity, report
+hash and handoff generation are recorded in release progress and the same
+machine-local evidence directory after the additive commit. Product runtime
+checks are not applicable to this receipt; no tests are added. Supervisor must
+still obtain the real approval and authorized existing-task prerequisite
+sequencing before original parent acceptance can resume.
