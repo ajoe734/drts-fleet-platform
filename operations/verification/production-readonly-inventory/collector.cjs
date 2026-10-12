@@ -138,6 +138,10 @@ const enumOf =
     values.includes(v);
 const bool = (v) => typeof v === "boolean";
 const integer = (v) => Number.isSafeInteger(v) && v >= 0 && v <= 1000000;
+// Optional observations only: missing values stay absent, including cpuIdle.
+// Instance counts use Google's nonnegative int32 contract, not the list budget.
+const instanceCount = (v) =>
+  Number.isSafeInteger(v) && v >= 0 && v <= 2147483647;
 const numeric = str(/^\d{1,30}$/);
 const tokenType = str(/^[a-zA-Z0-9_+/=.-]{0,1024}$/);
 const resourceName = str(
@@ -153,9 +157,15 @@ const groupType = str(
   /^https:\/\/www\.googleapis\.com\/compute\/v1\/projects\/drts-prod-devcc-20260825\/regions\/us-central1\/networkEndpointGroups\/[a-z][a-z0-9-]{0,62}$/,
 );
 const safeName = str(NAME);
+const revisionScaling = {
+  minInstanceCount: instanceCount,
+  maxInstanceCount: instanceCount,
+};
+const serviceContainers = [{ image: imageType, resources: { cpuIdle: bool } }];
 const revisionSchema = {
   name: runName,
-  containers: [{ image: imageType }],
+  containers: serviceContainers,
+  scaling: revisionScaling,
   serviceAccount: str(
     /^drts-prod-runtime@drts-prod-devcc-20260825\.iam\.gserviceaccount\.com$/,
   ),
@@ -203,8 +213,15 @@ const schemas = {
     latestCreatedRevision: runName,
     trafficStatuses: [{ revision: runName, percent: integer }],
     template: {
-      containers: [{ image: imageType }],
+      containers: serviceContainers,
       serviceAccount: revisionSchema.serviceAccount,
+      scaling: revisionScaling,
+    },
+    scaling: {
+      minInstanceCount: instanceCount,
+      maxInstanceCount: instanceCount,
+      manualInstanceCount: instanceCount,
+      scalingMode: enumOf("SCALING_MODE_UNSPECIFIED", "AUTOMATIC", "MANUAL"),
     },
   },
   revision: revisionSchema,

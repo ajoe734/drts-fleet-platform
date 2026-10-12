@@ -227,6 +227,20 @@ describe("background observations through actual GET, collection and serializati
 });
 
 describe("background fields reject malformed and sensitive metadata", () => {
+  it.each(
+    countPaths.flatMap((path) =>
+      [1, 2147483647].map((value) => ({ path, value })),
+    ),
+  )(
+    "accepts positive int32 boundary $path=$value without a list-budget ceiling",
+    async ({ path, value }) => {
+      const f = background();
+      setPath(f, path, value);
+      const output = saved(await c.collect(f.env, SHA, f.transport));
+      expect(observed(output, path[0]).data).toEqual(f[path[0]]);
+      expect(output.collection).toBe("complete");
+    },
+  );
   const invalidCounts = [
     null,
     "0",
@@ -259,7 +273,7 @@ describe("background fields reject malformed and sensitive metadata", () => {
       setPath(f, path, value);
       const output = saved(await c.collect(f.env, SHA, f.transport));
       expect(observed(output, path[0])).toMatchObject({
-        status: "unverified",
+        status: "blocked",
         code: "MALFORMED_METADATA",
       });
       expect(output.collection).toBe("incomplete");
@@ -356,7 +370,7 @@ describe("background fields reject malformed and sensitive metadata", () => {
       const output = saved(await c.collect(f.env, SHA, f.transport));
       expect(observed(output, "service").data).toEqual(f.service);
       expect(observed(output, "revision")).toMatchObject({
-        status: status === 403 ? "blocked" : "unverified",
+        status: "blocked",
         code: status === 403 ? "PERMISSION_DENIED" : "MISSING",
       });
       expect(output.collection).toBe("incomplete");

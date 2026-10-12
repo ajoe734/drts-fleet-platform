@@ -43,7 +43,7 @@
       "baseUrl": "https://run.googleapis.com/",
       "path": "v2/{+name}",
       "responseSchema": "GoogleCloudRunV2Service",
-      "verifiedSelector": "name,ingress,latestReadyRevision,latestCreatedRevision,trafficStatuses(revision,percent),template(containers(image),serviceAccount)",
+      "verifiedSelector": "name,ingress,latestReadyRevision,latestCreatedRevision,trafficStatuses(revision,percent),template(containers(image,resources(cpuIdle)),serviceAccount,scaling(minInstanceCount,maxInstanceCount)),scaling(minInstanceCount,maxInstanceCount,manualInstanceCount,scalingMode)",
       "partialResponseParameter": {
         "location": "query",
         "description": "Selector specifying which fields to include in a partial response.",
@@ -59,7 +59,7 @@
       "baseUrl": "https://run.googleapis.com/",
       "path": "v2/{+name}",
       "responseSchema": "GoogleCloudRunV2Revision",
-      "verifiedSelector": "name,containers(image),serviceAccount",
+      "verifiedSelector": "name,containers(image,resources(cpuIdle)),scaling(minInstanceCount,maxInstanceCount),serviceAccount",
       "partialResponseParameter": {
         "location": "query",
         "description": "Selector specifying which fields to include in a partial response.",
@@ -194,5 +194,17 @@
         "type": "string"
       }
     }
-  ]
+  ],
+  "backgroundFieldsSource": {
+    "observedAt": "2026-10-12T11:51:29.439782+00:00",
+    "discoveryUrl": "https://run.googleapis.com/$discovery/rest?version=v2",
+    "revision": "20261002",
+    "discoverySha256": "ba796aea80bbff79b00d04ef30dd49457b2f531394d381e92db5a79d410c9f1a",
+    "source": "Supervisor unauthenticated public definition receipt; not live resource observations",
+    "selectedTypes": {
+      "cpuIdle": "boolean",
+      "instanceCounts": "nonnegative int32 (0..2147483647)",
+      "scalingMode": ["SCALING_MODE_UNSPECIFIED", "AUTOMATIC", "MANUAL"]
+    }
+  }
 }
