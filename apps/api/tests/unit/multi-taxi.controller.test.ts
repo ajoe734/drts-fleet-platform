@@ -291,7 +291,7 @@ describe("MultiTaxiController ride intake", () => {
         scope: { month: "2026-07" },
         recordCount: 1,
       }),
-      createMultiTaxiTripExportJob: vi.fn().mockReturnValue({
+      createMultiTaxiTripExportJobDurably: vi.fn().mockResolvedValue({
         jobId: "JOB-001",
         status: "pending",
         idempotentReplay: false,
@@ -342,7 +342,7 @@ describe("MultiTaxiController ride intake", () => {
     expect(created.data).toMatchObject({ jobId: "JOB-001" });
     expect(status.data).toMatchObject({ status: "completed" });
     expect(download.data).toMatchObject({ jobId: "JOB-001" });
-    expect(reporting.createMultiTaxiTripExportJob).toHaveBeenCalledWith(
+    expect(reporting.createMultiTaxiTripExportJobDurably).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: "Monthly review" }),
       rows,
       identity,
