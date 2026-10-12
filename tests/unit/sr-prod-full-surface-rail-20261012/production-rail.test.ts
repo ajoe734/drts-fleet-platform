@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -30,6 +31,23 @@ const {
   verify,
 } = require("../../../operations/verification/production-release-rail/run.cjs");
 const { fixture, SHA, TAG, DEPLOYER } = require("./fixture.cjs");
+// Hosted CI uses shallow checkouts. Preserve the exact original git blobs,
+// including provenance and content hashes, rather than requiring old objects.
+const history = JSON.parse(
+  readFileSync(new URL("./historical-sources.json", import.meta.url), "utf8"),
+);
+function historicalSource(commit: string, file: string): string {
+  const snapshot = history.snapshots.find(
+    (item: any) => item.commit === commit && item.path === file,
+  );
+  if (
+    !snapshot ||
+    createHash("sha256").update(snapshot.source).digest("hex") !==
+      snapshot.sha256
+  )
+    throw new Error(`Missing or corrupt historical source: ${commit}:${file}`);
+  return snapshot.source;
+}
 const ids = [
   "api",
   "platform-admin-web",
@@ -95,10 +113,10 @@ describe("F-ARTIFACT-PROVIDERS actual preflight and production factories", () =>
       for (const file of ["rail.cjs", "preflight.cjs", "public-entry.cjs"])
         writeFileSync(
           path.join(dir, file),
-          execFileSync("git", [
-            "show",
-            `012215320817c4cfb8ca442d5b46755e9e03cff3:operations/verification/production-release-rail/${file}`,
-          ]),
+          historicalSource(
+            "012215320817c4cfb8ca442d5b46755e9e03cff3",
+            `operations/verification/production-release-rail/${file}`,
+          ),
         );
       const old = require(path.join(dir, "preflight.cjs")),
         f = fixture();
@@ -359,10 +377,10 @@ describe("F-PUBLIC-ENTRY public customer boundary", () => {
       const file = path.join(dir, "rail.cjs");
       writeFileSync(
         file,
-        execFileSync("git", [
-          "show",
-          "d4dcd9d4acadf6dc8bb5fdda9a36c354047596da:operations/verification/production-release-rail/rail.cjs",
-        ]),
+        historicalSource(
+          "d4dcd9d4acadf6dc8bb5fdda9a36c354047596da",
+          "operations/verification/production-release-rail/rail.cjs",
+        ),
       );
       const old = require(file),
         f = fixture();
@@ -608,11 +626,7 @@ describe("F-PUBLIC-ENTRY public customer boundary", () => {
 });
 describe("production complete topology and strict startup rail", () => {
   it("executes the old deployment arguments and reproduces the three-service defect and strict startup failure", () => {
-    const source = execFileSync(
-      "git",
-      ["show", `${SHA}:.github/workflows/deploy-prod.yml`],
-      { encoding: "utf8" },
-    );
+    const source = historicalSource(SHA, ".github/workflows/deploy-prod.yml");
     const jobs = JSON.parse(
       execFileSync(
         "python3",
