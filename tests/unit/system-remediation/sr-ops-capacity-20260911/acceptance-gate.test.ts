@@ -3,7 +3,6 @@ import { assertAcceptancePassed } from "../../../../tools/system-remediation/ops
 
 describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
   it("rejects a genuine 900s baseline payload that failed due to 112 HTTP 429s (24/74/14 error summary)", () => {
-    // This is the exact shape of the "false green" payload from the finding.
     const failedAcceptance = {
       taskId: "SR-OPS-CAPACITY-RUNNER-20260911",
       capability: "C123",
@@ -24,7 +23,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
             p95Ms: 15.2,
             p99Ms: 22.4,
             targets: { perMinute: 60, p95Ms: 2000, p99Ms: 5000 },
-            latencyTargetsMet: true
+            latencyTargetsMet: true,
           },
           dispatch: {
             requests: 4500,
@@ -32,7 +31,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
             p95Ms: 18.5,
             p99Ms: 25.1,
             targets: { perMinute: 300, p95Ms: 10000 },
-            latencyTargetsMet: true
+            latencyTargetsMet: true,
           },
           report: {
             requests: 450,
@@ -40,33 +39,180 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
             p95Ms: 21.3,
             p99Ms: 28.7,
             targets: { perMinute: 30, p95Ms: 5000 },
-            latencyTargetsMet: true
-          }
+            latencyTargetsMet: true,
+          },
         },
         result: "failed",
-        acceptance: "not_established"
+        acceptance: "not_established",
       },
       readback: {
-        booking: { expectedCount: 876, foundCount: 876, missing: [], matched: true },
-        dispatch: { expectedCount: 4426, foundCount: 4426, missing: [], matched: true },
-        report: { expectedCount: 436, foundCount: 436, missing: [], matched: true }
-      }
+        booking: {
+          expectedCount: 876,
+          foundCount: 876,
+          missing: [],
+          matched: true,
+        },
+        dispatch: {
+          expectedCount: 4426,
+          foundCount: 4426,
+          missing: [],
+          matched: true,
+        },
+        report: {
+          expectedCount: 436,
+          foundCount: 436,
+          missing: [],
+          matched: true,
+        },
+      },
     };
 
-    expect(() => assertAcceptancePassed(failedAcceptance)).toThrowError(/Workload failed: failed/);
+    expect(() => assertAcceptancePassed(failedAcceptance)).toThrowError(
+      /Workload failed: failed/,
+    );
   });
 
-  it("passes a valid full schedule summary with zero errors and perfect readback", () => {
-    const passedAcceptance = {
-      summary: {
-        result: "measurements_within_targets"
+  const validAcceptance = {
+    summary: {
+      result: "measurements_within_targets",
+      durationSeconds: 900,
+      fullBurstSchedule: true,
+      workflows: {
+        booking: {
+          requests: 900,
+          errors: 0,
+          p95Ms: 15.2,
+          p99Ms: 22.4,
+          latencyTargetsMet: true,
+        },
+        dispatch: {
+          requests: 4500,
+          errors: 0,
+          p95Ms: 18.5,
+          p99Ms: 25.1,
+          latencyTargetsMet: true,
+        },
+        report: {
+          requests: 450,
+          errors: 0,
+          p95Ms: 21.3,
+          p99Ms: 28.7,
+          latencyTargetsMet: true,
+        },
       },
-      readback: {
-        booking: { expectedCount: 900, foundCount: 900, missing: [], matched: true },
-        dispatch: { expectedCount: 4500, foundCount: 4500, missing: [], matched: true },
-        report: { expectedCount: 450, foundCount: 450, missing: [], matched: true }
-      }
-    };
-    expect(() => assertAcceptancePassed(passedAcceptance)).not.toThrow();
+    },
+    readback: {
+      booking: {
+        expectedCount: 900,
+        foundCount: 900,
+        missing: [],
+        matched: true,
+      },
+      dispatch: {
+        expectedCount: 4500,
+        foundCount: 4500,
+        missing: [],
+        matched: true,
+      },
+      report: {
+        expectedCount: 450,
+        foundCount: 450,
+        missing: [],
+        matched: true,
+      },
+    },
+  };
+
+  it("passes a valid full schedule summary with zero errors and perfect readback", () => {
+    expect(() => assertAcceptancePassed(validAcceptance)).not.toThrow();
+  });
+
+  it("rejects when measurements are absent", () => {
+    const invalid = structuredClone(validAcceptance);
+    delete (invalid.summary as any).workflows;
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(
+      /Workload failed: missing workload measurements for booking/,
+    );
+  });
+
+  it("rejects when duration is not 900s", () => {
+    const invalid = structuredClone(validAcceptance);
+    invalid.summary.durationSeconds = 899;
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(
+      /Workload failed: duration must be exactly 900s/,
+    );
+  });
+
+  it("rejects when not a full burst schedule", () => {
+    const invalid = structuredClone(validAcceptance);
+    invalid.summary.fullBurstSchedule = false;
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(
+      /Workload failed: must be full burst schedule/,
+    );
+  });
+
+  it("rejects when request counts do not match requirements", () => {
+    const invalid = structuredClone(validAcceptance);
+    invalid.summary.workflows.booking.requests = 899;
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(
+      /Workload failed: booking requires 900 requests/,
+    );
+  });
+
+  it("rejects when readback counts do not match request counts", () => {
+    const invalid = structuredClone(validAcceptance);
+    invalid.readback.booking.expectedCount = 899;
+    invalid.readback.booking.foundCount = 899;
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(
+      /booking readback failed: expected and found count must be 900/,
+    );
+  });
+
+  it("rejects when latency is null", () => {
+    const invalid = structuredClone(validAcceptance);
+    (invalid.summary.workflows.booking as any).p95Ms = null;
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(
+      /Workload failed: booking p95 latency missing or exceeded target/,
+    );
+  });
+
+  it("rejects when latency is beyond target", () => {
+    const invalid = structuredClone(validAcceptance);
+    invalid.summary.workflows.booking.p95Ms = 2001;
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(
+      /Workload failed: booking p95 latency missing or exceeded target/,
+    );
+  });
+
+  it("rejects when there are errors even if result is marked valid", () => {
+    const invalid = structuredClone(validAcceptance);
+    invalid.summary.workflows.booking.errors = 1;
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(
+      /Workload failed: booking requires zero errors/,
+    );
+  });
+
+  it("rejects when latencyTargetsMet is false", () => {
+    const invalid = structuredClone(validAcceptance);
+    invalid.summary.workflows.booking.latencyTargetsMet = false;
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(
+      /Workload failed: booking latency targets not met/,
+    );
+  });
+
+  it("rejects when readback has missing records", () => {
+    const invalid = structuredClone(validAcceptance);
+    (invalid.readback.booking as any).missing = ["some-id"];
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(
+      /booking readback failed: missing 1 claimed success resources/,
+    );
+  });
+
+  it("rejects when matched flag is false", () => {
+    const invalid = structuredClone(validAcceptance);
+    invalid.readback.booking.matched = false;
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(
+      /booking readback failed: matched flag is false/,
+    );
   });
 });

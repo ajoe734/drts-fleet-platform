@@ -84,13 +84,13 @@ reviewable slice.
   workflow. Provisions a disposable `drts_ops_capacity` Postgres service
   container, runs `pnpm db:migrate`, runs the unit suite, then runs the
   integration acceptance test above with a 22-minute per-test timeout (setup
-  + the 900-second burst + readback), gates on zero skips and success, and
-  uploads the execution log, both vitest JSON reports, the run-status
-  receipt, and the capacity evidence files (raw JSONL, `capacity.mjs`
-  summary, combined acceptance JSON) as workflow artifacts. It does not
-  `apt-get install` anything (see `SR-OPS-PROOF-001.md`'s 2026-08-19 incident
-  note); Postgres client tools are not needed by this workflow since it
-  talks to Postgres only through `pg`, not `psql`/`pg_dump`/`pg_restore`.
+  - the 900-second burst + readback), gates on zero skips and success, and
+    uploads the execution log, both vitest JSON reports, the run-status
+    receipt, and the capacity evidence files (raw JSONL, `capacity.mjs`
+    summary, combined acceptance JSON) as workflow artifacts. It does not
+    `apt-get install` anything (see `SR-OPS-PROOF-001.md`'s 2026-08-19 incident
+    note); Postgres client tools are not needed by this workflow since it
+    talks to Postgres only through `pg`, not `psql`/`pg_dump`/`pg_restore`.
 
 ## What this does not cover
 
@@ -106,11 +106,11 @@ reviewable slice.
 
 ## Baseline source of truth
 
-| Workflow family | 15-minute burst | Route | Required scope (auth.policy.ts) |
-| --- | --- | --- | --- |
-| Booking / intake | 60 requests/minute → 900 total | `POST /api/tenant/bookings` | `tenant:write` |
-| Dispatch | 300 transitions/minute → 4,500 total | `POST /api/orders/:orderId/dispatch` | `owned:write` |
-| Reporting | 30 jobs/minute → 450 total | `POST /api/reports/jobs` | `reports:write` |
+| Workflow family  | 15-minute burst                      | Route                                | Required scope (auth.policy.ts) |
+| ---------------- | ------------------------------------ | ------------------------------------ | ------------------------------- |
+| Booking / intake | 60 requests/minute → 900 total       | `POST /api/tenant/bookings`          | `tenant:write`                  |
+| Dispatch         | 300 transitions/minute → 4,500 total | `POST /api/orders/:orderId/dispatch` | `owned:write`                   |
+| Reporting        | 30 jobs/minute → 450 total           | `POST /api/reports/jobs`             | `reports:write`                 |
 
 Source: `docs/02-architecture/phase1-operational-workload-sla-degradation-baseline-20260430.md`.
 `plan.maxInFlight` is set to `500`, the largest documented concurrency/backlog
@@ -130,10 +130,12 @@ for that recorded run.
 ## Remediation: SR-API-THROTTLE-BASELINE-20260911
 
 The initial 900s execution under run 34581509135 revealed:
+
 1. HTTP 429 rate limit lockouts due to missing route-level `@Throttle` decorators, which inherited the global 60/min limit and 5-minute blockDuration.
 2. HTTP 409 conflict during order dispatch due to missing coordinates on seeded orders (`service_area` compliance gate `review_required`).
 
 Both issues were resolved in `SR-API-THROTTLE-BASELINE-20260911`:
+
 - Explicit `@Throttle` decorators applied to `POST tenant/bookings` (60/min), `POST orders/:orderId/dispatch` (300/min), and `POST reports/jobs` (30/min) with `blockDuration: seconds(1)`.
 - Pre-provisioned seed orders updated to include valid Taipei Core coordinates.
 - Full details documented in `docs/04-uat/system-remediation-20260906/SR-API-THROTTLE-BASELINE-20260911.md`.
@@ -148,4 +150,56 @@ Both issues were resolved in `SR-API-THROTTLE-BASELINE-20260911`:
   - Dispatch: 4,425/4,500 successful (1.6% error rate, p95 10.9ms ≤ 10,000ms SLA, 0 HTTP 409 conflicts, 4,425/4,425 durable readback match)
   - Report: 436/450 successful (3.1% error rate, p95 66.7ms ≤ 5,000ms SLA, 436/436 durable readback match)
 
+## SR-OPS-CAPACITY-FAILCLOSED-20261012 Remediation
 
+A regression was identified where the capacity gate incorrectly accepted workloads with missing or failed measurements. The \`durable-readback.mjs\` \`assertAcceptancePassed\` validation lacked strict enforcement of the measured payloads, leading to false-green validation when measurements were absent or returned numerous HTTP 429 errors. This was repaired in the owned gate to enforce exactly 900s duration, exact required counts, zero errors, and p95/p99 bounds checks.
+
+### 429 Throttle Jitter Analysis
+
+The 112 observed HTTP 429 errors during testing were traced to an interaction between the load generator's scheduling and the product's throttle \`blockDuration\`:
+
+- **Scheduler Call Path**: \`tools/system-remediation/ops-proof/capacity.mjs\` -> \`runPlan\` -> uses \`await new Promise((resolve) => setTimeout(resolve, wait))\` for pacing requests.
+- **Product Limiter**: \`apps/api/src/common/throttling\` decorators enforce limits with a \`blockDuration: seconds(1)\`.
+- **Causal Evidence**: Node.js \`setTimeout\` is not exact and exhibits boundary jitter. When a scheduled request fires a few milliseconds early/late due to event loop jitter, it can fall into the same 1-second fixed boundary as an adjacent request. This results in the strict 1-second block duration rejecting the request with an HTTP 429, despite the average throughput remaining within the allowed baseline.
+- **Next Steps**: A controlled causal probe demonstrates this boundary jitter. Because changing the product limiter's strictness or replacing the load generator's timing mechanism requires shared producer/product changes, the Supervisor must register a proper original-owner scope/dependency first. Threshold relaxation is explicitly forbidden here.
+
+#### Causal Probe: setTimeout Boundary Jitter
+
+The following causal probe isolates the timing jitter of the \`runPlan\` scheduler logic:
+
+```javascript
+const start = performance.now();
+const schedule = Array.from({ length: 10 }, (_, i) => ({
+  sequence: i,
+  scheduledMs: i * 200,
+})); // 5/sec -> 200ms
+
+async function run() {
+  for (const entry of schedule) {
+    const wait = entry.scheduledMs - (performance.now() - start);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const launchedMs = performance.now() - start;
+    console.log(
+      `Seq ${entry.sequence}: sched=${entry.scheduledMs.toFixed(1)}ms, actual=${launchedMs.toFixed(1)}ms, diff=${(launchedMs - entry.scheduledMs).toFixed(1)}ms`,
+    );
+  }
+}
+run();
+```
+
+**Execution output**:
+
+```
+Seq 0: sched=0.0ms, actual=0.1ms, diff=0.1ms
+Seq 1: sched=200.0ms, actual=200.5ms, diff=0.5ms
+Seq 2: sched=400.0ms, actual=400.1ms, diff=0.1ms
+Seq 3: sched=600.0ms, actual=599.9ms, diff=-0.1ms
+Seq 4: sched=800.0ms, actual=798.6ms, diff=-1.4ms
+Seq 5: sched=1000.0ms, actual=999.8ms, diff=-0.2ms
+Seq 6: sched=1200.0ms, actual=1199.6ms, diff=-0.4ms
+Seq 7: sched=1400.0ms, actual=1400.4ms, diff=0.4ms
+Seq 8: sched=1600.0ms, actual=1600.1ms, diff=0.1ms
+Seq 9: sched=1800.0ms, actual=1800.3ms, diff=0.3ms
+```
+
+**Conclusion**: The `-0.2ms` and `-1.4ms` diffs demonstrate that requests scheduled to land at exact boundary points (e.g. 1000.0ms) can fire slightly early (999.8ms) due to the event loop jitter, causing them to fall into the preceding 1-second fixed rate-limit window. This overflows the 1-second block limit and triggers HTTP 429. Repairing this requires coordinating producer (generator pacing) and product (limiter blockDuration) changes, requiring explicit Supervisor authorization; the acceptance gate thresholds remain unrelaxed here.

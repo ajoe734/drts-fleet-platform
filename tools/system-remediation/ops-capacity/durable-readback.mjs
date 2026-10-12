@@ -21,7 +21,8 @@ export async function readBackOwnedOrders(pool, orderIds) {
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    lagMs: new Date(row.updated_at).getTime() - new Date(row.created_at).getTime(),
+    lagMs:
+      new Date(row.updated_at).getTime() - new Date(row.created_at).getTime(),
   }));
 }
 
@@ -41,7 +42,8 @@ export async function readBackReportJobs(pool, jobIds) {
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    queueLagMs: new Date(row.updated_at).getTime() - new Date(row.created_at).getTime(),
+    queueLagMs:
+      new Date(row.updated_at).getTime() - new Date(row.created_at).getTime(),
   }));
 }
 
@@ -81,17 +83,103 @@ export function assertAcceptancePassed(acceptance) {
   if (!acceptance?.summary) {
     throw new Error("Missing workload summary");
   }
-  if (acceptance.summary.result !== "measurements_within_targets") {
-    throw new Error(`Workload failed: ${acceptance.summary.result}. Check error rows or latency targets.`);
+
+  const { summary } = acceptance;
+
+  if (summary.result !== "measurements_within_targets") {
+    throw new Error(
+      `Workload failed: ${summary.result}. Check error rows or latency targets.`,
+    );
   }
+
+  if (summary.durationSeconds !== 900) {
+    throw new Error(
+      `Workload failed: duration must be exactly 900s, got ${summary.durationSeconds}`,
+    );
+  }
+
+  if (summary.fullBurstSchedule !== true) {
+    throw new Error(`Workload failed: must be full burst schedule`);
+  }
+
+  const requiredCounts = {
+    booking: 900,
+    dispatch: 4500,
+    report: 450,
+  };
+
+  const expectedTargets = {
+    booking: { p95Ms: 2000, p99Ms: 5000 },
+    dispatch: { p95Ms: 10000 },
+    report: { p95Ms: 5000 },
+  };
+
   for (const family of ["booking", "dispatch", "report"]) {
-    const summary = acceptance.readback[family];
-    if (!summary) throw new Error(`Missing readback summary for ${family}`);
-    if (summary.missing.length > 0) {
-      throw new Error(`${family} readback failed: missing ${summary.missing.length} claimed success resources.`);
+    const workload = summary.workflows?.[family];
+    if (!workload) {
+      throw new Error(
+        `Workload failed: missing workload measurements for ${family}`,
+      );
     }
-    if (!summary.matched) {
+
+    if (workload.requests !== requiredCounts[family]) {
+      throw new Error(
+        `Workload failed: ${family} requires ${requiredCounts[family]} requests, got ${workload.requests}`,
+      );
+    }
+
+    if (workload.errors !== 0) {
+      throw new Error(
+        `Workload failed: ${family} requires zero errors, got ${workload.errors}`,
+      );
+    }
+
+    if (!workload.latencyTargetsMet) {
+      throw new Error(`Workload failed: ${family} latency targets not met`);
+    }
+
+    if (
+      !Number.isFinite(workload.p95Ms) ||
+      workload.p95Ms > expectedTargets[family].p95Ms
+    ) {
+      throw new Error(
+        `Workload failed: ${family} p95 latency missing or exceeded target`,
+      );
+    }
+
+    if (expectedTargets[family].p99Ms !== undefined) {
+      if (
+        !Number.isFinite(workload.p99Ms) ||
+        workload.p99Ms > expectedTargets[family].p99Ms
+      ) {
+        throw new Error(
+          `Workload failed: ${family} p99 latency missing or exceeded target`,
+        );
+      }
+    }
+
+    const readbackSummary = acceptance.readback?.[family];
+    if (!readbackSummary) {
+      throw new Error(`Missing readback summary for ${family}`);
+    }
+
+    if (readbackSummary.missing.length > 0) {
+      throw new Error(
+        `${family} readback failed: missing ${readbackSummary.missing.length} claimed success resources.`,
+      );
+    }
+
+    if (!readbackSummary.matched) {
       throw new Error(`${family} readback failed: matched flag is false.`);
+    }
+
+    if (
+      readbackSummary.expectedCount !== requiredCounts[family] ||
+      readbackSummary.foundCount !== requiredCounts[family]
+    ) {
+      throw new Error(
+        `${family} readback failed: expected and found count must be ${requiredCounts[family]}`,
+      );
     }
   }
 }
