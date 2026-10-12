@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # E2E-009 — Production rail dry-run
 #
-# This is a static governance E2E. It does not trigger GitHub Actions or deploy
-# to GCP. Instead, it validates that the production deployment rail is wired and
-# documented coherently across the local workflow and runbook artifacts.
+# This is an offline governance E2E. It checks workflow/runbook wiring and runs
+# the actual production plan, preflight and command-builder regressions with
+# external cloud boundaries stubbed. It does not deploy or start product servers.
 #
 # Flow under test:
 #   validate-config -> build-push contract -> deploy dry-run contract -> rollback by tag
@@ -22,6 +22,7 @@ source "${SCRIPT_DIR}/lib/helpers.sh"
 SCENARIO="E2E-009"
 WORKFLOW_PROD="${REPO_ROOT}/.github/workflows/deploy-prod.yml"
 WORKFLOW_STAGING="${REPO_ROOT}/.github/workflows/deploy-staging.yml"
+RAIL="${REPO_ROOT}/operations/verification/production-release-rail/rail.cjs"
 BRANCH_STRATEGY="${REPO_ROOT}/docs/ops/branch-strategy.md"
 
 chain_init
@@ -59,6 +60,7 @@ save_check() {
 
 require_file "$WORKFLOW_PROD"
 require_file "$WORKFLOW_STAGING"
+require_file "$RAIL"
 require_file "$BRANCH_STRATEGY"
 
 log_surface "validate-config — production workflow gate"
@@ -66,23 +68,30 @@ log_surface "validate-config — production workflow gate"
 assert_contains "$WORKFLOW_PROD" "validate-config:" "validate-config job exists"
 assert_contains "$WORKFLOW_PROD" "name: production" "production environment gate is declared"
 assert_contains "$WORKFLOW_PROD" "^prod/v[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}\\.[0-9]+$" "prod tag regex is enforced"
-assert_contains "$WORKFLOW_PROD" "git ls-remote --exit-code --tags origin \"refs/tags/\$tag\"" "origin tag existence check is present"
+assert_contains "$WORKFLOW_PROD" 'git fetch --no-tags origin "refs/tags/${RELEASE_TAG}"' "explicit remote tag fetch is present"
+assert_contains "$WORKFLOW_PROD" "FETCH_HEAD^{commit}" "tag is resolved to immutable commit"
 assert_contains "$WORKFLOW_PROD" "vars.PROD_GCP_PROJECT_ID" "PROD_GCP_PROJECT_ID config gate is present"
 assert_contains "$WORKFLOW_PROD" "vars.PROD_GCP_REGION" "PROD_GCP_REGION config gate is present"
-assert_contains "$WORKFLOW_PROD" "vars.PROD_GCP_CLOUDSQL_INSTANCE" "PROD_GCP_CLOUDSQL_INSTANCE config gate is present"
-assert_contains "$WORKFLOW_PROD" "vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT" "PROD_GCP_RUNTIME_SERVICE_ACCOUNT config gate is present"
+assert_contains "$RAIL" "PROD_GCP_CLOUDSQL_INSTANCE" "PROD_GCP_CLOUDSQL_INSTANCE config gate is present"
+assert_contains "$RAIL" "PROD_GCP_RUNTIME_SERVICE_ACCOUNT" "PROD_GCP_RUNTIME_SERVICE_ACCOUNT config gate is present"
 assert_contains "$WORKFLOW_PROD" "secrets.PROD_WIF_SERVICE_ACCOUNT" "PROD_WIF_SERVICE_ACCOUNT config gate is present"
 assert_contains "$WORKFLOW_PROD" "secrets.PROD_WIF_PROVIDER" "PROD_WIF_PROVIDER config gate is present"
-assert_contains "$WORKFLOW_PROD" "vars.PROD_ARTIFACT_REGISTRY" "PROD_ARTIFACT_REGISTRY config gate is present"
-assert_contains "$WORKFLOW_PROD" "Resolve Artifact Registry host" "single-path registry host resolution exists"
-assert_contains "$WORKFLOW_PROD" "gcloud auth configure-docker \${{ steps.registry_host.outputs.host }} --quiet" "docker auth uses derived registry host"
-assert_contains "$WORKFLOW_PROD" "vars.PROD_GCP_API_SERVICE" "PROD_GCP_API_SERVICE override is wired"
-assert_contains "$WORKFLOW_PROD" "vars.PROD_GCP_PLATFORM_ADMIN_SERVICE" "PROD_GCP_PLATFORM_ADMIN_SERVICE override is wired"
-assert_contains "$WORKFLOW_PROD" "vars.PROD_GCP_OPS_CONSOLE_SERVICE" "PROD_GCP_OPS_CONSOLE_SERVICE override is wired"
-assert_contains "$WORKFLOW_PROD" "vars.PROD_GCP_MIGRATION_JOB" "PROD_GCP_MIGRATION_JOB override is wired"
+assert_contains "$RAIL" "PROD_ARTIFACT_REGISTRY" "PROD_ARTIFACT_REGISTRY config gate is present"
+assert_contains "$WORKFLOW_PROD" 'registry_host: ${{ steps.plan.outputs.registry_host }}' "preflight exports frozen registry host"
+assert_contains "$WORKFLOW_PROD" 'REGISTRY_HOST: ${{ needs.validate-config.outputs.registry_host }}' "build receives the validated registry host"
+assert_contains "$WORKFLOW_PROD" 'gcloud auth configure-docker "$REGISTRY_HOST" --quiet' "docker auth uses derived registry host"
+assert_contains "$RAIL" "PROD_GCP_MIGRATION_JOB" "PROD_GCP_MIGRATION_JOB override is wired"
+
+assert_contains "$WORKFLOW_PROD" 'PROD_VARIABLES_JSON: ${{ toJSON(vars) }}' "all production variables reach the plan builder"
+assert_contains "$WORKFLOW_PROD" 'buildPlan(JSON.parse(process.env.PROD_VARIABLES_JSON)' "actual builder validates configuration before build"
+# Execute the existing production-function regressions; the read-only external
+# cloud boundary is stubbed, while strict validators/factories remain real.
+# The suite checks all ten service overrides, immutable arguments, public entry,
+# durable providers, and missing/partial configuration before rollout.
+(cd "$REPO_ROOT" && pnpm exec vitest run tests/unit/sr-prod-full-surface-rail-20261012/production-rail.test.ts)
 
 save_check "validate_config" "status" "pass"
-save_check "validate_config" "mode" "static_contract_check"
+save_check "validate_config" "mode" "workflow_wiring_and_offline_production_functions"
 
 log_surface "build-push — prod rail real implementation"
 
@@ -130,6 +139,6 @@ assert_chain "rollback" "status"
 print_chain_summary
 
 echo ""
-log_warn "E2E-009 is a static dry-run. It verifies the current prod rail contract (deploy-prod.yml now carries real build-push / migrate / deploy / health-check jobs per PROD-RAIL-001). Actual prod execution still requires PROD_* GCP project + WIF + Secret Manager + Artifact Registry to be configured in repo Settings."
+log_warn "E2E-009 is an offline dry-run of workflow wiring and actual production functions. Live deployment, public IAM/OAuth policy, provider/storage/scanner evidence and protected production approval remain separate requirements."
 log_ok "E2E-009 complete — production rail dry-run contract checks passed."
 echo -e "Evidence log: ${EVIDENCE_FILE}"
