@@ -146,8 +146,17 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
         orderId: `order-${i}`,
         status: "completed",
         orderSource: "app",
+        createdAt: "2026-10-12T00:00:00.000Z",
       },
-      traces: [],
+      traces: [
+        {
+          orderId: `order-${i}`,
+          traceId: `ready-${i}`,
+          eventType: "order.ready_for_dispatch",
+          createdAt: "2026-10-12T00:00:00.000Z",
+          details: {},
+        },
+      ],
       attempts: [],
     })),
     dispatchOrderStatusDistribution: { completed: 4500 } as Record<
@@ -323,20 +332,23 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
         completed: 1,
         delayed_queue: 4499,
       };
-      degraded.dispatchAttemptCoverage = {
-        attempted: 1,
-        unattemptedLawful: 4499,
-        unattemptedUnlawful: 0,
-        unattemptedLawfulReasons: reasons,
+      const invalid = {
+        ...degraded,
+        dispatchAttemptCoverage: {
+          attempted: 1,
+          unattemptedLawful: 4499,
+          unattemptedUnlawful: 0,
+          unattemptedLawfulReasons: reasons,
+        },
       };
-      degraded.queueLag.dispatchOrderQueueLag = {
+      invalid.queueLag.dispatchOrderQueueLag = {
         count: 1,
         minMs: 0,
         maxMs: 0,
         avgMs: 0,
         p95Ms: 0,
       };
-      expect(() => assertAcceptancePassed(degraded)).toThrow(/resource|reason/);
+      expect(() => assertAcceptancePassed(invalid)).toThrow(/resource|reason/);
     }
   });
 
@@ -358,6 +370,24 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
     expect(() => assertAcceptancePassed(invalid)).toThrow(/readiness/);
   });
 
+  it("rejects fabricated ready authority, lag values, and an unrelated readiness trace", () => {
+    for (const mutate of [
+      (row: (typeof validAcceptance.dispatchEvidence)[number]) => {
+        row.readySource = "unknown";
+      },
+      (row: (typeof validAcceptance.dispatchEvidence)[number]) => {
+        row.lagMs = 1;
+      },
+      (row: (typeof validAcceptance.dispatchEvidence)[number]) => {
+        row.traces[0]!.orderId = "unrelated-order";
+      },
+    ]) {
+      const invalid = structuredClone(validAcceptance);
+      mutate(invalid.dispatchEvidence[0]!);
+      expect(() => assertAcceptancePassed(invalid)).toThrow(/readiness|safety/);
+    }
+  });
+
   it("accepts a correlated recording-gated remainder and rejects unsafe assignment or missing reason trace", () => {
     const evidence = structuredClone(validAcceptance.dispatchEvidence);
     Object.assign(evidence[0]!, {
@@ -372,6 +402,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
       assignmentCount: 0,
       record: {
         orderId: "order-0",
+        createdAt: "2026-10-12T00:00:00.000Z",
         status: "recording_pending",
         orderSource: "phone",
         callId: "call-0",
@@ -421,6 +452,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
       assignmentCount: 0,
       record: {
         orderId: "order-0",
+        createdAt: "2026-10-12T00:00:00.000Z",
         status: "delayed_queue",
         orderSource: "app",
         queueFamily: "delayed_retry_queue",
@@ -446,6 +478,13 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
         },
       ],
       traces: [
+        {
+          orderId: "order-0",
+          traceId: "ready-0",
+          eventType: "order.ready_for_dispatch",
+          createdAt: "2026-10-12T00:00:00.000Z",
+          details: {},
+        },
         {
           orderId: "order-0",
           traceId: "delayed-trace",

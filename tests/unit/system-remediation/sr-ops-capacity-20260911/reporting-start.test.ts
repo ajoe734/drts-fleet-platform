@@ -55,9 +55,39 @@ function fixture(jobs: StoredReportJobRecord[]) {
   );
   return { repo, service, writes, stored, query };
 }
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 describe("reporting first actual start and rehydration", () => {
+  it("localizes the current trip_summary cohort limitation through the actual public worker path", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { service, stored } = fixture([]);
+    const callbacks: VoidFunction[] = [];
+    vi.spyOn(globalThis, "queueMicrotask").mockImplementation((callback) => {
+      callbacks.push(callback);
+    });
+    for (let minute = 0; minute < 2; minute++) {
+      vi.setSystemTime(Date.parse("2026-10-12T00:00:00.000Z") + minute * 60000);
+      for (let i = 0; i < 30; i++)
+        service.createReportJob({ jobType: "trip_summary", format: "csv" });
+      expect(
+        [...stored.values()].filter(
+          (job) => job.status === "queued" || job.status === "running",
+        ),
+      ).toHaveLength(30);
+      callbacks.splice(0).forEach((callback) => callback());
+      await vi.waitFor(() =>
+        expect(
+          [...stored.values()].every((job) => job.status === "completed"),
+        ).toBe(true),
+      );
+    }
+    expect(stored.size).toBe(60);
+    // This is a semantic fixture counterexample, not a report throughput claim.
+    // Real trip_summary work drains between budgeted cohorts; no 50-job proof.
+  });
   it("actual repository load and service init retain old start and leave completed legacy absence missing", async () => {
     const oldStart = "2026-10-12T00:00:01.000Z";
     const queued = { ...legacyJob("recover-1", "queued"), startedAt: oldStart };

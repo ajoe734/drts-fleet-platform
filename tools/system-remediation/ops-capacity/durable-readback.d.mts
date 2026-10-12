@@ -15,6 +15,7 @@ export type OwnedOrderReadbackRow = {
   createdAt: string | null;
   lagMs: number | null;
   authorityKnown: boolean;
+  voiceCreationVerified?: boolean;
   readyAt: string | null;
   readySource: string | null;
   hasAttempt: boolean;
