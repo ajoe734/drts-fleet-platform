@@ -56,7 +56,7 @@ function transport() {
     on: vi.fn(),
     detach: vi.fn().mockResolvedValue(undefined),
   };
-  const page = { on: vi.fn() };
+  const page = { on: vi.fn(), goto: vi.fn() };
   const context = {
     newCDPSession: vi.fn().mockResolvedValue(cdp),
     routeWebSocket: vi.fn(),
@@ -73,12 +73,13 @@ function transport() {
       url: string,
       headers: Record<string, string> = {},
       requestId = "request-1",
+      resourceType: unknown = "Document",
     ) {
       const handler = cdp.on.mock.calls.find(
         ([event]) => event === "Fetch.requestPaused",
       )?.[1];
       expect(handler).toBeTypeOf("function");
-      await handler({ requestId, request: { url, headers } });
+      await handler({ requestId, resourceType, request: { url, headers } });
     },
     run: () =>
       registered.body!({
@@ -99,6 +100,127 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("private ops map browser transport", () => {
+  it.each([
+    ["target-policy-rejected", "https://unapproved.example.test/", "Image"],
+    [
+      "continue-request-failed",
+      "https://ops.example.test/dispatch",
+      "Document",
+    ],
+  ])(
+    "diagnoses %s without retaining source strings",
+    async (category, url, resourceType) => {
+      const mock = transport();
+      mock.cdp.send.mockImplementation(async (method) => {
+        if (method === "Fetch.continueRequest")
+          throw new Error(`Protocol/navigation secret=${token} ${url}`);
+        return {};
+      });
+      mock.request.get.mockImplementation(async () => {
+        await mock.pause(
+          url!,
+          { Authorization: `Bearer ${token}` },
+          "secret-request-id",
+          resourceType,
+        );
+        return { ok: () => false, status: () => 403 };
+      });
+      await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+      expect(save.mock.calls[0]?.[1].transport_failures).toEqual([
+        { category, resource_type: resourceType, block_result: "blocked" },
+      ]);
+      const retained = JSON.stringify(save.mock.calls);
+      for (const secret of [
+        token,
+        url!,
+        "secret-request-id",
+        "Protocol/navigation",
+      ])
+        expect(retained).not.toContain(secret);
+    },
+  );
+
+  it.each([token, `Image?key=${token}`, null, {}, "image"])(
+    "replaces untrusted resource metadata with a fixed enum (%s)",
+    async (resourceType) => {
+      const mock = transport();
+      mock.request.get.mockImplementation(async () => {
+        await mock.pause(
+          `data:text/plain,${token}`,
+          {},
+          "request-1",
+          resourceType,
+        );
+        return { ok: () => false, status: () => 403 };
+      });
+      await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+      expect(save.mock.calls[0]?.[1].transport_failures).toEqual([
+        {
+          category: "target-policy-rejected",
+          resource_type: "Unknown",
+          block_result: "blocked",
+        },
+      ]);
+      expect(JSON.stringify(save.mock.calls)).not.toContain(token);
+    },
+  );
+
+  it("retains each of five failures and failed failRequest recovery truthfully", async () => {
+    const mock = transport();
+    mock.cdp.send.mockImplementation(async (method) => {
+      if (method === "Fetch.failRequest") throw new Error(`closed ${token}`);
+      return {};
+    });
+    mock.request.get.mockImplementation(async () => {
+      for (let index = 0; index < 5; index++)
+        await mock.pause(
+          `https://forbidden.example.test/?key=${token}`,
+          {},
+          `request-${index}`,
+          "Image",
+        );
+      return { ok: () => false, status: () => 403 };
+    });
+    await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+    expect(save.mock.calls[0]?.[1].transport_failures).toEqual(
+      Array.from({ length: 5 }, () => ({
+        category: "target-policy-rejected",
+        resource_type: "Image",
+        block_result: "block-failed",
+      })),
+    );
+    expect(save.mock.calls[0]?.[1].failures).toHaveLength(6);
+    expect(JSON.stringify(save.mock.calls)).not.toContain(token);
+    expect(mock.cdp.detach).toHaveBeenCalledOnce();
+  });
+
+  it("distinguishes navigation rejection from target and continue errors", async () => {
+    const mock = transport();
+    mock.request.get.mockResolvedValue({
+      ok: () => true,
+      status: () => 200,
+      headers: () => ({ "x-drts-candidate-sha": env.DRTS_CANDIDATE_SHA }),
+      json: async () => ({
+        provider: "google",
+        enabled: true,
+        reasonCode: null,
+      }),
+    });
+    mock.page.goto.mockRejectedValue(new Error(`Navigation failed ${token}`));
+    await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+    expect(save.mock.calls[0]?.[1]).toMatchObject({
+      stage: "page:/dispatch:http",
+      transport_failures: [
+        {
+          category: "navigation-failed",
+          resource_type: "Document",
+          block_result: "not-attempted",
+        },
+      ],
+    });
+    expect(JSON.stringify(save.mock.calls)).not.toContain(token);
+  });
+
   it("authenticates the actual spec's config request without following redirects", async () => {
     const mock = transport();
     await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
