@@ -151,7 +151,12 @@ Expected social providers require their complete, separate passenger credential
 bundles and exact `PROD_OAUTH_REDIRECT_ALLOWLIST` callbacks at
 `<PROD_PASSENGER_APP_ORIGIN>/auth/callback/<provider>` before build. The workforce
 OIDC client is not a substitute. Email OTP requires its managed pepper and SMTP
-configuration. Actual provider availability is checked by anonymous discovery;
+configuration plus `PROD_NOTIFICATION_OUTBOX_TYPE=postgres` for the actual durable
+delivery factory. Required phone login is blocked before build while the current
+`PassengerAppModule` binds `SMS_PORT` to `UnconfiguredSmsPort`; credentials/pepper
+alone cannot enable it. This records a missing production SMS adapter, preserving
+the phone-login requirement rather than pretending it is ready.
+Actual provider availability is checked by anonymous discovery;
 this is not proof of provider login, SMS/email delivery or consent/legal readiness.
 
 Verification re-reads external policies and records their hashes, then makes

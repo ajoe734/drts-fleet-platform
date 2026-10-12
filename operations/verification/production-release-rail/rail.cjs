@@ -300,10 +300,18 @@ function buildPlan(vars, sha, tag, deployer) {
         "REMOTE_SMTP_HOST",
         "REMOTE_SMTP_USERNAME_SECRET",
         "REMOTE_SMTP_PASSWORD_SECRET",
+        "NOTIFICATION_OUTBOX_TYPE",
       ],
       phone: ["PASSENGER_OTP_PEPPER_SECRET"],
     }[provider];
     for (const field of fields) need(`PROD_${field}`);
+    if (
+      provider === "email" &&
+      vars.PROD_NOTIFICATION_OUTBOX_TYPE !== "postgres"
+    )
+      reject(
+        "F-PUBLIC-ENTRY deployment blocker: PROD_NOTIFICATION_OUTBOX_TYPE=postgres required for production email OTP delivery",
+      );
     if (["google", "facebook", "line"].includes(provider)) {
       const callback = `${need("PROD_PASSENGER_APP_ORIGIN")}/auth/callback/${provider}`;
       if (

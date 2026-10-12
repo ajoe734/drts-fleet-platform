@@ -42,6 +42,10 @@ function validators() {
       .otpOptionsFromEnv,
     mail: load("modules/notification-delivery/smtp-mail.transport.ts")
       .createMailTransportFromEnv,
+    smsAvailability: () =>
+      new (load(
+        "modules/passenger-app/otp/sms.port.ts",
+      ).UnconfiguredSmsPort)().availability(),
     matchesScope: load("common/auth/internal-key-exception-registry.ts")
       .matchesScope,
     weakSecret: load("config/auth-startup-config.ts").isWeakSecret,
@@ -60,6 +64,18 @@ function validateRuntime(plan, values, checks = validators()) {
   };
   const report = checks.auth(env);
   if (!report.valid) reject(report.issues.map((i) => i.control).join(", "));
+  const providers = plan.services.find((s) => s.id === "passenger-app-web")
+    .publicEntry.expectedProviders;
+  // Match PassengerAppModule's actual SMS_PORT binding, rather than treating
+  // an OTP pepper as proof that an unavailable SMS adapter can serve users.
+  if (providers.includes("phone") && checks.smsAvailability() !== "available")
+    reject(
+      "F-PUBLIC-ENTRY deployment blocker: production PassengerAppModule SMS_PORT adapter unavailable for required phone login",
+    );
+  if (providers.includes("email") && !checks.mail(env)?.sendPlatform)
+    reject(
+      "F-PUBLIC-ENTRY deployment blocker: platform SMTP transport unavailable for required email login",
+    );
   try {
     const database = new URL(env.DATABASE_URL);
     if (

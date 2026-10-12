@@ -111,4 +111,30 @@ dependencies installed offline with scripts disabled; checks use this isolated
 install. Dependency restoration details and final check results are recorded in
 the machine-specific canonical `.local/` logs, not represented as product evidence.
 
-Final combined VM-safe checks: pending until the execution log is complete.
+The six affected VM-safe suites pass **203 tests** (including 103 real rail
+cases, the existing strict-auth/Google registry checks, passenger guard ingress,
+Referral embed security and Passenger BFF transport). The first combined command
+mistyped the startup suite path and ran only five suites; the corrected command
+uses `tests/unit/auth-startup-config.test.ts`, and all six suites completed.
+The new SMS case exercises `UnconfiguredSmsPort.availability`, matching the actual
+`PassengerAppModule` binding: a required phone-login policy blocks before build
+because an OTP pepper is not an SMS adapter. Email policy requires the actual
+factory's durable `postgres` outbox and a platform SMTP transport. These blockers
+preserve required customer methods; they do not assert missing adapters are ready.
+
+Full root TypeScript check, scoped ESLint/Prettier, workflow timeout unit checks,
+test discovery, repository classification, commit trailers and diff checks pass
+(exit 0). Versions are the same locked Node/pnpm/TypeScript/Vitest versions listed
+above. Canonical dependencies were restored with a locked offline install using
+their own virtual store: no root dependency links still point into this task
+worktree, and the canonical Vitest entry resolves. The assigned task worktree
+keeps its own isolated dependencies. Restoration log:
+canonical `.local/sr-prod-full-surface-rail-20261012/dependency-restoration.log`.
+
+Final immutable candidate verification is retained at canonical
+`.local/sr-prod-full-surface-rail-20261012/checks-<CANDIDATE_SHA>.log`; the full SHA
+and matching remote/PR head are recorded by handoff. Separate completed regression
+and typecheck output: `public-entry-regressions.log` and
+`public-entry-typecheck.log` in the same canonical directory. All public HTTP/cloud
+boundaries in these checks are mocked; no local product server, browser test
+server, Compose, PG, actual production request or cloud mutation was performed.

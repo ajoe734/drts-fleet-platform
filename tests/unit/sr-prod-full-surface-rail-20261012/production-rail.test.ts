@@ -164,6 +164,41 @@ describe("F-PUBLIC-ENTRY public customer boundary", () => {
     ).toThrow("private backend");
     expect(other.calls).toEqual([]);
   });
+  it("rejects a wrong passenger callback and mismatched referral host before external reads", () => {
+    const f = fixture();
+    f.vars.PROD_OAUTH_REDIRECT_ALLOWLIST =
+      "https://tenant-console-web.drts.invalid/auth/callback/google";
+    expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
+      "passenger callback",
+    );
+    expect(f.calls).toEqual([]);
+    const other = fixture();
+    other.vars.PROD_REFERRAL_EMBED_ALLOWED_HOSTS = "other.drts.invalid";
+    expect(() =>
+      preflight(other.vars, SHA, TAG, DEPLOYER, other.cloud),
+    ).toThrow("entryHost allowlist");
+    expect(other.calls).toEqual([]);
+  });
+  it("rejects workload/operator headers as substitutes for signed customer session fixtures", () => {
+    const { plan, headers } = candidate();
+    for (const id of ["passenger-app-web", "referral-embed-web"]) {
+      const changed = structuredClone(headers);
+      changed[id] = { "x-drts-google-id-token": "operator-only" };
+      expect(() => validateSmokeHeaders(plan, JSON.stringify(changed))).toThrow(
+        `${id} header`,
+      );
+    }
+  });
+  it("blocks required phone login on the actual unconfigured production SMS adapter before rollout", () => {
+    const f = fixture(),
+      config = JSON.parse(f.vars.PROD_PUBLIC_ENTRY_CONFIG_JSON);
+    config["passenger-app-web"].expectedProviders = ["phone"];
+    f.vars.PROD_PUBLIC_ENTRY_CONFIG_JSON = JSON.stringify(config);
+    f.vars.PROD_PASSENGER_OTP_PEPPER_SECRET = "drts-prod-otp-pepper";
+    expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
+      "SMS_PORT adapter unavailable",
+    );
+  });
   it.each([
     "unavailable",
     "staff-only",
@@ -254,19 +289,23 @@ describe("F-PUBLIC-ENTRY public customer boundary", () => {
   );
   it.each([
     "staff-login",
+    "generic-login",
     "wrong-providers",
     "empty-providers",
     "personal-data",
     "edge-denial",
+    "invalid-session-accepted",
   ])("rejects false public-entry success %s", async (fault) => {
     const { plan } = candidate(),
       service = plan.services.find((s: any) => s.id === "passenger-app-web");
     await expect(
-      verifyPublicEntry(service, async (url: string) => {
+      verifyPublicEntry(service, async (url: string, options: any) => {
         const pathname = new URL(url).pathname,
           value = publicResponse(service, pathname);
         if (fault === "staff-login" && pathname === "/login")
           value.status = 302;
+        if (fault === "generic-login" && pathname === "/login")
+          value.body = "<html>Google sign in</html>";
         if (
           ["wrong-providers", "empty-providers"].includes(fault) &&
           pathname.endsWith("providers")
@@ -283,6 +322,14 @@ describe("F-PUBLIC-ENTRY public customer boundary", () => {
         if (fault === "edge-denial" && pathname.endsWith("/me")) {
           value.status = 403;
           value.body = "IAP forbidden";
+        }
+        if (
+          fault === "invalid-session-accepted" &&
+          pathname.endsWith("/me") &&
+          options.headers.Cookie
+        ) {
+          value.status = 200;
+          value.body = JSON.stringify({ data: { passengerId: "leaked" } });
         }
         return { status: value.status, text: async () => value.body };
       }),
