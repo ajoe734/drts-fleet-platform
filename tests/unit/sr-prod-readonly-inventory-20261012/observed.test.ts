@@ -580,7 +580,7 @@ describe("all resource consumers retain ownership and request authority", () => 
       if (new URL(d.url).pathname.endsWith("/services/prod-api"))
         throw Object.assign(Error(SENTINEL), {
           observedResource: service(f).name,
-          diagnosis: SENTINEL,
+          diagnosis: "IMAGE_CONTRACT",
         });
       return f.transport(d);
     });

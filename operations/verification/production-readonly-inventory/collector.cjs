@@ -912,12 +912,13 @@ async function collect(env, head, transport) {
       } while (next);
       return { items: values, pages };
     } catch (e) {
-      if (!e || typeof e !== "object") e = new Error("REQUEST_FAILED");
+      const error =
+        e && typeof e === "object" ? e : new Error("REQUEST_FAILED");
       if (values.length) {
-        e.partialItems = values;
-        e.pages = Math.min(pages, LIMITS.pages);
+        error.partialItems = values;
+        error.pages = Math.min(pages, LIMITS.pages);
       }
-      throw e;
+      throw error;
     }
   };
   for (const op of [...plan.operations]) {
