@@ -31,9 +31,10 @@ const LIMITS = Object.freeze({
   requestMs: 15000,
   collectionMs: 480000,
 });
-function fail(code = "MALFORMED_METADATA") {
+function fail(code = "MALFORMED_METADATA", diagnosis = "UNKNOWN") {
   const e = new Error(code);
   e.code = code;
+  e.diagnosis = diagnosis;
   throw e;
 }
 function guard(env, head) {
@@ -148,8 +149,33 @@ const resourceName = str(
   /^projects\/(?:drts-prod-devcc-20260825|\d+)\/[a-zA-Z0-9_@./%-]{1,300}$/,
 );
 const runName = str(
-  /^projects\/drts-prod-devcc-20260825\/locations\/us-central1\/(?:services|jobs)\/[a-z][a-z0-9-]{0,62}(?:\/revisions\/[a-z][a-z0-9-]{0,62})?$/,
+  /^projects\/(?:drts-prod-devcc-20260825|[1-9][0-9]{0,29})\/locations\/us-central1\/(?:services|jobs)\/[a-z][a-z0-9-]{0,62}(?:\/revisions\/[a-z][a-z0-9-]{0,62})?$/,
 );
+function canonicalRunName(value, projectNumber) {
+  if (!runName(value)) fail("MALFORMED_METADATA", "RESOURCE_NAME");
+  const project = value.split("/")[1];
+  if (project !== TARGET.project && project !== projectNumber)
+    fail("IDENTITY_MISMATCH", "RESOURCE_IDENTITY");
+  return value.replace(`projects/${project}/`, `projects/${TARGET.project}/`);
+}
+function runIdentity(data, expected, kind, projectNumber) {
+  if (canonicalRunName(data.name, projectNumber) !== expected)
+    fail("IDENTITY_MISMATCH", "RESOURCE_IDENTITY");
+  if (kind === "service") {
+    for (const revision of [
+      data.latestReadyRevision,
+      data.latestCreatedRevision,
+      ...(Array.isArray(data.trafficStatuses)
+        ? data.trafficStatuses.map((t) => t?.revision)
+        : []),
+    ]) {
+      if (revision === undefined) continue;
+      const canonical = canonicalRunName(revision, projectNumber);
+      if (!canonical.startsWith(`${expected}/revisions/`))
+        fail("IDENTITY_MISMATCH", "REVISION_PARENT");
+    }
+  }
+}
 const imageType = str(
   /^us-central1-docker\.pkg\.dev\/(?:drts-prod-devcc-20260825\/[a-z0-9_-]+|drts-dev-devcc-20260825\/drts)\/(?:api|platform-admin-web|ops-console-web|fleet-partner-portal-web|tenant-console-web|bank-console-web|referral-embed-web|enterprise-dispatch-web|channel-partner-portal-web|passenger-app-web|migrate)(?:@sha256:[a-f0-9]{64}|:[a-f0-9]{40})$/,
 );
@@ -312,24 +338,37 @@ function fields(schema) {
 }
 function validate(value, schema, maxArray = LIMITS.pageSize) {
   if (typeof schema === "function") {
-    if (!schema(value)) fail();
+    if (!schema(value))
+      fail(
+        "MALFORMED_METADATA",
+        schema === runName
+          ? "RESOURCE_NAME"
+          : schema === imageType
+            ? "IMAGE_CONTRACT"
+            : schema === revisionSchema.serviceAccount
+              ? "RUNTIME_IDENTITY"
+              : "TYPE_OR_SCHEMA",
+      );
     return value;
   }
   if (Array.isArray(schema)) {
-    if (!Array.isArray(value) || value.length > maxArray) fail();
+    if (!Array.isArray(value) || value.length > maxArray)
+      fail("MALFORMED_METADATA", "TYPE_OR_SCHEMA");
     return value.map((v) => validate(v, schema[0], maxArray));
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) fail();
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    fail("MALFORMED_METADATA", "TYPE_OR_SCHEMA");
   const result = {};
   for (const key of Object.keys(value)) {
-    if (!Object.hasOwn(schema, key)) fail("UNEXPECTED_FIELDS");
+    if (!Object.hasOwn(schema, key))
+      fail("UNEXPECTED_FIELDS", "UNEXPECTED_FIELDS");
     result[key] = validate(value[key], schema[key], maxArray);
   }
   return result;
 }
 function requireFields(value, keys) {
   if (keys.some((k) => value[k] === undefined))
-    fail("INSUFFICIENT_OBSERVATION");
+    fail("INSUFFICIENT_OBSERVATION", "MISSING_REQUIRED_FIELDS");
 }
 const OPTIONAL_SECRETS = [
   "TENANT_OIDC_JWT_PUBLIC_KEY",
@@ -660,6 +699,19 @@ const SAFE_CODES = [
   "AUTH_REQUIRED",
   "COLLECTION_TIMEOUT",
 ];
+const SAFE_DIAGNOSES = Object.freeze([
+  "UNKNOWN",
+  "TYPE_OR_SCHEMA",
+  "UNEXPECTED_FIELDS",
+  "RESOURCE_NAME",
+  "RESOURCE_IDENTITY",
+  "REVISION_PARENT",
+  "IMAGE_CONTRACT",
+  "EXPECTED_IMAGE",
+  "RUNTIME_IDENTITY",
+  "MISSING_REQUIRED_FIELDS",
+  "TRAFFIC",
+]);
 function errorRecord(op, error) {
   const resource =
     op.kind === "account"
@@ -674,6 +726,9 @@ function errorRecord(op, error) {
     kind: op.kind,
     resource,
     status: "blocked",
+    diagnosis: SAFE_DIAGNOSES.includes(error?.diagnosis)
+      ? error.diagnosis
+      : "UNKNOWN",
     code: SAFE_CODES.includes(error?.code) ? error.code : "REQUEST_FAILED",
     ...(Number.isInteger(error?.httpStatus) &&
     error.httpStatus >= 100 &&
@@ -782,8 +837,12 @@ async function collect(env, head, transport) {
         requireFields(data.settings.backupConfiguration, ["enabled"]);
       }
       if (["service", "job", "revision"].includes(op.kind)) {
-        if (data.name !== new URL(op.url).pathname.slice(4))
-          fail("IDENTITY_MISMATCH");
+        runIdentity(
+          data,
+          new URL(op.url).pathname.slice(4),
+          op.kind,
+          projectNumber,
+        );
         const template =
           op.kind === "job"
             ? data.template?.template
@@ -793,11 +852,15 @@ async function collect(env, head, transport) {
         if (
           !template?.containers?.length ||
           !template.serviceAccount ||
+          template.containers.some((c) => !c.image)
+        )
+          fail("INSUFFICIENT_OBSERVATION", "MISSING_REQUIRED_FIELDS");
+        if (
           template.containers.some(
-            (c) => !c.image || !c.image.startsWith(`${plan.registry}/`),
+            (c) => !c.image.startsWith(`${plan.registry}/`),
           )
         )
-          fail("INSUFFICIENT_OBSERVATION");
+          fail("INSUFFICIENT_OBSERVATION", "EXPECTED_IMAGE");
         if (op.kind === "service") {
           requireFields(data, [
             "ingress",
@@ -806,16 +869,12 @@ async function collect(env, head, transport) {
             "trafficStatuses",
           ]);
           if (
-            !data.latestReadyRevision.startsWith(`${data.name}/revisions/`) ||
-            !data.latestCreatedRevision.startsWith(`${data.name}/revisions/`) ||
             data.trafficStatuses.some(
-              (t) =>
-                !t.revision?.startsWith(`${data.name}/revisions/`) ||
-                !integer(t.percent),
+              (t) => !t.revision || !integer(t.percent),
             ) ||
             data.trafficStatuses.reduce((a, t) => a + t.percent, 0) !== 100
           )
-            fail("INSUFFICIENT_OBSERVATION");
+            fail("INSUFFICIENT_OBSERVATION", "TRAFFIC");
           const revisions = new Set([
             data.latestReadyRevision,
             data.latestCreatedRevision,
@@ -827,7 +886,7 @@ async function collect(env, head, transport) {
               id: `${op.id}:${revision.split("/").pop()}`,
               kind: "revision",
               schemaKey: "revision",
-              url: `https://run.googleapis.com/v2/${revision}`,
+              url: `https://run.googleapis.com/v2/${canonicalRunName(revision, projectNumber)}`,
             });
             authorizedOperations.get(plan).add(operation);
             revisionsToRead.push(operation);
@@ -919,7 +978,15 @@ async function collect(env, head, transport) {
         });
         continue;
       }
-      records.push({ id: op.id, kind: op.kind, status: "observed", data });
+      records.push({
+        id: op.id,
+        kind: op.kind,
+        status: "observed",
+        ...(["service", "job", "revision"].includes(op.kind)
+          ? { resource: new URL(op.url).pathname.slice(4) }
+          : {}),
+        data,
+      });
     } catch (e) {
       partialRecord(op, e);
       records.push(errorRecord(op, e));
@@ -929,13 +996,27 @@ async function collect(env, head, transport) {
     try {
       const data = await read(op);
       requireFields(data, ["name", "containers", "serviceAccount"]);
+      runIdentity(
+        data,
+        new URL(op.url).pathname.slice(4),
+        op.kind,
+        projectNumber,
+      );
+      if (!data.containers.length)
+        fail("INSUFFICIENT_OBSERVATION", "MISSING_REQUIRED_FIELDS");
       if (
-        data.name !== new URL(op.url).pathname.slice(4) ||
-        !data.containers.length ||
         data.containers.some((c) => !c.image?.startsWith(`${plan.registry}/`))
       )
-        fail("IDENTITY_MISMATCH");
-      records.push({ id: op.id, kind: op.kind, status: "observed", data });
+        fail("IDENTITY_MISMATCH", "EXPECTED_IMAGE");
+      records.push({
+        id: op.id,
+        kind: op.kind,
+        status: "observed",
+        ...(["service", "job", "revision"].includes(op.kind)
+          ? { resource: new URL(op.url).pathname.slice(4) }
+          : {}),
+        data,
+      });
     } catch (e) {
       records.push(errorRecord(op, e));
     }
@@ -1076,6 +1157,16 @@ function serialize(report) {
     report.requests > LIMITS.requests
   )
     fail();
+  let projectNumber;
+  const projects = report.records.filter(
+    (r) => r.kind === "project" && r.status === "observed",
+  );
+  if (projects.length > 1) fail();
+  if (projects.length === 1) {
+    validate(projects[0].data, schemas.project);
+    requireFields(projects[0].data, ["name", "projectId", "state"]);
+    projectNumber = projects[0].data.name.split("/")[1];
+  }
   for (const record of report.records) {
     validate(record, {
       id: str(/^[a-zA-Z0-9_:-]{1,320}$/),
@@ -1089,6 +1180,7 @@ function serialize(report) {
       resource: str(/^[a-zA-Z0-9_:/-]{1,400}$/),
       httpStatus: (v) => Number.isInteger(v) && v >= 100 && v <= 599,
       code: enumOf(...SAFE_CODES),
+      diagnosis: enumOf(...SAFE_DIAGNOSES),
       data: () => true,
     });
     requireFields(record, ["id", "kind", "status"]);
@@ -1100,6 +1192,11 @@ function serialize(report) {
         outputSchemas[record.kind],
         LIMITS.pages * LIMITS.pageSize,
       );
+      if (["service", "job", "revision"].includes(record.kind)) {
+        requireFields(record, ["resource"]);
+        const expected = canonicalRunName(record.resource);
+        runIdentity(record.data, expected, record.kind, projectNumber);
+      }
     } else if (!record.code || record.data !== undefined) fail();
   }
   if (
