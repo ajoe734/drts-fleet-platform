@@ -15,6 +15,12 @@ export async function readBackOwnedOrders(pool, orderIds) {
        o.order_id,
        o.status,
        o.created_at as order_created_at,
+       (
+         SELECT MIN(t.created_at)
+         FROM ops.phase1_dispatch_trace_logs t
+         WHERE t.order_id = o.order_id AND t.event_type = 'callcenter.recording_bound'
+       ) as ready_transition_at,
+       o.record->'complianceFlags' as compliance_flags,
        j.created_at as job_created_at,
        j.updated_at as job_updated_at,
        (SELECT MIN(a.created_at) FROM ops.phase1_dispatch_attempts a WHERE a.dispatch_job_id = j.dispatch_job_id) as first_attempt_at,
@@ -29,9 +35,22 @@ export async function readBackOwnedOrders(pool, orderIds) {
     [unique],
   );
   return rows.map((row) => {
+    let readyAt = null;
+    let flags = [];
+    if (row.compliance_flags) {
+      flags = Array.isArray(row.compliance_flags) ? row.compliance_flags : (typeof row.compliance_flags === 'string' ? JSON.parse(row.compliance_flags) : []);
+    }
+    const isVoice = flags.includes("recording_bound") || flags.includes("recording_pending") || flags.includes("recording_missing") || (row.ready_transition_at != null);
+
+    if (row.ready_transition_at) {
+      readyAt = row.ready_transition_at;
+    } else if (!isVoice && row.order_created_at) {
+      readyAt = row.order_created_at;
+    }
+
     let lagMs = null;
-    if (row.first_attempt_at && row.order_created_at) {
-      lagMs = new Date(row.first_attempt_at).getTime() - new Date(row.order_created_at).getTime();
+    if (row.first_attempt_at && readyAt) {
+      lagMs = new Date(row.first_attempt_at).getTime() - new Date(readyAt).getTime();
     }
 
     return {
@@ -223,7 +242,6 @@ export function assertAcceptancePassed(acceptance) {
     "exception_hold"
   ]);
   let totalStatusCount = 0;
-  let unattemptedLawfulCount = 0;
   for (const [status, count] of Object.entries(acceptance.dispatchOrderStatusDistribution)) {
     if (!validStatuses.has(status)) {
       throw new Error(`Workload failed: unlawful status in distribution: ${status}`);
@@ -232,19 +250,26 @@ export function assertAcceptancePassed(acceptance) {
       throw new Error(`Workload failed: invalid count for status ${status}`);
     }
     totalStatusCount += count;
-    if (status === "no_supply" || status === "delayed_queue") {
-      unattemptedLawfulCount += count;
-    }
   }
   if (totalStatusCount !== requiredCounts.dispatch) {
     throw new Error(`Workload failed: dispatchOrderStatusDistribution total count must be ${requiredCounts.dispatch}, got ${totalStatusCount}`);
   }
 
-  const expectedDispatchLagCount = totalStatusCount - unattemptedLawfulCount;
+  if (!acceptance.dispatchAttemptCoverage) {
+    throw new Error(`Workload failed: missing dispatchAttemptCoverage`);
+  }
+  if (acceptance.dispatchAttemptCoverage.unattemptedUnlawful > 0) {
+    throw new Error(`Workload failed: ${acceptance.dispatchAttemptCoverage.unattemptedUnlawful} items missing attempts without lawful status`);
+  }
+  if (acceptance.dispatchAttemptCoverage.attempted + acceptance.dispatchAttemptCoverage.unattemptedLawful !== totalStatusCount) {
+    throw new Error(`Workload failed: attempt coverage does not match total status count`);
+  }
 
-  // Dispatch queue lag must have at least some samples, but may not be 4500 if some remain unassigned/queued lawfuly.
+  const expectedDispatchLagCount = acceptance.dispatchAttemptCoverage.attempted;
+
+  // Dispatch queue lag must have at least some samples, but may not be 4500 if some remain unassigned/queued lawfully.
   if (
-    acceptance.queueLag.dispatchOrderQueueLag.count <= 0 ||
+    (expectedDispatchLagCount > 0 && acceptance.queueLag.dispatchOrderQueueLag.count <= 0) ||
     !checkLagConsistency(acceptance.queueLag.dispatchOrderQueueLag, expectedDispatchLagCount)
   ) {
     throw new Error(

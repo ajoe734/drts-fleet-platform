@@ -502,6 +502,21 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
             },
             {} as Record<string, number>,
           ),
+          dispatchAttemptCoverage: dispatchReadback.reduce(
+            (acc: { attempted: number; unattemptedLawful: number; unattemptedUnlawful: number }, row: { status: string; lagMs: number | null }) => {
+              if (row.lagMs !== null) {
+                acc.attempted++;
+              } else {
+                if (row.status === "no_supply" || row.status === "delayed_queue") {
+                  acc.unattemptedLawful++;
+                } else {
+                  acc.unattemptedUnlawful++;
+                }
+              }
+              return acc;
+            },
+            { attempted: 0, unattemptedLawful: 0, unattemptedUnlawful: 0 },
+          ),
         };
         writeFileSync(
           resolve(evidenceDir, `${runTag}.acceptance.json`),

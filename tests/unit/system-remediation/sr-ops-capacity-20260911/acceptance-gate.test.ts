@@ -120,6 +120,11 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
     dispatchOrderStatusDistribution: {
       completed: 4500,
     },
+    dispatchAttemptCoverage: {
+      attempted: 4500,
+      unattemptedLawful: 0,
+      unattemptedUnlawful: 0,
+    },
     readback: {
       booking: {
         expectedCount: 900,
@@ -271,5 +276,21 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
     const invalid = structuredClone(validAcceptance);
     invalid.summary.workflows.booking.p95Ms = -1;
     expect(() => assertAcceptancePassed(invalid)).toThrowError(/invalid/);
+  });
+
+  it("passes when degraded with attempt coverage", () => {
+    const degraded = structuredClone(validAcceptance);
+    degraded.dispatchOrderStatusDistribution.completed = 4499;
+    degraded.dispatchOrderStatusDistribution.delayed_queue = 1;
+    degraded.dispatchAttemptCoverage.attempted = 4500;
+    degraded.queueLag.dispatchOrderQueueLag.count = 4500;
+    expect(() => assertAcceptancePassed(degraded)).not.toThrow();
+  });
+
+  it("rejects when attempt coverage is missing or inconsistent", () => {
+    const invalid = structuredClone(validAcceptance);
+    invalid.dispatchAttemptCoverage.attempted = 4499;
+    invalid.dispatchAttemptCoverage.unattemptedUnlawful = 1;
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(/Workload failed: 1 items missing attempts without lawful status/);
   });
 });
