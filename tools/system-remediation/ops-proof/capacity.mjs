@@ -2,6 +2,7 @@ import { request } from "node:http";
 import { createHash } from "node:crypto";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
+import { buildWorkloadSchedule } from "../ops-capacity/plan-builder.mjs";
 
 const baselinePath =
   "docs/02-architecture/phase1-operational-workload-sla-degradation-baseline-20260430.md";
@@ -60,6 +61,37 @@ export function validatePlan(plan) {
   }
   const keys = new Set();
   const dispatchOrders = new Set();
+  const profile = plan.profile ?? "uniform";
+  const counts = Object.fromEntries(
+    Object.entries(baseline).map(([family, targets]) => [
+      family,
+      Math.ceil((plan.durationSeconds * targets.perMinute) / 60),
+    ]),
+  );
+  const canonicalSchedule = buildWorkloadSchedule(profile, counts);
+  const schedule = plan.scheduleMs ?? canonicalSchedule;
+  for (const family of Object.keys(baseline)) {
+    const times = schedule[family];
+    if (
+      !Array.isArray(times) ||
+      times.length !== counts[family] ||
+      times.some(
+        (value, i) =>
+          !Number.isFinite(value) ||
+          value < 0 ||
+          value >= plan.durationSeconds * 1000 ||
+          value !== canonicalSchedule[family][i],
+      )
+    )
+      throw new Error(`Invalid ${family} profile schedule`);
+    // Validate actual rolling minute budgets, including boundaries between cohorts.
+    let first = 0;
+    times.forEach((time, i) => {
+      while (time - times[first] >= 60000) first++;
+      if (i - first + 1 > baseline[family].perMinute)
+        throw new Error(`${family} profile exceeds rolling minute budget`);
+    });
+  }
   for (const family of Object.keys(baseline)) {
     const items = plan.workloads?.[family];
     const count = Math.ceil(
@@ -73,7 +105,12 @@ export function validatePlan(plan) {
       if (
         !object(item) ||
         item.method !== "POST" ||
-        !routes[family].test(item.path) ||
+        !(
+          routes[family].test(item.path) ||
+          (family === "dispatch" &&
+            item.path === "/api/orders/{orderId}/dispatch" &&
+            object(item.stageOrder))
+        ) ||
         !object(item.body) ||
         !object(item.headers)
       ) {
@@ -117,6 +154,48 @@ export function validatePlan(plan) {
         );
       }
       keys.add(key);
+      if (item.stageOrder) {
+        const stage = item.stageOrder;
+        if (
+          family !== "dispatch" ||
+          profile !== "concurrent" ||
+          plan.durationSeconds !== 900 ||
+          item.path !== "/api/orders/{orderId}/dispatch" ||
+          stage.method !== "POST" ||
+          stage.path !== "/api/orders" ||
+          !object(stage.body) ||
+          !object(stage.headers) ||
+          !["pickup", "dropoff", "passenger"].every((field) =>
+            object(stage.body[field]),
+          ) ||
+          !["pickup", "dropoff"].every(
+            (field) =>
+              typeof stage.body[field].address === "string" &&
+              Number.isFinite(stage.body[field].lat) &&
+              Number.isFinite(stage.body[field].lng),
+          ) ||
+          Object.entries(stage.headers).some(
+            ([key, value]) =>
+              ![
+                "x-actor-type",
+                "x-actor-id",
+                "x-request-id",
+                "idempotency-key",
+              ].includes(key) ||
+              typeof value !== "string" ||
+              /[\r\n]/.test(value),
+          ) ||
+          stage.headers["x-actor-type"] !== "ops_user" ||
+          !stage.headers["x-actor-id"] ||
+          !stage.headers["idempotency-key"] ||
+          keys.has(stage.headers["idempotency-key"])
+        ) {
+          throw new Error(
+            "Dispatch stage requires the original isolated real HTTP fixture source and independent idempotency key",
+          );
+        }
+        keys.add(stage.headers["idempotency-key"]);
+      }
       if (
         family === "booking" &&
         (!headers["x-tenant-id"] ||
@@ -134,11 +213,22 @@ export function validatePlan(plan) {
         );
       }
       if (family === "dispatch") {
-        if (item.body.mode !== "auto" || dispatchOrders.has(item.path))
+        if (
+          item.body.mode !== "auto" ||
+          dispatchOrders.has(
+            item.stageOrder
+              ? item.stageOrder.headers["idempotency-key"]
+              : item.path,
+          )
+        )
           throw new Error(
             "Dispatch requires mode auto and independent pre-provisioned order IDs",
           );
-        dispatchOrders.add(item.path);
+        dispatchOrders.add(
+          item.stageOrder
+            ? item.stageOrder.headers["idempotency-key"]
+            : item.path,
+        );
       }
       if (family === "report" && (!item.body.jobType || !item.body.format))
         throw new Error(
@@ -146,7 +236,37 @@ export function validatePlan(plan) {
         );
     }
   }
+  if (
+    plan.workloads.dispatch.some((item) => item.stageOrder) &&
+    (plan.workloads.dispatch.filter((item) => !item.stageOrder).length !==
+      500 ||
+      plan.workloads.dispatch.slice(0, 500).some((item) => item.stageOrder))
+  ) {
+    throw new Error(
+      "Staged full baseline requires 500 actual initial backlog orders",
+    );
+  }
   return plan;
+}
+
+// Creation readiness comes from the production HTTP lifecycle. Never invent an
+// order ID or timestamp for a deferred fixture, and never retry a failed seed.
+export async function prepareDispatchItem(origin, item) {
+  if (!item.stageOrder) return { item, seed: null };
+  const seed = await measure(origin, item.stageOrder);
+  const orderId = seed.resourceIds?.orderId;
+  if (
+    seed.error ||
+    typeof orderId !== "string" ||
+    !/^[a-zA-Z0-9_-]+$/.test(orderId)
+  ) {
+    return {
+      item,
+      seed,
+      error: `Dispatch stage failed: ${seed.error ?? "missing real order ID"}`,
+    };
+  }
+  return { item: { ...item, path: `/api/orders/${orderId}/dispatch` }, seed };
 }
 
 export function measure(origin, item) {
@@ -242,22 +362,67 @@ export async function runPlan(plan, output, provenance) {
   const records = [];
   const active = new Set();
   const start = performance.now();
+  const profile = plan.profile ?? "uniform";
+  const scheduleMs =
+    plan.scheduleMs ??
+    buildWorkloadSchedule(
+      profile,
+      Object.fromEntries(
+        Object.keys(baseline).map((family) => [
+          family,
+          plan.workloads[family].length,
+        ]),
+      ),
+    );
   const schedule = Object.keys(baseline)
     .flatMap((family) =>
       plan.workloads[family].map((item, index) => ({
         family,
         item,
         sequence: index + 1,
-        scheduledMs: (index * 60000) / baseline[family].perMinute,
+        scheduledMs: scheduleMs[family][index],
       })),
     )
     .sort((a, b) => a.scheduledMs - b.scheduledMs);
   const familyLastLaunch = {};
+  const familyLaunches = Object.fromEntries(
+    Object.keys(baseline).map((family) => [family, []]),
+  );
   for (const entry of schedule) {
     const spacing = 60000 / baseline[entry.family].perMinute;
     let targetMs = entry.scheduledMs;
-    if (familyLastLaunch[entry.family] !== undefined) {
+    if (
+      (profile === "uniform" || entry.family === "dispatch") &&
+      familyLastLaunch[entry.family] !== undefined
+    ) {
       targetMs = Math.max(targetMs, familyLastLaunch[entry.family] + spacing);
+    }
+    const launches = familyLaunches[entry.family];
+    if (launches.length >= baseline[entry.family].perMinute) {
+      targetMs = Math.max(
+        targetMs,
+        launches[launches.length - baseline[entry.family].perMinute] + 60000,
+      );
+    }
+    const prepared = entry.item.stageOrder
+      ? await prepareDispatchItem(plan.origin, entry.item)
+      : { item: entry.item, seed: null };
+    if (prepared.seed) {
+      appendFileSync(
+        output,
+        `${JSON.stringify({
+          taskId: "SR-OPS-PROOF-001",
+          kind: "capacity_seed",
+          ...provenance,
+          isolatedResourceId: plan.isolatedResourceId,
+          sequence: entry.sequence,
+          method: "POST",
+          path: "/api/orders",
+          requestSha256: digest(JSON.stringify(entry.item.stageOrder.body)),
+          observedAt: new Date().toISOString(),
+          ...prepared.seed,
+        })}\n`,
+      );
     }
     while (true) {
       const wait = targetMs - (performance.now() - start);
@@ -274,7 +439,10 @@ export async function runPlan(plan, output, provenance) {
     // Do not queue and then falsely report the requested arrival rate as met.
     const overloaded = active.size >= plan.maxInFlight;
     const launchedMs = performance.now() - start;
-    if (!overloaded) familyLastLaunch[entry.family] = launchedMs;
+    if (!overloaded) {
+      familyLastLaunch[entry.family] = launchedMs;
+      launches.push(launchedMs);
+    }
     const job = (async () => {
       let result;
       try {
@@ -284,7 +452,9 @@ export async function runPlan(plan, output, provenance) {
               httpStatus: null,
               error: "Load generator maxInFlight exhausted; request not sent",
             }
-          : await measure(plan.origin, entry.item);
+          : prepared.error
+            ? { latencyMs: null, httpStatus: null, error: prepared.error }
+            : await measure(plan.origin, prepared.item);
       } catch (error) {
         result = { latencyMs: null, httpStatus: null, error: error.message };
       }
@@ -299,11 +469,12 @@ export async function runPlan(plan, output, provenance) {
         workload: entry.family,
         sequence: entry.sequence,
         method: "POST",
-        path: entry.item.path,
+        path: prepared.item.path,
         requestSha256: digest(JSON.stringify(entry.item.body)),
         scheduledMs: entry.scheduledMs,
         launchedMs,
         schedulingLagMs: launchedMs - entry.scheduledMs,
+        profile,
         ...result,
       };
       records.push(record);
@@ -353,6 +524,7 @@ export async function runPlan(plan, output, provenance) {
     fullBurstSchedule: plan.durationSeconds === 900,
     elapsedMs: performance.now() - start,
     maxInFlight: plan.maxInFlight,
+    profile,
     workflows,
     result: Object.values(workflows).every(
       (row) => row.errors === 0 && row.latencyTargetsMet,
