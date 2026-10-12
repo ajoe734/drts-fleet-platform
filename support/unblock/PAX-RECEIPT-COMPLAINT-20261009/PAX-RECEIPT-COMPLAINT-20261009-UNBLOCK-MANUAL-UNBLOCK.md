@@ -11,13 +11,18 @@ E-04 inputs. The parent is an incomplete published source checkpoint, not a
 review candidate. This helper delivers only this diagnosis and the operator
 transaction below; its merge must not resume the original source.
 
-Before handoff or merge, Supervisor must register this helper's three existing
-`resolved_parent_*` fields with a blocked disposition and update the parent's
-next step through the active release CLI. Both writes are currently **OPEN**:
-the worker's actual attempts were rejected by the dispatch guard. A report or
-draft PR cannot substitute for those canonical receipts.
+Supervisor completed this helper's three existing `resolved_parent_*` fields
+with a blocked disposition and the matching parent next step on
+2026-10-12 at 17:58 UTC. The resumed owner verified both genuine operator
+receipts against fresh canonical slices; see the additive receipt below.
+The earlier dispatch-guard denials remain historical evidence. Before every
+handoff or merge, recheck the exact blocked/Codex route and next text and the
+absence of `resolved_parent_at`; that timestamp belongs to the merge lifecycle.
 
-## Current identities and authoritative instructions
+## Initial inspection identities and authoritative instructions
+
+The following records describe the original `c816265` report inspection.
+The resumed operator verification and existing PR #2583 are recorded below.
 
 | Object                              | Observed identity / source                                                                                                                                                                                                                                                                                                                         |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -62,8 +67,8 @@ The helper does not change those logs, parent source, acceptance keys or scope.
 The actual release `transition_after_merge` calls
 `apply_unblock_parent_resolution`. For a blocked parent with
 `external_gate=false`, missing `resolved_parent_status` defaults to `todo`,
-clears its wait and resolves its blocker. This new helper currently has none of
-the three disposition fields. The older history helper's metadata is specific
+clears its wait and resolves its blocker. At the original report inspection,
+this helper had none of the three disposition fields. The older history helper's metadata is specific
 to that helper and does not protect this new one.
 
 A read-only local probe imported the specified release and called its real
@@ -141,7 +146,11 @@ push → exact-SHA independent Codex review/full CI/protected merge → both
 original acceptance keys. PG/HTTP/browser/PSP/legal/native/manual/full-system
 gaps remain separately recorded; no VM runtime is permitted.
 
-## Helper acceptance and verification ledger
+## Historical helper acceptance and verification ledger
+
+These are the original published report results, before the genuine operator
+transaction. The OPEN operator prerequisites in this table are superseded by
+the resumed receipt below; original parent acceptance remains OPEN.
 
 | Helper acceptance / finding              | Source / change                                                     | Result and command                                                                                                                                                        | Remaining condition                                                                            |
 | ---------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -180,7 +189,70 @@ while either operator prerequisite is open.
 | Normal commit hooks                            | PASS 0; generated guard, lint-staged Prettier and commit-message trailer hook                                                                                      | Ignored `.husky/_` shims were absent and copied from the existing canonical checkout before the first commit; no hook bypass/config change. lint-staged's temporary backup was cleaned normally |
 | Hosted checks / review / merge                 | Not yet candidate evidence                                                                                                                                         | Draft PR remains held; neither parent acceptance key is satisfied by these document checks                                                                                                      |
 
-**Remaining helper blocker:** genuine Supervisor metadata-only assignment and
+**Historical helper blocker at `c816265`:** genuine Supervisor metadata-only assignment and
 parent note, followed by fresh slice verification. Until both receipts exist,
 record the helper blocked and preserve its draft publication rather than
 handoff a mergeable candidate that would implicitly resume the parent.
+Supervisor subsequently completed both receipts; the following section records
+their fresh verification without rewriting the published checkpoint.
+
+## Resumed documentation helper — genuine operator receipt
+
+Supervisor's metadata-only assignment and parent note both exited **0** at
+17:58 UTC on 2026-10-12. The report-only resume exited **0** at 17:59 UTC.
+This worker did not execute those operator mutations. Their exact command,
+before/after and combined verification receipts remain in
+`/home/lupin/workspace/drts-fleet-platform/.local/continue-full-completion-20261012T0528/helper-parent-hold-disposition/`:
+
+- `PAX-RECEIPT-COMPLAINT-20261009-UNBLOCK-MANUAL-UNBLOCK-assign-command.json`
+- `PAX-RECEIPT-COMPLAINT-20261009-UNBLOCK-MANUAL-UNBLOCK-parent-note-command.json`
+- `PAX-RECEIPT-COMPLAINT-20261009-UNBLOCK-MANUAL-UNBLOCK-verified-after.json`
+- `PAX-RECEIPT-COMPLAINT-20261009-UNBLOCK-MANUAL-UNBLOCK-report-only-resume-command.json`
+- `verified-two-existing-helper-parent-hold-receipts.json`, SHA-256
+  `6ba53039f655e4e3994ec5134bd04a664e1c8f5d0b8851aba9185ef829048edb`.
+
+The owner read fresh helper/parent slices using the dispatched active release.
+`resolved_parent_status=blocked`, `resolved_parent_waiting_for=Codex`, and
+`resolved_parent_next` exactly equal the operator metadata. Parent status and
+waiting-for remain `blocked` / Codex, and its `next` exactly equals that text.
+`resolved_parent_at` is absent. Comparing the parent with the operator's before
+slice confirms no change except its next text and update timestamp: original
+roles, scopes, dependencies, source reference, candidate state and both required
+acceptance keys remain unchanged. Helper roles, scopes, dependencies and
+acceptance also remain unchanged.
+
+The real active-release `transition_after_merge` was called again on copies of
+these fresh slices. PASS **0**: the parent stays blocked/Codex with identical
+fields except the expected lifecycle update timestamp, its blocker stays open,
+and only the synthetic helper records the merge resolution timestamp. The
+audit sink alone was mocked; merge/time/blocker records were synthetic. This
+is scoped lifecycle evidence, not an actual merge or product acceptance.
+An initial probe assertion returned **1** because it also required the update
+timestamp to remain identical; source inspection confirmed the documented
+lifecycle timestamp update, and the corrected assertion preserves all other
+parent fields. No canonical state was written by either probe.
+
+Fresh owner evidence is in
+`/home/lupin/workspace/drts-fleet-platform/.local/pax-receipt-manual-unblock-resume-20261012/`:
+`canonical-receipt-probe.py`, `parent-current.json`, `helper-current.json`, and
+`verified-current-receipts.json`. Re-run this read-only probe immediately before
+handoff; the reviewer/integrator must repeat the canonical disposition check
+before merge and verify the parent remains blocked/HOLD after helper merge.
+
+Published history is preserved: `c81626528152ff165247bad052c0746a15f7d03f`
+and its anchor remain ancestors on the existing helper branch / [PR #2583](https://github.com/ajoe734/drts-fleet-platform/pull/2583).
+The parent still has draft PR #2556 at
+`a81b1842a09fabdb6caffc160cf4edcc564604a2`. Only this owned report is changed.
+No rebase, transplant, new child, parent push/handoff, source credits change,
+E04 input/scope grant, C123 four-ancestor exception, hosted900s execution or
+cloud/VM runtime authorization follows from these receipts.
+
+F-PARENT-DISPOSITION and the helper's parent-next acceptance now have actual
+canonical operator evidence. The parent next step remains Supervisor
+coordination of the exact authoritative completion/payment producers and
+affected callers/tests on the original task, respecting C123's
+`MultiTaxiController.createTripOperationalExportJob` reservation, followed by
+an explicit source resume. All original parent acceptance remains **OPEN**.
+The helper proceeds through fresh scoped checks, ordinary publication and
+exact-SHA independent Codex review/CI/protected merge; none of those steps is
+parent acceptance.
