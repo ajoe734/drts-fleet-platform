@@ -12,6 +12,14 @@ const TARGET = Object.freeze({
   cloudsql: "drts-prod-devcc-20260825:us-central1:drts-prod-db",
   runtime: "drts-prod-runtime@drts-prod-devcc-20260825.iam.gserviceaccount.com",
 });
+// Verified existing configuration is a reference only. It grants no Google
+// request authority outside TARGET, including this shared repository.
+const SHARED_REGISTRY = Object.freeze({
+  registry: "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts",
+  project: "drts-dev-devcc-20260825",
+  region: "us-central1",
+  repository: "drts",
+});
 const SHA = /^[a-f0-9]{40}$/;
 const NAME = /^[a-z][a-z0-9-]{0,62}$/;
 const SECRET_NAME = /^[a-zA-Z0-9_-]{1,255}$/;
@@ -78,21 +86,25 @@ function releaseSourceGuard(
       stdio: ["ignore", "pipe", "pipe"],
     }).trim(),
 ) {
-  const version = identity.ref.slice("refs/heads/release/".length);
-  for (const ref of [
-    `refs/remotes/origin/release/${version}`,
-    `refs/tags/release/${version}`,
-    `refs/remotes/origin/publish/${version}`,
-  ]) {
-    if (git(["rev-parse", `${ref}^{commit}`]) !== identity.definitionSha)
-      fail("SOURCE_PROVENANCE_REJECTED");
+  try {
+    const version = identity.ref.slice("refs/heads/release/".length);
+    for (const ref of [
+      `refs/remotes/origin/release/${version}`,
+      `refs/tags/release/${version}`,
+      `refs/remotes/origin/publish/${version}`,
+    ]) {
+      if (git(["rev-parse", `${ref}^{commit}`]) !== identity.definitionSha)
+        fail("SOURCE_PROVENANCE_REJECTED");
+    }
+    git([
+      "merge-base",
+      "--is-ancestor",
+      identity.definitionSha,
+      "refs/remotes/origin/dev",
+    ]);
+  } catch {
+    fail("SOURCE_PROVENANCE_REJECTED");
   }
-  git([
-    "merge-base",
-    "--is-ancestor",
-    identity.definitionSha,
-    "refs/remotes/origin/dev",
-  ]);
 }
 function checkRail() {
   for (const [file, expected] of [
@@ -126,6 +138,10 @@ const enumOf =
     values.includes(v);
 const bool = (v) => typeof v === "boolean";
 const integer = (v) => Number.isSafeInteger(v) && v >= 0 && v <= 1000000;
+// Optional observations only: missing values stay absent, including cpuIdle.
+// Instance counts use Google's nonnegative int32 contract, not the list budget.
+const instanceCount = (v) =>
+  Number.isSafeInteger(v) && v >= 0 && v <= 2147483647;
 const numeric = str(/^\d{1,30}$/);
 const tokenType = str(/^[a-zA-Z0-9_+/=.-]{0,1024}$/);
 const resourceName = str(
@@ -135,15 +151,21 @@ const runName = str(
   /^projects\/drts-prod-devcc-20260825\/locations\/us-central1\/(?:services|jobs)\/[a-z][a-z0-9-]{0,62}(?:\/revisions\/[a-z][a-z0-9-]{0,62})?$/,
 );
 const imageType = str(
-  /^us-central1-docker\.pkg\.dev\/drts-prod-devcc-20260825\/[a-z0-9_-]+\/(?:api|platform-admin-web|ops-console-web|fleet-partner-portal-web|tenant-console-web|bank-console-web|referral-embed-web|enterprise-dispatch-web|channel-partner-portal-web|passenger-app-web|migrate)(?:@sha256:[a-f0-9]{64}|:[a-f0-9]{40})$/,
+  /^us-central1-docker\.pkg\.dev\/(?:drts-prod-devcc-20260825\/[a-z0-9_-]+|drts-dev-devcc-20260825\/drts)\/(?:api|platform-admin-web|ops-console-web|fleet-partner-portal-web|tenant-console-web|bank-console-web|referral-embed-web|enterprise-dispatch-web|channel-partner-portal-web|passenger-app-web|migrate)(?:@sha256:[a-f0-9]{64}|:[a-f0-9]{40})$/,
 );
 const groupType = str(
   /^https:\/\/www\.googleapis\.com\/compute\/v1\/projects\/drts-prod-devcc-20260825\/regions\/us-central1\/networkEndpointGroups\/[a-z][a-z0-9-]{0,62}$/,
 );
 const safeName = str(NAME);
+const revisionScaling = {
+  minInstanceCount: instanceCount,
+  maxInstanceCount: instanceCount,
+};
+const serviceContainers = [{ image: imageType, resources: { cpuIdle: bool } }];
 const revisionSchema = {
   name: runName,
-  containers: [{ image: imageType }],
+  containers: serviceContainers,
+  scaling: revisionScaling,
   serviceAccount: str(
     /^drts-prod-runtime@drts-prod-devcc-20260825\.iam\.gserviceaccount\.com$/,
   ),
@@ -191,8 +213,15 @@ const schemas = {
     latestCreatedRevision: runName,
     trafficStatuses: [{ revision: runName, percent: integer }],
     template: {
-      containers: [{ image: imageType }],
+      containers: serviceContainers,
       serviceAccount: revisionSchema.serviceAccount,
+      scaling: revisionScaling,
+    },
+    scaling: {
+      minInstanceCount: instanceCount,
+      maxInstanceCount: instanceCount,
+      manualInstanceCount: instanceCount,
+      scalingMode: enumOf("SCALING_MODE_UNSPECIFIED", "AUTOMATIC", "MANUAL"),
     },
   },
   revision: revisionSchema,
@@ -423,8 +452,7 @@ function inventory(env) {
   if (env.PROD_MAP_PROVIDER_BACKEND === "google")
     for (const suffix of ["geocoding-api-key", "routes-api-key", "browser-key"])
       secrets.add(`${prefix}-google-maps-${suffix}`);
-  else if (env.PROD_MAP_PROVIDER_BACKEND !== "mock")
-    gap("map-provider", "secret-selection");
+  else gap("map-provider", "secret-selection");
   // Optional provider selection remains unresolved when public-entry config is
   // absent; it is never converted into an assertion that no secrets are needed.
   let entries;
@@ -484,20 +512,41 @@ function inventory(env) {
     /^us-central1-docker\.pkg\.dev\/drts-prod-devcc-20260825\/([a-z0-9_-]{1,63})$/.exec(
       registry,
     );
-  if (!match) fail("ARTIFACT_TARGET_REJECTED");
-  const repoRoot = `${runRoot}/repositories/${match[1]}`;
-  add(
-    "artifact-repository",
-    "repository",
-    `https://artifactregistry.googleapis.com/v1/${repoRoot}`,
-  );
-  add(
-    "artifact-images",
-    "images",
-    `https://artifactregistry.googleapis.com/v1/${repoRoot}/dockerImages`,
-    "images",
-    "dockerImages",
-  );
+  const shared = registry === SHARED_REGISTRY.registry;
+  if (!match && !shared) fail("ARTIFACT_TARGET_REJECTED");
+  for (const [key, expected] of Object.entries({
+    PROD_ARTIFACT_PROJECT_ID: shared ? SHARED_REGISTRY.project : TARGET.project,
+    PROD_ARTIFACT_REGION: TARGET.region,
+    PROD_ARTIFACT_REPOSITORY: shared ? SHARED_REGISTRY.repository : match[1],
+  }))
+    if ((shared || env[key]) && env[key] !== expected)
+      fail("ARTIFACT_TARGET_REJECTED");
+  if (shared) {
+    for (const [id, kind] of [
+      ["artifact-repository", "repository"],
+      ["artifact-images", "images"],
+    ])
+      gaps.push({
+        id,
+        kind,
+        status: "blocked",
+        code: "SHARED_REGISTRY_NOT_AUTHORIZED",
+      });
+  } else {
+    const repoRoot = `${runRoot}/repositories/${match[1]}`;
+    add(
+      "artifact-repository",
+      "repository",
+      `https://artifactregistry.googleapis.com/v1/${repoRoot}`,
+    );
+    add(
+      "artifact-images",
+      "images",
+      `https://artifactregistry.googleapis.com/v1/${repoRoot}/dockerImages`,
+      "images",
+      "dockerImages",
+    );
+  }
   // Fixed global LB / regional serverless NEG route used by the original rail.
   add(
     "load-balancer",
@@ -595,6 +644,7 @@ async function hostedTransport(descriptor, accessToken) {
   };
 }
 const SAFE_CODES = [
+  "SHARED_REGISTRY_NOT_AUTHORIZED",
   "CONFIG_UNVERIFIED",
   "PERMISSION_DENIED",
   "MISSING",
@@ -1078,26 +1128,147 @@ function serialize(report) {
   }
   return JSON.stringify(report, null, 2) + "\n";
 }
-async function main() {
-  try {
-    const head = execFileSync("git", ["rev-parse", "HEAD"], {
+const GUARD_CODES = Object.freeze([
+  "GUARD_PASSED",
+  "UNKNOWN_GUARD_FAILURE",
+  "UNPROTECTED_DISPATCH",
+  "SOURCE_REF_REJECTED",
+  "DEFINITION_SHA_MISMATCH",
+  "PRODUCT_SHA_REQUIRED",
+  "TARGET_MISMATCH",
+  "RUN_IDENTITY_REJECTED",
+  "SOURCE_PROVENANCE_REJECTED",
+  "RAIL_LINEAGE_CHANGED",
+  "OPERATION_REJECTED",
+  "CONFIG_REJECTED",
+  "RETIRED_SURFACE_REJECTED",
+  "DUPLICATE_SERVICE",
+  "ARTIFACT_TARGET_REJECTED",
+  "PROD_IDENTITY_REQUIRED",
+]);
+const RELEASE_REF = /^refs\/heads\/release\/v\d{4}\.\d{2}\.\d{2}\.\d+$/;
+function diagnostic(env, head, code, preAuth) {
+  const selected = (value, regex) =>
+    typeof value === "string" && value.length <= 128 && regex.test(value)
+      ? value
+      : "unverified";
+  return {
+    schema: 1,
+    purpose: "production-inventory-guard-diagnostic",
+    phase: preAuth ? "pre-auth" : "collect-validation",
+    result: code === "GUARD_PASSED" ? "passed" : "blocked",
+    code: GUARD_CODES.includes(code) ? code : "UNKNOWN_GUARD_FAILURE",
+    authAttempts: preAuth ? 0 : "unverified",
+    googleRequests: 0,
+    identity: {
+      definitionSha:
+        env.DEFINITION_SHA === env.GITHUB_SHA && env.DEFINITION_SHA === head
+          ? selected(head, SHA)
+          : "unverified",
+      expectedProductSha: selected(env.EXPECTED_PRODUCT_SHA, SHA),
+      ref: selected(env.GITHUB_REF, RELEASE_REF),
+      runId: selected(env.GITHUB_RUN_ID, /^\d{1,20}$/),
+      runAttempt: selected(env.GITHUB_RUN_ATTEMPT, /^\d{1,4}$/),
+      repository:
+        env.GITHUB_REPOSITORY === "ajoe734/drts-fleet-platform"
+          ? env.GITHUB_REPOSITORY
+          : "unverified",
+    },
+  };
+}
+function serializeDiagnostic(report) {
+  const verifiedOr = (regex) => (v) => v === "unverified" || str(regex)(v);
+  validate(report, {
+    schema: enumOf(1),
+    purpose: enumOf("production-inventory-guard-diagnostic"),
+    phase: enumOf("pre-auth", "collect-validation"),
+    result: enumOf("passed", "blocked"),
+    code: enumOf(...GUARD_CODES),
+    authAttempts: enumOf(0, "unverified"),
+    googleRequests: enumOf(0),
+    identity: {
+      definitionSha: verifiedOr(SHA),
+      expectedProductSha: verifiedOr(SHA),
+      ref: verifiedOr(RELEASE_REF),
+      runId: verifiedOr(/^\d{1,20}$/),
+      runAttempt: verifiedOr(/^\d{1,4}$/),
+      repository: enumOf("ajoe734/drts-fleet-platform", "unverified"),
+    },
+  });
+  requireFields(report, [
+    "schema",
+    "purpose",
+    "phase",
+    "result",
+    "code",
+    "authAttempts",
+    "googleRequests",
+    "identity",
+  ]);
+  requireFields(report.identity, [
+    "definitionSha",
+    "expectedProductSha",
+    "ref",
+    "runId",
+    "runAttempt",
+    "repository",
+  ]);
+  if (
+    (report.result === "passed") !== (report.code === "GUARD_PASSED") ||
+    (report.phase === "pre-auth"
+      ? report.authAttempts !== 0
+      : report.authAttempts !== "unverified")
+  )
+    fail();
+  return JSON.stringify(report, null, 2) + "\n";
+}
+function writeArtifact(name, contents) {
+  fs.mkdirSync(".artifacts/production-readonly-inventory", { recursive: true });
+  fs.writeFileSync(
+    `.artifacts/production-readonly-inventory/${name}.json`,
+    contents,
+    { mode: 0o600 },
+  );
+}
+// Boundary injection is for pure tests only; CLI callers cannot supply URLs,
+// metadata fields, source overrides or alternate authentication identities.
+async function main({
+  env = process.env,
+  args = process.argv.slice(2),
+  git = (gitArgs) =>
+    execFileSync("git", gitArgs, {
       encoding: "utf8",
-    }).trim();
-    const identity = guard(process.env, head);
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim(),
+  write = writeArtifact,
+  transport = hostedTransport,
+  log = (message) => console.error(message),
+  exitCode = (value) => {
+    process.exitCode = value;
+  },
+} = {}) {
+  let head;
+  let validationPassed = false;
+  const preAuth = args.length === 1 && args[0] === "guard";
+  try {
+    head = git(["rev-parse", "HEAD"]);
+    const identity = guard(env, head);
     checkRail();
-    releaseSourceGuard(identity);
-    if (
-      process.argv.length !== 3 ||
-      !["guard", "collect"].includes(process.argv[2])
-    )
+    releaseSourceGuard(identity, git);
+    if (args.length !== 1 || !["guard", "collect"].includes(args[0]))
       fail("OPERATION_REJECTED");
-    if (process.argv[2] === "guard") {
-      inventory(process.env);
+    const plan = inventory(env);
+    if (preAuth) {
+      write(
+        "guard-diagnostic",
+        serializeDiagnostic(diagnostic(env, head, "GUARD_PASSED", true)),
+      );
       return;
     }
-    const report = process.env.PROD_INVENTORY_ACCESS_TOKEN
-      ? await collect(process.env, head, (descriptor) =>
-          hostedTransport(descriptor, process.env.PROD_INVENTORY_ACCESS_TOKEN),
+    validationPassed = true;
+    const report = env.PROD_INVENTORY_ACCESS_TOKEN
+      ? await collect(env, head, (descriptor) =>
+          transport(descriptor, env.PROD_INVENTORY_ACCESS_TOKEN),
         )
       : {
           schema: 1,
@@ -1108,6 +1279,7 @@ async function main() {
           effectiveIamPermissions: "unverified",
           requests: 0,
           records: [
+            ...plan.gaps,
             {
               id: "production-wif",
               kind: "auth",
@@ -1116,20 +1288,32 @@ async function main() {
             },
           ],
         };
-    fs.mkdirSync(".artifacts/production-readonly-inventory", {
-      recursive: true,
-    });
-    fs.writeFileSync(
-      ".artifacts/production-readonly-inventory/metadata.json",
-      serialize(report),
-      { mode: 0o600 },
-    );
-    if (report.collection !== "complete") process.exitCode = 1;
-  } catch {
-    console.error(
+    write("metadata", serialize(report));
+    if (report.collection !== "complete") exitCode(1);
+  } catch (error) {
+    if (!validationPassed) {
+      try {
+        write(
+          "guard-diagnostic",
+          serializeDiagnostic(
+            diagnostic(
+              env,
+              head,
+              error?.code === "GUARD_PASSED"
+                ? "UNKNOWN_GUARD_FAILURE"
+                : error?.code,
+              preAuth,
+            ),
+          ),
+        );
+      } catch {
+        // Even a filesystem failure must not expose an error message or stack.
+      }
+    }
+    log(
       "Production metadata inspection failed; response and credential details withheld.",
     );
-    process.exitCode = 1;
+    exitCode(1);
   }
 }
 if (require.main === module) main();
@@ -1144,6 +1328,8 @@ module.exports = {
   hostedTransport,
   collect,
   serialize,
+  serializeDiagnostic,
+  main,
   schemas,
   fields,
   OPTIONAL_SECRETS,
