@@ -42,7 +42,8 @@ env:
 jobs:
   acceptance:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    #900s arrivals plus up to30min actual async completion and setup/checks.
+    timeout-minutes: 65
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -136,7 +137,7 @@ jobs:
           set -o pipefail
           pnpm exec vitest run \
             tests/integration/system-remediation/sr-ops-capacity-20260911/ops-capacity-acceptance.test.ts \
-            --no-file-parallelism --maxConcurrency=1 --testTimeout=1320000 \
+            --no-file-parallelism --maxConcurrency=1 --testTimeout=3120000 \
             --reporter=default --reporter=json \
             --outputFile.json=.artifacts/ops-capacity-acceptance/capacity-report.json \
             2>&1 | tee -a .artifacts/ops-capacity-acceptance/execution-log.txt

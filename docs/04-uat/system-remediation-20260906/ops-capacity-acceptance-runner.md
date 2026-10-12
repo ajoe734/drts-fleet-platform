@@ -290,11 +290,11 @@ ancestors still impose publication/provenance HOLD. These are unpublished
 local checkpoints; neither acceptance key is closed and no push, handoff or
 hosted dispatch is authorized yet.
 
-| Finding / key | Formal source / adjacent result | Check and evidence | Remaining |
-| --- | --- | --- | --- |
-| Durable acknowledgement | Original266b controller + `createReportJob` returned201 before the repository INSERT finished. Actual controller/service/repository test with only SQL write boundary blocked reproduced expected-false/actual-true. New two callers await `createReportJobDurably` and COMMIT. | `pnpm exec vitest run tests/unit/system-remediation/sr-ops-capacity-20260911/reporting-queue.test.ts`; old266b exit1, new working-source exit0. Logs in canonical `.local/c123-report-worker-20261012/old-266b-durable-ack.log` and `durable-ack-new.log`. First attempt lacked restored worktree dependency links, exit254, and is not reproduction evidence; links restored before exit1 run. | Full recovery/failure/shutdown/cross-worker regressions and migrated-PG verification still pending. |
-| F6 report executor / initial backlog | Bounded single FIFO worker uses existing JSON rows and a dedicated session advisory lock; state writes are awaited before publication. Yielding between jobs follows the accepted lower-priority async report model; no artificial service delay or quota/SLO change. | Implementation checkpoint, not throughput evidence. | Genuine run-owned50 persisted backlog, actual processing, SQL start/completion/error evidence still to implement and verify. |
-| Both required acceptance keys | Remain OPEN. Prior negative-payload evidence is retained. | No new candidate/CI/merge/900s result. | Publication HOLD, independent exact-candidate review/CI and original immutable hosted workflow remain required. |
+| Finding / key                        | Formal source / adjacent result                                                                                                                                                                                                                                                 | Check and evidence                                                                                                                                                                                                                                                                                                                                                                              | Remaining                                                                                                                    |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Durable acknowledgement              | Original266b controller + `createReportJob` returned201 before the repository INSERT finished. Actual controller/service/repository test with only SQL write boundary blocked reproduced expected-false/actual-true. New two callers await `createReportJobDurably` and COMMIT. | `pnpm exec vitest run tests/unit/system-remediation/sr-ops-capacity-20260911/reporting-queue.test.ts`; old266b exit1, new working-source exit0. Logs in canonical `.local/c123-report-worker-20261012/old-266b-durable-ack.log` and `durable-ack-new.log`. First attempt lacked restored worktree dependency links, exit254, and is not reproduction evidence; links restored before exit1 run. | Full recovery/failure/shutdown/cross-worker regressions and migrated-PG verification still pending.                          |
+| F6 report executor / initial backlog | Bounded single FIFO worker uses existing JSON rows and a dedicated session advisory lock; state writes are awaited before publication. Yielding between jobs follows the accepted lower-priority async report model; no artificial service delay or quota/SLO change.           | Implementation checkpoint, not throughput evidence.                                                                                                                                                                                                                                                                                                                                             | Genuine run-owned50 persisted backlog, actual processing, SQL start/completion/error evidence still to implement and verify. |
+| Both required acceptance keys        | Remain OPEN. Prior negative-payload evidence is retained.                                                                                                                                                                                                                       | No new candidate/CI/merge/900s result.                                                                                                                                                                                                                                                                                                                                                          | Publication HOLD, independent exact-candidate review/CI and original immutable hosted workflow remain required.              |
 
 Second local checkpoint after `1ec983935`: durable queue regressions7/7 pass,
 including transaction failure + original idempotency retry/replay, committed
@@ -322,3 +322,28 @@ and the corrected replay completed25/25, exit0. Initial C123 regression68tests
 completed exit0 before adding the new negative snapshot/SLO scenarios.
 Affected regressions, root typecheck and scoped lint for this new checkpoint
 are running; no passing result is claimed before their terminal output.
+
+Third checkpoint: completion collection now continues after the900s arrival
+window only as needed to observe the existing per-job5min start /30min
+completion SLOs. The arrival clock/counts, HTTP30s deadlines and latency/rate
+targets are unchanged. This avoids falsely rejecting a lawful async job that
+starts/completes after arrivals end. The existing workflow's test timeout is
+52min and job timeout65min solely to accommodate setup,900s arrivals and this
+bounded observation drain; no deployment or new runner is introduced.
+Raw failed/cancelled/missing samples remain failing, and SQL errors propagate.
+
+The changed worker reloads committed state after a failed conditional update,
+so a real external cancellation remains cancelled in storage and the local
+view. Start-write failures leave no invented first-start; terminal-write
+failures retain the last committed running state and first-start for recovery.
+Uncertain SQL sessions are discarded rather than returned to the pool.
+
+Caller audit limitation: the pre-existing synchronous
+`createMultiTaxiTripExportJob` producer still has a fire-and-forget enqueue,
+called by `apps/api/src/modules/multi-taxi/multi-taxi.controller.ts`:
+`createTripOperationalExportJob`. That controller is outside the exact
+two-generic-report-caller allocation and remains untouched; this checkpoint
+does not claim its acknowledgement is durable. Its exact path/symbol and
+needed allocation were recorded through owner `progress` for Supervisor.
+All generic C123 report jobs and the initial workload use the new awaited
+producer. Publication HOLD and both acceptance keys remain OPEN.

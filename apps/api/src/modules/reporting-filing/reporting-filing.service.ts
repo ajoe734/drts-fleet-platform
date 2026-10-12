@@ -1420,7 +1420,26 @@ export class ReportingFilingService
           }
           this.reportQueue.delete(jobId);
         },
-      );
+      ).catch(async (error: unknown) => {
+        // A conditional write can lose to a genuine cancellation/terminal
+        // transition. Refresh from committed storage, never the failed clone.
+        try {
+          const committed =
+            await this.reportingFilingRepository!.loadReportJob(jobId);
+          if (committed)
+            this.publishCommittedReport({
+              ...committed,
+              partnerRevenueRows: committed.partnerRevenueRows ?? [],
+              settlementMatrix: committed.settlementMatrix ?? [],
+            });
+        } catch (reloadError) {
+          this.reportingFilingRepository!.reportPersistenceFailure(
+            reloadError,
+            "reload_report_state",
+          );
+        }
+        throw error;
+      });
       if (claimed) {
         // Continue immediately on the next event-loop turn, not at the idle
         // recovery interval. The bounded executor never processes two at once.

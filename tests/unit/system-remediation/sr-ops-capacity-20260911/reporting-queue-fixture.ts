@@ -86,7 +86,9 @@ export function queueFixture(jobs: StoredReportJobRecord[] = []) {
           rows: [...stored.values()]
             .filter(
               (job) =>
-                !params.length || (job.jobId === params[0] && eligible(job)),
+                !params.length ||
+                (job.jobId === params[0] &&
+                  (!sql.includes("status IN") || eligible(job))),
             )
             .map((record) => ({ record: structuredClone(record) })),
         };

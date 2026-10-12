@@ -88,14 +88,22 @@ export function countsForDuration(
 ): Record<WorkloadFamily, number>;
 
 export type CapacitySummary = {
+  startedAt: string;
+  endedAt: string;
   durationSeconds: number;
   fullBurstSchedule: boolean;
   elapsedMs: number;
   maxInFlight: number;
   profile: CapacityPlan["profile"];
-  workflows: Record<WorkloadFamily, {
-    requests: number; errors: number; p95Ms: number | null; p99Ms: number | null;
-    latencyTargetsMet: boolean;
-  }>;
+  workflows: Record<
+    WorkloadFamily,
+    {
+      requests: number;
+      errors: number;
+      p95Ms: number | null;
+      p99Ms: number | null;
+      latencyTargetsMet: boolean;
+    }
+  >;
   result: "measurements_within_targets" | "failed";
 };

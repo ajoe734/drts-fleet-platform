@@ -403,6 +403,36 @@ export async function readBackReportJobs(pool, jobIds) {
   });
 }
 
+// The arrival window is900s, while accepted async completion can take30min
+// from creation. Drain observations after arrivals without extending either
+// job's5min start /30min completion SLO or changing the measured scheduler.
+export async function collectReportCompletions(pool, jobIds) {
+  const ids = [...new Set(jobIds)];
+  while (true) {
+    const rows = await readBackReportJobs(pool, ids);
+    if (!summarizeReadback(ids, rows, (row) => row.jobId).matched)
+      throw new Error(
+        "Missing durably accepted report during completion collection",
+      );
+    const now = Date.now();
+    if (
+      rows.every((row) => row.status === "completed") ||
+      rows.some(
+        (row) =>
+          ["failed", "cancelled"].includes(row.status) ||
+          !["queued", "running", "completed"].includes(row.status) ||
+          !Number.isFinite(new Date(row.createdAt).getTime()) ||
+          (!row.startedAt &&
+            now - new Date(row.createdAt).getTime() >= 300000) ||
+          (row.status !== "completed" &&
+            now - new Date(row.createdAt).getTime() >= 1800000),
+      )
+    )
+      return rows; // Preserve failures/missing samples for the original gate.
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+}
+
 // Compares the resource IDs an HTTP response claimed as successfully created
 // against what a direct, independent SQL read actually finds. `idOf` reads
 // the correlation key off both the expected id (string) and a found row.
@@ -869,7 +899,6 @@ function assertReportWorkload(acceptance) {
         started === null ||
         updated === null ||
         started < created ||
-        started > end ||
         started - created > 300000 ||
         updated < started ||
         updated - created > 1800000 ||

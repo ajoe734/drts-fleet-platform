@@ -270,6 +270,18 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
     expect(() => assertAcceptancePassed(validAcceptance)).not.toThrow();
   });
 
+  it("accepts lawful async processing after the900s arrival window within5min/30min job SLOs", () => {
+    const valid = structuredClone(validAcceptance);
+    const row = valid.reportWorkload.measuredEvidence[0]!;
+    row.createdAt = row.record.createdAt = "2026-10-12T00:14:00.100Z";
+    row.startedAt = row.record.startedAt = "2026-10-12T00:18:20.100Z";
+    row.updatedAt = row.record.updatedAt = "2026-10-12T00:20:00.100Z";
+    row.queueLagMs = 260000;
+    valid.queueLag.report.maxMs = 260000;
+    valid.queueLag.report.avgMs = (449 * 1000 + 260000) / 450;
+    expect(() => assertAcceptancePassed(valid)).not.toThrow();
+  });
+
   it.each([
     "missing",
     "foreign",
@@ -317,7 +329,16 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
       if (defect === "outside-window")
         workload.initialSnapshotAt = "2026-10-11T23:59:59.000Z";
       if (defect === "forged-lag") row.queueLagMs = 5;
-      if (defect === "summary-lag") invalid.queueLag.report.avgMs = 999;
+      if (defect === "summary-lag") {
+        // Internally consistent, but disagrees with all450 actual SQL rows.
+        invalid.queueLag.report = {
+          count: 450,
+          minMs: 999,
+          maxMs: 999,
+          avgMs: 999,
+          p95Ms: 999,
+        };
+      }
       expect(() => assertAcceptancePassed(invalid)).toThrow(/Report /);
     },
   );

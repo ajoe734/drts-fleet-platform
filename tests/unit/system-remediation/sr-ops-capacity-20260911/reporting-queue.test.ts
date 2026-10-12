@@ -65,6 +65,114 @@ describe("report durable HTTP acknowledgement", () => {
 });
 
 describe("actual bounded durable reporting worker", () => {
+  it("rolls back an entire initial backlog and rejects cross-tenant commands before enqueue", async () => {
+    const f = queueFixture();
+    let inserts = 0;
+    f.control.before = async (sql) => {
+      if (sql.includes("INSERT INTO") && ++inserts === 20)
+        throw new Error("batch insert20 failed");
+    };
+    await expect(
+      f.service.createReportJobsDurably(
+        Array.from({ length: 50 }, () => ({
+          jobType: "trip_summary",
+          format: "csv",
+        })),
+      ),
+    ).rejects.toThrow("batch insert20 failed");
+    expect(f.stored.size).toBe(0);
+    expect(f.service.listReportJobs()).toHaveLength(0);
+    await expect(
+      f.service.createReportJobDurably(
+        {
+          jobType: "trip_summary",
+          format: "csv",
+          filters: { tenantId: "tenant-b" },
+        },
+        undefined,
+        "tenant-a",
+      ),
+    ).rejects.toMatchObject({ code: "REPORT_TENANT_SCOPE_MISMATCH" });
+    expect(inserts).toBe(20);
+    await f.service.onModuleDestroy();
+  });
+
+  it("refuses configured startup when persisted state cannot be read", async () => {
+    const f = queueFixture();
+    f.control.before = async (sql) => {
+      if (sql.includes("SELECT record")) throw new Error("queue load failed");
+    };
+    await expect(f.service.onModuleInit()).rejects.toThrow("queue load failed");
+    expect(f.repository.reportPersistenceFailure).toHaveBeenCalledWith(
+      expect.any(Error),
+      "module init",
+    );
+    await f.service.onModuleDestroy();
+  });
+
+  it("keeps last committed running truth when completion and failure writes both fail, then recovers first start", async () => {
+    const f = queueFixture();
+    f.control.before = async (sql, params) => {
+      if (sql.includes("UPDATE") && params[1] !== "running")
+        throw new Error("terminal storage unavailable");
+    };
+    const accepted = await f.service.createReportJobDurably({
+      jobType: "trip_summary",
+      format: "csv",
+    });
+    f.service.onApplicationBootstrap();
+    await vi.waitFor(() =>
+      expect(f.repository.reportPersistenceFailure).toHaveBeenCalled(),
+    );
+    expect(f.stored.get(accepted.jobId)?.status).toBe("running");
+    expect(f.service.getReportJob(accepted.jobId).status).toBe("running");
+    expect(f.service.getReportJob(accepted.jobId).artifact).toBeNull();
+    const firstStart = f.stored.get(accepted.jobId)!.startedAt;
+    expect(f.releases).toHaveBeenCalledWith(true);
+    await f.service.onModuleDestroy();
+    f.control.before = undefined;
+    await f.service.onModuleInit();
+    f.service.onApplicationBootstrap();
+    try {
+      await vi.waitFor(() =>
+        expect(f.stored.get(accepted.jobId)?.status).toBe("completed"),
+      );
+      expect(f.stored.get(accepted.jobId)?.startedAt).toBe(firstStart);
+      expect(f.locks.size).toBe(0);
+    } finally {
+      await f.service.onModuleDestroy();
+    }
+  });
+
+  it("does not overwrite an externally cancelled job during a claimed build", async () => {
+    const f = queueFixture();
+    const provider = deferred();
+    f.service.registerDailyDispatchRecordProvider(async () => {
+      await provider.promise;
+      return [];
+    });
+    const accepted = await f.service.createReportJobDurably({
+      jobType: "daily_dispatch_record",
+      format: "csv",
+    });
+    f.service.onApplicationBootstrap();
+    await vi.waitFor(() =>
+      expect(f.stored.get(accepted.jobId)?.status).toBe("running"),
+    );
+    f.stored.get(accepted.jobId)!.status = "cancelled";
+    provider.resolve();
+    try {
+      await vi.waitFor(() =>
+        expect(f.repository.reportPersistenceFailure).toHaveBeenCalled(),
+      );
+      expect(f.stored.get(accepted.jobId)?.status).toBe("cancelled");
+      expect(f.service.getReportJob(accepted.jobId).status).toBe("cancelled");
+      expect(f.writes.some((job) => job.status === "completed")).toBe(false);
+    } finally {
+      await f.service.onModuleDestroy();
+    }
+  });
+
   it.each(["platform", "tenant"])(
     "rejects %s enqueue failure without caching accepted or starting a job",
     async (realm) => {

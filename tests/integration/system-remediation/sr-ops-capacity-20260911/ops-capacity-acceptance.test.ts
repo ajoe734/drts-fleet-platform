@@ -132,6 +132,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
       const {
         readBackOwnedOrders,
         readBackReportJobs,
+        collectReportCompletions,
         summarizeReadback,
         summarizeLag,
         summarizeDispatchEvidence,
@@ -379,7 +380,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         const { pollCapacityResources, runWithCapacityPolling } =
           await import("../../../../tools/system-remediation/ops-capacity/observations.mjs");
         const pollDb = async () => {
-          let currentJobIds: string[] = [...initialReportJobIds];
+          const currentJobIds: string[] = [...initialReportJobIds];
           const currentOrderIds = [...orderIds];
           try {
             // appendFileSync writes complete records on the same JS thread;
@@ -548,13 +549,15 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           pool,
           claimedDispatchOrderIds,
         );
-        const reportReadback = await readBackReportJobs(
-          pool,
-          claimedReportJobIds,
+        const allReportReadback = await collectReportCompletions(pool, [
+          ...initialReportJobIds,
+          ...claimedReportJobIds,
+        ]);
+        const reportReadback = allReportReadback.filter((row) =>
+          claimedReportJobIds.includes(row.jobId),
         );
-        const initialReportReadback = await readBackReportJobs(
-          pool,
-          initialReportJobIds,
+        const initialReportReadback = allReportReadback.filter((row) =>
+          initialReportJobIds.includes(row.jobId),
         );
 
         const bookingSummary = summarizeReadback(
@@ -645,6 +648,6 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         await pool.end();
       }
     },
-    22 * 60 * 1000,
+    52 * 60 * 1000,
   );
 });

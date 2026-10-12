@@ -134,6 +134,20 @@ export class ReportingFilingRepository {
     return result.rows.map((row) => row.job_id);
   }
 
+  async loadReportJob(jobId: string): Promise<StoredReportJobRecord | null> {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      "SELECT record FROM admin.phase1_report_jobs WHERE job_id = $1",
+      [jobId],
+    );
+    if (!result.rows[0]) return null;
+    const job = this.parseRecord<StoredReportJobRecord>(
+      result.rows[0].record,
+      "admin.phase1_report_jobs",
+    );
+    if (job.jobId !== jobId) throw new Error("Report readback ID mismatch");
+    return job;
+  }
+
   // Hold a session lock on a dedicated connection through the entire build.
   // Another process cannot recover a live job; process/connection loss releases
   // ownership without an expiring lease permitting two concurrent builders.
@@ -184,6 +198,10 @@ export class ReportingFilingRepository {
         previousStatus = next.status;
       });
       return true;
+    } catch (error) {
+      // Never pool an uncertain claim session after a query/write failure.
+      discard = true;
+      throw error;
     } finally {
       if (locked) {
         try {

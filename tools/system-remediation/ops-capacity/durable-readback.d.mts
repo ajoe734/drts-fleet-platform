@@ -63,6 +63,11 @@ export function readBackReportJobs(
   jobIds: string[],
 ): Promise<ReportJobReadbackRow[]>;
 
+export function collectReportCompletions(
+  pool: PgPoolLike,
+  jobIds: string[],
+): Promise<ReportJobReadbackRow[]>;
+
 export function summarizeReadback<T>(
   expectedIds: string[],
   foundRows: T[],
