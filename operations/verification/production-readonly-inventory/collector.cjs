@@ -435,8 +435,7 @@ function inventory(env) {
   if (env.PROD_MAP_PROVIDER_BACKEND === "google")
     for (const suffix of ["geocoding-api-key", "routes-api-key", "browser-key"])
       secrets.add(`${prefix}-google-maps-${suffix}`);
-  else if (env.PROD_MAP_PROVIDER_BACKEND !== "mock")
-    gap("map-provider", "secret-selection");
+  else gap("map-provider", "secret-selection");
   // Optional provider selection remains unresolved when public-entry config is
   // absent; it is never converted into an assertion that no secrets are needed.
   let entries;
@@ -1241,7 +1240,7 @@ async function main({
     releaseSourceGuard(identity, git);
     if (args.length !== 1 || !["guard", "collect"].includes(args[0]))
       fail("OPERATION_REJECTED");
-    inventory(env);
+    const plan = inventory(env);
     if (preAuth) {
       write(
         "guard-diagnostic",
@@ -1263,6 +1262,7 @@ async function main({
           effectiveIamPermissions: "unverified",
           requests: 0,
           records: [
+            ...plan.gaps,
             {
               id: "production-wif",
               kind: "auth",

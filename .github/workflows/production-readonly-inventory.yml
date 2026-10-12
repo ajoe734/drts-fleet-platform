@@ -84,6 +84,14 @@ jobs:
       - name: Guard exact definition, release branch, rail lineage and production target before auth
         id: guard
         run: node operations/verification/production-readonly-inventory/collector.cjs guard
+      - name: Preserve safe pre-auth guard diagnostic
+        if: always() && (steps.guard.outcome == 'success' || steps.guard.outcome == 'failure')
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-guard-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/production-readonly-inventory/guard-diagnostic.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Authenticate only the existing production WIF identity
         id: auth
         if: success() && steps.guard.outcome == 'success'
@@ -95,14 +103,6 @@ jobs:
           token_format: access_token
           create_credentials_file: false
           export_environment_variables: false
-      - name: Preserve safe pre-auth guard diagnostic
-        if: always() && (steps.guard.outcome == 'success' || steps.guard.outcome == 'failure')
-        uses: actions/upload-artifact@v4
-        with:
-          name: production-guard-${{ github.run_id }}-${{ github.run_attempt }}
-          path: .artifacts/production-readonly-inventory/guard-diagnostic.json
-          if-no-files-found: error
-          retention-days: 30
       - name: Collect filtered Google control-plane GET metadata
         if: always() && steps.guard.outcome == 'success'
         env:
