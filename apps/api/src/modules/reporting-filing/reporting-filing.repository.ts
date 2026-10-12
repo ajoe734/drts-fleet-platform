@@ -1,5 +1,5 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
-import type { PoolClient } from "pg";
+import { Client } from "pg";
 
 import type {
   FilingPackageRecord,
@@ -157,9 +157,17 @@ export class ReportingFilingRepository {
   ): Promise<boolean> {
     if (!this.isEnabled())
       throw new Error("Durable report storage is disabled");
-    const client: PoolClient = await this.databaseService!.connect();
+    // A builder can itself query DatabaseService. Borrowing its last pooled
+    // connection for ownership would deadlock a pool of size1. This bounded
+    // session uses the existing database URI, with no new hosting/config flag.
+    const client = new Client({ connectionString: process.env.DATABASE_URL });
+    try {
+      await client.connect();
+    } catch (error) {
+      await client.end().catch(() => undefined);
+      throw error;
+    }
     let locked = false;
-    let discard = false;
     try {
       const result = await client.query<{ locked: boolean }>(
         "SELECT pg_try_advisory_lock(hashtextextended($1, 123)) AS locked",
@@ -198,10 +206,6 @@ export class ReportingFilingRepository {
         previousStatus = next.status;
       });
       return true;
-    } catch (error) {
-      // Never pool an uncertain claim session after a query/write failure.
-      discard = true;
-      throw error;
     } finally {
       if (locked) {
         try {
@@ -210,11 +214,12 @@ export class ReportingFilingRepository {
             [jobId],
           );
         } catch (error) {
-          discard = true;
           this.reportPersistenceFailure(error, "release_report_claim");
         }
       }
-      client.release(discard);
+      // End this dedicated session on every path, including failed queries or
+      // unlock. It is never pooled, so uncertain ownership cannot be reused.
+      await client.end();
     }
   }
 

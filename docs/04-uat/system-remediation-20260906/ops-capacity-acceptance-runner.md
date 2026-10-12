@@ -363,3 +363,16 @@ failure, including the four published task ancestors and inherited merged
 history. No range narrowing, checker bypass, rewrite or new publication is
 used to label that result green. `git diff --check73ba..HEAD` exit0 and YAML/
 Node syntax checks exit0 do not satisfy that publication gate.
+
+Pre-closeout review at `b31a41fce` found a worker-resource defect: the claim
+borrowed a `DatabaseService` pooled connection through the build, while
+`daily_dispatch_record` calls `ReportingService.listDailyDispatchRecords` ->
+`ReportingRepository.listDailyDispatchRecords` -> the same pool's `query`.
+With the existing lawful `DATABASE_POOL_MAX=1`, ownership would occupy the only
+connection needed by the builder. The worker now uses one dedicated PG session
+per active claim against the existing database URI and closes it on every
+path; no new hosting/configuration flag or shared database source is changed.
+The existing executor bounds active sessions to one per service. The new
+regression runs the actual report builder and `ReportingRepository` with an
+external single-slot SQL pool boundary, rather than copying its SQL or mocking
+the queue logic. Real PG behavior still requires the original hosted workflow.

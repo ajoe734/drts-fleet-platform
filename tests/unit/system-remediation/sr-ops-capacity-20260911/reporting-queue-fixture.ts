@@ -7,6 +7,33 @@ import {
 } from "../../../../apps/api/src/modules/reporting-filing/reporting-filing.repository";
 import { ReportingFilingService } from "../../../../apps/api/src/modules/reporting-filing/reporting-filing.service";
 
+type SqlSession = {
+  query: (
+    sql: string,
+    params?: unknown[],
+  ) => Promise<{ rows: unknown[]; rowCount?: number }>;
+  release: (discard?: boolean) => void;
+};
+const pgBoundary = vi.hoisted(() => ({
+  open: null as (() => SqlSession) | null,
+}));
+vi.mock("pg", async (importOriginal) => {
+  const original = await importOriginal<typeof import("pg")>();
+  return {
+    ...original,
+    Client: class {
+      private readonly session = pgBoundary.open!();
+      async connect() {}
+      query(sql: string, params?: unknown[]) {
+        return this.session.query(sql, params);
+      }
+      async end() {
+        this.session.release();
+      }
+    },
+  };
+});
+
 // SQL/session/transaction boundary model only, not a PostgreSQL proof. Every
 // producer, repository statement, worker, builder and lifecycle hook is real.
 export function queueFixture(jobs: StoredReportJobRecord[] = []) {
@@ -105,6 +132,7 @@ export function queueFixture(jobs: StoredReportJobRecord[] = []) {
     };
   }
   const query = session().query;
+  pgBoundary.open = session;
   const database = {
     isEnabled: () => true,
     query,

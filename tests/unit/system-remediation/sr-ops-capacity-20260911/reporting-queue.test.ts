@@ -7,6 +7,7 @@ import { IdempotencyRepository } from "../../../../apps/api/src/common/idempoten
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import type { DatabaseService } from "../../../../apps/api/src/common/db";
 import { queueFixture } from "./reporting-queue-fixture";
+import { ReportingRepository } from "../../../../apps/api/src/modules/reporting/reporting.repository";
 
 function deferred() {
   let resolve!: () => void;
@@ -65,6 +66,54 @@ describe("report durable HTTP acknowledgement", () => {
 });
 
 describe("actual bounded durable reporting worker", () => {
+  it("lets the actual SQL-backed report repository query a size1 shared pool while the worker owns its separate session", async () => {
+    const f = queueFixture();
+    const connect = f.database.connect;
+    let borrowed = 0;
+    let builderQueries = 0;
+    f.database.connect = async () => {
+      borrowed++;
+      const client = await connect();
+      return {
+        ...client,
+        release: (discard?: boolean) => {
+          borrowed--;
+          client.release(discard);
+        },
+      };
+    };
+    f.control.before = async (sql) => {
+      if (sql.includes("FROM reporting.dispatch_daily_records")) {
+        builderQueries++;
+        // External one-slot pool boundary. The old pooled claim would consume
+        // this slot and leave the real repository unable to complete its read.
+        if (borrowed >= 1)
+          throw new Error("No free connection in size1 SQL pool");
+      }
+    };
+    const reporting = new ReportingRepository(
+      f.database as unknown as DatabaseService,
+    );
+    f.service.registerDailyDispatchRecordProvider((filters) =>
+      reporting.listDailyDispatchRecords(filters),
+    );
+    const accepted = await f.service.createReportJobDurably({
+      jobType: "daily_dispatch_record",
+      format: "csv",
+    });
+    f.service.onApplicationBootstrap();
+    try {
+      await vi.waitFor(() =>
+        expect(f.stored.get(accepted.jobId)?.status).toBe("completed"),
+      );
+      expect(builderQueries).toBe(1);
+      expect(borrowed).toBe(0);
+      expect(f.locks.size).toBe(0);
+    } finally {
+      await f.service.onModuleDestroy();
+    }
+  });
+
   it("rolls back an entire initial backlog and rejects cross-tenant commands before enqueue", async () => {
     const f = queueFixture();
     let inserts = 0;
@@ -128,7 +177,7 @@ describe("actual bounded durable reporting worker", () => {
     expect(f.service.getReportJob(accepted.jobId).status).toBe("running");
     expect(f.service.getReportJob(accepted.jobId).artifact).toBeNull();
     const firstStart = f.stored.get(accepted.jobId)!.startedAt;
-    expect(f.releases).toHaveBeenCalledWith(true);
+    expect(f.releases.mock.calls.length).toBeGreaterThanOrEqual(2);
     await f.service.onModuleDestroy();
     f.control.before = undefined;
     await f.service.onModuleInit();
