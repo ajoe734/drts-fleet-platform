@@ -569,7 +569,96 @@ export class ReportingFilingService
     identity: EvidenceAccessIdentity | null,
     requestId?: string,
   ): MultiTaxiTripOperationalExportJobAccepted {
-    const { actorId, policy } = this.assertMultiTaxiTripExportAccess(identity);
+    if (this.hasDurableReports()) {
+      throw new Error(
+        "Durable multi-taxi export requires createMultiTaxiTripExportJobDurably",
+      );
+    }
+    const { job, idempotentReplay } = this.prepareMultiTaxiTripExportJob(
+      command,
+      rows,
+      identity,
+    );
+    if (!idempotentReplay) {
+      this.publishCommittedReport(job);
+      this.persistChanges(
+        { reportJobs: [this.cloneStoredReportJob(job)] },
+        "queue_multi_taxi_trip_export",
+      );
+      this.scheduleReportJobCompletion(job.jobId, requestId);
+    }
+    return this.acceptMultiTaxiTripExportJob(
+      job,
+      idempotentReplay,
+      identity,
+      requestId,
+    );
+  }
+
+  async createMultiTaxiTripExportJobDurably(
+    command: CreateMultiTaxiTripOperationalExportJobCommand,
+    rows: readonly MultiTaxiTripOperationalExportRow[],
+    identity: EvidenceAccessIdentity | null,
+    requestId?: string,
+  ): Promise<MultiTaxiTripOperationalExportJobAccepted> {
+    if (this.reportWorkerStopping) throw new Error("Report worker is stopping");
+    if (!this.hasDurableReports()) {
+      return this.createMultiTaxiTripExportJob(
+        command,
+        rows,
+        identity,
+        requestId,
+      );
+    }
+    // Validate the original actor/purpose/scope contract before any write. The
+    // repository resolves actor-key replay from committed storage under a lock,
+    // including requests admitted by another worker or before recovery.
+    const { job: proposed } = this.prepareMultiTaxiTripExportJob(
+      command,
+      rows,
+      identity,
+      null,
+    );
+    proposed.status = "queued";
+    const enqueue =
+      this.reportingFilingRepository!.enqueueMultiTaxiTripExportJob(
+        this.cloneStoredReportJob(proposed),
+      );
+    this.reportEnqueues.add(enqueue);
+    let committed: Awaited<typeof enqueue>;
+    try {
+      committed = await enqueue;
+    } finally {
+      this.reportEnqueues.delete(enqueue);
+    }
+    const job = this.cloneStoredReportJob({
+      ...committed.job,
+      partnerRevenueRows: committed.job.partnerRevenueRows ?? [],
+      settlementMatrix: committed.job.settlementMatrix ?? [],
+    });
+    if (committed.idempotentReplay) {
+      // Keep the original conflict rule and canonical rows/metadata on replay.
+      this.prepareMultiTaxiTripExportJob(command, rows, identity, job);
+    }
+    this.publishCommittedReport(job);
+    if (["queued", "pending", "running"].includes(job.status)) {
+      this.scheduleReportJobCompletion(job.jobId, requestId);
+    }
+    return this.acceptMultiTaxiTripExportJob(
+      job,
+      committed.idempotentReplay,
+      identity,
+      requestId,
+    );
+  }
+
+  private prepareMultiTaxiTripExportJob(
+    command: CreateMultiTaxiTripOperationalExportJobCommand,
+    rows: readonly MultiTaxiTripOperationalExportRow[],
+    identity: EvidenceAccessIdentity | null,
+    existingJob?: StoredReportJob | null,
+  ): { job: StoredReportJob; idempotentReplay: boolean } {
+    const { actorId } = this.assertMultiTaxiTripExportAccess(identity);
     const scope = this.normalizeMultiTaxiTripExportScope(command.scope ?? {});
     const purpose = this.normalizeRequiredText(
       command.purpose,
@@ -581,12 +670,15 @@ export class ReportingFilingService
       "idempotencyKey",
       MAX_EXPORT_IDEMPOTENCY_KEY_LENGTH,
     );
-    const existing = this.reportJobs.find(
-      (job) =>
-        job.jobType === MULTI_TAXI_TRIP_EXPORT_JOB_TYPE &&
-        job.multiTaxiTripExport?.requestedByActorId === actorId &&
-        job.multiTaxiTripExport.idempotencyKey === idempotencyKey,
-    );
+    const existing =
+      existingJob === undefined
+        ? this.reportJobs.find(
+            (job) =>
+              job.jobType === MULTI_TAXI_TRIP_EXPORT_JOB_TYPE &&
+              job.multiTaxiTripExport?.requestedByActorId === actorId &&
+              job.multiTaxiTripExport.idempotencyKey === idempotencyKey,
+          )
+        : existingJob;
 
     if (existing) {
       const existingMetadata =
@@ -605,27 +697,7 @@ export class ReportingFilingService
           },
         );
       }
-      this.recordArtifactAccessAudit(
-        {
-          actionName: "replay_multi_taxi_trip_export_job",
-          resourceType: "report_job",
-          resourceId: existing.jobId,
-          newValuesSummary: buildEvidenceAccessAuditSummary(policy, "export", {
-            actorId,
-            status: existing.status,
-            recordCount: existingMetadata.recordCount,
-          }),
-        },
-        requestId,
-        identity,
-        null,
-        policy,
-      );
-      return {
-        jobId: existing.jobId,
-        status: this.toMultiTaxiTripExportStatus(existing.status),
-        idempotentReplay: true,
-      };
+      return { job: existing, idempotentReplay: true };
     }
 
     const createdAt = new Date().toISOString();
@@ -651,38 +723,52 @@ export class ReportingFilingService
       updatedAt: createdAt,
     };
 
-    this.reportJobs = [job, ...this.reportJobs];
-    this.persistChanges(
-      {
-        reportJobs: [this.cloneStoredReportJob(job)],
-      },
-      "queue_multi_taxi_trip_export",
-    );
+    return { job, idempotentReplay: false };
+  }
+
+  private acceptMultiTaxiTripExportJob(
+    job: StoredReportJob,
+    idempotentReplay: boolean,
+    identity: EvidenceAccessIdentity | null,
+    requestId?: string,
+  ): MultiTaxiTripOperationalExportJobAccepted {
+    const { actorId, policy } = this.assertMultiTaxiTripExportAccess(identity);
+    const metadata = this.requireMultiTaxiTripExportMetadata(job);
     this.recordArtifactAccessAudit(
       {
-        actionName: "create_multi_taxi_trip_export_job",
+        actionName: idempotentReplay
+          ? "replay_multi_taxi_trip_export_job"
+          : "create_multi_taxi_trip_export_job",
         resourceType: "report_job",
         resourceId: job.jobId,
-        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "export", {
-          actorId,
-          status: job.status,
-          scope,
-          purpose,
-          recordCount: metadata.recordCount,
-          format: job.format,
-        }),
+        newValuesSummary: buildEvidenceAccessAuditSummary(
+          policy,
+          "export",
+          idempotentReplay
+            ? {
+                actorId,
+                status: this.toMultiTaxiTripExportStatus(job.status),
+                recordCount: metadata.recordCount,
+              }
+            : {
+                actorId,
+                status: this.toMultiTaxiTripExportStatus(job.status),
+                scope: metadata.scope,
+                purpose: metadata.purpose,
+                recordCount: metadata.recordCount,
+                format: job.format,
+              },
+        ),
       },
       requestId,
       identity,
       null,
       policy,
     );
-    this.scheduleReportJobCompletion(job.jobId, requestId);
-
     return {
       jobId: job.jobId,
-      status: "pending",
-      idempotentReplay: false,
+      status: this.toMultiTaxiTripExportStatus(job.status),
+      idempotentReplay,
     };
   }
 

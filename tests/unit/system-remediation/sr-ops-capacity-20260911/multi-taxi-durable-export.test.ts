@@ -29,7 +29,7 @@ const rows: MultiTaxiTripOperationalExportRow[] = [
     pickupAt: null,
     dropoffAt: null,
     payableFareMinor: 35000,
-    actualFareMinor: null,
+    actualFareMinor: 35000,
     tollMinor: 0,
     currency: "NTD",
     farePolicyVersion: "fare-test",

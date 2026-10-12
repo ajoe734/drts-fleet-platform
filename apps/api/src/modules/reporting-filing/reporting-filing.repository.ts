@@ -124,6 +124,87 @@ export class ReportingFilingRepository {
     client.release();
   }
 
+  async enqueueMultiTaxiTripExportJob(job: StoredReportJobRecord): Promise<{
+    job: StoredReportJobRecord;
+    idempotentReplay: boolean;
+  }> {
+    if (!this.isEnabled())
+      throw new Error("Durable report storage is disabled");
+    const metadata = job.multiTaxiTripExport;
+    if (
+      job.jobType !== "multi_taxi_trip_records" ||
+      job.status !== "queued" ||
+      !metadata
+    )
+      throw new Error("Expected queued multi-taxi export");
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      // Preserve the original actor/key authority. A transaction lock serializes
+      // concurrent creation across instances without a new schema or migration.
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 124))",
+        [
+          JSON.stringify([
+            job.jobType,
+            metadata.requestedByActorId,
+            metadata.idempotencyKey,
+          ]),
+        ],
+      );
+      const found = await client.query<JsonRecordRow>(
+        `SELECT record FROM admin.phase1_report_jobs
+         WHERE job_type = $1
+           AND record->'multiTaxiTripExport'->>'requestedByActorId' = $2
+           AND record->'multiTaxiTripExport'->>'idempotencyKey' = $3`,
+        [job.jobType, metadata.requestedByActorId, metadata.idempotencyKey],
+      );
+      if (found.rows.length > 1)
+        throw new Error("Ambiguous multi-taxi export replay");
+      const existing = found.rows[0]
+        ? this.parseRecord<StoredReportJobRecord>(
+            found.rows[0].record,
+            "admin.phase1_report_jobs",
+          )
+        : null;
+      if (
+        existing &&
+        (existing.jobType !== job.jobType ||
+          existing.multiTaxiTripExport?.requestedByActorId !==
+            metadata.requestedByActorId ||
+          existing.multiTaxiTripExport.idempotencyKey !==
+            metadata.idempotencyKey)
+      )
+        throw new Error("Multi-taxi export replay authority mismatch");
+      if (!existing) {
+        await client.query(
+          `INSERT INTO admin.phase1_report_jobs
+           (job_id, job_type, status, created_at, updated_at, record)
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+          [
+            job.jobId,
+            job.jobType,
+            job.status,
+            job.createdAt,
+            job.updatedAt,
+            JSON.stringify(job),
+          ],
+        );
+      }
+      await client.query("COMMIT");
+      client.release();
+      return { job: existing ?? job, idempotentReplay: Boolean(existing) };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* discard below */
+      }
+      client.release(true);
+      throw error;
+    }
+  }
+
   async listRunnableReportJobIds(): Promise<string[]> {
     if (!this.isEnabled()) return [];
     const result = await this.databaseService!.query<{ job_id: string }>(

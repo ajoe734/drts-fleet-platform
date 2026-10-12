@@ -29,6 +29,10 @@ export function queueFixture(jobs: StoredReportJobRecord[] = []) {
   const locks = new Set<string>();
   const writes: StoredReportJobRecord[] = [];
   const releases = vi.fn();
+  const transactionLocks = new Map<
+    string,
+    { promise: Promise<void>; resolve: () => void }
+  >();
   const control: {
     before?: ((sql: string, params: unknown[]) => Promise<void>) | undefined;
   } = {};
@@ -37,8 +41,24 @@ export function queueFixture(jobs: StoredReportJobRecord[] = []) {
   function session() {
     let transaction: Map<string, StoredReportJobRecord> | null = null;
     const owned = new Set<string>();
+    let releaseTransactionLock: (() => void) | undefined;
     const query = vi.fn(async (sql: string, params: unknown[] = []) => {
       await control.before?.(sql, params);
+      if (sql.includes("pg_advisory_xact_lock")) {
+        const key = String(params[0]);
+        const previous = transactionLocks.get(key);
+        let resolve!: () => void;
+        const promise = new Promise<void>((yes) => {
+          resolve = yes;
+        });
+        const own = { promise, resolve };
+        transactionLocks.set(key, own);
+        await previous?.promise;
+        releaseTransactionLock = () => {
+          resolve();
+          if (transactionLocks.get(key) === own) transactionLocks.delete(key);
+        };
+      }
       if (sql === "BEGIN") transaction = new Map();
       if (sql === "ROLLBACK") transaction = null;
       if (sql === "COMMIT") {
@@ -47,6 +67,10 @@ export function queueFixture(jobs: StoredReportJobRecord[] = []) {
           writes.push(job);
         }
         transaction = null;
+      }
+      if (sql === "COMMIT" || sql === "ROLLBACK") {
+        releaseTransactionLock?.();
+        releaseTransactionLock = undefined;
       }
       if (sql.includes("pg_try_advisory_lock")) {
         const id = String(params[0]);
@@ -100,13 +124,16 @@ export function queueFixture(jobs: StoredReportJobRecord[] = []) {
       ) {
         return {
           rows: [...stored.values()]
-            .filter(
-              (job) =>
-                !params.length ||
-                ((Array.isArray(params[0])
-                  ? params[0].includes(job.jobId)
-                  : job.jobId === params[0]) &&
-                  (!sql.includes("status IN") || eligible(job))),
+            .filter((job) =>
+              sql.includes("record->'multiTaxiTripExport'")
+                ? job.jobType === params[0] &&
+                  job.multiTaxiTripExport?.requestedByActorId === params[1] &&
+                  job.multiTaxiTripExport.idempotencyKey === params[2]
+                : !params.length ||
+                  ((Array.isArray(params[0])
+                    ? params[0].includes(job.jobId)
+                    : job.jobId === params[0]) &&
+                    (!sql.includes("status IN") || eligible(job))),
             )
             .map((record) => ({
               job_id: record.jobId,
@@ -119,6 +146,7 @@ export function queueFixture(jobs: StoredReportJobRecord[] = []) {
     return {
       query,
       release: (discard?: boolean) => {
+        releaseTransactionLock?.();
         for (const id of owned) locks.delete(id);
         owned.clear();
         releases(discard);
