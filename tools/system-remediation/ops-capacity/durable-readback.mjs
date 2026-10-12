@@ -102,6 +102,16 @@ export function assertAcceptancePassed(acceptance) {
     throw new Error(`Workload failed: must be full burst schedule`);
   }
 
+  if (typeof summary.elapsedMs !== "number" || summary.elapsedMs < 890000) {
+    throw new Error(
+      `Workload failed: invalid elapsedMs, must be at least 890000 for a 900s run, got ${summary.elapsedMs}`,
+    );
+  }
+
+  if (typeof summary.maxInFlight !== "number" || summary.maxInFlight <= 0) {
+    throw new Error(`Workload failed: invalid maxInFlight`);
+  }
+
   const requiredCounts = {
     booking: 900,
     dispatch: 4500,
@@ -113,6 +123,36 @@ export function assertAcceptancePassed(acceptance) {
     dispatch: { p95Ms: 10000 },
     report: { p95Ms: 5000 },
   };
+
+  if (
+    !acceptance.queueLag ||
+    !acceptance.queueLag.report ||
+    !acceptance.queueLag.dispatchOrderWriteLag
+  ) {
+    throw new Error(`Workload failed: missing queueLag evidence`);
+  }
+
+  if (
+    typeof acceptance.queueLag.report.avgMs !== "number" ||
+    acceptance.queueLag.report.avgMs < 0 ||
+    typeof acceptance.queueLag.dispatchOrderWriteLag.avgMs !== "number" ||
+    acceptance.queueLag.dispatchOrderWriteLag.avgMs < 0
+  ) {
+    throw new Error(
+      `Workload failed: invalid or missing queueLag measurements`,
+    );
+  }
+
+  if (!acceptance.dispatchOrderStatusDistribution) {
+    throw new Error(`Workload failed: missing dispatchOrderStatusDistribution`);
+  }
+
+  const statuses = Object.keys(acceptance.dispatchOrderStatusDistribution);
+  if (statuses.length === 0) {
+    throw new Error(
+      `Workload failed: dispatchOrderStatusDistribution is empty`,
+    );
+  }
 
   for (const family of ["booking", "dispatch", "report"]) {
     const workload = summary.workflows?.[family];
@@ -139,21 +179,23 @@ export function assertAcceptancePassed(acceptance) {
     }
 
     if (
-      !Number.isFinite(workload.p95Ms) ||
+      typeof workload.p95Ms !== "number" ||
+      workload.p95Ms <= 0 ||
       workload.p95Ms > expectedTargets[family].p95Ms
     ) {
       throw new Error(
-        `Workload failed: ${family} p95 latency missing or exceeded target`,
+        `Workload failed: ${family} p95 latency missing, invalid, or exceeded target`,
       );
     }
 
     if (expectedTargets[family].p99Ms !== undefined) {
       if (
-        !Number.isFinite(workload.p99Ms) ||
+        typeof workload.p99Ms !== "number" ||
+        workload.p99Ms <= 0 ||
         workload.p99Ms > expectedTargets[family].p99Ms
       ) {
         throw new Error(
-          `Workload failed: ${family} p99 latency missing or exceeded target`,
+          `Workload failed: ${family} p99 latency missing, invalid, or exceeded target`,
         );
       }
     }

@@ -77,6 +77,8 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
       result: "measurements_within_targets",
       durationSeconds: 900,
       fullBurstSchedule: true,
+      elapsedMs: 899000,
+      maxInFlight: 50,
       workflows: {
         booking: {
           requests: 900,
@@ -100,6 +102,13 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
           latencyTargetsMet: true,
         },
       },
+    },
+    queueLag: {
+      report: { count: 450, minMs: 10, maxMs: 100, avgMs: 45 },
+      dispatchOrderWriteLag: { count: 4500, minMs: 5, maxMs: 50, avgMs: 20 },
+    },
+    dispatchOrderStatusDistribution: {
+      COMPLETED: 4500,
     },
     readback: {
       booking: {
@@ -172,7 +181,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
     const invalid = structuredClone(validAcceptance);
     (invalid.summary.workflows.booking as any).p95Ms = null;
     expect(() => assertAcceptancePassed(invalid)).toThrowError(
-      /Workload failed: booking p95 latency missing or exceeded target/,
+      /Workload failed: booking p95 latency missing, invalid, or exceeded target/,
     );
   });
 
@@ -180,7 +189,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
     const invalid = structuredClone(validAcceptance);
     invalid.summary.workflows.booking.p95Ms = 2001;
     expect(() => assertAcceptancePassed(invalid)).toThrowError(
-      /Workload failed: booking p95 latency missing or exceeded target/,
+      /Workload failed: booking p95 latency missing, invalid, or exceeded target/,
     );
   });
 
@@ -214,5 +223,43 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
     expect(() => assertAcceptancePassed(invalid)).toThrowError(
       /booking readback failed: matched flag is false/,
     );
+  });
+
+  it("rejects when elapsedMs is absent or too low", () => {
+    const invalid = structuredClone(validAcceptance);
+    invalid.summary.elapsedMs = 1;
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(
+      /invalid elapsedMs/,
+    );
+  });
+
+  it("rejects when maxInFlight is zero", () => {
+    const invalid = structuredClone(validAcceptance);
+    invalid.summary.maxInFlight = 0;
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(
+      /invalid maxInFlight/,
+    );
+  });
+
+  it("rejects when queueLag is missing or avgMs is null", () => {
+    const invalid = structuredClone(validAcceptance);
+    (invalid.queueLag.report as any).avgMs = null;
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(
+      /invalid or missing queueLag measurements/,
+    );
+  });
+
+  it("rejects when dispatchOrderStatusDistribution is empty", () => {
+    const invalid = structuredClone(validAcceptance);
+    invalid.dispatchOrderStatusDistribution = {};
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(
+      /dispatchOrderStatusDistribution is empty/,
+    );
+  });
+
+  it("rejects negative latency measurements", () => {
+    const invalid = structuredClone(validAcceptance);
+    invalid.summary.workflows.booking.p95Ms = -1;
+    expect(() => assertAcceptancePassed(invalid)).toThrowError(/invalid/);
   });
 });
