@@ -238,3 +238,38 @@ check runner and retain each command and exit code in `checks-3cfcba689aa4cb012b
 The production provider/public-policy settings and all C125 live gates remain
 pending exactly as recorded above. No production or provider request, cloud
 mutation, VM product/preview/browser/PG server or Compose infrastructure ran.
+
+## Authorized E2E-009 repair and frozen shallow verification (2026-10-12)
+
+Supervisor extended the original task's canonical `write_scopes` to the exact
+`tests/e2e/E2E-009-prod-rail-dry-run.sh` file after reviewing the concrete proposal
+and confirming no active writer conflict. The earlier scope blocker above is
+resolved by that authorization, not waived. Recoverability anchor
+`3c7d4502d0d6ad200332b6783bb12cfe32a99efc` applies the reviewed patch and accurately
+labels the scenario as offline workflow wiring plus production-function checks.
+No central CI workflow, lockfile, config or additional product helper changed.
+
+The scenario now checks explicit remote tag fetch and commit resolution,
+`toJSON(vars)` feeding the real `buildPlan`, and the preflight's frozen registry
+host reaching Docker authentication. It executes the existing real plan,
+preflight, deploy/migration/verification builders and storage/scanner factories
+in the 142-case suite. Only external cloud/HTTP boundaries are stubbed. Existing
+production environment, tag, registry, staging/build, migrate, deploy, health,
+manual dispatch, concurrency and rollback assertions remain required; there is
+no skip, inert workflow string or gate waiver.
+
+| Finding / required acceptance                                                                                    | Actual source and repair                                                                                    | Old reproduction → repaired result                                                                                                                                                                                                           | Commands / versions / evidence                                                                                                                                                                                                           | Unverified limits                                                                                                                                                  |
+| ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| F-CI-SHALLOW; `production_complete_topology_regression` / `production_strict_auth_config_fail_closed_regression` | Hash-verified exact historical sources from `3cfcba689`; E2E-009 executes `production-rail.test.ts`         | Frozen depth-1 `742317648e9ef88c5aa9864471fee5db1a943614`: 3 failed / 139 passed, exit 1. Frozen depth-1 `3c7d4502d0d6ad200332b6783bb12cfe32a99efc`: 142 passed within E2E-009, exit 0. Both report shallow=true; old objects remain absent. | Node 22.23.2 / pnpm 10.33.0 / Vitest 4.1.4; `pnpm exec vitest run tests/unit/sr-prod-full-surface-rail-20261012/production-rail.test.ts`; canonical task `.local/shallow-old-742317648-dispatch.log`, `shallow-e2e009-new-3c7d4502d.log` | Offline mocks do not establish live topology, IAM/OAuth, provider or C125 acceptance.                                                                              |
+| F-CI-E2E009; `production_exact_sha_review_ci_protected_merge`                                                    | Authorized scenario checks current workflow/helper wiring and executes actual production functions          | Frozen old E2E-009 fails on obsolete `git ls-remote` literal, exit 1. Tracked repair passes all four chain stages in both owner worktree and depth-1 clone, exit 0.                                                                          | `bash tests/e2e/E2E-009-prod-rail-dry-run.sh`; `.local/e2e009-old-dispatch.log`, `e2e009-3c7d4502d.log`, `shallow-e2e009-new-3c7d4502d.log`; chain/evidence files beside logs                                                            | Fresh same-SHA Gemini2 review, full hosted CI, protected merge and named acceptance remain pending; auto-merge is disabled.                                        |
+| Previous F-PUBLIC-ENTRY / F-ARTIFACT-PROVIDERS and full C125 gates                                               | Original helper/product boundary regressions remain required; production runtime logic unchanged this round | Ten affected suites pass 328 tests, exit 0, including topology, strict auth, Google registry, public customer boundaries, real artifact factories and upload/proxy regressions.                                                              | `.local/checks-3c7d4502d0d6ad200332b6783bb12cfe32a99efc.log`; final exact candidate checks are recorded in `.local/checks-<CANDIDATE_SHA>.log` / `.json` before handoff                                                                  | Production configuration/public policy/native storage/scanner and genuine supply AND case/reply/composite/legal-role evidence remain outstanding exactly as above. |
+
+Frozen clones were created with `git clone --depth 1 --no-local --branch
+codex/sr-prod-full-surface-rail-20261012 file://<assigned-worktree>` under canonical
+`.local/`; neither active worktree nor published history was reset or rewritten.
+Locked offline `--ignore-scripts` dependencies were installed in the new clone.
+Inherited owner dependency symlinks were detached only in this assigned worker,
+preserving all canonical targets, then restored with a locked offline install
+(exit 0; `e2e009-isolated-dependencies.log`). All started local checks finish and
+their results are read before exact-SHA handoff. No product/preview/browser/PG
+server, Compose infrastructure, live provider request or cloud mutation ran.
