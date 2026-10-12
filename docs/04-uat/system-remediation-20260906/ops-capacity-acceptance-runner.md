@@ -551,3 +551,41 @@ rewrite/recovery/transplant, checker bypass, hosted dispatch, cloud mutation or
 VM product hosting was performed. Both required keys stay OPEN; effective
 Cloud Run CPU/billing/minimum instances and real idle/recovery/start/completion
 behavior still require their original runtime owner and genuine evidence.
+
+### Exact final source types and remaining delivery blockers
+
+Supervisor's isolated frozen-dependency receipt validates `0a327db0f139`,
+before the claim-connection-loss repair. This continuation validates the actual
+later local checkpoint `20acb78c81f4dfb00118c66ee029ad94c31efbf7`: its repository
+and two claim regression files differ from that earlier source. A separate
+read-only Git archive, within canonical `.local/c123-report-worker-20261012/`,
+contains all6,360 tracked blobs from that exact SHA. Every blob matches before
+and after the checks. No branch/worktree, source adoption or product runtime was
+created; the original task worktree and earlier evidence remain intact.
+
+Node22.23.2 / pnpm10.33.0. The archive's own29-workspace dependency installation
+uses `pnpm install --frozen-lockfile --offline --ignore-scripts`, exit0. Root
+typecheck and API typecheck both finish exit0 with zero TypeScript diagnostics.
+The API's actual `prebuild` prerequisites are only the existing contracts and
+control-plane-auth TypeScript builds; these also finish exit0 within the archive.
+The unchanged tracked lockfile and byte verification are recorded in canonical
+`.local/c123-report-worker-20261012/exact-final-types-20acb78/check-manifest.json`,
+with exact commands, source/archive/script/log hashes and completion times.
+
+| Finding / acceptance                               | Exact source / finished evidence                                                                                                                                                                                               | Remaining requirement                                                                                                                                                                           |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Final report claim source and root/API types       | `20acb78c`: `root-typecheck.log`, `api-prerequisites.log`, `api-typecheck.log`, all exit0/zero errors; all6,360 tracked blobs unchanged. Earlier shared-cache68-error logs and Supervisor's earlier0a327 receipt are retained. | Exact local types are verified. This supersedes the local dependency/type uncertainty for this source only; independent candidate review and matching mandatory CI remain required.             |
+| Existing affected and gate evidence                | `prior-evidence-audit.json` verifies every prior source and log hash against the retained connection-loss manifest:279 affected tests,16 API tests,32 narrow tests and25 gate decisions remain unchanged passing evidence.     | These completed checks were not rerun. SQL/socket/provider boundaries remain modeled; real PostgreSQL connection loss and cross-instance/idle recovery are unverified.                          |
+| Immutable publication/provenance HOLD              | Fresh fetch and PR2575 readback: remote/PR head remains `266b2d89f2352a97e015da8b2b3f23c567ed689b`; Commit trailers is FAILURE. Local20ac is19 append-only checkpoints ahead, with no divergence.                              | Supervisor must obtain lawful disposition for the four malformed published ancestors before push/handoff or original hosted dispatch. Append-only source/type success does not cure ancestors.  |
+| `capacity_failed_summary_rejected`                 | Original24/74/14-error payload still has the retained uncaught exit1 gate rejection. All112 raw429 and original ZIP/hash are preserved; no new hosted run is claimed.                                                          | Key remains OPEN pending independent exact-candidate lifecycle and required evidence. Actual server-arrival/network429 causality remains unproved.                                              |
+| `capacity_same_candidate_full_900s_valid_baseline` | NOT RUN; original900s/900booking/4500dispatch/450report/5850 measured requests, concurrency/backlog/degradation/auth/SLO/SQL requirements remain unchanged.                                                                    | Lawful publication disposition, exact review/CI and Supervisor's original immutable hosted workflow are still required. No synthetic or typecheck result fills this key.                        |
+| Managed report-worker runtime                      | Existing `cloudrun-background-source-contract-gap.json` and the actual in-process bounded worker's immediate/recovery timers remain the recorded basis. No effective cloud configuration or idle/recovery proof was read.      | Original runtime owner must provide effective CPU/billing/minimum-instance or managed-trigger authority plus genuine idle/recovery/start/completion SLO evidence; no hosting mutation inferred. |
+
+Only this evidence/documentation checkpoint follows the typed source; production
+and test bytes remain unchanged. Current Codex2/Codex and historical
+Claude/Claude2/Gemini credit, all source/history reservations and both OPEN keys
+are preserved. Publication HOLD forbids push/handoff, history rewrite/recovery,
+source transplant, checker bypass and hosted900s dispatch. No cloud mutation,
+VM product/PG/browser/Compose hosting, candidate CI/merge or acceptance closure
+occurred. The remaining delivery blockers require Supervisor disposition and
+original runtime-owner evidence; this checkpoint is not a candidate handoff.
