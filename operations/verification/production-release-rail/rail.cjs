@@ -1,3 +1,4 @@
+const { publicEntryConfig } = require("./public-entry.cjs");
 // This is the configuration/argument builder used by deploy-prod.yml.
 // It performs no cloud calls. Plans contain names and pinned versions, never values.
 const TOPOLOGY = [
@@ -286,6 +287,7 @@ function buildPlan(vars, sha, tag, deployer) {
   );
   if (!smoke || typeof smoke !== "object" || Array.isArray(smoke))
     reject("PROD_RELEASE_SMOKE_CONFIG_JSON");
+  const publicEntries = publicEntryConfig(vars.PROD_PUBLIC_ENTRY_CONFIG_JSON);
   const services = TOPOLOGY.map(([id, key, port, route]) => {
     const name = need(`PROD_GCP_${key}_SERVICE`);
     if (
@@ -297,13 +299,15 @@ function buildPlan(vars, sha, tag, deployer) {
       id === "api"
         ? apiOrigin
         : https(need(`PROD_${key}_ORIGIN`), `PROD_${key}_ORIGIN`, true);
-    const transportAudience =
-      id === "api" ? audience : need(`PROD_${key}_IAP_CLIENT_ID`);
-    if (transportAudience === "*" || /\s/.test(transportAudience))
+    const publicEntry = publicEntries[id];
+    const transportAudience = publicEntry
+      ? null
+      : id === "api" ? audience : need(`PROD_${key}_IAP_CLIENT_ID`);
+    if (!publicEntry && (transportAudience === "*" || /\s/.test(transportAudience)))
       reject(`PROD_${key}_IAP_CLIENT_ID`);
     const exposure = vars[`PROD_${key}_ALLOW_UNAUTHENTICATED`] || "false";
     if (exposure !== "false")
-      reject(`PROD_${key}_ALLOW_UNAUTHENTICATED (private required)`);
+      reject(`PROD_${key}_ALLOW_UNAUTHENTICATED (private backend; public entry requires verified LB policy)`);
     const probe = smoke[id];
     if (
       !probe ||
@@ -413,6 +417,8 @@ function buildPlan(vars, sha, tag, deployer) {
         )
       )
         reject("PROD_REFERRAL_EMBED_ALLOWED_HOSTS");
+      if (!env.REFERRAL_EMBED_ALLOWED_HOSTS.split(/\s+/).includes(publicEntry.entryHost))
+        reject("PROD_PUBLIC_ENTRY_CONFIG_JSON.referral-embed-web.entryHost allowlist");
       env.REFERRAL_EMBED_DEMO = "false";
     }
     if (id === "ops-console-web") {
@@ -443,6 +449,7 @@ function buildPlan(vars, sha, tag, deployer) {
       port,
       origin,
       transportAudience,
+      publicEntry,
       env,
       secrets,
       probe,

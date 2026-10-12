@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { deployArgs, reject } = require("./rail.cjs");
+const { checkPublicEntryPolicies, verifyPublicEntry } = require("./public-entry.cjs");
 
 function sdk(args) {
   try {
@@ -242,6 +243,7 @@ async function verify(
     migration:
       process.env.SKIP_MIGRATION === "true" ? "operator-skipped" : "completed",
     services: [],
+    publicEntryPolicies: checkPublicEntryPolicies(plan, cloud),
     limits:
       "Deployment smoke only. No device, provider, legal/manual, restore, or complete end-to-end acceptance.",
   };
@@ -291,23 +293,27 @@ async function verify(
       description,
       revision,
     );
-    const token = cloud([
+    const publicEntry = service.publicEntry
+      ? await verifyPublicEntry(service, request)
+      : undefined;
+    const token = service.publicEntry ? null : cloud([
       "auth",
       "print-identity-token",
       `--impersonate-service-account=${process.env.DEPLOYER_SERVICE_ACCOUNT}`,
       `--audiences=${service.transportAudience}`,
       "--include-email",
     ]);
-    if (!token) reject(`${service.id} signed IAP transport token`);
+    if (!service.publicEntry && !token) reject(`${service.id} signed IAP transport token`);
     const response = await request(`${service.origin}${service.probe.path}`, {
       method: "GET",
-      headers: { ...headers[service.id], Authorization: `Bearer ${token}` },
+      headers: { ...headers[service.id], ...(token ? {Authorization: `Bearer ${token}`} : {}) },
       redirect: "manual",
       signal: AbortSignal.timeout(30000),
     });
     assertProbe(service, response, await response.text());
     evidence.services.push({
       ...record,
+      publicEntry,
       smoke: {
         path: service.probe.path,
         status: response.status,

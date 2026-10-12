@@ -8,6 +8,7 @@ const {
   constants,
 } = require("node:crypto");
 const { buildPlan, reject } = require("./rail.cjs");
+const { checkPublicEntryPolicies } = require("./public-entry.cjs");
 
 // Load the production validators without starting Nest or any product server.
 // The compiler is locked by pnpm-lock.yaml; all checks remain offline except
@@ -266,6 +267,7 @@ function validateSmokeHeaders(plan, raw) {
 }
 function preflight(vars, sha, tag, deployer, cloud) {
   const plan = buildPlan(vars, sha, tag, deployer);
+  plan.publicEntryPolicies = checkPublicEntryPolicies(plan, cloud.publicEntryRead);
   cloud.checkActAs(plan.runtime, plan.project);
   const names = [
     ...new Set([
@@ -311,6 +313,9 @@ function gcloud(args, control) {
   } // Never echo SDK stderr or secret payloads.
 }
 const cloud = {
+  publicEntryRead(args) {
+    return gcloud(args, "F-PUBLIC-ENTRY external IAM/OAuth policy evidence unavailable");
+  },
   checkMap(plan, values) {
     const api = plan.services[0],
       ops = plan.services.find((s) => s.id === "ops-console-web");
