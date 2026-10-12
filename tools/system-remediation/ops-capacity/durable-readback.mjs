@@ -33,7 +33,7 @@ export async function readBackOwnedOrders(pool, orderIds) {
     if (row.first_attempt_at && row.order_created_at) {
       lagMs = new Date(row.first_attempt_at).getTime() - new Date(row.order_created_at).getTime();
     }
-    
+
     return {
       orderId: row.order_id,
       status: row.status,
@@ -49,9 +49,9 @@ export async function readBackReportJobs(pool, jobIds) {
     return [];
   }
   // admin.phase1_report_jobs does not have an assignments table.
-  // We'll read the startedAt or similar if it exists, or fallback to updated_at 
+  // We'll read the startedAt or similar if it exists, or fallback to updated_at
   // only if status changed from 'pending' to 'processing' (which we can't easily query without history).
-  // For now, if the job has a non-null updated_at and status is not pending, we use it, 
+  // For now, if the job has a non-null updated_at and status is not pending, we use it,
   // but this is a known limitation. We'll extract 'startedAt' from record JSON if possible.
   const { rows } = await pool.query(
     `SELECT job_id, status, created_at, updated_at, record->>'startedAt' as started_at
@@ -201,7 +201,7 @@ export function assertAcceptancePassed(acceptance) {
       `Workload failed: dispatchOrderStatusDistribution is empty`,
     );
   }
-  
+
   const validStatuses = new Set([
     "created",
     "recording_pending",
