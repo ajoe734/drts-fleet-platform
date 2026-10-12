@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { CapacitySummary } from "../../../../tools/system-remediation/ops-capacity/plan-builder.mjs";
 
 // SR-OPS-CAPACITY-RUNNER-20260911 (C123): real, GitHub-hosted-only capacity
 // acceptance. This VM never hosts Postgres, so DATABASE_URL is unset locally
@@ -115,13 +116,10 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         await import("../../../../apps/api/src/config/auth-startup-config");
       const { buildCapacityPlan, countsForDuration } =
         await import("../../../../tools/system-remediation/ops-capacity/plan-builder.mjs");
-      // capacity.mjs belongs to the already-accepted SR-OPS-PROOF-001 (C122)
-      // task and is out of this task's write scope, so it has no .d.mts
-      // declaration file; suppress the resulting no-declaration error here
-      // rather than adding one outside this task's owned paths.
-      // @ts-expect-error -- TS7016: no declaration file for capacity.mjs
-      const { runPlan } =
-        await import("../../../../tools/system-remediation/ops-proof/capacity.mjs");
+      // The Supervisor allocated this exact producer file, not a shared declaration.
+      // prettier-ignore
+      // @ts-expect-error -- TS7016: no declaration file for the allocated capacity.mjs
+      const { runPlan } = await import("../../../../tools/system-remediation/ops-proof/capacity.mjs");
       const {
         readBackOwnedOrders,
         readBackReportJobs,
@@ -161,13 +159,14 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         // that's a false negative from the harness, not a signal about the
         // measured booking/dispatch/report burst.
         const dispatchCount = countsForDuration(DURATION_SECONDS).dispatch;
-        const orderIds: string[] = new Array(dispatchCount);
+        const initialBacklogCount = 500;
+        const orderIds: string[] = new Array(initialBacklogCount);
         let nextIndex = 0;
         async function seedWorker() {
           for (;;) {
             const index = nextIndex;
             nextIndex += 1;
-            if (index >= dispatchCount) {
+            if (index >= initialBacklogCount) {
               return;
             }
             const response = await fetch(`${baseUrl}/api/orders`, {
@@ -228,9 +227,9 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           }
         }
         await Promise.all(
-          Array.from({ length: Math.min(40, dispatchCount) }, seedWorker),
+          Array.from({ length: Math.min(40, initialBacklogCount) }, seedWorker),
         );
-        expect(orderIds).toHaveLength(dispatchCount);
+        expect(orderIds).toHaveLength(initialBacklogCount);
         expect(
           orderIds.every((id) => typeof id === "string" && id.length > 0),
         ).toBe(true);
@@ -358,6 +357,8 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           reportJwt: platformJwt,
           orderIds,
           runTag,
+          profile: "concurrent",
+          stagedDispatch: true,
         });
 
         const recordsPath = resolve(evidenceDir, `${runTag}.jsonl`);
@@ -367,15 +368,27 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           await import("../../../../tools/system-remediation/ops-capacity/observations.mjs");
         const pollDb = async () => {
           let currentJobIds: string[] = [];
+          const currentOrderIds = [...orderIds];
           try {
             // appendFileSync writes complete records on the same JS thread;
             // parse errors are failures, not a normal partially-written line.
             const content = readFileSync(recordsPath, "utf8");
-            currentJobIds = content
+            const currentRecords = content
               .trim()
               .split("\n")
               .filter(Boolean)
-              .map((line) => JSON.parse(line))
+              .map((line) => JSON.parse(line));
+            currentOrderIds.push(
+              ...currentRecords
+                .filter(
+                  (row) =>
+                    row.kind === "capacity_seed" &&
+                    !row.error &&
+                    row.resourceIds?.orderId,
+                )
+                .map((row) => row.resourceIds.orderId),
+            );
+            currentJobIds = currentRecords
               .filter(
                 (row) =>
                   row.workload === "report" &&
@@ -393,7 +406,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           }
           const observation = await pollCapacityResources(
             pool,
-            orderIds,
+            currentOrderIds,
             currentJobIds,
           );
           peakReport = Math.max(peakReport, observation.report);
@@ -402,7 +415,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
             observation.dispatchable,
           );
         };
-        const summary = await runWithCapacityPolling(
+        const summary = await runWithCapacityPolling<CapacitySummary>(
           () =>
             runPlan(plan, recordsPath, {
               baseSha: process.env.WORKFLOW_SHA ?? "local",
@@ -425,7 +438,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           plan.workloads.report.length,
         );
         expect(plan.workloads.booking).toHaveLength(900);
-        expect(plan.workloads.dispatch).toHaveLength(4500);
+        expect(plan.workloads.dispatch).toHaveLength(dispatchCount);
         expect(plan.workloads.report).toHaveLength(450);
 
         type CapacityRecord = {
@@ -529,7 +542,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           backlog: {
             dispatchable: peakDispatchable,
           },
-          dispatchOrderIds: orderIds,
+          dispatchOrderIds: claimedDispatchOrderIds,
           dispatchEvidence: dispatchReadback,
           degradation: summarizeDispatchEvidence(dispatchReadback).degradation,
           readback: {

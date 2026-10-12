@@ -220,3 +220,29 @@ positive waits up and rechecks its clock after wakeup, replacing a busy loop.
 No product quota or request deadline was changed. An initial unit fixture
 failure was due to accumulated mock call history, then corrected by resetting
 the HTTP boundary between cases; it is not product acceptance evidence.
+
+Checkpoint D (after `5163a40c0`): planner/producer now declare and validate an
+explicit `uniform` / `concurrent` profile and full per-family schedule. The
+concurrent profile launches 50 intake requests together plus the remaining ten
+later in each minute, within the original 60/min rolling budget. Reporting uses
+cohorts of 30 within the original 30/min budget; it does **not** claim those
+cohorts prove a 50 queued/running backlog. The producer enforces actual launch
+budgets and retains all raw errors and original 30s request deadlines. Ordinary
+uniform spacing tests remain intact. `unit-d-plan.log`: 17 tests, exit 0.
+
+The harness now creates an initial backlog of exactly 500 real API orders and
+stages the remaining 4000 through the same canonical `POST /api/orders` fixture
+creation path before each dispatch's due time. `prepareDispatchItem` uses the
+actual measured HTTP response's order ID, records each seed separately, refuses
+failed/missing seeds without retries, and never writes a readiness timestamp.
+The original isolated fixture actor convention is preserved; booking/dispatch/
+report authentication and product quotas are unchanged. All 5850 measured
+requests remain; deferred paths resolve only from real created IDs. Polling
+includes this run's initial and actually created staged IDs. `unit-d-stage.log`:
+19 tests exit 0; these mock only external HTTP and timers and do not establish
+actual migrated-PG readiness or capacity.
+
+The existing workflow's final gate additionally loads exactly one actual
+acceptance JSON and calls the actual exported gate independently of Vitest's
+terminal result. Candidate/workflow provenance must match the run. No new
+workflow or alternative acceptance route was introduced.
