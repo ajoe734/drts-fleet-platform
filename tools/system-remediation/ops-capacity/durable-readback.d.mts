@@ -13,16 +13,14 @@ export type OwnedOrderReadbackRow = {
   orderId: string;
   status: string;
   createdAt: string;
-  updatedAt: string;
-  lagMs: number;
+  lagMs: number | null;
 };
 
 export type ReportJobReadbackRow = {
   jobId: string;
   status: string;
   createdAt: string;
-  updatedAt: string;
-  queueLagMs: number;
+  queueLagMs: number | null;
 };
 
 export type ReadbackSummary = {

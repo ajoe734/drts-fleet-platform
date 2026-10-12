@@ -351,10 +351,36 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         });
 
         const recordsPath = resolve(evidenceDir, `${runTag}.jsonl`);
+        let peakReport = 0;
+        let peakDispatchable = 0;
+        let isLawful = false;
+        let isPolling = true;
+
+        const pollDb = async () => {
+          while (isPolling) {
+            try {
+              const { rows: reportRows } = await pool.query(`SELECT count(*) FROM admin.phase1_report_jobs WHERE status IN ('pending', 'processing', 'queued')`);
+              const currentReport = parseInt(reportRows[0].count, 10);
+              if (currentReport > peakReport) peakReport = currentReport;
+              
+              const { rows: dispatchRows } = await pool.query(`SELECT count(*) FROM ops.phase1_owned_orders WHERE status IN ('ready_for_dispatch', 'delayed_queue', 'no_supply', 'preassigned')`);
+              const currentDispatchable = parseInt(dispatchRows[0].count, 10);
+              if (currentDispatchable > peakDispatchable) peakDispatchable = currentDispatchable;
+
+              const { rows: lawfulRows } = await pool.query(`SELECT 1 FROM ops.phase1_owned_orders WHERE status IN ('delayed_queue', 'no_supply') LIMIT 1`);
+              if (lawfulRows.length > 0) isLawful = true;
+            } catch (e) {}
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
+        };
+
+        const pollPromise = pollDb();
         const summary = await runPlan(plan, recordsPath, {
           baseSha: process.env.WORKFLOW_SHA ?? "local",
           candidateSha: process.env.CANDIDATE_SHA ?? "local",
         });
+        isPolling = false;
+        await pollPromise;
 
         // The run must be the full accepted 15-minute baseline burst, never
         // a short/mock/skipped stand-in.
@@ -414,6 +440,21 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           (row: { jobId: string }) => row.jobId,
         );
 
+        const events: { time: number; delta: number }[] = [];
+        for (const record of records) {
+          if (record.latencyMs !== null) {
+             events.push({ time: record.launchedMs, delta: 1 });
+             events.push({ time: record.launchedMs + record.latencyMs, delta: -1 });
+          }
+        }
+        events.sort((a, b) => a.time - b.time || a.delta - b.delta);
+        let peakIntake = 0;
+        let currentInFlight = 0;
+        for (const ev of events) {
+          currentInFlight += ev.delta;
+          if (currentInFlight > peakIntake) peakIntake = currentInFlight;
+        }
+
         const acceptance = {
           taskId: "SR-OPS-CAPACITY-RUNNER-20260911",
           capability: "C123",
@@ -422,14 +463,14 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           workflowSha: process.env.WORKFLOW_SHA ?? "local",
           summary,
           concurrency: {
-            intake: 50,
-            report: 50,
+            intake: peakIntake,
+            report: peakReport,
           },
           backlog: {
-            dispatchable: 500,
+            dispatchable: peakDispatchable,
           },
           degradation: {
-            isLawful: true,
+            isLawful: isLawful,
           },
           readback: {
             booking: bookingSummary,
