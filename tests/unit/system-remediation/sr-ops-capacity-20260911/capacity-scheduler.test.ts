@@ -129,6 +129,25 @@ afterEach(() => {
 });
 
 describe("actual capacity scheduler boundaries across all families", () => {
+  it("rejects actual arrivals beyond 900s even when all 5850 responses meet their targets", async () => {
+    const output = resolve(directory, "late-baseline-arrivals.jsonl");
+    const run = runPlan(plan(900), output, {}, {
+      initialize: () => new Promise<void>((resolve) => setTimeout(resolve, 1000)),
+    });
+    await vi.advanceTimersByTimeAsync(910000);
+    const summary = await run;
+    const rows = read(output);
+    expect(rows).toHaveLength(5850);
+    expect(rows.every((row) => row.error === null)).toBe(true);
+    expect(Math.max(...rows.map((row) => row.launchedMs))).toBe(900800);
+    for (const family of ["booking", "dispatch", "report"] as const) {
+      expect(summary.workflows[family].errors).toBe(0);
+      expect(summary.workflows[family].latencyTargetsMet).toBe(true);
+    }
+    expect(summary.result).toBe("failed");
+    expect(summary.fullBurstSchedule).toBe(false);
+  });
+
   it("includes actual preparation time in the original window and preserves every measured request", async () => {
     const output = resolve(directory, "baseline-initialize.jsonl");
     const initialize = vi.fn(async ({ startedAt }: { startedAt: string }) => {

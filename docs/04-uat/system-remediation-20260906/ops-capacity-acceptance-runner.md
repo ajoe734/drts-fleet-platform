@@ -589,3 +589,30 @@ source transplant, checker bypass and hosted900s dispatch. No cloud mutation,
 VM product/PG/browser/Compose hosting, candidate CI/merge or acceptance closure
 occurred. The remaining delivery blockers require Supervisor disposition and
 original runtime-owner evidence; this checkpoint is not a candidate handoff.
+
+### Original source continuation after the four-message disposition
+
+The explicit user exception was executed and consumed on 2026-10-12. The
+canonical preservation packet is
+`.local/production-continuation-20261012T2330/`: all29 source trees and non-parent
+headers are identical; exactly four commit messages changed. The original
+remote `266b2d89` became `47fa3c3520f9720a6d7fd981ac03b35deaadc926`, and the
+original local `84a66055` became `4aae55b9399f96829192d476a50410ccc39914c5`.
+Fresh fetch confirms local4aae is20 ordinary descendants of remote47fa with
+no divergence, and PR2575 still points to47fa. The former publication HOLD
+above is superseded solely by this verified disposition. Future commits and
+pushes use ordinary history; no further rewrite exception exists. Historical
+Claude/Claude2/Gemini credits and current Codex2/Codex roles remain intact.
+
+An additional actual-function reproduction at4aae found that `runPlan` marks
+`fullBurstSchedule` true solely from the configured900s duration. One second
+of real preparation advances the last measured launch to900800ms, while all
+5850 responses retain zero errors and valid latency targets; the producer
+still returns `measurements_within_targets`. This fails the original900s
+arrival requirement despite preserving nominal schedule/counts.
+
+| Finding / acceptance | Source and reproduced result | Command / evidence | Remaining |
+| --- | --- | --- | --- |
+| Actual arrivals outside the configured900s window | `ops-proof/capacity.mjs:runPlan`; actual production function, external HTTP/clock boundaries controlled. Expected failed, actual measurements_within_targets at4aae, last launch900800ms, all5850 rows retained. | `pnpm exec vitest run tests/unit/system-remediation/sr-ops-capacity-20260911/capacity-scheduler.test.ts --testNamePattern 'rejects actual arrivals beyond 900s' --maxWorkers=2`, exit1, one actual failing reproduction; twelve unrelated cases skipped by this narrow selector. Canonical `.local/c123-report-worker-20261012/arrival-window-continuation/old-4aae-reproduction.log`. | Compute actual per-family arrival observations and require them in producer/gate; retain ordinary response deadlines and every raw request. |
+| capacity_failed_summary_rejected | Original112HTTP429 payload and its expected rejection remain preserved. | Previous original-artifact checks remain separate. | New exact-candidate independent review/evidence; no acceptance key recorded here. |
+| capacity_same_candidate_full_900s_valid_baseline | OPEN. No new hosted900s result. | NOT RUN on this VM. | Original Supervisor-dispatched immutable workflow, actual HTTP/PG/counts/SLO/security/concurrency/backlog/degradation/readback. Managed CPU/billing/scaling/idle recovery and genuine PG connection-loss/recovery remain unverified and block acceptance/production. |
