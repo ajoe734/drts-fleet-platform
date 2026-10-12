@@ -154,3 +154,33 @@ gaps remain separately recorded; no VM runtime is permitted.
 Repository checks for this document do not require product execution. No
 product tests, servers, browser/PG/Compose infrastructure, deployment or live
 provider acceptance were started by this helper.
+
+### Publication and completed local check receipt
+
+Anchor `52801362c81556e5f99a0316dab2d6b234eb9680` was committed on the
+assigned branch with actual Codex2 / task ID / Codex trailers and ordinary
+`git push -u origin` succeeded. `git ls-remote` confirmed that exact head;
+there was no pre-existing helper candidate. Only the designated report is in
+the committed diff from immutable base `cf58d490`.
+
+The checks below completed at the anchor, with every result read before this
+additive receipt. Node v22.23.2; the active release and probe input slices are
+identified above. Final publication checks, remote head and draft PR identity
+are recorded in the helper's machine next and PR; they do not lock a candidate
+while either operator prerequisite is open.
+
+| Check                                          | Result / command                                                                                                                                                   | Evidence in the helper receipt directory                                                                                                                                                        |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Canonical content/citation consistency         | PASS 0, zero findings; `python3 tools/ci/git/check_canonical_consistency.py --ci --base cf58d49053993c760a7f5491d79465912609c46f --head HEAD`                      | `canonical-consistency.log`                                                                                                                                                                     |
+| Repository classification                      | PASS 0, 6,357 files; `node tools/ci/check-repo-classification.mjs`                                                                                                 | `repo-classification.log`                                                                                                                                                                       |
+| Document formatting                            | PASS 0; `pnpm exec prettier --check` on this report                                                                                                                | `prettier.log`                                                                                                                                                                                  |
+| Recipe / scope content check                   | PASS 0; operator next text exactly equals the probed metadata, `bash -n` passes without executing the recipe, committed path is only this report                   | `check-report.py`, `report-content.log`, `operator-prepared.sh`                                                                                                                                 |
+| Actual-release disposition probe               | PASS 0; missing fields control / explicit blocked preservation, synthetic merge only                                                                               | `disposition-probe.py`, `disposition-probe.log`, `disposition-probe-result.json`                                                                                                                |
+| Commit trailers / whitespace / generated files | PASS 0 on anchor range; shared trailer checker verifies 1 commit, `git diff --check`; generated guard with `--range cf58d49053993c760a7f5491d79465912609c46f HEAD` | Commit output, `generated-range.log`; initial generated-guard invocation used unsupported `--base/--head` and returned argparse error 2, then the documented `--range` command completed 0      |
+| Normal commit hooks                            | PASS 0; generated guard, lint-staged Prettier and commit-message trailer hook                                                                                      | Ignored `.husky/_` shims were absent and copied from the existing canonical checkout before the first commit; no hook bypass/config change. lint-staged's temporary backup was cleaned normally |
+| Hosted checks / review / merge                 | Not yet candidate evidence                                                                                                                                         | Draft PR remains held; neither parent acceptance key is satisfied by these document checks                                                                                                      |
+
+**Remaining helper blocker:** genuine Supervisor metadata-only assignment and
+parent note, followed by fresh slice verification. Until both receipts exist,
+record the helper blocked and preserve its draft publication rather than
+handoff a mergeable candidate that would implicitly resume the parent.
