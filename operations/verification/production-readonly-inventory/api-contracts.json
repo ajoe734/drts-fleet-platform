@@ -11,7 +11,12 @@
       "baseUrl": "https://cloudresourcemanager.googleapis.com/",
       "path": "v3/{+name}",
       "responseSchema": "Project",
-      "verifiedSelector": "name,projectId,state"
+      "verifiedSelector": "name,projectId,state",
+      "partialResponseParameter": {
+        "location": "query",
+        "description": "Selector specifying which fields to include in a partial response.",
+        "type": "string"
+      }
     },
     {
       "kind": "sql",
@@ -22,7 +27,12 @@
       "baseUrl": "https://sqladmin.googleapis.com/",
       "path": "sql/v1beta4/projects/{project}/instances/{instance}",
       "responseSchema": "DatabaseInstance",
-      "verifiedSelector": "name,region,state,settings(backupConfiguration(enabled,pointInTimeRecoveryEnabled,transactionLogRetentionDays,backupRetentionSettings(retainedBackups,retentionUnit)))"
+      "verifiedSelector": "name,region,state,settings(backupConfiguration(enabled,pointInTimeRecoveryEnabled,transactionLogRetentionDays,backupRetentionSettings(retainedBackups,retentionUnit)))",
+      "partialResponseParameter": {
+        "description": "Selector specifying which fields to include in a partial response.",
+        "location": "query",
+        "type": "string"
+      }
     },
     {
       "kind": "service",
@@ -33,7 +43,12 @@
       "baseUrl": "https://run.googleapis.com/",
       "path": "v2/{+name}",
       "responseSchema": "GoogleCloudRunV2Service",
-      "verifiedSelector": "name,ingress,latestReadyRevision,latestCreatedRevision,trafficStatuses(revision,percent),template(containers(image),serviceAccount)"
+      "verifiedSelector": "name,ingress,latestReadyRevision,latestCreatedRevision,trafficStatuses(revision,percent),template(containers(image),serviceAccount)",
+      "partialResponseParameter": {
+        "location": "query",
+        "description": "Selector specifying which fields to include in a partial response.",
+        "type": "string"
+      }
     },
     {
       "kind": "revision",
@@ -44,7 +59,12 @@
       "baseUrl": "https://run.googleapis.com/",
       "path": "v2/{+name}",
       "responseSchema": "GoogleCloudRunV2Revision",
-      "verifiedSelector": "name,containers(image),serviceAccount"
+      "verifiedSelector": "name,containers(image),serviceAccount",
+      "partialResponseParameter": {
+        "location": "query",
+        "description": "Selector specifying which fields to include in a partial response.",
+        "type": "string"
+      }
     },
     {
       "kind": "job",
@@ -55,7 +75,12 @@
       "baseUrl": "https://run.googleapis.com/",
       "path": "v2/{+name}",
       "responseSchema": "GoogleCloudRunV2Job",
-      "verifiedSelector": "name,template(template(containers(image),serviceAccount))"
+      "verifiedSelector": "name,template(template(containers(image),serviceAccount))",
+      "partialResponseParameter": {
+        "location": "query",
+        "description": "Selector specifying which fields to include in a partial response.",
+        "type": "string"
+      }
     },
     {
       "kind": "repository",
@@ -66,7 +91,12 @@
       "baseUrl": "https://artifactregistry.googleapis.com/",
       "path": "v1/{+name}",
       "responseSchema": "Repository",
-      "verifiedSelector": "name,format"
+      "verifiedSelector": "name,format",
+      "partialResponseParameter": {
+        "description": "Selector specifying which fields to include in a partial response.",
+        "type": "string",
+        "location": "query"
+      }
     },
     {
       "kind": "images",
@@ -77,7 +107,12 @@
       "baseUrl": "https://artifactregistry.googleapis.com/",
       "path": "v1/{+parent}/dockerImages",
       "responseSchema": "ListDockerImagesResponse",
-      "verifiedSelector": "dockerImages(uri),nextPageToken"
+      "verifiedSelector": "dockerImages(uri),nextPageToken",
+      "partialResponseParameter": {
+        "description": "Selector specifying which fields to include in a partial response.",
+        "type": "string",
+        "location": "query"
+      }
     },
     {
       "kind": "versions",
@@ -88,7 +123,12 @@
       "baseUrl": "https://secretmanager.googleapis.com/",
       "path": "v1/{+parent}/versions",
       "responseSchema": "ListSecretVersionsResponse",
-      "verifiedSelector": "versions(name,state),nextPageToken"
+      "verifiedSelector": "versions(name,state),nextPageToken",
+      "partialResponseParameter": {
+        "location": "query",
+        "type": "string",
+        "description": "Selector specifying which fields to include in a partial response."
+      }
     },
     {
       "kind": "backends",
@@ -99,7 +139,12 @@
       "baseUrl": "https://compute.googleapis.com/compute/v1/",
       "path": "projects/{project}/global/backendServices",
       "responseSchema": "BackendServiceList",
-      "verifiedSelector": "items(name,iap(enabled,oauth2ClientId),backends(group)),nextPageToken"
+      "verifiedSelector": "items(name,iap(enabled,oauth2ClientId),backends(group)),nextPageToken",
+      "partialResponseParameter": {
+        "location": "query",
+        "type": "string",
+        "description": "Selector specifying which fields to include in a partial response."
+      }
     },
     {
       "kind": "negs",
@@ -110,7 +155,12 @@
       "baseUrl": "https://compute.googleapis.com/compute/v1/",
       "path": "projects/{project}/regions/{region}/networkEndpointGroups",
       "responseSchema": "NetworkEndpointGroupList",
-      "verifiedSelector": "items(name,networkEndpointType,cloudRun(service)),nextPageToken"
+      "verifiedSelector": "items(name,networkEndpointType,cloudRun(service)),nextPageToken",
+      "partialResponseParameter": {
+        "location": "query",
+        "type": "string",
+        "description": "Selector specifying which fields to include in a partial response."
+      }
     },
     {
       "kind": "account",
@@ -121,7 +171,12 @@
       "baseUrl": "https://iam.googleapis.com/",
       "path": "v1/{+name}",
       "responseSchema": "ServiceAccount",
-      "verifiedSelector": "uniqueId,disabled"
+      "verifiedSelector": "uniqueId,disabled",
+      "partialResponseParameter": {
+        "type": "string",
+        "description": "Selector specifying which fields to include in a partial response.",
+        "location": "query"
+      }
     },
     {
       "kind": "policy",
@@ -132,7 +187,12 @@
       "baseUrl": "https://run.googleapis.com/",
       "path": "v2/{+resource}:getIamPolicy",
       "responseSchema": "GoogleIamV1Policy",
-      "verifiedSelector": "bindings(role,members,condition(expression))"
+      "verifiedSelector": "bindings(role,members,condition(expression))",
+      "partialResponseParameter": {
+        "location": "query",
+        "description": "Selector specifying which fields to include in a partial response.",
+        "type": "string"
+      }
     }
   ]
 }

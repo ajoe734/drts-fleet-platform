@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 const require = createRequire(import.meta.url);
@@ -563,5 +564,31 @@ describe("secret version canonical project identity", () => {
         project === "123456789" ? "complete" : "incomplete",
       );
     }
+  });
+});
+
+describe("actual CLI failure logging", () => {
+  it("withholds credentials in guard failure before any hosted authentication", () => {
+    const f = fixture();
+    const result = spawnSync(
+      process.execPath,
+      [
+        "operations/verification/production-readonly-inventory/collector.cjs",
+        "collect",
+      ],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          ...f.env,
+          DEFINITION_SHA: "wrong",
+          PROD_INVENTORY_ACCESS_TOKEN: SENTINEL,
+        },
+        timeout: 5000,
+      },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stdout + result.stderr).not.toContain(SENTINEL);
+    expect(result.stderr).toContain("credential details withheld");
   });
 });
