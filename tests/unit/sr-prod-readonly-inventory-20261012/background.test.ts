@@ -49,8 +49,8 @@ const countPaths = [
   ["service", "template", "scaling", "maxInstanceCount"],
   ["revision", "scaling", "minInstanceCount"],
   ["revision", "scaling", "maxInstanceCount"],
-];
-function setPath(root: any, path: string[], value: any) {
+] as const;
+function setPath(root: any, path: readonly string[], value: any) {
   const parent = path.slice(0, -1).reduce((obj, key) => obj[key], root);
   parent[path.at(-1)!] = value;
 }
@@ -290,22 +290,27 @@ describe("background fields reject malformed and sensitive metadata", () => {
           "0",
           "resources",
           "cpuIdle",
-        ],
+        ] as const,
         value,
       },
-      { path: ["revision", "containers", "0", "resources", "cpuIdle"], value },
+      {
+        path: ["revision", "containers", "0", "resources", "cpuIdle"] as const,
+        value,
+      },
     ]),
     ...[null, 0, "automatic", SENTINEL].map((value) => ({
-      path: ["service", "scaling", "scalingMode"],
+      path: ["service", "scaling", "scalingMode"] as const,
       value,
     })),
-    ...[
+    ...([
       ["service", "scaling"],
       ["service", "template", "scaling"],
       ["service", "template", "containers", "0", "resources"],
       ["revision", "scaling"],
       ["revision", "containers", "0", "resources"],
-    ].flatMap((path) => [null, [], SENTINEL].map((value) => ({ path, value }))),
+    ] as const).flatMap((path) =>
+      [null, [], SENTINEL].map((value) => ({ path, value })),
+    ),
   ];
   it.each(invalidFields)(
     "rejects typed field $path=$value at both boundaries",
