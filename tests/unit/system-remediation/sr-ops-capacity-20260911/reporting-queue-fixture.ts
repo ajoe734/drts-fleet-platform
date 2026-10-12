@@ -128,7 +128,7 @@ export function queueFixture(jobs: StoredReportJobRecord[] = []) {
               sql.includes("record->'multiTaxiTripExport'")
                 ? job.jobType === params[0] &&
                   job.multiTaxiTripExport?.requestedByActorId === params[1] &&
-                  job.multiTaxiTripExport.idempotencyKey === params[2]
+                  job.multiTaxiTripExport?.idempotencyKey === params[2]
                 : !params.length ||
                   ((Array.isArray(params[0])
                     ? params[0].includes(job.jobId)

@@ -35,7 +35,7 @@ const rows: MultiTaxiTripOperationalExportRow[] = [
     payableFareMinor: 35000,
     actualFareMinor: 35000,
     tollMinor: 0,
-    currency: "NTD",
+    currency: "TWD",
     farePolicyVersion: "fare-test",
     chargingMode: "platform_quote",
     generatedAt: "2026-10-12T01:31:00.000Z",
