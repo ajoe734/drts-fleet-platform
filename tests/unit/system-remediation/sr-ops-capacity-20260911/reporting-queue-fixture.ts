@@ -15,7 +15,7 @@ export function queueFixture(jobs: StoredReportJobRecord[] = []) {
   const writes: StoredReportJobRecord[] = [];
   const releases = vi.fn();
   const control: {
-    before?: (sql: string, params: unknown[]) => Promise<void>;
+    before?: ((sql: string, params: unknown[]) => Promise<void>) | undefined;
   } = {};
   const eligible = (job: StoredReportJobRecord) =>
     ["queued", "pending", "running"].includes(job.status);

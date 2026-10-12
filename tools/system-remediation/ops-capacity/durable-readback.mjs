@@ -419,7 +419,7 @@ export async function collectReportCompletions(pool, jobIds) {
       rows.every((row) => row.status === "completed") ||
       rows.some(
         (row) =>
-          ["failed", "cancelled"].includes(row.status) ||
+          ["failed", "expired"].includes(row.status) ||
           !["queued", "running", "completed"].includes(row.status) ||
           !Number.isFinite(new Date(row.createdAt).getTime()) ||
           (!row.startedAt &&

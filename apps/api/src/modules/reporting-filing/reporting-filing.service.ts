@@ -1421,7 +1421,7 @@ export class ReportingFilingService
           this.reportQueue.delete(jobId);
         },
       ).catch(async (error: unknown) => {
-        // A conditional write can lose to a genuine cancellation/terminal
+        // A conditional write can lose to a genuine expiry/terminal
         // transition. Refresh from committed storage, never the failed clone.
         try {
           const committed =

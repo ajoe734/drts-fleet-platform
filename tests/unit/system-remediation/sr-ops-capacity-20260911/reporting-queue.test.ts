@@ -144,7 +144,7 @@ describe("actual bounded durable reporting worker", () => {
     }
   });
 
-  it("does not overwrite an externally cancelled job during a claimed build", async () => {
+  it("does not overwrite a legitimate externally expired job during a claimed build", async () => {
     const f = queueFixture();
     const provider = deferred();
     f.service.registerDailyDispatchRecordProvider(async () => {
@@ -159,14 +159,14 @@ describe("actual bounded durable reporting worker", () => {
     await vi.waitFor(() =>
       expect(f.stored.get(accepted.jobId)?.status).toBe("running"),
     );
-    f.stored.get(accepted.jobId)!.status = "cancelled";
+    f.stored.get(accepted.jobId)!.status = "expired";
     provider.resolve();
     try {
       await vi.waitFor(() =>
         expect(f.repository.reportPersistenceFailure).toHaveBeenCalled(),
       );
-      expect(f.stored.get(accepted.jobId)?.status).toBe("cancelled");
-      expect(f.service.getReportJob(accepted.jobId).status).toBe("cancelled");
+      expect(f.stored.get(accepted.jobId)?.status).toBe("expired");
+      expect(f.service.getReportJob(accepted.jobId).status).toBe("expired");
       expect(f.writes.some((job) => job.status === "completed")).toBe(false);
     } finally {
       await f.service.onModuleDestroy();

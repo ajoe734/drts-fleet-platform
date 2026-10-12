@@ -330,10 +330,10 @@ targets are unchanged. This avoids falsely rejecting a lawful async job that
 starts/completes after arrivals end. The existing workflow's test timeout is
 52min and job timeout65min solely to accommodate setup,900s arrivals and this
 bounded observation drain; no deployment or new runner is introduced.
-Raw failed/cancelled/missing samples remain failing, and SQL errors propagate.
+Raw failed/expired/missing samples remain failing, and SQL errors propagate.
 
 The changed worker reloads committed state after a failed conditional update,
-so a real external cancellation remains cancelled in storage and the local
+so a real external expiry remains expired in storage and the local
 view. Start-write failures leave no invented first-start; terminal-write
 failures retain the last committed running state and first-start for recovery.
 Uncertain SQL sessions are discarded rather than returned to the pool.
@@ -347,3 +347,19 @@ does not claim its acknowledgement is durable. Its exact path/symbol and
 needed allocation were recorded through owner `progress` for Supervisor.
 All generic C123 report jobs and the initial workload use the new awaited
 producer. Publication HOLD and both acceptance keys remain OPEN.
+
+Checks at `f7d877d93`: affected24files/257tests exit0; scoped ESLint exit0;
+unchanged25-case exported-gate replay exit0; original digest-verified failed
+payload produces uncaught `Workload failed: failed`, exit1 (expected negative)
+with24/74/14 errors retained. Root typecheck exit2 also identified NEW fixture
+TS2412 optional-hook assignment and an invalid `cancelled` report status.
+Both were repaired: explicit optional-hook undefined typing and the formal
+`expired` terminal status. The report contract has no cancelled enum; no enum
+or public contract was changed. Final affected/type/lint results after this
+repair are pending and must be read before disposition.
+
+`check_commit_trailers.py --base73ba.. --head HEAD` exit1 remains a full history
+failure, including the four published task ancestors and inherited merged
+history. No range narrowing, checker bypass, rewrite or new publication is
+used to label that result green. `git diff --check73ba..HEAD` exit0 and YAML/
+Node syntax checks exit0 do not satisfy that publication gate.
