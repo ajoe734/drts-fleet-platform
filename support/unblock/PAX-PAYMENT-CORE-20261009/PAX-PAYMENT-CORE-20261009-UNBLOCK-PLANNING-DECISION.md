@@ -187,11 +187,11 @@ candidate `bed2fa8baafefeaa243283a68915eb36374165f7`, generation
 `fc77f579d087c019660128d85c6ec4a8644a989e`. Both original required acceptance keys
 remain unfilled. `resolved_parent_at` is still reserved for actual helper merge.
 
-| Finding / acceptance | Old → current result | Command / evidence | Remaining limit |
-| --- | --- | --- | --- |
-| Parent disposition and concrete next step | Earlier worker writes rejected → genuine Supervisor metadata and parent note persisted; receipt verified | Operator readback above and fresh release `show` snapshots, exit 0, in canonical `.local/pax-payment-planning-decision-20261012/` | Parent remains blocked; no acceptance resume |
-| Missing policy / scope cut / explicit follow-up | Canonical human-required question and existing-task route retained; no scope cut | Read policy/config source; only this packet and Q-PAX-PAYMENT-CORE-20261009 receipt updated | Actual policy/expiry approval and Payment-specific PG/HTTP/device/PSP evidence still missing |
-| Published history and prior checks | Existing local/remote/PR head `eb229938185493d59b549f6b848e8461dbd696d6` matched; ordinary additive receipt follows | `git fetch origin`, `git ls-remote`, `gh pr view 2564`, exits 0; regular CI 38160245900 terminal 13 SUCCESS; draft integration 38160245964 terminal 5 SUCCESS / 12 SKIP, read via `gh run view`, exit 0 | Prior CI belongs to eb229938; final receipt SHA requires fresh review/CI. Draft skips are not runtime acceptance |
+| Finding / acceptance                            | Old → current result                                                                                                | Command / evidence                                                                                                                                                                                      | Remaining limit                                                                                                  |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Parent disposition and concrete next step       | Earlier worker writes rejected → genuine Supervisor metadata and parent note persisted; receipt verified            | Operator readback above and fresh release `show` snapshots, exit 0, in canonical `.local/pax-payment-planning-decision-20261012/`                                                                       | Parent remains blocked; no acceptance resume                                                                     |
+| Missing policy / scope cut / explicit follow-up | Canonical human-required question and existing-task route retained; no scope cut                                    | Read policy/config source; only this packet and Q-PAX-PAYMENT-CORE-20261009 receipt updated                                                                                                             | Actual policy/expiry approval and Payment-specific PG/HTTP/device/PSP evidence still missing                     |
+| Published history and prior checks              | Existing local/remote/PR head `eb229938185493d59b549f6b848e8461dbd696d6` matched; ordinary additive receipt follows | `git fetch origin`, `git ls-remote`, `gh pr view 2564`, exits 0; regular CI 38160245900 terminal 13 SUCCESS; draft integration 38160245964 terminal 5 SUCCESS / 12 SKIP, read via `gh run view`, exit 0 | Prior CI belongs to eb229938; final receipt SHA requires fresh review/CI. Draft skips are not runtime acceptance |
 
 Final document/range/trailer checks, local/remote/PR candidate identity, report
 hash and handoff generation are recorded in release progress and the same
@@ -199,3 +199,14 @@ machine-local evidence directory after the additive commit. Product runtime
 checks are not applicable to this receipt; no tests are added. Supervisor must
 still obtain the real approval and authorized existing-task prerequisite
 sequencing before original parent acceptance can resume.
+
+Continuation tooling: dispatch restored a shared `node_modules` symlink whose
+Prettier package target no longer exists; `pnpm exec prettier --write` exited 1.
+The receipt anchor `9f8651682` committed normally but this worktree lacked the
+ignored `.husky/_` runtime, so hooks did not execute on that anchor. Manual
+committed-range consistency, trailer and whitespace checks passed; direct
+immutable-store Prettier found formatting to correct (exit 1). The final
+formatting commit restores worktree-local ignored tool links and Husky runtime
+from the existing store/canonical runtime, then runs normal hooks and final
+checks. No shared dependencies or tracked tooling are changed, and no hook
+bypass is set. This limitation is not a product test result.
