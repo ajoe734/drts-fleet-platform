@@ -253,6 +253,7 @@ function validateSmokeHeaders(plan, raw) {
       reject(`release-smoke-headers.${s.id}`);
     for (const [key, value] of Object.entries(entry)) {
       if (
+        (s.publicEntry && key.toLowerCase() !== "cookie") ||
         !["cookie", "x-drts-authorization", "x-drts-google-id-token"].includes(
           key.toLowerCase(),
         ) ||
@@ -267,7 +268,10 @@ function validateSmokeHeaders(plan, raw) {
 }
 function preflight(vars, sha, tag, deployer, cloud) {
   const plan = buildPlan(vars, sha, tag, deployer);
-  plan.publicEntryPolicies = checkPublicEntryPolicies(plan, cloud.publicEntryRead);
+  plan.publicEntryPolicies = checkPublicEntryPolicies(
+    plan,
+    cloud.publicEntryRead,
+  );
   cloud.checkActAs(plan.runtime, plan.project);
   const names = [
     ...new Set([
@@ -314,7 +318,10 @@ function gcloud(args, control) {
 }
 const cloud = {
   publicEntryRead(args) {
-    return gcloud(args, "F-PUBLIC-ENTRY external IAM/OAuth policy evidence unavailable");
+    return gcloud(
+      args,
+      "F-PUBLIC-ENTRY external IAM/OAuth policy evidence unavailable",
+    );
   },
   checkMap(plan, values) {
     const api = plan.services[0],

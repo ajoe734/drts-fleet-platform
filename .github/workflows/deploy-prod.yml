@@ -116,7 +116,7 @@ jobs:
           # the plan is emitted. No deploy uses the mutable latest reference.
           secret_args="WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=${workload_google_registry_secret}:latest"
           echo "GOOGLE_REGISTRY_REFERENCE=$secret_args" >> "$GITHUB_ENV"
-      - name: Validate actual strict API startup and freeze secret versions
+      - name: Validate public-entry policies and strict startup; freeze secret versions
         id: plan
         run: node operations/verification/production-release-rail/preflight.cjs
       - uses: actions/upload-artifact@v4
@@ -269,7 +269,7 @@ jobs:
         run: node operations/verification/production-release-rail/run.cjs deploy
 
   health-check:
-    name: Verify all exact revisions and protected smoke contracts
+    name: Verify exact revisions, public customer entry and protected contracts
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production
@@ -305,7 +305,7 @@ jobs:
           service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@v2
         with: { project_id: "${{ env.PROJECT_ID }}" }
-      - name: Verify all exact revisions and protected smoke contracts
+      - name: Verify exact revisions, anonymous entry and authenticated contracts
         run: node operations/verification/production-release-rail/run.cjs verify
       - uses: actions/upload-artifact@v4
         with:

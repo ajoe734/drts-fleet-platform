@@ -32,8 +32,10 @@ The eleventh image is `migrate`, built from `Dockerfile.migrate`; it is a job,
 not another active service.
 
 All services have `internal-and-cloud-load-balancing` ingress and
-`--no-allow-unauthenticated`. Configure authenticated IAP frontends for every
-origin; the rail rejects public exposure flags. API and console/BFF upstreams
+`--no-allow-unauthenticated` on the **backend**. API and the seven consoles use
+authenticated IAP frontends. Referral Embed and Passenger App require explicit,
+approved **public entry through their own LB/IAP policy**, described below;
+they must not require an employee Google account. API and console/BFF upstreams
 use the protected API origin and its IAP OAuth client ID as the workload token
 audience. Passenger App has its own first-party BFF, with no inherited tenant
 identity, console proxy URL, JWT secret or OAuth client secret.
@@ -54,8 +56,9 @@ Required variables:
 - `PROD_CONTROL_PLANE_API_ORIGIN`, `PROD_IAP_CLIENT_ID` (API OAuth transport
   audience), `PROD_IAP_EXPECTED_AUDIENCE` (API IAP assertion **resource** audience).
   The last two are different contracts; do not substitute one for the other.
-- Nine `PROD_<suffix>_ORIGIN` and nine `PROD_<suffix>_IAP_CLIENT_ID` values for
-  the web services. Supply each frontend's actual IAP OAuth transport audience.
+- Nine `PROD_<suffix>_ORIGIN` and seven `PROD_<suffix>_IAP_CLIENT_ID` values for
+  the private console services. Referral Embed and Passenger App need no
+  frontend employee IAP client ID; their BFF still uses the private API audience.
 - `PROD_BANK_IAP_AUDIENCE`, the bank IAP assertion resource audience, distinct
   from `PROD_BANK_CONSOLE_IAP_CLIENT_ID`.
 - `PROD_AUTH_MODE=production`, `PROD_JWT_ISSUER`, `PROD_JWT_AUDIENCE`,
@@ -86,6 +89,7 @@ Required variables:
   live Google map gates run before building any image.
 - `PROD_RELEASE_SMOKE_CONFIG_JSON`: all ten authenticated read probes described
   below. Missing/partial fixtures fail preflight.
+- `PROD_PUBLIC_ENTRY_CONFIG_JSON`: the two public entry policies below.
 
 Repository/environment secrets: `PROD_WIF_PROVIDER`,
 `PROD_WIF_SERVICE_ACCOUNT`. Runtime and deployer identities must differ.
@@ -97,8 +101,75 @@ The derived defaults are the target region/project and repository `drts`.
 defaults do not supply missing identity/provider/product settings.
 
 Exposure flags `PROD_<suffix>_ALLOW_UNAUTHENTICATED` default to `false` and must
-remain exactly `false`; the older umbrella `PROD_PRODUCT_WEB_ALLOW_UNAUTHENTICATED` must also be absent or `false`. Insecure auth, MFA waiver, mock OIDC, CI tenant-actor,
+remain exactly `false` for Cloud Run backends. This does not make customer
+entry staff-only: its separate LB/IAP policy must permit anonymous access.
+The older umbrella `PROD_PRODUCT_WEB_ALLOW_UNAUTHENTICATED` must also be absent
+or `false`. Insecure auth, MFA waiver, mock OIDC, CI tenant-actor,
 Bank demo-login and Referral demo switches are rejected if enabled.
+
+## Public customer entry: F-PUBLIC-ENTRY release gate
+
+The actual application boundaries differ from workforce IAP: Passenger
+`/login` discovers `/api/passenger-app/auth/providers`, then uses OTP or
+Facebook/LINE/Google transactions through its first-party BFF. Its `/me`
+requires a passenger session. Referral `/embed/<entrySlug>` resolves a
+canonical partner entry and offers standalone fallback without a handoff;
+`/api/referral/active` requires an active, signed referral session. Neither
+frontend uses an IAP employee subject as the passenger identity.
+
+The rail provides an explicit `iap-public-entry` adapter for **approved existing**
+global LB policies, one regional serverless NEG and separate backend service per
+public surface. It does not provision or approve a new exposure policy. Supply
+`PROD_PUBLIC_ENTRY_CONFIG_JSON` with exactly `referral-embed-web` and
+`passenger-app-web` keys. Both entries require `mode: "iap-public-entry"`,
+`backendService` (actual global backend service name), and `approvalRef`
+(repository issue/PR URL containing the operator's approved exposure decision
+and IAM/OAuth review evidence). Passenger also requires `expectedProviders`, a
+nonempty array of the approved, enabled `phone`, `email`, `facebook`, `line`,
+`google` methods. Referral requires canonical `entrySlug` and `entryHost`;
+the host must appear in `PROD_REFERRAL_EMBED_ALLOWED_HOSTS`.
+
+The authorization reference is not proof of cloud state. Before image build,
+preflight reads project number, enabled backend IAP, the exact regional NEG
+target, resource-specific IAP policy, Run invoker policy and ingress. It requires
+an unconditional `allUsers` grant of `roles/iap.httpsResourceAccessor` on **each
+public LB backend**, with the IAP service agent allowed to invoke its private
+Run service. Run public IAM members, disabled invoker IAM, tagged/wildcard/wrong
+NEG targets, missing evidence, read denial, and staff-only or
+`allAuthenticatedUsers` grants block deployment. The approved policy must not
+cover API or private consoles; other LB designs require a reviewed adapter.
+Existing public services/LB policies must be provisioned through the operator
+workflow before this gate can succeed for a first rollout.
+
+Google documents that [ingress does not waive IAM](https://cloud.google.com/run/docs/securing/ingress)
+and that [IAP public requests have no subject/email and public grants cannot be conditional](https://cloud.google.com/iap/docs/managing-access).
+Application passenger/referral sessions remain the authority for personal data;
+the public IAP grant is transport access only. No broad API/console opening or
+authentication bypass is performed by this rail.
+
+Expected social providers require their complete, separate passenger credential
+bundles and exact `PROD_OAUTH_REDIRECT_ALLOWLIST` callbacks at
+`<PROD_PASSENGER_APP_ORIGIN>/auth/callback/<provider>` before build. The workforce
+OIDC client is not a substitute. Email OTP requires its managed pepper and SMTP
+configuration. Actual provider availability is checked by anonymous discovery;
+this is not proof of provider login, SMS/email delivery or consent/legal readiness.
+
+Verification re-reads external policies and records their hashes, then makes
+credential-free GETs to the canonical Referral entry, Passenger login and provider
+discovery. It rejects employee login redirects and generic HTML/HTTP success.
+Anonymous and invalid-session `/me` must return the application's 401 passenger
+denial; Referral active-trip must return its 400 missing-session contract. Neither
+may return personal data. Signed customer read fixtures then run separately,
+without employee IAP transport tokens on these two surfaces. Private console/API
+probes retain signed IAP transport. The single source-SHA artifact includes both
+public-entry and protected-contract results without response bodies or tokens.
+
+**Concrete deployment blocker (2026-10-12):** approved production public-entry
+IAM/OAuth evidence and `PROD_PUBLIC_ENTRY_CONFIG_JSON` are not supplied to this
+worker; no actual cloud policy or public customer request has been verified.
+Keep the public product scope and this fail-closed gate. Operator-only success
+cannot clear F-PUBLIC-ENTRY. Required live environment review and all previously
+listed production settings/fixtures remain outstanding.
 
 ## Secret Manager and IAM
 
@@ -179,8 +250,9 @@ entry contains the required existing signed session credential in `cookie`,
 `x-drts-authorization`, or `x-drts-google-id-token`. Secret Manager holds these
 private fixtures; never put their values in repo variables, commits, artifacts
 or logs. No actor, role, tenant, internal-key or spoofed proxy headers are allowed.
-The workflow separately mints a real Google transport token per frontend's
-OAuth audience. Prepare renewable, scoped fixture credentials before approving
+Public entry fixtures must use only the actual customer session `cookie`.
+The workflow separately mints a real Google transport token for each private
+console/API audience. Prepare renewable, scoped fixture credentials before approving
 the release; their validity is proven by the protected smoke, not by merely
 finding a secret name.
 

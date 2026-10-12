@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- executable CommonJS deployment rail */
 const { publicEntryConfig } = require("./public-entry.cjs");
 // This is the configuration/argument builder used by deploy-prod.yml.
 // It performs no cloud calls. Plans contain names and pinned versions, never values.
@@ -288,6 +289,34 @@ function buildPlan(vars, sha, tag, deployer) {
   if (!smoke || typeof smoke !== "object" || Array.isArray(smoke))
     reject("PROD_RELEASE_SMOKE_CONFIG_JSON");
   const publicEntries = publicEntryConfig(vars.PROD_PUBLIC_ENTRY_CONFIG_JSON);
+  for (const provider of publicEntries["passenger-app-web"].expectedProviders) {
+    const fields = {
+      google: ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET_SECRET"],
+      facebook: ["FACEBOOK_APP_ID", "FACEBOOK_APP_SECRET_SECRET"],
+      line: ["LINE_CHANNEL_ID", "LINE_CHANNEL_SECRET_SECRET"],
+      email: [
+        "PASSENGER_OTP_PEPPER_SECRET",
+        "NOTIFICATION_FROM_EMAIL",
+        "REMOTE_SMTP_HOST",
+        "REMOTE_SMTP_USERNAME_SECRET",
+        "REMOTE_SMTP_PASSWORD_SECRET",
+      ],
+      phone: ["PASSENGER_OTP_PEPPER_SECRET"],
+    }[provider];
+    for (const field of fields) need(`PROD_${field}`);
+    if (["google", "facebook", "line"].includes(provider)) {
+      const callback = `${need("PROD_PASSENGER_APP_ORIGIN")}/auth/callback/${provider}`;
+      if (
+        !need("PROD_OAUTH_REDIRECT_ALLOWLIST")
+          .split(",")
+          .map((v) => v.trim())
+          .includes(callback)
+      )
+        reject(
+          `F-PUBLIC-ENTRY deployment blocker: PROD_OAUTH_REDIRECT_ALLOWLIST (${provider} passenger callback)`,
+        );
+    }
+  }
   const services = TOPOLOGY.map(([id, key, port, route]) => {
     const name = need(`PROD_GCP_${key}_SERVICE`);
     if (
@@ -302,12 +331,19 @@ function buildPlan(vars, sha, tag, deployer) {
     const publicEntry = publicEntries[id];
     const transportAudience = publicEntry
       ? null
-      : id === "api" ? audience : need(`PROD_${key}_IAP_CLIENT_ID`);
-    if (!publicEntry && (transportAudience === "*" || /\s/.test(transportAudience)))
+      : id === "api"
+        ? audience
+        : need(`PROD_${key}_IAP_CLIENT_ID`);
+    if (
+      !publicEntry &&
+      (transportAudience === "*" || /\s/.test(transportAudience))
+    )
       reject(`PROD_${key}_IAP_CLIENT_ID`);
     const exposure = vars[`PROD_${key}_ALLOW_UNAUTHENTICATED`] || "false";
     if (exposure !== "false")
-      reject(`PROD_${key}_ALLOW_UNAUTHENTICATED (private backend; public entry requires verified LB policy)`);
+      reject(
+        `PROD_${key}_ALLOW_UNAUTHENTICATED (private backend; public entry requires verified LB policy)`,
+      );
     const probe = smoke[id];
     if (
       !probe ||
@@ -417,8 +453,14 @@ function buildPlan(vars, sha, tag, deployer) {
         )
       )
         reject("PROD_REFERRAL_EMBED_ALLOWED_HOSTS");
-      if (!env.REFERRAL_EMBED_ALLOWED_HOSTS.split(/\s+/).includes(publicEntry.entryHost))
-        reject("PROD_PUBLIC_ENTRY_CONFIG_JSON.referral-embed-web.entryHost allowlist");
+      if (
+        !env.REFERRAL_EMBED_ALLOWED_HOSTS.split(/\s+/).includes(
+          publicEntry.entryHost,
+        )
+      )
+        reject(
+          "PROD_PUBLIC_ENTRY_CONFIG_JSON.referral-embed-web.entryHost allowlist",
+        );
       env.REFERRAL_EMBED_DEMO = "false";
     }
     if (id === "ops-console-web") {

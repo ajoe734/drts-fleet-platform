@@ -3,7 +3,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { deployArgs, reject } = require("./rail.cjs");
-const { checkPublicEntryPolicies, verifyPublicEntry } = require("./public-entry.cjs");
+const {
+  checkPublicEntryPolicies,
+  verifyPublicEntry,
+} = require("./public-entry.cjs");
 
 function sdk(args) {
   try {
@@ -296,17 +299,23 @@ async function verify(
     const publicEntry = service.publicEntry
       ? await verifyPublicEntry(service, request)
       : undefined;
-    const token = service.publicEntry ? null : cloud([
-      "auth",
-      "print-identity-token",
-      `--impersonate-service-account=${process.env.DEPLOYER_SERVICE_ACCOUNT}`,
-      `--audiences=${service.transportAudience}`,
-      "--include-email",
-    ]);
-    if (!service.publicEntry && !token) reject(`${service.id} signed IAP transport token`);
+    const token = service.publicEntry
+      ? null
+      : cloud([
+          "auth",
+          "print-identity-token",
+          `--impersonate-service-account=${process.env.DEPLOYER_SERVICE_ACCOUNT}`,
+          `--audiences=${service.transportAudience}`,
+          "--include-email",
+        ]);
+    if (!service.publicEntry && !token)
+      reject(`${service.id} signed IAP transport token`);
     const response = await request(`${service.origin}${service.probe.path}`, {
       method: "GET",
-      headers: { ...headers[service.id], ...(token ? {Authorization: `Bearer ${token}`} : {}) },
+      headers: {
+        ...headers[service.id],
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       redirect: "manual",
       signal: AbortSignal.timeout(30000),
     });

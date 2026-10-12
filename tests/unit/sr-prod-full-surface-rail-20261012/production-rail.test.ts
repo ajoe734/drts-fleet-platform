@@ -9,7 +9,11 @@ const require = createRequire(import.meta.url);
 const {
   deployArgs,
   AUTH_FIELDS,
+  buildPlan,
 } = require("../../../operations/verification/production-release-rail/rail.cjs");
+const {
+  verifyPublicEntry,
+} = require("../../../operations/verification/production-release-rail/public-entry.cjs");
 const {
   preflight,
   validators,
@@ -47,6 +51,244 @@ function candidate() {
   const f = fixture();
   return { ...f, plan: preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud) };
 }
+function publicResponse(service: any, pathname: string) {
+  if (pathname === "/login")
+    return { status: 200, body: "<html>登入智行叫車</html>" };
+  if (pathname.endsWith("auth/providers"))
+    return {
+      status: 200,
+      body: JSON.stringify({ data: { providers: ["google"] } }),
+    };
+  if (pathname.startsWith("/embed/"))
+    return {
+      status: 200,
+      body: `<html>/embed/${service.publicEntry.entrySlug} fallback_to_web</html>`,
+    };
+  return service.id === "referral-embed-web"
+    ? {
+        status: 400,
+        body: JSON.stringify({
+          ok: false,
+          error: { message: "UNAUTHORIZED: Active referral session required" },
+        }),
+      }
+    : {
+        status: 401,
+        body: JSON.stringify({
+          error: {
+            code: "unauthorized",
+            message: "An active passenger session is required.",
+          },
+        }),
+      };
+}
+describe("F-PUBLIC-ENTRY public customer boundary", () => {
+  it("reproduces the rejected candidate's staff-only requirement using its actual builder", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "old-public-entry-"));
+    try {
+      const file = path.join(dir, "rail.cjs");
+      writeFileSync(
+        file,
+        execFileSync("git", [
+          "show",
+          "d4dcd9d4acadf6dc8bb5fdda9a36c354047596da:operations/verification/production-release-rail/rail.cjs",
+        ]),
+      );
+      const old = require(file),
+        f = fixture();
+      expect(() => old.buildPlan(f.vars, SHA, TAG, DEPLOYER)).toThrow(
+        "PROD_REFERRAL_EMBED_IAP_CLIENT_ID",
+      );
+      expect(() => buildPlan(f.vars, SHA, TAG, DEPLOYER)).not.toThrow();
+      const plan = preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud);
+      expect(plan.publicEntryPolicies).toHaveLength(2);
+      expect(
+        plan.services
+          .filter((s: any) => s.publicEntry)
+          .every((s: any) => s.transportAudience === null),
+      ).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it.each([undefined, "{}", "[]", "null", "invalid"])(
+    "blocks missing/partial public policy evidence %s before cloud reads",
+    (raw) => {
+      const f = fixture();
+      f.vars.PROD_PUBLIC_ENTRY_CONFIG_JSON = raw;
+      expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
+        "F-PUBLIC-ENTRY deployment blocker",
+      );
+      expect(f.calls).toEqual([]);
+    },
+  );
+  it.each([
+    ["mode", "staff-only"],
+    ["mode", "public-run"],
+    ["approvalRef", ""],
+    ["backendService", ""],
+    ["expectedProviders", []],
+    ["expectedProviders", ["fake"]],
+  ])("rejects unsafe customer entry setting %s", (key, value) => {
+    const f = fixture(),
+      config = JSON.parse(f.vars.PROD_PUBLIC_ENTRY_CONFIG_JSON);
+    config["passenger-app-web"][key] = value;
+    f.vars.PROD_PUBLIC_ENTRY_CONFIG_JSON = JSON.stringify(config);
+    expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
+      "F-PUBLIC-ENTRY",
+    );
+    expect(f.calls).toEqual([]);
+  });
+  it.each([
+    "PROD_GOOGLE_OAUTH_CLIENT_ID",
+    "PROD_GOOGLE_OAUTH_CLIENT_SECRET_SECRET",
+    "PROD_OAUTH_REDIRECT_ALLOWLIST",
+  ])("requires actual login wiring %s before builds", (key) => {
+    const f = fixture();
+    delete f.vars[key];
+    expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(key);
+    expect(f.calls).toEqual([]);
+  });
+  it("rejects public policy applied to a console and public Run IAM shortcut", () => {
+    const f = fixture(),
+      entries = JSON.parse(f.vars.PROD_PUBLIC_ENTRY_CONFIG_JSON);
+    entries["ops-console-web"] = entries["passenger-app-web"];
+    f.vars.PROD_PUBLIC_ENTRY_CONFIG_JSON = JSON.stringify(entries);
+    expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
+      "only referral and passenger",
+    );
+    const other = fixture();
+    other.vars.PROD_PASSENGER_APP_ALLOW_UNAUTHENTICATED = "true";
+    expect(() =>
+      preflight(other.vars, SHA, TAG, DEPLOYER, other.cloud),
+    ).toThrow("private backend");
+    expect(other.calls).toEqual([]);
+  });
+  it.each([
+    "unavailable",
+    "staff-only",
+    "google-users-only",
+    "conditional",
+    "iap-off",
+    "wrong-backend",
+    "tagged-backend",
+    "public-run",
+    "wrong-agent",
+    "ingress-all",
+    "iam-disabled",
+  ])(
+    "blocks external policy %s before secrets/build/migration/deploy",
+    (fault) => {
+      const f = fixture();
+      f.cloud.publicEntryRead = (args: string[]) => {
+        if (fault === "unavailable") throw Error("external read denied");
+        const value = JSON.parse(f.policyRead(args));
+        if (args[0] === "iap") {
+          if (fault === "staff-only")
+            value.bindings[0].members = ["group:staff@drts.invalid"];
+          if (fault === "google-users-only")
+            value.bindings[0].members = ["allAuthenticatedUsers"];
+          if (fault === "conditional")
+            value.bindings[0].condition = { expression: "true" };
+        }
+        if (fault === "iap-off" && value.iap) value.iap.enabled = false;
+        if (fault === "wrong-backend" && value.cloudRun)
+          value.cloudRun.service = "drts-prod-ops-console-web";
+        if (fault === "tagged-backend" && value.cloudRun)
+          value.cloudRun.tag = "old-release";
+        if (args[0] === "run" && args[2] === "get-iam-policy") {
+          if (fault === "public-run")
+            value.bindings[0].members.push("allUsers");
+          if (fault === "wrong-agent")
+            value.bindings[0].members = ["serviceAccount:wrong@drts.invalid"];
+        }
+        if (value.metadata) {
+          if (fault === "ingress-all")
+            value.metadata.annotations["run.googleapis.com/ingress"] = "all";
+          if (fault === "iam-disabled")
+            value.metadata.annotations[
+              "run.googleapis.com/invoker-iam-disabled"
+            ] = "true";
+        }
+        return JSON.stringify(value);
+      };
+      expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
+        "F-PUBLIC-ENTRY deployment blocker",
+      );
+      expect(f.calls).toEqual([]);
+    },
+  );
+  it.each(["passenger-app-web", "referral-embed-web"])(
+    "probes anonymous entry and data denial for %s without employee tokens",
+    async (id) => {
+      const { plan } = candidate(),
+        service = plan.services.find((s: any) => s.id === id),
+        calls: any[] = [];
+      const evidence = await verifyPublicEntry(
+        service,
+        async (url: string, options: any) => {
+          calls.push(options);
+          const value = publicResponse(service, new URL(url).pathname);
+          return { status: value.status, text: async () => value.body };
+        },
+      );
+      expect(evidence.map((r: any) => r.kind)).toContain(
+        "anonymous-data-denied",
+      );
+      expect(evidence.map((r: any) => r.kind)).toContain(
+        "invalid-session-denied",
+      );
+      expect(
+        calls.slice(0, -1).every((o) => Object.keys(o.headers).length === 0),
+      ).toBe(true);
+      expect(calls.at(-1).headers.Cookie).toContain("pax_session=invalid");
+      expect(
+        calls.every(
+          (o) =>
+            o.redirect === "manual" &&
+            !o.headers.Authorization &&
+            !o.headers["x-drts-google-id-token"],
+        ),
+      ).toBe(true);
+    },
+  );
+  it.each([
+    "staff-login",
+    "wrong-providers",
+    "empty-providers",
+    "personal-data",
+    "edge-denial",
+  ])("rejects false public-entry success %s", async (fault) => {
+    const { plan } = candidate(),
+      service = plan.services.find((s: any) => s.id === "passenger-app-web");
+    await expect(
+      verifyPublicEntry(service, async (url: string) => {
+        const pathname = new URL(url).pathname,
+          value = publicResponse(service, pathname);
+        if (fault === "staff-login" && pathname === "/login")
+          value.status = 302;
+        if (
+          ["wrong-providers", "empty-providers"].includes(fault) &&
+          pathname.endsWith("providers")
+        )
+          value.body = JSON.stringify({
+            data: {
+              providers: fault === "empty-providers" ? [] : ["facebook"],
+            },
+          });
+        if (fault === "personal-data" && pathname.endsWith("/me")) {
+          value.status = 200;
+          value.body = JSON.stringify({ data: { passengerId: "leaked" } });
+        }
+        if (fault === "edge-denial" && pathname.endsWith("/me")) {
+          value.status = 403;
+          value.body = "IAP forbidden";
+        }
+        return { status: value.status, text: async () => value.body };
+      }),
+    ).rejects.toThrow("F-PUBLIC-ENTRY");
+  });
+});
 describe("production complete topology and strict startup rail", () => {
   it("executes the old deployment arguments and reproduces the three-service defect and strict startup failure", () => {
     const source = execFileSync(
@@ -345,7 +587,9 @@ describe("production complete topology and strict startup rail", () => {
     expect(() => preflight(f.vars, SHA, TAG, DEPLOYER, f.cloud)).toThrow(
       "actAs denied",
     );
-    expect(f.calls).toEqual([]);
+    expect(f.calls.every((call: any) => call[0] === "public-policy")).toBe(
+      true,
+    );
     const c = candidate();
     expect(() =>
       deployArgs(c.plan, c.plan.services[0], `${c.plan.registry}/api:${SHA}`),
@@ -496,33 +740,49 @@ describe("exact release evidence and protected smoke", () => {
     );
   });
   it("executes every service verification and produces one complete SHA artifact without tokens or response data", async () => {
-    const { plan, headers } = candidate(),
+    const { plan, headers, policyRead } = candidate(),
       images = imagesFor(plan);
     const reads: any[] = [],
       probes: any[] = [];
+    let currentService = plan.services[0];
     const cloud = (args: string[]) => {
       reads.push(args);
+      if (
+        ["projects", "compute", "iap"].includes(args[0]!) ||
+        args[2] === "get-iam-policy"
+      )
+        return policyRead(args);
       if (args[0] === "secrets") return JSON.stringify(headers);
       if (args[0] === "auth") return "opaque-transport-token";
       const service =
         plan.services.find((s: any) => s.name === args[3]) || plan.services[0];
+      if (args[1] === "services") currentService = service;
       const m = metadata(plan, service, images[service.id]);
       return JSON.stringify(
         args[1] === "services"
-          ? m.description
-          : metadata(
-              plan,
-              probes.length < ids.length
-                ? plan.services[probes.length]
-                : service,
-              images[ids[probes.length]!],
-            ).revision,
+          ? {
+              ...m.description,
+              metadata: {
+                annotations: {
+                  "run.googleapis.com/ingress":
+                    "internal-and-cloud-load-balancing",
+                },
+              },
+            }
+          : metadata(plan, currentService, images[currentService.id]).revision,
       );
     };
     const request = async (url: string, options: any) => {
       const service = plan.services.find(
-        (s: any) => url === `${s.origin}${s.probe.path}`,
+        (s: any) => new URL(url).origin === s.origin,
       );
+      if (
+        service.publicEntry &&
+        options.headers.cookie !== headers[service.id].cookie
+      ) {
+        const value = publicResponse(service, new URL(url).pathname);
+        return { status: value.status, text: async () => value.body };
+      }
       probes.push({ id: service.id, options });
       return {
         status: 200,
@@ -551,10 +811,19 @@ describe("exact release evidence and protected smoke", () => {
       probes.every(
         (p) =>
           p.options.redirect === "manual" &&
-          p.options.headers.Authorization === "Bearer opaque-transport-token",
+          (plan.services.find((s: any) => s.id === p.id).publicEntry
+            ? !p.options.headers.Authorization
+            : p.options.headers.Authorization ===
+              "Bearer opaque-transport-token"),
       ),
     ).toBe(true);
-    expect(reads.filter((r) => r[0] === "auth")).toHaveLength(10);
+    expect(reads.filter((r) => r[0] === "auth")).toHaveLength(8);
+    expect(evidence.publicEntryPolicies).toHaveLength(2);
+    expect(
+      evidence.services
+        .filter((s: any) => s.publicEntry)
+        .map((s: any) => s.service),
+    ).toEqual(["referral-embed-web", "passenger-app-web"]);
     expect(JSON.stringify(evidence)).not.toContain("opaque-transport-token");
     expect(JSON.stringify(evidence)).not.toContain("fixture-signed-session");
     expect(evidence.sourceSha).toBe(SHA);

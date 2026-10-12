@@ -89,7 +89,7 @@ function fixture() {
       mode: "iap-public-entry",
       backendService: "passenger-public-lb",
       approvalRef: "https://github.com/ajoe734/drts-fleet-platform/issues/1",
-      expectedProviders: ["email", "google"],
+      expectedProviders: ["google"],
     },
     "referral-embed-web": {
       mode: "iap-public-entry",
@@ -101,6 +101,10 @@ function fixture() {
   });
   delete vars.PROD_PASSENGER_APP_IAP_CLIENT_ID;
   delete vars.PROD_REFERRAL_EMBED_IAP_CLIENT_ID;
+  vars.PROD_GOOGLE_OAUTH_CLIENT_ID = "passenger-google-client";
+  vars.PROD_GOOGLE_OAUTH_CLIENT_SECRET_SECRET =
+    "drts-prod-passenger-google-secret";
+  vars.PROD_OAUTH_REDIRECT_ALLOWLIST = `${vars.PROD_PASSENGER_APP_ORIGIN}/auth/callback/google`;
   const values = {
     "drts-prod-bank-iap-jwt-public-key": ec.publicKey,
     "drts-prod-bank-artifact-signing-private-key": rsa.privateKey,
@@ -129,14 +133,58 @@ function fixture() {
   const calls = [];
   const policyRead = (args) => {
     const publicConfig = JSON.parse(vars.PROD_PUBLIC_ENTRY_CONFIG_JSON);
-    const entry = Object.entries(publicConfig).find(([, e]) => args.some((a) => a.includes(e.backendService)));
-    const serviceId = entry?.[0] || args.find((a) => a === "drts-prod-passenger-app-web" || a === "drts-prod-referral-embed-web")?.replace("drts-prod-", "");
-    if (args[0] === "projects") return JSON.stringify({projectNumber: "123"});
-    if (args[1] === "backend-services") return JSON.stringify({name: entry[1].backendService, iap: {enabled: true}, backends: [{group: `https://www.googleapis.com/compute/v1/projects/drts-prod-fixture/regions/us-central1/networkEndpointGroups/${entry[1].backendService}-neg`}]});
-    if (args[1] === "network-endpoint-groups") return JSON.stringify({networkEndpointType: "SERVERLESS", cloudRun: {service: `drts-prod-${serviceId}`}});
-    if (args[0] === "iap") return JSON.stringify({bindings: [{role: "roles/iap.httpsResourceAccessor", members: ["allUsers"]}]});
-    if (args[2] === "get-iam-policy") return JSON.stringify({bindings: [{role: "roles/run.invoker", members: ["serviceAccount:service-123@gcp-sa-iap.iam.gserviceaccount.com"]}]});
-    return JSON.stringify({metadata: {annotations: {"run.googleapis.com/ingress": "internal-and-cloud-load-balancing"}}});
+    const entry = Object.entries(publicConfig).find(([, e]) =>
+      args.some((a) => a.includes(e.backendService)),
+    );
+    const serviceId =
+      entry?.[0] ||
+      args
+        .find(
+          (a) =>
+            a === "drts-prod-passenger-app-web" ||
+            a === "drts-prod-referral-embed-web",
+        )
+        ?.replace("drts-prod-", "");
+    if (args[0] === "projects") return JSON.stringify({ projectNumber: "123" });
+    if (args[1] === "backend-services")
+      return JSON.stringify({
+        name: entry[1].backendService,
+        iap: { enabled: true },
+        backends: [
+          {
+            group: `https://www.googleapis.com/compute/v1/projects/drts-prod-fixture/regions/us-central1/networkEndpointGroups/${entry[1].backendService}-neg`,
+          },
+        ],
+      });
+    if (args[1] === "network-endpoint-groups")
+      return JSON.stringify({
+        networkEndpointType: "SERVERLESS",
+        cloudRun: { service: `drts-prod-${serviceId}` },
+      });
+    if (args[0] === "iap")
+      return JSON.stringify({
+        bindings: [
+          { role: "roles/iap.httpsResourceAccessor", members: ["allUsers"] },
+        ],
+      });
+    if (args[2] === "get-iam-policy")
+      return JSON.stringify({
+        bindings: [
+          {
+            role: "roles/run.invoker",
+            members: [
+              "serviceAccount:service-123@gcp-sa-iap.iam.gserviceaccount.com",
+            ],
+          },
+        ],
+      });
+    return JSON.stringify({
+      metadata: {
+        annotations: {
+          "run.googleapis.com/ingress": "internal-and-cloud-load-balancing",
+        },
+      },
+    });
   };
   const cloud = {
     publicEntryRead(args) {
