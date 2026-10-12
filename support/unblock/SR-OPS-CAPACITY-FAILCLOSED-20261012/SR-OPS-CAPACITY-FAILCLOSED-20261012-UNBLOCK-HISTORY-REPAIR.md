@@ -181,6 +181,41 @@ The two local ancestor-check logs are byte-identical, SHA-256
 `1c1fe0f2edaf51cde247cc31f4f64ce2092eb1055656b3371ed211f29dcc0a50`.
 The downloaded hosted log SHA-256 is
 `7c426750615a4ed795aa33b6e06326190477db1e179ab8779f628649e218fdb1`.
-Local report checks and immutable publication receipt will be appended before
-closeout. Review, CI/merge, canonical routing receipts and parent product
-acceptance remain separate gates.
+Review, CI/merge, canonical routing receipts and parent product acceptance
+remain separate gates.
+
+## Publication and routing-prerequisite receipt
+
+The report-only anchor `4e57e1fc22ae1c256f1b73c35a7e1d56372cc49f` was
+committed on the assigned helper branch with the literal helper task ID and
+`LLM-Agent: codex2`, `Reviewer: Codex`. Its ordinary non-force push completed
+with exit 0. [Draft PR #2579](https://github.com/ajoe734/drts-fleet-platform/pull/2579)
+was created against `dev`; it changes only this helper artifact. The PR body
+explicitly holds handoff/merge pending the canonical routing receipt.
+
+Checks at that exact anchor all completed and were read: full helper-range
+Commit trailers (one commit), Prettier, `git diff --check origin/dev..HEAD`,
+canonical consistency (zero findings), repository classification (6,356
+files), staged generated-file guard and range generated-file guard, all
+**exit 0**. No product test is represented by these document checks. The final
+additive receipt commit is checked again, and its full local/remote/PR head
+and report hash are recorded in `publication-final.json` and the helper's
+release-CLI progress note. No pushed commit is amended or rebased.
+
+`python3 /home/lupin/workspace/drts-fleet-platform/.local/c123-history-repair-20261012/blocked-floor-probe.py`
+completed with **exit 0**. It imports the actual release `transition_after_merge`,
+uses independent copies of the saved initial task slices, and mocks only the
+durable audit sink. With absent helper metadata, the real function changes the
+simulated blocked parent to `todo`; with the proposed floor, it retains
+`blocked` / `Claude` and the concrete next step. Both cases retain original
+roles and acceptance keys. The probe never invokes the mutation executor,
+save/sync or a real merge. Its simulated completion timestamp is not canonical
+evidence. Result: `blocked-floor-probe-result.json`; release module SHA-256
+`c92d25106b6be2394fc2aef870bc3f6bbdb91d5ff8d80bc5837f7a3c90c2b88b`.
+
+The supported release `blocker` command completed with exit 0 and records this
+helper **blocked, waiting for Claude**, including the exact Supervisor actions
+required. Parent update and helper floor registration remain pending because
+the dispatched-worker guard rejected those operations. The draft publication
+and successful local checks do not authorize candidate handoff, merge, parent
+resumption, report-worker implementation or either capacity acceptance key.
