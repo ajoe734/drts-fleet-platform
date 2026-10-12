@@ -100,6 +100,61 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("private ops map browser transport", () => {
+  it("does not classify successful allowed continuations as failures", async () => {
+    const mock = transport();
+    mock.request.get.mockImplementation(async () => {
+      await mock.pause(
+        "https://ops.example.test/dispatch",
+        {},
+        "ops",
+        "Document",
+      );
+      await mock.pause(
+        "https://maps.gstatic.com/asset.png",
+        { Authorization: token },
+        "image",
+        "Image",
+      );
+      return { ok: () => false, status: () => 403 };
+    });
+    await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+    expect(save.mock.calls[0]?.[1].transport_failures).toEqual([]);
+    expect(
+      mock.cdp.send.mock.calls.filter(
+        ([method]) => method === "Fetch.continueRequest",
+      ),
+    ).toHaveLength(2);
+  });
+
+  it.each(["session", "enable", "websocket", "detach"])(
+    "sanitizes %s lifecycle failure and keeps the final gate failed",
+    async (operation) => {
+      const mock = transport();
+      const error = new Error(`CDP lifecycle secret=${token}`);
+      if (operation === "session")
+        mock.context.newCDPSession.mockRejectedValue(error);
+      if (operation === "enable") mock.cdp.send.mockRejectedValue(error);
+      if (operation === "websocket")
+        mock.context.routeWebSocket.mockRejectedValue(error);
+      if (operation === "detach") mock.cdp.detach.mockRejectedValue(error);
+      await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+      expect(save.mock.calls[0]?.[1]).toMatchObject({
+        status: "failed",
+        transport_failures: [
+          {
+            category:
+              operation === "detach"
+                ? "interception-cleanup-failed"
+                : "interception-setup-failed",
+            resource_type: "Unknown",
+            block_result: "not-attempted",
+          },
+        ],
+      });
+      expect(JSON.stringify(save.mock.calls)).not.toContain(token);
+    },
+  );
+
   it("settles outstanding interception recovery before writing final evidence", async () => {
     const mock = transport();
     let rejectContinue: ((reason: Error) => void) | undefined;
@@ -121,13 +176,18 @@ describe("private ops map browser transport", () => {
       paused = mock.pause("https://ops.example.test/dispatch");
       return { ok: () => false, status: () => 403 };
     });
-    const run = expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+    const run = expect(mock.run()).rejects.toThrow(
+      "Hosted map rendering failed",
+    );
     try {
       await vi.waitFor(() => expect(mock.cdp.detach).toHaveBeenCalledOnce());
       expect(save).not.toHaveBeenCalled();
       rejectContinue!(new Error(`late protocol failure ${token}`));
       await vi.waitFor(() =>
-        expect(mock.cdp.send).toHaveBeenCalledWith("Fetch.failRequest", expect.anything()),
+        expect(mock.cdp.send).toHaveBeenCalledWith(
+          "Fetch.failRequest",
+          expect.anything(),
+        ),
       );
       expect(save).not.toHaveBeenCalled();
     } finally {
@@ -137,7 +197,11 @@ describe("private ops map browser transport", () => {
       await paused;
     }
     expect(save.mock.calls[0]?.[1].transport_failures).toEqual([
-      { category: "continue-request-failed", resource_type: "Document", block_result: "blocked" },
+      {
+        category: "continue-request-failed",
+        resource_type: "Document",
+        block_result: "blocked",
+      },
     ]);
     expect(JSON.stringify(save.mock.calls)).not.toContain(token);
   });
@@ -377,6 +441,15 @@ describe("private ops map browser transport", () => {
     "https://user:password@ops.example.test/",
     "http://ops.example.test/",
     `data:text/plain,${token}`,
+    `data:image/png;base64,${token}`,
+    `blob:https://ops.example.test/${token}`,
+    `javascript:${token}`,
+    `file:///${token}`,
+    "about:blank",
+    "not a URL",
+    "https://maps.googleapis.com.evil.test/",
+    "https://maps.googleapis.com:444/",
+    "https://user:password@maps.gstatic.com/",
     `https://unapproved.example.test/?secret=${token}`,
   ])(
     "blocks a disallowed target without emitting credentials: %s",

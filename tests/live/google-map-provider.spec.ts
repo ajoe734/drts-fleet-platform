@@ -111,6 +111,12 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
     transport_failures: [] as TransportFailure[],
   };
   let cdp: CDPSession | undefined;
+  const pendingInterceptions = new Set<Promise<void>>();
+  const settleInterceptions = async () => {
+    while (pendingInterceptions.size > 0) {
+      await Promise.all([...pendingInterceptions]);
+    }
+  };
   try {
     const authentication = createOpsConsoleAuthentication(process.env);
     evidence.stage = "network-interception";
@@ -123,44 +129,50 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
     });
     interception.on(
       "Fetch.requestPaused",
-      async ({ requestId, request: intercepted, resourceType }) => {
-        let category: TransportFailure["category"] = "target-policy-rejected";
-        try {
-          const headers = authentication.headersFor(
-            intercepted.url,
-            intercepted.headers,
-          );
-          category = "continue-request-failed";
-          await interception.send("Fetch.continueRequest", {
-            requestId,
-            headers: Object.entries(headers).map(([name, value]) => ({
-              name,
-              value,
-            })),
-          });
-        } catch {
-          // Classify by the operation that failed, never by parsing an exception.
-          // A continue failure does not prove cancellation or a harmless request.
-          failures.push("Browser request blocked or interception failed");
-          const failure: TransportFailure = {
-            category,
-            resource_type:
-              RESOURCE_TYPES.find((value) => value === resourceType) ?? "Unknown",
-            block_result: "not-attempted",
-          };
-          // One entry per failed request, including duplicates; recovery status
-          // is separate so a failed failRequest cannot disappear or double count.
-          evidence.transport_failures.push(failure);
+      ({ requestId, request: intercepted, resourceType }) => {
+        const pending = (async () => {
+          let category: TransportFailure["category"] = "target-policy-rejected";
           try {
-            await interception.send("Fetch.failRequest", {
+            const headers = authentication.headersFor(
+              intercepted.url,
+              intercepted.headers,
+            );
+            category = "continue-request-failed";
+            await interception.send("Fetch.continueRequest", {
               requestId,
-              errorReason: "BlockedByClient",
+              headers: Object.entries(headers).map(([name, value]) => ({
+                name,
+                value,
+              })),
             });
-            failure.block_result = "blocked";
           } catch {
-            failure.block_result = "block-failed";
+            // Classify by the operation that failed, never by parsing an exception.
+            // A continue failure does not prove cancellation or a harmless request.
+            failures.push("Browser request blocked or interception failed");
+            const failure: TransportFailure = {
+              category,
+              resource_type:
+                RESOURCE_TYPES.find((value) => value === resourceType) ??
+                "Unknown",
+              block_result: "not-attempted",
+            };
+            // One entry per failed request, including duplicates; recovery status
+            // is separate so a failed failRequest cannot disappear or double count.
+            evidence.transport_failures.push(failure);
+            try {
+              await interception.send("Fetch.failRequest", {
+                requestId,
+                errorReason: "BlockedByClient",
+              });
+              failure.block_result = "blocked";
+            } catch {
+              failure.block_result = "block-failed";
+            }
           }
-        }
+        })();
+        pendingInterceptions.add(pending);
+        void pending.finally(() => pendingInterceptions.delete(pending));
+        return pending;
       },
     );
     await context.routeWebSocket("**/*", (socket) => {
@@ -230,6 +242,7 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
         imagery_decoded: true,
         screenshot,
       });
+      await settleInterceptions();
       expect(failures).toEqual([]);
     }
     evidence.stage = "complete";
@@ -245,7 +258,6 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
     failures.push(
       `Map rendering failed at ${evidence.stage}; only sanitized evidence is retained`,
     );
-    throw new Error("Hosted map rendering failed; see evidence-browser.json");
   } finally {
     await cdp?.detach().catch(() => {
       failures.push("Browser interception cleanup failed");
@@ -256,9 +268,16 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
       });
       evidence.status = "failed";
     });
+    // Detach ends new interception events; settle the callbacks already started
+    // before taking the durable snapshot, including their failRequest results.
+    await settleInterceptions();
+    if (failures.length > 0) evidence.status = "failed";
     writeEvidence(
       ".artifacts/live-map-acceptance/evidence-browser.json",
       evidence,
     );
+  }
+  if (evidence.status !== "passed") {
+    throw new Error("Hosted map rendering failed; see evidence-browser.json");
   }
 });
