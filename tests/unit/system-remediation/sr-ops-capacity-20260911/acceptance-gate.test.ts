@@ -76,7 +76,10 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
   });
 
   const validAcceptance = {
+    runTag: "synthetic-valid-capacity",
     summary: {
+      startedAt: "2026-10-12T00:00:00.000Z",
+      endedAt: "2026-10-12T00:14:59.800Z",
       result: "measurements_within_targets",
       durationSeconds: 900,
       fullBurstSchedule: true,
@@ -119,7 +122,13 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
       unsafeOrderIds: [],
     },
     queueLag: {
-      report: { count: 450, minMs: 10, maxMs: 100, avgMs: 45, p95Ms: 90 },
+      report: {
+        count: 450,
+        minMs: 1000,
+        maxMs: 1000,
+        avgMs: 1000,
+        p95Ms: 1000,
+      },
       dispatchOrderQueueLag: {
         count: 4500,
         minMs: 1000,
@@ -189,11 +198,129 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
         matched: true,
       },
     },
+    reportWorkload: {
+      initialJobIds: Array.from(
+        { length: 50 },
+        (_, i) => `initial-report-${i}`,
+      ),
+      measuredJobIds: Array.from(
+        { length: 450 },
+        (_, i) => `measured-report-${i}`,
+      ),
+      initialSnapshotAt: "2026-10-12T00:00:00.500Z",
+      initialSnapshot: Array.from({ length: 50 }, (_, i) => ({
+        jobId: `initial-report-${i}`,
+        status: "queued",
+        createdAt: "2026-10-12T00:00:00.100Z",
+        updatedAt: "2026-10-12T00:00:00.100Z",
+        startedAt: null,
+        queueLagMs: null,
+        record: {
+          jobId: `initial-report-${i}`,
+          status: "queued",
+          createdAt: "2026-10-12T00:00:00.100Z",
+          updatedAt: "2026-10-12T00:00:00.100Z",
+          filters: {
+            runTag: "synthetic-valid-capacity",
+            capacityRole: "initial_backlog",
+          },
+        },
+      })),
+      initialEvidence: Array.from({ length: 50 }, (_, i) => ({
+        jobId: `initial-report-${i}`,
+        status: "completed",
+        createdAt: "2026-10-12T00:00:00.100Z",
+        startedAt: "2026-10-12T00:00:01.100Z",
+        updatedAt: "2026-10-12T00:00:02.100Z",
+        queueLagMs: 1000,
+        record: {
+          jobId: `initial-report-${i}`,
+          status: "completed",
+          createdAt: "2026-10-12T00:00:00.100Z",
+          startedAt: "2026-10-12T00:00:01.100Z",
+          updatedAt: "2026-10-12T00:00:02.100Z",
+          filters: {
+            runTag: "synthetic-valid-capacity",
+            capacityRole: "initial_backlog",
+          },
+          artifact: { artifactId: `initial-artifact-${i}` },
+        },
+      })),
+      measuredEvidence: Array.from({ length: 450 }, (_, i) => ({
+        jobId: `measured-report-${i}`,
+        status: "completed",
+        createdAt: "2026-10-12T00:00:00.100Z",
+        startedAt: "2026-10-12T00:00:01.100Z",
+        updatedAt: "2026-10-12T00:00:02.100Z",
+        queueLagMs: 1000,
+        record: {
+          jobId: `measured-report-${i}`,
+          status: "completed",
+          createdAt: "2026-10-12T00:00:00.100Z",
+          startedAt: "2026-10-12T00:00:01.100Z",
+          updatedAt: "2026-10-12T00:00:02.100Z",
+          filters: { runTag: "synthetic-valid-capacity" },
+          artifact: { artifactId: `measured-artifact-${i}` },
+        },
+      })),
+    },
   };
 
   it("passes a valid full schedule summary with zero errors and perfect readback", () => {
     expect(() => assertAcceptancePassed(validAcceptance)).not.toThrow();
   });
+
+  it.each([
+    "missing",
+    "foreign",
+    "duplicate",
+    "overlap",
+    "drained",
+    "unstarted",
+    "failed",
+    "late-start",
+    "late-completion",
+    "outside-window",
+    "forged-lag",
+    "summary-lag",
+  ])(
+    "rejects %s report backlog/processing evidence rather than trusting a50 count",
+    (defect) => {
+      const invalid = structuredClone(validAcceptance);
+      const workload = invalid.reportWorkload;
+      const row = workload.initialEvidence[0]!;
+      if (defect === "missing") workload.initialEvidence.pop();
+      if (defect === "foreign") row.record.filters.runTag = "another-run";
+      if (defect === "duplicate")
+        workload.initialEvidence[1] = structuredClone(row);
+      if (defect === "overlap")
+        workload.measuredJobIds[0] = workload.initialJobIds[0]!;
+      if (defect === "drained") {
+        workload.initialSnapshot[0]!.status = "completed";
+        workload.initialSnapshot[0]!.record.status = "completed";
+      }
+      if (defect === "unstarted") {
+        row.startedAt = "";
+        row.record.startedAt = "";
+      }
+      if (defect === "failed") {
+        row.status = "failed";
+        row.record.status = "failed";
+      }
+      if (defect === "late-start") {
+        row.startedAt = row.record.startedAt = "2026-10-12T00:06:00.100Z";
+        row.updatedAt = row.record.updatedAt = "2026-10-12T00:06:01.100Z";
+        row.queueLagMs = 360000;
+      }
+      if (defect === "late-completion")
+        row.updatedAt = row.record.updatedAt = "2026-10-12T00:31:00.100Z";
+      if (defect === "outside-window")
+        workload.initialSnapshotAt = "2026-10-11T23:59:59.000Z";
+      if (defect === "forged-lag") row.queueLagMs = 5;
+      if (defect === "summary-lag") invalid.queueLag.report.avgMs = 999;
+      expect(() => assertAcceptancePassed(invalid)).toThrow(/Report /);
+    },
+  );
 
   it("rejects when measurements are absent", () => {
     const invalid = structuredClone(validAcceptance);

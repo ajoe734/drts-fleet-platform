@@ -33,6 +33,9 @@ export type ReportJobReadbackRow = {
   status: string;
   createdAt: string;
   queueLagMs: number | null;
+  startedAt: string | null;
+  updatedAt: string | null;
+  record: Record<string, unknown> | null;
 };
 
 export type ReadbackSummary = {

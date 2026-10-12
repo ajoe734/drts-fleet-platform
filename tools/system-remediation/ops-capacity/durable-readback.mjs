@@ -380,7 +380,7 @@ export async function readBackReportJobs(pool, jobIds) {
   }
   // Only the first actual worker start is queue-lag authority; legacy absence stays missing.
   const { rows } = await pool.query(
-    `SELECT job_id, status, created_at, updated_at, record->>'startedAt' as started_at
+    `SELECT job_id, status, created_at, updated_at, record, record->>'startedAt' as started_at
        FROM admin.phase1_report_jobs
       WHERE job_id = ANY($1::text[])`,
     [unique],
@@ -396,6 +396,9 @@ export async function readBackReportJobs(pool, jobIds) {
       status: row.status,
       createdAt: row.created_at,
       queueLagMs,
+      startedAt: instant(row.started_at),
+      updatedAt: instant(row.updated_at),
+      record: row.record ?? null,
     };
   });
 }
@@ -774,4 +777,115 @@ export function assertAcceptancePassed(acceptance) {
       );
     }
   }
+  assertReportWorkload(acceptance);
+  const measuredReportLag = summarizeLag(
+    acceptance.reportWorkload.measuredEvidence,
+    "queueLagMs",
+  );
+  if (
+    Object.keys(measuredReportLag).some(
+      (key) => acceptance.queueLag.report[key] !== measuredReportLag[key],
+    )
+  )
+    throw new Error(
+      "Report queueLag summary does not match actual SQL evidence",
+    );
+}
+
+const reportInstant = (value) =>
+  value != null && Number.isFinite(new Date(value).getTime())
+    ? new Date(value).getTime()
+    : null;
+
+function assertReportWorkload(acceptance) {
+  const { reportWorkload: workload, summary, runTag } = acceptance;
+  const start = reportInstant(summary.startedAt);
+  const end = reportInstant(summary.endedAt);
+  if (
+    !nonblank(runTag) ||
+    !workload ||
+    start === null ||
+    end === null ||
+    end < start ||
+    Math.abs(end - start - summary.elapsedMs) > 1000
+  )
+    throw new Error("Report workload missing run/window authority");
+  const {
+    initialJobIds,
+    measuredJobIds,
+    initialSnapshot,
+    initialSnapshotAt,
+    initialEvidence,
+    measuredEvidence,
+  } = workload;
+  if (
+    !Array.isArray(initialJobIds) ||
+    initialJobIds.length !== 50 ||
+    !Array.isArray(measuredJobIds) ||
+    measuredJobIds.length !== 450 ||
+    [...initialJobIds, ...measuredJobIds].some((id) => !nonblank(id)) ||
+    new Set([...initialJobIds, ...measuredJobIds]).size !== 500
+  )
+    throw new Error(
+      "Report workload requires50 distinct initial and450 distinct measured jobs",
+    );
+  const validateRows = (ids, rows, role, snapshot = false) => {
+    if (
+      !Array.isArray(rows) ||
+      rows.length !== ids.length ||
+      new Set(rows.map((row) => row.jobId)).size !== ids.length
+    )
+      throw new Error("Report workload missing/duplicate SQL rows");
+    for (const row of rows) {
+      const record = row.record;
+      const created = reportInstant(row.createdAt);
+      const started = reportInstant(row.startedAt);
+      const updated = reportInstant(row.updatedAt);
+      if (
+        !ids.includes(row.jobId) ||
+        !record ||
+        record.jobId !== row.jobId ||
+        record.status !== row.status ||
+        reportInstant(record.createdAt) !== created ||
+        reportInstant(record.startedAt) !== started ||
+        reportInstant(record.updatedAt) !== updated ||
+        record.filters?.runTag !== runTag ||
+        (role === "initial" &&
+          record.filters?.capacityRole !== "initial_backlog") ||
+        (role === "measured" &&
+          record.filters?.capacityRole === "initial_backlog") ||
+        created === null ||
+        created < start ||
+        created > end
+      )
+        throw new Error("Report workload foreign/inconsistent SQL authority");
+      if (snapshot) {
+        if (!["queued", "running"].includes(row.status))
+          throw new Error(
+            "Report initial backlog is not50 genuinely queued/running jobs",
+          );
+      } else if (
+        row.status !== "completed" ||
+        started === null ||
+        updated === null ||
+        started < created ||
+        started > end ||
+        started - created > 300000 ||
+        updated < started ||
+        updated - created > 1800000 ||
+        row.queueLagMs !== started - created ||
+        !nonblank(record.artifact?.artifactId)
+      ) {
+        throw new Error(
+          "Report workload incomplete/failed/missing start or completion SLO",
+        );
+      }
+    }
+  };
+  const observed = reportInstant(initialSnapshotAt);
+  if (observed === null || observed < start || observed > end)
+    throw new Error("Report initial snapshot outside the actual window");
+  validateRows(initialJobIds, initialSnapshot, "initial", true);
+  validateRows(initialJobIds, initialEvidence, "initial");
+  validateRows(measuredJobIds, measuredEvidence, "measured");
 }

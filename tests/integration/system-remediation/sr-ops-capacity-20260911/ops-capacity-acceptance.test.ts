@@ -1,5 +1,10 @@
 import { createRequire } from "node:module";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import type { AddressInfo } from "node:net";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -114,6 +119,10 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         await import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.service");
       const { detectAuthEnvironment } =
         await import("../../../../apps/api/src/config/auth-startup-config");
+      const { ReportingFilingService } =
+        await import("../../../../apps/api/src/modules/reporting-filing/reporting-filing.service");
+      type ReportRow =
+        import("../../../../tools/system-remediation/ops-capacity/durable-readback.mjs").ReportJobReadbackRow;
       const { buildCapacityPlan, countsForDuration } =
         await import("../../../../tools/system-remediation/ops-capacity/plan-builder.mjs");
       // The Supervisor allocated this exact producer file, not a shared declaration.
@@ -362,12 +371,15 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         });
 
         const recordsPath = resolve(evidenceDir, `${runTag}.jsonl`);
+        let initialReportJobIds: string[] = [];
+        let initialReportSnapshot: ReportRow[] = [];
+        let initialReportSnapshotAt: string | null = null;
         let peakReport = 0;
         let peakDispatchable = 0;
         const { pollCapacityResources, runWithCapacityPolling } =
           await import("../../../../tools/system-remediation/ops-capacity/observations.mjs");
         const pollDb = async () => {
-          let currentJobIds: string[] = [];
+          let currentJobIds: string[] = [...initialReportJobIds];
           const currentOrderIds = [...orderIds];
           try {
             // appendFileSync writes complete records on the same JS thread;
@@ -388,14 +400,16 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
                 )
                 .map((row) => row.resourceIds.orderId),
             );
-            currentJobIds = currentRecords
-              .filter(
-                (row) =>
-                  row.workload === "report" &&
-                  !row.error &&
-                  row.resourceIds?.jobId,
-              )
-              .map((row) => row.resourceIds.jobId);
+            currentJobIds.push(
+              ...currentRecords
+                .filter(
+                  (row) =>
+                    row.workload === "report" &&
+                    !row.error &&
+                    row.resourceIds?.jobId,
+                )
+                .map((row) => row.resourceIds.jobId),
+            );
           } catch (error) {
             if (
               !(error instanceof Error) ||
@@ -417,10 +431,58 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         };
         const summary = await runWithCapacityPolling<CapacitySummary>(
           () =>
-            runPlan(plan, recordsPath, {
-              baseSha: process.env.WORKFLOW_SHA ?? "local",
-              candidateSha: process.env.CANDIDATE_SHA ?? "local",
-            }),
+            runPlan(
+              plan,
+              recordsPath,
+              {
+                baseSha: process.env.WORKFLOW_SHA ?? "local",
+                candidateSha: process.env.CANDIDATE_SHA ?? "local",
+              },
+              {
+                initialize: async () => {
+                  // A real run-owned recovery workload, not extra measured
+                  // HTTP requests or a fixed delay. All50 valid commands commit
+                  // atomically via the same producer used by the HTTP callers.
+                  const reporting = app.get(ReportingFilingService);
+                  const commands = Array.from({ length: 50 }, () => ({
+                    jobType: "trip_summary",
+                    format: "csv" as const,
+                    filters: { runTag, capacityRole: "initial_backlog" },
+                  }));
+                  const accepted = await reporting.createReportJobsDurably(
+                    commands,
+                    `${runTag}-report-backlog`,
+                  );
+                  initialReportJobIds = accepted.map((job) => job.jobId);
+                  initialReportSnapshot = await readBackReportJobs(
+                    pool,
+                    initialReportJobIds,
+                  );
+                  initialReportSnapshotAt = new Date().toISOString();
+                  // Only actual SQL rows establish the queue observation. If a
+                  // fast worker already drained it, the acceptance remains red.
+                  peakReport = Math.max(
+                    peakReport,
+                    initialReportSnapshot.filter(
+                      (job) =>
+                        job.status === "queued" || job.status === "running",
+                    ).length,
+                  );
+                  appendFileSync(
+                    recordsPath,
+                    `${JSON.stringify({
+                      kind: "capacity_report_backlog",
+                      runTag,
+                      commands,
+                      observedAt: initialReportSnapshotAt,
+                      jobIds: initialReportJobIds,
+                      rows: initialReportSnapshot,
+                      error: null,
+                    })}\n`,
+                  );
+                },
+              },
+            ),
           pollDb,
         );
 
@@ -490,6 +552,10 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           pool,
           claimedReportJobIds,
         );
+        const initialReportReadback = await readBackReportJobs(
+          pool,
+          initialReportJobIds,
+        );
 
         const bookingSummary = summarizeReadback(
           claimedBookingOrderIds,
@@ -535,6 +601,14 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           candidateSha: process.env.CANDIDATE_SHA ?? "local",
           workflowSha: process.env.WORKFLOW_SHA ?? "local",
           summary,
+          reportWorkload: {
+            initialJobIds: initialReportJobIds,
+            measuredJobIds: claimedReportJobIds,
+            initialSnapshot: initialReportSnapshot,
+            initialSnapshotAt: initialReportSnapshotAt,
+            initialEvidence: initialReportReadback,
+            measuredEvidence: reportReadback,
+          },
           concurrency: {
             intake: peakIntake,
             report: peakReport,

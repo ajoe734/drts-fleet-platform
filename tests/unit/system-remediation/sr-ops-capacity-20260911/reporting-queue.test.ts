@@ -6,6 +6,7 @@ import { IdempotencyService } from "../../../../apps/api/src/common/idempotency/
 import { IdempotencyRepository } from "../../../../apps/api/src/common/idempotency/idempotency.repository";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import type { DatabaseService } from "../../../../apps/api/src/common/db";
+import { queueFixture } from "./reporting-queue-fixture";
 
 function deferred() {
   let resolve!: () => void;
@@ -48,13 +49,232 @@ describe("report durable HTTP acknowledgement", () => {
         returned = true;
         return value;
       });
-    await vi.waitFor(() => expect(query.mock.calls.some(([sql]) => sql.includes("INSERT INTO"))).toBe(true));
+    await vi.waitFor(() =>
+      expect(
+        query.mock.calls.some(([sql]) => sql.includes("INSERT INTO")),
+      ).toBe(true),
+    );
     await new Promise<void>((resolve) => setImmediate(resolve));
     try {
       expect(returned).toBe(false);
     } finally {
       barrier.resolve();
       await response;
+    }
+  });
+});
+
+describe("actual bounded durable reporting worker", () => {
+  it.each(["platform", "tenant"])(
+    "rejects %s enqueue failure without caching accepted or starting a job",
+    async (realm) => {
+      const f = queueFixture();
+      f.control.before = async (sql) => {
+        if (sql.includes("INSERT INTO"))
+          throw new Error("queue storage unavailable");
+      };
+      const idempotency = new IdempotencyService(new IdempotencyRepository());
+      const controller = new ReportingFilingController(f.service, idempotency);
+      const command = { jobType: "trip_summary", format: "csv" } as const;
+      const call = () =>
+        realm === "tenant"
+          ? controller.createTenantReportJob(
+              command,
+              null,
+              "tenant-a",
+              "enqueue-failure",
+            )
+          : controller.createReportJob(command, null, "enqueue-failure");
+      await expect(call()).rejects.toThrow("queue storage unavailable");
+      expect(f.stored.size).toBe(0);
+      expect(f.service.listReportJobs()).toHaveLength(0);
+      expect(f.locks.size).toBe(0);
+      f.control.before = undefined;
+      const response = await call();
+      expect(response.data).toMatchObject({ status: "queued" });
+      expect(f.stored.size).toBe(1);
+      if (realm === "tenant")
+        expect([...f.stored.values()][0]!.filters).toMatchObject({
+          tenantId: "tenant-a",
+        });
+      const replay = await call();
+      expect(replay.data).toEqual(response.data);
+      expect(f.stored.size).toBe(1);
+      await f.service.onModuleDestroy();
+    },
+  );
+
+  it("processes a real50-job producer backlog using trip_summary without worker/clock padding", async () => {
+    const f = queueFixture();
+    await f.service.onModuleInit();
+    const accepted = await f.service.createReportJobsDurably(
+      Array.from({ length: 50 }, () => ({
+        jobType: "trip_summary",
+        format: "csv",
+        filters: { capacityRunTag: "run-50" },
+      })),
+    );
+    expect(new Set(accepted.map((job) => job.jobId)).size).toBe(50);
+    expect(
+      [...f.stored.values()].every(
+        (job) => job.status === "queued" && !job.startedAt,
+      ),
+    ).toBe(true);
+    f.service.onApplicationBootstrap();
+    try {
+      await vi.waitFor(() =>
+        expect(
+          [...f.stored.values()].filter((job) => job.status === "completed"),
+        ).toHaveLength(50),
+      );
+      expect(f.writes.filter((job) => job.status === "running")).toHaveLength(
+        50,
+      );
+      expect(
+        [...f.stored.values()].every(
+          (job) => !!job.startedAt && !!job.artifact,
+        ),
+      ).toBe(true);
+      expect(f.locks.size).toBe(0);
+    } finally {
+      await f.service.onModuleDestroy();
+    }
+  });
+
+  it("bounds builders, rejects duplicate live recovery, and drains the claimed job on shutdown", async () => {
+    const f = queueFixture();
+    const provider = deferred();
+    let active = 0;
+    let peak = 0;
+    let builds = 0;
+    f.service.registerDailyDispatchRecordProvider(async () => {
+      builds++;
+      peak = Math.max(peak, ++active);
+      await provider.promise;
+      active--;
+      return [];
+    });
+    const jobs = await f.service.createReportJobsDurably(
+      Array.from({ length: 2 }, () => ({
+        jobType: "daily_dispatch_record",
+        format: "csv",
+      })),
+    );
+    f.service.onApplicationBootstrap();
+    await vi.waitFor(() => expect(builds).toBe(1));
+    const running = [...f.stored.values()].find(
+      (job) => job.status === "running",
+    )!;
+    const competing = new ReportingFilingRepository(
+      f.database as unknown as DatabaseService,
+    );
+    const duplicate = vi.fn();
+    expect(await competing.withReportJobClaim(running.jobId, duplicate)).toBe(
+      false,
+    );
+    expect(duplicate).not.toHaveBeenCalled();
+    let stopped = false;
+    const stop = f.service.onModuleDestroy().then(() => {
+      stopped = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(stopped).toBe(false);
+    await expect(
+      f.service.createReportJobDurably({
+        jobType: "trip_summary",
+        format: "csv",
+      }),
+    ).rejects.toThrow("stopping");
+    provider.resolve();
+    await stop;
+    expect(peak).toBe(1);
+    expect(builds).toBe(1);
+    expect(jobs.map((job) => f.stored.get(job.jobId)!.status).sort()).toEqual([
+      "completed",
+      "queued",
+    ]);
+    expect(f.locks.size).toBe(0);
+    f.service.onApplicationBootstrap();
+    try {
+      await vi.waitFor(() => expect(builds).toBe(2));
+    } finally {
+      await f.service.onModuleDestroy();
+    }
+  });
+
+  it("keeps completion uncommitted until storage succeeds and records builder failures truthfully", async () => {
+    const f = queueFixture();
+    const barrier = deferred();
+    f.control.before = async (sql, params) => {
+      if (sql.includes("UPDATE") && params[1] === "completed")
+        await barrier.promise;
+    };
+    const job = await f.service.createReportJobDurably({
+      jobType: "trip_summary",
+      format: "csv",
+    });
+    f.service.onApplicationBootstrap();
+    await vi.waitFor(() =>
+      expect(f.stored.get(job.jobId)?.status).toBe("running"),
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(f.service.getReportJob(job.jobId).status).toBe("running");
+    expect(f.service.getReportJob(job.jobId).artifact).toBeNull();
+    barrier.resolve();
+    await vi.waitFor(() =>
+      expect(f.stored.get(job.jobId)?.status).toBe("completed"),
+    );
+    f.service.registerDailyDispatchRecordProvider(async () => {
+      throw new Error("source query failed");
+    });
+    const failed = await f.service.createReportJobDurably({
+      jobType: "daily_dispatch_record",
+      format: "csv",
+    });
+    try {
+      await vi.waitFor(() =>
+        expect(f.stored.get(failed.jobId)?.status).toBe("failed"),
+      );
+      expect(f.stored.get(failed.jobId)?.artifact).toBeNull();
+      expect(
+        f.audit
+          .listAuditLogs()
+          .find(
+            (row) =>
+              row.resourceId === failed.jobId &&
+              row.actionName === "fail_report_job",
+          )?.newValuesSummary,
+      ).toMatchObject({ error: "source query failed" });
+    } finally {
+      await f.service.onModuleDestroy();
+    }
+  });
+
+  it("preserves queued/unknown first-start after a failed claim write and recovers on the real worker", async () => {
+    const f = queueFixture();
+    f.control.before = async (sql) => {
+      if (sql.includes("UPDATE")) throw new Error("state write unavailable");
+    };
+    const job = await f.service.createReportJobDurably({
+      jobType: "trip_summary",
+      format: "csv",
+    });
+    f.service.onApplicationBootstrap();
+    await vi.waitFor(() =>
+      expect(f.repository.reportPersistenceFailure).toHaveBeenCalled(),
+    );
+    expect(f.stored.get(job.jobId)?.status).toBe("queued");
+    expect(f.stored.get(job.jobId)).not.toHaveProperty("startedAt");
+    expect(f.service.getReportJob(job.jobId).status).toBe("queued");
+    await f.service.onModuleDestroy();
+    f.control.before = undefined;
+    f.service.onApplicationBootstrap();
+    try {
+      await vi.waitFor(() =>
+        expect(f.stored.get(job.jobId)?.status).toBe("completed"),
+      );
+    } finally {
+      await f.service.onModuleDestroy();
     }
   });
 });

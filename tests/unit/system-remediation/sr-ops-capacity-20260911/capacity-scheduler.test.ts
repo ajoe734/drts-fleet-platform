@@ -129,6 +129,50 @@ afterEach(() => {
 });
 
 describe("actual capacity scheduler boundaries across all families", () => {
+  it("includes actual preparation time in the original window and preserves every measured request", async () => {
+    const output = resolve(directory, "baseline-initialize.jsonl");
+    const initialize = vi.fn(async ({ startedAt }: { startedAt: string }) => {
+      expect(startedAt).toBe(new Date(0).toISOString());
+      expect(boundary.request).not.toHaveBeenCalled();
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    });
+    const run = runPlan(plan(), output, {}, { initialize });
+    await vi.advanceTimersByTimeAsync(20000);
+    const summary = await run;
+    const rows = read(output);
+    expect(initialize).toHaveBeenCalledTimes(1);
+    expect(Math.min(...rows.map((row) => row.launchedMs))).toBe(25);
+    assertUniformCadence(rows);
+    expect(rows).toHaveLength(39);
+    expect(summary.elapsedMs).toBeGreaterThanOrEqual(25 + 5800);
+    expect(Date.parse(summary.endedAt) - Date.parse(summary.startedAt)).toBe(
+      summary.elapsedMs,
+    );
+  });
+
+  it("retains raw preparation failure and never sends measured requests after it", async () => {
+    const output = resolve(directory, "baseline-initialize-failed.jsonl");
+    await expect(
+      runPlan(
+        plan(),
+        output,
+        {},
+        {
+          initialize: async () => {
+            throw new Error("durable backlog commit failed");
+          },
+        },
+      ),
+    ).rejects.toThrow("durable backlog commit failed");
+    expect(boundary.request).not.toHaveBeenCalled();
+    expect(read(output)).toMatchObject([
+      {
+        kind: "capacity_preparation_failure",
+        error: "durable backlog commit failed",
+      },
+    ]);
+  });
+
   it("runs every scheduled stage through the actual producer and retains 5850 measured and 4000 seed records", async () => {
     const staged = buildCapacityPlan({
       origin: "http://127.0.0.1:4010/",

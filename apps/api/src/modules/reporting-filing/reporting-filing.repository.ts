@@ -100,13 +100,23 @@ export class ReportingFilingRepository {
           `INSERT INTO admin.phase1_report_jobs
            (job_id, job_type, status, created_at, updated_at, record)
            VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-          [job.jobId, job.jobType, job.status, job.createdAt, job.updatedAt,
-            JSON.stringify(job)],
+          [
+            job.jobId,
+            job.jobType,
+            job.status,
+            job.createdAt,
+            job.updatedAt,
+            JSON.stringify(job),
+          ],
         );
       }
       await client.query("COMMIT");
     } catch (error) {
-      try { await client.query("ROLLBACK"); } catch { /* discard below */ }
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* discard below */
+      }
       // A connection with uncertain transaction/commit state is never pooled.
       client.release(true);
       throw error;
@@ -131,7 +141,8 @@ export class ReportingFilingRepository {
     jobId: string,
     run: (job: StoredReportJobRecord, write: ReportJobWriter) => Promise<void>,
   ): Promise<boolean> {
-    if (!this.isEnabled()) throw new Error("Durable report storage is disabled");
+    if (!this.isEnabled())
+      throw new Error("Durable report storage is disabled");
     const client: PoolClient = await this.databaseService!.connect();
     let locked = false;
     let discard = false;
@@ -149,7 +160,8 @@ export class ReportingFilingRepository {
       );
       if (!current.rows[0]) return false;
       const job = this.parseRecord<StoredReportJobRecord>(
-        current.rows[0].record, "admin.phase1_report_jobs",
+        current.rows[0].record,
+        "admin.phase1_report_jobs",
       );
       if (job.jobId !== jobId) throw new Error("Report claim ID mismatch");
       let previousStatus = job.status;
@@ -159,16 +171,26 @@ export class ReportingFilingRepository {
           `UPDATE admin.phase1_report_jobs SET
              status = $2, updated_at = $3, record = $4::jsonb
            WHERE job_id = $1 AND status = $5 RETURNING job_id`,
-          [jobId, next.status, next.updatedAt, JSON.stringify(next), previousStatus],
+          [
+            jobId,
+            next.status,
+            next.updatedAt,
+            JSON.stringify(next),
+            previousStatus,
+          ],
         );
-        if (saved.rowCount !== 1) throw new Error("Report state changed during claim");
+        if (saved.rowCount !== 1)
+          throw new Error("Report state changed during claim");
         previousStatus = next.status;
       });
       return true;
     } finally {
       if (locked) {
         try {
-          await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 123))", [jobId]);
+          await client.query(
+            "SELECT pg_advisory_unlock(hashtextextended($1, 123))",
+            [jobId],
+          );
         } catch (error) {
           discard = true;
           this.reportPersistenceFailure(error, "release_report_claim");

@@ -295,3 +295,30 @@ hosted dispatch is authorized yet.
 | Durable acknowledgement | Original266b controller + `createReportJob` returned201 before the repository INSERT finished. Actual controller/service/repository test with only SQL write boundary blocked reproduced expected-false/actual-true. New two callers await `createReportJobDurably` and COMMIT. | `pnpm exec vitest run tests/unit/system-remediation/sr-ops-capacity-20260911/reporting-queue.test.ts`; old266b exit1, new working-source exit0. Logs in canonical `.local/c123-report-worker-20261012/old-266b-durable-ack.log` and `durable-ack-new.log`. First attempt lacked restored worktree dependency links, exit254, and is not reproduction evidence; links restored before exit1 run. | Full recovery/failure/shutdown/cross-worker regressions and migrated-PG verification still pending. |
 | F6 report executor / initial backlog | Bounded single FIFO worker uses existing JSON rows and a dedicated session advisory lock; state writes are awaited before publication. Yielding between jobs follows the accepted lower-priority async report model; no artificial service delay or quota/SLO change. | Implementation checkpoint, not throughput evidence. | Genuine run-owned50 persisted backlog, actual processing, SQL start/completion/error evidence still to implement and verify. |
 | Both required acceptance keys | Remain OPEN. Prior negative-payload evidence is retained. | No new candidate/CI/merge/900s result. | Publication HOLD, independent exact-candidate review/CI and original immutable hosted workflow remain required. |
+
+Second local checkpoint after `1ec983935`: durable queue regressions7/7 pass,
+including transaction failure + original idempotency retry/replay, committed
+state publication, cross-session duplicate claim rejection, real builder
+failure, queued recovery and shutdown draining only the active claim. The50-job
+unit backlog uses the actual `trip_summary` builder without worker/clock mocks;
+only external SQL/session behavior is modeled. It is not PostgreSQL capacity
+evidence. Rehydration regressions now use actual claim/bootstrap/shutdown hooks,
+retaining prior first-start and legacy unknown cases.
+
+`runPlan` now admits the initial50-job producer backlog inside its original
+timed window, without resetting the clock or replacing any of5850 measured
+requests. Real independent SQL snapshots and final raw JSON job records remain
+separate from the450 HTTP reports. A drained initial snapshot, foreign or
+duplicate IDs, missing/failed processing, absent first-start, starts beyond5min,
+completion beyond30min or inconsistent per-row/summary lag fails the formal
+gate. No delay is introduced to force a snapshot; an insufficient genuine
+SQL snapshot leaves acceptance red. All existing HTTP errors and extra staged
+operations remain raw evidence. Preparation failures are recorded and throw.
+
+The fixed25-case operator contract replay is still executed unchanged. A
+first attempt to split a helper module failed because that diagnostic imports
+the formal gate through a data URL; the implementation was kept self-contained
+and the corrected replay completed25/25, exit0. Initial C123 regression68tests
+completed exit0 before adding the new negative snapshot/SLO scenarios.
+Affected regressions, root typecheck and scoped lint for this new checkpoint
+are running; no passing result is claimed before their terminal output.

@@ -355,13 +355,14 @@ export function measure(origin, item) {
   });
 }
 
-export async function runPlan(plan, output, provenance) {
+export async function runPlan(plan, output, provenance, lifecycle = {}) {
   validatePlan(plan);
   writeFileSync(output, "");
   const baselineSha256 = digest(readFileSync(baselinePath));
   const records = [];
   const active = new Set();
   const start = performance.now();
+  const startedAt = new Date().toISOString();
   const profile = plan.profile ?? "uniform";
   const scheduleMs =
     plan.scheduleMs ??
@@ -388,6 +389,25 @@ export async function runPlan(plan, output, provenance) {
   const familyLaunches = Object.fromEntries(
     Object.keys(baseline).map((family) => [family, []]),
   );
+  // Run-owned durable recovery preparation belongs inside the original timed
+  // window. It neither replaces a measured request nor resets the clock.
+  if (lifecycle.initialize) {
+    try {
+      await lifecycle.initialize({ startedAt });
+    } catch (error) {
+      appendFileSync(
+        output,
+        `${JSON.stringify({
+          kind: "capacity_preparation_failure",
+          ...provenance,
+          isolatedResourceId: plan.isolatedResourceId,
+          observedAt: new Date().toISOString(),
+          error: error instanceof Error ? error.message : String(error),
+        })}\n`,
+      );
+      throw error;
+    }
+  }
   for (const entry of schedule) {
     const spacing = 60000 / baseline[entry.family].perMinute;
     let targetMs = entry.scheduledMs;
@@ -523,6 +543,8 @@ export async function runPlan(plan, output, provenance) {
     durationSeconds: plan.durationSeconds,
     fullBurstSchedule: plan.durationSeconds === 900,
     elapsedMs: performance.now() - start,
+    startedAt,
+    endedAt: new Date().toISOString(),
     maxInFlight: plan.maxInFlight,
     profile,
     workflows,

@@ -1,6 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { HttpStatus, Injectable, OnModuleInit, OnApplicationBootstrap, OnModuleDestroy, Optional } from "@nestjs/common";
+import {
+  HttpStatus,
+  Injectable,
+  OnModuleInit,
+  OnApplicationBootstrap,
+  OnModuleDestroy,
+  Optional,
+} from "@nestjs/common";
 
 import type {
   AuditLogRecord,
@@ -192,7 +199,9 @@ export type ReportArtifactResult = {
 };
 
 @Injectable()
-export class ReportingFilingService implements OnModuleInit, OnApplicationBootstrap, OnModuleDestroy {
+export class ReportingFilingService
+  implements OnModuleInit, OnApplicationBootstrap, OnModuleDestroy
+{
   private reportJobs: StoredReportJob[] = [];
 
   private filingPackages: StoredFilingPackage[] = [];
@@ -972,11 +981,16 @@ export class ReportingFilingService implements OnModuleInit, OnApplicationBootst
     tenantScopeId?: string | null,
   ): ReportJobAccepted {
     if (this.hasDurableReports()) {
-      throw new Error("Durable report creation requires createReportJobDurably");
+      throw new Error(
+        "Durable report creation requires createReportJobDurably",
+      );
     }
     const job = this.prepareReportJob(command, tenantScopeId);
     this.reportJobs = [job, ...this.reportJobs];
-    this.persistChanges({ reportJobs: [this.cloneStoredReportJob(job)] }, "queue_report_job");
+    this.persistChanges(
+      { reportJobs: [this.cloneStoredReportJob(job)] },
+      "queue_report_job",
+    );
     this.auditReportEnqueue(job, requestId);
     this.scheduleReportJobCompletion(job.jobId, requestId);
     return { jobId: job.jobId, status: "queued" };
@@ -987,7 +1001,11 @@ export class ReportingFilingService implements OnModuleInit, OnApplicationBootst
     requestId?: string,
     tenantScopeId?: string | null,
   ): Promise<ReportJobAccepted> {
-    const [accepted] = await this.createReportJobsDurably([command], requestId, tenantScopeId);
+    const [accepted] = await this.createReportJobsDurably(
+      [command],
+      requestId,
+      tenantScopeId,
+    );
     return accepted!;
   }
 
@@ -1000,12 +1018,22 @@ export class ReportingFilingService implements OnModuleInit, OnApplicationBootst
   ): Promise<ReportJobAccepted[]> {
     if (this.reportWorkerStopping) throw new Error("Report worker is stopping");
     if (!this.hasDurableReports()) {
-      return commands.map((command) => this.createReportJob(command, requestId, tenantScopeId));
+      return commands.map((command) =>
+        this.createReportJob(command, requestId, tenantScopeId),
+      );
     }
-    const jobs = commands.map((command) => this.prepareReportJob(command, tenantScopeId));
-    const enqueue = this.reportingFilingRepository!.enqueueReportJobs(jobs.map((job) => this.cloneStoredReportJob(job)));
+    const jobs = commands.map((command) =>
+      this.prepareReportJob(command, tenantScopeId),
+    );
+    const enqueue = this.reportingFilingRepository!.enqueueReportJobs(
+      jobs.map((job) => this.cloneStoredReportJob(job)),
+    );
     this.reportEnqueues.add(enqueue);
-    try { await enqueue; } finally { this.reportEnqueues.delete(enqueue); }
+    try {
+      await enqueue;
+    } finally {
+      this.reportEnqueues.delete(enqueue);
+    }
     this.reportJobs = [...jobs, ...this.reportJobs];
     for (const job of jobs) {
       this.auditReportEnqueue(job, requestId);
@@ -1082,7 +1110,6 @@ export class ReportingFilingService implements OnModuleInit, OnApplicationBootst
       },
       requestId,
     );
-
   }
 
   listReportJobs(
@@ -1329,8 +1356,13 @@ export class ReportingFilingService implements OnModuleInit, OnApplicationBootst
   }
 
   private wakeReportWorker() {
-    if (!this.reportWorkerActive || this.reportWorkerStopping ||
-        this.reportWorkerTask || this.reportWorkerWake) return;
+    if (
+      !this.reportWorkerActive ||
+      this.reportWorkerStopping ||
+      this.reportWorkerTask ||
+      this.reportWorkerWake
+    )
+      return;
     if (this.reportRecoveryTimer) clearTimeout(this.reportRecoveryTimer);
     this.reportRecoveryTimer = null;
     // Reports are lower priority: one builder, yielding between jobs. There is
@@ -1339,12 +1371,22 @@ export class ReportingFilingService implements OnModuleInit, OnApplicationBootst
       this.reportWorkerWake = null;
       let didWork = false;
       this.reportWorkerTask = this.processNextDurableReport()
-        .then((worked) => { didWork = worked; })
-        .catch((error: unknown) => this.reportingFilingRepository!.reportPersistenceFailure(error, "report_worker"))
+        .then((worked) => {
+          didWork = worked;
+        })
+        .catch((error: unknown) =>
+          this.reportingFilingRepository!.reportPersistenceFailure(
+            error,
+            "report_worker",
+          ),
+        )
         .finally(() => {
           this.reportWorkerTask = null;
           if (!this.reportWorkerActive || this.reportWorkerStopping) return;
-          if (didWork) { this.wakeReportWorker(); return; }
+          if (didWork) {
+            this.wakeReportWorker();
+            return;
+          }
           this.reportRecoveryTimer = setTimeout(() => {
             this.reportRecoveryTimer = null;
             this.wakeReportWorker();
@@ -1355,22 +1397,30 @@ export class ReportingFilingService implements OnModuleInit, OnApplicationBootst
   }
 
   private async processNextDurableReport() {
-    const ids = await this.reportingFilingRepository!.listRunnableReportJobIds();
+    const ids =
+      await this.reportingFilingRepository!.listRunnableReportJobIds();
     for (const jobId of ids) {
       if (this.reportWorkerStopping) return false;
-      const claimed = await this.reportingFilingRepository!.withReportJobClaim(jobId, async (record, write) => {
-        const job = this.cloneStoredReportJob({ ...record,
-          partnerRevenueRows: record.partnerRevenueRows ?? [],
-          settlementMatrix: record.settlementMatrix ?? [] });
-        const requestId = this.reportQueue.get(jobId);
-        try {
+      const claimed = await this.reportingFilingRepository!.withReportJobClaim(
+        jobId,
+        async (record, write) => {
+          const job = this.cloneStoredReportJob({
+            ...record,
+            partnerRevenueRows: record.partnerRevenueRows ?? [],
+            settlementMatrix: record.settlementMatrix ?? [],
+          });
+          const requestId = this.reportQueue.get(jobId);
+          // If claim/start persistence fails, leave the previous durable state
+          // and its missing first-start observation intact for recovery.
           await this.startDurableReportJob(job, write);
-          await this.completeReportJob(job, requestId, write);
-        } catch (error) {
-          await this.failReportJob(job, error, requestId, write);
-        }
-        this.reportQueue.delete(jobId);
-      });
+          try {
+            await this.completeReportJob(job, requestId, write);
+          } catch (error) {
+            await this.failReportJob(job, error, requestId, write);
+          }
+          this.reportQueue.delete(jobId);
+        },
+      );
       if (claimed) {
         // Continue immediately on the next event-loop turn, not at the idle
         // recovery interval. The bounded executor never processes two at once.
@@ -1380,7 +1430,10 @@ export class ReportingFilingService implements OnModuleInit, OnApplicationBootst
     return false;
   }
 
-  private async startDurableReportJob(job: StoredReportJob, write: ReportJobWriter) {
+  private async startDurableReportJob(
+    job: StoredReportJob,
+    write: ReportJobWriter,
+  ) {
     const now = new Date().toISOString();
     job.status = "running";
     job.updatedAt = now;
@@ -1467,7 +1520,11 @@ export class ReportingFilingService implements OnModuleInit, OnApplicationBootst
     );
   }
 
-  private async completeReportJob(job: StoredReportJob, requestId?: string, write?: ReportJobWriter) {
+  private async completeReportJob(
+    job: StoredReportJob,
+    requestId?: string,
+    write?: ReportJobWriter,
+  ) {
     // A job persisted before the builder registry existed can still carry an
     // unimplemented type. Those complete empty as they always did; the guard
     // that stops new ones is in `createReportJob`, not here.
@@ -1507,12 +1564,13 @@ export class ReportingFilingService implements OnModuleInit, OnApplicationBootst
     if (write) {
       await write(this.cloneStoredReportJob(job));
       this.publishCommittedReport(job);
-    } else this.persistChanges(
-      {
-        reportJobs: [this.cloneStoredReportJob(job)],
-      },
-      "complete_report_job",
-    );
+    } else
+      this.persistChanges(
+        {
+          reportJobs: [this.cloneStoredReportJob(job)],
+        },
+        "complete_report_job",
+      );
 
     this.recordAudit(
       {
@@ -1549,12 +1607,13 @@ export class ReportingFilingService implements OnModuleInit, OnApplicationBootst
     if (write) {
       await write(this.cloneStoredReportJob(job));
       this.publishCommittedReport(job);
-    } else this.persistChanges(
-      {
-        reportJobs: [this.cloneStoredReportJob(job)],
-      },
-      "fail_report_job",
-    );
+    } else
+      this.persistChanges(
+        {
+          reportJobs: [this.cloneStoredReportJob(job)],
+        },
+        "fail_report_job",
+      );
     this.recordAudit(
       {
         actorId: null,
