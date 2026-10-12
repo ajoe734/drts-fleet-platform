@@ -151,3 +151,299 @@ describe("independently anchored observed Cloud Run names", () => {
     }
   });
 });
+
+describe("fixed safe diagnosis and independent partial observations", () => {
+  it.each([
+    ["image", "IMAGE_CONTRACT"],
+    ["runtime", "RUNTIME_IDENTITY"],
+    ["expected-image", "EXPECTED_IMAGE"],
+  ] as const)(
+    "retains owned safe fields while %s stays blocked",
+    async (field, diagnosis) => {
+      const f = ownedNumeric();
+      const body = service(f);
+      body.template.containers[0].resources = { cpuIdle: false };
+      body.template.scaling = {
+        minInstanceCount: 0,
+        maxInstanceCount: 2147483647,
+      };
+      body.scaling = { manualInstanceCount: 0, scalingMode: "MANUAL" };
+      if (field === "image")
+        body.template.containers[0].image = `https://user:${SENTINEL}@evil.invalid/image`;
+      if (field === "runtime")
+        body.template.serviceAccount = `${SENTINEL}@foreign.iam.gserviceaccount.com`;
+      if (field === "expected-image")
+        body.template.containers[0].image = `us-central1-docker.pkg.dev/${c.TARGET.project}/other/api@sha256:${"c".repeat(64)}`;
+      const report = await c.collect(f.env, SHA, f.transport);
+      expect(record(report)).toMatchObject({
+        status: "blocked",
+        diagnosis,
+        observedResource: body.name,
+      });
+      const partial = record(report, "api:partial");
+      expect(partial).toMatchObject({
+        status: "partial",
+        diagnosis,
+        data: {
+          name: body.name,
+          ingress: body.ingress,
+          scaling: body.scaling,
+          template: {
+            scaling: body.template.scaling,
+            containers: [{ resources: { cpuIdle: false } }],
+          },
+        },
+      });
+      expect(partial.data.template.serviceAccount).toBeUndefined();
+      expect(partial.data.template.containers[0].image).toBeUndefined();
+      expect(report.collection).toBe("incomplete");
+      expect(report.runtimeProvenance).toBe("unverified");
+      expect(report.effectiveIamPermissions).toBe("unverified");
+      const saved = c.serialize(report);
+      expect(saved).not.toContain(SENTINEL);
+      expect(saved).not.toContain("evil.invalid");
+      expect(saved).not.toContain("/other/api");
+      expect(
+        f.calls.every(
+          (d: any) => d.method === "GET" && d.url.includes(c.TARGET.project),
+        ),
+      ).toBe(true);
+      expect(
+        f.calls.filter((d: any) =>
+          d.url.includes("/services/prod-api/revisions/"),
+        ),
+      ).toHaveLength(0);
+    },
+  );
+  it.each(["revision", "job"])(
+    "classifies %s legacy fields without retaining unsafe values",
+    async (kind) => {
+      const f = ownedNumeric();
+      const path =
+        kind === "revision"
+          ? `/v2/projects/${c.TARGET.project}/locations/us-central1/services/prod-api/revisions/prod-api-00001`
+          : new URL(f.plan.operations.find((o: any) => o.kind === "job").url)
+              .pathname;
+      const body = f.responses.get(path).body;
+      const template = kind === "job" ? body.template.template : body;
+      template.serviceAccount = SENTINEL;
+      if (kind === "revision") {
+        template.containers[0].resources = { cpuIdle: true };
+        template.scaling = { minInstanceCount: 0 };
+      }
+      const report = await c.collect(f.env, SHA, f.transport);
+      const id = kind === "job" ? "migration" : "api:prod-api-00001";
+      expect(record(report, id)).toMatchObject({
+        status: "blocked",
+        diagnosis: "RUNTIME_IDENTITY",
+      });
+      if (kind === "revision")
+        expect(record(report, `${id}:partial`)).toMatchObject({
+          status: "partial",
+          data: {
+            scaling: { minInstanceCount: 0 },
+            containers: [{ resources: { cpuIdle: true } }],
+          },
+        });
+      else expect(record(report, `${id}:partial`)).toBeUndefined();
+      expect(c.serialize(report)).not.toContain(SENTINEL);
+    },
+  );
+  it("leaves absent/default background observations unknown in partial data", async () => {
+    const f = ownedNumeric();
+    service(f).template.containers[0].image = SENTINEL;
+    const report = await c.collect(f.env, SHA, f.transport);
+    const partial = record(report, "api:partial");
+    expect(partial.data.scaling).toBeUndefined();
+    expect(partial.data.template.scaling).toBeUndefined();
+    expect(partial.data.template.containers).toEqual([{}]);
+    expect(() => c.serialize(report)).not.toThrow();
+  });
+  it.each([
+    "missing-image",
+    "missing-runtime",
+    "missing-ingress",
+    "bool",
+    "int32",
+    "enum",
+    "traffic",
+    "extra",
+    "unknown-error",
+  ])("classifies %s with no raw or invented field names", async (mode) => {
+    const f = ownedNumeric();
+    const body = service(f);
+    let expected = "TYPE_OR_SCHEMA";
+    if (mode === "missing-image") {
+      delete body.template.containers[0].image;
+      expected = "MISSING_REQUIRED_FIELDS";
+    }
+    if (mode === "missing-runtime") {
+      delete body.template.serviceAccount;
+      expected = "MISSING_REQUIRED_FIELDS";
+    }
+    if (mode === "missing-ingress") {
+      delete body.ingress;
+      expected = "MISSING_REQUIRED_FIELDS";
+    }
+    if (mode === "bool")
+      body.template.containers[0].resources = { cpuIdle: SENTINEL };
+    if (mode === "int32") body.scaling = { minInstanceCount: 2147483648 };
+    if (mode === "enum") body.scaling = { scalingMode: SENTINEL };
+    if (mode === "traffic") {
+      body.trafficStatuses[0].percent = 101;
+      expected = "TRAFFIC";
+    }
+    if (mode === "extra") {
+      body.template[SENTINEL] = SENTINEL;
+      expected = "UNEXPECTED_FIELDS";
+    }
+    const transport =
+      mode === "unknown-error"
+        ? async (d: any) => {
+            if (new URL(d.url).pathname.endsWith("/services/prod-api"))
+              throw Object.assign(Error(SENTINEL), {
+                diagnosis: SENTINEL,
+                observedResource: SENTINEL,
+              });
+            return f.transport(d);
+          }
+        : f.transport;
+    if (mode === "unknown-error") expected = "UNKNOWN";
+    const report = await c.collect(f.env, SHA, transport);
+    expect(record(report)).toMatchObject({
+      status: "blocked",
+      diagnosis: expected,
+    });
+    expect(record(report, "api:partial")).toBeUndefined();
+    expect(c.serialize(report)).not.toContain(SENTINEL);
+  });
+  it.each([
+    "foreign-name",
+    "foreign-parent",
+    "bad-cpu",
+    "bad-count",
+    "bad-mode",
+    "bad-traffic",
+    "extra-key",
+  ])("image failure does not hide %s in partial data", async (mode) => {
+    const f = ownedNumeric();
+    const body = service(f);
+    body.template.containers[0].image = SENTINEL;
+    if (mode === "foreign-name")
+      body.name = body.name.replace(NUMBER, "999999999");
+    if (mode === "foreign-parent")
+      body.latestReadyRevision = body.latestReadyRevision.replace(
+        "services/prod-api/",
+        "services/other/",
+      );
+    if (mode === "bad-cpu")
+      body.template.containers[0].resources = { cpuIdle: SENTINEL };
+    if (mode === "bad-count") body.scaling = { minInstanceCount: -1 };
+    if (mode === "bad-mode") body.scaling = { scalingMode: SENTINEL };
+    if (mode === "bad-traffic") body.trafficStatuses[0].percent = 101;
+    if (mode === "extra-key") body.template[SENTINEL] = SENTINEL;
+    const report = await c.collect(f.env, SHA, f.transport);
+    expect(record(report).status).toBe("blocked");
+    expect(record(report, "api:partial")).toBeUndefined();
+    expect(c.serialize(report)).not.toContain(SENTINEL);
+  });
+  it.each([403, 404])(
+    "keeps HTTP %s truthful and never reads partial data from error bodies",
+    async (status) => {
+      const f = ownedNumeric();
+      f.responses.set(
+        `/v2/projects/${c.TARGET.project}/locations/us-central1/services/prod-api`,
+        { status, body: service(f) },
+      );
+      const report = await c.collect(f.env, SHA, f.transport);
+      expect(record(report)).toMatchObject({
+        status: "blocked",
+        httpStatus: status,
+        code: status === 403 ? "PERMISSION_DENIED" : "MISSING",
+        diagnosis: "UNKNOWN",
+      });
+      expect(record(report, "api:partial")).toBeUndefined();
+      expect(() => c.serialize(report)).not.toThrow();
+    },
+  );
+  it("independent serializer rejects forged partials, unsafe values and diagnostic content", async () => {
+    const f = ownedNumeric();
+    service(f).template.containers[0].image = SENTINEL;
+    const report = await c.collect(f.env, SHA, f.transport);
+    for (const mode of [
+      "image",
+      "runtime",
+      "cpu",
+      "count",
+      "diagnosis",
+      "diagnostic-extra",
+      "raw-name",
+      "no-anchor",
+      "no-block",
+      "no-resource",
+      "wrong-parent",
+      "complete",
+    ] as const) {
+      const changed = structuredClone(report);
+      const partial = record(changed, "api:partial");
+      if (mode === "image")
+        partial.data.template.containers[0].image = SENTINEL;
+      if (mode === "runtime") partial.data.template.serviceAccount = SENTINEL;
+      if (mode === "cpu")
+        partial.data.template.containers[0].resources = { cpuIdle: SENTINEL };
+      if (mode === "count")
+        partial.data.scaling = { minInstanceCount: 2147483648 };
+      if (mode === "diagnosis") record(changed).diagnosis = SENTINEL;
+      if (mode === "diagnostic-extra")
+        record(changed).diagnosticFields = { [SENTINEL]: SENTINEL };
+      if (mode === "raw-name") record(changed).observedResource = SENTINEL;
+      if (mode === "no-anchor")
+        changed.records = changed.records.filter(
+          (r: any) => r.kind !== "project",
+        );
+      if (mode === "no-block")
+        changed.records = changed.records.filter((r: any) => r.id !== "api");
+      if (mode === "no-resource") delete partial.resource;
+      if (mode === "wrong-parent")
+        partial.data.latestCreatedRevision =
+          partial.data.latestCreatedRevision.replace(
+            "services/prod-api/",
+            "services/other/",
+          );
+      if (mode === "complete") changed.collection = "complete";
+      expect(() => c.serialize(changed)).toThrow();
+    }
+  });
+});
+
+describe("literal legacy field old-to-new exported-function regressions", () => {
+  it("diagnoses literal legacy image without raw field content", async () => {
+    const f = fixture({}, c);
+    service(f).template.containers[0].image = SENTINEL;
+    const report = await c.collect(f.env, SHA, f.transport);
+    expect(record(report)).toMatchObject({
+      status: "blocked",
+      code: "MALFORMED_METADATA",
+      diagnosis: "IMAGE_CONTRACT",
+    });
+    expect(c.serialize(report)).not.toContain(SENTINEL);
+  });
+  it("retains literal owned independent CPU/scaling in explicit partial record", async () => {
+    const f = fixture({}, c);
+    const body = service(f);
+    body.template.containers[0].image = SENTINEL;
+    body.template.containers[0].resources = { cpuIdle: false };
+    body.template.scaling = { minInstanceCount: 0, maxInstanceCount: 7 };
+    const report = await c.collect(f.env, SHA, f.transport);
+    expect(record(report, "api:partial")).toMatchObject({
+      status: "partial",
+      data: {
+        template: {
+          containers: [{ resources: { cpuIdle: false } }],
+          scaling: { minInstanceCount: 0, maxInstanceCount: 7 },
+        },
+      },
+    });
+    expect(c.serialize(report)).not.toContain(SENTINEL);
+  });
+});

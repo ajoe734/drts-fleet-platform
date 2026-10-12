@@ -159,6 +159,11 @@ function canonicalRunName(value, projectNumber) {
   return value.replace(`projects/${project}/`, `projects/${TARGET.project}/`);
 }
 function runIdentity(data, expected, kind, projectNumber) {
+  const suffix = kind === "job" ? "jobs" : "services";
+  const shape = new RegExp(
+    `^projects/${TARGET.project}/locations/${TARGET.region}/${suffix}/[a-z][a-z0-9-]{0,62}${kind === "revision" ? "/revisions/[a-z][a-z0-9-]{0,62}" : ""}$`,
+  );
+  if (!shape.test(expected)) fail("IDENTITY_MISMATCH", "RESOURCE_IDENTITY");
   if (canonicalRunName(data.name, projectNumber) !== expected)
     fail("IDENTITY_MISMATCH", "RESOURCE_IDENTITY");
   if (kind === "service") {
@@ -175,6 +180,13 @@ function runIdentity(data, expected, kind, projectNumber) {
         fail("IDENTITY_MISMATCH", "REVISION_PARENT");
     }
   }
+}
+function trafficIdentity(data) {
+  if (
+    data.trafficStatuses.some((t) => !t.revision || !integer(t.percent)) ||
+    data.trafficStatuses.reduce((a, t) => a + t.percent, 0) !== 100
+  )
+    fail("INSUFFICIENT_OBSERVATION", "TRAFFIC");
 }
 const imageType = str(
   /^us-central1-docker\.pkg\.dev\/(?:drts-prod-devcc-20260825\/[a-z0-9_-]+|drts-dev-devcc-20260825\/drts)\/(?:api|platform-admin-web|ops-console-web|fleet-partner-portal-web|tenant-console-web|bank-console-web|referral-embed-web|enterprise-dispatch-web|channel-partner-portal-web|passenger-app-web|migrate)(?:@sha256:[a-f0-9]{64}|:[a-f0-9]{40})$/,
@@ -370,6 +382,50 @@ function requireFields(value, keys) {
   if (keys.some((k) => value[k] === undefined))
     fail("INSUFFICIENT_OBSERVATION", "MISSING_REQUIRED_FIELDS");
 }
+// A failed image/runtime contract does not authorize storing that value. This
+// projection walks the ORIGINAL schema: unknown keys and all other bad types
+// still reject the entire partial observation. It is never used for success.
+function independentRunFields(value, schema) {
+  if (schema === imageType || schema === revisionSchema.serviceAccount)
+    return undefined;
+  if (typeof schema === "function") return validate(value, schema);
+  if (Array.isArray(schema)) {
+    if (!Array.isArray(value) || value.length > LIMITS.pageSize)
+      fail("MALFORMED_METADATA", "TYPE_OR_SCHEMA");
+    return value.map((v) => independentRunFields(v, schema[0]));
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    fail("MALFORMED_METADATA", "TYPE_OR_SCHEMA");
+  const result = {};
+  for (const key of Object.keys(value)) {
+    if (!Object.hasOwn(schema, key))
+      fail("UNEXPECTED_FIELDS", "UNEXPECTED_FIELDS");
+    const selected = independentRunFields(value[key], schema[key]);
+    if (selected !== undefined) result[key] = selected;
+  }
+  return result;
+}
+function independentRunSchema(schema) {
+  if (Array.isArray(schema)) return [independentRunSchema(schema[0])];
+  if (typeof schema !== "object") return schema;
+  return Object.fromEntries(
+    Object.entries(schema)
+      .filter(
+        ([, type]) =>
+          type !== imageType && type !== revisionSchema.serviceAccount,
+      )
+      .map(([key, type]) => [key, independentRunSchema(type)]),
+  );
+}
+const partialSchemas = freezeSchema({
+  service: independentRunSchema(schemas.service),
+  revision: independentRunSchema(schemas.revision),
+});
+const PARTIAL_DIAGNOSES = Object.freeze([
+  "IMAGE_CONTRACT",
+  "EXPECTED_IMAGE",
+  "RUNTIME_IDENTITY",
+]);
 const OPTIONAL_SECRETS = [
   "TENANT_OIDC_JWT_PUBLIC_KEY",
   "OIDC_CLIENT_SECRET",
@@ -712,6 +768,7 @@ const SAFE_DIAGNOSES = Object.freeze([
   "MISSING_REQUIRED_FIELDS",
   "TRAFFIC",
 ]);
+const failureObservations = new WeakMap();
 function errorRecord(op, error) {
   const resource =
     op.kind === "account"
@@ -726,6 +783,7 @@ function errorRecord(op, error) {
     kind: op.kind,
     resource,
     status: "blocked",
+    ...(failureObservations.get(error) || {}),
     diagnosis: SAFE_DIAGNOSES.includes(error?.diagnosis)
       ? error.diagnosis
       : "UNKNOWN",
@@ -779,6 +837,41 @@ async function collect(env, head, transport) {
         data: { items, pages: e.pages },
       });
   };
+  const runFailure = (op, error, body) => {
+    if (!["service", "job", "revision"].includes(op.kind)) return;
+    try {
+      canonicalRunName(body?.name, projectNumber);
+      failureObservations.set(error, { observedResource: body.name });
+    } catch {
+      /* Unsafe/unanchored spelling is not reportable. */
+    }
+    if (
+      !partialSchemas[op.kind] ||
+      !PARTIAL_DIAGNOSES.includes(error?.diagnosis)
+    )
+      return;
+    try {
+      // Identity and immediate parent first, then every independent type/key.
+      runIdentity(
+        body,
+        new URL(op.url).pathname.slice(4),
+        op.kind,
+        projectNumber,
+      );
+      const data = independentRunFields(body, schemas[op.schemaKey]);
+      validate(data, partialSchemas[op.kind]);
+      if (op.kind === "service" && data.trafficStatuses !== undefined)
+        trafficIdentity(data);
+      records.push({
+        ...errorRecord(op, error),
+        id: `${op.id}:partial`,
+        status: "partial",
+        data,
+      });
+    } catch {
+      /* No partial data if another field/identity is not safe. */
+    }
+  };
   const read = async (op) => {
     let next,
       pages = 0;
@@ -806,7 +899,13 @@ async function collect(env, head, transport) {
           e.httpStatus = result.status;
           throw e;
         }
-        const body = validate(result.body, schemas[op.schemaKey]);
+        let body;
+        try {
+          body = validate(result.body, schemas[op.schemaKey]);
+        } catch (e) {
+          runFailure(op, e, result.body);
+          throw e;
+        }
         if (!op.listKey) return body;
         values.push(...(body[op.listKey] || []));
         next = body.nextPageToken;
@@ -821,8 +920,9 @@ async function collect(env, head, transport) {
     }
   };
   for (const op of [...plan.operations]) {
+    let data;
     try {
-      const data = await read(op);
+      data = await read(op);
       if (["backends", "negs"].includes(op.kind)) {
         rawLists[op.kind] = data.items;
         continue;
@@ -868,18 +968,14 @@ async function collect(env, head, transport) {
             "latestCreatedRevision",
             "trafficStatuses",
           ]);
-          if (
-            data.trafficStatuses.some(
-              (t) => !t.revision || !integer(t.percent),
-            ) ||
-            data.trafficStatuses.reduce((a, t) => a + t.percent, 0) !== 100
-          )
-            fail("INSUFFICIENT_OBSERVATION", "TRAFFIC");
-          const revisions = new Set([
-            data.latestReadyRevision,
-            data.latestCreatedRevision,
-            ...data.trafficStatuses.map((t) => t.revision),
-          ]);
+          trafficIdentity(data);
+          const revisions = new Set(
+            [
+              data.latestReadyRevision,
+              data.latestCreatedRevision,
+              ...data.trafficStatuses.map((t) => t.revision),
+            ].map((r) => canonicalRunName(r, projectNumber)),
+          );
           if (revisions.size > 10) fail("RESPONSE_BOUND_EXCEEDED");
           for (const revision of revisions) {
             const operation = Object.freeze({
@@ -988,13 +1084,15 @@ async function collect(env, head, transport) {
         data,
       });
     } catch (e) {
+      if (data) runFailure(op, e, data);
       partialRecord(op, e);
       records.push(errorRecord(op, e));
     }
   }
   for (const op of revisionsToRead) {
+    let data;
     try {
-      const data = await read(op);
+      data = await read(op);
       requireFields(data, ["name", "containers", "serviceAccount"]);
       runIdentity(
         data,
@@ -1018,6 +1116,7 @@ async function collect(env, head, transport) {
         data,
       });
     } catch (e) {
+      if (data) runFailure(op, e, data);
       records.push(errorRecord(op, e));
     }
   }
@@ -1176,15 +1275,56 @@ function serialize(report) {
         "iap-selection",
         "auth",
       ),
-      status: enumOf("observed", "blocked", "unverified"),
+      status: enumOf("observed", "blocked", "unverified", "partial"),
       resource: str(/^[a-zA-Z0-9_:/-]{1,400}$/),
+      observedResource: runName,
       httpStatus: (v) => Number.isInteger(v) && v >= 100 && v <= 599,
       code: enumOf(...SAFE_CODES),
       diagnosis: enumOf(...SAFE_DIAGNOSES),
       data: () => true,
     });
     requireFields(record, ["id", "kind", "status"]);
-    if (record.status === "observed") {
+    if (record.observedResource !== undefined) {
+      if (!["service", "job", "revision"].includes(record.kind)) fail();
+      canonicalRunName(record.observedResource, projectNumber);
+    }
+    if (record.status === "partial") {
+      if (
+        !partialSchemas[record.kind] ||
+        !record.code ||
+        !PARTIAL_DIAGNOSES.includes(record.diagnosis)
+      )
+        fail();
+      requireFields(record, ["resource", "data", "observedResource"]);
+      validate(record.data, partialSchemas[record.kind]);
+      runIdentity(
+        record.data,
+        canonicalRunName(record.resource),
+        record.kind,
+        projectNumber,
+      );
+      if (
+        record.kind === "service" &&
+        record.data.trafficStatuses !== undefined
+      )
+        trafficIdentity(record.data);
+      if (record.data.name !== record.observedResource) fail();
+      const blocked = report.records.find(
+        (r) =>
+          r.id === record.id.replace(/:partial$/, "") &&
+          r.kind === record.kind &&
+          r.status === "blocked" &&
+          r.resource === record.resource &&
+          r.code === record.code &&
+          r.diagnosis === record.diagnosis,
+      );
+      if (!record.id.endsWith(":partial") || !blocked) fail();
+    } else if (record.status === "observed") {
+      if (
+        record.diagnosis !== undefined ||
+        record.observedResource !== undefined
+      )
+        fail();
       if (record.code || !outputSchemas[record.kind]) fail();
       requireFields(record, ["data"]);
       validate(
