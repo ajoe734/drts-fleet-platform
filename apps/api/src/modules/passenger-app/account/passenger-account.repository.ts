@@ -8,6 +8,7 @@ import type {
   PassengerAccountTransaction,
   SessionRecord,
 } from "./passenger-account.port";
+import { assertNoUnpaidPassengerRides } from "../payment/unpaid-payment.guard";
 
 function iso(value: unknown): string {
   return new Date(value as string).toISOString();
@@ -193,6 +194,10 @@ export class PostgresPassengerAccountTransaction implements PassengerAccountTran
     );
   }
   async anonymize(id: string, now: string) {
+    // Covers both DELETE /me and last-identity Facebook provider deletion.
+    // Existing session revocation and anonymization share this transaction;
+    // debt refusal rolls back every preceding mutation.
+    await assertNoUnpaidPassengerRides(this.client, id, "deletion");
     await this.client.query(
       `UPDATE passenger.accounts SET display_name=NULL, contact_phone=NULL,
       contact_phone_verified=false, verified_phone=NULL, verified_email=NULL, contact_consent=false,

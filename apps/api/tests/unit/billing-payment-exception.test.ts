@@ -191,6 +191,9 @@ describe("multi-taxi payment exception read authority", () => {
     expect(transactionQuery.mock.calls.map(([sql]) => sql)).toEqual([
       "BEGIN",
       expect.stringContaining(
+        "SELECT drts_passenger_id FROM passenger.payment_charge_records",
+      ),
+      expect.stringContaining(
         "UPDATE billing.multi_taxi_payment_recovery_commands",
       ),
       expect.stringContaining("UPDATE billing.multi_taxi_passenger_payments"),

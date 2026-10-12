@@ -3,6 +3,7 @@ import type {
   ConsumerNotificationOutboxRecord,
   OrderPartnerNotificationRoute,
   PartnerEntryNotificationBinding,
+  PartnerPassengerEventType,
 } from "@drts/contracts";
 import { PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME } from "@drts/contracts";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -24,7 +25,9 @@ import {
 
 export function harness(productionHttps = false) {
   const now = new Date().toISOString();
-  const row: ConsumerNotificationOutboxRecord = {
+  const row: ConsumerNotificationOutboxRecord & {
+    eventType: PartnerPassengerEventType;
+  } = {
     outboxId: "outbox-1",
     orderId: "order-1",
     passengerSubjectRef: "subject-1",
