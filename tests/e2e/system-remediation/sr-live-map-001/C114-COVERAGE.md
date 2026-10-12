@@ -1760,3 +1760,106 @@ is general compatibility guidance, and the [CDP Fetch reference](https://chromed
 describes the external protocol. Neither is runtime proof of these five failures
 or authority to widen the exact allowlist. No such widening was made. The
 owner does not alter scheduled promotion/production gates or issue #2589.
+
+### Unlocked upstream dependency integration and fresh candidate (2026-10-12)
+
+Supervisor resumed this same task at `2026-10-12T16:44:54Z` after the separate
+`SR-PAX-AUTH-UI-CONSENT-READINESS-20261012` source dependency completed. The
+owner read the original brief, actual hosted artifacts, callback-drain feedback
+and the dependency's original evidence ledger. The five actual hosted errors
+remain **UNKNOWN**; no diagnostic hosted run has resolved them yet.
+
+Historical candidate **`2b3d38b3270f0760016335f10fd334fb2a25ee31`**, generation
+`95b8eae420a4416bbb004657a4527292`, received Codex2's independent source approval
+at `2026-10-12T15:42:07Z`. That approval was limited to diagnostics, callback
+accounting and security. Its regular CI
+[38271154837](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38271154837)
+succeeded; integration CI
+[38271154848](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38271154848)
+failed. The completed unit job `114886281399` reported **1 failed / 8077 passed /
+75 skipped** tests (1 failed / 583 passed / 11 skipped files). The failed
+`auth-ui.test.tsx` phone case expected navigation to `/` after interacting with
+disabled consent controls. The old candidate was not merged; its source review
+and successful individual jobs do not certify integration or live acceptance.
+
+Dependency [PR #2592](https://github.com/ajoe734/drts-fleet-platform/pull/2592)
+merged as **`9c5b5c826c3912a367e20a115bd79385ca176c65`**, with separately reviewed
+source candidate `076b9c0ca8c6784765ceb32b1ebffe35cb1b4fa0`. Its original ledger
+retains frozen navigation failures, actual client/BFF/OTP/account paths, all
+65 UI cases / 69 existing assertion expressions, and strict TSX fixture repair.
+This map owner did not copy, cherry-pick or modify those files. After normal
+fetch confirmed the old PR head and terminal CI, an authorized normal merge of
+`origin/dev` created and ordinarily pushed anchor
+**`cb887427795751b80b06546aa5b18f565db4d8c4`**. Both the previous map candidate and
+the dependency merge are ancestors. Relative to `origin/dev`, only the original
+three allocated map spec/test/ledger paths differ; the auth helper, target gate,
+workflow, product code and authorization defaults retain their original bytes.
+
+New machine-specific evidence lives at the canonical absolute path
+`/home/lupin/workspace/drts-fleet-platform/.local/map-browser-transport-resume-20261012/`.
+The earlier owner logs cited above were no longer available to the independent
+reviewer; this continuation retains fresh replay scripts and logs outside the
+worker worktree. `replay.mjs` uses Vitest 4.1.4 `startVitest` and a read-only
+Vite load plugin to execute the actual spec/tests/auth/gate from immutable Git
+objects at their original module identities. It does not reset or switch the
+worktree, copy the policy, mock the functions being verified, start a browser or
+make HTTP requests. Only the existing tests' Playwright/CDP and evidence-file
+boundaries are mocked. Vite stack excerpts can show current disk line numbers;
+the executed frozen bytes are identified by Git SHA and source hashes.
+`EVIDENCE` in the replay commands denotes that canonical evidence directory.
+
+| Finding / required acceptance                                 | Source and old → current result                                                                                                                                                                                   | Commands, exits and fresh evidence                                                                                                                                              | Outstanding limits                                                                                                                                   |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F-TRANSPORT-DIAGNOSTICS / truthful count and privacy          | `google-map-provider.spec.ts` handler / navigation / fixed classifications; `7fca0609a` spec byte-identical to frozen17a: 9 failed / 28 passed → current source: all 66 passed                                    | `node "$EVIDENCE/replay.mjs" "$PWD" 7fca0609a`, exit **1**, `frozen17a-replay.log`; `... HEAD` at cb8874277, exit **0**, `current-transport-replay.log`                         | Demonstrates diagnostic omissions, not the real five-error cause                                                                                     |
+| F-TRANSPORT-EARLY-EVIDENCE-RACE                               | Actual callback recovery / final snapshot; `19a95e3a8`: 1 failed / 37 passed → current recovery assertion passes                                                                                                  | Same replay command with `19a95e3a8`, exit **1**, `early-evidence-race-replay.log`; current 66-case replay exit **0**                                                           | External delayed CDP promises, not hosted Chromium                                                                                                   |
+| F-TRANSPORT-UNBOUNDED-DRAIN                                   | Actual cumulative drain and detach; `c4634094c` spec byte-identical to b8f85b: stalled continue/block/detach and continuous arrivals give 4 failed / 62 passed → current four cases pass within fake-clock budget | Same replay command with `c4634094c`, exit **1**, `unbounded-drain-replay.log`; current 66-case replay exit **0**                                                               | Timeout remains failed evidence with truthful unfinished callbacks; never a pass waiver                                                              |
+| Prior consent CI dependency                                   | Original upstream auth UI test / fixture, unchanged in this task; terminal old CI failed phone navigation → all 519 affected auth tests pass after normal upstream merge                                          | Combined command below, exit **0**, `map-auth-isolated-regression.log`: **33 files / 798 tests / zero skips**, comprising map **12 / 279** and auth **21 / 519**                | Unit boundaries remain as documented by original auth task; no held PAX/SMS/Ride/Payment/native/provider authority or full-goal acceptance           |
+| `map_browser_transport_owned_failure_and_security_regression` | All three actual frozen failures plus current fixed source, original exact-origin / per-hop stripping / forbidden-target / privacy / runner-gate cases retained                                                   | Fresh frozen exits **1**, current transport **66 pass** and combined **798 pass**; root strict TypeScript / scoped lint / source format exit **0**                              | Independent reviewer/operator evaluates this key; source checks do not prove five hosted errors repaired                                             |
+| `map_browser_transport_exact_sha_review_ci_merge`             | New final head on existing branch / PR #2590; final commit changes this ledger only from cb8874277                                                                                                                | Final local / remote / PR identity supplied by owner `handoff`; fresh Codex2 review and same-SHA regular + integration CI / protected merge **PENDING**                         | Historical 2b3 review / CI and dependency 076b CI cannot certify the new candidate                                                                   |
+| `map_browser_transport_deployed_chromium_positive_evidence`   | Unchanged original hosted profile with exact independently reviewed harness and freshly pinned already-deployed runtime                                                                                           | **PENDING**, Supervisor-only authorized hosted diagnostic / positive run, both decoded pages, zero transport/Google/target failures, service-area/freshness and revoked cleanup | Actual five triggers remain UNKNOWN; if diagnostic run fails, preserve artifacts and return this same task with the real trigger; no unchanged retry |
+
+All checks started by this owner finished and their results were read. Versions:
+Node **22.23.2**, pnpm **10.33.0**, Vitest **4.1.4**, TypeScript **5.9.3**.
+The combined regression command was:
+
+```bash
+pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001 \
+  tests/unit/pax-web-auth-ui-20261009 tests/unit/pax-web-shell-20261009 \
+  tests/unit/pax-account-session-20261009 tests/unit/pax-otp-20261009 \
+  tests/unit/pax-oidc-login-20261009 tests/unit/pax-facebook-login-20261009 \
+  --exclude '**/fixture-provisioning.postgres.test.ts'
+pnpm exec tsc -p tsconfig.json --noEmit --incremental false
+pnpm exec eslint tests/live/google-map-provider.spec.ts \
+  tests/e2e/system-remediation/sr-live-map-001/browser-auth.ts \
+  tests/unit/system-remediation/sr-live-map-001/browser-transport.test.ts --max-warnings=0
+```
+
+Root compiler `strict`, `noUncheckedIndexedAccess` and
+`exactOptionalPropertyTypes` are unchanged. PostgreSQL was explicitly **not
+run**, rather than counted as pass. Initial shared-link checks are retained
+separately: map + auth directory run exit **1**, 11 suites failed to load /
+4 files passed / 102 tests passed (`map-auth-regression.log`); root TypeScript
+exit **2** (`root-typecheck.log`), with missing NestJS / client dependencies.
+These are dependency setup failures, not source reproductions. The owner
+unlinked only this worktree's **22** `node_modules` symlinks, saved their targets
+in `dependency-links.txt`, and left shared targets intact. Isolated
+`pnpm install --offline --frozen-lockfile --ignore-scripts` then exited **0**;
+`install.log` records no downloads. No tracked dependency/config files changed.
+
+Fresh log SHA256:
+
+- Frozen17a: `ab9e435be900431b906150d842940d402f5897790558d685e202c3d554aa4682`.
+- Early evidence race: `cdf82d8748ce2c16c0eb70ad41b17e75c8c88c6d183f81fd49b2e41631e09761`.
+- Unbounded drain: `ddcb3fb14ae80be7713849fb9b4b88e44f1553a4b700f771a3d6f25800fec600`.
+- Current 66-case replay: `877f1f8b890266b0d17d06c6d39fab26d035be188c32906380b7769734102ec5`.
+- Combined 798-case regression: `5216cf22f4788948baebcdb2c4b35d203ff9916cfee4d027af957ab6d0ee1bf5`.
+
+Spec/test/auth/gate hashes remain exactly the final hashes recorded above.
+Source evidence is ready for a **fresh** independent candidate review. The
+existing three map acceptance keys and regression issue #2589 remain open;
+original C114/Claude2 credits, 44 issues / 134 capabilities / 15 scope groups,
+Android + iOS, original 47 obligations and C123 four-ancestor HOLD are preserved.
+No product runtime was started on this VM and no owner hosted dispatch,
+credential mint, deployment, cloud/provider/secret/production mutation or
+acceptance recording occurred. The final SHA/generation is written only through
+the existing candidate lifecycle; the owner does not call `done`.
