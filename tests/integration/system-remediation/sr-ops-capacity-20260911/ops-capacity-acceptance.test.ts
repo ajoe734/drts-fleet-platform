@@ -101,34 +101,35 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         };
       };
       const { AppModule } = await import("../../../../apps/api/src/app.module");
-      const { JwtAuthService } = await import(
-        "../../../../apps/api/src/common/auth/jwt-auth.service"
-      );
-      const { IdentityRepository } = await import(
-        "../../../../apps/api/src/modules/identity/identity.repository"
-      );
-      const { AUTH_SCOPE_PRESETS } = await import(
-        "../../../../apps/api/src/common/auth/auth.constants"
-      );
-      const { SecurityEventsService } = await import(
-        "../../../../apps/api/src/modules/security-events/security-events.service"
-      );
-      const { TenantPartnerService } = await import(
-        "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service"
-      );
-      const { detectAuthEnvironment } = await import(
-        "../../../../apps/api/src/config/auth-startup-config"
-      );
-      const { buildCapacityPlan, countsForDuration } = await import(
-        "../../../../tools/system-remediation/ops-capacity/plan-builder.mjs"
-      );
+      const { JwtAuthService } =
+        await import("../../../../apps/api/src/common/auth/jwt-auth.service");
+      const { IdentityRepository } =
+        await import("../../../../apps/api/src/modules/identity/identity.repository");
+      const { AUTH_SCOPE_PRESETS } =
+        await import("../../../../apps/api/src/common/auth/auth.constants");
+      const { SecurityEventsService } =
+        await import("../../../../apps/api/src/modules/security-events/security-events.service");
+      const { TenantPartnerService } =
+        await import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.service");
+      const { detectAuthEnvironment } =
+        await import("../../../../apps/api/src/config/auth-startup-config");
+      const { buildCapacityPlan, countsForDuration } =
+        await import("../../../../tools/system-remediation/ops-capacity/plan-builder.mjs");
       // capacity.mjs belongs to the already-accepted SR-OPS-PROOF-001 (C122)
       // task and is out of this task's write scope, so it has no .d.mts
       // declaration file; suppress the resulting no-declaration error here
       // rather than adding one outside this task's owned paths.
       // @ts-expect-error -- TS7016: no declaration file for capacity.mjs
-      const { runPlan } = await import("../../../../tools/system-remediation/ops-proof/capacity.mjs");
-      const { readBackOwnedOrders, readBackReportJobs, summarizeReadback, summarizeLag, assertAcceptancePassed } =
+      const { runPlan } =
+        await import("../../../../tools/system-remediation/ops-proof/capacity.mjs");
+      const {
+        readBackOwnedOrders,
+        readBackReportJobs,
+        summarizeReadback,
+        summarizeLag,
+        summarizeDispatchEvidence,
+        assertAcceptancePassed,
+      } =
         await import("../../../../tools/system-remediation/ops-capacity/durable-readback.mjs");
 
       const evidenceDir = resolve(
@@ -211,7 +212,9 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
             } catch (parseError) {
               throw new Error(
                 `Dispatchable order seed #${index} returned HTTP ${response.status} with unparseable JSON body: ${rawBody.slice(0, 500)} (${
-                  parseError instanceof Error ? parseError.message : String(parseError)
+                  parseError instanceof Error
+                    ? parseError.message
+                    : String(parseError)
                 })`,
               );
             }
@@ -228,7 +231,9 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           Array.from({ length: Math.min(40, dispatchCount) }, seedWorker),
         );
         expect(orderIds).toHaveLength(dispatchCount);
-        expect(orderIds.every((id) => typeof id === "string" && id.length > 0)).toBe(true);
+        expect(
+          orderIds.every((id) => typeof id === "string" && id.length > 0),
+        ).toBe(true);
 
         // --- Mint a real tenant JWT via the real HTTP bootstrap-session route.
         const tenantSessionResponse = await fetch(
@@ -236,7 +241,10 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ email: TENANT_DISPATCH_EMAIL, tenantId: TENANT_ID }),
+            body: JSON.stringify({
+              email: TENANT_DISPATCH_EMAIL,
+              tenantId: TENANT_ID,
+            }),
           },
         );
         if (!tenantSessionResponse.ok) {
@@ -287,9 +295,10 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         const platformPrincipal = await identityRepository.findPrincipalById(
           "principal_platform_admin_default",
         );
-        const platformMemberships = await identityRepository.findMembershipsByPrincipalId(
-          "principal_platform_admin_default",
-        );
+        const platformMemberships =
+          await identityRepository.findMembershipsByPrincipalId(
+            "principal_platform_admin_default",
+          );
         const platformMembership = platformMemberships.find(
           (membership: { membershipId: string }) =>
             membership.membershipId === "membership_platform_admin_default",
@@ -299,9 +308,10 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
             "Default platform admin account was not durably provisioned by IdentityRepository.onModuleInit; cannot mint a real platform-realm JWT.",
           );
         }
-        const platformRoleBindings = await identityRepository.findRoleBindingsByMembershipId(
-          platformMembership.membershipId,
-        );
+        const platformRoleBindings =
+          await identityRepository.findRoleBindingsByMembershipId(
+            platformMembership.membershipId,
+          );
         const platformTokenVersion = Math.max(
           Date.parse(platformPrincipal.updatedAt),
           Date.parse(platformMembership.updatedAt),
@@ -353,7 +363,6 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         const recordsPath = resolve(evidenceDir, `${runTag}.jsonl`);
         let peakReport = 0;
         let peakDispatchable = 0;
-        let isLawful = false;
         let isPolling = true;
         let pollError: Error | null = null;
 
@@ -368,31 +377,45 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
                   .split("\n")
                   .filter((line) => line)
                   .map((line) => JSON.parse(line))
-                  .filter((row) => row.workload === "report" && !row.error && row.resourceIds?.jobId)
+                  .filter(
+                    (row) =>
+                      row.workload === "report" &&
+                      !row.error &&
+                      row.resourceIds?.jobId,
+                  )
                   .map((row) => row.resourceIds!.jobId);
-              } catch (e) {
-                // Ignore if file is missing or JSON is mid-write
+              } catch {
+                // The file does not exist before the first producer write.
               }
 
               if (currentJobIds.length > 0) {
-                const { rows: reportRows } = await pool.query(`SELECT count(*) FROM admin.phase1_report_jobs WHERE status IN ('queued', 'running') AND job_id = ANY($1::text[])`, [currentJobIds]);
-                const currentReport = parseInt(String(reportRows[0]?.count || "0"), 10);
+                const { rows: reportRows } = await pool.query(
+                  `SELECT count(*) FROM admin.phase1_report_jobs WHERE status IN ('queued', 'running') AND job_id = ANY($1::text[])`,
+                  [currentJobIds],
+                );
+                const currentReport = parseInt(
+                  String(reportRows[0]?.count || "0"),
+                  10,
+                );
                 if (currentReport > peakReport) peakReport = currentReport;
               }
 
-              const { rows: dispatchRows } = await pool.query(`SELECT count(*) FROM ops.phase1_owned_orders WHERE status IN ('ready_for_dispatch', 'delayed_queue', 'no_supply', 'preassigned') AND order_id = ANY($1::text[])`, [orderIds]);
-              const currentDispatchable = parseInt(String(dispatchRows[0]?.count || "0"), 10);
-              if (currentDispatchable > peakDispatchable) peakDispatchable = currentDispatchable;
-
-              const { rows: lawfulRows } = await pool.query(`SELECT count(*) FROM ops.phase1_owned_orders WHERE status IN ('delayed_queue', 'no_supply') AND order_id = ANY($1::text[])`, [orderIds]);
-              const currentLawful = parseInt(String(lawfulRows[0]?.count || "0"), 10);
-              if (currentLawful >= 50) isLawful = true;
+              const { rows: dispatchRows } = await pool.query(
+                `SELECT count(*) FROM ops.phase1_owned_orders WHERE status IN ('ready_for_dispatch', 'delayed_queue', 'no_supply', 'preassigned') AND order_id = ANY($1::text[])`,
+                [orderIds],
+              );
+              const currentDispatchable = parseInt(
+                String(dispatchRows[0]?.count || "0"),
+                10,
+              );
+              if (currentDispatchable > peakDispatchable)
+                peakDispatchable = currentDispatchable;
             } catch (e) {
               pollError = e instanceof Error ? e : new Error(String(e));
               isPolling = false;
             }
             if (isPolling) {
-              await new Promise(resolve => setTimeout(resolve, 2000));
+              await new Promise((resolve) => setTimeout(resolve, 2000));
             }
           }
         };
@@ -414,9 +437,15 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         // a short/mock/skipped stand-in.
         expect(summary.durationSeconds).toBe(DURATION_SECONDS);
         expect(summary.fullBurstSchedule).toBe(true);
-        expect(summary.workflows.booking.requests).toBe(plan.workloads.booking.length);
-        expect(summary.workflows.dispatch.requests).toBe(plan.workloads.dispatch.length);
-        expect(summary.workflows.report.requests).toBe(plan.workloads.report.length);
+        expect(summary.workflows.booking.requests).toBe(
+          plan.workloads.booking.length,
+        );
+        expect(summary.workflows.dispatch.requests).toBe(
+          plan.workloads.dispatch.length,
+        );
+        expect(summary.workflows.report.requests).toBe(
+          plan.workloads.report.length,
+        );
         expect(plan.workloads.booking).toHaveLength(900);
         expect(plan.workloads.dispatch).toHaveLength(4500);
         expect(plan.workloads.report).toHaveLength(450);
@@ -441,18 +470,35 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         // as `error` never enters this claim -- an honestly reported
         // failure is not a fabricated success.
         const claimedBookingOrderIds = records
-          .filter((row) => row.workload === "booking" && !row.error && row.resourceIds?.orderId)
+          .filter(
+            (row) =>
+              row.workload === "booking" &&
+              !row.error &&
+              row.resourceIds?.orderId,
+          )
           .map((row) => row.resourceIds!.orderId!);
         const claimedDispatchOrderIds = records
           .filter((row) => row.workload === "dispatch" && !row.error)
           .map((row) => row.path.split("/")[3]!);
         const claimedReportJobIds = records
-          .filter((row) => row.workload === "report" && !row.error && row.resourceIds?.jobId)
+          .filter(
+            (row) =>
+              row.workload === "report" && !row.error && row.resourceIds?.jobId,
+          )
           .map((row) => row.resourceIds!.jobId!);
 
-        const bookingReadback = await readBackOwnedOrders(pool, claimedBookingOrderIds);
-        const dispatchReadback = await readBackOwnedOrders(pool, claimedDispatchOrderIds);
-        const reportReadback = await readBackReportJobs(pool, claimedReportJobIds);
+        const bookingReadback = await readBackOwnedOrders(
+          pool,
+          claimedBookingOrderIds,
+        );
+        const dispatchReadback = await readBackOwnedOrders(
+          pool,
+          claimedDispatchOrderIds,
+        );
+        const reportReadback = await readBackReportJobs(
+          pool,
+          claimedReportJobIds,
+        );
 
         const bookingSummary = summarizeReadback(
           claimedBookingOrderIds,
@@ -472,9 +518,15 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
 
         const events: { time: number; delta: number }[] = [];
         for (const record of records) {
-          if (record.workload === "booking" && typeof record.latencyMs === "number") {
-             events.push({ time: record.launchedMs, delta: 1 });
-             events.push({ time: record.launchedMs + record.latencyMs, delta: -1 });
+          if (
+            record.workload === "booking" &&
+            typeof record.latencyMs === "number"
+          ) {
+            events.push({ time: record.launchedMs, delta: 1 });
+            events.push({
+              time: record.launchedMs + record.latencyMs,
+              delta: -1,
+            });
           }
         }
         events.sort((a, b) => a.time - b.time || a.delta - b.delta);
@@ -499,9 +551,9 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           backlog: {
             dispatchable: peakDispatchable,
           },
-          degradation: {
-            isLawful: isLawful,
-          },
+          dispatchOrderIds: orderIds,
+          dispatchEvidence: dispatchReadback,
+          degradation: summarizeDispatchEvidence(dispatchReadback).degradation,
           readback: {
             booking: bookingSummary,
             dispatch: dispatchSummary,
@@ -511,29 +563,10 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
             report: summarizeLag(reportReadback, "queueLagMs"),
             dispatchOrderQueueLag: summarizeLag(dispatchReadback, "lagMs"),
           },
-          dispatchOrderStatusDistribution: dispatchReadback.reduce(
-            (acc: Record<string, number>, row: { status: string }) => {
-              acc[row.status] = (acc[row.status] ?? 0) + 1;
-              return acc;
-            },
-            {} as Record<string, number>,
-          ),
-          dispatchAttemptCoverage: dispatchReadback.reduce(
-            (acc: { attempted: number; unattemptedLawful: number; unattemptedUnlawful: number; unattemptedLawfulReasons: string[] }, row: { orderId: string; status: string; lagMs: number | null }) => {
-              if (row.lagMs !== null) {
-                acc.attempted++;
-              } else {
-                if (row.status === "no_supply" || row.status === "delayed_queue") {
-                  acc.unattemptedLawful++;
-                  acc.unattemptedLawfulReasons.push(row.orderId);
-                } else {
-                  acc.unattemptedUnlawful++;
-                }
-              }
-              return acc;
-            },
-            { attempted: 0, unattemptedLawful: 0, unattemptedUnlawful: 0, unattemptedLawfulReasons: [] },
-          ),
+          dispatchOrderStatusDistribution:
+            summarizeDispatchEvidence(dispatchReadback).distribution,
+          dispatchAttemptCoverage:
+            summarizeDispatchEvidence(dispatchReadback).coverage,
         };
         writeFileSync(
           resolve(evidenceDir, `${runTag}.acceptance.json`),
