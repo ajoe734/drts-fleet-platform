@@ -148,6 +148,25 @@ export class ReportingFilingRepository {
     return job;
   }
 
+  async loadReportJobs(jobIds: string[]): Promise<StoredReportJobRecord[]> {
+    if (!jobIds.length) return [];
+    const result = await this.databaseService!.query<
+      JsonRecordRow & { job_id: string }
+    >(
+      "SELECT job_id, record FROM admin.phase1_report_jobs WHERE job_id = ANY($1::text[])",
+      [jobIds],
+    );
+    return result.rows.map((row) => {
+      const job = this.parseRecord<StoredReportJobRecord>(
+        row.record,
+        "admin.phase1_report_jobs",
+      );
+      if (job.jobId !== row.job_id || !jobIds.includes(job.jobId))
+        throw new Error("Report readback ID mismatch");
+      return job;
+    });
+  }
+
   // Hold a session lock on a dedicated connection through the entire build.
   // Another process cannot recover a live job; process/connection loss releases
   // ownership without an expiring lease permitting two concurrent builders.

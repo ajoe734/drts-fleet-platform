@@ -94,7 +94,8 @@ export function queueFixture(jobs: StoredReportJobRecord[] = []) {
         };
       }
       if (
-        sql.includes("SELECT record") &&
+        (sql.includes("SELECT record") ||
+          sql.includes("SELECT job_id, record")) &&
         sql.includes("admin.phase1_report_jobs")
       ) {
         return {
@@ -102,10 +103,15 @@ export function queueFixture(jobs: StoredReportJobRecord[] = []) {
             .filter(
               (job) =>
                 !params.length ||
-                (job.jobId === params[0] &&
+                ((Array.isArray(params[0])
+                  ? params[0].includes(job.jobId)
+                  : job.jobId === params[0]) &&
                   (!sql.includes("status IN") || eligible(job))),
             )
-            .map((record) => ({ record: structuredClone(record) })),
+            .map((record) => ({
+              job_id: record.jobId,
+              record: structuredClone(record),
+            })),
         };
       }
       return { rows: [], rowCount: 0 };

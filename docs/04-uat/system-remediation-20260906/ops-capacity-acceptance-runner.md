@@ -388,3 +388,11 @@ The production worker also rejects missing existing `DATABASE_URL` rather than
 falling back to an implicit database. Corrected size1 test passes, exit0 with
 11non-selected cases skipped; this narrow probe is not the full regression.
 Failure/probe logs remain under canonical `.local/c123-report-worker-20261012`.
+
+Corrected boundary regression at `879118f15`: affected24files/259tests exit0,
+scoped lint exit0, root typecheck exit2 with no task-owned diagnostics. A final
+cross-worker observation repair also batch-loads this service's known pending
+job IDs from committed SQL. A job completed by another actual worker becomes
+completed in the admitting service's view instead of staying queued forever;
+the regression requires exactly one running and completion write across the
+two services. No get route, authorization or public enum/response is changed.

@@ -71,6 +71,38 @@ describe("report durable HTTP acknowledgement", () => {
 });
 
 describe("actual bounded durable reporting worker", () => {
+  it("refreshes a locally queued view after another actual worker completes its claim", async () => {
+    const f = queueFixture();
+    const accepted = await f.service.createReportJobDurably({
+      jobType: "trip_summary",
+      format: "csv",
+    });
+    const other = new ReportingFilingService(
+      new AuditNotificationService(),
+      new ReportingFilingRepository(f.database as unknown as DatabaseService),
+    );
+    await other.onModuleInit();
+    other.onApplicationBootstrap();
+    try {
+      await vi.waitFor(() =>
+        expect(f.stored.get(accepted.jobId)?.status).toBe("completed"),
+      );
+      expect(f.service.getReportJob(accepted.jobId).status).toBe("queued");
+      f.service.onApplicationBootstrap();
+      await vi.waitFor(() =>
+        expect(f.service.getReportJob(accepted.jobId).status).toBe("completed"),
+      );
+      expect(f.writes.filter((row) => row.status === "running")).toHaveLength(
+        1,
+      );
+      expect(f.writes.filter((row) => row.status === "completed")).toHaveLength(
+        1,
+      );
+    } finally {
+      await Promise.all([f.service.onModuleDestroy(), other.onModuleDestroy()]);
+    }
+  });
+
   it("rejects a missing existing database URI before opening a default claim connection", async () => {
     const f = queueFixture();
     vi.stubEnv("DATABASE_URL", "");

@@ -1397,6 +1397,21 @@ export class ReportingFilingService
   }
 
   private async processNextDurableReport() {
+    // Another instance may own/finish a locally admitted job. Refresh known
+    // pending views from committed rows so those jobs never stay queued forever
+    // merely because this worker correctly declined their duplicate claim.
+    const committedJobs = await this.reportingFilingRepository!.loadReportJobs([
+      ...this.reportQueue.keys(),
+    ]);
+    for (const committed of committedJobs) {
+      this.publishCommittedReport({
+        ...committed,
+        partnerRevenueRows: committed.partnerRevenueRows ?? [],
+        settlementMatrix: committed.settlementMatrix ?? [],
+      });
+      if (!["pending", "queued", "running"].includes(committed.status))
+        this.reportQueue.delete(committed.jobId);
+    }
     const ids =
       await this.reportingFilingRepository!.listRunnableReportJobIds();
     for (const jobId of ids) {
