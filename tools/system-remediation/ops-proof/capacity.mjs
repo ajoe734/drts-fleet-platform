@@ -137,12 +137,27 @@ export async function runPlan(plan, output, provenance) {
   const schedule = Object.keys(baseline).flatMap((family) => plan.workloads[family].map((item, index) => ({
     family, item, sequence: index + 1, scheduledMs: index * 60000 / baseline[family].perMinute,
   }))).sort((a, b) => a.scheduledMs - b.scheduledMs);
+  const familyLastLaunch = {};
   for (const entry of schedule) {
-    const wait = entry.scheduledMs - (performance.now() - start);
-    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    const spacing = 60000 / baseline[entry.family].perMinute;
+    let targetMs = entry.scheduledMs;
+    if (familyLastLaunch[entry.family] !== undefined) {
+      targetMs = Math.max(targetMs, familyLastLaunch[entry.family] + spacing);
+    }
+    while (true) {
+      const wait = targetMs - (performance.now() - start);
+      if (wait > 1) {
+        await new Promise((resolve) => setTimeout(resolve, wait));
+      } else if (wait > 0) {
+        while (performance.now() - start < targetMs) {}
+      } else {
+        break;
+      }
+    }
     // Do not queue and then falsely report the requested arrival rate as met.
     const overloaded = active.size >= plan.maxInFlight;
     const launchedMs = performance.now() - start;
+    if (!overloaded) familyLastLaunch[entry.family] = launchedMs;
     const job = (async () => {
       let result;
       try {
