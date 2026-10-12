@@ -9,7 +9,7 @@ const {
 const SHA = "a".repeat(40),
   PRODUCT = "b".repeat(40),
   SENTINEL = "SECRET_SENTINEL_DO_NOT_STORE";
-function fixture() {
+function fixture(overrides = {}, collector = { TARGET, inventory }) {
   const env = {
     GITHUB_EVENT_NAME: "workflow_dispatch",
     INVENTORY_ENVIRONMENT: "production",
@@ -44,7 +44,8 @@ function fixture() {
   };
   for (const [id, key] of TOPOLOGY)
     env[`PROD_GCP_${key}_SERVICE`] = `prod-${id}`;
-  const plan = inventory(env),
+  Object.assign(env, overrides);
+  const plan = collector.inventory(env),
     responses = new Map();
   const image = (id) => `${plan.registry}/${id}@sha256:${"c".repeat(64)}`;
   const neg = (id) => `prod-${id}-neg`;
