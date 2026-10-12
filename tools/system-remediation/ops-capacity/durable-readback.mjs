@@ -76,3 +76,22 @@ export function summarizeLag(rows, lagKey) {
     avgMs: sum / values.length,
   };
 }
+
+export function assertAcceptancePassed(acceptance) {
+  if (!acceptance?.summary) {
+    throw new Error("Missing workload summary");
+  }
+  if (acceptance.summary.result !== "measurements_within_targets") {
+    throw new Error(`Workload failed: ${acceptance.summary.result}. Check error rows or latency targets.`);
+  }
+  for (const family of ["booking", "dispatch", "report"]) {
+    const summary = acceptance.readback[family];
+    if (!summary) throw new Error(`Missing readback summary for ${family}`);
+    if (summary.missing.length > 0) {
+      throw new Error(`${family} readback failed: missing ${summary.missing.length} claimed success resources.`);
+    }
+    if (!summary.matched) {
+      throw new Error(`${family} readback failed: matched flag is false.`);
+    }
+  }
+}

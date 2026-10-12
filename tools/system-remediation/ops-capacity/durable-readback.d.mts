@@ -59,3 +59,5 @@ export function summarizeLag<T extends Record<string, unknown>>(
   rows: T[],
   lagKey: keyof T,
 ): LagSummary;
+
+export function assertAcceptancePassed(acceptance: any): void;

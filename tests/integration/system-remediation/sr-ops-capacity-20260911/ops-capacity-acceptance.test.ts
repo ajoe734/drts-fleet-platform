@@ -128,7 +128,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
       // rather than adding one outside this task's owned paths.
       // @ts-expect-error -- TS7016: no declaration file for capacity.mjs
       const { runPlan } = await import("../../../../tools/system-remediation/ops-proof/capacity.mjs");
-      const { readBackOwnedOrders, readBackReportJobs, summarizeReadback, summarizeLag } =
+      const { readBackOwnedOrders, readBackReportJobs, summarizeReadback, summarizeLag, assertAcceptancePassed } =
         await import("../../../../tools/system-remediation/ops-capacity/durable-readback.mjs");
 
       const evidenceDir = resolve(
@@ -443,13 +443,8 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           `${JSON.stringify(acceptance, null, 2)}\n`,
         );
 
-        // The core acceptance gate: no claimed success without a durable row.
-        expect(bookingSummary.missing).toEqual([]);
-        expect(dispatchSummary.missing).toEqual([]);
-        expect(reportSummary.missing).toEqual([]);
-        expect(bookingSummary.matched).toBe(true);
-        expect(dispatchSummary.matched).toBe(true);
-        expect(reportSummary.matched).toBe(true);
+        // The core acceptance gate: workload must pass latency/error targets, and no claimed success without a durable row.
+        assertAcceptancePassed(acceptance);
       } finally {
         await app.close();
         await pool.end();
