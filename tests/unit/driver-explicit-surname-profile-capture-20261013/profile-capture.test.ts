@@ -182,6 +182,7 @@ describe("explicit driver surname production profile capture", () => {
         "rejects supplied invalid value #$index without partial mutation or side effects",
         async ({ value }) => {
           const f = fixture();
+          const auditWrites = vi.spyOn(f.audit, "recordAuditLog");
           const driverId = "drv-invalid-fixture";
           if (operation !== "create") {
             f.service.createProfile(driverId, {
@@ -192,7 +193,7 @@ describe("explicit driver surname production profile capture", () => {
           }
           const before = f.service.getProfile(driverId);
           const beforeRecords = [...f.records];
-          const beforeAudit = f.audit.listAuditLogs();
+          const beforeAudit = auditWrites.mock.calls.length;
           const beforeCalls = f.query.mock.calls.length;
           const command = {
             name: "Must not commit",
@@ -221,7 +222,7 @@ describe("explicit driver surname production profile capture", () => {
           else expect(f.service.getProfile(driverId)).toEqual(before);
           expect(f.query.mock.calls.length).toBe(beforeCalls);
           expect([...f.records]).toEqual(beforeRecords);
-          expect(f.audit.listAuditLogs()).toEqual(beforeAudit);
+          expect(auditWrites.mock.calls.length).toBe(beforeAudit);
         },
       );
     },
@@ -383,5 +384,9 @@ describe("actual SDK JSON transport to typed controller and repository", () => {
     );
     expect((await client.getDriverProfile()).name).toBe("Renamed");
     expect(f.service.findProfileForDriver("drv-other")).toBeNull();
+    identity.actorId = "drv-wire-legacy";
+    absent(await client.createDriverProfile({ name: "Legacy Wire Fixture" }));
+    controller = new DriverProfileController(await f.reload());
+    absent(await client.getDriverProfile());
   });
 });
