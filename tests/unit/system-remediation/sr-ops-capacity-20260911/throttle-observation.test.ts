@@ -46,6 +46,11 @@ const { ThrottlerStorageService } = requireApi("@nestjs/throttler") as {
 const { KeyScopedThrottlerStorage } = production<
   typeof import("../../../../apps/api/src/common/throttling/key-scoped-throttler.storage")
 >("apps/api/src/common/throttling/key-scoped-throttler.storage.ts");
+// Source evaluation belongs to test setup, outside the timed behavioral case.
+// This imports definitions only and does not start an application lifecycle.
+const { AppModule } = production<
+  typeof import("../../../../apps/api/src/app.module")
+>("apps/api/src/app.module.ts");
 type GuardContext = {
   getClass(): typeof CapacityController;
   getHandler(): typeof create;
@@ -470,9 +475,6 @@ describe.each([
 it("observes the actual AppModule storage provider singleton without starting an application", async () => {
   // Evaluate source definitions and the dependency's provider factory only.
   // No application lifecycle, listener, database or product worker starts.
-  const { AppModule } = production<
-    typeof import("../../../../apps/api/src/app.module")
-  >("apps/api/src/app.module.ts");
   const { ThrottlerModule, getStorageToken, getOptionsToken } = requireApi(
     "@nestjs/throttler",
   ) as typeof import("../../../../apps/api/node_modules/@nestjs/throttler");
