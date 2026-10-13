@@ -134,7 +134,9 @@ the old condition even when an unconditional binding already exists.
 and reject all SA grants inherited from a folder or organization.
 
 `apply()` removes only the drill SA member from that exact obsolete binding
-before adding the unconditional binding. Other members and all unrelated
+before adding the unconditional binding. The [gcloud command contract](https://docs.cloud.google.com/sdk/gcloud/reference/projects/remove-iam-policy-binding)
+selects the member, role and exact condition, including optional description;
+the implementation does not use `--all`. Other members and all unrelated
 role/condition pairs survive. An already-present unconditional binding is not
 added again; repeat apply performs no writes. Failed removal stops before add;
 failed add can be retried from the audited intermediate state. Migration does
@@ -180,4 +182,32 @@ the authorization audit is never mocked.
 | Correct residual risk                                                        | `role_specs` comment, `plan.residual_risk`, this section                                                                                 | Historical ineffective condition → explicit one-permission unconditional project grant, any-name/size/cost/repository trust risks                                                                                           | Production diff and content review; runtime reproduction not applicable                                                                                                                                         | Operator must review plan before apply                                 |
 | `同候選SHA CI通過且獨立reviewer審查`                                         | Final published candidate and PR; independent Codex2 review                                                                              | Pending canonical handoff/hosted CI; no prior green result reused                                                                                                                                                           | Candidate lifecycle records exact SHA and results                                                                                                                                                               | Same-SHA CI, independent review, merge and acceptance evidence pending |
 
-Final regression results are recorded below before candidate handoff.
+Checks on verification anchor `b64d6847177c659df07d03a730436b0601dd55ce`:
+
+- Create-scoped regression: **pass**, exit 0, 11/11, 31.833s
+  (`create-regression.log`; production code matches the verification anchor).
+- `python3 -m unittest tests/unit/system-remediation/sr-live-ops-001/test_drill.py -v`:
+  **pass**, exit 0, 48/48, 58.733s (`unit.log`).
+- `pnpm exec vitest run tests/unit/system-remediation/sr-live-ops-001/restore-drill.test.ts`:
+  **pass**, exit 0, 1 file / 2 tests, 59.71s (`vitest.log`); this executes the
+  real Python suite through the existing CI wrapper. Node v22.23.2 /
+  pnpm 10.33.0 / Vitest 4.1.4.
+- `python3 -m py_compile infra/gcp/dev/ops-drill/*.py tests/unit/system-remediation/sr-live-ops-001/test_drill.py tests/unit/system-remediation/sr-live-ops-001/fake_cli.py`:
+  **pass**, exit 0.
+- `python3 tools/ci/check_test_coverage.py`: **pass**, exit 0; all 97 registered
+  test files yield tests run by CI. The existing `ci-integ.yml` executes this
+  Python suite; the Vitest wrapper also executes it against offline CLIs.
+- Baseline/current role comparison: **pass**, exit 0 (`role-preservation.log`);
+  production role definitions/bindings are compared directly, not copied SQL
+  or mocked authorization logic.
+- `pnpm exec prettier --check infra/gcp/dev/ops-drill/OPS-DRILL-CLONE-CREATE-PERMISSION-20261010.md`
+  and `git diff --check`: **pass**, exit 0; rechecked after the final evidence edit.
+
+The final closeout commit changes this evidence document only after the
+verification anchor; tested production and regression code is identical.
+Hosted same-SHA CI starts from the final PR/handoff and remains pending here.
+
+The first repaired replacement-test run failed because its expected-state
+fixture shared the legacy and desired member list; this was corrected by
+copying the fixture. `create-fixture-failure.log` retains that failure, and
+the final scoped/full results above contain no failing or skipped tests.
