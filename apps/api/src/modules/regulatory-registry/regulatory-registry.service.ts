@@ -1068,7 +1068,7 @@ export class RegulatoryRegistryService
     );
   }
 
-  createDriver(command: CreateDriverMasterCommand, requestId?: string) {
+  async createDriver(command: CreateDriverMasterCommand, requestId?: string) {
     const driverId = command.driverId?.trim() || `drv_${randomUUID()}`;
     this.assertNonBlank(driverId, "driverId");
     if (this.drivers.some((candidate) => candidate.driverId === driverId)) {
@@ -1120,7 +1120,7 @@ export class RegulatoryRegistryService
         ? {}
         : { bankAccount: command.bankAccount }),
     };
-    const profile = this.driverProfileService.upsertAdminProfile(
+    const profile = await this.driverProfileService.upsertAdminProfile(
       driverId,
       profileCommand,
       requestId,
