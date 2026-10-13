@@ -31,6 +31,7 @@ import { EventEmitter2 } from "@nestjs/event-emitter";
 
 import type {
   ActualTripFareBreakdown,
+  DriverDeclaredSurnameSnapshot,
   DriverTaskStatus,
   AddressPayload,
   ApplyManualFareOverrideCommand,
@@ -6967,6 +6968,10 @@ export class OwnedMobilityService
     }
 
     const actualFareBreakdown = this.captureActualFareBreakdown(order, command);
+    const driverSurnameSnapshot =
+      this.regulatoryRegistryService.getDriverDeclaredSurnameSnapshot?.(
+        task.driverId,
+      ) ?? {};
 
     if (proof.photos.length < order.proofRequirements.minPhotoCount) {
       await this.markDriverTaskProofPending(
@@ -7035,6 +7040,7 @@ export class OwnedMobilityService
               ...(actualFareBreakdown ? { actualFareBreakdown } : {}),
             },
             proof,
+            driverSurnameSnapshot,
           )
         : null;
 
@@ -7044,6 +7050,7 @@ export class OwnedMobilityService
       task.completedAt = command.completedAt;
       task.actualDistanceKm = command.actualDistanceKm;
       task.actualDurationSec = command.actualDurationSec;
+      Object.assign(task, driverSurnameSnapshot);
       task.fare = order.fixedPrice ? order.quotedFare : (command.fare ?? null);
       if (actualFareBreakdown) {
         task.actualFareBreakdown = { ...actualFareBreakdown };
@@ -7266,6 +7273,10 @@ export class OwnedMobilityService
       order,
       params.command,
     );
+    const driverSurnameSnapshot =
+      this.regulatoryRegistryService.getDriverDeclaredSurnameSnapshot?.(
+        task.driverId,
+      ) ?? {};
     const proofPendingError = this.buildDriverTaskProofPendingError(
       order,
       params.proof,
@@ -7340,6 +7351,7 @@ export class OwnedMobilityService
               ...(actualFareBreakdown ? { actualFareBreakdown } : {}),
             },
             params.proof,
+            driverSurnameSnapshot,
           )
         : null;
 
@@ -7348,6 +7360,7 @@ export class OwnedMobilityService
     task.completedAt = params.command.completedAt;
     task.actualDistanceKm = params.command.actualDistanceKm;
     task.actualDurationSec = params.command.actualDurationSec;
+    Object.assign(task, driverSurnameSnapshot);
     task.fare = order.fixedPrice
       ? order.quotedFare
       : (params.command.fare ?? null);
@@ -7604,6 +7617,7 @@ export class OwnedMobilityService
     proof: Required<Pick<CompletionProofBundle, "photos" | "expenseItems">> & {
       signatureId: string | null;
     },
+    driverSurnameSnapshot: Partial<DriverDeclaredSurnameSnapshot> = {},
   ): OwnedMobilityMultiTaxiTripCompletedEvent {
     const fare = order.fixedPrice ? order.quotedFare : command.fare;
     const plateNo =
@@ -7641,6 +7655,7 @@ export class OwnedMobilityService
       runtimeProfileCode: "multi_taxi_direct",
       orderId: order.orderId,
       tripId: task.taskId,
+      ...driverSurnameSnapshot,
       plateNo,
       pickupAt: task.startedAt,
       dropoffAt: command.completedAt,
