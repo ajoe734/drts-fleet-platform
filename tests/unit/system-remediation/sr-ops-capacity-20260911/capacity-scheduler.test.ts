@@ -70,7 +70,8 @@ function stagedPlan() {
 type Row = {
   workload: WorkloadFamily;
   sequence: number;
-  launchedMs: number;
+  launchedMs: number | null;
+  attemptedMs: number;
   scheduledMs: number;
   error: string | null;
   requestId: string;
@@ -102,14 +103,14 @@ const spacing: Record<WorkloadFamily, number> = {
 function assertUniformCadence(rows: Row[]) {
   for (const family of ["booking", "dispatch", "report"] as const) {
     const familyRows = rows
-      .filter((row) => row.workload === family)
+      .filter((row) => row.workload === family && row.launchedMs !== null)
       .sort((a, b) => a.sequence - b.sequence);
     expect(familyRows.length).toBeGreaterThanOrEqual(3);
     familyRows.forEach((row, i) => {
-      expect(row.launchedMs).toBeGreaterThanOrEqual(row.scheduledMs);
+      expect(row.launchedMs!).toBeGreaterThanOrEqual(row.scheduledMs);
       if (i)
         expect(
-          row.launchedMs - familyRows[i - 1]!.launchedMs,
+          row.launchedMs! - familyRows[i - 1]!.launchedMs!,
         ).toBeGreaterThanOrEqual(spacing[family]);
     });
   }
@@ -195,17 +196,19 @@ afterEach(() => {
 });
 
 describe("actual capacity scheduler boundaries across all families", () => {
-  it("rejects actual arrivals beyond 900s even when all 5850 responses meet their targets", async () => {
+  it("refuses late admissions, preserves all 5850 outcomes and drains every sent request", async () => {
+    const original = boundary.request.getMockImplementation()!;
+    let first = true;
+    boundary.request.mockImplementation((...args) => {
+      if (first) {
+        first = false;
+        // Actual synchronous HTTP-boundary stall after t0, not setup lateness.
+        boundary.offset += 1000;
+      }
+      return original(...args);
+    });
     const output = resolve(directory, "late-baseline-arrivals.jsonl");
-    const run = runPlan(
-      plan(900),
-      output,
-      {},
-      {
-        initialize: () =>
-          new Promise<void>((resolve) => setTimeout(resolve, 1000)),
-      },
-    );
+    const run = runPlan(plan(900), output, {});
     await vi.advanceTimersByTimeAsync(910000);
     const summary = await run;
     const rows = read(output);
@@ -214,35 +217,24 @@ describe("actual capacity scheduler boundaries across all families", () => {
       expect(row.requestId).toBe(
         `scheduler-fixture-${row.workload}-req-${row.sequence - 1}`,
       );
-    expect(rows.every((row) => row.error === null)).toBe(true);
-    expect(Math.max(...rows.map((row) => row.launchedMs))).toBe(900800);
-    for (const family of ["booking", "dispatch", "report"] as const) {
-      expect(summary.workflows[family].errors).toBe(0);
-      expect(summary.workflows[family].latencyTargetsMet).toBe(true);
-    }
+    const unsent = rows.filter((row) => row.launchedMs === null);
+    expect(unsent).toHaveLength(5);
+    expect(unsent.every((row) => row.attemptedMs >= 900000)).toBe(true);
+    expect(
+      unsent.every((row) => row.error?.includes("admission window elapsed")),
+    ).toBe(true);
+    expect(boundary.request).toHaveBeenCalledTimes(5850 - unsent.length);
+    expect(
+      rows
+        .filter((row) => row.launchedMs !== null)
+        .every((row) => row.launchedMs! < 900000),
+    ).toBe(true);
+    expect(summary.workflows.dispatch.arrivals.count).toBe(4495);
+    expect(summary.workflows.dispatch.errors).toBe(5);
+    expect(summary.workflows.dispatch.arrivals.late).toBe(5);
     expect(summary.result).toBe("failed");
     expect(summary.fullBurstSchedule).toBe(false);
-    expect(summary.workflows.booking.arrivals).toEqual({
-      count: 900,
-      firstMs: 1000,
-      lastMs: 900000,
-      early: 0,
-      late: 1,
-    });
-    expect(summary.workflows.dispatch.arrivals).toEqual({
-      count: 4500,
-      firstMs: 1000,
-      lastMs: 900800,
-      early: 0,
-      late: 5,
-    });
-    expect(summary.workflows.report.arrivals).toEqual({
-      count: 450,
-      firstMs: 1000,
-      lastMs: 899000,
-      early: 0,
-      late: 0,
-    });
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("allows responses after900s when all actual arrivals stay inside the original window", async () => {
@@ -254,14 +246,14 @@ describe("actual capacity scheduler boundaries across all families", () => {
     const rows = read(output);
     expect(rows).toHaveLength(5850);
     expect(rows.every((row) => row.error === null)).toBe(true);
-    expect(Math.max(...rows.map((row) => row.launchedMs))).toBe(899800);
+    expect(Math.max(...rows.map((row) => row.launchedMs!))).toBe(899800);
     expect(summary.elapsedMs).toBe(900050);
     expect(summary.result).toBe("measurements_within_targets");
     expect(summary.fullBurstSchedule).toBe(true);
     for (const family of ["booking", "dispatch", "report"] as const) {
       const launches = rows
         .filter((row) => row.workload === family)
-        .map((row) => row.launchedMs);
+        .map((row) => row.launchedMs!);
       expect(summary.workflows[family].arrivals).toEqual({
         count: launches.length,
         firstMs: Math.min(...launches),
@@ -272,7 +264,7 @@ describe("actual capacity scheduler boundaries across all families", () => {
     }
   });
 
-  it("includes actual preparation time in the original window and preserves every measured request", async () => {
+  it("records real readiness before one measured t0 and preserves every measured request", async () => {
     const output = resolve(directory, "baseline-initialize.jsonl");
     const initialize = vi.fn(async ({ startedAt }: { startedAt: string }) => {
       expect(startedAt).toBe(new Date(0).toISOString());
@@ -284,10 +276,12 @@ describe("actual capacity scheduler boundaries across all families", () => {
     const summary = await run;
     const rows = read(output);
     expect(initialize).toHaveBeenCalledTimes(1);
-    expect(Math.min(...rows.map((row) => row.launchedMs))).toBe(25);
+    expect(Math.min(...rows.map((row) => row.launchedMs!))).toBe(0);
+    expect(summary.preparationStartedAt).toBe(new Date(0).toISOString());
+    expect(summary.startedAt).toBe(new Date(25).toISOString());
     assertUniformCadence(rows);
     expect(rows).toHaveLength(39);
-    expect(summary.elapsedMs).toBeGreaterThanOrEqual(25 + 5800);
+    expect(summary.elapsedMs).toBe(5805);
     expect(Date.parse(summary.endedAt) - Date.parse(summary.startedAt)).toBe(
       summary.elapsedMs,
     );
@@ -350,7 +344,7 @@ describe("actual capacity scheduler boundaries across all families", () => {
         const dispatched = dispatch.find(
           (row) => row.sequence === seed.sequence,
         )!;
-        expect(dispatched.launchedMs).toBeGreaterThanOrEqual(seed.readyMs);
+        expect(dispatched.launchedMs!).toBeGreaterThanOrEqual(seed.readyMs);
       }
       expect(vi.getTimerCount()).toBe(0);
     },

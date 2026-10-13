@@ -532,7 +532,8 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
             error: string | null;
             resourceIds?: Record<string, string>;
             latencyMs?: number | null;
-            launchedMs: number;
+            attemptedMs?: number;
+            launchedMs: number | null;
           };
           // Parse independent rows without changing the original file. A corrupt
           // line remains an error, while other owned claims still get read back.
@@ -554,7 +555,13 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
                 parsed.workload &&
                 (!["booking", "dispatch", "report"].includes(parsed.workload) ||
                   typeof parsed.path !== "string" ||
-                  !Number.isFinite(parsed.launchedMs) ||
+                  !(
+                    Number.isFinite(parsed.launchedMs) ||
+                    (parsed.launchedMs === null &&
+                      Number.isFinite(parsed.attemptedMs) &&
+                      typeof parsed.error === "string" &&
+                      parsed.error.length > 0)
+                  ) ||
                   !(parsed.error === null || typeof parsed.error === "string"))
               )
                 throw new Error("Invalid measured capacity record");
@@ -644,6 +651,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           for (const record of records) {
             if (
               record.workload === "booking" &&
+              typeof record.launchedMs === "number" &&
               typeof record.latencyMs === "number"
             ) {
               events.push({ time: record.launchedMs, delta: 1 });

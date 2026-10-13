@@ -361,8 +361,7 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
   const baselineSha256 = digest(readFileSync(baselinePath));
   const records = [];
   const active = new Set();
-  const start = performance.now();
-  const startedAt = new Date().toISOString();
+  const preparationStartedAt = new Date().toISOString();
   const profile = plan.profile ?? "uniform";
   const scheduleMs =
     plan.scheduleMs ??
@@ -389,11 +388,12 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
   const familyLaunches = Object.fromEntries(
     Object.keys(baseline).map((family) => [family, []]),
   );
-  // Run-owned durable recovery preparation belongs inside the original timed
-  // window. It neither replaces a measured request nor resets the clock.
+  // Ready the actual durable worker before the measured admission window. This
+  // is setup, never a measured request; retain its own wall-clock provenance.
+  // The measured origin is established once, after successful readiness.
   if (lifecycle.initialize) {
     try {
-      await lifecycle.initialize({ startedAt });
+      await lifecycle.initialize({ startedAt: preparationStartedAt });
     } catch (error) {
       try {
         appendFileSync(
@@ -415,6 +415,8 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
       throw error;
     }
   }
+  const start = performance.now();
+  const startedAt = new Date().toISOString();
   // Keep real seed readiness inside the original clock, with at most eight
   // prepared/in-flight orders and a1600ms lookahead. Serial seed HTTP must not
   // block every next scheduled family. Each order is prepared once, never
@@ -479,9 +481,27 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
       preparations.set(entry.sequence, preparation);
     }
   };
+  const waitUntil = async (targetMs) => {
+    while (true) {
+      const wait = targetMs - (performance.now() - start);
+      if (wait <= 0) return;
+      // Pass the remaining absolute delay, without rounding it up on each
+      // interval. Hosts may truncate or wake early: always re-check the actual
+      // clock, with a minimum1ms sleep and no busy-spin.
+      await new Promise((resolve) => setTimeout(resolve, Math.max(1, wait)));
+    }
+  };
   try {
     for (const entry of schedule) {
       primeSeeds(entry.scheduledMs);
+      const prepared = entry.item.stageOrder
+        ? await preparations.get(entry.sequence)
+        : { item: entry.item, seed: null };
+      if (entry.item.stageOrder) preparations.delete(entry.sequence);
+      // Wake for the absolute START due time first. Only then apply actual
+      // spacing and rolling-budget floors. Anchoring every sleep to the prior
+      // wakeup would accumulate even constant timer lateness across4500 starts.
+      await waitUntil(entry.scheduledMs);
       const spacing = 60000 / baseline[entry.family].perMinute;
       let targetMs = entry.scheduledMs;
       if (
@@ -497,41 +517,37 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
           launches[launches.length - baseline[entry.family].perMinute] + 60000,
         );
       }
-      const prepared = entry.item.stageOrder
-        ? await preparations.get(entry.sequence)
-        : { item: entry.item, seed: null };
-      if (entry.item.stageOrder) preparations.delete(entry.sequence);
-      while (true) {
-        const wait = targetMs - (performance.now() - start);
-        if (wait > 0) {
-          // Round up and re-check after every host timer wakeup; never busy-spin
-          // or assume a fractional/early callback reached the launch boundary.
-          await new Promise((resolve) =>
-            setTimeout(resolve, Math.max(1, Math.ceil(wait))),
-          );
-        } else {
-          break;
-        }
-      }
+      await waitUntil(targetMs);
       // Do not queue and then falsely report the requested arrival rate as met.
       const overloaded = active.size >= plan.maxInFlight;
-      const launchedMs = performance.now() - start;
-      if (!overloaded) {
+      const attemptedMs = performance.now() - start;
+      const late = attemptedMs >= plan.durationSeconds * 1000;
+      const launchedMs =
+        late || overloaded || prepared.error ? null : attemptedMs;
+      if (launchedMs !== null) {
         familyLastLaunch[entry.family] = launchedMs;
         launches.push(launchedMs);
       }
       const job = (async () => {
         let result;
         try {
-          result = overloaded
+          result = late
             ? {
                 latencyMs: null,
                 httpStatus: null,
-                error: "Load generator maxInFlight exhausted; request not sent",
+                error:
+                  "Load generator admission window elapsed; request not sent",
               }
-            : prepared.error
-              ? { latencyMs: null, httpStatus: null, error: prepared.error }
-              : await measure(plan.origin, prepared.item);
+            : overloaded
+              ? {
+                  latencyMs: null,
+                  httpStatus: null,
+                  error:
+                    "Load generator maxInFlight exhausted; request not sent",
+                }
+              : prepared.error
+                ? { latencyMs: null, httpStatus: null, error: prepared.error }
+                : await measure(plan.origin, prepared.item);
         } catch (error) {
           result = { latencyMs: null, httpStatus: null, error: error.message };
         }
@@ -551,8 +567,9 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
           requestSha256: digest(JSON.stringify(entry.item.body)),
           scheduledMs: entry.scheduledMs,
           clockOriginMs: start,
+          attemptedMs,
           launchedMs,
-          schedulingLagMs: launchedMs - entry.scheduledMs,
+          schedulingLagMs: attemptedMs - entry.scheduledMs,
           profile,
           ...result,
         };
@@ -591,14 +608,19 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
           : null;
       const p95Ms = percentile(0.95),
         p99Ms = percentile(0.99);
-      const launches = rows.map((row) => row.launchedMs);
+      const launches = rows
+        .map((row) => row.launchedMs)
+        .filter(Number.isFinite);
       const arrivals = {
-        count: launches.filter(Number.isFinite).length,
+        count: launches.length,
         firstMs: launches.length ? Math.min(...launches) : null,
         lastMs: launches.length ? Math.max(...launches) : null,
-        early: rows.filter((row) => row.launchedMs < row.scheduledMs).length,
+        early: rows.filter(
+          (row) =>
+            Number.isFinite(row.launchedMs) && row.launchedMs < row.scheduledMs,
+        ).length,
         late: rows.filter(
-          (row) => row.launchedMs >= plan.durationSeconds * 1000,
+          (row) => row.attemptedMs >= plan.durationSeconds * 1000,
         ).length,
       };
       return [
@@ -636,6 +658,7 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
       ),
     elapsedMs: performance.now() - start,
     startedAt,
+    preparationStartedAt,
     endedAt: new Date().toISOString(),
     maxInFlight: plan.maxInFlight,
     profile,
