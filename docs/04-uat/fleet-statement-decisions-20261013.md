@@ -38,7 +38,7 @@
 
 | 驗收項                                  | 原始碼／案例                                                                           | 本機結果                                                                 | hosted 證據／限制                                                                                 |
 | --------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| 確認、爭議、重試、真實回讀及舊案件行為  | `tests/unit/fleet-statement-decisions-20261013/`、既有 Fleet 與 Complaint suites       | root 後端相關 80、API unit 42、前端／SDK 相關 39、Fleet app 21：全部通過 | 具體命令與 exit 0 在 `.local/fleet-statement-decisions-20261013/`；沒有真實供應商操作             |
+| 確認、爭議、重試、真實回讀及舊案件行為  | `tests/unit/fleet-statement-decisions-20261013/`、既有 Fleet 與 Complaint suites       | root 後端相關 98、API unit 42、前端／SDK 相關 39、Fleet app 21：全部通過 | 具體命令與 exit 0 在 `.local/fleet-statement-decisions-20261013/`；沒有真實供應商操作             |
 | 重建後保存、多實例、paid 狀態及交易回滾 | 正式 V0117、`apps/api/tests/integration/fleet-statement-decisions.integration.test.ts` | TypeScript／lint 通過；17 個案例未在 VM 執行                             | 由同候選 PR 的既有 integration 工作實際套用 migrations 並執行，結果以該 SHA 的 GitHub checks 為準 |
 | 配號與共用契約相容                      | 既有 recovery-contracts／partner-notify-contracts suites                               | 58 通過                                                                  | 原配號值保留，新增 V0117，不取代實際 DB 測試                                                      |
 | 靜態檢查                                | API／Fleet／SDK／root TypeScript、scoped ESLint、i18n、classification、diff check      | 全部通過                                                                 | hosted build／CI 與獨立審查另由既有 candidate lifecycle 記錄                                      |
@@ -82,6 +82,28 @@ Fleet 回覆先保存客服備註，再建立收據與重試紀錄；失敗可�
 通過。來源未變的前端／SDK 39、Fleet app 21、配號 58 項沿用先前結果，相關
 本機驗證共 240 項。原 15 項 PostgreSQL 測試保留，另外增加正式回覆保存與
 寫入後完整回滾兩項，共 17 項，由新候選的 hosted CI 驗證；VM 未執行 DB 測試。
+
+### 修正版審查發現 F2：同一事件的並行案件關聯
+
+候選 `b52ccd52140e804ab5336d44435f1e1a0df3ae3f` 三組 CI 均成功；
+正式 Reviewer Codex2 另以實際 Incident／Complaint controllers 與 services、
+只模擬 repository 儲存及寫入時點，重現 Incident／Incident、Complaint／Complaint
+與混合入口三種併發。第二筆請求雖收到關聯衝突，CRM 案件及歷程卻已提交，
+重新讀取仍保留錯誤關聯。因此 Reviewer 正式 reopen 原任務，沒有合併或部署該候選。
+
+修正驗收須讓兩個入口透過共用 IncidentService，依同一事件協調衝突檢查、
+CRM 提交及事件關聯發布。失敗那筆必須在 CRM 寫入前拒絕；仍保留 F1 的
+寫入成功才回應、寫入失敗不發布事件關聯行為。回歸另驗證相同配對重播、
+第一筆寫入失敗後重試、原有一般案件，以及建立事件後的 escalation 入口。
+修正後原三種競爭全部通過；新增回歸共 9 項通過，包含兩個入口相同配對重播、
+第一筆寫入失敗後真實重試、排隊的競爭者成功、一般案件與 escalation 競爭。
+共用 IncidentService 每個事件的操作佇列成功或失敗都會釋放；原同步服務 API 保留。
+實際 Nest 模組只由 IncidentModule 提供這個 service，兩個 controller 共用同一實例。
+08:47 重跑後端相關 98、API unit 42 項全過，root／API 型別與 scoped lint 通過；
+來源未變的前端／SDK／配號 118 項沿用前次結果，相關本機驗證共 258 項。
+舊候選 b52 的 hosted 17／331 項及完整 CI 結果保留為歷史證據；新候選仍需自己的
+正式審查與雲端 CI。原正式審查與重現摘要保留於
+`.local/fleet-statement-decisions-20261013/f2-formal-review.json`。
 
 候選 SHA、獨立審查、hosted PostgreSQL 與完整 CI 結果以本任務的正式
 candidate lifecycle／同 SHA PR checks 為準。本機通過不表示真實供應商、
