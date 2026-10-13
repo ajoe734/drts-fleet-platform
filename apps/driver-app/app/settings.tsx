@@ -580,7 +580,13 @@ export default function SettingsScreen() {
               onChangeText={(value) => updateProfile({ profileSurname: value })}
               placeholder={driverStrings.settings.surname.placeholder}
               helpText={driverStrings.settings.surname.help}
-              error={profileErrors.profileSurname}
+              error={
+                profileErrors.profileSurname
+                  ? driverStrings.settings.surname.errors[
+                      profileErrors.profileSurname
+                    ]
+                  : undefined
+              }
               editable={profileLoaded && !saving}
             />
             <FormField

@@ -4,7 +4,6 @@ import type {
   UpdateDriverProfileCommand,
   UpdateDriverSettingsCommand,
 } from "@drts/contracts";
-import { driverStrings } from "./strings";
 
 export interface SettingsFormValues {
   language: string;
@@ -27,8 +26,8 @@ export type SettingsFieldErrors = Partial<
   Record<keyof SettingsFormValues, string>
 >;
 export type ProfileFieldErrors = Partial<
-  Record<keyof ProfileFormValues, string>
->;
+  Record<Exclude<keyof ProfileFormValues, "profileSurname">, string>
+> & { profileSurname?: "blank" | "clear" };
 
 const MAX_RADIUS_KM = 200;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -146,9 +145,9 @@ export function validateProfileValues(
   const surname = values.profileSurname ?? "";
   if (!surname.trim()) {
     if ((initial?.profileSurname ?? "").trim()) {
-      errors.profileSurname = driverStrings.settings.surname.errors.clear;
+      errors.profileSurname = "clear";
     } else if (surname.length > 0) {
-      errors.profileSurname = driverStrings.settings.surname.errors.blank;
+      errors.profileSurname = "blank";
     }
   }
 
@@ -196,7 +195,7 @@ export function buildProfileCommand(
   initial?: ProfileFormValues,
 ): UpdateDriverProfileCommand {
   const surnameError = validateProfileValues(values, initial).profileSurname;
-  if (surnameError) throw new Error(surnameError);
+  if (surnameError) throw new Error(`Invalid profileSurname: ${surnameError}`);
   const trimmedSurname = (values.profileSurname ?? "").trim();
   const trimmedName = values.profileName.trim();
   const trimmedPhone = values.profilePhone.trim();

@@ -27,9 +27,9 @@ describe("typed profile surname draft and omission contract", () => {
     const values = profileValuesFromRecord(record);
     expect(values.profileSurname).toBe("");
     expect(validateProfileValues(values, values)).toEqual({});
-    expect(
-      profileValuesEqual(values, { ...values, profileSurname: undefined }),
-    ).toBe(true);
+    const omitted = { ...values };
+    delete omitted.profileSurname;
+    expect(profileValuesEqual(values, omitted)).toBe(true);
     const command: UpdateDriverProfileCommand = buildProfileCommand(
       { ...values, profileEmail: "other@example.com" },
       values,
@@ -67,11 +67,9 @@ describe("typed profile surname draft and omission contract", () => {
       });
       const values = { ...saved, profileSurname: surname };
       expect(profileValuesEqual(saved, values)).toBe(false);
-      expect(validateProfileValues(values, saved).profileSurname).toContain(
-        "已保存的姓氏不能清空",
-      );
+      expect(validateProfileValues(values, saved).profileSurname).toBe("clear");
       expect(() => buildProfileCommand(values, saved)).toThrow(
-        "已保存的姓氏不能清空",
+        "Invalid profileSurname: clear",
       );
       expect(saved.profileSurname).toBe("歐陽");
     },
@@ -79,11 +77,9 @@ describe("typed profile surname draft and omission contract", () => {
   it("rejects explicitly supplied blank text instead of silently omitting it", () => {
     const initial = { ...DEFAULT_PROFILE_VALUES, profileName: "Fixture" };
     const values = { ...initial, profileSurname: " \t " };
-    expect(validateProfileValues(values, initial).profileSurname).toContain(
-      "姓氏不可只含空白",
-    );
+    expect(validateProfileValues(values, initial).profileSurname).toBe("blank");
     expect(() => buildProfileCommand(values, initial)).toThrow(
-      "姓氏不可只含空白",
+      "Invalid profileSurname: blank",
     );
   });
 });
