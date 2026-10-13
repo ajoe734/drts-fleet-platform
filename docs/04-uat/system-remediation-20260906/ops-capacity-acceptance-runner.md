@@ -1171,3 +1171,49 @@ source checks to its exact immutable SHA, obtain ordinary independent
 review/CI/merge and then the original authorized full900s acceptance. Both
 acceptance keys remain OPEN. This delivery blocker is not a product/limiter
 failure, quota determination or provider disablement.
+
+### Original-task allocated delivery and verification (Codex2, 2026-10-13)
+
+Supervisor's durable allocation is recorded in the original task specification
+and `.local/shared-dev-release-resumption-20261013-root/c123-preserving-original-code-branch-allocation/concrete-supervisor-preserving-branch-allocation.json`.
+The allocated `codex2/sr-ops-capacity-failclosed-20261012` starts at the exact
+existing code anchor `41e6f1b5316cd69ca9c8c716086a200a20c078a2`; all original
+code commits remain ancestors. Documentation checkpoint `efa818cb8` reapplies
+only the exact 53-line owned documentation delta from published
+`ca4eff8f80de6a0656837416197012eea16e28ee` through
+`445365374ff79274eb56ce624b68f342e1377411`. Its complete tree matches4453653.
+The original published Claude branch, documentation commits and draft PR2605
+remain unchanged. This is the recorded ordinary branch allocation, with no
+reuse of the consumed published-history exception.
+
+Normal merge checkpoint `5f3734757` integrates `origin/dev` at
+`7939d4a409b2f2d83f8a7bce58781e3e6a35c7ba`. That dev tree equals the prior
+reviewed d73 tree. Four conflicts are entirely within the original owned
+documentation/observer/producer scopes; their resolution preserves the current
+repair. The staged merge tree matches efa818cb8 exactly. No product code is
+recreated or changed by this delivery continuation.
+
+Evidence directory `L` is
+`G/delivery-codex2-preserving-branch/`. The original raw evidence and failed
+attempts in G remain intact. `L/verification-manifest.json` binds each repeated
+check, command, exit code, version, source hash and output digest to the final
+full candidate SHA; `L/publication.json` binds the normally pushed remote head
+and new PR. All checks started for this delivery must finish and be read before
+handoff. Candidate identity and subsequent CI are recorded externally to avoid
+changing the candidate while it is under independent Codex review.
+
+| Finding / acceptance                         | Source and delivery boundary                                                                  | Verification and evidence                                                                                       | Remaining limits                                                                                                              |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Published documentation subject failed gate   | Exact owned documentation reapplication on allocated original-code ancestry; valid task subject | Per-commit trailer gate over origin/dev..candidate; preserved refs/tree comparison in L/verification-manifest.json | Original ca4/445 history and PR2605 stay preserved; ordinary new candidate review/CI/merge remain required.                       |
+| Guard-time admission and all retained controls | Unchanged41e producer, observer, harness and actual storage functions                            | Repeat affected194 controls, original25-case gate,24-case harness and retained real-payload negative replay in L   | External transport/clock/SQL boundaries are controlled; these checks provide no actual hosted capacity credit.                  |
+| capacity_failed_summary_rejected              | Actual formal gate and raw-arrival readback, retained real failed d73 payload                    | Current-source negative regression evidence in L; prior acceptance receipt remains historical                     | OPEN for the next matching generation until original lifecycle records its required acceptance evidence.                      |
+| capacity_same_candidate_full_900s_valid_baseline | Original full900s HTTP/AppModule/migratedPG acceptance workflow                                | OPEN; no new hosted positive result is asserted by this delivery                                                   | Same-SHA Codex review/CI/protected merge, then Supervisor-authorized original changed-source full900s with every retained measure. |
+
+Both legacy profiles/floors, the explicit budgeted burst, actual guard rolling
+60000ms budgets60/300/30, all5850 measured requests and4000 separate seeds,
+900s admission/899800ms genuine final arrival, readiness/maxInFlight/eight-slot
+preparation,50intake/50reports/500owned backlog and every SLO/security/SQL/
+cleanup requirement remain. Original112/prior375/new1647 failures, F1–F6 and
+Claude/Claude2/Gemini credit remain preserved. Runtime CPU/billing/idle/recovery,
+native Android AND iOS, providers, financial/legal/manual/public-entry,
+H3F2/HOLD/F2/ZEROremoved and all full-system gates retain their prior state.
