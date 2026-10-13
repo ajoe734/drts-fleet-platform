@@ -12,8 +12,8 @@ export async function flush() {
   for (let i = 0; i < 30; i++) await Promise.resolve();
 }
 
-export function observe<T>(result: T | Promise<T>) {
-  const state: { status: string; value?: T; error?: unknown } = {
+export function observe<T>(result: T) {
+  const state: { status: string; value?: Awaited<T>; error?: unknown } = {
     status: "pending",
   };
   const settled = Promise.resolve(result).then(
