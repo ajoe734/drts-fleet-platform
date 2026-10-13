@@ -115,7 +115,15 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
         }
       : null;
   };
-  const observeAdmission = (key, ttl, limit, name, guardMs, incoming) => {
+  const observeAdmission = (
+    key,
+    ttl,
+    limit,
+    name,
+    guardMs,
+    guardCountedMs,
+    incoming,
+  ) => {
     const receipt = admissions.get(incoming?.requestId);
     if (!receipt) {
       if ([...families.values()].some((family) => family.key === key))
@@ -143,8 +151,12 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
     family.key ??= key;
     family.identityHash ??= identityHash;
     family.pending--;
-    family.guardTimes.push(guardMs);
+    // The genuine synchronous increment has counted its hit by this observed
+    // return. Use that upper bound for prior admissions, so variable observer
+    // work before increment cannot compress the actual rolling guard window.
+    family.guardTimes.push(guardCountedMs);
     receipt.guardMs = guardMs;
+    receipt.guardCountedMs = guardCountedMs;
     receipt.keyHash = hash(key);
     receipt.name = name;
     const actual = state(key, name);
@@ -204,6 +216,7 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
         family: familyName,
         reservedMs: now,
         guardMs: null,
+        guardCountedMs: null,
         keyHash: null,
         name: null,
         result: null,
@@ -312,7 +325,8 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
     });
     replace(storage, "increment", function (...args) {
       const [key, ttl, limit, blockDuration, name] = args;
-      const guardMs = performance.now();
+      let guardMs;
+      let guardCountedMs;
       let incoming = null;
       try {
         incoming = requestContext();
@@ -336,7 +350,9 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
       let result;
       depth++;
       try {
+        guardMs = performance.now();
         result = originalIncrement.apply(this, args);
+        guardCountedMs = performance.now();
       } catch (error) {
         record(() => ({ kind: "capacity_throttle_throw", call }));
         throw error;
@@ -349,7 +365,15 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
         afterCall: state(key, name),
       }));
       try {
-        observeAdmission(key, ttl, limit, name, guardMs, incoming);
+        observeAdmission(
+          key,
+          ttl,
+          limit,
+          name,
+          guardMs,
+          guardCountedMs,
+          incoming,
+        );
       } catch {
         failAdmission("could not read genuine guard accounting");
       }

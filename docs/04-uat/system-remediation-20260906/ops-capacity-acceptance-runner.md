@@ -1071,7 +1071,11 @@ identities or policies, blocked/missing state and successful HTTP without
 matching guard results fail closed. HTTP/transport errors remain unchanged.
 An actual guard arrival outside the original admission window is also red,
 even when its client launch was timely. All raw rows retain client times and
-the separately observed absolute guard time, key hash and original result.
+the separately observed absolute native increment start and counted-return
+times, key hash and original result. Prior rolling admission uses the genuine
+synchronous counted-return upper bound, including variable observation work
+before increment; it cannot mistake the observer wrapper's earlier entry for
+the actual guard count. The900s boundary also checks that counted return.
 
 No shared storage, guard, rate policy, identity, seed policy or HTTP response
 is changed. The existing preparation, both legacy profiles and floors,

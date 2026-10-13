@@ -54,6 +54,7 @@ export type CapacityThrottleObserver = {
     complete(requestId: string): {
       error: string | null;
       guardMs?: number | null;
+      guardCountedMs?: number | null;
       keyHash?: string | null;
       result?: { totalHits: number; isBlocked: boolean } | null;
     };

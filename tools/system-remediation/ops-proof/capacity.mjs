@@ -639,8 +639,8 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
               result.error = admissionFeedback.error;
             if (
               !result.error &&
-              (!Number.isFinite(admissionFeedback.guardMs) ||
-                admissionFeedback.guardMs - start >=
+              (!Number.isFinite(admissionFeedback.guardCountedMs) ||
+                admissionFeedback.guardCountedMs - start >=
                   plan.durationSeconds * 1000)
             )
               result.error =
