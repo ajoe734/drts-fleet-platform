@@ -32,6 +32,7 @@ const supplyReviewEn = {
   "supplyReview.queue.subtitle":
     "Fleet submission → Review → Approve into canonical registry",
   "supplyReview.queue.moreFilters": "More Filters",
+  "supplyReview.queue.hideFilters": "Hide Filters",
   "supplyReview.queue.tabPending": "Pending",
   "supplyReview.queue.tabMine": "Under My Review",
   "supplyReview.queue.tabHistory": "History",
@@ -284,6 +285,7 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
   "supplyReview.queue.subtitle":
     "車行送件 → 審核 → 核可寫入 canonical registry",
   "supplyReview.queue.moreFilters": "更多篩選",
+  "supplyReview.queue.hideFilters": "收合篩選",
   "supplyReview.queue.tabPending": "待審",
   "supplyReview.queue.tabMine": "我審核中",
   "supplyReview.queue.tabHistory": "歷史",
@@ -3544,6 +3546,8 @@ const en = {
   "audit.page.refresh": "Refresh (T6 manual)",
   "audit.page.refreshing": "Refreshing…",
   "audit.page.exportCsv": "Export CSV",
+  "audit.page.exportStarted": "CSV download started: {count} record(s).",
+  "audit.page.exportFailed": "CSV download failed. Please try again.",
   "audit.page.tabLog": "Audit log",
   "audit.page.tabPolicy": "Retention policies",
   "audit.page.tabHold": "Active legal holds",
@@ -7190,6 +7194,8 @@ const zh: typeof en = {
   "audit.page.refresh": "重新整理 (T6 手動)",
   "audit.page.refreshing": "重新整理中…",
   "audit.page.exportCsv": "匯出 CSV",
+  "audit.page.exportStarted": "已開始下載 CSV，共 {count} 筆紀錄。",
+  "audit.page.exportFailed": "CSV 下載失敗，請再試一次。",
   "audit.page.tabLog": "稽核紀錄",
   "audit.page.tabPolicy": "保留政策",
   "audit.page.tabHold": "有效法定保留",
