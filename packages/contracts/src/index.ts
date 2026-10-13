@@ -7127,6 +7127,8 @@ export interface DriverProfileBankAccount {
 export interface DriverProfileRecord {
   driverId: string;
   name: string;
+  /** Explicitly supplied surname; absent on legacy profiles, never inferred from name. */
+  driverSurname?: string;
   phone: string | null;
   email: string | null;
   photoUrl: string | null;
@@ -7138,6 +7140,8 @@ export interface DriverProfileRecord {
 
 export interface CreateDriverProfileCommand {
   name: string;
+  /** Nonempty text, trimmed like name with no length cap; omission leaves surname absent. */
+  driverSurname?: string;
   phone?: string | null;
   email?: string | null;
   photoUrl?: string | null;
@@ -7147,6 +7151,8 @@ export interface CreateDriverProfileCommand {
 
 export interface UpdateDriverProfileCommand {
   name?: string;
+  /** Nonempty text, trimmed like name with no length cap; omission preserves surname. No clear/null. */
+  driverSurname?: string;
   phone?: string | null;
   email?: string | null;
   photoUrl?: string | null;
