@@ -7,6 +7,8 @@ import type {
   RetirePlatformFareVersionCommand,
   MultiTaxiFareManagementList,
   MultiTaxiManagedFareVersion,
+  MultiTaxiManagedFareWireVersion,
+  MultiTaxiFareManagementWireList,
 } from "@drts/contracts";
 /**
  * @drts/api-client - Shared API client for DRTS client surfaces
@@ -599,13 +601,35 @@ function hasHeader(headers: Record<string, string>, key: string): boolean {
   return Object.keys(headers).some((header) => header.toLowerCase() === target);
 }
 
+// Fee identifiers are transported as string values because the HTTP serializer
+// converts every object key. Decode DTO fields first, then reconstruct the map.
+function decodeManagedFareVersion(value: unknown): MultiTaxiManagedFareVersion {
+  const wire = deepToCamelCase(value) as MultiTaxiManagedFareWireVersion;
+  const { additionalFeeEntries, ...tariff } = wire.tariff;
+  return {
+    ...wire,
+    tariff: {
+      ...tariff,
+      additionalFees: Object.fromEntries(
+        additionalFeeEntries.map(({ key, amount }) => [key, amount]),
+      ),
+    },
+  };
+}
+
 function parseApiErrorEnvelope(body: string): ApiErrorEnvelope["error"] | null {
   if (!body.trim()) {
     return null;
   }
 
   try {
-    const parsed = JSON.parse(body) as ApiErrorEnvelope;
+    const parsed = JSON.parse(body) as ApiErrorEnvelope & {
+      error: { trace_id?: unknown };
+    };
+    const traceId =
+      typeof parsed?.error?.traceId === "string"
+        ? parsed.error.traceId
+        : parsed?.error?.trace_id;
     if (
       parsed &&
       typeof parsed === "object" &&
@@ -614,9 +638,11 @@ function parseApiErrorEnvelope(body: string): ApiErrorEnvelope["error"] | null {
       typeof parsed.error.code === "string" &&
       typeof parsed.error.message === "string" &&
       typeof parsed.error.retryable === "boolean" &&
-      typeof parsed.error.traceId === "string"
+      typeof traceId === "string"
     ) {
-      return parsed.error;
+      // Keep details and business metadata intact; the global exception filter
+      // serializes trace_id while existing camelCase callers send traceId.
+      return { ...parsed.error, traceId };
     }
   } catch {
     return null;
@@ -4156,35 +4182,36 @@ export class ApiClient {
   }
 
   async listPlatformFareVersions(): Promise<MultiTaxiFareManagementList> {
-    const result = await this.fetchEnvelope<MultiTaxiFareManagementList>(
+    const result = await this.fetchEnvelope<MultiTaxiFareManagementWireList>(
       "GET",
       "/api/platform-admin/multi-taxi/fare-versions",
     );
-    // These routes emit the typed camelCase contract. Preserve arbitrary fee
-    // map keys instead of recursively rewriting operator-defined identifiers.
-    return result.data;
+    const wire = deepToCamelCase(
+      result.data,
+    ) as MultiTaxiFareManagementWireList;
+    return { ...wire, items: wire.items.map(decodeManagedFareVersion) };
   }
 
   async getPlatformFareVersion(
     id: string,
   ): Promise<MultiTaxiManagedFareVersion> {
-    const result = await this.fetchEnvelope<MultiTaxiManagedFareVersion>(
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
       "GET",
       `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}`,
     );
-    return result.data;
+    return decodeManagedFareVersion(result.data);
   }
 
   async createPlatformFareVersion(
     command: CreatePlatformFareVersionCommand,
     idempotencyKey: string,
   ): Promise<MultiTaxiManagedFareVersion> {
-    const result = await this.fetchEnvelope<MultiTaxiManagedFareVersion>(
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
       "POST",
       "/api/platform-admin/multi-taxi/fare-versions",
       { body: command, idempotencyKey },
     );
-    return result.data;
+    return decodeManagedFareVersion(result.data);
   }
 
   async updatePlatformFareVersion(
@@ -4192,12 +4219,12 @@ export class ApiClient {
     command: UpdatePlatformFareVersionCommand,
     idempotencyKey: string,
   ): Promise<MultiTaxiManagedFareVersion> {
-    const result = await this.fetchEnvelope<MultiTaxiManagedFareVersion>(
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
       "PUT",
       `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}`,
       { body: command, idempotencyKey },
     );
-    return result.data;
+    return decodeManagedFareVersion(result.data);
   }
 
   async recordPlatformFareVersionFiling(
@@ -4205,12 +4232,12 @@ export class ApiClient {
     command: RecordPlatformFareVersionFilingCommand,
     idempotencyKey: string,
   ): Promise<MultiTaxiManagedFareVersion> {
-    const result = await this.fetchEnvelope<MultiTaxiManagedFareVersion>(
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
       "POST",
       `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}/file`,
       { body: command, idempotencyKey },
     );
-    return result.data;
+    return decodeManagedFareVersion(result.data);
   }
 
   async schedulePlatformFareVersion(
@@ -4218,12 +4245,12 @@ export class ApiClient {
     command: SchedulePlatformFareVersionCommand,
     idempotencyKey: string,
   ): Promise<MultiTaxiManagedFareVersion> {
-    const result = await this.fetchEnvelope<MultiTaxiManagedFareVersion>(
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
       "POST",
       `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}/schedule`,
       { body: command, idempotencyKey },
     );
-    return result.data;
+    return decodeManagedFareVersion(result.data);
   }
 
   async retirePlatformFareVersion(
@@ -4231,12 +4258,12 @@ export class ApiClient {
     command: RetirePlatformFareVersionCommand,
     idempotencyKey: string,
   ): Promise<MultiTaxiManagedFareVersion> {
-    const result = await this.fetchEnvelope<MultiTaxiManagedFareVersion>(
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
       "POST",
       `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}/retire`,
       { body: command, idempotencyKey },
     );
-    return result.data;
+    return decodeManagedFareVersion(result.data);
   }
 
   async listPlatformPricingRules(): Promise<PlatformPricingRuleRecord[]> {

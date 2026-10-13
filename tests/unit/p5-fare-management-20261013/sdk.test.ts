@@ -1,148 +1,200 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient } from "../../../packages/api-client/src/index";
+import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
+import { identity, NOW } from "./backend-fixture";
 import {
-  demoFareList,
-  fareEditor,
-  fareEditorCommand,
-} from "../../../apps/platform-admin-web/app/platform-admin/p5/fares/fare-management-model";
+  filteredError,
+  opaqueFees,
+  unavailableError,
+  wireCommand,
+  wireHarness,
+} from "./wire-harness";
 
 afterEach(() => vi.unstubAllGlobals());
-const list = demoFareList("2026-10-13T00:00:00.000Z");
-list.items[0]!.tariff.additionalFees = JSON.parse(
-  '{"Airport_Fee":35,"night-fee":20,"__proto__":4}',
-);
-const record = list.items[0]!;
-const editor = fareEditor(record, false);
-editor.publicSummary = "Supplied proposal";
-const create = fareEditorCommand(editor);
-const { fareVersionId: _id, ...draft } = create;
-void _id;
-const update = { ...draft, expectedRevision: 7 };
 
-describe("P5 fare SDK wire contract", () => {
-  it.each(["list", "get"] as const)(
-    "%s preserves server metadata and opaque fee keys through the existing proxy transform",
-    async (action) => {
-      const fetch = vi
-        .fn()
-        .mockResolvedValue(
-          Response.json({ data: action === "list" ? list : record }),
+describe("AUTO-WIRE-001 actual controller/serializer -> SDK", () => {
+  for (const action of [
+    "list",
+    "get",
+    "create",
+    "update",
+    "file",
+    "schedule",
+    "immediate",
+    "retire",
+  ] as const) {
+    it(`${action} returns camel DTO with lossless opaque fees through the real serialized response`, async () => {
+      const f = wireHarness();
+      const input = wireCommand();
+      if (action !== "create" && action !== "list")
+        await f.controller.create(input, identity, "prepare-draft");
+      if (action === "schedule" || action === "immediate")
+        await f.controller.file(
+          input.fareVersionId,
+          {
+            expectedRevision: 1,
+            authorityFilingRef: "operator-reference",
+            filingEvidenceReference: "operator-evidence",
+          },
+          identity,
+          "prepare-file",
         );
-      vi.stubGlobal("fetch", fetch);
+      vi.stubGlobal("fetch", f.fetch);
       const client = new ApiClient({
         baseUrl: "https://unit.invalid/control-plane-proxy",
         pathTransform: (path) => path.replace(/^\/api/, ""),
       });
-      const result =
+      const key = "same-intent-key";
+      const id = input.fareVersionId;
+      const { fareVersionId: _id, ...draft } = input;
+      void _id;
+      const update = { ...draft, expectedRevision: 1, displayName: "Updated" };
+      const filing = {
+        expectedRevision: 1,
+        authorityFilingRef: "operator-reference",
+        filingEvidenceReference: "operator-evidence",
+      };
+      const schedule = {
+        expectedRevision: 2,
+        effectiveFrom:
+          action === "immediate" ? null : "2026-11-01T00:00:00.000Z",
+      };
+      const retirement = { expectedRevision: 1, reason: "Withdraw draft" };
+      const response =
         action === "list"
           ? await client.listPlatformFareVersions()
-          : await client.getPlatformFareVersion("fare /A");
-      expect(result).toEqual(action === "list" ? list : record);
-      expect(fetch.mock.calls[0]![0]).toBe(
-        "https://unit.invalid/control-plane-proxy/platform-admin/multi-taxi/fare-versions" +
-          (action === "get" ? "/fare%20%2FA" : ""),
+          : action === "get"
+            ? await client.getPlatformFareVersion(id)
+            : action === "create"
+              ? await client.createPlatformFareVersion(input, key)
+              : action === "update"
+                ? await client.updatePlatformFareVersion(id, update, key)
+                : action === "file"
+                  ? await client.recordPlatformFareVersionFiling(
+                      id,
+                      filing,
+                      key,
+                    )
+                  : action === "retire"
+                    ? await client.retirePlatformFareVersion(
+                        id,
+                        retirement,
+                        key,
+                      )
+                    : await client.schedulePlatformFareVersion(
+                        id,
+                        schedule,
+                        key,
+                      );
+      const expected =
+        action === "list" ? await f.service.list() : await f.service.get(id);
+      expect(response).toEqual(expected);
+      const result = "items" in response ? response.items[0]! : response;
+      expect(result.tariff.additionalFees).toEqual(opaqueFees);
+      expect(Object.keys(result.tariff.additionalFees)).toEqual(
+        Object.keys(opaqueFees),
       );
-      expect(fetch.mock.calls[0]![1].method).toBe("GET");
-    },
-  );
-
-  const commands = [
-    ["create", "POST", "", create],
-    ["update", "PUT", "/fare%20%2FA", update],
-    [
-      "file",
-      "POST",
-      "/fare%20%2FA/file",
-      {
-        expectedRevision: 7,
-        authorityFilingRef: "operator-ref",
-        filingEvidenceReference: "operator-evidence",
-      },
-    ],
-    [
-      "schedule",
-      "POST",
-      "/fare%20%2FA/schedule",
-      { expectedRevision: 7, effectiveFrom: "2026-11-01T00:00:00.000Z" },
-    ],
-    [
-      "immediate",
-      "POST",
-      "/fare%20%2FA/schedule",
-      { expectedRevision: 7, effectiveFrom: null },
-    ],
-    [
-      "retire",
-      "POST",
-      "/fare%20%2FA/retire",
-      { expectedRevision: 7, reason: "Withdraw draft" },
-    ],
-  ] as const;
-  for (const [action, method, path, body] of commands)
-    it(`${action} carries exact payload and retry key and reads the committed record`, async () => {
-      const fetch = vi.fn().mockResolvedValue(Response.json({ data: record }));
-      vi.stubGlobal("fetch", fetch);
-      const client = new ApiClient({
-        baseUrl: "https://unit.invalid",
-        defaultHeaders: { "x-request-origin": "platform" },
-      });
-      const key = "same-intent-key";
-      const result =
-        action === "create"
-          ? await client.createPlatformFareVersion(body, key)
+      expect(Object.hasOwn(result.tariff.additionalFees, "__proto__")).toBe(
+        true,
+      );
+      expect(result.availableActions).toBeDefined();
+      expect(result.tariff.baseFare).toBe(85);
+      if ("items" in response) expect(response.evaluatedAt).toBe(NOW);
+      expect(f.requests).toHaveLength(1);
+      expect(f.requests[0]!.method).toBe(
+        action === "list" || action === "get"
+          ? "GET"
           : action === "update"
-            ? await client.updatePlatformFareVersion("fare /A", body, key)
-            : action === "file"
-              ? await client.recordPlatformFareVersionFiling(
-                  "fare /A",
-                  body,
-                  key,
-                )
-              : action === "retire"
-                ? await client.retirePlatformFareVersion("fare /A", body, key)
-                : await client.schedulePlatformFareVersion(
-                    "fare /A",
-                    body,
-                    key,
-                  );
-      expect(result).toEqual(record);
-      const [url, init] = fetch.mock.calls[0]!;
-      expect(url).toBe(
-        `https://unit.invalid/api/platform-admin/multi-taxi/fare-versions${path}`,
+            ? "PUT"
+            : "POST",
       );
-      expect(init.method).toBe(method);
-      expect(init.headers["Idempotency-Key"]).toBe(key);
-      expect(init.headers["x-request-origin"]).toBe("platform");
-      expect(JSON.parse(init.body)).toEqual(body);
+      expect(f.requests[0]!.key).toBe(
+        action === "list" || action === "get" ? null : key,
+      );
+      expect(f.requests[0]!.path).toBe(
+        `/api/platform-admin/multi-taxi/fare-versions${action === "list" || action === "create" ? "" : `/fare%20%2FA${["file", "schedule", "immediate", "retire"].includes(action) ? `/${action === "immediate" ? "schedule" : action}` : ""}`}`,
+      );
+      if (action === "create") expect(f.requests[0]!.body).toEqual(input);
+      if (action === "update") expect(f.requests[0]!.body).toEqual(update);
+      if (action === "file") expect(f.requests[0]!.body).toEqual(filing);
+      if (action === "schedule" || action === "immediate")
+        expect(f.requests[0]!.body).toEqual(schedule);
+      if (action === "retire") expect(f.requests[0]!.body).toEqual(retirement);
     });
+  }
+});
 
+describe("AUTO-WIRE-002 actual exception filter -> SDK", () => {
   it.each([
-    [409, "fare_revision_conflict"],
-    [503, "fare_management_unavailable"],
+    [409, "fare_revision_conflict", false],
+    [503, "fare_management_unavailable", true],
   ] as const)(
-    "propagates %s without synthetic success",
-    async (status, code) => {
+    "preserves actual %s business code, trace, retryable and details",
+    async (status, code, retryable) => {
+      const error =
+        status === 503
+          ? unavailableError()
+          : new ApiRequestError(
+              status,
+              code,
+              "Draft changed.",
+              { currentRevision: 9 },
+              retryable,
+            );
+      const output = filteredError(error);
+      const wire = output.body as {
+        error: { trace_id: string; details: unknown; message: string };
+      };
+      expect(wire.error.trace_id).toEqual(expect.any(String));
       vi.stubGlobal(
         "fetch",
-        vi.fn().mockResolvedValue(
-          Response.json(
-            {
-              error: {
-                code,
-                message: "Operator can retry",
-                retryable: status === 503,
-                traceId: "unit-trace",
-              },
-            },
-            { status },
+        vi
+          .fn()
+          .mockResolvedValue(
+            Response.json(output.body, { status: output.status }),
           ),
-        ),
       );
       await expect(
         new ApiClient({
           baseUrl: "https://unit.invalid",
-        }).updatePlatformFareVersion("draft", update, "intent"),
-      ).rejects.toMatchObject({ statusCode: status, code });
+        }).getPlatformFareVersion("draft"),
+      ).rejects.toMatchObject({
+        statusCode: status,
+        code,
+        retryable,
+        traceId: wire.error.trace_id,
+        details: wire.error.details,
+        apiMessage: wire.error.message,
+      });
     },
   );
+
+  it("retains existing camelCase error-envelope compatibility", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json(
+          {
+            error: {
+              code: "fare_revision_conflict",
+              message: "Changed",
+              retryable: false,
+              traceId: "camel-trace",
+              details: { currentRevision: 9 },
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+    await expect(
+      new ApiClient({ baseUrl: "https://unit.invalid" }).getPlatformFareVersion(
+        "draft",
+      ),
+    ).rejects.toMatchObject({
+      code: "fare_revision_conflict",
+      traceId: "camel-trace",
+      details: { currentRevision: 9 },
+    });
+  });
 });

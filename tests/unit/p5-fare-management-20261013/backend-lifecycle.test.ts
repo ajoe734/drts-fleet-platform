@@ -66,7 +66,10 @@ describe("actual public fare management service/controllers", () => {
       displayName: "Edited draft",
       tariff: {
         baseFare: 90,
-        additionalFees: { airport_fee: 60, 中文費目: 5 },
+        additionalFeeEntries: [
+          { key: "airport_fee", amount: 60 },
+          { key: "中文費目", amount: 5 },
+        ],
       },
     });
     expect(

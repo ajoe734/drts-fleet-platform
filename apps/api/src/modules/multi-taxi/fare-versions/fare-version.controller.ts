@@ -22,6 +22,7 @@ import { CurrentIdentity, RequireRealms } from "../../../common/auth";
 import type { BootstrapRequestIdentity } from "../../../common/auth";
 import type { FareCommandContext } from "./fare-version.types";
 import { FareVersionService } from "./fare-version.service";
+import { fareListWire, fareVersionWire } from "./fare-version.wire";
 
 @Controller("platform-admin/multi-taxi/fare-versions")
 @RequireRealms("platform", "system")
@@ -47,14 +48,20 @@ export class FareVersionController {
 
   @Get()
   async list(@Headers("x-request-id") requestId?: string) {
-    return toApiSuccessEnvelope(await this.service.list(), requestId);
+    return toApiSuccessEnvelope(
+      fareListWire(await this.service.list()),
+      requestId,
+    );
   }
   @Get(":fareVersionId")
   async get(
     @Param("fareVersionId") id: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(await this.service.get(id), requestId);
+    return toApiSuccessEnvelope(
+      fareVersionWire(await this.service.get(id)),
+      requestId,
+    );
   }
   @Post()
   async create(
@@ -64,10 +71,12 @@ export class FareVersionController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.service.create(
-        command,
-        key,
-        this.context(identity, requestId),
+      fareVersionWire(
+        await this.service.create(
+          command,
+          key,
+          this.context(identity, requestId),
+        ),
       ),
       requestId,
     );
@@ -81,11 +90,13 @@ export class FareVersionController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.service.update(
-        id,
-        command,
-        key,
-        this.context(identity, requestId),
+      fareVersionWire(
+        await this.service.update(
+          id,
+          command,
+          key,
+          this.context(identity, requestId),
+        ),
       ),
       requestId,
     );
@@ -99,11 +110,13 @@ export class FareVersionController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.service.file(
-        id,
-        command,
-        key,
-        this.context(identity, requestId),
+      fareVersionWire(
+        await this.service.file(
+          id,
+          command,
+          key,
+          this.context(identity, requestId),
+        ),
       ),
       requestId,
     );
@@ -117,11 +130,13 @@ export class FareVersionController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.service.schedule(
-        id,
-        command,
-        key,
-        this.context(identity, requestId),
+      fareVersionWire(
+        await this.service.schedule(
+          id,
+          command,
+          key,
+          this.context(identity, requestId),
+        ),
       ),
       requestId,
     );
@@ -135,11 +150,13 @@ export class FareVersionController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.service.retire(
-        id,
-        command,
-        key,
-        this.context(identity, requestId),
+      fareVersionWire(
+        await this.service.retire(
+          id,
+          command,
+          key,
+          this.context(identity, requestId),
+        ),
       ),
       requestId,
     );

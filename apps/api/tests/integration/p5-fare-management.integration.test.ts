@@ -138,7 +138,9 @@ describe.sequential(
       id: string,
       extra: Partial<CreatePlatformFareVersionCommand> = {},
     ) {
-      const current = (await api.get(SEED)).data;
+      const current = await new FareVersionService(
+        new FareVersionRepository(db),
+      ).get(SEED);
       const input: CreatePlatformFareVersionCommand = {
         fareVersionId: id,
         displayName: `Test proposed ${id}`,
@@ -224,11 +226,14 @@ describe.sequential(
       ).toBe(SEED);
     });
     it("persists draft/edit/full fee identifiers across an independent pool while active seed remains", async () => {
-      const original = (await api.get(SEED)).data;
+      const original = await new FareVersionService(
+        new FareVersionRepository(db),
+      ).get(SEED);
+      const fees = { airport_fee: 60, 中文費目: 5 };
       const row = await draft("draft", {
         tariff: {
           ...original.tariff,
-          additionalFees: { airport_fee: 60, 中文費目: 5 },
+          additionalFees: fees,
         },
       });
       await api.update(
@@ -239,7 +244,7 @@ describe.sequential(
           publicSummary: row.publicSummary,
           sourceReference: row.sourceReference,
           effectiveFrom: F20,
-          tariff: { ...row.tariff, baseFare: 90 },
+          tariff: { ...original.tariff, baseFare: 90, additionalFees: fees },
         },
         identity,
         "edit",
@@ -249,7 +254,10 @@ describe.sequential(
         displayName: "Edited",
         tariff: {
           baseFare: 90,
-          additionalFees: { airport_fee: 60, 中文費目: 5 },
+          additionalFeeEntries: [
+            { key: "airport_fee", amount: 60 },
+            { key: "中文費目", amount: 5 },
+          ],
         },
       });
       expect(
@@ -443,7 +451,11 @@ describe.sequential(
         publicSummary: row.publicSummary,
         sourceReference: row.sourceReference,
         effectiveFrom: F20,
-        tariff: row.tariff,
+        tariff: (
+          await new FareVersionService(new FareVersionRepository(db)).get(
+            "revision",
+          )
+        ).tariff,
       };
       await api.update("revision", command, identity, "first");
       await expect(

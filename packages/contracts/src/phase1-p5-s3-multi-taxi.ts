@@ -904,6 +904,27 @@ export interface MultiTaxiFareManagementList {
   activeFareVersionId: string | null;
 }
 
+/**
+ * Management responses carry opaque fee identifiers as values so the global
+ * snake_case response serializer cannot rename or merge operator-defined keys.
+ * The SDK restores the domain additionalFees map after decoding the DTO fields.
+ */
+export interface MultiTaxiManagedFareWireVersion extends Omit<
+  MultiTaxiManagedFareVersion,
+  "tariff"
+> {
+  tariff: Omit<MultiTaxiFareTariffParameters, "additionalFees"> & {
+    additionalFeeEntries: Array<{ key: string; amount: number }>;
+  };
+}
+
+export interface MultiTaxiFareManagementWireList extends Omit<
+  MultiTaxiFareManagementList,
+  "items"
+> {
+  items: MultiTaxiManagedFareWireVersion[];
+}
+
 export interface CreatePlatformFareVersionCommand {
   fareVersionId: string;
   displayName: string;

@@ -79,3 +79,83 @@
 
 本文件記錄功能與可重現驗收流程；不宣稱 hosted DB、真實外部備查、
 全系統瀏覽器 UAT 或正式上線已完成。
+
+## 2026-10-13 Codex2 REOPEN：正式傳輸格式回歸
+
+被退回的候選為 `42310415e1b7b47077fa4d174662ddf493c930f4`，review generation
+為 `fd7dee7b5163451ebdb1e52693b340ad`。下列兩項均保留，不以既有的
+camelCase mock 測試或先前 105 項通過結果取代正式傳輸驗證。
+
+| Finding         | 舊候選的實際結果                                                                                                                                                                             | 修正與新驗證                                                                                                                                                                                              |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AUTO-WIRE-001` | 全域成功序列化器把 DTO 轉成 snake_case，七個新 SDK 方法卻直接回傳。UI 讀不到 `availableActions` 等欄位；`airportFee` 與 `airport_fee` 更在序列化時碰撞，資料已丟失，單純反轉大小寫無法還原。 | 費率專用 wire DTO 用 `additionalFeeEntries` 的 `{key, amount}` 陣列承載不透明名稱，再由 SDK 正規化 DTO 並重建完整費用 map。全域序列化器維持原狀。依序驗證七方法及實際畫面的讀取、複製、建立、讀回、編輯。 |
+| `AUTO-WIRE-002` | 正式 `SnakeCaseExceptionFilter` 輸出 `trace_id`，SDK 只認 `traceId`，導致 409／503 退化成通用 HTTP error，丟失 code、trace、details 及 retryable。                                           | F1 通過後才修正 SDK error envelope 解析；接受正式 snake_case trace，保留既有 camelCase 相容性及原始 details。以實際 `ApiRequestError`／filter 經 SDK 到 UI 驗證衝突提示、保留輸入及同一操作重試。         |
+
+在未修改 423 production 檔案時，新增傳輸測試的基準結果為 **10 failed／
+1 passed**：F1 八個操作（七方法，排程含未來及立即）全部失敗；F2 實際
+409／503 失敗；既有 camelCase error 相容測試通過。此結果屬實際失敗
+證據；測試只替代 HTTP 和持久層，使用正式 controller、service、
+`deepToSnakeCase` 與 exception filter，沒有啟動 API 或資料庫。
+
+新測試的附加費同時包含 `airportFee`、`airport_fee`、`Airport_Fee`、
+`night-fee`、`__proto__`，要求名稱與金額全部保留。實際元件測試使用
+正式 `ApiClient` 消費序列化回應，再透過表單複製、保存及編輯；錯誤
+測試使用 filter 的 mock response host，不自行編造 camelCase 錯誤。
+
+機器證據保存在工作機 `.local/p5-fare-management-20261013/`：
+`reopen-423-wire-baseline.json`／`.log` 保留原 SHA、原 production 檔案雜湊、
+零 production diff 及失敗輸出；後續修正結果另記，不覆寫此基準。
+新修正版的 immutable SHA 及最終結果由原 owner 完成正常 commit／review
+後綁定，不能沿用被退回的候選當作通過。
+
+本次修正的 repository-only 驗證結果：
+
+| 檢查點                        | 結果                                                                                            | 證據                                |
+| ----------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------- |
+| F1 修正後、F2 parser 尚未修改 | 9 passed；其餘 19 個測試由 `-t AUTO-WIRE-001` 刻意排除                                          | `reopen-f1-after.json`／`.log`      |
+| F2 修正前（F1 已通過）        | 3 failed／2 passed；實際 UI 衝突提示與 SDK 的 409／503 metadata 仍失敗                          | `reopen-f2-before.json`／`.log`     |
+| F2 修正後                     | 5 passed；其餘 23 個測試由 `-t AUTO-WIRE-002` 刻意排除                                          | `reopen-f2-after.json`／`.log`      |
+| 最終相依測試                  | 16 files、143 tests 全通過，無 skip                                                             | `reopen-affected-tests.log`         |
+| 原 owner 前端檢查             | app types、SDK types、實際 TSX test types、lint、格式、i18n、classification 及 diff checks 通過 | `reopen-frontend-verification.json` |
+
+以上結果針對 423 基礎上的修正工作樹；不是新的 immutable candidate review。
+修正後 SDK source SHA256 為
+`141302507db56f81a1c7c10fb85057cd17834674139bd240bb7220037fe8da92`。
+最終 receipt 同時記錄 source／test hashes，供 root 在正常提交後綁定新的
+immutable SHA；舊 423 的 hosted 結果不自動沿用。
+
+原 reviewer 的 51 項通過與前端測試無法解析 `react`／
+`@testing-library/react` 的啟動失敗一併保留：當時前端 suite 並未執行，
+不是產品行為通過或失敗的證據。原 owner 的安裝依賴環境可執行實際
+元件測試；修正版仍須新的 reviewer 結果。
+
+舊 423 候選的 hosted PostgreSQL 17 項結果已由 root 記錄為通過，
+但候選已被退回，不能作為修正版驗收或發布依據。修正版 matching CI、
+hosted PG、重新 review、合併與正式上線仍須分別完成；VM 不執行這些
+產品或資料庫 runtime。
+
+### CI-ALLOCATION-CONSUMERS
+
+舊 423 的 CI 另外暴露兩個既有 migration allocation 消費測試漏列新增
+`public_fare_management_allocations`：磁碟已有 V0118，但測試只計算到
+最高已保留 V0117，因此兩項「磁碟 migration 不得超過保留範圍」斷言失敗。
+原 owner 的基準重現為兩個檔案共 **56 passed／2 failed**，保存在
+`allocation-consumer-baseline.json`。
+
+root 已透過 supported Supervisor 流程把以下兩個既有測試納入原 task
+scope，在既有各處 `allAllocations` 列舉補上
+`public_fare_management_allocations` 群組：
+
+- `tests/unit/system-remediation/sr-partner-notify-con-20260917/sr-partner-notify-con-20260917.test.ts`
+- `tests/unit/system-remediation/sr-recovery-contracts-20260911/sr-recovery-contracts-20260911.test.ts`
+
+所有原有 invariants／assertions、migration、ledger 及保留範圍規則均未
+放寬或更動；這是讓既有檢查讀到原已配置的費率管理群組。root 唯一修改
+並驗證這兩個檔案：最終 **58／58 passed、零 skip、exit 0**，證據為
+`allocation-consumer-final.json`。中途第一次補列僅完成部分位置，曾有
+57 passed／1 failed，保留在 `allocation-consumer-first-followup.json`，
+未覆寫原始失敗歷史。最終 partner 測試的一處、recovery 測試的三處
+既有群組列舉均已補齊。
+
+這 58 項與前述 143 項沒有重疊，修正版合計 **201 項 scoped tests 通過**。
+新候選仍須通過自己的 hosted CI，不能沿用舊 423 的結果發布。

@@ -21,6 +21,14 @@ import {
   t as translate,
   type Locale,
 } from "../../../apps/platform-admin-web/lib/translations";
+import { ApiClient } from "../../../packages/api-client/src/index";
+import { identity } from "./backend-fixture";
+import {
+  opaqueFees,
+  unavailableError,
+  wireCommand,
+  wireHarness,
+} from "./wire-harness";
 import { demoFareList } from "../../../apps/platform-admin-web/app/platform-admin/p5/fares/fare-management-model";
 import { createUiModuleLoader } from "../system-remediation/sr-wire-001/ui-module-loader";
 
@@ -33,6 +41,7 @@ const client = {
   schedulePlatformFareVersion: vi.fn(),
   retirePlatformFareVersion: vi.fn(),
 };
+let activeClient: typeof client | ApiClient = client;
 let scopes: string[];
 let locale: Locale;
 const tt = (key: string, params?: Record<string, string | number>) =>
@@ -41,7 +50,7 @@ const load = createUiModuleLoader(appRoot, {
   react: React,
   "react/jsx-runtime": jsxRuntime,
   "@drts/ui-web": canvas,
-  "@/lib/admin-client": { usePlatformAdminClient: () => client },
+  "@/lib/admin-client": { usePlatformAdminClient: () => activeClient },
   "@/lib/platform-admin-authority": {
     usePlatformAdminAuthority: () => ({ scopes }),
   },
@@ -121,6 +130,7 @@ function deferred<T>() {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  activeClient = client;
   scopes = ["foundation:read", "foundation:write"];
   locale = "en";
   client.listPlatformFareVersions.mockResolvedValue(list(record()));
@@ -526,5 +536,131 @@ describe("actual P5 fare page and interactions", () => {
       screen.getByLabelText("生效時間 · 台灣時間（UTC+08:00）"),
     ).toBeTruthy();
     expect(rendered.container.textContent).not.toContain("fareManage.");
+  });
+});
+
+describe("AUTO-WIRE-001 production serialized response -> actual fare component", () => {
+  it("consumes the actual list and preserves every colliding fee through clone/create/readback/edit", async () => {
+    const f = wireHarness();
+    vi.stubGlobal("fetch", f.fetch);
+    activeClient = new ApiClient({ baseUrl: "https://unit.invalid" });
+    render(<PublicFareManagement />);
+    await loaded();
+    expect(screen.getByText(/NT\$85 \/ 1250 m/)).toBeTruthy();
+    for (const name of Object.keys(opaqueFees))
+      expect(screen.getByText(name)).toBeTruthy();
+    fireEvent.click(button("p5.fares.create"));
+    for (const [index, [name, amount]] of Object.entries(
+      opaqueFees,
+    ).entries()) {
+      expect(
+        (
+          screen.getByLabelText(
+            `${tt("fareManage.feeName")} ${index + 1}`,
+          ) as HTMLInputElement
+        ).value,
+      ).toBe(name);
+      expect(
+        (
+          screen.getByLabelText(
+            `${tt("fareManage.feeAmount")} ${index + 1}`,
+          ) as HTMLInputElement
+        ).value,
+      ).toBe(String(amount));
+    }
+    change("fareManage.field.fareVersionId", "wire-clone");
+    change("fareManage.field.displayName", "Wire clone");
+    change("fareManage.field.effectiveLocal", "2026-11-01T08:00");
+    fireEvent.click(button("fareManage.saveDraft"));
+    await screen.findByText(tt("fareManage.saved"));
+    expect((await f.service.get("wire-clone")).tariff.additionalFees).toEqual(
+      opaqueFees,
+    );
+    fireEvent.click(button("fareManage.edit"));
+    change("fareManage.field.baseFare", "90");
+    fireEvent.click(button("fareManage.saveDraft"));
+    await screen.findByText(tt("fareManage.saved"));
+    const saved = await f.service.get("wire-clone");
+    expect(saved.tariff.baseFare).toBe(90);
+    expect(saved.tariff.additionalFees).toEqual(opaqueFees);
+    expect(Object.hasOwn(saved.tariff.additionalFees, "__proto__")).toBe(true);
+    expect(
+      f.requests
+        .filter((request) => request.method !== "GET")
+        .map((request) => request.method),
+    ).toEqual(["POST", "PUT"]);
+  });
+});
+
+describe("AUTO-WIRE-002 production exception filter -> SDK -> actual fare component", () => {
+  it("shows actual revision conflict guidance and retains the original edit revision after reload", async () => {
+    const f = wireHarness();
+    const input = wireCommand("wire-draft");
+    await f.controller.create(input, identity, "prepare");
+    vi.stubGlobal("fetch", f.fetch);
+    activeClient = new ApiClient({ baseUrl: "https://unit.invalid" });
+    render(<PublicFareManagement />);
+    await loaded();
+    choose("wire-draft");
+    fireEvent.click(button("fareManage.edit"));
+    const { fareVersionId: _id, ...body } = input;
+    void _id;
+    await f.controller.update(
+      input.fareVersionId,
+      { ...body, expectedRevision: 1, displayName: "Concurrent update" },
+      identity,
+      "another-editor",
+    );
+    change("fareManage.field.baseFare", "95");
+    fireEvent.click(button("fareManage.saveDraft"));
+    await screen.findByText(tt("fareManage.revisionError"));
+    expect(
+      (
+        screen.getByLabelText(
+          tt("fareManage.field.baseFare"),
+        ) as HTMLInputElement
+      ).value,
+    ).toBe("95");
+    fireEvent.click(button("fareManage.refresh"));
+    await loaded();
+    fireEvent.click(button("fareManage.saveDraft"));
+    await screen.findByText(tt("fareManage.revisionError"));
+    const attempts = f.requests.filter((request) => request.method === "PUT");
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]!.key).toBe(attempts[0]!.key);
+    expect(attempts[1]!.body).toMatchObject({ expectedRevision: 1 });
+    expect((await f.service.get(input.fareVersionId)).displayName).toBe(
+      "Concurrent update",
+    );
+  });
+
+  it("keeps the entered draft through actual 503 and retries the same intent through the real SDK", async () => {
+    const f = wireHarness();
+    const input = wireCommand("wire-draft");
+    await f.controller.create(input, identity, "prepare");
+    vi.stubGlobal("fetch", f.fetch);
+    activeClient = new ApiClient({ baseUrl: "https://unit.invalid" });
+    render(<PublicFareManagement />);
+    await loaded();
+    choose("wire-draft");
+    fireEvent.click(button("fareManage.edit"));
+    change("fareManage.field.baseFare", "95");
+    f.failNext(unavailableError());
+    fireEvent.click(button("fareManage.saveDraft"));
+    await screen.findByText(tt("fareManage.saveError"));
+    expect(
+      (
+        screen.getByLabelText(
+          tt("fareManage.field.baseFare"),
+        ) as HTMLInputElement
+      ).value,
+    ).toBe("95");
+    fireEvent.click(button("fareManage.saveDraft"));
+    await screen.findByText(tt("fareManage.saved"));
+    const attempts = f.requests.filter((request) => request.method === "PUT");
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]!.key).toBe(attempts[0]!.key);
+    expect(attempts[1]!.body).toEqual(attempts[0]!.body);
+    expect((await f.service.get(input.fareVersionId)).tariff.baseFare).toBe(95);
   });
 });

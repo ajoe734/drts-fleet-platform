@@ -91,7 +91,7 @@ describe("actual fare repository transaction/transport boundary", () => {
     expect(data.items[0]).toMatchObject({
       revision: 0,
       authorityFilingRef: null,
-      tariff: { additionalFees: { airport_fee: 60 } },
+      tariff: { additionalFeeEntries: [{ key: "airport_fee", amount: 60 }] },
     });
   });
   it("holds actual controller acknowledgement until transaction COMMIT finishes", async () => {
