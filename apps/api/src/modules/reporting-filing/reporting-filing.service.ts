@@ -1,6 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import {
+  HttpStatus,
+  Injectable,
+  OnModuleInit,
+  OnApplicationBootstrap,
+  OnModuleDestroy,
+  Optional,
+} from "@nestjs/common";
 
 import type {
   AuditLogRecord,
@@ -73,6 +80,7 @@ import {
   ReportingFilingRepository,
   type PersistReportingFilingChanges,
   type MultiTaxiTripExportJobMetadata,
+  type ReportJobWriter,
 } from "./reporting-filing.repository";
 import {
   DEFAULT_CONTROLLED_DOWNLOAD_HOST,
@@ -132,6 +140,7 @@ type StoredReportJob = ReportJobRecord & {
   partnerRevenueRows: PartnerRevenueSummaryRowRecord[];
   settlementMatrix: SettlementMatrixRecord[];
   multiTaxiTripExport?: MultiTaxiTripExportJobMetadata;
+  startedAt?: string | null;
 };
 
 type StoredFilingPackage = FilingPackageRecord & {
@@ -190,12 +199,22 @@ export type ReportArtifactResult = {
 };
 
 @Injectable()
-export class ReportingFilingService implements OnModuleInit {
+export class ReportingFilingService
+  implements OnModuleInit, OnApplicationBootstrap, OnModuleDestroy
+{
   private reportJobs: StoredReportJob[] = [];
 
   private filingPackages: StoredFilingPackage[] = [];
 
   private readonly scheduledReportJobIds = new Set<string>();
+
+  private readonly reportQueue = new Map<string, string | undefined>();
+  private reportWorkerActive = false;
+  private reportWorkerStopping = false;
+  private reportWorkerTask: Promise<void> | null = null;
+  private reportWorkerWake: NodeJS.Immediate | null = null;
+  private reportRecoveryTimer: NodeJS.Timeout | null = null;
+  private reportEnqueues = new Set<Promise<unknown>>();
 
   private readonly scheduledFilingPackageIds = new Set<string>();
 
@@ -415,7 +434,33 @@ export class ReportingFilingService implements OnModuleInit {
         error,
         "module init",
       );
+      // A configured queue cannot boot with unknown persisted state.
+      if (this.hasDurableReports()) throw error;
     }
+  }
+
+  onApplicationBootstrap() {
+    if (!this.hasDurableReports()) return;
+    this.reportWorkerStopping = false;
+    this.reportWorkerActive = true;
+    this.wakeReportWorker();
+  }
+
+  async onModuleDestroy() {
+    this.reportWorkerStopping = true;
+    this.reportWorkerActive = false;
+    if (this.reportWorkerWake) clearImmediate(this.reportWorkerWake);
+    if (this.reportRecoveryTimer) clearTimeout(this.reportRecoveryTimer);
+    this.reportWorkerWake = null;
+    this.reportRecoveryTimer = null;
+    // Finish the claimed job and all admitted writes; unclaimed work remains
+    // durably queued for recovery rather than extending shutdown indefinitely.
+    await Promise.allSettled([...this.reportEnqueues]);
+    await this.reportWorkerTask;
+  }
+
+  private hasDurableReports() {
+    return this.reportingFilingRepository?.isEnabled?.() ?? false;
   }
 
   registerOrderFeedProvider(provider: OrderFeedProvider) {
@@ -524,7 +569,96 @@ export class ReportingFilingService implements OnModuleInit {
     identity: EvidenceAccessIdentity | null,
     requestId?: string,
   ): MultiTaxiTripOperationalExportJobAccepted {
-    const { actorId, policy } = this.assertMultiTaxiTripExportAccess(identity);
+    if (this.hasDurableReports()) {
+      throw new Error(
+        "Durable multi-taxi export requires createMultiTaxiTripExportJobDurably",
+      );
+    }
+    const { job, idempotentReplay } = this.prepareMultiTaxiTripExportJob(
+      command,
+      rows,
+      identity,
+    );
+    if (!idempotentReplay) {
+      this.publishCommittedReport(job);
+      this.persistChanges(
+        { reportJobs: [this.cloneStoredReportJob(job)] },
+        "queue_multi_taxi_trip_export",
+      );
+      this.scheduleReportJobCompletion(job.jobId, requestId);
+    }
+    return this.acceptMultiTaxiTripExportJob(
+      job,
+      idempotentReplay,
+      identity,
+      requestId,
+    );
+  }
+
+  async createMultiTaxiTripExportJobDurably(
+    command: CreateMultiTaxiTripOperationalExportJobCommand,
+    rows: readonly MultiTaxiTripOperationalExportRow[],
+    identity: EvidenceAccessIdentity | null,
+    requestId?: string,
+  ): Promise<MultiTaxiTripOperationalExportJobAccepted> {
+    if (this.reportWorkerStopping) throw new Error("Report worker is stopping");
+    if (!this.hasDurableReports()) {
+      return this.createMultiTaxiTripExportJob(
+        command,
+        rows,
+        identity,
+        requestId,
+      );
+    }
+    // Validate the original actor/purpose/scope contract before any write. The
+    // repository resolves actor-key replay from committed storage under a lock,
+    // including requests admitted by another worker or before recovery.
+    const { job: proposed } = this.prepareMultiTaxiTripExportJob(
+      command,
+      rows,
+      identity,
+      null,
+    );
+    proposed.status = "queued";
+    const enqueue =
+      this.reportingFilingRepository!.enqueueMultiTaxiTripExportJob(
+        this.cloneStoredReportJob(proposed),
+      );
+    this.reportEnqueues.add(enqueue);
+    let committed: Awaited<typeof enqueue>;
+    try {
+      committed = await enqueue;
+    } finally {
+      this.reportEnqueues.delete(enqueue);
+    }
+    const job = this.cloneStoredReportJob({
+      ...committed.job,
+      partnerRevenueRows: committed.job.partnerRevenueRows ?? [],
+      settlementMatrix: committed.job.settlementMatrix ?? [],
+    });
+    if (committed.idempotentReplay) {
+      // Keep the original conflict rule and canonical rows/metadata on replay.
+      this.prepareMultiTaxiTripExportJob(command, rows, identity, job);
+    }
+    this.publishCommittedReport(job);
+    if (["queued", "pending", "running"].includes(job.status)) {
+      this.scheduleReportJobCompletion(job.jobId, requestId);
+    }
+    return this.acceptMultiTaxiTripExportJob(
+      job,
+      committed.idempotentReplay,
+      identity,
+      requestId,
+    );
+  }
+
+  private prepareMultiTaxiTripExportJob(
+    command: CreateMultiTaxiTripOperationalExportJobCommand,
+    rows: readonly MultiTaxiTripOperationalExportRow[],
+    identity: EvidenceAccessIdentity | null,
+    existingJob?: StoredReportJob | null,
+  ): { job: StoredReportJob; idempotentReplay: boolean } {
+    const { actorId } = this.assertMultiTaxiTripExportAccess(identity);
     const scope = this.normalizeMultiTaxiTripExportScope(command.scope ?? {});
     const purpose = this.normalizeRequiredText(
       command.purpose,
@@ -536,12 +670,15 @@ export class ReportingFilingService implements OnModuleInit {
       "idempotencyKey",
       MAX_EXPORT_IDEMPOTENCY_KEY_LENGTH,
     );
-    const existing = this.reportJobs.find(
-      (job) =>
-        job.jobType === MULTI_TAXI_TRIP_EXPORT_JOB_TYPE &&
-        job.multiTaxiTripExport?.requestedByActorId === actorId &&
-        job.multiTaxiTripExport.idempotencyKey === idempotencyKey,
-    );
+    const existing =
+      existingJob === undefined
+        ? this.reportJobs.find(
+            (job) =>
+              job.jobType === MULTI_TAXI_TRIP_EXPORT_JOB_TYPE &&
+              job.multiTaxiTripExport?.requestedByActorId === actorId &&
+              job.multiTaxiTripExport.idempotencyKey === idempotencyKey,
+          )
+        : existingJob;
 
     if (existing) {
       const existingMetadata =
@@ -560,27 +697,7 @@ export class ReportingFilingService implements OnModuleInit {
           },
         );
       }
-      this.recordArtifactAccessAudit(
-        {
-          actionName: "replay_multi_taxi_trip_export_job",
-          resourceType: "report_job",
-          resourceId: existing.jobId,
-          newValuesSummary: buildEvidenceAccessAuditSummary(policy, "export", {
-            actorId,
-            status: existing.status,
-            recordCount: existingMetadata.recordCount,
-          }),
-        },
-        requestId,
-        identity,
-        null,
-        policy,
-      );
-      return {
-        jobId: existing.jobId,
-        status: this.toMultiTaxiTripExportStatus(existing.status),
-        idempotentReplay: true,
-      };
+      return { job: existing, idempotentReplay: true };
     }
 
     const createdAt = new Date().toISOString();
@@ -606,38 +723,52 @@ export class ReportingFilingService implements OnModuleInit {
       updatedAt: createdAt,
     };
 
-    this.reportJobs = [job, ...this.reportJobs];
-    this.persistChanges(
-      {
-        reportJobs: [this.cloneStoredReportJob(job)],
-      },
-      "queue_multi_taxi_trip_export",
-    );
+    return { job, idempotentReplay: false };
+  }
+
+  private acceptMultiTaxiTripExportJob(
+    job: StoredReportJob,
+    idempotentReplay: boolean,
+    identity: EvidenceAccessIdentity | null,
+    requestId?: string,
+  ): MultiTaxiTripOperationalExportJobAccepted {
+    const { actorId, policy } = this.assertMultiTaxiTripExportAccess(identity);
+    const metadata = this.requireMultiTaxiTripExportMetadata(job);
     this.recordArtifactAccessAudit(
       {
-        actionName: "create_multi_taxi_trip_export_job",
+        actionName: idempotentReplay
+          ? "replay_multi_taxi_trip_export_job"
+          : "create_multi_taxi_trip_export_job",
         resourceType: "report_job",
         resourceId: job.jobId,
-        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "export", {
-          actorId,
-          status: job.status,
-          scope,
-          purpose,
-          recordCount: metadata.recordCount,
-          format: job.format,
-        }),
+        newValuesSummary: buildEvidenceAccessAuditSummary(
+          policy,
+          "export",
+          idempotentReplay
+            ? {
+                actorId,
+                status: this.toMultiTaxiTripExportStatus(job.status),
+                recordCount: metadata.recordCount,
+              }
+            : {
+                actorId,
+                status: this.toMultiTaxiTripExportStatus(job.status),
+                scope: metadata.scope,
+                purpose: metadata.purpose,
+                recordCount: metadata.recordCount,
+                format: job.format,
+              },
+        ),
       },
       requestId,
       identity,
       null,
       policy,
     );
-    this.scheduleReportJobCompletion(job.jobId, requestId);
-
     return {
       jobId: job.jobId,
-      status: "pending",
-      idempotentReplay: false,
+      status: this.toMultiTaxiTripExportStatus(job.status),
+      idempotentReplay,
     };
   }
 
@@ -935,6 +1066,72 @@ export class ReportingFilingService implements OnModuleInit {
     requestId?: string,
     tenantScopeId?: string | null,
   ): ReportJobAccepted {
+    if (this.hasDurableReports()) {
+      throw new Error(
+        "Durable report creation requires createReportJobDurably",
+      );
+    }
+    const job = this.prepareReportJob(command, tenantScopeId);
+    this.reportJobs = [job, ...this.reportJobs];
+    this.persistChanges(
+      { reportJobs: [this.cloneStoredReportJob(job)] },
+      "queue_report_job",
+    );
+    this.auditReportEnqueue(job, requestId);
+    this.scheduleReportJobCompletion(job.jobId, requestId);
+    return { jobId: job.jobId, status: "queued" };
+  }
+
+  async createReportJobDurably(
+    command: CreateReportJobCommand,
+    requestId?: string,
+    tenantScopeId?: string | null,
+  ): Promise<ReportJobAccepted> {
+    const [accepted] = await this.createReportJobsDurably(
+      [command],
+      requestId,
+      tenantScopeId,
+    );
+    return accepted!;
+  }
+
+  // Internal producer, also used to establish a valid persisted recovery
+  // workload. Every command uses the same validation/tenant authority as HTTP.
+  async createReportJobsDurably(
+    commands: readonly CreateReportJobCommand[],
+    requestId?: string,
+    tenantScopeId?: string | null,
+  ): Promise<ReportJobAccepted[]> {
+    if (this.reportWorkerStopping) throw new Error("Report worker is stopping");
+    if (!this.hasDurableReports()) {
+      return commands.map((command) =>
+        this.createReportJob(command, requestId, tenantScopeId),
+      );
+    }
+    const jobs = commands.map((command) =>
+      this.prepareReportJob(command, tenantScopeId),
+    );
+    const enqueue = this.reportingFilingRepository!.enqueueReportJobs(
+      jobs.map((job) => this.cloneStoredReportJob(job)),
+    );
+    this.reportEnqueues.add(enqueue);
+    try {
+      await enqueue;
+    } finally {
+      this.reportEnqueues.delete(enqueue);
+    }
+    this.reportJobs = [...jobs, ...this.reportJobs];
+    for (const job of jobs) {
+      this.auditReportEnqueue(job, requestId);
+      this.scheduleReportJobCompletion(job.jobId, requestId);
+    }
+    return jobs.map((job) => ({ jobId: job.jobId, status: "queued" }));
+  }
+
+  private prepareReportJob(
+    command: CreateReportJobCommand,
+    tenantScopeId?: string | null,
+  ): StoredReportJob {
     this.assertNonBlank(command.jobType, "jobType");
     this.assertReportTypeProducesRows(command.jobType);
     this.assertReportFormatRenders(command.format);
@@ -978,13 +1175,10 @@ export class ReportingFilingService implements OnModuleInit {
       updatedAt: createdAt,
     };
 
-    this.reportJobs = [job, ...this.reportJobs];
-    this.persistChanges(
-      {
-        reportJobs: [this.cloneStoredReportJob(job)],
-      },
-      "queue_report_job",
-    );
+    return job;
+  }
+
+  private auditReportEnqueue(job: StoredReportJob, requestId?: string) {
     this.recordAudit(
       {
         actorId: null,
@@ -1002,13 +1196,6 @@ export class ReportingFilingService implements OnModuleInit {
       },
       requestId,
     );
-
-    this.scheduleReportJobCompletion(job.jobId, requestId);
-
-    return {
-      jobId: job.jobId,
-      status: "queued" as const satisfies ReportJobAccepted["status"],
-    };
   }
 
   listReportJobs(
@@ -1237,6 +1424,11 @@ export class ReportingFilingService implements OnModuleInit {
   }
 
   private scheduleReportJobCompletion(jobId: string, requestId?: string) {
+    if (this.hasDurableReports()) {
+      this.reportQueue.set(jobId, requestId);
+      this.wakeReportWorker();
+      return;
+    }
     if (this.scheduledReportJobIds.has(jobId)) {
       return;
     }
@@ -1247,6 +1439,134 @@ export class ReportingFilingService implements OnModuleInit {
         this.scheduledReportJobIds.delete(jobId);
       });
     });
+  }
+
+  private wakeReportWorker() {
+    if (
+      !this.reportWorkerActive ||
+      this.reportWorkerStopping ||
+      this.reportWorkerTask ||
+      this.reportWorkerWake
+    )
+      return;
+    if (this.reportRecoveryTimer) clearTimeout(this.reportRecoveryTimer);
+    this.reportRecoveryTimer = null;
+    // Reports are lower priority: one builder, yielding between jobs. There is
+    // no sleep/latency padding; durable runnable jobs are refreshed FIFO.
+    this.reportWorkerWake = setImmediate(() => {
+      this.reportWorkerWake = null;
+      let didWork = false;
+      this.reportWorkerTask = this.processNextDurableReport()
+        .then((worked) => {
+          didWork = worked;
+        })
+        .catch((error: unknown) =>
+          this.reportingFilingRepository!.reportPersistenceFailure(
+            error,
+            "report_worker",
+          ),
+        )
+        .finally(() => {
+          this.reportWorkerTask = null;
+          if (!this.reportWorkerActive || this.reportWorkerStopping) return;
+          if (didWork) {
+            this.wakeReportWorker();
+            return;
+          }
+          this.reportRecoveryTimer = setTimeout(() => {
+            this.reportRecoveryTimer = null;
+            this.wakeReportWorker();
+          }, 1000);
+          this.reportRecoveryTimer.unref();
+        });
+    });
+  }
+
+  private async processNextDurableReport() {
+    // Another instance may own/finish a locally admitted job. Refresh known
+    // pending views from committed rows so those jobs never stay queued forever
+    // merely because this worker correctly declined their duplicate claim.
+    const committedJobs = await this.reportingFilingRepository!.loadReportJobs([
+      ...this.reportQueue.keys(),
+    ]);
+    for (const committed of committedJobs) {
+      this.publishCommittedReport({
+        ...committed,
+        partnerRevenueRows: committed.partnerRevenueRows ?? [],
+        settlementMatrix: committed.settlementMatrix ?? [],
+      });
+      if (!["pending", "queued", "running"].includes(committed.status))
+        this.reportQueue.delete(committed.jobId);
+    }
+    const ids =
+      await this.reportingFilingRepository!.listRunnableReportJobIds();
+    for (const jobId of ids) {
+      if (this.reportWorkerStopping) return false;
+      const claimed = await this.reportingFilingRepository!.withReportJobClaim(
+        jobId,
+        async (record, write) => {
+          const job = this.cloneStoredReportJob({
+            ...record,
+            partnerRevenueRows: record.partnerRevenueRows ?? [],
+            settlementMatrix: record.settlementMatrix ?? [],
+          });
+          const requestId = this.reportQueue.get(jobId);
+          // If claim/start persistence fails, leave the previous durable state
+          // and its missing first-start observation intact for recovery.
+          await this.startDurableReportJob(job, write);
+          try {
+            await this.completeReportJob(job, requestId, write);
+          } catch (error) {
+            await this.failReportJob(job, error, requestId, write);
+          }
+          this.reportQueue.delete(jobId);
+        },
+      ).catch(async (error: unknown) => {
+        // A conditional write can lose to a genuine expiry/terminal
+        // transition. Refresh from committed storage, never the failed clone.
+        try {
+          const committed =
+            await this.reportingFilingRepository!.loadReportJob(jobId);
+          if (committed)
+            this.publishCommittedReport({
+              ...committed,
+              partnerRevenueRows: committed.partnerRevenueRows ?? [],
+              settlementMatrix: committed.settlementMatrix ?? [],
+            });
+        } catch (reloadError) {
+          this.reportingFilingRepository!.reportPersistenceFailure(
+            reloadError,
+            "reload_report_state",
+          );
+        }
+        throw error;
+      });
+      if (claimed) {
+        // Continue immediately on the next event-loop turn, not at the idle
+        // recovery interval. The bounded executor never processes two at once.
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private async startDurableReportJob(
+    job: StoredReportJob,
+    write: ReportJobWriter,
+  ) {
+    const now = new Date().toISOString();
+    job.status = "running";
+    job.updatedAt = now;
+    job.startedAt ??= now;
+    await write(this.cloneStoredReportJob(job));
+    this.publishCommittedReport(job);
+  }
+
+  private publishCommittedReport(job: StoredReportJob) {
+    const copy = this.cloneStoredReportJob(job);
+    const index = this.reportJobs.findIndex((item) => item.jobId === job.jobId);
+    if (index < 0) this.reportJobs.unshift(copy);
+    else this.reportJobs[index] = copy;
   }
 
   private scheduleFilingPackageCompletion(
@@ -1282,7 +1602,7 @@ export class ReportingFilingService implements OnModuleInit {
       this.startReportJob(job);
       await this.completeReportJob(job, requestId);
     } catch (error) {
-      this.failReportJob(job, error, requestId);
+      await this.failReportJob(job, error, requestId);
     }
   }
 
@@ -1309,6 +1629,9 @@ export class ReportingFilingService implements OnModuleInit {
     const updatedAt = new Date().toISOString();
     job.status = "running";
     job.updatedAt = updatedAt;
+    if (!job.startedAt) {
+      job.startedAt = updatedAt;
+    }
     this.persistChanges(
       {
         reportJobs: [this.cloneStoredReportJob(job)],
@@ -1317,7 +1640,11 @@ export class ReportingFilingService implements OnModuleInit {
     );
   }
 
-  private async completeReportJob(job: StoredReportJob, requestId?: string) {
+  private async completeReportJob(
+    job: StoredReportJob,
+    requestId?: string,
+    write?: ReportJobWriter,
+  ) {
     // A job persisted before the builder registry existed can still carry an
     // unimplemented type. Those complete empty as they always did; the guard
     // that stops new ones is in `createReportJob`, not here.
@@ -1354,12 +1681,16 @@ export class ReportingFilingService implements OnModuleInit {
     job.artifact = this.createArtifact("report", job.jobId, artifactPayload);
     job.status = "completed";
     job.updatedAt = new Date().toISOString();
-    this.persistChanges(
-      {
-        reportJobs: [this.cloneStoredReportJob(job)],
-      },
-      "complete_report_job",
-    );
+    if (write) {
+      await write(this.cloneStoredReportJob(job));
+      this.publishCommittedReport(job);
+    } else
+      this.persistChanges(
+        {
+          reportJobs: [this.cloneStoredReportJob(job)],
+        },
+        "complete_report_job",
+      );
 
     this.recordAudit(
       {
@@ -1384,19 +1715,25 @@ export class ReportingFilingService implements OnModuleInit {
     );
   }
 
-  private failReportJob(
+  private async failReportJob(
     job: StoredReportJob,
     error: unknown,
     requestId?: string,
+    write?: ReportJobWriter,
   ) {
     job.status = "failed";
+    job.artifact = null;
     job.updatedAt = new Date().toISOString();
-    this.persistChanges(
-      {
-        reportJobs: [this.cloneStoredReportJob(job)],
-      },
-      "fail_report_job",
-    );
+    if (write) {
+      await write(this.cloneStoredReportJob(job));
+      this.publishCommittedReport(job);
+    } else
+      this.persistChanges(
+        {
+          reportJobs: [this.cloneStoredReportJob(job)],
+        },
+        "fail_report_job",
+      );
     this.recordAudit(
       {
         actorId: null,
