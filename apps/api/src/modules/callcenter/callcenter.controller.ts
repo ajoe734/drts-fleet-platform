@@ -250,17 +250,13 @@ export class CallcenterController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.takeoverAiCallSession(
-        callId,
-        command,
-        requestId,
-      ),
+      this.callcenterService.takeoverAiCallSession(callId, command, requestId),
       requestId,
     );
   }
 
   @Post("sessions/:callId/transfer-to-complaint")
-  transferCallToComplaint(
+  async transferCallToComplaint(
     @Param("callId") callId: string,
     @Body() command: TransferCallToComplaintCommand,
     @Headers("x-request-id") requestId?: string,
@@ -276,6 +272,9 @@ export class CallcenterController {
         description: command.description,
       },
       requestId,
+    );
+    await this.complaintService.awaitSettlementPersistence(
+      complaintCase.caseNo,
     );
 
     return toApiSuccessEnvelope(

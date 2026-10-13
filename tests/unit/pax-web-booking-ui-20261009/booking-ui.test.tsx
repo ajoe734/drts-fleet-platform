@@ -288,8 +288,12 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
     await form();
     await selectAddress(0, "上車");
     await selectAddress(1, "下車");
+    fireEvent.change(screen.getByLabelText("預約時間"), {
+      target: { value: "2099-10-11T12:00" },
+    });
     click("試算車資");
     await screen.findByText("您選擇的地點超出目前服務範圍");
+    expect(calls("/quotes")).toHaveLength(1);
     expect(screen.queryByLabelText("我已確認費用與優惠說明")).toBeNull();
     expect(calls("/rides")).toHaveLength(0);
   });

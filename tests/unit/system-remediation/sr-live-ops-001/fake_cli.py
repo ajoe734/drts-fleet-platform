@@ -141,6 +141,8 @@ elif kind == "gcloud":
     if args[:3] == ["sql", "instances", "list"]:
         emit([{"name": "drts-dev-db"}] + ([{"name": "drts-dev-db-drill-999-1"}] if scenario == "leftover" else []))
     if args[:2] == ["logging", "read"]:
+        if (root / "audit.json").exists():
+            emit(json.loads((root / "audit.json").read_text()))
         if scenario == "audit_denied":
             fail()
         if scenario == "audit_empty":

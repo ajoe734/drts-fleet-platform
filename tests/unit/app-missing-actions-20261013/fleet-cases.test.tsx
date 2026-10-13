@@ -81,6 +81,7 @@ function harness(
     "react/jsx-runtime": jsxRuntime,
     "@drts/ui-web": canvas,
     "server-only": {},
+    "@/app/statements/actions": { submitStatementDecision: vi.fn() },
     "./api-client.server": {
       getServerFleetPartnerClient: async () => ({
         client: { getList, get },

@@ -5,11 +5,13 @@ import {
   CanvasDL,
   CanvasPageHeader,
 } from "@drts/ui-web";
-import { FleetStatementActions, StatementDecisionNote } from "@/components/fleet-statement-actions";
-import { getServerFleetPartnerClient } from "@/lib/api-client.server";
+import {
+  FleetStatementActions,
+  StatementDecisionNote,
+} from "@/components/fleet-statement-actions";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { loadRevenue, loadStatements } from "@/lib/fleet-portal-data.server";
-import { BiLabel, DataSourceNotice } from "@/lib/fleet-portal-ui";
+import { loadRevenue } from "@/lib/fleet-portal-data.server";
+import { BiLabel } from "@/lib/fleet-portal-ui";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 import { resolveStatementBannerState } from "./statement-banner";
@@ -17,19 +19,27 @@ import { trRevenue } from "./translations";
 
 export const dynamic = "force-dynamic";
 
-export default async function FleetRevenuePage() {
+export default async function FleetRevenuePage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ period?: string }>;
+}) {
+  const params = searchParams ? await searchParams : {};
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
-  const [s, statementsView, { fleetPartnerId }] = await Promise.all([
-    loadRevenue(),
-    loadStatements(),
-    getServerFleetPartnerClient(),
-  ]);
-  const currentStatement =
-    statementsView.rows.find((row) => row.period === s.period) ??
-    statementsView.rows[0] ??
-    null;
+  const s = await loadRevenue(params.period);
+  const currentStatement = s.statement;
   const bannerState = resolveStatementBannerState(currentStatement);
+  const periods = [...new Set([...s.availablePeriods, s.period])].sort((a, b) =>
+    b.localeCompare(a),
+  );
+  const exportAvailable = s.source === "live" && currentStatement !== null;
+  const exportUnavailableReason = trRevenue(
+    s.error
+      ? "revenue.exportUnavailable.readFailed"
+      : "revenue.exportUnavailable.noStatement",
+    locale,
+  );
 
   return (
     <>
@@ -39,24 +49,91 @@ export default async function FleetRevenuePage() {
         subtitle={t("revenue.subtitle", locale)}
         actions={
           <>
-            <CanvasBtn theme={theme} icon="filter">
-              {t("revenue.period", locale)}
-            </CanvasBtn>
-            <CanvasBtn theme={theme}>
-              {t("revenue.exportLines", locale)}
-            </CanvasBtn>
+            <form
+              action="/revenue"
+              method="get"
+              style={{ display: "flex", alignItems: "center", gap: 6 }}
+            >
+              <label
+                htmlFor="revenue-period"
+                style={{ fontSize: 12, color: theme.textMuted }}
+              >
+                {t("revenue.period", locale)}
+              </label>
+              <select
+                id="revenue-period"
+                name="period"
+                defaultValue={s.period}
+                style={{
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: 7,
+                  background: theme.bgRaised,
+                  color: theme.text,
+                  padding: "5px 8px",
+                  fontFamily: theme.monoFamily,
+                  fontSize: 12,
+                }}
+              >
+                {periods.map((period) => (
+                  <option key={period} value={period}>
+                    {period}
+                  </option>
+                ))}
+              </select>
+              <CanvasBtn theme={theme} icon="filter" type="submit">
+                {trRevenue("revenue.applyPeriod", locale)}
+              </CanvasBtn>
+            </form>
+            {exportAvailable ? (
+              <a
+                href={`/statements/export?statementId=${encodeURIComponent(currentStatement.id)}`}
+                download
+                style={{ textDecoration: "none" }}
+              >
+                <CanvasBtn theme={theme} icon="export">
+                  {t("revenue.exportLines", locale)}
+                </CanvasBtn>
+              </a>
+            ) : (
+              <span title={exportUnavailableReason}>
+                <CanvasBtn theme={theme} icon="export" disabled>
+                  {t("revenue.exportLines", locale)}
+                </CanvasBtn>
+                <span
+                  style={{
+                    display: "block",
+                    fontSize: 11,
+                    color: theme.textMuted,
+                  }}
+                >
+                  {exportUnavailableReason}
+                </span>
+              </span>
+            )}
           </>
         }
       />
-      {s.source === "fallback" && (
+      {s.error ? (
         <div style={{ padding: "16px 24px 0" }}>
-          <DataSourceNotice
+          <CanvasBanner
             theme={theme}
-            source={s.source}
-            body={t("data.fixtureNotice", locale)}
+            tone="danger"
+            icon="warn"
+            title={trRevenue("revenue.readFailed.title", locale)}
+            body={trRevenue("revenue.readFailed.body", locale, {
+              period: s.period,
+            })}
+            actions={
+              <a
+                href={`/revenue?period=${encodeURIComponent(s.period)}`}
+                style={{ color: theme.accent }}
+              >
+                {trRevenue("revenue.retry", locale)}
+              </a>
+            }
           />
         </div>
-      )}
+      ) : null}
       <div
         style={{
           padding: 24,
@@ -185,7 +262,11 @@ export default async function FleetRevenuePage() {
                 panel below uses, so it can never claim "generated, please
                 confirm" while also saying "no actionable statement" — the
                 exact self-contradiction reported in R13. */}
-            {bannerState === "no_statement" ? (
+            {s.error ? (
+              <div style={{ fontSize: 12, color: theme.textMuted }}>
+                {trRevenue("revenue.actionsUnavailable", locale)}
+              </div>
+            ) : bannerState === "no_statement" ? (
               <CanvasBanner
                 theme={theme}
                 tone="info"
@@ -206,6 +287,20 @@ export default async function FleetRevenuePage() {
                   payable: currentStatement!.payable,
                 })}
               />
+            ) : bannerState === "confirmed" || bannerState === "disputed" ? (
+              <CanvasBanner
+                theme={theme}
+                tone={bannerState === "confirmed" ? "success" : "warn"}
+                icon="notices"
+                title={t(`statements.request.${bannerState}`, locale)}
+                body={trRevenue(
+                  `revenue.${bannerState}Statement.body`,
+                  locale,
+                  {
+                    period: currentStatement!.period,
+                  },
+                )}
+              />
             ) : (
               <CanvasBanner
                 theme={theme}
@@ -217,23 +312,23 @@ export default async function FleetRevenuePage() {
                 })}
               />
             )}
-            {currentStatement ? (
+            {currentStatement && s.fleetPartnerId ? (
               <div style={{ marginTop: 12 }}>
                 <FleetStatementActions
-                  fleetPartnerId={fleetPartnerId}
+                  fleetPartnerId={s.fleetPartnerId}
                   statement={currentStatement}
+                  available={s.source === "live"}
                   size="sm"
                 />
-                <StatementDecisionNote
-                  fleetPartnerId={fleetPartnerId}
-                  statementId={currentStatement.id}
-                />
+                <StatementDecisionNote statement={currentStatement} />
               </div>
-            ) : (
-              <div style={{ marginTop: 12, fontSize: 12, color: theme.textDim }}>
+            ) : !s.error ? (
+              <div
+                style={{ marginTop: 12, fontSize: 12, color: theme.textDim }}
+              >
                 {t("actions.reason.noCurrentStatement", locale)}
               </div>
-            )}
+            ) : null}
           </CanvasCard>
         </div>
       </div>

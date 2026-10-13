@@ -55,7 +55,11 @@ export default async function FleetStatementsPage() {
         ) : (
           <>
             <CanvasCard theme={theme} padding={0}>
-              <StatementsTable fleetPartnerId={fleetPartnerId} rows={rows} />
+              <StatementsTable
+                fleetPartnerId={fleetPartnerId}
+                rows={rows}
+                available={source === "live"}
+              />
             </CanvasCard>
             <CanvasCard
               theme={theme}

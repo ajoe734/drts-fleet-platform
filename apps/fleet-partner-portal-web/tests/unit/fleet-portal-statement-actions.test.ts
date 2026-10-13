@@ -1,88 +1,30 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildStatementArtifactContent,
-  buildStatementDecisionRequestContent,
-  buildStatementStorageKey,
-  parseStatementDecisionMap,
-} from "../../lib/fleet-portal-statement-actions";
+import type { FleetPartnerStatementRecord } from "@drts/contracts";
+import { mapStatementDecision } from "../../lib/fleet-portal-statement-actions";
 
-const statement = {
-  id: "fst_2026_08",
-  period: "2026-08",
-  trips: 12,
-  payable: "NT$ 8,400",
-  status: "pending_confirm" as const,
-  issued: "2026-08-01",
-};
-
-describe("fleet portal statement actions", () => {
-  it("builds a fleet-scoped storage key", () => {
-    expect(buildStatementStorageKey("fleet-demo-001")).toBe(
-      "drts:fleet-partner-portal:statements:fleet-demo-001",
-    );
-  });
-
-  it("parses only valid persisted decisions", () => {
-    expect(
-      parseStatementDecisionMap(
-        JSON.stringify({
-          fst_2026_08: {
-            decision: "confirmed",
-            requestedAt: "2026-08-08T12:00:00Z",
-          },
-          invalid: {
-            decision: "oops",
-            requestedAt: 1,
-          },
-        }),
-      ),
-    ).toEqual({
-      fst_2026_08: {
-        decision: "confirmed",
-        requestedAt: "2026-08-08T12:00:00Z",
-      },
+describe("fleet portal server decision mapping", () => {
+  it("defaults older server records to unreviewed without a fabricated note or case", () => {
+    expect(mapStatementDecision({} as FleetPartnerStatementRecord)).toEqual({
+      decisionStatus: "unreviewed",
+      confirmedAt: null,
+      confirmedBy: null,
+      confirmNote: null,
+      disputedAt: null,
+      disputedBy: null,
+      disputeReason: null,
+      disputeCaseId: null,
     });
   });
-
-  it("renders statement artifact downloads with fleet scope and statement id", () => {
+  it("preserves the authoritative note, actor, timestamp and linked case", () => {
+    const fields = {
+      decisionStatus: "disputed" as const,
+      disputedAt: "2026-10-13T08:00:00Z",
+      disputedBy: "reviewer-27",
+      disputeReason: "Actual discrepancy",
+      disputeCaseId: "case-27",
+    };
     expect(
-      buildStatementArtifactContent({
-        fleetPartnerId: "fleet-demo-001",
-        statement,
-        downloadedAt: "2026-08-08T12:00:00Z",
-      }),
-    ).toContain("fleet_partner_id=fleet-demo-001");
-    expect(
-      buildStatementArtifactContent({
-        fleetPartnerId: "fleet-demo-001",
-        statement,
-        downloadedAt: "2026-08-08T12:00:00Z",
-      }),
-    ).toContain("statement_id=fst_2026_08");
-  });
-
-  it("renders decision requests with action and reason", () => {
-    expect(
-      buildStatementDecisionRequestContent({
-        fleetPartnerId: "fleet-demo-001",
-        statement,
-        decision: {
-          decision: "disputed",
-          requestedAt: "2026-08-08T12:05:00Z",
-          reason: "Need trip-level reconciliation",
-        },
-      }),
-    ).toContain("action=disputed");
-    expect(
-      buildStatementDecisionRequestContent({
-        fleetPartnerId: "fleet-demo-001",
-        statement,
-        decision: {
-          decision: "disputed",
-          requestedAt: "2026-08-08T12:05:00Z",
-          reason: "Need trip-level reconciliation",
-        },
-      }),
-    ).toContain("reason=Need trip-level reconciliation");
+      mapStatementDecision(fields as FleetPartnerStatementRecord),
+    ).toMatchObject(fields);
   });
 });

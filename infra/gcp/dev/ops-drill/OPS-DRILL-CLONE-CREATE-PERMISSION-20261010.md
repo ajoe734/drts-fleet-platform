@@ -4,8 +4,9 @@ Owner: Codex. Independent reviewer: Codex2. This task-scoped evidence extends
 the existing [restore-drill ledger](../../../../docs/04-uat/system-remediation-20260906/SR-LIVE-OPS-001.md);
 its older permission table and clone-only residual risk are historical.
 
-The conditional-create design below is also historical: see the
-[2026-10-13 correction](#2026-10-13-unconditional-project-create-correction).
+The earlier conditional and unconditional create designs below are historical.
+The current repair and evidence are in
+[OPS-DRILL-SWEEP-CREATE-AUDIT-20261013](#ops-drill-sweep-create-audit-20261013).
 
 ## Trigger and authorized boundary
 
@@ -211,3 +212,83 @@ The first repaired replacement-test run failed because its expected-state
 fixture shared the legacy and desired member list; this was corrected by
 copying the fixture. `create-fixture-failure.log` retains that failure, and
 the final scoped/full results above contain no failing or skipped tests.
+
+## OPS-DRILL-SWEEP-CREATE-AUDIT-20261013
+
+Owner: Codex. Independent reviewer: Codex2. Baseline:
+`108766390714775d2cdaeab390bf0ff5c4590d1b`. Regression anchor:
+`5dc55a85b`; implementation/verification anchor:
+`de25cfa20240d43e9f9b3e5c0a6f3e5dac5eb33f`. The final candidate adds this
+evidence update and fixture formatting; production code is the verified anchor's
+code. Its full SHA, branch and PR are recorded by canonical handoff.
+
+### Actual trigger and repair boundary
+
+The [hosted drill 38379371905](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38379371905)
+at `cb8f33103105067a6d2752561c27a784c6400676` restored/read back successfully
+and confirmed deletion, but its sweep failed. This worker read the completed
+job results and downloaded sanitized artifacts into
+`.local/ops-drill-sweep-create-audit-20261013/hosted-baseline/`:
+`restore_readback_passed`, clone operation
+`616d39b0-33fa-494f-a2da-36c000000032`, RTO runnable 508.124s/readable 511.810s,
+cleanup `deleted` at `10:02:12.491508Z`; sweep failure
+`audit_destination_or_identity_missing` with no remaining drill instances.
+
+The dispatch's canonical integration notes supply three actual audit shapes:
+clone start with a destination in the request, clone completion with a null
+request, and create permission check with no operation/null request. The last
+record identifies the new instance in the granted create authorization's
+`resourceAttributes.name` and its `database_id` label. These shapes are retained
+in `tests/unit/system-remediation/sr-live-ops-001/create-audit-20261013.json`;
+insert IDs are sanitized, and tokens/OAuth identifiers are omitted. No live
+audit query or IAM mutation was run by this worker.
+
+`sweep_drill.destination()` handles null requests, extracts only granted
+`cloudsql.instances.create` authorizations with service
+`sqladmin.googleapis.com` and an exact `projects/<PROJECT>/instances/<name>`
+path, and checks agreement among authorization names, request name and the
+optional `database_id == <PROJECT>:<name>`. Missing identity/destination,
+malformed data and conflicts fail closed. Source/project `resourceName` is
+never a destination fallback. Clone completion correlation remains restricted
+to clone records with the same operation ID. Non-drill destinations are
+reported for operator inspection; foreign projects fail before acceptance.
+
+The same observed new-instance resource attribute is the basis for narrowing
+`drtsOpsDrillCloneCreate` to exactly the temporary role's sqladmin/drill-prefix
+expression. Its sole permission remains `cloudsql.instances.create`.
+`inventory(complete=True)` accepts only the new binding, rejecting unconditional,
+obsolete project-name conditions, broader/altered grants and inheritance.
+Pre-apply inventory allows only the two exact historical create bindings for
+replacement. `apply()` removes the drill SA from those exact bindings before
+adding the new condition (`--condition=None` selects the unconditional grant),
+preserves other members/grants, and remains retryable without duplicate grants.
+Readiness publication is separate and performs the strict post-apply audit.
+
+Remaining risk: the prefix condition does not limit instance size, count or
+cost. Additional drill-prefixed clones may copy dev data; clone source IAM,
+runner destination guards and sweep remain necessary. WIF trust remains
+repository-wide, and DB credentials retain their SQL privileges.
+
+### Finding-level verification
+
+Logs: `.local/ops-drill-sweep-create-audit-20261013/`. Python 3.12.3,
+Node v22.23.2, pnpm 10.33.0, Vitest 4.1.4. External CLI responses are mocked;
+production destination parsing, sweep, policy inventory, apply, readiness
+publication, restore and cleanup execute unchanged through those boundaries.
+The dummy proxy process does not bind a socket. Readiness tests isolate git's
+dirty-tree check and operator input, retaining the production IAM audit.
+
+| Finding / required acceptance                                 | Source and test                                                                                                                                                        | Baseline → repair                                                                                                                                                                                                                         | Command / result / evidence                                                                                                                                                                                                                                 | Pending or limitation                                                                                         |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `sweep能從create權限檢查紀錄取得目的地且仍拒絕無法辨識的紀錄` | `destination`, `sweep`; `test_sweep_real_clone_completion_and_create_check_pass` and three real-create negative/positive tests                                         | Baseline null request raises AttributeError (exit 1); repaired three-record sweep passes; non-drill/foreign project, absent/denied/wrong permission, malformed service/path/labels/request, conflicting names and missing identity reject | `python3 -m unittest tests/unit/system-remediation/sr-live-ops-001/test_drill.py -k test_sweep_real_clone_completion_and_create_check_pass -v`: baseline exit 1 (`baseline-sweep.log`) → repaired exit 0 (`repaired-sweep.log`); full regression `unit.log` | Offline audit boundary; fresh hosted sweep awaits operator readiness/redispatch                               |
+| `建立權限依實證收緊為drill前綴`                               | `role_specs`, `obsolete_create_bindings`, `inventory`, `apply`, readiness publisher; prefix plan, exact migration/retry, dual-obsolete-grant and drift/readiness tests | Baseline plan expression is None (exit 1); repaired expression equals temporary sqladmin/prefix condition; unconditional grant removal uses exact None selector; strict readiness rejects old/broader grants                              | `-k test_plan_limits_sql_create_to_drill_prefix -v`: baseline exit 1 (`baseline-prefix.log`) → repaired exit 0 (`repaired-prefix.log`); full suite exit 0 (`unit.log`); four other production role definitions/bindings unchanged (`role-preservation.log`) | Real condition application/evaluation remains Supervisor/operator work after integration; no gcloud mutations |
+| Prior restore/sweep/cleanup and readiness regressions         | Existing `test_drill.py` and Vitest CI wrapper                                                                                                                         | All prior behaviors retained, including leftovers, truncated/missing audit, correlated completion, failed replacement retry, ancestor/resource grants and candidate receipt                                                               | `python3 -m unittest tests/unit/system-remediation/sr-live-ops-001/test_drill.py -v`: exit 0, 54/54, 64.097s (`unit.log`); `pnpm exec vitest run tests/unit/system-remediation/sr-live-ops-001/restore-drill.test.ts`: exit 0, 2/2, 61.95s (`vitest.log`)   | No product server, PG, browser runner or Docker started                                                       |
+| `同候選SHA CI通過且獨立reviewer審查`                          | Final pushed candidate/PR and canonical lifecycle; assigned Codex2 reviewer                                                                                            | Local checks pass; hosted CI and independent same-SHA review pending at candidate creation                                                                                                                                                | Exact final SHA/PR supplied at handoff; no baseline CI/review reused                                                                                                                                                                                        | CI results must be read for this candidate; reviewer approval, merge and acceptance are not owner completion  |
+
+Additional checks: `python3 -m py_compile infra/gcp/dev/ops-drill/*.py
+tests/unit/system-remediation/sr-live-ops-001/test_drill.py
+tests/unit/system-remediation/sr-live-ops-001/fake_cli.py` and
+`python3 tools/ci/check_test_coverage.py`: exit 0 (97 registered test files).
+Formatting and `git diff --check` are checked before the final commit.
+Local checks have no failing or skipped tests. The two intentional baseline
+regression failures above are retained separately from the passing repair runs.

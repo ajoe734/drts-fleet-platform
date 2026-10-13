@@ -17,6 +17,6 @@ import { ComplaintService } from "./complaint.service";
   ],
   controllers: [ComplaintController],
   providers: [ComplaintRepository, ComplaintService],
-  exports: [ComplaintService],
+  exports: [ComplaintService, ComplaintRepository],
 })
 export class ComplaintModule {}
