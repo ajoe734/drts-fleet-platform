@@ -251,6 +251,97 @@ for (const database of [false, true]) {
         expect(ctx.service.getDriverTask(ctx.taskId).status).toBe("on_trip");
       });
 
+      for (const immediate of [false, true]) {
+        it(`detaches actual facts from the real public task stream (${immediate ? "during" : "after"} publication)`, async () => {
+          const ctx = await setup(database);
+          let emitted: CapturedTask | undefined;
+          let deliveries = 0;
+          const subscription = ctx.service
+            .streamDriverTaskEvents(
+              ctx.service.getDriverTask(ctx.taskId).driverId,
+            )
+            .subscribe((message) => {
+              const task = (message.data as { data: { task: CapturedTask } })
+                .data.task;
+              if (task.status === "completed") {
+                emitted = task;
+                deliveries += 1;
+                if (immediate) task.actualFareBreakdown!.startMinor = 999;
+              }
+            });
+          try {
+            const input = supplied({ ...actual });
+            const result = (await ctx.service.completeDriverTask(
+              ctx.taskId,
+              input,
+              "real-stream-replay",
+            )) as CapturedTask;
+            expect(emitted?.actualFareBreakdown).toBeDefined();
+            if (!immediate) emitted!.actualFareBreakdown!.startMinor = 999;
+            expect(result.actualFareBreakdown).toEqual(actual);
+            expect(
+              (ctx.service.getDriverTask(ctx.taskId) as CapturedTask)
+                .actualFareBreakdown,
+            ).toEqual(actual);
+            expect(
+              (
+                ctx.service
+                  .listDriverTasks()
+                  .find((task) => task.taskId === ctx.taskId) as CapturedTask
+              ).actualFareBreakdown,
+            ).toEqual(actual);
+            if (database)
+              ctx.repository.hasDriverTaskTraceRequestId.mockResolvedValue(
+                true,
+              );
+            const replay = (await ctx.service.completeDriverTask(
+              ctx.taskId,
+              supplied({
+                startMinor: 10000,
+                distanceMinor: 0,
+                delayMinor: 0,
+                nightMinor: 0,
+              }),
+              "real-stream-replay",
+            )) as CapturedTask;
+            expect(replay.actualFareBreakdown).toEqual(actual);
+            expect(deliveries).toBe(1);
+            if (database) {
+              expect(
+                ctx.writes[0]!.driverTasks![0]!.actualFareBreakdown,
+              ).toEqual(actual);
+              expect(JSON.stringify(ctx.outbox)).toContain('"startMinor":3500');
+              expect(JSON.stringify(ctx.outbox)).not.toContain(
+                '"startMinor":999',
+              );
+            }
+          } finally {
+            subscription.unsubscribe();
+          }
+        });
+      }
+
+      it("preserves legacy absence in the real public task stream", async () => {
+        const ctx = await setup(database);
+        let emitted: CapturedTask | undefined;
+        const subscription = ctx.service
+          .streamDriverTaskEvents(
+            ctx.service.getDriverTask(ctx.taskId).driverId,
+          )
+          .subscribe((message) => {
+            const task = (message.data as { data: { task: CapturedTask } }).data
+              .task;
+            if (task.status === "completed") emitted = task;
+          });
+        try {
+          await ctx.service.completeDriverTask(ctx.taskId, { ...command });
+          expect(emitted).toBeDefined();
+          expect(emitted).not.toHaveProperty("actualFareBreakdown");
+        } finally {
+          subscription.unsubscribe();
+        }
+      });
+
       const malformed: Array<[string, unknown]> = [
         ["null", null],
         ["array", []],

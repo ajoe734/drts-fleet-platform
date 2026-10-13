@@ -7099,7 +7099,7 @@ export class OwnedMobilityService
         await this.publishMultiTaxiCertificateEvent(certificateEvent);
       }
       await this.ownedMobilityTaskEventsService.publishTaskUpdated(
-        task,
+        this.cloneTaskWithDetachedActualFare(task),
         order,
         requestId,
       );
@@ -7512,7 +7512,7 @@ export class OwnedMobilityService
         }
       }
       await this.ownedMobilityTaskEventsService.publishTaskUpdated(
-        committed.task,
+        this.cloneTaskWithDetachedActualFare(committed.task),
         committed.order,
         requestId,
       );
@@ -14646,12 +14646,25 @@ export class OwnedMobilityService
     };
   }
 
+  private cloneTaskWithDetachedActualFare(
+    task: DriverTaskRecord,
+  ): DriverTaskRecord {
+    // The task-event service shallow-spreads additive fields. Detach captured
+    // facts at completion producers without changing its unrelated clone policy.
+    return {
+      ...task,
+      ...(task.actualFareBreakdown
+        ? { actualFareBreakdown: { ...task.actualFareBreakdown } }
+        : {}),
+    };
+  }
+
   private cloneTask(task: DriverTaskRecord): DriverTaskRecord {
     const order = this.orders.find(
       (candidateOrder) => candidateOrder.orderId === task.orderId,
     );
     return {
-      ...task,
+      ...this.cloneTaskWithDetachedActualFare(task),
       ...(task.bookingQualification
         ? { bookingQualification: structuredClone(task.bookingQualification) }
         : {}),
@@ -14659,9 +14672,6 @@ export class OwnedMobilityService
         ? { bookingRequirements: structuredClone(task.bookingRequirements) }
         : {}),
       fare: task.fare ? { ...task.fare } : null,
-      ...(task.actualFareBreakdown
-        ? { actualFareBreakdown: { ...task.actualFareBreakdown } }
-        : {}),
       proof: task.proof
         ? {
             photos: [...task.proof.photos],

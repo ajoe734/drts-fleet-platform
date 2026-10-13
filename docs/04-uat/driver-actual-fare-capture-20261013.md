@@ -23,6 +23,8 @@ Only `DriverCompleteTaskCommand`, `DriverTaskRecord`, their additive shared type
 
 The focused test executes actual public `OwnedMobilityService.completeDriverTask` in both in-memory and transactional paths and actual certificate-event/outbox construction. Database and event **transports** are unit fixtures; business completion/validation/persistence decisions are not replacement processors. A fixture selects the multi-taxi completion branch after the standard dispatch lifecycle; this is not a licensed multi-taxi admission, genuine PG commit, PSP capture or authorized-role journey witness.
 
+The following table preserves the initial pre-R2 candidate checks (`b964ec613a6f4a7fb4335170e7f273cf705a0d8c`). The independent finding and repaired results follow below.
+
 | Check                                                              | Evidence/result                                                                                                                                                                                                                       |
 | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Old immutable source, actual public completion in both paths       | Two genuine assertions fail because supplied `actualFareBreakdown` is lost; two legacy controls pass. `actual-fare-old-source-red-qualified.json`. The other 96 cases were deliberately not selected; they are not counted as passes. |
@@ -53,6 +55,29 @@ pnpm --filter @drts/contracts build
 pnpm --filter @drts/control-plane-auth build
 pnpm --filter @drts/api typecheck
 ```
+
+## Independent findings and repair — retained, not overwritten
+
+### R1: owner delivery trailers
+
+The first published `edb5c18648981db1aec83cc8127f222f8f12f964` / PR #2612 had `Task`/`LLM` aliases rather than required `Task-ID`/`LLM-Agent`/`Reviewer` trailers. The owner corrected this engineering delivery error with a separately named publication, `b964ec613a6f4a7fb4335170e7f273cf705a0d8c` / PR #2613. Both old published refs remain intact; the two source trees are exactly identical. No amend, rebase, force-push, gate waiver or published-history rewrite occurred. The actual checker reports **one commit OK** for the new publication. Original Codex independently verified that result and exact tree equivalence; R1 is resolved, not falsely attributed to external inputs.
+
+### R2: public task stream aliased stored actual facts
+
+Codex independently reopened exact candidate `b964ec613a6f4a7fb4335170e7f273cf705a0d8c`, generation `d58ed191389d4d68ac4881ed25e1ca3d`, for a genuine P2 correctness defect. After actual public completion, `OwnedMobilityTaskEventsService` shallow-spread the additive breakdown from the stored task into its event. Mutating `envelope.data.task.actualFareBreakdown.startMinor` from **3500 to 999** through the public observable also changed `getDriverTask` and the original request's immutable replay. This is a supported in-process publication alias, **not** a claim that a remote HTTP client can mutate server memory.
+
+The exact Codex executable probe, adjacent SHA/source and original finding are retained in the canonical reopen message and `.local/pi-can-finish-20261013/actual-fare-r2-independent-review-record.json`. New owner regressions execute the real public completion, real task-event publisher and public observable, with mutations both during and after publication. On unchanged `b964` production source they yield **three genuine assertion failures and three passing controls** (102 other cases deliberately unselected), recorded as `actual-fare-r2-b964-stream-red.json`. The controls include transactional late mutation and both legacy-absence paths; neither setup failures nor unselected cases are credited as passes.
+
+Repair stays inside the already-authorized completion/clone producer scope:
+
+- Detach only the actual-fare fields before both direct completion task-stream publications, including the transactional committed-return path. Do not add recomputed compliance fields or change unrelated event semantics.
+- Reuse that narrow detachment in the existing task-record clone. Existing completion outbox construction/delivery already invokes that clone, so its captured facts remain separated from public event objects.
+- `owned-mobility-task-events.service.ts` is read-only and unchanged; no extra module scope was assumed or granted.
+- Real stream regressions verify returned/get/list/replay facts, no republish on replay, legacy absence and unchanged persisted/outbox snapshots. Existing fixed-price, currency, missing/zero, unknown total-convention, rollback and ingress-lock controls remain.
+
+Repaired repository-only verification: **108** focused actual-production regressions; **161** selected root cases plus **147** existing API service/repository/certificate/task-event cases, **308 passed / zero failed / zero skipped**. API typecheck, scoped ESLint/Prettier and diff checks pass in the owner's isolated dependency-local worktree. New candidate exact-SHA review/hosted CI/protected merge are still required; this local repair is not self-approval or genuine PG/native/E04 acceptance.
+
+The independent review's API typecheck separately found missing `nodemailer` symlink targets in its detached dependency workspace, so that check was honestly recorded failed/unavailable rather than relabeled green. The owner's dependency-local typecheck passes; a source import workaround or weakening the compiler is not introduced.
 
 ## Explicitly not closed
 
