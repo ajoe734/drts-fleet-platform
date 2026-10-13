@@ -537,11 +537,9 @@ describe("actual registry profile getter and asynchronous transport controls", (
         audit,
         profiles,
       );
-      const getter = Reflect.get(
-        registry,
-        "getDriverDeclaredSurnameSnapshot",
-      ) as (id: string) => Row | null;
-      expect(getter.call(registry, "fixture-declared-driver")).toBeNull();
+      expect(
+        registry.getDriverDeclaredSurnameSnapshot("fixture-declared-driver"),
+      ).toBeNull();
     },
   );
   it.each([undefined, null, "", "not-a-time"])(
@@ -569,21 +567,16 @@ describe("actual registry profile getter and asynchronous transport controls", (
         audit,
         profiles,
       );
-      const getter = Reflect.get(
-        registry,
-        "getDriverDeclaredSurnameSnapshot",
-      ) as (id: string) => Row | null;
-      expect(getter.call(registry, "fixture-declared-driver")).toBeNull();
+      expect(
+        registry.getDriverDeclaredSurnameSnapshot("fixture-declared-driver"),
+      ).toBeNull();
     },
   );
   it("a mutated getter DTO cannot change the saved profile or later capture", async () => {
     const ctx = await setup();
     const profile = await ctx.setSurname("歐陽");
-    const getter = Reflect.get(
-      ctx.registry,
-      "getDriverDeclaredSurnameSnapshot",
-    ) as (id: string) => Row;
-    const mutable = getter.call(ctx.registry, ctx.driverId);
+    const mutable = ctx.registry.getDriverDeclaredSurnameSnapshot(ctx.driverId);
+    if (!mutable) throw new Error("Saved explicit surname snapshot is missing");
     mutable.driverSurname = "Changed getter DTO";
     mutable.driverSurnameProfileUpdatedAt = "Changed revision";
     expect(ctx.profiles.getProfileForDriver(ctx.driverId).driverSurname).toBe(
@@ -611,12 +604,12 @@ describe("actual registry profile getter and asynchronous transport controls", (
   });
   it("uses saved/reloaded profile JSON and does not materialize unknown or seed surname", async () => {
     const ctx = await setup();
-    const getter = Reflect.get(
-      ctx.registry,
-      "getDriverDeclaredSurnameSnapshot",
-    ) as (id: string) => Row | null;
-    expect(getter.call(ctx.registry, "fixture-unknown-driver")).toBeNull();
-    expect(getter.call(ctx.registry, ctx.driverId)).toBeNull();
+    expect(
+      ctx.registry.getDriverDeclaredSurnameSnapshot("fixture-unknown-driver"),
+    ).toBeNull();
+    expect(
+      ctx.registry.getDriverDeclaredSurnameSnapshot(ctx.driverId),
+    ).toBeNull();
     const saved = await ctx.setSurname("歐陽");
     const reloaded = new DriverProfileService(
       new AuditNotificationService(),
@@ -626,11 +619,13 @@ describe("actual registry profile getter and asynchronous transport controls", (
     expect(reloaded.getProfileForDriver(ctx.driverId).driverSurname).toBe(
       "歐陽",
     );
-    expect(getter.call(ctx.registry, ctx.driverId)).toEqual({
-      driverSurname: "歐陽",
-      driverSurnameSource: "driver_profile_declared",
-      driverSurnameProfileUpdatedAt: saved.updatedAt,
-    });
+    expect(ctx.registry.getDriverDeclaredSurnameSnapshot(ctx.driverId)).toEqual(
+      {
+        driverSurname: "歐陽",
+        driverSurnameSource: "driver_profile_declared",
+        driverSurnameProfileUpdatedAt: saved.updatedAt,
+      },
+    );
   });
   it("profile changes during an actual repository write cannot split task/event/outbox facts", async () => {
     const ctx = await setup(true);

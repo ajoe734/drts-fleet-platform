@@ -85,16 +85,17 @@ Machine-specific raw logs/JSON:
 `.local/pi-continue-finish-20261013T1550/` in canonical machine root.
 
 - Dedicated final file: **39 focused cases**, included in the root total below.
-- `surname-final-root.json`: **300 passed / 0 failed / 0 skipped** across new
+- `surname-r1-root.json`: **300 passed / 0 failed / 0 skipped** across new
   snapshot, actual-fare capture, explicit-surname capture, durable-profile ACK,
   Owned Mobility, Profile and Registry suites.
-- `surname-final-api.json`: **192 passed / 0 failed / 0 skipped** across Owned
+- `surname-r1-api.json`: **192 passed / 0 failed / 0 skipped** across Owned
   Mobility service/repository/task events/durable sinks, Profile and Registry
   service/repository suites.
 - Unique selected root + API total: **492 passed / 0 failed / 0 skipped**.
   Do **not** add the focused subset or earlier runs again.
 - `@drts/contracts`, `@drts/control-plane`, `@drts/control-plane-auth` builds,
-  API typecheck, scoped ESLint/Prettier and diff checks: exit 0.
+  API typecheck, **full root + workspace `pnpm run typecheck`**, scoped
+  ESLint/Prettier and diff checks: exit 0.
 - Actual commands: root `pnpm exec vitest run` with named affected paths; API
   `pnpm --filter @drts/api exec vitest run` with named affected paths;
   `pnpm --filter @drts/api typecheck`; scoped `pnpm exec eslint`/`prettier`.
@@ -107,6 +108,39 @@ Preserved failures, **not** successes:
 - `api-typecheck.log` initially failed because the fresh offline worktree had not
   built `@drts/control-plane-auth`. No compiler/import/source was weakened;
   normal dependency build and `api-typecheck-final`/`-candidate` genuinely pass.
+
+## CI-TYPE-001: preserved publication failure and ordinary append repair
+
+First published candidate `1568ace064deca691a988fab56f5623d1a32ba5e`
+(tree `889b2fcf287e662c7ebb45be7256bedcdace9b1f`, PR #2618,
+generation `7cb8b3305a6a4969a948f9dafbc86354`) failed required full root
+Typecheck: run `38433429325` Product smoke rejects test line 582 with **TS2352**.
+The reflective getter cast to generic `Row` did not respect the actual typed
+nullable `DriverDeclaredSurnameSnapshot`. Scoped API typecheck and executable
+unit passes did not catch root test typing. This is an owner delivery defect,
+not missing credentials or a production-business reproduction.
+
+The subsequent smoke PG/voice gate files were unavailable because Typecheck
+stopped the product step; no such old-run tests are credited. Integration-trunk
+run `38433428322` likewise has a failed typecheck, even if other jobs pass.
+The GitHub bus correctly returned the unapproved candidate to `in_progress`.
+No self-approval/reviewer approval existed and no original acceptance changed.
+
+Repair uses the actual **public typed registry getter** in these tests, with
+an explicit non-null expectation before the mutation probe. No `unknown` cast,
+index-signature extension, compiler/import weakening, test skip or assertion
+removal. The four production source blobs remain identical to 1568. The new
+candidate is an **ordinary append** on the same published branch, preserving
+1568 and its failed CI rather than amending/rebasing/force-pushing it.
+
+- `root-typecheck-repair.log`: actual full-root tsc exit 0.
+- `full-typecheck-repair.log`: actual `NODE_ENV=test pnpm run typecheck`, root and
+  workspace tasks exit 0; generated types/build artifacts only, no product server.
+- `surname-r1-root.json` / `surname-r1-api.json`: all **492** affected unit cases
+  genuinely pass again, zero failed/skipped; dedicated **39** are included.
+- Raw failed CI: machine-root `hosted-smoke-failure.log`; no unchanged retry or
+  passing claim for those failed runs. Fresh exact candidate/generation review
+  and required CI are mandatory after the append.
 
 ## Delivery and remaining gates
 
