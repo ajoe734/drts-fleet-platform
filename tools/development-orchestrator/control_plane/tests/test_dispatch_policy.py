@@ -51,6 +51,16 @@ class CandidateDispatchPolicyTest(unittest.TestCase):
         self.assertEqual(decision.target_agent, "Codex")
         self.assertEqual(decision.reason, DispatchReason.ACCEPTANCE_READY)
 
+    def test_requested_original_acceptance_routes_current_reviewer(self) -> None:
+        from control_plane.tests.acceptance_review_routing.fixtures import requested_task
+
+        task = requested_task()
+        decision = resolve_dispatch_target(task, {task["id"]: task}, self.policy)
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.task_id, task["id"])
+        self.assertEqual(decision.target_agent, "Codex")
+        self.assertEqual(decision.reason, DispatchReason.REVIEW_READY)
+
     def test_external_acceptance_waits_until_existing_gate_is_released(self) -> None:
         task = self.task("acceptance", merge_sha="abc123", external_gate=True)
         for update in ("first verification", "same missing phone resources"):
