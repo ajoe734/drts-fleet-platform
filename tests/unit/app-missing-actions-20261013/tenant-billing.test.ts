@@ -179,6 +179,94 @@ describe("tenant billing profile action through the actual API client", () => {
 });
 
 describe("tenant billing profile form", () => {
+  it.each([undefined, "not_provisioned"])(
+    "offers refresh instead of an empty replacement form after a failed profile read (emptyReason=%s)",
+    async (emptyReason) => {
+      let profileUnavailable = true;
+      mocks.request.mockImplementation(
+        async (url: string, init: RequestInit) => {
+          if (init.method === "POST") return response(savedProfile);
+          if (
+            url.endsWith("/api/tenant/billing/profile") &&
+            profileUnavailable
+          ) {
+            return new Response(
+              JSON.stringify({
+                error: {
+                  code: "UNAVAILABLE",
+                  message: "Temporarily unavailable",
+                },
+              }),
+              { status: 503 },
+            );
+          }
+          return readResponse(url);
+        },
+      );
+
+      const view = render(
+        await BillingPage({ searchParams: Promise.resolve({ emptyReason }) }),
+      );
+      expect(
+        screen.getByText("Unable to load tenant billing profile."),
+      ).toBeTruthy();
+      expect(
+        screen.queryByRole("form", { name: "Edit billing profile" }),
+      ).toBeNull();
+      expect(screen.queryByLabelText("Invoice title *")).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Save billing profile" }),
+      ).toBeNull();
+      expect(
+        screen
+          .getAllByRole("button", { name: "Edit billing profile" })
+          .every((button) => (button as HTMLButtonElement).disabled),
+      ).toBe(true);
+      expect(
+        screen.getByRole("link", { name: "Refresh" }).getAttribute("href"),
+      ).toBe("/billing");
+      expect(
+        mocks.request.mock.calls.filter(([, init]) => init.method === "POST"),
+      ).toHaveLength(0);
+
+      // The existing Refresh link reloads this server page. Re-run its actual
+      // reads after recovery and keep the real form/action/API client chain.
+      profileUnavailable = false;
+      view.rerender(await BillingPage({}));
+      expect((screen.getByLabelText("Tax id") as HTMLInputElement).value).toBe(
+        profile.taxId,
+      );
+      expect(
+        (screen.getByLabelText("Billing contact") as HTMLInputElement).value,
+      ).toBe(profile.contactName);
+      expect(
+        (screen.getByLabelText("Billing address") as HTMLInputElement).value,
+      ).toBe(profile.address);
+      fireEvent.change(screen.getByLabelText("Invoice title *"), {
+        target: { value: "Updated Transit" },
+      });
+      fireEvent.change(screen.getByLabelText("Billing email *"), {
+        target: { value: "updated@example.test" },
+      });
+      fireEvent.click(
+        screen.getByRole("button", { name: "Save billing profile" }),
+      );
+      await screen.findByText("Billing profile saved.");
+      const writes = mocks.request.mock.calls.filter(
+        ([, init]) => init.method === "POST",
+      );
+      expect(writes).toHaveLength(1);
+      expect(JSON.parse(String(writes[0]![1].body))).toEqual({
+        invoiceTitle: "Updated Transit",
+        email: "updated@example.test",
+        taxId: profile.taxId,
+        address: profile.address,
+        contactName: profile.contactName,
+      });
+      expect(mocks.refresh).toHaveBeenCalledOnce();
+    },
+  );
+
   it("loads the actual billing page, retains edits through API failure, and refreshes after retry", async () => {
     render(await BillingPage({}));
     expect(
@@ -275,14 +363,15 @@ describe("tenant billing profile form", () => {
     ).toBe(savedProfile.invoiceTitle);
   });
 
-  it("lets an unprovisioned profile be entered while respecting a disabled action", async () => {
-    const view = render(
-      createElement(BillingProfileForm, {
-        profile: null,
-        descriptor,
-        locale: "en",
-      }),
+  it("lets an explicitly unprovisioned profile from the actual page be entered while respecting a disabled action", async () => {
+    mocks.request.mockImplementation(async (url: string, init: RequestInit) =>
+      init.method === "POST"
+        ? response(savedProfile)
+        : url.endsWith("/api/tenant/billing/profile")
+          ? response(null)
+          : readResponse(url),
     );
+    const view = render(await BillingPage({}));
     expect(
       (screen.getByLabelText("Invoice title *") as HTMLInputElement).value,
     ).toBe("");
@@ -296,7 +385,17 @@ describe("tenant billing profile form", () => {
       screen.getByRole("button", { name: "Save billing profile" }),
     );
     await screen.findByRole("status");
-    expect(mocks.request).toHaveBeenCalledOnce();
+    const writes = mocks.request.mock.calls.filter(
+      ([, init]) => init.method === "POST",
+    );
+    expect(writes).toHaveLength(1);
+    expect(JSON.parse(String(writes[0]![1].body))).toEqual({
+      invoiceTitle: "Updated Transit",
+      email: "updated@example.test",
+      taxId: "",
+      address: "",
+      contactName: "",
+    });
     view.unmount();
     mocks.request.mockClear();
     render(

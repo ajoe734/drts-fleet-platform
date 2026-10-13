@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { PageHero } from "@/components/page-primitives";
 import { loadBankProgramsData } from "@/lib/bank-dev-read-models";
 import {
@@ -27,7 +28,16 @@ export default async function ProgramsPage({
   const tenant = resolveBankDemoTenant(params?.bank);
   const session = getBankConsoleSession(tenant, locale, params?.role);
   const result = await loadBankProgramsData(tenant.tenantId, session.role);
-  const { programs, usageAvailable } = result.data;
+  const { usageAvailable } = result.data;
+  const selectedProgramId = Array.isArray(params?.program)
+    ? params.program[0]
+    : params?.program;
+  const programs = selectedProgramId
+    ? result.data.programs.filter((program) => program.id === selectedProgramId)
+    : result.data.programs;
+  if (selectedProgramId && programs.length === 0 && !result.degradedMessage) {
+    notFound();
+  }
 
   return (
     <div
@@ -89,13 +99,19 @@ export default async function ProgramsPage({
               <Link
                 className="table-action-button is-ghost"
                 href={bankConsoleHref(
-                  `/programs/${encodeURIComponent(program.id)}`,
+                  "/programs",
                   tenant,
                   locale,
                   session.role,
+                  selectedProgramId ? undefined : { program: program.id },
                 )}
               >
-                {t("programs.action.drill", locale)}
+                {t(
+                  selectedProgramId
+                    ? "programs.action.back"
+                    : "programs.action.drill",
+                  locale,
+                )}
               </Link>
             </div>
             <div className="bank-card-body">
@@ -127,9 +143,24 @@ export default async function ProgramsPage({
       <section className="bank-card">
         <div className="bank-card-head">
           <div>
-            <h3>{t("programs.summary.title", locale)}</h3>
+            <h3>
+              {t(
+                selectedProgramId
+                  ? "programs.summary.selectedTitle"
+                  : "programs.summary.title",
+                locale,
+              )}
+            </h3>
             <p>{t("programs.summary.subtitle", locale)}</p>
           </div>
+          {selectedProgramId && programs.length === 0 ? (
+            <Link
+              className="table-action-button is-ghost"
+              href={bankConsoleHref("/programs", tenant, locale, session.role)}
+            >
+              {t("programs.action.back", locale)}
+            </Link>
+          ) : null}
         </div>
         <div className="bank-card-body">
           <ProgramUsageTable

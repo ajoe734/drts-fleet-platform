@@ -129,11 +129,6 @@ function harness(
   const listPage = load<{
     default: (props: SearchProps) => Promise<React.ReactElement>;
   }>(resolve(appRoot, "app/programs/page.tsx")).default;
-  const detailPage = load<{
-    default: (
-      props: SearchProps & { params: Promise<{ programId: string }> },
-    ) => Promise<React.ReactElement>;
-  }>(resolve(appRoot, "app/programs/[programId]/page.tsx")).default;
   const data = load<{
     loadBankProgramsData: (
       tenant: string,
@@ -155,7 +150,7 @@ function harness(
       degradedMessage: string | null;
     }>;
   }>(resolve(appRoot, "lib/bank-dev-read-models.ts"));
-  return { listPage, detailPage, data, fetchMock };
+  return { listPage, data, fetchMock };
 }
 
 function csvFrom(link: HTMLElement) {
@@ -174,7 +169,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("bank program live list, detail and usage download", () => {
+describe("bank program live cards, selected-program filter and usage download", () => {
   it("reads only the relevant APIs with the tenant context, decodes the HTTP wire contract and keeps programs without usage", async () => {
     const { data, fetchMock } = harness();
     const result = await data.loadBankProgramsData(
@@ -263,7 +258,7 @@ describe("bank program live list, detail and usage download", () => {
   });
 
   it("navigates by actual program ID with bank, locale and role intact, and downloads only that program's periods", async () => {
-    const { listPage, detailPage } = harness();
+    const { listPage } = harness();
     const list = render(
       await listPage({ searchParams: Promise.resolve(query) }),
     );
@@ -278,8 +273,11 @@ describe("bank program live list, detail and usage download", () => {
       detailLink.getAttribute("href")!,
       "http://bank.unit.test",
     );
-    expect(detailUrl.pathname).toBe("/programs/live-program-alpha");
-    expect(Object.fromEntries(detailUrl.searchParams)).toEqual(query);
+    expect(detailUrl.pathname).toBe("/programs");
+    expect(Object.fromEntries(detailUrl.searchParams)).toEqual({
+      ...query,
+      program: "live-program-alpha",
+    });
     const cardCsv = csvFrom(
       within(card).getByRole("link", { name: "Export usage" }),
     );
@@ -292,22 +290,33 @@ describe("bank program live list, detail and usage download", () => {
       screen.queryByRole("button", { name: "Edit eligibility policy" }),
     ).toBeNull();
     list.unmount();
-    render(
-      await detailPage({
-        params: Promise.resolve({
-          programId: detailUrl.pathname.split("/").at(-1)!,
-        }),
+    const selected = render(
+      await listPage({
         searchParams: Promise.resolve(
           Object.fromEntries(detailUrl.searchParams),
         ),
       }),
     );
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
-      definitions[0].display_name,
+      "Programs & quota",
     );
-    expect(screen.getByText("price-alpha")).toBeTruthy();
-    expect(screen.getByText("eligibility-alpha")).toBeTruthy();
-    expect(screen.getByText("rules-alpha")).toBeTruthy();
+    expect(document.querySelector(".programs-banner")).toBeTruthy();
+    expect(
+      document.querySelectorAll(".programs-card-grid article"),
+    ).toHaveLength(1);
+    expect(
+      screen.getByRole("heading", { name: definitions[0].display_name }),
+    ).toBeTruthy();
+    expect(screen.queryByText("Beta live program")).toBeNull();
+    expect(screen.queryByText("New program without usage")).toBeNull();
+    expect(
+      screen.getByRole("heading", { name: "Quota summary — selected program" }),
+    ).toBeTruthy();
+    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(
+      3,
+    );
+    expect(document.querySelector(".bank-dl")).toBeNull();
+    expect(screen.queryByText("price-alpha")).toBeNull();
     expect(screen.getByText("2026-09")).toBeTruthy();
     expect(screen.getByText("2026-10")).toBeTruthy();
     expect(screen.getAllByText("Not provided")).toHaveLength(2);
@@ -316,11 +325,27 @@ describe("bank program live list, detail and usage download", () => {
       "program-live-program-alpha-usage.csv",
     );
     expect(csvFrom(download)).toBe(cardCsv);
+    const back = screen.getByRole("link", { name: "Back to programs" });
+    expect(back.closest(".bank-card-head")).toBeTruthy();
+    expect(back.getAttribute("href")).toBe(
+      "/programs?bank=contoso&locale=en&role=bank_finance",
+    );
+    const backUrl = new URL(
+      back.getAttribute("href")!,
+      "http://bank.unit.test",
+    );
+    selected.unmount();
+    render(
+      await listPage({
+        searchParams: Promise.resolve(Object.fromEntries(backUrl.searchParams)),
+      }),
+    );
     expect(
-      screen
-        .getByRole("link", { name: "Back to programs" })
-        .getAttribute("href"),
-    ).toBe("/programs?bank=contoso&locale=en&role=bank_finance");
+      document.querySelectorAll(".programs-card-grid article"),
+    ).toHaveLength(3);
+    expect(
+      screen.getByRole("heading", { name: "Quota summary — all programs" }),
+    ).toBeTruthy();
   });
 
   it("renders connected-but-empty results without fabricated programs or downloads", async () => {
@@ -335,16 +360,20 @@ describe("bank program live list, detail and usage download", () => {
     expect(screen.queryByRole("link", { name: "View details" })).toBeNull();
   });
 
-  it("renders a known program without usage and preserves inactive and nullable settings", async () => {
-    const { detailPage } = harness({ usage: [] });
+  it("renders a selected known program without usage and preserves its inactive status", async () => {
+    const { listPage } = harness({ usage: [] });
     render(
-      await detailPage({
-        params: Promise.resolve({ programId: "live-program-beta" }),
-        searchParams: Promise.resolve(query),
+      await listPage({
+        searchParams: Promise.resolve({
+          ...query,
+          program: "live-program-beta",
+        }),
       }),
     );
     expect(screen.getByText("Inactive")).toBeTruthy();
-    expect(screen.getByText("Not provided")).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "Beta live program" }),
+    ).toBeTruthy();
     expect(
       screen.getAllByText(
         "No usage records are available for these programs yet.",
@@ -353,18 +382,22 @@ describe("bank program live list, detail and usage download", () => {
     expect(screen.queryByRole("link", { name: "Export usage" })).toBeNull();
   });
 
-  it("keeps loaded settings visible when usage fails and does not offer an empty CSV", async () => {
-    const { detailPage } = harness({ failUsage: true });
+  it("keeps the selected card visible when usage fails and does not offer an empty CSV", async () => {
+    const { listPage } = harness({ failUsage: true });
     render(
-      await detailPage({
-        params: Promise.resolve({ programId: "live-program-alpha" }),
-        searchParams: Promise.resolve(query),
+      await listPage({
+        searchParams: Promise.resolve({
+          ...query,
+          program: "live-program-alpha",
+        }),
       }),
     );
     expect(screen.getByRole("alert").textContent).toContain(
       "Usage: Unavailable",
     );
-    expect(screen.getByText("price-alpha")).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: definitions[0].display_name }),
+    ).toBeTruthy();
     expect(screen.getAllByText(/Usage could not be loaded/)).toHaveLength(2);
     expect(screen.queryByRole("link", { name: "Export usage" })).toBeNull();
     expect(
@@ -375,20 +408,20 @@ describe("bank program live list, detail and usage download", () => {
   });
 
   it("keeps actual usage available with a clear partial source state if settings fail", async () => {
-    const { detailPage } = harness({ failDefinitions: true });
+    const { listPage } = harness({ failDefinitions: true });
     render(
-      await detailPage({
-        params: Promise.resolve({ programId: "live-program-alpha" }),
-        searchParams: Promise.resolve(query),
+      await listPage({
+        searchParams: Promise.resolve({
+          ...query,
+          program: "live-program-alpha",
+        }),
       }),
     );
     expect(screen.getByRole("alert").textContent).toContain(
       "Program settings: Unavailable",
     );
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
-      "LIVE-ALPHA",
-    );
-    expect(screen.getByText(/Program settings were not returned/)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "LIVE-ALPHA" })).toBeTruthy();
+    expect(screen.queryByText("LIVE-BETA")).toBeNull();
     expect(
       csvFrom(screen.getByRole("link", { name: "Export usage" })),
     ).toContain('"live-program-alpha","LIVE-ALPHA"');
@@ -397,18 +430,30 @@ describe("bank program live list, detail and usage download", () => {
   it("uses not-found only for a healthy missing program; outage is shown as retryable", async () => {
     const healthy = harness();
     const props = {
-      params: Promise.resolve({ programId: "unknown-program" }),
-      searchParams: Promise.resolve(query),
+      searchParams: Promise.resolve({ ...query, program: "unknown-program" }),
     };
-    await expect(healthy.detailPage(props)).rejects.toThrow("NEXT_NOT_FOUND");
+    await expect(healthy.listPage(props)).rejects.toThrow("NEXT_NOT_FOUND");
     const failing = harness({ failDefinitions: true, failUsage: true });
-    render(await failing.detailPage(props));
+    render(await failing.listPage(props));
     expect(screen.getByRole("alert")).toBeTruthy();
-    expect(
-      screen.getByText(
-        "This program could not be loaded. Reload the page to try again.",
-      ),
-    ).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Program settings: Unavailable",
+    );
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Usage: Unavailable",
+    );
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+      "Programs & quota",
+    );
+    const back = screen.getByRole("link", { name: "Back to programs" });
+    expect(back.closest(".bank-card-head")).toBeTruthy();
+    const backUrl = new URL(
+      back.getAttribute("href")!,
+      "http://bank.unit.test",
+    );
+    expect(backUrl.pathname).toBe("/programs");
+    expect(Object.fromEntries(backUrl.searchParams)).toEqual(query);
+    expect(backUrl.searchParams.has("program")).toBe(false);
     expect(screen.queryByRole("link", { name: "Export usage" })).toBeNull();
   });
 

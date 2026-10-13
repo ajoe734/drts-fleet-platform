@@ -107,6 +107,7 @@ const actionAnchorStyle: CSSProperties = {
 
 type BillingData = {
   profile: TenantBillingProfile | null;
+  profileLoaded: boolean;
   invoices: TenantInvoiceRecord[];
   statements: DriverStatementRecord[];
   quota: TenantQuotaSummary | null;
@@ -252,6 +253,7 @@ async function loadBillingData(
 
   return {
     profile,
+    profileLoaded: profileResult.status === "fulfilled",
     invoices,
     statements,
     quota,
@@ -259,7 +261,12 @@ async function loadBillingData(
     emptyReason: emptyReasonOverride ?? inferredEmptyReason,
     generatedAt,
     refreshTier: REFRESH_TIER,
-    availableActions: [...ROUTE_ACTIONS],
+    availableActions: ROUTE_ACTIONS.map((action) =>
+      action.action === "edit_billing_profile" &&
+      profileResult.status === "rejected"
+        ? { ...action, enabled: false }
+        : action,
+    ),
   };
 }
 
@@ -752,11 +759,15 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
 
         <div style={splitGridStyle}>
           <CanvasCard theme={th} title={t("billing.section.profile", locale)}>
-            <BillingProfileForm
-              profile={data.profile}
-              descriptor={editProfileAction}
-              locale={locale}
-            />
+            {data.profileLoaded ? (
+              <BillingProfileForm
+                profile={data.profile}
+                descriptor={editProfileAction}
+                locale={locale}
+              />
+            ) : (
+              <p>{t("billing.form.unavailable", locale)}</p>
+            )}
           </CanvasCard>
 
           <CanvasCard
