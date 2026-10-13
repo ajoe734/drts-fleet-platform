@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
+import { BASELINE_PER_MINUTE } from "./plan-builder.mjs";
 
 // Observe the existing application's singleton, never substitute a storage or
 // guard. Only this disposable hosted acceptance app installs these hooks. No
@@ -33,6 +34,15 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
   let restorationFailures = 0;
   let depth = 0;
   let stopped = false;
+  // Admission is opt-in for this hosted producer. Reservations represent HTTP
+  // requests not yet counted by the genuine guard, not extra limiter tokens.
+  // Read the actual singleton counters; only its own callbacks release hits.
+  const admissions = new Map();
+  const families = new Map();
+  let admissionFailure = null;
+  const failAdmission = (message) => {
+    admissionFailure ??= `Capacity admission feedback: ${message}`;
+  };
   const hash = (value) =>
     createHash("sha256").update(`${runTag}:${value}`).digest("hex");
   const requestContext = () => {
@@ -100,6 +110,129 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
         }
       : null;
   };
+  const observeAdmission = (key, ttl, limit, name, guardMs, incoming) => {
+    const receipt = admissions.get(incoming?.requestId);
+    if (!receipt) {
+      if ([...families.values()].some((family) => family.key === key))
+        failAdmission("unreserved request reached a measured key");
+      return;
+    }
+    const family = families.get(receipt.family);
+    if (receipt.guardMs !== null) {
+      failAdmission("request reached the guard more than once");
+      return;
+    }
+    const identityHash = incoming.identityHash;
+    if (
+      ttl !== 60000 ||
+      limit !== BASELINE_PER_MINUTE[receipt.family] ||
+      name !== "default" ||
+      !identityHash ||
+      (family.key !== null &&
+        (family.key !== key || family.identityHash !== identityHash)) ||
+      [...families.values()].some(
+        (other) => other !== family && other.key === key,
+      )
+    )
+      failAdmission("measured key, identity or policy changed");
+    family.key ??= key;
+    family.identityHash ??= identityHash;
+    family.pending--;
+    family.guardTimes.push(guardMs);
+    receipt.guardMs = guardMs;
+    receipt.keyHash = hash(key);
+    receipt.name = name;
+    const actual = state(key, name);
+    if (!actual || actual.isBlocked)
+      failAdmission("actual measured key is blocked or absent");
+  };
+  const admission = {
+    tryReserve(familyName, requestId) {
+      if (stopped || dropped || recordingFailures)
+        failAdmission("singleton observation stopped or incomplete");
+      if (
+        !Object.hasOwn(BASELINE_PER_MINUTE, familyName) ||
+        typeof requestId !== "string" ||
+        !requestId.startsWith(`${runTag}-`) ||
+        requestId.length > 200 ||
+        admissions.has(requestId)
+      )
+        failAdmission("invalid or reused reservation identity");
+      if (admissionFailure) return { error: admissionFailure };
+      let family = families.get(familyName);
+      if (!family) {
+        family = { key: null, identityHash: null, pending: 0, guardTimes: [] };
+        families.set(familyName, family);
+      }
+      const now = performance.now();
+      family.guardTimes = family.guardTimes.filter(
+        (time) => now - time < 60000,
+      );
+      const actual = family.key === null ? null : state(family.key, "default");
+      if (
+        family.key !== null &&
+        (!actual ||
+          actual.isBlocked ||
+          !Number.isSafeInteger(actual.totalHits) ||
+          actual.totalHits < 0)
+      ) {
+        failAdmission("invalid or blocked actual counter");
+        return { error: admissionFailure };
+      }
+      const limit = BASELINE_PER_MINUTE[familyName];
+      if (
+        (actual?.totalHits ?? 0) + family.pending >= limit ||
+        family.guardTimes.length + family.pending >= limit
+      )
+        return {
+          allowed: false,
+          // At the observed rolling boundary, re-read the actual counter. A
+          // delayed expiry still owns its slot even after60000ms have elapsed.
+          waitMs: family.guardTimes.length
+            ? Math.max(1, 60000 - (now - family.guardTimes[0]))
+            : 1,
+        };
+      const receipt = {
+        family: familyName,
+        reservedMs: now,
+        guardMs: null,
+        keyHash: null,
+        name: null,
+        result: null,
+        settled: false,
+      };
+      family.pending++;
+      admissions.set(requestId, receipt);
+      record(() => ({
+        kind: "capacity_admission_reserved",
+        requestId,
+        ...receipt,
+        actualHits: actual?.totalHits ?? null,
+        pending: family.pending,
+      }));
+      return { allowed: true, reservedMs: now };
+    },
+    complete(requestId) {
+      const receipt = admissions.get(requestId);
+      if (
+        !receipt ||
+        receipt.settled ||
+        receipt.guardMs === null ||
+        !receipt.result
+      )
+        failAdmission("HTTP settled without one matching genuine guard result");
+      if (receipt) receipt.settled = true;
+      const feedback = { ...receipt, error: admissionFailure };
+      record(() => ({
+        kind: "capacity_admission_settled",
+        requestId,
+        ...feedback,
+      }));
+      // Missing feedback never releases a reservation: the request could still
+      // arrive after a transport error. Preserve that error and fail closed.
+      return feedback;
+    },
+  };
   const watch = (key, entry) => {
     if (watched.has(entry.totalHits)) return;
     // Bound both the trace and the number of installed hooks. A truncated trace
@@ -152,6 +285,8 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
     });
     replace(storage, "increment", function (...args) {
       const [key, ttl, limit, blockDuration, name] = args;
+      const guardMs = performance.now();
+      const incoming = requestContext();
       const call = ++calls;
       if (context.getStore()) correlatedCalls++;
       record(() => ({
@@ -180,11 +315,25 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
         call,
         afterCall: state(key, name),
       }));
+      try {
+        observeAdmission(key, ttl, limit, name, guardMs, incoming);
+      } catch {
+        failAdmission("could not read genuine guard accounting");
+      }
       // Preserve the exact original promise and rejection. The tap has no
       // asynchronous work, no new timer, and cannot throw into the application.
       try {
         result.then(
-          (value) =>
+          (value) => {
+            const receipt = admissions.get(incoming?.requestId);
+            if (receipt) {
+              receipt.result = {
+                totalHits: value.totalHits,
+                isBlocked: value.isBlocked,
+              };
+              if (value.isBlocked)
+                failAdmission("genuine guard rejected a measured request");
+            }
             record(() => ({
               kind: "capacity_throttle_result",
               call,
@@ -195,7 +344,8 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
                 timeToBlockExpire: value.timeToBlockExpire,
               },
               atSettlement: state(key, name),
-            })),
+            }));
+          },
           () => record(() => ({ kind: "capacity_throttle_rejection", call })),
         );
       } catch {
@@ -239,6 +389,7 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
       "Actual singleton calls and hit mutations; owned inbound requests only. No historical 429 inference or capacity credit.",
   });
   return {
+    admission,
     middleware(request, response, next) {
       const requestId = request.headers?.["x-request-id"];
       if (

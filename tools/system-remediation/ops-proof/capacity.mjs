@@ -560,12 +560,38 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
           if (wait <= 0) break;
           await sleepFor(wait, clock, true);
         }
+        // Client launch spacing cannot bound variable transport/guard delay or
+        // release hits whose genuine expiry callback has not run. The hosted
+        // singleton observer reserves unsent requests against actual key hits
+        // and rolling guard times. It never increments or resets the limiter.
+        let admission = null;
+        if (lifecycle.admission && !prepared.error) {
+          while (
+            performance.now() - start < plan.durationSeconds * 1000 &&
+            active.size < plan.maxInFlight
+          ) {
+            admission = lifecycle.admission.tryReserve(
+              entry.family,
+              entry.item.headers["x-request-id"],
+            );
+            if (admission.allowed || admission.error) break;
+            await sleepFor(
+              Math.min(
+                admission.waitMs ?? 1,
+                plan.durationSeconds * 1000 - (performance.now() - start),
+              ),
+              clock,
+            );
+          }
+        }
         // Do not queue and then falsely report the requested arrival rate as met.
         const overloaded = active.size >= plan.maxInFlight;
         const attemptedMs = performance.now() - start;
         const late = attemptedMs >= plan.durationSeconds * 1000;
         const launchedMs =
-          late || overloaded || prepared.error ? null : attemptedMs;
+          late || overloaded || prepared.error || admission?.error
+            ? null
+            : attemptedMs;
         if (launchedMs !== null) {
           familyLastLaunch[entry.family] = launchedMs;
           launches.push(launchedMs);
@@ -589,13 +615,29 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
                   }
                 : prepared.error
                   ? { latencyMs: null, httpStatus: null, error: prepared.error }
-                  : await measure(plan.origin, prepared.item);
+                  : admission?.error
+                    ? {
+                        latencyMs: null,
+                        httpStatus: null,
+                        error: admission.error,
+                      }
+                    : await measure(plan.origin, prepared.item);
           } catch (error) {
             result = {
               latencyMs: null,
               httpStatus: null,
               error: error.message,
             };
+          }
+          let admissionFeedback = null;
+          if (lifecycle.admission && launchedMs !== null) {
+            admissionFeedback = lifecycle.admission.complete(
+              entry.item.headers["x-request-id"],
+            );
+            // Preserve raw HTTP/transport errors. Missing/invalid accounting
+            // cannot turn a successful HTTP response into capacity evidence.
+            if (admissionFeedback.error && !result.error)
+              result.error = admissionFeedback.error;
           }
           const record = {
             taskId: "SR-OPS-PROOF-001",
@@ -618,6 +660,7 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
             finishedMs: launchedMs === null ? null : performance.now() - start,
             schedulingLagMs: attemptedMs - entry.scheduledMs,
             profile,
+            ...(lifecycle.admission ? { admissionFeedback } : {}),
             ...result,
           };
           records.push(record);

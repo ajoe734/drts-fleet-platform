@@ -30,6 +30,23 @@ export type ThrottleObservationSummary = {
   scope: string;
 };
 export type CapacityThrottleObserver = {
+  admission: {
+    tryReserve(
+      family: "booking" | "dispatch" | "report",
+      requestId: string,
+    ): {
+      allowed?: boolean;
+      reservedMs?: number;
+      waitMs?: number;
+      error?: string;
+    };
+    complete(requestId: string): {
+      error: string | null;
+      guardMs?: number | null;
+      keyHash?: string | null;
+      result?: { totalHits: number; isBlocked: boolean } | null;
+    };
+  };
   middleware(
     request: ThrottleRequest,
     response: ThrottleResponse,

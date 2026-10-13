@@ -478,6 +478,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
                 candidateSha: process.env.CANDIDATE_SHA ?? "local",
               },
               {
+                admission: throttleObserver!.admission,
                 initialize: async () => {
                   // A real run-owned recovery workload, not extra measured
                   // HTTP requests or a fixed delay. All50 valid commands commit
