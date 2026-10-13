@@ -80,6 +80,8 @@ export class ComplaintService implements OnModuleInit {
 
   private settlementRefresh: Promise<void> | undefined;
 
+  private incidentLinkOperations = new Map<string, Promise<void>>();
+
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional() private readonly complaintRepository?: ComplaintRepository,
@@ -177,6 +179,29 @@ export class ComplaintService implements OnModuleInit {
         );
       }
       return;
+    }
+  }
+
+  /** Hold the source complaint before an escalation allocates an incident.
+   * Link controllers acquire this queue before the shared incident queue. */
+  async withIncidentLink<T>(
+    caseNo: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.incidentLinkOperations.get(caseNo);
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.incidentLinkOperations.set(caseNo, current);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.incidentLinkOperations.get(caseNo) === current) {
+        this.incidentLinkOperations.delete(caseNo);
+      }
     }
   }
 

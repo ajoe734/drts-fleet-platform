@@ -198,59 +198,64 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
-    return this.incidentService.withComplaintLink(incidentId, async () => {
-      await this.complaintService.refreshSettlementCases();
-      const incidentRecord = this.incidentService.getIncident(incidentId);
-      const complaintCase = this.complaintService.getComplaintCase(
-        body.complaintCaseNo,
-      );
-      if (
-        incidentRecord.relatedComplaintCaseNo &&
-        incidentRecord.relatedComplaintCaseNo !== complaintCase.caseNo
-      ) {
-        throw new ApiRequestError(
-          HttpStatus.CONFLICT,
-          "INCIDENT_COMPLAINT_LINK_CONFLICT",
-          "This incident is already linked to a different complaint case.",
-          {
+    return this.complaintService.withIncidentLink(
+      body.complaintCaseNo,
+      async () => {
+        return this.incidentService.withComplaintLink(incidentId, async () => {
+          await this.complaintService.refreshSettlementCases();
+          const incidentRecord = this.incidentService.getIncident(incidentId);
+          const complaintCase = this.complaintService.getComplaintCase(
+            body.complaintCaseNo,
+          );
+          if (
+            incidentRecord.relatedComplaintCaseNo &&
+            incidentRecord.relatedComplaintCaseNo !== complaintCase.caseNo
+          ) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "INCIDENT_COMPLAINT_LINK_CONFLICT",
+              "This incident is already linked to a different complaint case.",
+              {
+                incidentId,
+                existingComplaintCaseNo: incidentRecord.relatedComplaintCaseNo,
+                requestedComplaintCaseNo: complaintCase.caseNo,
+              },
+            );
+          }
+          if (
+            complaintCase.relatedIncidentId &&
+            complaintCase.relatedIncidentId !== incidentRecord.incidentId
+          ) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "COMPLAINT_INCIDENT_LINK_CONFLICT",
+              "This complaint case is already linked to a different incident.",
+              {
+                caseNo: complaintCase.caseNo,
+                existingIncidentId: complaintCase.relatedIncidentId,
+                requestedIncidentId: incidentRecord.incidentId,
+              },
+            );
+          }
+          this.complaintService.linkIncident(
+            body.complaintCaseNo,
+            {
+              incidentId,
+            } satisfies LinkComplaintToIncidentCommand,
+            requestId,
+          );
+          await this.complaintService.awaitSettlementPersistence(
+            body.complaintCaseNo,
+          );
+          const incident = this.incidentService.linkComplaint(
             incidentId,
-            existingComplaintCaseNo: incidentRecord.relatedComplaintCaseNo,
-            requestedComplaintCaseNo: complaintCase.caseNo,
-          },
-        );
-      }
-      if (
-        complaintCase.relatedIncidentId &&
-        complaintCase.relatedIncidentId !== incidentRecord.incidentId
-      ) {
-        throw new ApiRequestError(
-          HttpStatus.CONFLICT,
-          "COMPLAINT_INCIDENT_LINK_CONFLICT",
-          "This complaint case is already linked to a different incident.",
-          {
-            caseNo: complaintCase.caseNo,
-            existingIncidentId: complaintCase.relatedIncidentId,
-            requestedIncidentId: incidentRecord.incidentId,
-          },
-        );
-      }
-      this.complaintService.linkIncident(
-        body.complaintCaseNo,
-        {
-          incidentId,
-        } satisfies LinkComplaintToIncidentCommand,
-        requestId,
-      );
-      await this.complaintService.awaitSettlementPersistence(
-        body.complaintCaseNo,
-      );
-      const incident = this.incidentService.linkComplaint(
-        incidentId,
-        body.complaintCaseNo,
-        requestId,
-        identity,
-      );
-      return toApiSuccessEnvelope(incident, requestId);
-    });
+            body.complaintCaseNo,
+            requestId,
+            identity,
+          );
+          return toApiSuccessEnvelope(incident, requestId);
+        });
+      },
+    );
   }
 }

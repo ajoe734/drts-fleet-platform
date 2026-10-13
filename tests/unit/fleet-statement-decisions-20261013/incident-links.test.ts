@@ -404,18 +404,20 @@ describe("settlement complaint and incident links remain reciprocal", () => {
       await vi.waitFor(() =>
         expect(fixture.persistChanges).toHaveBeenCalledTimes(1),
       );
-      const incident = handlers.incidents.listIncidents()[0]!;
+      const incidentId = handlers.complaints.getComplaintCase(
+        caseA!.caseNo,
+      ).relatedIncidentId!;
+      expect(incidentId).toBeTruthy();
+      expect(handlers.incidents.listIncidents()).toEqual([]);
       competingOutcome = Promise.allSettled([
-        link(handlers, "incident", caseB!.caseNo, incident.incidentId),
+        link(handlers, "incident", caseB!.caseNo, incidentId),
       ]);
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(fixture.persistChanges).toHaveBeenCalledTimes(1);
       gate.resolve();
       const response = await escalated;
       expect(response.data.incident.relatedComplaintCaseNo).toBe(caseA!.caseNo);
-      expect(response.data.complaintCase.relatedIncidentId).toBe(
-        incident.incidentId,
-      );
+      expect(response.data.complaintCase.relatedIncidentId).toBe(incidentId);
       expect(await competingOutcome).toEqual([
         expect.objectContaining({
           status: "rejected",
@@ -425,7 +427,7 @@ describe("settlement complaint and incident links remain reciprocal", () => {
         }),
       ]);
       const winner = await freshCase(fixture.repository, caseA!.caseNo);
-      expect(winner.record.relatedIncidentId).toBe(incident.incidentId);
+      expect(winner.record.relatedIncidentId).toBe(incidentId);
       expect(winner.timeline.map((entry) => entry.action)).toEqual([
         "case_created",
         "escalated_to_incident",

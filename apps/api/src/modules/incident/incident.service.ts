@@ -127,6 +127,19 @@ export class IncidentService implements OnModuleInit {
     requestId?: string,
     identity: BootstrapRequestIdentity | null = null,
   ) {
+    return this.publishPreparedIncident(
+      this.prepareIncident(inputCommand, identity),
+      requestId,
+      identity,
+    );
+  }
+
+  /** Reserve the record without publishing events or writing incident state.
+   * Complaint escalation publishes it only after its CRM association commits. */
+  prepareIncident(
+    inputCommand: CreateIncidentCommand,
+    identity: BootstrapRequestIdentity | null = null,
+  ) {
     // A driver may only file incidents (incl. SOS) for themselves; never trust a
     // client-supplied reportedBy / relatedDriverId from the driver realm.
     const command =
@@ -170,6 +183,17 @@ export class IncidentService implements OnModuleInit {
       updatedAt: now,
     };
 
+    return { incident, command };
+  }
+
+  publishPreparedIncident(
+    prepared: ReturnType<IncidentService["prepareIncident"]>,
+    requestId?: string,
+    identity: BootstrapRequestIdentity | null = null,
+  ) {
+    const { incident, command } = prepared;
+    const incidentId = incident.incidentId;
+    const now = incident.createdAt;
     const timelineEntries = [
       this.createTimelineEntry(
         incidentId,

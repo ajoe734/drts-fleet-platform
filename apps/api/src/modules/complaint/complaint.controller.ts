@@ -223,94 +223,80 @@ export class ComplaintController {
     @Body() command: EscalateComplaintToIncidentCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    await this.complaintService.refreshSettlementCases();
-    const complaintCase = this.complaintService.getComplaintCase(caseNo);
-    if (complaintCase.relatedIncidentId) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "COMPLAINT_ALREADY_ESCALATED",
-        "This complaint case is already linked to an incident.",
-        {
-          caseNo,
-          existingIncidentId: complaintCase.relatedIncidentId,
+    return this.complaintService.withIncidentLink(caseNo, async () => {
+      await this.complaintService.refreshSettlementCases();
+      const complaintCase = this.complaintService.getComplaintCase(caseNo);
+      if (complaintCase.relatedIncidentId) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "COMPLAINT_ALREADY_ESCALATED",
+          "This complaint case is already linked to an incident.",
+          {
+            caseNo,
+            existingIncidentId: complaintCase.relatedIncidentId,
+          },
+        );
+      }
+      const createIncidentInput: Parameters<
+        typeof this.incidentService.createIncident
+      >[0] = {
+        title: command.title,
+        description: `Escalated from complaint ${caseNo}: ${command.reason}`,
+        category:
+          complaintCase.category === "safety_concern"
+            ? "safety"
+            : "operational",
+        severity: command.severity,
+        reportedBy: complaintCase.assigneeId ?? "system",
+      };
+      if (complaintCase.relatedOrderId) {
+        createIncidentInput.relatedOrderId = complaintCase.relatedOrderId;
+      }
+      const preparedIncident =
+        this.incidentService.prepareIncident(createIncidentInput);
+      return this.incidentService.withComplaintLink(
+        preparedIncident.incident.incidentId,
+        async () => {
+          await this.complaintService.refreshSettlementCases();
+          const currentCase = this.complaintService.getComplaintCase(caseNo);
+          if (currentCase.relatedIncidentId) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "COMPLAINT_ALREADY_ESCALATED",
+              "This complaint case is already linked to an incident.",
+              { caseNo, existingIncidentId: currentCase.relatedIncidentId },
+            );
+          }
+          const updatedCase = this.complaintService.escalateToIncident(
+            caseNo,
+            preparedIncident.incident.incidentId,
+            command.reason,
+            requestId,
+          );
+          await this.complaintService.awaitSettlementPersistence(caseNo);
+          const createdIncident = this.incidentService.publishPreparedIncident(
+            preparedIncident,
+            requestId,
+          );
+          const incident = currentCase.assigneeId
+            ? this.incidentService.updateIncident(
+                createdIncident.incidentId,
+                { assignedTo: currentCase.assigneeId },
+                requestId,
+              )
+            : createdIncident;
+          const linkedIncident = this.incidentService.linkComplaint(
+            incident.incidentId,
+            caseNo,
+            requestId,
+          );
+          return toApiSuccessEnvelope(
+            { complaintCase: updatedCase, incident: linkedIncident },
+            requestId,
+          );
         },
       );
-    }
-    const createIncidentInput: Parameters<
-      typeof this.incidentService.createIncident
-    >[0] = {
-      title: command.title,
-      description: `Escalated from complaint ${caseNo}: ${command.reason}`,
-      category:
-        complaintCase.category === "safety_concern" ? "safety" : "operational",
-      severity: command.severity,
-      reportedBy: complaintCase.assigneeId ?? "system",
-    };
-    if (complaintCase.relatedOrderId) {
-      createIncidentInput.relatedOrderId = complaintCase.relatedOrderId;
-    }
-    const createdIncident = this.incidentService.createIncident(
-      createIncidentInput,
-      requestId,
-    );
-    const incident = complaintCase.assigneeId
-      ? this.incidentService.updateIncident(
-          createdIncident.incidentId,
-          {
-            assignedTo: complaintCase.assigneeId,
-          },
-          requestId,
-        )
-      : createdIncident;
-    return this.incidentService.withComplaintLink(
-      incident.incidentId,
-      async () => {
-        await this.complaintService.refreshSettlementCases();
-        const currentCase = this.complaintService.getComplaintCase(caseNo);
-        if (currentCase.relatedIncidentId) {
-          throw new ApiRequestError(
-            HttpStatus.CONFLICT,
-            "COMPLAINT_ALREADY_ESCALATED",
-            "This complaint case is already linked to an incident.",
-            { caseNo, existingIncidentId: currentCase.relatedIncidentId },
-          );
-        }
-        const currentIncident = this.incidentService.getIncident(
-          incident.incidentId,
-        );
-        if (
-          currentIncident.relatedComplaintCaseNo &&
-          currentIncident.relatedComplaintCaseNo !== caseNo
-        ) {
-          throw new ApiRequestError(
-            HttpStatus.CONFLICT,
-            "INCIDENT_COMPLAINT_LINK_CONFLICT",
-            "This incident is already linked to a different complaint case.",
-            {
-              incidentId: incident.incidentId,
-              existingComplaintCaseNo: currentIncident.relatedComplaintCaseNo,
-              requestedComplaintCaseNo: caseNo,
-            },
-          );
-        }
-        const updatedCase = this.complaintService.escalateToIncident(
-          caseNo,
-          incident.incidentId,
-          command.reason,
-          requestId,
-        );
-        await this.complaintService.awaitSettlementPersistence(caseNo);
-        const linkedIncident = this.incidentService.linkComplaint(
-          incident.incidentId,
-          caseNo,
-          requestId,
-        );
-        return toApiSuccessEnvelope(
-          { complaintCase: updatedCase, incident: linkedIncident },
-          requestId,
-        );
-      },
-    );
+    });
   }
 
   @Post(":caseNo/link-incident")
@@ -319,56 +305,58 @@ export class ComplaintController {
     @Body() command: LinkComplaintToIncidentCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return this.incidentService.withComplaintLink(
-      command.incidentId,
-      async () => {
-        await this.complaintService.refreshSettlementCases();
-        const complaintCase = this.complaintService.getComplaintCase(caseNo);
-        const incident = this.incidentService.getIncident(command.incidentId);
-        if (
-          complaintCase.relatedIncidentId &&
-          complaintCase.relatedIncidentId !== incident.incidentId
-        ) {
-          throw new ApiRequestError(
-            HttpStatus.CONFLICT,
-            "COMPLAINT_INCIDENT_LINK_CONFLICT",
-            "This complaint case is already linked to a different incident.",
-            {
-              caseNo,
-              existingIncidentId: complaintCase.relatedIncidentId,
-              requestedIncidentId: incident.incidentId,
-            },
+    return this.complaintService.withIncidentLink(caseNo, async () => {
+      return this.incidentService.withComplaintLink(
+        command.incidentId,
+        async () => {
+          await this.complaintService.refreshSettlementCases();
+          const complaintCase = this.complaintService.getComplaintCase(caseNo);
+          const incident = this.incidentService.getIncident(command.incidentId);
+          if (
+            complaintCase.relatedIncidentId &&
+            complaintCase.relatedIncidentId !== incident.incidentId
+          ) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "COMPLAINT_INCIDENT_LINK_CONFLICT",
+              "This complaint case is already linked to a different incident.",
+              {
+                caseNo,
+                existingIncidentId: complaintCase.relatedIncidentId,
+                requestedIncidentId: incident.incidentId,
+              },
+            );
+          }
+          if (
+            incident.relatedComplaintCaseNo &&
+            incident.relatedComplaintCaseNo !== caseNo
+          ) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "INCIDENT_COMPLAINT_LINK_CONFLICT",
+              "This incident is already linked to a different complaint case.",
+              {
+                incidentId: incident.incidentId,
+                existingComplaintCaseNo: incident.relatedComplaintCaseNo,
+                requestedComplaintCaseNo: caseNo,
+              },
+            );
+          }
+          const updatedComplaintCase = this.complaintService.linkIncident(
+            caseNo,
+            command,
+            requestId,
           );
-        }
-        if (
-          incident.relatedComplaintCaseNo &&
-          incident.relatedComplaintCaseNo !== caseNo
-        ) {
-          throw new ApiRequestError(
-            HttpStatus.CONFLICT,
-            "INCIDENT_COMPLAINT_LINK_CONFLICT",
-            "This incident is already linked to a different complaint case.",
-            {
-              incidentId: incident.incidentId,
-              existingComplaintCaseNo: incident.relatedComplaintCaseNo,
-              requestedComplaintCaseNo: caseNo,
-            },
+          await this.complaintService.awaitSettlementPersistence(caseNo);
+          this.incidentService.linkComplaint(
+            command.incidentId,
+            caseNo,
+            requestId,
           );
-        }
-        const updatedComplaintCase = this.complaintService.linkIncident(
-          caseNo,
-          command,
-          requestId,
-        );
-        await this.complaintService.awaitSettlementPersistence(caseNo);
-        this.incidentService.linkComplaint(
-          command.incidentId,
-          caseNo,
-          requestId,
-        );
-        return toApiSuccessEnvelope(updatedComplaintCase, requestId);
-      },
-    );
+          return toApiSuccessEnvelope(updatedComplaintCase, requestId);
+        },
+      );
+    });
   }
 
   @Post(":caseNo/sla-breach")
