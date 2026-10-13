@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { DriverProfileRepository } from "../../src/modules/driver-profile/driver-profile.repository";
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 
@@ -27,6 +28,10 @@ function createService(
   const auditNotificationService = new AuditNotificationService();
   const driverProfileService = new DriverProfileService(
     auditNotificationService,
+    new DriverProfileRepository({
+      isEnabled: () => true,
+      query: async () => ({ rows: [] }),
+    } as never),
   );
   const regulatoryRegistryRepository = {
     isEnabled: vi.fn(() => false),
@@ -357,10 +362,10 @@ describe("RegulatoryRegistryService", () => {
     ]);
   });
 
-  it("creates a driver master with linked profile and lifecycle audit metadata", () => {
+  it("creates a driver master with linked profile and lifecycle audit metadata", async () => {
     const { service, auditNotificationService } = createService();
 
-    const created = service.createDriver(
+    const created = await service.createDriver(
       {
         name: "Driver Admin Created",
         phone: "+886-912-555-666",
