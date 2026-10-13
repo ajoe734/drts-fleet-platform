@@ -171,6 +171,7 @@ export class DriverProfileService implements OnModuleInit {
     const created: DriverProfileRecord = {
       ...base,
       name: this.normalizeRequiredText("name", command.name),
+      ...this.normalizeExplicitSurname(command),
       phone: this.normalizeOptionalText(command.phone) ?? null,
       email: this.normalizeOptionalText(command.email) ?? null,
       photoUrl: this.normalizeOptionalText(command.photoUrl) ?? null,
@@ -208,6 +209,7 @@ export class DriverProfileService implements OnModuleInit {
     const current = this.resolveBaseProfile(driverId);
     const updated: DriverProfileRecord = {
       ...current,
+      ...this.normalizeExplicitSurname(command),
       ...(command.name !== undefined && {
         name: this.normalizeRequiredText("name", command.name),
       }),
@@ -262,6 +264,7 @@ export class DriverProfileService implements OnModuleInit {
     const updated: DriverProfileRecord = {
       ...current,
       name: this.normalizeRequiredText("name", command.name),
+      ...this.normalizeExplicitSurname(command),
       phone: this.normalizeOptionalText(command.phone) ?? null,
       email: this.normalizeOptionalText(command.email) ?? null,
       photoUrl: this.normalizeOptionalText(command.photoUrl) ?? null,
@@ -475,6 +478,30 @@ export class DriverProfileService implements OnModuleInit {
     return normalized;
   }
 
+  private normalizeExplicitSurname(
+    command: CreateDriverProfileCommand | UpdateDriverProfileCommand,
+  ): Pick<DriverProfileRecord, "driverSurname"> {
+    if (!Object.prototype.hasOwnProperty.call(command, "driverSurname")) {
+      return {};
+    }
+
+    if (typeof command.driverSurname !== "string") {
+      throw new ApiRequestError(
+        400,
+        "INVALID_DRIVER_PROFILE",
+        "driverSurname must be nonempty text for driver profile.",
+        { field: "driverSurname" },
+      );
+    }
+
+    return {
+      driverSurname: this.normalizeRequiredText(
+        "driverSurname",
+        command.driverSurname,
+      ),
+    };
+  }
+
   private normalizeOptionalText(value: string | null | undefined) {
     if (value === undefined) {
       return undefined;
@@ -546,6 +573,9 @@ export class DriverProfileService implements OnModuleInit {
     return {
       driverId: profile.driverId,
       name: maskName(profile.name),
+      ...(profile.driverSurname !== undefined && {
+        driverSurnameConfigured: true,
+      }),
       phone: maskPhone(profile.phone),
       email: maskEmail(profile.email),
       photoConfigured: profile.photoUrl !== null,
