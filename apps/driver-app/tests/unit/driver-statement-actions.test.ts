@@ -1,0 +1,383 @@
+import React from "react";
+import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import type { DriverStatementRecord } from "@drts/contracts";
+
+const boundary = vi.hoisted(() => ({
+  get: vi.fn(),
+  getList: vi.fn(),
+  getPlatformEarningsSummary: vi.fn(),
+  getPlatformEarningsByPlatform: vi.fn(),
+  openURL: vi.fn(),
+}));
+vi.mock("react-native", () => ({
+  ActivityIndicator: "ActivityIndicator",
+  View: "View",
+  Text: "Text",
+  Pressable: "Pressable",
+  ScrollView: "ScrollView",
+  TextInput: "TextInput",
+  KeyboardAvoidingView: "KeyboardAvoidingView",
+  Platform: {
+    OS: "web",
+    select: (values: { web?: unknown; default?: unknown }) =>
+      values.web ?? values.default,
+  },
+  StyleSheet: { create: <T>(styles: T) => styles },
+  Linking: { openURL: boundary.openURL },
+}));
+vi.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
+vi.mock("react-native-safe-area-context", () => ({
+  useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+}));
+vi.mock("expo-router", () => ({ Redirect: "Redirect" }));
+vi.mock("@/lib/api-client", () => ({
+  getDriverClient: () => ({ ...boundary, isFeatureEnabled: async () => true }),
+  isDriverIdentityProvisioned: () => true,
+  registerProtectedCacheClearHandler: () => () => {},
+  formatDriverError: (error: unknown, fallback: string) =>
+    error instanceof Error ? error.message : fallback,
+}));
+
+import EarningsScreen from "../../app/earnings";
+import { DriverStatementRow } from "../../components/earnings/driver-statement-row";
+import { driverStrings } from "../../lib/strings";
+
+type Node = {
+  type: unknown;
+  props: Record<string, unknown>;
+  children: (Node | string)[];
+};
+type Renderer = ReactTestRenderer & {
+  root: { findAll(predicate: (node: Node) => boolean): Node[] };
+};
+const renderers: Renderer[] = [];
+const copy = driverStrings.earnings.statement;
+const money = (amountMinor: number) => ({ currency: "TWD", amountMinor });
+
+beforeAll(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
+afterAll(() => vi.unstubAllGlobals());
+
+function record(
+  overrides: Partial<DriverStatementRecord> = {},
+): DriverStatementRecord {
+  return {
+    statementId: "statement /driver-1",
+    driverId: "driver-1",
+    periodMonth: "2026-10",
+    receiptNo: "RECEIPT-OLD",
+    feePlanVersion: "plan-old",
+    payoutStatus: "pending",
+    grossEarning: money(15000),
+    serviceFee: money(1000),
+    subsidy: money(0),
+    netAmount: money(14000),
+    lines: [
+      {
+        lineId: "line-1",
+        orderId: "order-detail",
+        grossEarning: money(15000),
+        serviceFee: money(1000),
+        subsidy: money(0),
+        netAmount: money(14000),
+        reimbursementRequired: true,
+      },
+    ],
+    artifactUrl: "https://example.invalid/old.pdf",
+    createdAt: "2026-10-01T00:00:00Z",
+    updatedAt: "2026-10-01T00:00:00Z",
+    ...overrides,
+  };
+}
+function freshRecord(): DriverStatementRecord {
+  return record({
+    receiptNo: "RECEIPT-FRESH",
+    feePlanVersion: "plan-fresh",
+    payoutStatus: "paid",
+    artifactUrl: "https://example.invalid/current.pdf",
+  });
+}
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+function text(node: Node | string): string {
+  return typeof node === "string" ? node : node.children.map(text).join("");
+}
+function allText(renderer: Renderer) {
+  return renderer.root
+    .findAll((node) => node.type === "Text")
+    .map(text)
+    .join("\n");
+}
+function button(renderer: Renderer, label: string): Node {
+  const found = renderer.root.findAll(
+    (node) => node.type === "Pressable" && text(node) === label,
+  );
+  expect(found).toHaveLength(1);
+  return found[0]!;
+}
+async function press(renderer: Renderer, label: string) {
+  const action = button(renderer, label).props.onPress;
+  expect(action).toBeTypeOf("function");
+  await act(async () => {
+    (action as () => void)();
+  });
+}
+async function mount(element: React.ReactElement): Promise<Renderer> {
+  let renderer!: Renderer;
+  await act(async () => {
+    renderer = create(element) as Renderer;
+  });
+  renderers.push(renderer);
+  return renderer;
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  boundary.get.mockReset().mockResolvedValue(freshRecord());
+  boundary.getList.mockReset().mockResolvedValue([record()]);
+  boundary.getPlatformEarningsSummary.mockReset().mockResolvedValue({
+    totalGross: money(15000),
+    totalServiceFee: money(1000),
+    totalSubsidy: money(0),
+    totalNet: money(14000),
+    platformCount: 1,
+    notes: [],
+  });
+  boundary.getPlatformEarningsByPlatform
+    .mockReset()
+    .mockResolvedValue({ items: [] });
+  boundary.openURL.mockReset().mockResolvedValue(undefined);
+});
+afterEach(async () => {
+  await act(async () => {
+    for (const renderer of renderers.splice(0)) renderer.unmount();
+  });
+});
+
+describe("Driver monthly statement detail and download", () => {
+  it("connects the actual Earnings screen row to current statement detail and its approved receipt/fee/line data", async () => {
+    const renderer = await mount(React.createElement(EarningsScreen));
+    expect(boundary.getList).toHaveBeenCalledWith(
+      "/api/driver/profile/statements",
+    );
+    expect(button(renderer, copy.download).props.disabled).toBe(false);
+    await press(renderer, copy.view);
+    expect(boundary.get).toHaveBeenCalledWith(
+      "/api/driver/profile/statements/statement%20%2Fdriver-1",
+    );
+    expect(allText(renderer)).toContain("RECEIPT-FRESH");
+    expect(allText(renderer)).toContain("plan-fresh");
+    expect(allText(renderer)).toContain("order-detail");
+    expect(allText(renderer)).toContain(copy.reimbursement);
+    expect(allText(renderer)).toContain("已撥款");
+    await press(renderer, copy.close);
+    expect(allText(renderer)).not.toContain("order-detail");
+    expect(boundary.openURL).not.toHaveBeenCalled();
+  });
+
+  it("keeps a deferred detail read visibly loading and prevents duplicate requests", async () => {
+    const pending = deferred<DriverStatementRecord>();
+    boundary.get.mockReturnValue(pending.promise);
+    const renderer = await mount(
+      React.createElement(DriverStatementRow, {
+        statement: record(),
+        last: true,
+        onLoaded: vi.fn(),
+      }),
+    );
+    const onPress = button(renderer, copy.view).props.onPress as () => void;
+    await act(async () => {
+      onPress();
+      onPress();
+    });
+    expect(allText(renderer)).toContain(copy.loading);
+    expect(button(renderer, copy.download).props.disabled).toBe(true);
+    expect(boundary.get).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      pending.resolve(freshRecord());
+    });
+    expect(allText(renderer)).not.toContain(copy.loading);
+  });
+
+  it("shows a detail read failure and retries the same statement instead of reporting success", async () => {
+    boundary.get
+      .mockRejectedValueOnce(new Error("Statement not available"))
+      .mockResolvedValueOnce(freshRecord());
+    const renderer = await mount(React.createElement(EarningsScreen));
+    await press(renderer, copy.view);
+    expect(allText(renderer)).toContain("Statement not available");
+    expect(allText(renderer)).not.toContain("RECEIPT-FRESH");
+    await press(renderer, copy.retry);
+    expect(boundary.get.mock.calls).toEqual([
+      ["/api/driver/profile/statements/statement%20%2Fdriver-1"],
+      ["/api/driver/profile/statements/statement%20%2Fdriver-1"],
+    ]);
+    expect(allText(renderer)).toContain("RECEIPT-FRESH");
+    expect(boundary.openURL).not.toHaveBeenCalled();
+  });
+
+  it("re-reads the statement before opening its refreshed server-issued download URL", async () => {
+    const oldMetadata = {
+      kind: "report",
+      subjectId: "statement /driver-1",
+      manifestHash: "hash",
+      host: "example.invalid",
+      keyId: "key",
+      signedAt: "2000-01-01T00:00:00Z",
+      expiresAt: "2000-01-02T00:00:00Z",
+      ttlMinutes: 60,
+      signatureVersion: 1,
+      signature: "old",
+      downloadUrl: "https://example.invalid/expired.pdf",
+      immutable: true as const,
+    };
+    boundary.getList.mockResolvedValue([
+      record({ artifactDownloadMetadata: oldMetadata }),
+    ]);
+    boundary.get.mockResolvedValue(
+      record({
+        artifactDownloadMetadata: {
+          ...oldMetadata,
+          expiresAt: "2099-01-01T00:00:00Z",
+          signature: "new",
+          downloadUrl: "https://example.invalid/refreshed.pdf?signature=new",
+        },
+      }),
+    );
+    const renderer = await mount(React.createElement(EarningsScreen));
+    await press(renderer, copy.download);
+    expect(boundary.get).toHaveBeenCalledWith(
+      "/api/driver/profile/statements/statement%20%2Fdriver-1",
+    );
+    expect(boundary.openURL).toHaveBeenCalledWith(
+      "https://example.invalid/refreshed.pdf?signature=new",
+    );
+    expect(boundary.openURL).toHaveBeenCalledTimes(1);
+    expect(allText(renderer)).not.toContain("下載成功");
+  });
+
+  it("never opens the cached artifact when the current download read is denied", async () => {
+    boundary.get.mockRejectedValue(new Error("Statement access denied"));
+    const renderer = await mount(React.createElement(EarningsScreen));
+    await press(renderer, copy.download);
+    expect(allText(renderer)).toContain("Statement access denied");
+    expect(boundary.openURL).not.toHaveBeenCalled();
+    expect(boundary.get).toHaveBeenCalledWith(
+      "/api/driver/profile/statements/statement%20%2Fdriver-1",
+    );
+  });
+
+  it("keeps missing artifacts unavailable until a real detail retry returns one", async () => {
+    boundary.get
+      .mockResolvedValueOnce(record({ artifactUrl: null }))
+      .mockResolvedValueOnce(freshRecord());
+    const renderer = await mount(
+      React.createElement(DriverStatementRow, {
+        statement: record({ artifactUrl: null }),
+        last: true,
+        onLoaded: vi.fn(),
+      }),
+    );
+    expect(button(renderer, copy.download).props.disabled).toBe(true);
+    await press(renderer, copy.view);
+    expect(allText(renderer)).toContain(copy.missing);
+    expect(boundary.openURL).not.toHaveBeenCalled();
+    await press(renderer, copy.retry);
+    expect(button(renderer, copy.download).props.disabled).toBe(false);
+  });
+
+  it("does not open an expired link returned by a fresh read", async () => {
+    const expired = {
+      kind: "report",
+      subjectId: "statement /driver-1",
+      manifestHash: "hash",
+      host: "example.invalid",
+      keyId: "key",
+      signedAt: "2000-01-01T00:00:00Z",
+      expiresAt: "2000-01-02T00:00:00Z",
+      ttlMinutes: 60,
+      signatureVersion: 1,
+      signature: "signature",
+      downloadUrl: "https://example.invalid/expired.pdf",
+      immutable: true as const,
+    };
+    boundary.get.mockResolvedValue(
+      record({ artifactDownloadMetadata: expired }),
+    );
+    const renderer = await mount(React.createElement(EarningsScreen));
+    await press(renderer, copy.download);
+    expect(allText(renderer)).toContain(copy.expired);
+    expect(boundary.openURL).not.toHaveBeenCalled();
+  });
+
+  it("reports an opener failure and retries with another fresh statement read", async () => {
+    boundary.openURL
+      .mockRejectedValueOnce(new Error("Could not open document"))
+      .mockResolvedValueOnce(undefined);
+    const renderer = await mount(React.createElement(EarningsScreen));
+    await press(renderer, copy.download);
+    expect(allText(renderer)).toContain("Could not open document");
+    await press(renderer, copy.download);
+    expect(boundary.get).toHaveBeenCalledTimes(2);
+    expect(boundary.openURL).toHaveBeenCalledTimes(2);
+    expect(allText(renderer)).not.toContain("Could not open document");
+  });
+
+  it("does not open or republish a pending response after its row is removed", async () => {
+    const pending = deferred<DriverStatementRecord>();
+    const onLoaded = vi.fn();
+    boundary.get.mockReturnValue(pending.promise);
+    const renderer = await mount(
+      React.createElement(DriverStatementRow, {
+        statement: record(),
+        last: true,
+        onLoaded,
+      }),
+    );
+    await press(renderer, copy.download);
+    await act(async () => {
+      renderer.unmount();
+    });
+    renderers.splice(renderers.indexOf(renderer), 1);
+    await act(async () => {
+      pending.resolve(freshRecord());
+    });
+    expect(onLoaded).not.toHaveBeenCalled();
+    expect(boundary.openURL).not.toHaveBeenCalled();
+  });
+
+  it("separates a failed monthly-list read from no statements and offers an actual refresh", async () => {
+    boundary.getList
+      .mockRejectedValueOnce(new Error("Monthly statements unavailable"))
+      .mockResolvedValueOnce([record()]);
+    const renderer = await mount(React.createElement(EarningsScreen));
+    expect(allText(renderer)).toContain("Monthly statements unavailable");
+    expect(allText(renderer)).not.toContain("尚無月結報表");
+    await press(renderer, copy.listRetry);
+    expect(boundary.getList).toHaveBeenCalledTimes(2);
+    expect(button(renderer, copy.view).props.disabled).toBe(false);
+    expect(allText(renderer)).not.toContain("Monthly statements unavailable");
+  });
+
+  it("retains the honest empty monthly state after a successful zero-row read", async () => {
+    boundary.getList.mockResolvedValue([]);
+    const renderer = await mount(React.createElement(EarningsScreen));
+    expect(allText(renderer)).toContain("尚無月結報表");
+    expect(allText(renderer)).not.toContain(copy.errorTitle);
+    expect(boundary.get).not.toHaveBeenCalled();
+  });
+});
