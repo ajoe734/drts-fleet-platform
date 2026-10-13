@@ -1,3 +1,4 @@
+import { passengerFetch } from "../runtime-fetch";
 import { PassengerClient } from "@drts/passenger-client";
 
 /** Compatibility facade; all formal commands now live in the shared client. */
@@ -25,7 +26,7 @@ export function createAuthClient() {
   return new PassengerAuthClient(
     new PassengerClient({
       baseUrl: "",
-      fetchFn: (url, init) => fetch(url, init),
+      fetchFn: passengerFetch,
     }),
   );
 }

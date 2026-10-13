@@ -1,4 +1,5 @@
 "use client";
+import { passengerFetch } from "../../lib/runtime-fetch";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type {
@@ -42,7 +43,7 @@ export interface BookingScreenProps {
 export function createBookingClient() {
   return new PassengerBookingClient({
     baseUrl: "",
-    fetchFn: (url, init) => fetch(url, init),
+    fetchFn: passengerFetch,
   });
 }
 const emptyDraft: BookingDraft = {

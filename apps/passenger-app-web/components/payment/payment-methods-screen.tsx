@@ -1,4 +1,5 @@
 "use client";
+import { passengerFetch } from "../../lib/runtime-fetch";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type {
@@ -40,7 +41,7 @@ export function PaymentMethodsScreen({
       supplied ??
       new PassengerPaymentClient({
         baseUrl: "",
-        fetchFn: (url, options) => fetch(url, options),
+        fetchFn: passengerFetch,
       }),
   );
   const [accountClient] = useState(
@@ -48,7 +49,7 @@ export function PaymentMethodsScreen({
       accountSupplied ??
       new PassengerClient({
         baseUrl: "",
-        fetchFn: (url, options) => fetch(url, options),
+        fetchFn: passengerFetch,
       }),
   );
   const [methods, setMethods] = useState<PassengerPaymentMethod[]>();

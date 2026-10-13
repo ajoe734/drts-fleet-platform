@@ -22,6 +22,7 @@ from control_plane.domain.dispatch_policy import (
     DispatchReason as DomainDispatchReason,
     ReadyDispatchPolicy,
     build_dispatch_event as build_domain_dispatch_event,
+    pending_acceptance_review,
     ready_dispatch_signature as domain_ready_dispatch_signature,
     resolve_dispatch_target as resolve_domain_dispatch_target,
 )
@@ -133,7 +134,7 @@ def task_is_dispatch_eligible_for_agent(
             if any(not isinstance(v, list) or any(not isinstance(a, str) or not a.strip() for a in v)
                    for v in raw.values()):
                 return False
-            role = role or ("reviewer" if task.get("status") == "review" else "owner")
+            role = role or ("reviewer" if task.get("status") == "review" or pending_acceptance_review(task) else "owner")
             allowed = raw.get(role)
             return isinstance(allowed, list) and agent_name in allowed
         allowed = raw.get("agents") if set(raw) == {"agents"} else None
@@ -165,7 +166,7 @@ def task_role_for_dispatch_reason(reason: str | None) -> str | None:
     normalized = str(reason or "").strip()
     if normalized == "review_ready_dispatch":
         return "reviewer"
-    if normalized in {"owned_in_progress_dispatch", "owned_ready_dispatch"}:
+    if normalized in {"owned_in_progress_dispatch", "owned_ready_dispatch", "acceptance_ready_dispatch"}:
         return "owner"
     return None
 

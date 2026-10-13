@@ -800,3 +800,34 @@ full-system/native Android AND iOS/provider/financial/legal/manual/public-entry/
 H3F2/HOLD/F2/ZEROremoved floor remain intact. This work stays `in_progress`,
 ordinary pushed anchors only; it is not ready for candidate handoff. DraftPR2601
 at tested5ad297 has no reported checks; there is no CI pass inferred from that.
+
+### Ordinary upstream integration boundary (2026-10-13)
+
+Owner checkpoint `6e3852cdfd87d8c8f35dedd22f930adbbf5082c2` and draft
+PR2601 head matched before integration, with no active candidate or reported CI
+checks. Fresh `origin/dev` was `f9b1dd990762659e8b421d061cb26bcad42d7f27`,
+containing the independently reviewed storage delivery
+`deb6a6cd22123f15ada5789e384d8b7f6a2b3555`. The actual merge preview had six
+conflicts, all within the registered C123 owner scopes: this runner artifact,
+the integration harness, capacity scheduler tests, durable readback, polling
+observations and the original capacity producer. Every upstream C123 scoped
+file still matched frozen `6d986764dc830dbb005caa4b8126d548ada23765` exactly.
+
+The owner therefore resolves those six conflicts with the current owned source,
+retaining all32 scoped blobs before this documentation append. The ordinary
+merge imports accepted upstream changes; AppModule and key-owned storage bytes
+match that exact dev head, without owner edits to shared rate/auth policy.
+`before-merge.json` and `merge-preview.log` under
+`.local/c123-report-worker-20261012/integration-continuation-20261013/`
+record the source/hash and conflict boundary. Post-merge verification remains
+pending at this anchor; neither required acceptance key gains evidence.
+
+The four strict timing controls remain red, including both1ms cases ending
+dispatch at904299ms. Supervisor/reviewer coordination of the explicit accepted
+profile pacing boundary remains necessary: no existing minimum interval,
+rolling budget, count, original clock/deadline, raw failure, safety or SQL floor
+is waived by this integration. Actual original112/current375 HTTP429 causality
+and a fresh same-candidate full900s hosted baseline remain OPEN. No unchanged
+hosted retry, VM product runtime, cloud mutation, history rewrite or candidate
+handoff occurs. All prior findings/source credit and retained full-system/
+runtime/native/provider/legal/manual/H3F2/HOLD/F2/ZEROremoved floors remain.

@@ -1,4 +1,9 @@
-"""Validate operator-published readiness before obtaining a cloud token."""
+"""Validate operator-published readiness before obtaining a cloud token.
+
+IAM authorization is audited by provision_drill_sa.inventory(complete=True)
+before publishing this candidate-bound receipt: create must be unconditional
+on the dev project, with no obsolete conditional or broader SA grants.
+"""
 import os
 import sys
 

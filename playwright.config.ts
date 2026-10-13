@@ -14,7 +14,11 @@ function readSelectedProjects() {
       continue;
     }
     const nextValue = argv[index + 1];
-    if (value === "--project" && typeof nextValue === "string" && nextValue.length > 0) {
+    if (
+      value === "--project" &&
+      typeof nextValue === "string" &&
+      nextValue.length > 0
+    ) {
       selectedProjects.add(nextValue);
     }
   }
@@ -138,7 +142,7 @@ export default defineConfig({
     {
       name: "ops-assistant-on",
       testIgnore:
-        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui|p5-passenger-live-authority)\.spec\.ts/,
+        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui|p5-passenger-live-authority|pax-functional-demo)\.spec\.ts/,
       use: {
         baseURL: "http://127.0.0.1:3202",
       },
@@ -146,7 +150,7 @@ export default defineConfig({
     {
       name: "ops-assistant-off",
       testIgnore:
-        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui|p5-passenger-live-authority)\.spec\.ts/,
+        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui|p5-passenger-live-authority|pax-functional-demo)\.spec\.ts/,
       use: {
         baseURL: "http://127.0.0.1:3202",
       },
@@ -154,7 +158,7 @@ export default defineConfig({
     {
       name: "platform-admin-assistant-on",
       testIgnore:
-        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui|p5-passenger-live-authority)\.spec\.ts/,
+        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui|p5-passenger-live-authority|pax-functional-demo)\.spec\.ts/,
       use: {
         baseURL: "http://127.0.0.1:3102",
       },
@@ -162,7 +166,7 @@ export default defineConfig({
     {
       name: "platform-admin-assistant-off",
       testIgnore:
-        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui|p5-passenger-live-authority)\.spec\.ts/,
+        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui|p5-passenger-live-authority|pax-functional-demo)\.spec\.ts/,
       use: {
         baseURL: "http://127.0.0.1:3103",
       },

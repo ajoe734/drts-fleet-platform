@@ -35,6 +35,7 @@ const { PathParamsContext, SearchParamsContext } = appRequire(
   "next/dist/shared/lib/hooks-client-context.shared-runtime",
 ) as typeof import("next/dist/shared/lib/hooks-client-context.shared-runtime");
 const router: AppRouterInstance = {
+  bfcacheId: "auth-ui-unit-segment",
   push: navigation.push,
   replace: vi.fn(),
   back: vi.fn(),
@@ -142,9 +143,28 @@ describe("login capabilities and actual OTP components", () => {
     async (provider) => {
       render(<LoginPage />);
       await enterOtp(provider);
-      await finishOtp();
-      expect((button("繼續") as HTMLButtonElement).disabled).toBe(true);
+      // login() first reads the session account; hold the subsequent consent
+      // read so a visible heading cannot stand in for interactive readiness.
+      const read = f.holdNextAccountRead(1);
+      try {
+        await finishOtp();
+        await read.started;
+        expect(
+          (screen.getByRole("checkbox") as HTMLInputElement).disabled,
+        ).toBe(true);
+        expect((button("繼續") as HTMLButtonElement).disabled).toBe(true);
+      } finally {
+        await act(async () => read.release());
+      }
+      await waitFor(() =>
+        expect(
+          (screen.getByRole("checkbox") as HTMLInputElement).disabled,
+        ).toBe(false),
+      );
       fireEvent.click(screen.getByRole("checkbox"));
+      await waitFor(() =>
+        expect((button("繼續") as HTMLButtonElement).disabled).toBe(false),
+      );
       click("繼續");
       await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/"));
       const account = await f.client.getAccount();
