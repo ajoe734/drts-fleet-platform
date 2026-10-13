@@ -2,10 +2,16 @@ import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
 
 async function demoNavigation(page: Page, name: string) {
-  await page
+  const link = page
     .getByRole("navigation", { name: "示範導覽" })
-    .getByRole("link", { name, exact: true })
-    .click();
+    .getByRole("link", { name, exact: true });
+  const href = await link.getAttribute("href");
+  expect(href).toBeTruthy();
+  const destination = new URL(href!, page.url()).href;
+  await link.click();
+  // Next client navigation may commit after click resolves. Wait before a
+  // caller reloads, otherwise reload aborts navigation back onto the ride page.
+  await expect(page).toHaveURL(destination);
 }
 
 async function bookDemoRide(page: Page, firstBooking: boolean) {
