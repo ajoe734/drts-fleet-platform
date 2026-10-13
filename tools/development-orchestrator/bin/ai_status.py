@@ -644,6 +644,11 @@ def candidate_is_locked(task: dict[str, Any]) -> bool:
 
 
 def clear_candidate_evidence(task: dict[str, Any], *, preserve_failed_sha: bool = False) -> None:
+    request = task.get("acceptance_review_request")
+    if request is not None and (not isinstance(request, dict) or request.get("state") not in ("declined", "reopened")):
+        # A new candidate cannot inherit pending routing for invalidated source.
+        # The original request remains in the append-only activity log.
+        task.pop("acceptance_review_request", None)
     candidate_sha = task.get("candidate_sha") if preserve_failed_sha else None
     for key in (
         "candidate_sha",
@@ -2095,7 +2100,7 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit("REVIEWED_SHA must match the candidate being reopened")
     request = task.get("acceptance_review_request")
     if task.get("status") == "acceptance" and request is not None:
-        if not isinstance(request, dict) or request.get("state") == "pending":
+        if not isinstance(request, dict) or request.get("state") not in ("declined", "reopened"):
             request = _require_pending_acceptance_review(task, os.environ.get("ACCEPTANCE_REVIEW_REQUEST_ID", ""))
             _resolve_acceptance_review(task, request, "reopened", message)
     timestamp = iso_now()

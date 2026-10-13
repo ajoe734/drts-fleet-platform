@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Any, Mapping
 
@@ -85,7 +86,7 @@ def acceptance_review_snapshot(task: Mapping[str, Any]) -> dict[str, str] | None
     fields = ("candidate_sha", "candidate_generation", "reviewed_sha", "merge_sha", "reviewer")
     if any(not isinstance(task.get(key), str) or not task[key].strip() for key in ("id", *fields)):
         return None
-    if not task.get("owner") or task["owner"] == task["reviewer"]:
+    if not isinstance(task.get("owner"), str) or not task["owner"].strip() or task["owner"] == task["reviewer"]:
         return None
     if any(not re.fullmatch(r"[0-9a-f]{40}", task[key]) for key in ("candidate_sha", "merge_sha")):
         return None
@@ -107,7 +108,12 @@ def pending_acceptance_review(task: Mapping[str, Any]) -> Mapping[str, Any] | No
     if any(not isinstance(request.get(key), str) or not request[key].strip()
            for key in ("request_id", "requested_at", "reason", "evidence_ref")):
         return None
-    if request.get("requested_by") not in {task.get("owner"), task.get("reviewer"), "Supervisor"}:
+    if not isinstance(request.get("requested_by"), str) or request["requested_by"] not in {task["owner"], task["reviewer"], "Supervisor"}:
+        return None
+    try:
+        if datetime.fromisoformat(request["requested_at"].replace("Z", "+00:00")).tzinfo is None:
+            return None
+    except ValueError:
         return None
     return request
 
@@ -177,7 +183,7 @@ def resolve_dispatch_target(
                 return None
             return DispatchDecision(record.id, record.reviewer, DispatchReason.REVIEW_READY)
         if request is not None and (not isinstance(request, Mapping)
-                                    or request.get("state") not in {"declined", "reopened"}):
+                                    or request.get("state") not in ("declined", "reopened")):
             return None
     if record.status in policy.review_statuses and record.reviewer:
         return DispatchDecision(record.id, record.reviewer, DispatchReason.REVIEW_READY)

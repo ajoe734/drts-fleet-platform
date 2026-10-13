@@ -200,3 +200,33 @@ class AcceptanceReviewTransactions(DispatchEnvironmentIsolation, unittest.TestCa
         self.unchanged_rejection(lambda: self.command("decline-acceptance-review", [self.task_id, request_id, "No"],
                                                      "Codex", **self.fence("owner")), "actor must match")
 
+    def test_stale_request_can_be_superseded_only_with_current_snapshot(self):
+        self.assertTrue(self.request().ok)
+        first = self.task()["acceptance_review_request"]
+        state = json.loads(self.path.read_text())
+        state["tasks"][0]["candidate_generation"] = "new-generation"
+        self.path.write_text(json.dumps(state))
+        self.unchanged_rejection(lambda: self.request(ACCEPTANCE_REVIEW_SNAPSHOT_JSON=json.dumps(snapshot(self.original))),
+                                 "exactly match")
+        before = self.task()
+        self.assertTrue(self.request().ok)
+        after = self.task()
+        replacement = after.pop("acceptance_review_request")
+        before.pop("acceptance_review_request")
+        self.assertEqual(after, before)
+        self.assertNotEqual(first["request_id"], replacement["request_id"])
+        log = [json.loads(line) for line in (self.root / "ai-activity-log.jsonl").read_text().splitlines()]
+        requests = [entry["request"]["request_id"] for entry in log if entry["type"] == "acceptance_review_requested"]
+        self.assertEqual(requests, [first["request_id"], replacement["request_id"]])
+
+    def test_existing_done_reopen_permission_clears_obsolete_pending_routing(self):
+        self.assertTrue(self.request().ok)
+        state = json.loads(self.path.read_text())
+        state["tasks"][0]["status"] = "done"
+        self.path.write_text(json.dumps(state))
+        self.assertTrue(self.command("reopen", [self.task_id, "New finding after done"], "Codex").ok)
+        task = self.task()
+        self.assertEqual(task["status"], "in_progress")
+        self.assertNotIn("acceptance_review_request", task)
+        self.assertEqual(task["required_acceptance"], self.original["required_acceptance"])
+

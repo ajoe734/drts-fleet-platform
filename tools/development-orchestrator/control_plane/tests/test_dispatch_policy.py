@@ -66,13 +66,16 @@ class CandidateDispatchPolicyTest(unittest.TestCase):
 
         changes = [{key: "drifted"} for key in (
             "candidate_sha", "candidate_generation", "reviewed_sha", "merge_sha", "reviewer", "task_id"
-        )] + [{key: ""} for key in ("request_id", "requested_at", "reason", "evidence_ref")] + [{"requested_by": "Gemini"}]
+        )] + [{key: ""} for key in ("request_id", "requested_at", "reason", "evidence_ref")] + [
+            {"requested_by": "Gemini"}, {"requested_by": []}, {"requested_at": "invalid"},
+            {"requested_at": "2026-10-13T01:28:18"}
+        ]
         for change in changes:
             with self.subTest(change=change):
                 task = requested_task()
                 task["acceptance_review_request"].update(change)
                 self.assertIsNone(resolve_dispatch_target(task, {task["id"]: task}, self.policy))
-        for malformed in ("pending", [], {}, {"state": "bogus"}):
+        for malformed in ("pending", [], {}, {"state": "bogus"}, {"state": []}):
             task = requested_task()
             task["acceptance_review_request"] = malformed
             self.assertIsNone(resolve_dispatch_target(task, {task["id"]: task}, self.policy))

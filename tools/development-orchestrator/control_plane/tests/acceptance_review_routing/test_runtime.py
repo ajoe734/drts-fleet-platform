@@ -111,6 +111,35 @@ class ManagedAcceptanceReviewRuntime(DispatchEnvironmentIsolation, unittest.Test
                 self.assertEqual(self.start(self.request())[1], "dispatch_acceptance_review_changed")
             adapter.assert_not_called()
 
+    def test_request_resolved_during_workspace_io_rejected_before_delivery(self):
+        current = deepcopy(self.task)
+        current["acceptance_review_request"]["state"] = "declined"
+        with (mock.patch.object(runtime, "load_status", side_effect=[{"tasks": [self.task]}, {"tasks": [current]}]),
+              mock.patch.object(runtime, "ensure_task_brief"),
+              mock.patch.object(runtime, "ensure_execution_workspace", return_value=(
+                  self.root / "reviews", self.task["candidate_sha"], "dev", "existing_review_worktree")),
+              mock.patch.object(runtime, "build_adapter") as adapter):
+            self.assertEqual(self.start(self.request())[1], "dispatch_acceptance_review_changed")
+        adapter.assert_not_called()
+
+    def test_pending_original_owner_queue_prevents_second_review_enqueue(self):
+        owner_task = acceptance_task()
+        event = build_dispatch_event(owner_task, "Codex2", "acceptance_ready_dispatch", {owner_task["id"]: owner_task})
+        event.update(event_id="evt-owner", target_agent="codex2", event_key=event.pop("key"))
+        state = {"workers": {}, "queue": {"events": {"evt-owner": {"status": "queued"}}}}
+        with (mock.patch.object(runtime, "load_status", return_value={"tasks": [self.task]}),
+              mock.patch.object(runtime, "load_event_queue", return_value=[event]),
+              mock.patch.object(runtime, "queue_delivery_event") as queue):
+            runtime.dispatch_ready_tasks(self.config, state, provider_report={})
+        queue.assert_not_called()
+
+    def test_original_review_dispatch_completion_keeps_existing_receipt_protocol(self):
+        worker = {"request_snapshot": {"reason": "review_ready_dispatch", "metadata": {"task": self.task}}}
+        statuses = runtime.worker_expected_completion_statuses(self.config, worker, self.task)
+        self.assertIn("in_progress", statuses)
+        self.assertIn("acceptance", statuses)
+        self.assertNotIn("integrating", statuses)
+
     def test_current_request_does_not_enable_helper_reassignment(self):
         self.assertIsNone(runtime.proactive_claim_plan_for_idle_agent(
             self.config, task=self.task, task_map={self.task["id"]: self.task}, idle_agent_name="Gemini",
