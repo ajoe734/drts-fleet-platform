@@ -1,0 +1,63 @@
+# DRIVER-ACTUAL-FARE-CAPTURE-20261013 — upstream actual-fare capture
+
+Owner: **Pi**. Independent reviewer: **Codex**. Base: `116132df18b6bc0b64bb3311a44a84697c653985`.
+
+This is an additive upstream source unit for `PAX-RECEIPT-COMPLAINT-20261009`, not a replacement for its Codex2/Codex ownership, downstream implementation, history floor or acceptance. Registration/spec/evidence are under `.local/pi-can-finish-20261013/`; frozen current spec is `driver-actual-fare-capture-task-spec-v2.json`.
+
+## Gap and implementation
+
+E-04 requires the **actual** start/distance/delay/night components. The existing completion command/task/certificate event carried aggregate fare, distance and time but did not capture those four facts. Reconstructing them from a quote or inserting zero-valued defaults would not satisfy the requirement.
+
+The existing driver-completion command now accepts optional `actualFareBreakdown`:
+
+- `startMinor`, `distanceMinor`, `delayMinor`, `nightMinor` are all explicitly supplied nonnegative safe integer NTD amounts.
+- A safely representable component sum and canonical effective NTD fare are required when the extra facts are supplied. Arrays, missing/invalid values, nonfinite/fractional/unsafe amounts and incompatible currency are rejected before a completion write or effects.
+- **No aggregate/toll convention is inferred.** In particular, the implementation does not assert that the component sum equals aggregate fare, decide whether aggregate fare includes toll, or change either amount. Spec revision 2 removes an initially proposed equality constraint before any candidate was published; the original Receipt's outstanding authoritative-total-convention requirement remains.
+- Existing fixed-price fare authority, settlement/payment behavior and legacy callers are preserved. Missing actual components stay absent; supplied real zeros are retained, never synthesized.
+- Incoming components are copied before database-lock waits. Completed task records and certificate events get separate copies; returned/listed task records cannot mutate stored facts.
+- The existing transaction, task JSON record and completion outbox carry the optional facts. Failed transactions do not publish them or change committed memory; existing immutable request replay returns its original captured facts rather than replacing them.
+
+Only `DriverCompleteTaskCommand`, `DriverTaskRecord`, their additive shared type, completion/event/clone hunks and the focused tests/document are changed. No renderer, Driver UI, SDK, registry, schema, pricing formula, provider, IAM, workflow or security mechanism is added or changed.
+
+## Repository checks — not live/legal receipt acceptance
+
+The focused test executes actual public `OwnedMobilityService.completeDriverTask` in both in-memory and transactional paths and actual certificate-event/outbox construction. Database and event **transports** are unit fixtures; business completion/validation/persistence decisions are not replacement processors. A fixture selects the multi-taxi completion branch after the standard dispatch lifecycle; this is not a licensed multi-taxi admission, genuine PG commit, PSP capture or authorized-role journey witness.
+
+| Check                                                              | Evidence/result                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Old immutable source, actual public completion in both paths       | Two genuine assertions fail because supplied `actualFareBreakdown` is lost; two legacy controls pass. `actual-fare-old-source-red-qualified.json`. The other 96 cases were deliberately not selected; they are not counted as passes. |
+| New capture regressions                                            | 102 cases, no skips: both completion paths, explicit zeros, invalid fields/currency/overflow, fixed-price controls, unknown aggregate/toll convention, copying, locked ingress, rollback and replay.                                  |
+| Capture + existing root completion/proof/outbox/certificate suites | 155 passed, zero failed/skipped in `NODE_ENV=test`; final candidate rerun recorded in `.local/pi-can-finish-20261013/`.                                                                                                               |
+| Existing API service/repository/certificate/task-event suites      | 147 passed, zero failed/skipped; includes existing durable completion/commit/outbox controls.                                                                                                                                         |
+| Static checks                                                      | Contracts/control-plane package builds; API `typecheck`; scoped ESLint and Prettier; `git diff --check`.                                                                                                                              |
+
+An initial probe had zero tests because a root test import could not resolve the API-only Nest dependency; a later fixture attempt failed on event-transport/reconciliation setup. These artifacts are retained and **not** treated as reproductions. The qualified old-source evidence above is an actual business assertion failure after both legacy controls pass.
+
+The first broad root run inherited this VM's `NODE_ENV=production`, which disables unrelated partner demo entries, yielding 144 passes and nine existing partner-fixture failures. No partner source or policy was changed. Explicit command-local `NODE_ENV=test`, matching repository unit-fixture execution, runs all selected cases successfully. Both reports are retained; production-profile fixture failures are not silently relabeled green.
+
+Reproduce repository-only checks in the isolated task worktree:
+
+```bash
+NODE_ENV=test pnpm exec vitest run \
+  tests/unit/driver-actual-fare-capture-20261013/actual-fare-capture.test.ts \
+  tests/unit/owned-mobility.test.ts \
+  tests/unit/driver-app-completion-proof.test.ts \
+  tests/unit/driver-completion-outbox-migrations.test.ts \
+  tests/unit/system-remediation/sr-qa-reports-001/c098-electronic-ride-certificate.test.ts
+NODE_ENV=test pnpm --filter @drts/api exec vitest run \
+  tests/unit/owned-mobility.service.test.ts \
+  tests/unit/owned-mobility.repository.test.ts \
+  tests/unit/certificate-support.service.test.ts \
+  tests/unit/owned-mobility-task-events.service.test.ts
+pnpm --filter @drts/contracts build
+pnpm --filter @drts/control-plane-auth build
+pnpm --filter @drts/api typecheck
+```
+
+## Explicitly not closed
+
+Independent exact-SHA review, matching hosted CI and protected integration are mandatory after normal handoff; the owner does not self-approve or mark done. A future release must include the accepted source before any runtime credit.
+
+This unit does **not** fabricate a complete `e04Snapshot`, lawful issuer/surname/credential, captured payment method, real fare/PSP witness or accepted receipt. Driver UI capture and downstream consumption of these facts remain to be implemented/coordinated through their original scopes. The original Receipt remains blocked/open on its full factual/source/adoption requirements; its acceptance keys are not satisfied by this unit. Real PG, producer-to-writer HTML/PDF, browser, Android/iOS, provider, role and full-system acceptance remain separate genuine gates.
+
+No product/API/browser/PG/Docker/Metro server is started on this VM. Root dirty files, other agents' source/locks and existing user data are preserved.
