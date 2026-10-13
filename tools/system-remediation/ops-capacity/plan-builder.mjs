@@ -104,7 +104,7 @@ export function readBackBudgetedDispatchArrivals(records) {
         throw new Error(
           `Budgeted burst ${family} exceeds actual rolling budget`,
         );
-      finalArrivalMs = Math.max(finalArrivalMs, row.launchedMs);
+      if (family === "dispatch") finalArrivalMs = row.launchedMs;
     }
   }
   if (finalArrivalMs < 899800)

@@ -264,6 +264,13 @@ describe("actual capacity scheduler boundaries across all families", () => {
         profile: "budgeted_dispatch_burst",
         finalArrivalMs: summary.workflows.dispatch.arrivals.lastMs,
       });
+      const laterIntake = structuredClone(requests);
+      laterIntake.find(
+        (row) => row.workload === "booking" && row.sequence === 900,
+      )!.launchedMs = 899999;
+      expect(readBackBudgetedDispatchArrivals(laterIntake).finalArrivalMs).toBe(
+        summary.workflows.dispatch.arrivals.lastMs,
+      );
       expect(() => readBackBudgetedDispatchArrivals(requests.slice(1))).toThrow(
         /5850/,
       );
