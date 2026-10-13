@@ -1140,3 +1140,34 @@ raw evidence digests are retained in `G/verification-manifest.json`; publication
 and matching CI are separate in `G/publication.json` and `G/ci-result.json`.
 The final documentation-only closeout preserves these verified code bytes.
 Both required acceptance keys remain OPEN for the next matching generation.
+
+### Publication metadata blocker before candidate handoff (2026-10-13)
+
+Owner error: the documentation-only closeout commit
+`ca4eff8f80de6a0656837416197012eea16e28ee` was ordinarily pushed with subject
+`fix(ops-capacity): pace against genuine guard admission counts`, which does
+not satisfy the repository's uppercase Task-ID subject contract. The original
+five code/evidence anchors are valid; the source checks above remain valid,
+but the actual required commit gate is **FAILED**, not green. Command
+`python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`
+exits1 and identifies precisely this commit; `G/commit-trailers.log` retains
+the result. PR2605 preserves the exact original branch and published history.
+No candidate handoff or independent approval has occurred. The PR returns to
+draft while the publication blocker is coordinated with Supervisor.
+
+An append cannot change that already-published ancestor's subject: the gate
+checks every non-merge commit in the original PR range. The dispatch and
+worker anchor protocol forbid amending/rebasing/force-pushing published
+history, and the original allocation grants no recovery branch, ancestry
+transplant or CI waiver. The owner therefore preserves every published ref,
+source/evidence byte and raw failure. No bypass flag/label, history rewrite,
+alternate branch, source transplant or hosted capacity retry is used.
+
+`G/publication-blocker.json` records the exact SHAs, failed gate, retained
+source verification and a **proposal only** for Supervisor's registered
+history disposition. Any authorized new candidate must preserve the original
+published branch and credit, pass the genuine per-commit gate, rebind all
+source checks to its exact immutable SHA, obtain ordinary independent
+review/CI/merge and then the original authorized full900s acceptance. Both
+acceptance keys remain OPEN. This delivery blocker is not a product/limiter
+failure, quota determination or provider disablement.
