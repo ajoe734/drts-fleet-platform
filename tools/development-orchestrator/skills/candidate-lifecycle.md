@@ -56,7 +56,11 @@ approve a candidate or grant acceptance credit. Scope is merged canonical
    `ACCEPTANCE_REVIEW_REQUEST_ID` to the pending `request_id` supplied in the
    prompt. Source repair uses existing `reopen <task-id> <findings>`, which
    consumes the request and clears candidate/acceptance evidence under the
-   existing contract. If no repair is needed, use
+   existing contract. A dispatched worker must have the actual reviewer role
+   and `AI_NAME` matching its dispatched agent to consume a pending request
+   through reopen; owner dispatch cannot claim the reviewer identity. Genuine
+   unfenced reviewer decisions and nonacceptance reopen permissions retain
+   their existing behavior. If no repair is needed, use
    `decline-acceptance-review <task-id> <request-id> <reason>`; it resolves only
    routing metadata and restores ordinary acceptance-owner routing. Owners and
    Supervisor cannot decline or substitute for the reviewer decision.

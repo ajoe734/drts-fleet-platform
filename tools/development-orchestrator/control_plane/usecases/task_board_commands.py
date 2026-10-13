@@ -92,11 +92,20 @@ class TaskBoardCommandExecutor:
         agent = os.environ.get("ORCH_DISPATCH_AGENT", "")
         if task.get(role) != agent or not task_is_dispatch_eligible_for_agent(task, agent, role):
             raise SystemExit("Worker assignment changed; discard stale attempt")
-        if command in {"request-acceptance-review", "decline-acceptance-review"}:
+        request = task.get("acceptance_review_request")
+        # Match command_reopen's request-consuming path, before it can append
+        # a resolution log or clear the frozen candidate/acceptance evidence.
+        acceptance_review_reopen = (
+            command == "reopen" and task.get("status") == "acceptance" and request is not None
+            and (not isinstance(request, dict) or request.get("state") not in ("declined", "reopened"))
+        )
+        if command in {"request-acceptance-review", "decline-acceptance-review"} or acceptance_review_reopen:
             if os.environ.get("AI_NAME", "") != agent:
                 raise SystemExit("Acceptance review command actor must match the dispatched agent")
             if command == "decline-acceptance-review" and role != "reviewer":
                 raise SystemExit("Only a reviewer dispatch can decline acceptance review")
+            if acceptance_review_reopen and role != "reviewer":
+                raise SystemExit("Only a reviewer dispatch can reopen acceptance review")
         if role == "reviewer":
             for key in ("candidate_sha", "candidate_generation"):
                 if str(task.get(key) or "") != os.environ.get(f"ORCH_DISPATCH_{key.upper()}", ""):

@@ -24,7 +24,7 @@ workspace and current task/role/candidate fences. Decline is reviewer-only;
 actual rework uses existing reviewer `reopen`. Preserve dependency, external,
 CI, merge and acceptance floors, and never overlap an active original worker.
 
-### ROUTING-REOPEN-ACTOR-FINDING: reproduced, repair pending
+### ROUTING-REOPEN-ACTOR-FINDING: repaired locally, delivery gates pending
 
 The Supervisor probe at checkpoint
 `5854e3071d59869a9dc39da819e02dc323f84f92` and Codex's formal review of
@@ -53,6 +53,19 @@ pending acceptance-review reopen must use the actual reviewer dispatch with
 a matching actor, before any handler/log mutation. Keep genuine unfenced
 reviewer reopen, original nonacceptance permissions, same-owner request,
 decline, foreign-task and stale candidate/generation/merge controls.
+
+`_guard_worker_command` now applies the request/decline actor comparison to
+the acceptance reopen path that consumes unresolved request metadata, and
+requires reviewer dispatch before invoking the handler. It matches the
+existing handler's status/request predicate, including malformed unresolved
+metadata, without changing nonacceptance or resolved-request behavior.
+The same supplied probe now exits 0: forbidden command exit 1, board unchanged,
+candidate retained, request still pending (`fixed-probe.log`). New real
+transaction tests pass (`actor-regression-green.log`): owner/reviewer actor
+impersonation and owner-role negatives preserve board **and** activity-log
+bytes; legitimate fenced/unfenced reviewer and nonacceptance controls pass.
+The regression anchor is `ee296fc17`; full affected-suite results follow in
+the final verification section before the new candidate is handed off.
 
 ## Implementation and protocol
 
