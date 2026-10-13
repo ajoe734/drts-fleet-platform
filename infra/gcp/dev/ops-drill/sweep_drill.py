@@ -3,20 +3,52 @@ import argparse
 import datetime as dt
 import json
 from pathlib import Path
+import re
 import sys
 import time
 
 from provision_drill_sa import SA
-from restore_drill import PREFIX, CommandTimeout, DrillError, context, gc, iso, obj, require, timestamp, utcnow, write
+from restore_drill import PREFIX, PROJECT, CommandTimeout, DrillError, context, gc, iso, obj, require, timestamp, utcnow, write
 
 
 def destination(entry):
     payload = entry.get("protoPayload", {})
-    request = payload.get("request", {})
+    request = payload.get("request")
+    request = {} if request is None else request
+    require(isinstance(request, dict), "audit_request_invalid")
     body = request.get("body", request)
+    body = {} if body is None else body
+    require(isinstance(body, dict), "audit_request_invalid")
     if payload.get("methodName") == "cloudsql.instances.clone":
         return body.get("cloneContext", {}).get("destinationInstanceName")
-    return body.get("name")
+    require(payload.get("methodName") == "cloudsql.instances.create", "audit_method_invalid")
+    names = []
+    if body.get("name") is not None:
+        names.append(body["name"])
+    # Create permission checks can omit request and operation. Only the
+    # granted create authorization identifies the NEW instance; resourceName
+    # and authorization.resource may identify the project/source instead.
+    authorizations = payload.get("authorizationInfo", [])
+    require(isinstance(authorizations, list), "audit_authorization_invalid")
+    for authorization in authorizations:
+        require(isinstance(authorization, dict), "audit_authorization_invalid")
+        if authorization.get("permission") != "cloudsql.instances.create" or authorization.get("granted") is not True:
+            continue
+        attributes = authorization.get("resourceAttributes", {})
+        require(isinstance(attributes, dict), "audit_create_resource_invalid")
+        resource = attributes.get("name")
+        require(attributes.get("service") == "sqladmin.googleapis.com" and isinstance(resource, str), "audit_create_resource_invalid")
+        match = re.fullmatch(r"projects/([^/]+)/instances/([a-z][a-z0-9-]*)", resource)
+        require(match is not None and match[1] == PROJECT, "audit_create_resource_invalid")
+        names.append(match[2])
+    if not names:
+        return None
+    require(all(isinstance(name, str) and name for name in names), "audit_destination_or_identity_missing")
+    require(len(set(names)) == 1, "audit_create_destination_conflict")
+    labels = entry.get("resource", {}).get("labels", {})
+    if "database_id" in labels:
+        require(labels["database_id"] == f"{PROJECT}:{names[0]}", "audit_create_database_id_conflict")
+    return names[0]
 
 
 def sweep(target, evidence_file, output):
@@ -67,9 +99,9 @@ def sweep(target, evidence_file, output):
             # LRO completion records can omit the request. Correlate them to
             # the first entry by operation ID; never infer a destination from
             # the source resourceName or silently discard an unknown record.
-            if not name and record.get("operation", {}).get("last") is True:
+            if not name and record["protoPayload"]["methodName"] == "cloudsql.instances.clone" and record.get("operation", {}).get("last") is True:
                 operation_id = record["operation"].get("id")
-                matches = [r for r in records if operation_id and r.get("operation", {}).get("id") == operation_id and destination(r)]
+                matches = [r for r in records if operation_id and r.get("protoPayload", {}).get("methodName") == "cloudsql.instances.clone" and r.get("operation", {}).get("id") == operation_id and destination(r)]
                 require(len({destination(r) for r in matches}) == 1, "audit_completion_uncorrelated")
                 name = destination(matches[0])
             require(isinstance(name, str) and name and record.get("insertId") and record.get("timestamp"), "audit_destination_or_identity_missing")
@@ -83,7 +115,7 @@ def sweep(target, evidence_file, output):
         require(not evidence["remaining_drill_instances"], "drill_instances_remain")
         require(not evidence["unexpected_destinations"], "non_drill_create_by_drill_sa")
         evidence["status"] = "sweep_passed"
-    except (DrillError, OSError, ValueError, TypeError, KeyError) as error:
+    except (DrillError, OSError, ValueError, TypeError, KeyError, AttributeError) as error:
         evidence["failure_code"] = str(error) if isinstance(error, DrillError) else "invalid_sweep_response"
     finally:
         evidence["finished_at"] = iso(utcnow())
@@ -103,7 +135,7 @@ def main():
     try:
         sweep(args.target, args.evidence, args.output)
         return 0
-    except (DrillError, OSError, ValueError, TypeError, KeyError):
+    except (DrillError, OSError, ValueError, TypeError, KeyError, AttributeError):
         print("Post-run sweep failed; inspect sanitized sweep artifact and exact resource IDs.", file=sys.stderr)
         return 1
 
