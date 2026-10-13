@@ -74,6 +74,12 @@ export class ComplaintService implements OnModuleInit {
 
   private complaintTimelines = new Map<string, ComplaintTimelineEntry[]>();
 
+  private settlementMutationRevision = 0;
+
+  private settlementPersistence = new Map<string, Promise<void>>();
+
+  private settlementRefresh: Promise<void> | undefined;
+
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional() private readonly complaintRepository?: ComplaintRepository,
@@ -111,19 +117,66 @@ export class ComplaintService implements OnModuleInit {
    * submitted through another API replica. Other complaint state is untouched. */
   async refreshSettlementCases(): Promise<void> {
     if (!this.complaintRepository?.isEnabled()) return;
-    const state = await this.complaintRepository.loadSettlementState();
-    this.complaintCases = [
-      ...this.complaintCases.filter(
-        (item) => item.category !== "settlement_dispute",
-      ),
-      ...state.complaintCases.map((item) => this.cloneComplaintCase(item)),
-    ];
-    const timelines = this.buildTimelineMap(state.complaintTimelines);
-    for (const item of state.complaintCases) {
-      this.complaintTimelines.set(
-        item.caseNo,
-        timelines.get(item.caseNo) ?? [],
-      );
+    if (this.settlementRefresh) return this.settlementRefresh;
+    const refresh = this.reloadSettlementCases();
+    this.settlementRefresh = refresh;
+    try {
+      await refresh;
+    } finally {
+      if (this.settlementRefresh === refresh)
+        this.settlementRefresh = undefined;
+    }
+  }
+
+  /** Settlement endpoints must acknowledge only committed case and timeline
+   * changes. Ordinary complaints retain their existing synchronous behavior. */
+  async awaitSettlementPersistence(caseNo?: string): Promise<void> {
+    // Capture the initiating request's writes once. A later request for the
+    // same case must not turn this successful commit into its own failure.
+    const pending = [...this.settlementPersistence.entries()].filter(
+      ([pendingCaseNo]) => !caseNo || pendingCaseNo === caseNo,
+    );
+    const results = await Promise.allSettled(
+      pending.map(([, persistence]) => persistence),
+    );
+    for (const [pendingCaseNo, persistence] of pending) {
+      if (this.settlementPersistence.get(pendingCaseNo) === persistence) {
+        this.settlementPersistence.delete(pendingCaseNo);
+      }
+    }
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
+  }
+
+  private async reloadSettlementCases(): Promise<void> {
+    while (true) {
+      do {
+        await this.awaitSettlementPersistence();
+      } while (this.settlementPersistence.size > 0);
+      const revision = this.settlementMutationRevision;
+      const state = await this.complaintRepository!.loadSettlementState();
+      // A request may mutate a case while the committed snapshot is being
+      // read. Wait for that write and read again before replacing memory.
+      if (revision !== this.settlementMutationRevision) continue;
+      const previousCaseNos = this.complaintCases
+        .filter((item) => item.category === "settlement_dispute")
+        .map((item) => item.caseNo);
+      this.complaintCases = [
+        ...this.complaintCases.filter(
+          (item) => item.category !== "settlement_dispute",
+        ),
+        ...state.complaintCases.map((item) => this.cloneComplaintCase(item)),
+      ];
+      const timelines = this.buildTimelineMap(state.complaintTimelines);
+      for (const caseNo of previousCaseNos)
+        this.complaintTimelines.delete(caseNo);
+      for (const item of state.complaintCases) {
+        this.complaintTimelines.set(
+          item.caseNo,
+          timelines.get(item.caseNo) ?? [],
+        );
+      }
+      return;
     }
   }
 
@@ -266,10 +319,40 @@ export class ComplaintService implements OnModuleInit {
     command: AddComplaintCaseNoteCommand,
     requestId?: string,
   ) {
+    return this.addComplaintCaseNoteInternal(caseNo, command, requestId);
+  }
+
+  /** The Fleet case contract permits replies until closed, including a
+   * resolved settlement case. Such replies keep the resolution intact. */
+  addFleetSettlementCaseNote(
+    caseNo: string,
+    command: AddComplaintCaseNoteCommand,
+    requestId?: string,
+  ) {
+    const complaintCase = this.requireComplaintCase(caseNo);
+    if (complaintCase.category !== "settlement_dispute") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "COMPLAINT_NOT_SETTLEMENT",
+        "Fleet settlement notes require a settlement dispute case.",
+        { caseNo },
+      );
+    }
+    return this.addComplaintCaseNoteInternal(caseNo, command, requestId, true);
+  }
+
+  private addComplaintCaseNoteInternal(
+    caseNo: string,
+    command: AddComplaintCaseNoteCommand,
+    requestId?: string,
+    allowResolvedSettlement = false,
+  ) {
     this.assertNonBlank(command.note, "note");
 
     const complaintCase = this.requireComplaintCase(caseNo);
-    this.assertCaseOpenForAction(complaintCase, "note");
+    if (!(allowResolvedSettlement && complaintCase.status === "resolved")) {
+      this.assertCaseOpenForAction(complaintCase, "note");
+    }
 
     const nextStatus =
       complaintCase.status === "new" ||
@@ -771,7 +854,7 @@ export class ComplaintService implements OnModuleInit {
     complaintCases: readonly ComplaintCaseRecord[],
   ) {
     const maxSequence = complaintCases.reduce((currentMax, complaintCase) => {
-      if (complaintCase.category === "settlement_dispute") return currentMax;
+      if (complaintCase.caseNo.includes("-FS-")) return currentMax;
       const rawSequence = complaintCase.caseNo.split("-").at(-1) ?? "0";
       const parsedSequence = Number.parseInt(rawSequence, 10);
       if (!Number.isInteger(parsedSequence)) {
@@ -896,6 +979,30 @@ export class ComplaintService implements OnModuleInit {
       persistPayload.complaintTimelines = changes.complaintTimelines.map(
         (entry) => ({ ...entry }),
       );
+    }
+
+    const settlementCaseNos = (changes.complaintCases ?? [])
+      .filter((item) => item.category === "settlement_dispute")
+      .map((item) => item.caseNo);
+    if (settlementCaseNos.length && this.complaintRepository.isEnabled()) {
+      this.settlementMutationRevision += 1;
+      const previous = settlementCaseNos.flatMap((caseNo) => {
+        const persistence = this.settlementPersistence.get(caseNo);
+        return persistence ? [persistence] : [];
+      });
+      const persistence = Promise.all(previous)
+        .then(() => this.complaintRepository!.persistChanges(persistPayload))
+        .catch((error: unknown) => {
+          this.complaintRepository!.reportPersistenceFailure(error, context);
+          throw error;
+        });
+      for (const caseNo of settlementCaseNos) {
+        this.settlementPersistence.set(caseNo, persistence);
+      }
+      // Shared synchronous callers can start a mutation before the HTTP layer
+      // awaits it. Keep its rejection observable without an unhandled promise.
+      void persistence.catch(() => undefined);
+      return;
     }
 
     void this.complaintRepository

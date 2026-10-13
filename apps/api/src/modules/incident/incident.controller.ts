@@ -112,7 +112,10 @@ export class IncidentController {
     return toApiSuccessEnvelope(
       buildUiReadModelList(this.incidentService.getTimeline(incidentId), {
         staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
-        emptyState: buildEmptyStateEnvelope("no_data", "incidents.timeline.empty"),
+        emptyState: buildEmptyStateEnvelope(
+          "no_data",
+          "incidents.timeline.empty",
+        ),
       }),
       requestId,
     );
@@ -189,12 +192,13 @@ export class IncidentController {
   }
 
   @Post(":incidentId/link-complaint")
-  linkComplaint(
+  async linkComplaint(
     @Param("incidentId") incidentId: string,
     @Body() body: { complaintCaseNo: string },
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
+    await this.complaintService.refreshSettlementCases();
     const incidentRecord = this.incidentService.getIncident(incidentId);
     const complaintCase = this.complaintService.getComplaintCase(
       body.complaintCaseNo,
@@ -229,18 +233,21 @@ export class IncidentController {
         },
       );
     }
-    const incident = this.incidentService.linkComplaint(
-      incidentId,
-      body.complaintCaseNo,
-      requestId,
-      identity,
-    );
     this.complaintService.linkIncident(
       body.complaintCaseNo,
       {
         incidentId,
       } satisfies LinkComplaintToIncidentCommand,
       requestId,
+    );
+    await this.complaintService.awaitSettlementPersistence(
+      body.complaintCaseNo,
+    );
+    const incident = this.incidentService.linkComplaint(
+      incidentId,
+      body.complaintCaseNo,
+      requestId,
+      identity,
     );
     return toApiSuccessEnvelope(incident, requestId);
   }

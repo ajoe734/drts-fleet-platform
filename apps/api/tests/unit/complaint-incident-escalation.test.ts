@@ -164,7 +164,7 @@ describe("Complaint → Incident escalation", () => {
     ).toBe(complaint.caseNo);
   });
 
-  it("keeps complaint and incident links in sync from the incident endpoint", () => {
+  it("keeps complaint and incident links in sync from the incident endpoint", async () => {
     const { complaintService, incidentController, incidentService } =
       createServices();
 
@@ -182,7 +182,7 @@ describe("Complaint → Incident escalation", () => {
       reportedBy: "ops-agent-011",
     });
 
-    incidentController.linkComplaint(
+    await incidentController.linkComplaint(
       incident.incidentId,
       { complaintCaseNo: complaint.caseNo },
       "req-link-incident-complaint-001",
@@ -284,7 +284,7 @@ describe("Complaint → Incident escalation", () => {
     ).toBeNull();
   });
 
-  it("does not mutate the incident when linking to a missing complaint", () => {
+  it("does not mutate the incident when linking to a missing complaint", async () => {
     const { incidentController, incidentService } = createServices();
 
     const incident = incidentService.createIncident({
@@ -295,13 +295,13 @@ describe("Complaint → Incident escalation", () => {
       reportedBy: "ops-agent-404",
     });
 
-    expect(() =>
+    await expect(
       incidentController.linkComplaint(
         incident.incidentId,
         { complaintCaseNo: "C-20260430-404404" },
         "req-link-missing-complaint-001",
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
 
     expect(
       incidentService.getIncident(incident.incidentId).relatedComplaintCaseNo,
@@ -356,13 +356,13 @@ describe("Complaint → Incident escalation", () => {
         "req-link-complaint-reassign-001",
       ),
     ).rejects.toThrowError(ApiRequestError);
-    expect(() =>
+    await expect(
       incidentController.linkComplaint(
         incidentA.incidentId,
         { complaintCaseNo: complaintB.caseNo },
         "req-link-incident-reassign-001",
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
 
     expect(
       complaintService.getComplaintCase(complaintA.caseNo).relatedIncidentId,

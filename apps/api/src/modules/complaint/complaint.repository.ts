@@ -82,6 +82,26 @@ export class ComplaintRepository {
       return;
     }
 
+    if (
+      !transaction &&
+      changes.complaintCases?.some(
+        (item) => item.category === "settlement_dispute",
+      )
+    ) {
+      const client = await this.databaseService!.connect();
+      try {
+        await client.query("BEGIN");
+        await this.persistChanges(changes, client);
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+      return;
+    }
+
     const queryable: {
       query(text: string, values: unknown[]): Promise<unknown>;
     } = transaction ?? this.databaseService!;
@@ -156,27 +176,42 @@ export class ComplaintRepository {
   async loadSettlementState(): Promise<ComplaintState> {
     if (!this.isEnabled())
       return { complaintCases: [], complaintTimelines: [] };
-    const cases = await this.databaseService!.query<JsonRecordRow>(
-      `SELECT record FROM crm.phase1_complaint_cases WHERE record->>'category' = 'settlement_dispute'`,
-    );
-    const timelines = await this.databaseService!.query<JsonRecordRow>(
-      `SELECT timeline.record FROM crm.phase1_complaint_timelines timeline
-       JOIN crm.phase1_complaint_cases c ON c.case_no = timeline.case_no
-       WHERE c.record->>'category' = 'settlement_dispute' ORDER BY timeline.created_at`,
+    // One PostgreSQL statement gives the cases and their timelines the same
+    // snapshot even when another API replica commits during this read.
+    const snapshot = await this.databaseService!.query<
+      JsonRecordRow & { kind: "case" | "timeline" }
+    >(
+      `WITH settlement_cases AS (
+         SELECT case_no, record, created_at
+         FROM crm.phase1_complaint_cases
+         WHERE record->>'category' = 'settlement_dispute'
+       )
+       SELECT kind, record FROM (
+         SELECT 'case' AS kind, record, created_at FROM settlement_cases
+         UNION ALL
+         SELECT 'timeline' AS kind, timeline.record, timeline.created_at
+         FROM crm.phase1_complaint_timelines timeline
+         JOIN settlement_cases c ON c.case_no = timeline.case_no
+       ) snapshot
+       ORDER BY kind, created_at`,
     );
     return {
-      complaintCases: cases.rows.map((row) =>
-        this.parseRecord<ComplaintCaseRecord>(
-          row.record,
-          "settlement complaint",
+      complaintCases: snapshot.rows
+        .filter((row) => row.kind === "case")
+        .map((row) =>
+          this.parseRecord<ComplaintCaseRecord>(
+            row.record,
+            "settlement complaint",
+          ),
         ),
-      ),
-      complaintTimelines: timelines.rows.map((row) =>
-        this.parseRecord<ComplaintTimelineEntry>(
-          row.record,
-          "settlement timeline",
+      complaintTimelines: snapshot.rows
+        .filter((row) => row.kind === "timeline")
+        .map((row) =>
+          this.parseRecord<ComplaintTimelineEntry>(
+            row.record,
+            "settlement timeline",
+          ),
         ),
-      ),
     };
   }
 

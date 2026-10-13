@@ -58,6 +58,38 @@ class FailAfterComplaintWrites extends ComplaintRepository {
   }
 }
 
+class FailAfterLaterComplaintWrites extends ComplaintRepository {
+  wroteUpdatedCaseAndNote = false;
+
+  override async persistChanges(
+    ...args: Parameters<ComplaintRepository["persistChanges"]>
+  ) {
+    await super.persistChanges(...args);
+    const [changes, transaction] = args;
+    if (!transaction) {
+      throw new Error("Expected a repository-owned later mutation transaction");
+    }
+    const updated = changes.complaintCases![0]!;
+    const note = changes.complaintTimelines![0]!;
+    const cases = await transaction.query<{ record: ComplaintCaseRecord }>(
+      "SELECT record FROM crm.phase1_complaint_cases WHERE case_no = $1",
+      [updated.caseNo],
+    );
+    const timeline = await transaction.query<{
+      record: ComplaintTimelineEntry;
+    }>(
+      "SELECT record FROM crm.phase1_complaint_timelines WHERE entry_id = $1",
+      [note.entryId],
+    );
+    this.wroteUpdatedCaseAndNote =
+      cases.rowCount === 1 &&
+      cases.rows[0]!.record.status === updated.status &&
+      timeline.rowCount === 1 &&
+      timeline.rows[0]!.record.note === note.note;
+    throw new Error("SETTLEMENT_MUTATION_INJECTED_AFTER_CASE_AND_NOTE");
+  }
+}
+
 describe("fleet statement decisions against migrated PostgreSQL", () => {
   const databases: DatabaseService[] = [];
   const fleetPartnerIds = new Set<string>();
@@ -574,6 +606,125 @@ describe("fleet statement decisions against migrated PostgreSQL", () => {
     ).rejects.toMatchObject({
       code: "CASE_NOT_FLEET_SCOPED",
     });
+  });
+
+  it("commits a later Fleet reply and case update for a fresh service on another database pool", async () => {
+    const writerDb = database();
+    const readerDb = database();
+    const fixture = await seed(writerDb);
+    const disputed = await decisions(writerDb).decide(
+      fixture.fleetPartnerId,
+      fixture.statement.statementId,
+      fixture.actorId,
+      "disputed",
+      "Reply after the dispute transaction has committed",
+    );
+    const caseNo = disputed.disputeCaseId!;
+    const before = await rowsFor(readerDb, fixture);
+    const complaints = new ComplaintService(
+      new AuditNotificationService(),
+      new ComplaintRepository(writerDb),
+    );
+    const cases = new FleetPartnerCaseService(complaints);
+    const reply = await cases.submitReply(
+      fixture.fleetPartnerId,
+      caseNo,
+      fixture.actorId,
+      {
+        content: "The missing trip has been checked",
+        idempotencyKey: randomUUID(),
+      },
+    );
+    expect(reply).toMatchObject({
+      caseId: caseNo,
+      content: "The missing trip has been checked",
+      deduplicated: false,
+    });
+
+    const fresh = new ComplaintService(
+      new AuditNotificationService(),
+      new ComplaintRepository(readerDb),
+    );
+    await fresh.refreshSettlementCases();
+    const updated = fresh.getComplaintCase(caseNo);
+    expect(updated).toMatchObject({
+      caseNo,
+      fleetPartnerId: fixture.fleetPartnerId,
+      relatedStatementId: fixture.statement.statementId,
+      status: "under_investigation",
+    });
+    const timeline = fresh.getComplaintTimeline(caseNo);
+    expect(timeline).toHaveLength(2);
+    expect(timeline).toEqual(
+      expect.arrayContaining([
+        before.timeline[0]!.record,
+        expect.objectContaining({
+          caseNo,
+          action: "case_note_added",
+          note: `[車行回覆 · ${fixture.fleetPartnerId}] The missing trip has been checked`,
+        }),
+      ]),
+    );
+    const after = await rowsFor(readerDb, fixture);
+    expect(after.cases).toHaveLength(1);
+    expect(after.cases[0]!.record).toEqual(updated);
+    expect(after.timeline).toHaveLength(2);
+    expect(after.statement).toEqual(before.statement);
+    expect(after.decision).toEqual(before.decision);
+  });
+
+  it("rolls back a later settlement mutation after both actual case and timeline writes, then permits retry", async () => {
+    const writerDb = database();
+    const readerDb = database();
+    const fixture = await seed(writerDb);
+    const disputed = await decisions(writerDb).decide(
+      fixture.fleetPartnerId,
+      fixture.statement.statementId,
+      fixture.actorId,
+      "disputed",
+      "Keep the committed dispute if a later mutation fails",
+    );
+    const caseNo = disputed.disputeCaseId!;
+    const before = await rowsFor(readerDb, fixture);
+    const updated: ComplaintCaseRecord = {
+      ...before.cases[0]!.record,
+      status: "under_investigation",
+      updatedAt: "2099-11-01T00:00:00.000Z",
+    };
+    const validNote: ComplaintTimelineEntry = {
+      entryId: `later-note-${randomUUID()}`,
+      caseNo,
+      action: "case_note_added",
+      note: "This valid note must roll back with the case update",
+      createdAt: updated.updatedAt,
+    };
+    const repository = new FailAfterLaterComplaintWrites(writerDb);
+    // No transaction is supplied: the production repository must own this
+    // later-mutation transaction. The injected failure occurs only after both
+    // actual writes have completed and are observed on that same real client.
+    await expect(
+      repository.persistChanges({
+        complaintCases: [updated],
+        complaintTimelines: [validNote],
+      }),
+    ).rejects.toThrow("SETTLEMENT_MUTATION_INJECTED_AFTER_CASE_AND_NOTE");
+    expect(repository.wroteUpdatedCaseAndNote).toBe(true);
+    expect(await rowsFor(readerDb, fixture)).toEqual(before);
+
+    // The rolled-back transaction releases its client and permits a clean
+    // retry, retaining the initial decision and creation timeline unchanged.
+    await new ComplaintRepository(writerDb).persistChanges({
+      complaintCases: [updated],
+      complaintTimelines: [validNote],
+    });
+    const retried = await rowsFor(readerDb, fixture);
+    expect(retried.cases[0]!.record).toEqual(updated);
+    expect(retried.timeline.map((row) => row.record)).toEqual(
+      expect.arrayContaining([before.timeline[0]!.record, validNote]),
+    );
+    expect(retried.timeline).toHaveLength(2);
+    expect(retried.statement).toEqual(before.statement);
+    expect(retried.decision).toEqual(before.decision);
   });
 
   it("serializes a monthly rebuild with a concurrent decision on its statement", async () => {

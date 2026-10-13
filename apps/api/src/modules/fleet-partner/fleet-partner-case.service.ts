@@ -164,6 +164,10 @@ export class FleetPartnerCaseService {
   private attachments = new Map<string, FleetCaseAttachmentRecord>();
   private replies = new Map<string, FleetCaseReplyRecord>();
   private repliesByIdempotencyKey = new Map<string, FleetCaseReplyRecord>();
+  private pendingSettlementReplies = new Map<
+    string,
+    Promise<FleetCaseReplyRecord>
+  >();
 
   constructor(
     @Optional() private readonly complaintService?: ComplaintService,
@@ -774,6 +778,43 @@ export class FleetPartnerCaseService {
       }
     }
 
+    const pendingKey =
+      caseItem.cat === "settlement_dispute" && idempotencyKey
+        ? `${caseItem.id}:${idempotencyKey}`
+        : null;
+    if (pendingKey) {
+      const pending = this.pendingSettlementReplies.get(pendingKey);
+      if (pending) return { ...(await pending), deduplicated: true };
+    }
+    const reply = this.createReply(
+      fleetPartnerId,
+      caseItem,
+      actorId,
+      command,
+      content,
+      idempotencyKey,
+      requestId,
+    );
+    if (!pendingKey) return reply;
+    this.pendingSettlementReplies.set(pendingKey, reply);
+    try {
+      return await reply;
+    } finally {
+      if (this.pendingSettlementReplies.get(pendingKey) === reply) {
+        this.pendingSettlementReplies.delete(pendingKey);
+      }
+    }
+  }
+
+  private async createReply(
+    fleetPartnerId: string,
+    caseItem: FleetCaseItem,
+    actorId: string,
+    command: SubmitFleetCaseReplyCommand,
+    content: string,
+    idempotencyKey: string,
+    requestId?: string,
+  ): Promise<FleetCaseReplyRecord> {
     const now = new Date().toISOString();
     const replyId = `reply-${randomUUID()}`;
 
@@ -818,7 +859,31 @@ export class FleetPartnerCaseService {
       deduplicated: false,
     };
 
-    // Store reply
+    const attsNote = resolvedAttachments.length
+      ? ` (附件: ${resolvedAttachments.map((a) => a.name).join(", ")})`
+      : "";
+    const notePayload = `[車行回覆 · ${fleetPartnerId}] ${content}${attsNote}`;
+    let settlementTimelineEntryId: string | undefined;
+    if (caseItem.cat === "settlement_dispute") {
+      if (!this.complaintService) {
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "SETTLEMENT_REPLY_UNAVAILABLE",
+          "Settlement case replies require complaint persistence.",
+        );
+      }
+      this.complaintService.addFleetSettlementCaseNote(
+        caseItem.caseNo,
+        { note: notePayload },
+        requestId,
+      );
+      settlementTimelineEntryId = this.complaintService
+        .getComplaintTimeline(caseItem.caseNo)
+        .at(-1)?.entryId;
+      await this.complaintService.awaitSettlementPersistence(caseItem.caseNo);
+    }
+
+    // Publish a settlement receipt only after its CRM note has committed.
     this.replies.set(replyId, replyRecord);
     if (idempotencyKey) {
       this.repliesByIdempotencyKey.set(
@@ -829,7 +894,7 @@ export class FleetPartnerCaseService {
 
     // Append to timeline
     const timelineEntry: FleetCaseTimelineEvent = {
-      entryId: `tl-${replyId}`,
+      entryId: settlementTimelineEntryId ?? `tl-${replyId}`,
       caseId: caseItem.id,
       at: now,
       tone: "accent",
@@ -851,12 +916,8 @@ export class FleetPartnerCaseService {
     this.timelines.set(caseItem.caseNo, updatedTl);
 
     // Synchronize to authoritative ComplaintService timeline so Ops can read it immediately
-    if (this.complaintService) {
+    if (this.complaintService && caseItem.cat !== "settlement_dispute") {
       try {
-        const attsNote = resolvedAttachments.length
-          ? ` (附件: ${resolvedAttachments.map((a) => a.name).join(", ")})`
-          : "";
-        const notePayload = `[車行回覆 · ${fleetPartnerId}] ${content}${attsNote}`;
         this.complaintService.addComplaintCaseNote(
           caseItem.caseNo,
           { note: notePayload },

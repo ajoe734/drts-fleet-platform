@@ -49,10 +49,14 @@ export class ComplaintController {
       idempotencyKey,
       requestPath: "complaints",
       payload: command,
-      execute: async () => ({
-        data: this.complaintService.createComplaintCase(command, requestId),
-        statusCode: HttpStatus.CREATED,
-      }),
+      execute: async () => {
+        const data = this.complaintService.createComplaintCase(
+          command,
+          requestId,
+        );
+        await this.complaintService.awaitSettlementPersistence(data.caseNo);
+        return { data, statusCode: HttpStatus.CREATED };
+      },
     });
 
     applyIdempotentResponseHeaders(response, result);
@@ -74,6 +78,7 @@ export class ComplaintController {
   async evaluateAllSlaBreach(@Headers("x-request-id") requestId?: string) {
     await this.complaintService.refreshSettlementCases();
     const breached = this.complaintService.evaluateAllSlaBreach(requestId);
+    await this.complaintService.awaitSettlementPersistence();
     return toApiSuccessEnvelope(
       { breachedCount: breached.length, items: breached },
       requestId,
@@ -127,10 +132,13 @@ export class ComplaintController {
     @Headers("x-request-id") requestId?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    return toApiSuccessEnvelope(
-      this.complaintService.assignComplaintCase(caseNo, command, requestId),
+    const updated = this.complaintService.assignComplaintCase(
+      caseNo,
+      command,
       requestId,
     );
+    await this.complaintService.awaitSettlementPersistence(caseNo);
+    return toApiSuccessEnvelope(updated, requestId);
   }
 
   @Post(":caseNo/notes")
@@ -140,10 +148,13 @@ export class ComplaintController {
     @Headers("x-request-id") requestId?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    return toApiSuccessEnvelope(
-      this.complaintService.addComplaintCaseNote(caseNo, command, requestId),
+    const updated = this.complaintService.addComplaintCaseNote(
+      caseNo,
+      command,
       requestId,
     );
+    await this.complaintService.awaitSettlementPersistence(caseNo);
+    return toApiSuccessEnvelope(updated, requestId);
   }
 
   @Get(":caseNo/export")
@@ -165,10 +176,13 @@ export class ComplaintController {
     @Headers("x-request-id") requestId?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    return toApiSuccessEnvelope(
-      this.complaintService.reopenComplaintCase(caseNo, command, requestId),
+    const updated = this.complaintService.reopenComplaintCase(
+      caseNo,
+      command,
       requestId,
     );
+    await this.complaintService.awaitSettlementPersistence(caseNo);
+    return toApiSuccessEnvelope(updated, requestId);
   }
 
   @Post(":caseNo/resolve")
@@ -178,10 +192,13 @@ export class ComplaintController {
     @Headers("x-request-id") requestId?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    return toApiSuccessEnvelope(
-      this.complaintService.resolveComplaintCase(caseNo, command, requestId),
+    const updated = this.complaintService.resolveComplaintCase(
+      caseNo,
+      command,
       requestId,
     );
+    await this.complaintService.awaitSettlementPersistence(caseNo);
+    return toApiSuccessEnvelope(updated, requestId);
   }
 
   @Post(":caseNo/close")
@@ -191,10 +208,13 @@ export class ComplaintController {
     @Headers("x-request-id") requestId?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    return toApiSuccessEnvelope(
-      this.complaintService.closeComplaintCase(caseNo, command, requestId),
+    const updated = this.complaintService.closeComplaintCase(
+      caseNo,
+      command,
       requestId,
     );
+    await this.complaintService.awaitSettlementPersistence(caseNo);
+    return toApiSuccessEnvelope(updated, requestId);
   }
 
   @Post(":caseNo/escalate-to-incident")
@@ -248,6 +268,7 @@ export class ComplaintController {
       command.reason,
       requestId,
     );
+    await this.complaintService.awaitSettlementPersistence(caseNo);
     this.incidentService.linkComplaint(incident.incidentId, caseNo, requestId);
     return toApiSuccessEnvelope(
       { complaintCase: updatedCase, incident },
@@ -299,6 +320,7 @@ export class ComplaintController {
       command,
       requestId,
     );
+    await this.complaintService.awaitSettlementPersistence(caseNo);
     this.incidentService.linkComplaint(command.incidentId, caseNo, requestId);
     return toApiSuccessEnvelope(updatedComplaintCase, requestId);
   }
@@ -309,9 +331,11 @@ export class ComplaintController {
     @Headers("x-request-id") requestId?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    return toApiSuccessEnvelope(
-      this.complaintService.markComplaintSlaBreach(caseNo, requestId),
+    const updated = this.complaintService.markComplaintSlaBreach(
+      caseNo,
       requestId,
     );
+    await this.complaintService.awaitSettlementPersistence(caseNo);
+    return toApiSuccessEnvelope(updated, requestId);
   }
 }
