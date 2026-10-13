@@ -27,9 +27,38 @@ export type ThrottleObservationSummary = {
   restorationFailures: number;
   stopped: boolean;
   complete: boolean;
+  admissionFeedback: {
+    reserved: number;
+    guardObserved: number;
+    settled: number;
+    pending: number;
+    error: string | null;
+  };
   scope: string;
 };
 export type CapacityThrottleObserver = {
+  admission: {
+    tryReserve(
+      family: "booking" | "dispatch" | "report",
+      requestId: string,
+    ): {
+      allowed?: boolean;
+      reservedMs?: number;
+      waitMs?: number | null;
+      error?: string;
+    };
+    waitForChange(
+      family: "booking" | "dispatch" | "report",
+      timeoutMs: number,
+    ): Promise<void>;
+    complete(requestId: string): {
+      error: string | null;
+      guardMs?: number | null;
+      guardCountedMs?: number | null;
+      keyHash?: string | null;
+      result?: { totalHits: number; isBlocked: boolean } | null;
+    };
+  };
   middleware(
     request: ThrottleRequest,
     response: ThrottleResponse,

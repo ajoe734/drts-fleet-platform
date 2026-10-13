@@ -1042,3 +1042,178 @@ native-both/runtime/provider/financial/legal/manual/H3F2/HOLD/F2/ZEROremoved and
 both required acceptance keys retain their prior state. No product VM runtime,
 policy/cloud/provider mutation, source/history rewrite, alternative workflow,
 unchanged hosted capacity retry or acceptance waiver is introduced.
+
+### Genuine guard admission feedback after d73 acceptance REOPEN (Codex2, 2026-10-13)
+
+Codex independently reopened candidate
+`d73ec2fd4f64177f7d232745e9834881180cac9a`, generation
+`457a888c0e2043339da6aeb988c73b6e`. Original authorized run38362439099,
+job115179579487, artifact11796112777 finished FAILURE. The immutable ZIP
+SHA256 is `4cbefd83940fe806487c94ec07abc0c541e9475ee58c0d8366cf46af8bc1c3a0`.
+All1647 HTTP429 correlate to the actual owned request, generated key and
+blocked singleton result: booking246, dispatch1227, report174. Client rolling
+peaks60/300/30 concealed guard peaks89/461/47. Booking61 had a client gap
+60000.729901ms but guard gap59963.889454ms, with60 unexpired hits before its
+increment. Report31 and dispatch308 show the same actual accounting boundary.
+This establishes this run's failure, not historical112/prior375 causality.
+The original negative gate, final SQL654/3273/276 and complete observer trace
+remain valid red-run evidence; they do not establish positive capacity.
+
+The next repair uses the existing hosted singleton observer as producer
+feedback. `runPlan.runFamily` reserves each unsent measured request against
+the unchanged60/300/30 budget. Until the genuine guard sees the request, its
+reservation remains occupied. The observer binds the family to the actual
+generated key and identity, checks actual counter state plus rolling guard
+times, and releases occupied hits only through the original storage's expiry
+callbacks. The producer wakes on real guard/hit mutations or the original
+rolling/deadline boundary; it adds no guessed ingress buffer. Changed keys,
+identities or policies, blocked/missing state and successful HTTP without
+matching guard results fail closed. HTTP/transport errors remain unchanged.
+An actual guard arrival outside the original admission window is also red,
+even when its client launch was timely. All raw rows retain client times and
+the separately observed absolute native increment start and counted-return
+times, key hash and original result. Prior rolling admission uses the genuine
+synchronous counted-return upper bound, including variable observation work
+before increment; it cannot mistake the observer wrapper's earlier entry for
+the actual guard count. The900s boundary also checks that counted return.
+
+No shared storage, guard, rate policy, identity, seed policy or HTTP response
+is changed. The existing preparation, both legacy profiles and floors,
+additional burst profile, client rolling budgets, maxInFlight, eight-slot
+seed readiness and every deadline remain. Seeds are never admission retries.
+The original harness now supplies the observer's actual admission interface
+to the original producer. SQL/finalizer/security/report behavior remains.
+
+Evidence directory `G` is the canonical machine-specific
+`.local/c123-guard-admission-20261013/`. Checkpoints21e09e437 andfb741c692 were
+ordinary pushes on the original branch, not review candidates. The complete
+d73 minimal-source snapshot is retained under `G/old-d73-source/`; its
+production files are extracted directly from that immutable commit, with
+the same regression test added externally. No active checkout was reset.
+
+| Finding / acceptance                                                        | Actual source / repair                                                                                               | Old → new observed result                                                                                                                                                                                                                                              | Commands / evidence                                                                                                                                                                    | Remaining limits                                                                                                                                                                 |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Client launch budget concealed compressed guard arrivals and delayed expiry | Actual `runPlan/measure`, observer admission reservations and genuine `KeyScopedThrottlerStorage.increment/countHit` | Old d73: each61s legacy case has7 actual429; full controlled burst has2421 (111/2100/210). New event-wake checkpoint: both legacy cases and5850/4000 positive pass with zero429; genuine final dispatch client launch899912ms.                                         | `guard-admission.test.ts`; `G/old-d73-{regression,snapshot-regression}.log`, `old-d73-raw/` and `new-event-wake/` raw/summary/actual singleton traces.                                 | Only external transport, clock and timer scheduling are controlled. Actual countHit/increment/expiry bodies and producer logic are unmocked. This is no hosted capacity receipt. |
+| Missing feedback, raw errors, key change and impossible timing              | Same original producer and observer; exact request/key correlation                                                   | Missing genuine guard observation is red.2000ms delayed expiry preserves every5850 request and4000 seed outcome, with unsent requests recorded and no guard bypass. Raw429/deadline, key rotation and actual guard arrival after the window have explicit regressions. | `G/verified-serial/` and final check manifest/logs; old/new regression sources and complete raw artifacts retained.                                                                    | Repository checks only; original real HTTP/report/phase SLO,50intake/50reports/500backlog, SQL, security, degradation and cleanup still require hosted measurement.              |
+| Original failed-summary guard and diagnostic retention                      | Unchanged formal gate, original raw-arrival readback and finalizer                                                   | Original25-case actual exported gate replay exits0. Old d73 red payload/negative receipt remains historical after reopen.                                                                                                                                              | `node /home/lupin/workspace/drts-fleet-platform/.local/continue-full-completion-20261012T0528/operator-gate-contract-replay.mjs .`; `G/gate25.log`; final exact-source harness replay. | Synthetic positive/negative controls prove gate behavior, not capacity.                                                                                                          |
+| capacity_failed_summary_rejected                                            | Original same-candidate lifecycle and formal negative gate                                                           | OPEN for the new generation. No old acceptance receipt is transferred.                                                                                                                                                                                                 | Final candidate/publication/CI and subsequent original authorized acceptance evidence.                                                                                                 | Independent matching review/CI/merge and fresh negative evidence still required.                                                                                                 |
+| capacity_same_candidate_full_900s_valid_baseline                            | Original full900s HTTP/AppModule/migratedPG workflow with actual singleton feedback and trace                        | OPEN. The unit positive is not real capacity.                                                                                                                                                                                                                          | Final exact candidate, then Supervisor-authorized ORIGINAL changed-source full900s run.                                                                                                | All900/4500/450 measured plus4000 separate seeds, actual guard admission,50intake/50reports/500owned backlog and every original SLO/security/SQL/cleanup observation must pass.  |
+
+All intermediate failures remain separate: initial5s test timeout, the first
+over-conservative wait calculation, the polling-version fake-clock timeout,
+inherited missing nodemailer, root implicit callback parameter types and API
+missing built workspace declarations. The first broad parallel regression
+timed out three existing5s fake-clock cases and caused a subsequent fixture
+counter failure; it is not recorded as pass. Dependencies were installed in
+this isolated worktree with frozen lockfile/ignored scripts, then required
+workspace declarations built. The inherited dependency symlink targets were
+recorded before detaching only those worktree links. The final sequential
+repository test command uses a30s **test-runner wall timeout**, without changing
+the original900s admission,30s HTTP or report/phase deadlines.
+
+Original Claude/Claude2/Gemini credit, every published source/history and F1–F6,
+112/prior375 and this actual1647 red run remain preserved. Runtime CPU/billing/
+scaling/idle/recovery/PG-loss/cross-instance, native Android AND iOS, provider/
+financial/legal/manual/public-entry/H3F2/HOLD/F2/ZEROremoved and all full-system
+gates keep their previous state. No VM product server, Docker, browser, cloud,
+provider, production deployment, history rewrite, limiter reset/bypass,
+count/error filtering, policy increase or unchanged hosted retry is performed.
+
+The final code checkpoint41e6f1b53 passes194/194 affected regressions in15 files,
+including all original184 controls and ten actual-storage admission cases.
+`G/final-regression.log` records the full sequential command with zero skips;
+`G/final-regression/` retains each producer raw file, summary and actual
+singleton trace. The native-count timestamp case additionally delays only
+external identity-observation clock work before the unmocked increment, proving
+the observer wrapper's earlier entry is not used as the genuine count time.
+The complete positive retains5850 requests/4000 seeds and no429; actual guard
+rolling peaks remain within60/300/30 and the final counted admission is inside
+the900s window. The impossible-delay case remains red with every outcome.
+
+Root/API strict types, scoped lint, formatting, syntax and diff checks pass.
+The actual original25-case gate replay passes25/25. The original harness
+replay passes24/24, with its external producer boundary also asserting that
+the real admission methods are supplied. Both actual formal gate and raw
+arrival readback reject the retained real d73 payload (expected negative
+wrapper2/2, exit0). All commands, exits, exact source/blob hashes, versions and
+raw evidence digests are retained in `G/verification-manifest.json`; publication
+and matching CI are separate in `G/publication.json` and `G/ci-result.json`.
+The final documentation-only closeout preserves these verified code bytes.
+Both required acceptance keys remain OPEN for the next matching generation.
+
+### Publication metadata blocker before candidate handoff (2026-10-13)
+
+Owner error: the documentation-only closeout commit
+`ca4eff8f80de6a0656837416197012eea16e28ee` was ordinarily pushed with subject
+`fix(ops-capacity): pace against genuine guard admission counts`, which does
+not satisfy the repository's uppercase Task-ID subject contract. The original
+five code/evidence anchors are valid; the source checks above remain valid,
+but the actual required commit gate is **FAILED**, not green. Command
+`python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`
+exits1 and identifies precisely this commit; `G/commit-trailers.log` retains
+the result. PR2605 preserves the exact original branch and published history.
+No candidate handoff or independent approval has occurred. The PR returns to
+draft while the publication blocker is coordinated with Supervisor.
+
+An append cannot change that already-published ancestor's subject: the gate
+checks every non-merge commit in the original PR range. The dispatch and
+worker anchor protocol forbid amending/rebasing/force-pushing published
+history, and the original allocation grants no recovery branch, ancestry
+transplant or CI waiver. The owner therefore preserves every published ref,
+source/evidence byte and raw failure. No bypass flag/label, history rewrite,
+alternate branch, source transplant or hosted capacity retry is used.
+
+`G/publication-blocker.json` records the exact SHAs, failed gate, retained
+source verification and a **proposal only** for Supervisor's registered
+history disposition. Any authorized new candidate must preserve the original
+published branch and credit, pass the genuine per-commit gate, rebind all
+source checks to its exact immutable SHA, obtain ordinary independent
+review/CI/merge and then the original authorized full900s acceptance. Both
+acceptance keys remain OPEN. This delivery blocker is not a product/limiter
+failure, quota determination or provider disablement.
+
+### Original-task allocated delivery and verification (Codex2, 2026-10-13)
+
+Supervisor's durable allocation is recorded in the original task specification
+and `.local/shared-dev-release-resumption-20261013-root/c123-preserving-original-code-branch-allocation/concrete-supervisor-preserving-branch-allocation.json`.
+The allocated `codex2/sr-ops-capacity-failclosed-20261012` starts at the exact
+existing code anchor `41e6f1b5316cd69ca9c8c716086a200a20c078a2`; all original
+code commits remain ancestors. Documentation checkpoint `efa818cb8` reapplies
+only the exact 53-line owned documentation delta from published
+`ca4eff8f80de6a0656837416197012eea16e28ee` through
+`445365374ff79274eb56ce624b68f342e1377411`. Its complete tree matches4453653.
+The original published Claude branch, documentation commits and draft PR2605
+remain unchanged. This is the recorded ordinary branch allocation, with no
+reuse of the consumed published-history exception.
+
+Normal merge checkpoint `5f3734757` integrates `origin/dev` at
+`7939d4a409b2f2d83f8a7bce58781e3e6a35c7ba`. That dev tree equals the prior
+reviewed d73 tree. Four conflicts are entirely within the original owned
+documentation/observer/producer scopes; their resolution preserves the current
+repair. The staged merge tree matches efa818cb8 exactly. No product code is
+recreated or changed by this delivery continuation.
+
+Evidence directory `L` is
+`G/delivery-codex2-preserving-branch/`. The original raw evidence and failed
+attempts in G remain intact. `L/verification-manifest.json` binds each repeated
+check, command, exit code, version, source hash and output digest to the final
+full candidate SHA; `L/publication.json` binds the normally pushed remote head
+and new PR. All checks started for this delivery must finish and be read before
+handoff. Candidate identity and subsequent CI are recorded externally to avoid
+changing the candidate while it is under independent Codex review.
+
+| Finding / acceptance                             | Source and delivery boundary                                                                    | Verification and evidence                                                                                          | Remaining limits                                                                                                                   |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Published documentation subject failed gate      | Exact owned documentation reapplication on allocated original-code ancestry; valid task subject | Per-commit trailer gate over origin/dev..candidate; preserved refs/tree comparison in L/verification-manifest.json | Original ca4/445 history and PR2605 stay preserved; ordinary new candidate review/CI/merge remain required.                        |
+| Guard-time admission and all retained controls   | Unchanged41e producer, observer, harness and actual storage functions                           | Repeat affected194 controls, original25-case gate,24-case harness and retained real-payload negative replay in L   | External transport/clock/SQL boundaries are controlled; these checks provide no actual hosted capacity credit.                     |
+| capacity_failed_summary_rejected                 | Actual formal gate and raw-arrival readback, retained real failed d73 payload                   | Current-source negative regression evidence in L; prior acceptance receipt remains historical                      | OPEN for the next matching generation until original lifecycle records its required acceptance evidence.                           |
+| capacity_same_candidate_full_900s_valid_baseline | Original full900s HTTP/AppModule/migratedPG acceptance workflow                                 | OPEN; no new hosted positive result is asserted by this delivery                                                   | Same-SHA Codex review/CI/protected merge, then Supervisor-authorized original changed-source full900s with every retained measure. |
+
+Both legacy profiles/floors, the explicit budgeted burst, actual guard rolling
+60000ms budgets60/300/30, all5850 measured requests and4000 separate seeds,
+900s admission/899800ms genuine final arrival, readiness/maxInFlight/eight-slot
+preparation,50intake/50reports/500owned backlog and every SLO/security/SQL/
+cleanup requirement remain. Original112/prior375/new1647 failures, F1–F6 and
+Claude/Claude2/Gemini credit remain preserved. Runtime CPU/billing/idle/recovery,
+native Android AND iOS, providers, financial/legal/manual/public-entry,
+H3F2/HOLD/F2/ZEROremoved and all full-system gates retain their prior state.
