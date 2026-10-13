@@ -49,7 +49,7 @@ const routes = {
 };
 type Route = {
   controller: ExecutionContext["getClass"] extends () => infer C ? C : never;
-  handler: () => unknown;
+  handler: ReturnType<ExecutionContext["getHandler"]>;
 };
 type Request = {
   identity?: {
@@ -108,7 +108,7 @@ async function fixture(
           },
         }),
       }),
-    } as ExecutionContext;
+    } as unknown as ExecutionContext;
     try {
       return { accepted: await guard.canActivate(context), headers };
     } catch (error) {
