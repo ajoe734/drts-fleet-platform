@@ -355,7 +355,14 @@ function assertCapture(command) {
           await api.clearDriverProvisioning();
         });
         assert.equal(fields(r).length, 0);
-        await press(r, "重新整理");
+        // Empty state also has a refresh button; choose the real header action.
+        await act(async () => {
+          r.root
+            .findAll(
+              (n) => n.type === "Pressable" && flatten(n) === "重新整理",
+            )[0]
+            .props.onPress();
+        });
       } else await press(r, "重新整理");
       if (scenario === "same-task-refresh")
         assert.equal(fields(r)[0].props.value, "35");
