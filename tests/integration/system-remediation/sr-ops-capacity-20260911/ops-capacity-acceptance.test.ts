@@ -245,12 +245,20 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
               orderIds[index] = orderId;
             }
           }
-          await Promise.all(
+          const seedResults = await Promise.allSettled(
             Array.from(
               { length: Math.min(40, initialBacklogCount) },
               seedWorker,
             ),
           );
+          const seedFailures = seedResults
+            .filter((result) => result.status === "rejected")
+            .map((result) => result.reason);
+          if (seedFailures.length)
+            throw new AggregateError(
+              seedFailures,
+              "Initial capacity seeds failed",
+            );
           expect(orderIds).toHaveLength(initialBacklogCount);
           expect(
             orderIds.every((id) => typeof id === "string" && id.length > 0),

@@ -408,102 +408,162 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
       throw error;
     }
   }
-  for (const entry of schedule) {
-    const spacing = 60000 / baseline[entry.family].perMinute;
-    let targetMs = entry.scheduledMs;
-    if (
-      (profile === "uniform" || entry.family === "dispatch") &&
-      familyLastLaunch[entry.family] !== undefined
+  // Keep real seed readiness inside the original clock, with at most eight
+  // prepared/in-flight orders and a1600ms lookahead. Serial seed HTTP must not
+  // block every next scheduled family. Each order is prepared once, never
+  // retried, and dispatch still waits for its actual successful creation.
+  const stagedEntries = schedule.filter((entry) => entry.item.stageOrder);
+  const preparations = new Map();
+  const producerFailures = [];
+  let nextSeed = 0;
+  const primeSeeds = (scheduledMs) => {
+    while (
+      preparations.size < 8 &&
+      nextSeed < stagedEntries.length &&
+      stagedEntries[nextSeed].scheduledMs <= scheduledMs + 1600
     ) {
-      targetMs = Math.max(targetMs, familyLastLaunch[entry.family] + spacing);
+      const entry = stagedEntries[nextSeed++];
+      const startedMs = performance.now() - start;
+      const preparation = prepareDispatchItem(plan.origin, entry.item)
+        .catch((error) => ({
+          item: entry.item,
+          error: `Dispatch stage failed: ${error?.message ?? String(error)}`,
+          seed: {
+            httpStatus: null,
+            latencyMs: performance.now() - start - startedMs,
+            error: error?.message ?? String(error),
+          },
+        }))
+        .then((prepared) => {
+          appendFileSync(
+            output,
+            `${JSON.stringify({
+              taskId: "SR-OPS-PROOF-001",
+              kind: "capacity_seed",
+              ...provenance,
+              isolatedResourceId: plan.isolatedResourceId,
+              sequence: entry.sequence,
+              method: "POST",
+              path: "/api/orders",
+              requestSha256: digest(JSON.stringify(entry.item.stageOrder.body)),
+              startedMs,
+              readyMs: prepared.error ? null : performance.now() - start,
+              scheduledDispatchMs: entry.scheduledMs,
+              observedAt: new Date().toISOString(),
+              ...prepared.seed,
+            })}\n`,
+          );
+          return prepared;
+        })
+        .catch((error) => {
+          // Evidence write failure is fatal, but do not leak other requests or
+          // leave an unhandled prefetch rejection before this slot is consumed.
+          producerFailures.push(error);
+          return {
+            item: entry.item,
+            error: "Dispatch preparation evidence failed",
+          };
+        });
+      preparations.set(entry.sequence, preparation);
     }
-    const launches = familyLaunches[entry.family];
-    if (launches.length >= baseline[entry.family].perMinute) {
-      targetMs = Math.max(
-        targetMs,
-        launches[launches.length - baseline[entry.family].perMinute] + 60000,
-      );
-    }
-    const prepared = entry.item.stageOrder
-      ? await prepareDispatchItem(plan.origin, entry.item)
-      : { item: entry.item, seed: null };
-    if (prepared.seed) {
-      appendFileSync(
-        output,
-        `${JSON.stringify({
+  };
+  try {
+    for (const entry of schedule) {
+      primeSeeds(entry.scheduledMs);
+      const spacing = 60000 / baseline[entry.family].perMinute;
+      let targetMs = entry.scheduledMs;
+      if (
+        (profile === "uniform" || entry.family === "dispatch") &&
+        familyLastLaunch[entry.family] !== undefined
+      ) {
+        targetMs = Math.max(targetMs, familyLastLaunch[entry.family] + spacing);
+      }
+      const launches = familyLaunches[entry.family];
+      if (launches.length >= baseline[entry.family].perMinute) {
+        targetMs = Math.max(
+          targetMs,
+          launches[launches.length - baseline[entry.family].perMinute] + 60000,
+        );
+      }
+      const prepared = entry.item.stageOrder
+        ? await preparations.get(entry.sequence)
+        : { item: entry.item, seed: null };
+      if (entry.item.stageOrder) preparations.delete(entry.sequence);
+      while (true) {
+        const wait = targetMs - (performance.now() - start);
+        if (wait > 0) {
+          // Round up and re-check after every host timer wakeup; never busy-spin
+          // or assume a fractional/early callback reached the launch boundary.
+          await new Promise((resolve) =>
+            setTimeout(resolve, Math.max(1, Math.ceil(wait))),
+          );
+        } else {
+          break;
+        }
+      }
+      // Do not queue and then falsely report the requested arrival rate as met.
+      const overloaded = active.size >= plan.maxInFlight;
+      const launchedMs = performance.now() - start;
+      if (!overloaded) {
+        familyLastLaunch[entry.family] = launchedMs;
+        launches.push(launchedMs);
+      }
+      const job = (async () => {
+        let result;
+        try {
+          result = overloaded
+            ? {
+                latencyMs: null,
+                httpStatus: null,
+                error: "Load generator maxInFlight exhausted; request not sent",
+              }
+            : prepared.error
+              ? { latencyMs: null, httpStatus: null, error: prepared.error }
+              : await measure(plan.origin, prepared.item);
+        } catch (error) {
+          result = { latencyMs: null, httpStatus: null, error: error.message };
+        }
+        const record = {
           taskId: "SR-OPS-PROOF-001",
-          kind: "capacity_seed",
+          kind: "capacity_request",
           ...provenance,
           isolatedResourceId: plan.isolatedResourceId,
+          baselinePath,
+          baselineSha256,
+          observedAt: new Date().toISOString(),
+          workload: entry.family,
           sequence: entry.sequence,
           method: "POST",
-          path: "/api/orders",
-          requestSha256: digest(JSON.stringify(entry.item.stageOrder.body)),
-          observedAt: new Date().toISOString(),
-          ...prepared.seed,
-        })}\n`,
+          path: prepared.item.path,
+          requestSha256: digest(JSON.stringify(entry.item.body)),
+          scheduledMs: entry.scheduledMs,
+          launchedMs,
+          schedulingLagMs: launchedMs - entry.scheduledMs,
+          profile,
+          ...result,
+        };
+        records.push(record);
+        appendFileSync(output, `${JSON.stringify(record)}\n`);
+      })();
+      active.add(job);
+      job.then(
+        () => active.delete(job),
+        (error) => {
+          producerFailures.push(error);
+          active.delete(job);
+        },
       );
     }
-    while (true) {
-      const wait = targetMs - (performance.now() - start);
-      if (wait > 0) {
-        // Round up and re-check after every host timer wakeup; never busy-spin
-        // or assume a fractional/early callback reached the launch boundary.
-        await new Promise((resolve) =>
-          setTimeout(resolve, Math.max(1, Math.ceil(wait))),
-        );
-      } else {
-        break;
-      }
-    }
-    // Do not queue and then falsely report the requested arrival rate as met.
-    const overloaded = active.size >= plan.maxInFlight;
-    const launchedMs = performance.now() - start;
-    if (!overloaded) {
-      familyLastLaunch[entry.family] = launchedMs;
-      launches.push(launchedMs);
-    }
-    const job = (async () => {
-      let result;
-      try {
-        result = overloaded
-          ? {
-              latencyMs: null,
-              httpStatus: null,
-              error: "Load generator maxInFlight exhausted; request not sent",
-            }
-          : prepared.error
-            ? { latencyMs: null, httpStatus: null, error: prepared.error }
-            : await measure(plan.origin, prepared.item);
-      } catch (error) {
-        result = { latencyMs: null, httpStatus: null, error: error.message };
-      }
-      const record = {
-        taskId: "SR-OPS-PROOF-001",
-        kind: "capacity_request",
-        ...provenance,
-        isolatedResourceId: plan.isolatedResourceId,
-        baselinePath,
-        baselineSha256,
-        observedAt: new Date().toISOString(),
-        workload: entry.family,
-        sequence: entry.sequence,
-        method: "POST",
-        path: prepared.item.path,
-        requestSha256: digest(JSON.stringify(entry.item.body)),
-        scheduledMs: entry.scheduledMs,
-        launchedMs,
-        schedulingLagMs: launchedMs - entry.scheduledMs,
-        profile,
-        ...result,
-      };
-      records.push(record);
-      appendFileSync(output, `${JSON.stringify(record)}\n`);
-    })();
-    active.add(job);
-    job.finally(() => active.delete(job));
+  } catch (error) {
+    producerFailures.push(error);
   }
-  await Promise.all(active);
+  await Promise.allSettled([...preparations.values(), ...active]);
+  if (producerFailures.length === 1) throw producerFailures[0];
+  if (producerFailures.length)
+    throw new AggregateError(
+      producerFailures,
+      "Capacity scheduling/evidence failed",
+    );
   const workflows = Object.fromEntries(
     Object.entries(baseline).map(([family, targets]) => {
       const rows = records.filter((row) => row.workload === family);
