@@ -145,7 +145,7 @@ beforeEach(() => {
             // increment and expiration callback bodies completely unmocked.
             const timerHook = vi
               .spyOn(globalThis, "setTimeout")
-              .mockImplementation(((fn, ms) =>
+              .mockImplementation(((fn: () => void, ms: number) =>
                 timer(fn, Number(ms) + expirationDelay)) as typeof setTimeout);
             let result;
             try {
