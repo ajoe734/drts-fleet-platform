@@ -44,7 +44,7 @@ describe("actual capacity diagnostic finalization", () => {
   it("accepts complete evidence through the real gate after independent cleanup", async () => {
     const payload = validFixture();
     const events: string[] = [];
-    const result = await finalizeCapacityRun({
+    const result = await finalizeCapacityRun<Record<string, unknown>>({
       execute: async () => {
         events.push("producer joined");
       },

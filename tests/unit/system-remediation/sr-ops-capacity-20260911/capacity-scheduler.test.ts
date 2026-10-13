@@ -74,6 +74,20 @@ type Row = {
   scheduledMs: number;
   error: string | null;
 };
+type RecordedRow =
+  | (Row & { kind: "capacity_request"; path: string })
+  | {
+      kind: "capacity_seed";
+      sequence: number;
+      error: string | null;
+      startedMs: number;
+      readyMs: number | null;
+    };
+const readRecords = (output: string): RecordedRow[] =>
+  readFileSync(output, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
 const read = (output: string): Row[] =>
   readFileSync(output, "utf8")
     .trim()
@@ -306,13 +320,7 @@ describe("actual capacity scheduler boundaries across all families", () => {
       const run = runPlan(staged, output, {});
       await vi.advanceTimersByTimeAsync(910000);
       const summary = await run;
-      const allRows: (Row & { kind: string; path: string })[] = readFileSync(
-        output,
-        "utf8",
-      )
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line));
+      const allRows = readRecords(output);
       const requests = allRows.filter((row) => row.kind === "capacity_request");
       expect(requests).toHaveLength(5850);
       expect(
@@ -328,10 +336,10 @@ describe("actual capacity scheduler boundaries across all families", () => {
       expect(boundary.request).toHaveBeenCalledTimes(9850);
       expect(peakSeeds).toBeLessThanOrEqual(8);
       expect(activeSeeds).toBe(0);
-      const seeds = allRows.filter(
-        (row) => row.kind === "capacity_seed",
-      ) as (Row & { startedMs: number; readyMs: number })[];
+      const seeds = allRows.filter((row) => row.kind === "capacity_seed");
       for (const seed of seeds) {
+        if (seed.readyMs === null)
+          throw new Error("Expected successful real seed readiness");
         expect(seed.startedMs).toBeGreaterThanOrEqual(0);
         expect(seed.readyMs - seed.startedMs).toBe(seedMs);
         const dispatched = dispatch.find(
@@ -349,10 +357,7 @@ describe("actual capacity scheduler boundaries across all families", () => {
     const run = runPlan(stagedPlan(), output, {});
     await vi.advanceTimersByTimeAsync(910000);
     const summary = await run;
-    const rows = read(output) as (Row & {
-      kind: string;
-      readyMs: number | null;
-    })[];
+    const rows = readRecords(output);
     const seeds = rows.filter((row) => row.kind === "capacity_seed");
     const requests = rows.filter((row) => row.kind === "capacity_request");
     expect(seeds).toHaveLength(4000);
@@ -376,7 +381,7 @@ describe("actual capacity scheduler boundaries across all families", () => {
     const run = runPlan(stagedPlan(), output, {});
     await vi.advanceTimersByTimeAsync(1400000);
     const summary = await run;
-    const rows = read(output) as (Row & { kind: string })[];
+    const rows = readRecords(output);
     expect(rows.filter((row) => row.kind === "capacity_seed")).toHaveLength(
       4000,
     );
