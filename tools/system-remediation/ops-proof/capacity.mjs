@@ -491,125 +491,141 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
       await new Promise((resolve) => setTimeout(resolve, Math.max(1, wait)));
     }
   };
-  try {
-    for (const entry of schedule) {
-      primeSeeds(entry.scheduledMs);
-      const prepared = entry.item.stageOrder
-        ? await preparations.get(entry.sequence)
-        : { item: entry.item, seed: null };
-      if (entry.item.stageOrder) preparations.delete(entry.sequence);
-      // Wake for the absolute START due time first. Only then apply actual
-      // spacing and rolling-budget floors. Anchoring every sleep to the prior
-      // wakeup would accumulate even constant timer lateness across4500 starts.
-      await waitUntil(entry.scheduledMs);
-      const spacing = 60000 / baseline[entry.family].perMinute;
-      let targetMs = entry.scheduledMs;
-      if (
-        (profile === "uniform" || entry.family === "dispatch") &&
-        familyLastLaunch[entry.family] !== undefined
-      ) {
-        targetMs = Math.max(targetMs, familyLastLaunch[entry.family] + spacing);
-      }
-      const launches = familyLaunches[entry.family];
-      if (launches.length >= baseline[entry.family].perMinute) {
-        targetMs = Math.max(
-          targetMs,
-          launches[launches.length - baseline[entry.family].perMinute] + 60000,
-        );
-      }
-      await waitUntil(targetMs);
-      // Compare actual differences as well as absolute sums: floating-point
-      // addition can round last+60000 down while now-last is still below60000.
-      // Never tolerate even that early rolling boundary or spacing deficit.
-      while (true) {
-        const now = performance.now() - start;
-        const prior = familyLastLaunch[entry.family];
-        const spacingWait =
+  // Independent family lanes share one actual t0 and one in-flight bound.
+  // Awaiting a real dispatch seed must not hold up duly scheduled intake or
+  // reports. Each family still admits sequentially under its own hard floors.
+  const runFamily = async (family) => {
+    try {
+      for (const entry of schedule.filter((row) => row.family === family)) {
+        if (family === "dispatch") primeSeeds(entry.scheduledMs);
+        const prepared = entry.item.stageOrder
+          ? await preparations.get(entry.sequence)
+          : { item: entry.item, seed: null };
+        if (entry.item.stageOrder) preparations.delete(entry.sequence);
+        // Wake for the absolute START due time first. Only then apply actual
+        // spacing and rolling-budget floors. Anchoring every sleep to the prior
+        // wakeup would accumulate even constant timer lateness across4500 starts.
+        await waitUntil(entry.scheduledMs);
+        const spacing = 60000 / baseline[entry.family].perMinute;
+        let targetMs = entry.scheduledMs;
+        if (
           (profile === "uniform" || entry.family === "dispatch") &&
-          prior !== undefined
-            ? spacing - (now - prior)
-            : 0;
-        const budgetWait =
-          launches.length >= baseline[entry.family].perMinute
-            ? 60000 -
-              (now -
-                launches[launches.length - baseline[entry.family].perMinute])
-            : 0;
-        const wait = Math.max(spacingWait, budgetWait);
-        if (wait <= 0) break;
-        await new Promise((resolve) => setTimeout(resolve, Math.max(1, wait)));
-      }
-      // Do not queue and then falsely report the requested arrival rate as met.
-      const overloaded = active.size >= plan.maxInFlight;
-      const attemptedMs = performance.now() - start;
-      const late = attemptedMs >= plan.durationSeconds * 1000;
-      const launchedMs =
-        late || overloaded || prepared.error ? null : attemptedMs;
-      if (launchedMs !== null) {
-        familyLastLaunch[entry.family] = launchedMs;
-        launches.push(launchedMs);
-      }
-      const job = (async () => {
-        let result;
-        try {
-          result = late
-            ? {
-                latencyMs: null,
-                httpStatus: null,
-                error:
-                  "Load generator admission window elapsed; request not sent",
-              }
-            : overloaded
+          familyLastLaunch[entry.family] !== undefined
+        ) {
+          targetMs = Math.max(
+            targetMs,
+            familyLastLaunch[entry.family] + spacing,
+          );
+        }
+        const launches = familyLaunches[entry.family];
+        if (launches.length >= baseline[entry.family].perMinute) {
+          targetMs = Math.max(
+            targetMs,
+            launches[launches.length - baseline[entry.family].perMinute] +
+              60000,
+          );
+        }
+        await waitUntil(targetMs);
+        // Compare actual differences as well as absolute sums: floating-point
+        // addition can round last+60000 down while now-last is still below60000.
+        // Never tolerate even that early rolling boundary or spacing deficit.
+        while (true) {
+          const now = performance.now() - start;
+          const prior = familyLastLaunch[entry.family];
+          const spacingWait =
+            (profile === "uniform" || entry.family === "dispatch") &&
+            prior !== undefined
+              ? spacing - (now - prior)
+              : 0;
+          const budgetWait =
+            launches.length >= baseline[entry.family].perMinute
+              ? 60000 -
+                (now -
+                  launches[launches.length - baseline[entry.family].perMinute])
+              : 0;
+          const wait = Math.max(spacingWait, budgetWait);
+          if (wait <= 0) break;
+          await new Promise((resolve) =>
+            setTimeout(resolve, Math.max(1, wait)),
+          );
+        }
+        // Do not queue and then falsely report the requested arrival rate as met.
+        const overloaded = active.size >= plan.maxInFlight;
+        const attemptedMs = performance.now() - start;
+        const late = attemptedMs >= plan.durationSeconds * 1000;
+        const launchedMs =
+          late || overloaded || prepared.error ? null : attemptedMs;
+        if (launchedMs !== null) {
+          familyLastLaunch[entry.family] = launchedMs;
+          launches.push(launchedMs);
+        }
+        const job = (async () => {
+          let result;
+          try {
+            result = late
               ? {
                   latencyMs: null,
                   httpStatus: null,
                   error:
-                    "Load generator maxInFlight exhausted; request not sent",
+                    "Load generator admission window elapsed; request not sent",
                 }
-              : prepared.error
-                ? { latencyMs: null, httpStatus: null, error: prepared.error }
-                : await measure(plan.origin, prepared.item);
-        } catch (error) {
-          result = { latencyMs: null, httpStatus: null, error: error.message };
-        }
-        const record = {
-          taskId: "SR-OPS-PROOF-001",
-          kind: "capacity_request",
-          ...provenance,
-          isolatedResourceId: plan.isolatedResourceId,
-          baselinePath,
-          baselineSha256,
-          observedAt: new Date().toISOString(),
-          workload: entry.family,
-          sequence: entry.sequence,
-          method: "POST",
-          path: prepared.item.path,
-          requestId: entry.item.headers["x-request-id"],
-          requestSha256: digest(JSON.stringify(entry.item.body)),
-          scheduledMs: entry.scheduledMs,
-          clockOriginMs: start,
-          attemptedMs,
-          launchedMs,
-          finishedMs: launchedMs === null ? null : performance.now() - start,
-          schedulingLagMs: attemptedMs - entry.scheduledMs,
-          profile,
-          ...result,
-        };
-        records.push(record);
-        appendFileSync(output, `${JSON.stringify(record)}\n`);
-      })();
-      active.add(job);
-      job.then(
-        () => active.delete(job),
-        (error) => {
-          producerFailures.push(error);
-          active.delete(job);
-        },
-      );
+              : overloaded
+                ? {
+                    latencyMs: null,
+                    httpStatus: null,
+                    error:
+                      "Load generator maxInFlight exhausted; request not sent",
+                  }
+                : prepared.error
+                  ? { latencyMs: null, httpStatus: null, error: prepared.error }
+                  : await measure(plan.origin, prepared.item);
+          } catch (error) {
+            result = {
+              latencyMs: null,
+              httpStatus: null,
+              error: error.message,
+            };
+          }
+          const record = {
+            taskId: "SR-OPS-PROOF-001",
+            kind: "capacity_request",
+            ...provenance,
+            isolatedResourceId: plan.isolatedResourceId,
+            baselinePath,
+            baselineSha256,
+            observedAt: new Date().toISOString(),
+            workload: entry.family,
+            sequence: entry.sequence,
+            method: "POST",
+            path: prepared.item.path,
+            requestId: entry.item.headers["x-request-id"],
+            requestSha256: digest(JSON.stringify(entry.item.body)),
+            scheduledMs: entry.scheduledMs,
+            clockOriginMs: start,
+            attemptedMs,
+            launchedMs,
+            finishedMs: launchedMs === null ? null : performance.now() - start,
+            schedulingLagMs: attemptedMs - entry.scheduledMs,
+            profile,
+            ...result,
+          };
+          records.push(record);
+          appendFileSync(output, `${JSON.stringify(record)}\n`);
+        })();
+        active.add(job);
+        job.then(
+          () => active.delete(job),
+          (error) => {
+            producerFailures.push(error);
+            active.delete(job);
+          },
+        );
+      }
+    } catch (error) {
+      producerFailures.push(error);
     }
-  } catch (error) {
-    producerFailures.push(error);
-  }
+  };
+  await Promise.all(Object.keys(baseline).map(runFamily));
   await Promise.allSettled([...preparations.values(), ...active]);
   if (producerFailures.length === 1) throw producerFailures[0];
   if (producerFailures.length)

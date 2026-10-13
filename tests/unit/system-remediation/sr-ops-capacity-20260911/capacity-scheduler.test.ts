@@ -427,7 +427,11 @@ describe("actual capacity scheduler boundaries across all families", () => {
     const rows = read(output);
     const booking = rows.filter((row) => row.workload === "booking");
     expect(booking.filter((row) => row.launchedMs === 0)).toHaveLength(50);
-    expect(booking.filter((row) => row.launchedMs < 50000)).toHaveLength(50);
+    expect(
+      booking.filter(
+        (row) => row.launchedMs !== null && row.launchedMs < 50000,
+      ),
+    ).toHaveLength(50);
     expect(summary.workflows.booking.requests).toBe(60);
     expect(summary.workflows.dispatch.requests).toBe(300);
     expect(summary.workflows.report.requests).toBe(30);
