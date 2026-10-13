@@ -13,6 +13,8 @@ export type ThrottleResponse = {
   once(event: "finish", callback: () => void): unknown;
 };
 export type ThrottleObservationSummary = {
+  clockOriginMs: number;
+  startedAt: string;
   storageType: string;
   calls: number;
   inboundRequests: number;

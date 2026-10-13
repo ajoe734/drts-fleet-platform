@@ -19,6 +19,7 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
   const entries = storage.storage;
   const context = new AsyncLocalStorage();
   const start = performance.now();
+  const startedAt = new Date().toISOString();
   const events = [];
   const restores = [];
   const watched = new WeakSet();
@@ -215,6 +216,8 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
     throw new AggregateError(failures, "Capacity observer setup failed");
   }
   const summary = () => ({
+    clockOriginMs: start,
+    startedAt,
     storageType: storage.constructor.name,
     calls,
     inboundRequests,
