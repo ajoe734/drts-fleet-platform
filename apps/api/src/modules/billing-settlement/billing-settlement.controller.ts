@@ -428,6 +428,33 @@ export class BillingSettlementController {
     );
   }
 
+  @Get("driver/profile/statements")
+  @RequireRealms("driver")
+  listDriverOwnStatements(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Query("period") period?: string,
+    @Query("periodMonth") periodMonth?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return this.listDriverStatements(
+      identity,
+      period,
+      periodMonth,
+      undefined,
+      requestId,
+    );
+  }
+
+  @Get("driver/profile/statements/:statementId")
+  @RequireRealms("driver")
+  getDriverOwnStatement(
+    @Param("statementId") statementId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return this.getDriverStatement(statementId, identity, requestId);
+  }
+
   @Get("reimbursements")
   listReimbursementBatches(
     @Query("status") status?: "pending" | "paid",
