@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Linking,
@@ -37,6 +37,19 @@ export function DriverStatementRow({
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false);
   const generation = useRef(0);
+  const parentStatement = useRef(statement);
+  const publishedStatement = useRef<DriverStatementRecord | null>(null);
+  useLayoutEffect(() => {
+    if (parentStatement.current === statement) return;
+    parentStatement.current = statement;
+    // Our own completed read is published through onLoaded. A separately
+    // refreshed parent record cancels reads started from the previous row.
+    if (publishedStatement.current === statement) return;
+    generation.current += 1;
+    inFlight.current = false;
+    setBusy(null);
+    setError(null);
+  }, [statement]);
   useEffect(
     () => () => {
       generation.current += 1;
@@ -64,6 +77,7 @@ export function DriverStatementRow({
       );
       if (generation.current !== requestGeneration) return;
       setHasDetail(true);
+      publishedStatement.current = record;
       onLoaded(record);
       if (operation === "download") {
         const target = resolveDriverStatementDownload(record);
@@ -84,8 +98,10 @@ export function DriverStatementRow({
         setError(formatDriverError(readError, copy.errorFallback));
       }
     } finally {
-      inFlight.current = false;
-      if (generation.current === requestGeneration) setBusy(null);
+      if (generation.current === requestGeneration) {
+        inFlight.current = false;
+        setBusy(null);
+      }
     }
   };
 

@@ -60,6 +60,7 @@ type Node = {
 };
 type Renderer = ReactTestRenderer & {
   root: { findAll(predicate: (node: Node) => boolean): Node[] };
+  update(element: React.ReactElement): void;
 };
 const renderers: Renderer[] = [];
 const copy = driverStrings.earnings.statement;
@@ -105,6 +106,28 @@ function freshRecord(): DriverStatementRecord {
     feePlanVersion: "plan-fresh",
     payoutStatus: "paid",
     artifactUrl: "https://example.invalid/current.pdf",
+  });
+}
+function refreshedRecord(): DriverStatementRecord {
+  return record({
+    receiptNo: "RECEIPT-REFRESHED",
+    feePlanVersion: "plan-refreshed",
+    payoutStatus: "paid",
+    grossEarning: money(25000),
+    netAmount: money(24000),
+    lines: [
+      {
+        lineId: "line-refreshed",
+        orderId: "order-refreshed",
+        grossEarning: money(25000),
+        serviceFee: money(1000),
+        subsidy: money(0),
+        netAmount: money(24000),
+        reimbursementRequired: false,
+      },
+    ],
+    artifactUrl: "https://example.invalid/refreshed.pdf",
+    updatedAt: "2026-10-13T00:00:00Z",
   });
 }
 function deferred<T>() {
@@ -417,6 +440,33 @@ describe("Driver monthly statement detail and download", () => {
     expect(allText(renderer)).not.toContain("Could not open document");
   });
 
+  it("keeps an accepted download pending while its own fresh record is published into the actual Earnings screen", async () => {
+    const pendingOpen = deferred<void>();
+    boundary.openURL.mockReturnValueOnce(pendingOpen.promise);
+    const renderer = await mount(React.createElement(EarningsScreen));
+
+    await press(renderer, copy.download);
+
+    const row = renderer.root.findAll(
+      (node) => node.type === DriverStatementRow,
+    )[0]!;
+    expect((row.props.statement as DriverStatementRecord).receiptNo).toBe(
+      "RECEIPT-FRESH",
+    );
+    expect(allText(renderer)).toContain("RECEIPT-FRESH");
+    expect(allText(renderer)).toContain(copy.opening);
+    expect(button(renderer, copy.download).props.disabled).toBe(true);
+    expect(boundary.get).toHaveBeenCalledTimes(1);
+    expect(boundary.openURL).toHaveBeenCalledTimes(1);
+
+    await act(async () => pendingOpen.resolve());
+
+    expect(allText(renderer)).not.toContain(copy.opening);
+    expect(button(renderer, copy.download).props.disabled).toBe(false);
+    expect(allText(renderer)).toContain("RECEIPT-FRESH");
+    expect(allText(renderer)).toContain("order-detail");
+  });
+
   it("does not open or republish a pending response after its row is removed", async () => {
     const pending = deferred<DriverStatementRecord>();
     const onLoaded = vi.fn();
@@ -438,6 +488,145 @@ describe("Driver monthly statement detail and download", () => {
     });
     expect(onLoaded).not.toHaveBeenCalled();
     expect(boundary.openURL).not.toHaveBeenCalled();
+  });
+
+  it.each(["expanded", "collapsed"] as const)(
+    "shows refreshed same-statement payout, receipt, amounts and lines after viewing %s detail in the actual Earnings screen",
+    async (visibility) => {
+      const old = record();
+      const refreshed = refreshedRecord();
+      boundary.get.mockResolvedValue(old);
+      boundary.getList
+        .mockResolvedValueOnce([old])
+        .mockResolvedValueOnce([refreshed]);
+      const renderer = await mount(React.createElement(EarningsScreen));
+      await press(renderer, copy.view);
+      if (visibility === "collapsed") await press(renderer, copy.close);
+
+      await press(renderer, driverStrings.common.refresh);
+
+      expect(boundary.getList).toHaveBeenCalledTimes(2);
+      expect(allText(renderer)).toContain("RECEIPT-REFRESHED");
+      expect(allText(renderer)).toContain("plan-refreshed");
+      expect(allText(renderer)).toContain("已撥款");
+      expect(allText(renderer)).toContain("240.00");
+      expect(allText(renderer)).not.toContain("RECEIPT-OLD");
+      expect(allText(renderer)).not.toContain("待撥款");
+      expect(allText(renderer)).not.toContain("order-detail");
+      if (visibility === "expanded") {
+        expect(allText(renderer)).toContain("order-refreshed");
+        expect(allText(renderer)).toContain("250.00");
+      } else {
+        expect(allText(renderer)).not.toContain("order-refreshed");
+        expect(button(renderer, copy.view).props.disabled).toBe(false);
+      }
+      expect(boundary.get).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("makes a previously missing artifact downloadable after normal refresh and still reads its current URL before opening", async () => {
+    const missing = record({ artifactUrl: null });
+    const refreshed = refreshedRecord();
+    boundary.get
+      .mockResolvedValueOnce(missing)
+      .mockResolvedValueOnce(refreshed);
+    boundary.getList
+      .mockResolvedValueOnce([missing])
+      .mockResolvedValueOnce([refreshed]);
+    const renderer = await mount(React.createElement(EarningsScreen));
+    await press(renderer, copy.view);
+    expect(button(renderer, copy.download).props.disabled).toBe(true);
+    expect(allText(renderer)).toContain(copy.missing);
+
+    await press(renderer, driverStrings.common.refresh);
+
+    expect(button(renderer, copy.download).props.disabled).toBe(false);
+    expect(allText(renderer)).not.toContain(copy.missing);
+    expect(boundary.openURL).not.toHaveBeenCalled();
+    await press(renderer, copy.download);
+    expect(boundary.get).toHaveBeenCalledTimes(2);
+    expect(boundary.openURL).toHaveBeenCalledWith(refreshed.artifactUrl);
+    expect(allText(renderer)).toContain("RECEIPT-REFRESHED");
+    expect(allText(renderer)).toContain("order-refreshed");
+  });
+
+  it.each(["detail", "download"] as const)(
+    "discards a late pre-refresh %s response instead of reverting the actual Earnings row or opening its old artifact",
+    async (operation) => {
+      const old = record();
+      const refreshed = refreshedRecord();
+      const pending = deferred<DriverStatementRecord>();
+      boundary.get.mockReturnValueOnce(pending.promise);
+      boundary.getList
+        .mockResolvedValueOnce([old])
+        .mockResolvedValueOnce([refreshed]);
+      const renderer = await mount(React.createElement(EarningsScreen));
+      await press(
+        renderer,
+        operation === "download" ? copy.download : copy.view,
+      );
+      await press(renderer, driverStrings.common.refresh);
+      expect(allText(renderer)).toContain("RECEIPT-REFRESHED");
+      await act(async () => pending.resolve(old));
+      expect(allText(renderer)).not.toContain(copy.loading);
+      expect(allText(renderer)).not.toContain(copy.opening);
+
+      const row = renderer.root.findAll(
+        (node) => node.type === DriverStatementRow,
+      )[0]!;
+      expect((row.props.statement as DriverStatementRecord).receiptNo).toBe(
+        "RECEIPT-REFRESHED",
+      );
+      expect(allText(renderer)).toContain("RECEIPT-REFRESHED");
+      expect(allText(renderer)).not.toContain("RECEIPT-OLD");
+      expect(allText(renderer)).toContain("240.00");
+      expect(boundary.openURL).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a post-refresh read pending when an older canceled response settles, then publishes only the current read", async () => {
+    const old = record();
+    const refreshed = refreshedRecord();
+    const pendingOld = deferred<DriverStatementRecord>();
+    const pendingCurrent = deferred<DriverStatementRecord>();
+    const onLoaded = vi.fn();
+    boundary.get
+      .mockReturnValueOnce(pendingOld.promise)
+      .mockReturnValueOnce(pendingCurrent.promise);
+    const renderer = await mount(
+      React.createElement(DriverStatementRow, {
+        statement: old,
+        last: true,
+        onLoaded,
+      }),
+    );
+    await press(renderer, copy.download);
+    await act(async () => {
+      renderer.update(
+        React.createElement(DriverStatementRow, {
+          statement: refreshed,
+          last: true,
+          onLoaded,
+        }),
+      );
+    });
+    expect(button(renderer, copy.download).props.disabled).toBe(false);
+    const currentPress = button(renderer, copy.download).props
+      .onPress as () => void;
+    await act(async () => currentPress());
+    await act(async () => pendingOld.resolve(old));
+    expect(onLoaded).not.toHaveBeenCalled();
+    expect(boundary.openURL).not.toHaveBeenCalled();
+    expect(allText(renderer)).toContain(copy.opening);
+    await act(async () => currentPress());
+    expect(boundary.get).toHaveBeenCalledTimes(2);
+
+    await act(async () => pendingCurrent.resolve(refreshed));
+    expect(onLoaded).toHaveBeenCalledTimes(1);
+    expect(onLoaded).toHaveBeenCalledWith(refreshed);
+    expect(boundary.openURL).toHaveBeenCalledOnce();
+    expect(boundary.openURL).toHaveBeenCalledWith(refreshed.artifactUrl);
+    expect(allText(renderer)).not.toContain(copy.opening);
   });
 
   it("separates a failed monthly-list read from no statements and offers an actual refresh", async () => {
