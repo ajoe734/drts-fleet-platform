@@ -27,6 +27,13 @@ export type ThrottleObservationSummary = {
   restorationFailures: number;
   stopped: boolean;
   complete: boolean;
+  admissionFeedback: {
+    reserved: number;
+    guardObserved: number;
+    settled: number;
+    pending: number;
+    error: string | null;
+  };
   scope: string;
 };
 export type CapacityThrottleObserver = {
@@ -37,9 +44,13 @@ export type CapacityThrottleObserver = {
     ): {
       allowed?: boolean;
       reservedMs?: number;
-      waitMs?: number;
+      waitMs?: number | null;
       error?: string;
     };
+    waitForChange(
+      family: "booking" | "dispatch" | "report",
+      timeoutMs: number,
+    ): Promise<void>;
     complete(requestId: string): {
       error: string | null;
       guardMs?: number | null;

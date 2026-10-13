@@ -1,5 +1,12 @@
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -29,6 +36,9 @@ let observer: ReturnType<typeof observeCapacityThrottle>;
 let directory: string;
 let expirationDelay: number;
 let omitGuard: boolean;
+let extraIngressDelay: number;
+let rawError: "429" | "deadline" | null;
+let rotateKey: boolean;
 const guards: { family: WorkloadFamily; at: number; blocked: boolean }[] = [];
 const runTag = "guard-fixture";
 
@@ -68,6 +78,21 @@ const rows = (output: string): RequestRow[] =>
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line));
+function capture(output: string) {
+  const target = process.env.C123_ADMISSION_EVIDENCE_DIR;
+  if (!target) return;
+  mkdirSync(target, { recursive: true });
+  const name = output.split("/").at(-1)!;
+  copyFileSync(output, resolve(target, name));
+  copyFileSync(
+    `${output}.summary.json`,
+    resolve(target, `${name}.summary.json`),
+  );
+  writeFileSync(
+    resolve(target, `${name}.guard.json`),
+    JSON.stringify({ guards, observation: observer.snapshot() }),
+  );
+}
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
@@ -77,6 +102,9 @@ beforeEach(() => {
   observer = observeCapacityThrottle(storage, runTag);
   expirationDelay = 25;
   omitGuard = false;
+  extraIngressDelay = 0;
+  rawError = null;
+  rotateKey = false;
   guards.length = 0;
   boundary.request.mockReset();
   boundary.request.mockImplementation((url, options, callback) => {
@@ -135,7 +163,7 @@ beforeEach(() => {
                 response,
                 () =>
                   storage.increment(
-                    `genuine-${family}`,
+                    `genuine-${family}${rotateKey && sequence === 1 ? "-changed" : ""}`,
                     60000,
                     limit,
                     1000,
@@ -153,6 +181,8 @@ beforeEach(() => {
             });
             response.statusCode = decision.isBlocked ? 429 : 201;
           }
+          if (rawError === "deadline") return;
+          if (rawError === "429") response.statusCode = 429;
           callback(response);
           response.emit(
             "data",
@@ -167,7 +197,7 @@ beforeEach(() => {
           );
           response.emit("end");
           response.emit("finish");
-        }, ingressDelay);
+        }, ingressDelay + extraIngressDelay);
       },
     });
     return req;
@@ -195,6 +225,7 @@ it.each(["uniform", "concurrent"] as const)(
     await vi.advanceTimersByTimeAsync(125000);
     const summary = await run;
     const actual = rows(output);
+    capture(output);
     expect(actual).toHaveLength(397);
     expect(actual.filter((row) => row.httpStatus === 429)).toHaveLength(0);
     expect(summary.result).toBe("measurements_within_targets");
@@ -220,6 +251,7 @@ it("retains all5850/4000 and the genuine899800ms tail with variable ingress and 
   await vi.advanceTimersByTimeAsync(1000000);
   const summary = await run;
   const actual = rows(output);
+  capture(output);
   expect(actual.filter((row) => row.kind === "capacity_request")).toHaveLength(
     5850,
   );
@@ -243,7 +275,7 @@ it("retains all5850/4000 and the genuine899800ms tail with variable ingress and 
       expect(row.blocked).toBe(false);
     });
   }
-});
+}, 30000);
 
 it("refuses infeasible expiration delay inside900s and retains every unsent outcome", async () => {
   expirationDelay = 2000;
@@ -257,6 +289,7 @@ it("refuses infeasible expiration delay inside900s and retains every unsent outc
   await vi.advanceTimersByTimeAsync(1100000);
   const summary = await run;
   const actual = rows(output).filter((row) => row.kind === "capacity_request");
+  capture(output);
   expect(actual).toHaveLength(5850);
   expect(summary.result).toBe("failed");
   expect(
@@ -266,7 +299,7 @@ it("refuses infeasible expiration delay inside900s and retains every unsent outc
     actual.every((row) => row.launchedMs === null || row.launchedMs < 900000),
   ).toBe(true);
   expect(guards.every((row) => !row.blocked)).toBe(true);
-});
+}, 30000);
 
 it("rejects successful HTTP without genuine matching guard observation", async () => {
   omitGuard = true;
@@ -274,9 +307,74 @@ it("rejects successful HTTP without genuine matching guard observation", async (
   const run = runPlan(plan(2), output, {}, { admission: observer.admission });
   await vi.advanceTimersByTimeAsync(35000);
   const summary = await run;
+  capture(output);
   expect(rows(output)).toHaveLength(13);
   expect(summary.result).toBe("failed");
   expect(rows(output).some((row) => row.error?.includes("admission"))).toBe(
     true,
   );
+});
+
+it.each(["429", "deadline"] as const)(
+  "preserves every raw %s refusal without retry or filtering",
+  async (error) => {
+    rawError = error;
+    const output = resolve(directory, `raw-${error}.jsonl`);
+    const run = runPlan(plan(2), output, {}, { admission: observer.admission });
+    await vi.advanceTimersByTimeAsync(95000);
+    const summary = await run;
+    const actual = rows(output);
+    capture(output);
+    expect(actual).toHaveLength(13);
+    expect(boundary.request).toHaveBeenCalledTimes(13);
+    expect(summary.result).toBe("failed");
+    expect(
+      actual.every(
+        (row) =>
+          row.error ===
+          (error === "429"
+            ? "HTTP 429"
+            : "Request deadline exceeded 30 seconds"),
+      ),
+    ).toBe(true);
+  },
+);
+
+it("rejects a guard arrival after the original window even when the client launch was timely", async () => {
+  extraIngressDelay = 250;
+  const output = resolve(directory, "late-guard.jsonl");
+  const run = runPlan(plan(2), output, {}, { admission: observer.admission });
+  await vi.advanceTimersByTimeAsync(65000);
+  const summary = await run;
+  const actual = rows(output);
+  capture(output);
+  expect(actual).toHaveLength(13);
+  expect(boundary.request).toHaveBeenCalledTimes(13);
+  expect(
+    actual.every((row) => row.launchedMs !== null && row.launchedMs < 2000),
+  ).toBe(true);
+  expect(
+    actual.some(
+      (row) =>
+        row.error === "Genuine guard admission outside the original window",
+    ),
+  ).toBe(true);
+  expect(summary.result).toBe("failed");
+});
+
+it("refuses measured key rotation rather than gaining a fresh admission budget", async () => {
+  rotateKey = true;
+  const output = resolve(directory, "changed-key.jsonl");
+  const run = runPlan(plan(2), output, {}, { admission: observer.admission });
+  await vi.advanceTimersByTimeAsync(65000);
+  const summary = await run;
+  const actual = rows(output);
+  capture(output);
+  expect(actual).toHaveLength(13);
+  expect(
+    actual.some((row) =>
+      row.error?.includes("key, identity or policy changed"),
+    ),
+  ).toBe(true);
+  expect(summary.result).toBe("failed");
 });

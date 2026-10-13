@@ -39,7 +39,12 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
   // Read the actual singleton counters; only its own callbacks release hits.
   const admissions = new Map();
   const families = new Map();
+  const waiters = new Map();
   let admissionFailure = null;
+  const notifyAdmission = (key) => {
+    for (const [name, family] of families)
+      if (family.key === key) waiters.get(name)?.forEach((wake) => wake());
+  };
   const failAdmission = (message) => {
     admissionFailure ??= `Capacity admission feedback: ${message}`;
   };
@@ -145,6 +150,7 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
     const actual = state(key, name);
     if (!actual || actual.isBlocked)
       failAdmission("actual measured key is blocked or absent");
+    notifyAdmission(key);
   };
   const admission = {
     tryReserve(familyName, requestId) {
@@ -188,9 +194,11 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
           allowed: false,
           // At the observed rolling boundary, re-read the actual counter. A
           // delayed expiry still owns its slot even after60000ms have elapsed.
-          waitMs: family.guardTimes.length
-            ? Math.max(1, 60000 - (now - family.guardTimes[0]))
-            : 1,
+          waitMs:
+            family.guardTimes.length + family.pending >= limit &&
+            family.guardTimes.length
+              ? 60000 - (now - family.guardTimes[0])
+              : null,
         };
       const receipt = {
         family: familyName,
@@ -211,6 +219,24 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
         pending: family.pending,
       }));
       return { allowed: true, reservedMs: now };
+    },
+    waitForChange(familyName, timeoutMs) {
+      // Wake on genuine counter/guard observation, or at the exact rolling or
+      // admission deadline. No guessed ingress buffer or repeated polling.
+      return new Promise((resolve) => {
+        let listeners = waiters.get(familyName);
+        if (!listeners) {
+          listeners = new Set();
+          waiters.set(familyName, listeners);
+        }
+        const wake = () => {
+          clearTimeout(timer);
+          listeners.delete(wake);
+          resolve();
+        };
+        const timer = setTimeout(wake, Math.max(1, timeoutMs));
+        listeners.add(wake);
+      });
     },
     complete(requestId) {
       const receipt = admissions.get(requestId);
@@ -264,6 +290,7 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
               : "outside_increment",
         context: requestContext(),
       }));
+      notifyAdmission(key);
       return result;
     });
     watched.add(entry.totalHits);
@@ -286,7 +313,13 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
     replace(storage, "increment", function (...args) {
       const [key, ttl, limit, blockDuration, name] = args;
       const guardMs = performance.now();
-      const incoming = requestContext();
+      let incoming = null;
+      try {
+        incoming = requestContext();
+      } catch {
+        recordingFailures++;
+        failAdmission("could not correlate genuine guard identity");
+      }
       const call = ++calls;
       if (context.getStore()) correlatedCalls++;
       record(() => ({
@@ -327,12 +360,16 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
           (value) => {
             const receipt = admissions.get(incoming?.requestId);
             if (receipt) {
-              receipt.result = {
-                totalHits: value.totalHits,
-                isBlocked: value.isBlocked,
-              };
-              if (value.isBlocked)
-                failAdmission("genuine guard rejected a measured request");
+              try {
+                receipt.result = {
+                  totalHits: value.totalHits,
+                  isBlocked: value.isBlocked,
+                };
+                if (value.isBlocked)
+                  failAdmission("genuine guard rejected a measured request");
+              } catch {
+                failAdmission("could not observe genuine guard result");
+              }
             }
             record(() => ({
               kind: "capacity_throttle_result",
@@ -385,6 +422,18 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
       dropped === 0 &&
       recordingFailures === 0 &&
       restorationFailures === 0,
+    admissionFeedback: {
+      reserved: admissions.size,
+      guardObserved: [...admissions.values()].filter(
+        (row) => row.guardMs !== null,
+      ).length,
+      settled: [...admissions.values()].filter((row) => row.settled).length,
+      pending: [...families.values()].reduce(
+        (count, family) => count + family.pending,
+        0,
+      ),
+      error: admissionFailure,
+    },
     scope:
       "Actual singleton calls and hit mutations; owned inbound requests only. No historical 429 inference or capacity credit.",
   });
@@ -431,6 +480,8 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
     stop() {
       if (stopped) return;
       stopped = true;
+      for (const listeners of waiters.values())
+        listeners.forEach((wake) => wake());
       const failures = [];
       for (const restore of restores.reverse()) {
         try {

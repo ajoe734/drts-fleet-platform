@@ -575,12 +575,11 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
               entry.item.headers["x-request-id"],
             );
             if (admission.allowed || admission.error) break;
-            await sleepFor(
-              Math.min(
-                admission.waitMs ?? 1,
-                plan.durationSeconds * 1000 - (performance.now() - start),
-              ),
-              clock,
+            const remaining =
+              plan.durationSeconds * 1000 - (performance.now() - start);
+            await lifecycle.admission.waitForChange(
+              entry.family,
+              Math.min(admission.waitMs ?? remaining, remaining),
             );
           }
         }
@@ -638,6 +637,14 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
             // cannot turn a successful HTTP response into capacity evidence.
             if (admissionFeedback.error && !result.error)
               result.error = admissionFeedback.error;
+            if (
+              !result.error &&
+              (!Number.isFinite(admissionFeedback.guardMs) ||
+                admissionFeedback.guardMs - start >=
+                  plan.durationSeconds * 1000)
+            )
+              result.error =
+                "Genuine guard admission outside the original window";
           }
           const record = {
             taskId: "SR-OPS-PROOF-001",
