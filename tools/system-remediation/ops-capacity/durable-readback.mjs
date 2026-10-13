@@ -468,6 +468,14 @@ export function summarizeLag(rows, lagKey) {
 }
 
 export function assertAcceptancePassed(acceptance) {
+  if (
+    acceptance?.diagnostics &&
+    (acceptance.diagnostics.acceptance !== "established" ||
+      !Array.isArray(acceptance.diagnostics.failures) ||
+      acceptance.diagnostics.failures.length)
+  ) {
+    throw new Error("Capacity diagnostic/cleanup failures prevent acceptance");
+  }
   if (!acceptance?.summary) {
     throw new Error("Missing workload summary");
   }
