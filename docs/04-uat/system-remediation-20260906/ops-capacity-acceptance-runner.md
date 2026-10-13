@@ -870,3 +870,62 @@ manual/public-entry/H3F2/HOLD/F2/ZEROremoved floors retain their prior state.
 This is an ordinary source checkpoint, stays `in_progress`, and is not ready
 for candidate handoff. No product VM runtime, cloud mutation, history rewrite,
 alternate acceptance route or unchanged hosted retry occurs.
+
+### Absolute admission and measured timer wake repair (2026-10-13)
+
+The durable Supervisor clarification in the original task specification records
+its04:27 decision:900seconds is the measured arrival/admission window, with
+real readiness before measured t0 and bounded response/report completion after
+it under the original deadlines. This supersedes the pending proposal above;
+no additional dispatch-burst profile or spacing waiver was adopted. The original
+uniform/concurrent schedules, hard floors and rolling budgets are retained.
+
+This owner unit uses independent family admission lanes with one measured t0,
+the existing shared measured-request in-flight bound and eight-slot real seed
+preparation. A slow dispatch seed cannot serialize intake/report admission.
+Each lane first waits for its absolute due time and then verifies its actual
+spacing and rolling budget. Subsequent floor waits use the preceding actual
+timer wake latency to wake ahead and re-check the boundary. The positive1us
+sleep bias prevents arithmetic rounding down; it is an additional wait, never
+an early-launch tolerance. Every wake re-checks actual time differences without
+a spacing/budget tolerance, retains a minimum1ms sleep, and never busy-spins.
+
+At/after900seconds, measured HTTP admission is refused. Its planned outcome is
+still written with actual `attemptedMs`, null `launchedMs`/`finishedMs` and an
+explicit error. Already admitted requests drain under the unchanged30second
+HTTP deadline. All outcomes remain in the denominator. The actual harness
+accepts these explicit unsent diagnostic rows, independently reads all successful
+owned resources and still rejects the missing/error arrivals at the formal gate.
+The run-owned initial50-report readiness has a separate real
+`preparationStartedAt`; only initial job/snapshot evidence uses that bound.
+All450 measured report creations retain the actual measured t0, and every
+initial/measured job retains its genuine first-start/completion/5min/30min SLO,
+marker, ownership and independent SQL requirements.
+
+Evidence appendix `E` extends the original task tree:
+`.local/c123-report-worker-20261012/absolute-start-continuation-20261013/`.
+Published pre-change head was `425f2c24d289c48889dbdbaf0b1bee10f3a70674`.
+Final code checkpoint is `b02e58da384440266d936731bee586a92c5f612d`;
+exact subsequent verification/publication identity is recorded in
+`E/verification-manifest.json` and `E/publication.json`. All intermediate
+failures remain retained, including the incomplete harness input-identity copy,
+canonical dependency-link typecheck failure, feasible0/2ms fixture initially
+mislabeled as a refusal case, and strict fractional timing failures before wake
+feedback. None is counted as a passing check.
+
+| Finding / acceptance                             | Actual source and repair                                                                                                                                                   | Old reproduction → repaired result                                                                                                                                                                                                                                                                                | Commands / evidence                                                                                                                                                                           | Remaining limits                                                                                                                                                                                |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Accumulated timer lateness / true seed readiness | Actual `runPlan`, `measure`, `prepareDispatchItem` and existing planner; absolute admission, independent lanes, measured wake feedback and exact actual difference checks. | Byte-identical original12-case probe:425f exits1 with4 red; b02e exits0,12/12. Uniform0.05/0.1ms end899805.596/899805.693ms; both1ms cases end899801ms instead of904299ms. All5850 measured/4000 staged rows, actual floors/budgets, latencies, raw results and cleared deadlines retained.                       | `node --experimental-vm-modules E/{old-timing,feedback-timing}/actual-timing-boundary.mjs <frozen-root> <explicit-full-SHA>`; original raw/summary files and hashes.                          | HTTP/clock/timer boundaries are controlled; this is actual producer regression, not real capacity or archived429 causality. Unachievable variable jitter must still refuse admission.           |
+| Late admission / bounded drain                   | Producer writes every unsent outcome honestly; actual harness preserves it for final diagnostics. Existing response deadline and all admitted outcomes remain.             | Actual synchronous boundary-stall regression retains5850 outcomes, refuses five late dispatches, sends5845, drains every sent request and returns failed. Original response-after900s positive, all raw429, overload, slow/failed seed, early-wake and0/250ms variable-lateness refusals remain passing controls. | Owned scheduler21/21; `E/feedback-scheduler.log`. Complete affected checks and strict raw verification are recorded in the final manifest.                                                    | A refusal is not a successful measured request or positive baseline credit. No counts/error/late records are removed.                                                                           |
+| Real report readiness before measured t0         | `assertReportWorkload` uses the separately recorded preparation origin only for initial50 jobs/snapshot; measured450 retain t0.                                            | Actual formal-gate positive and five invalid-origin/initial-before-readiness/snapshot-before-readiness/measured-before-t0 refusals pass. Initial50 and measured450 SQL/worker requirements remain.                                                                                                                | Frozen95b56 source affected suite175/175, ROOT/API strict types and scoped lint exit0; original25-case gate replay remains25/25. Final exact-source checks in `E/verification-manifest.json`. | Real PostgreSQL/worker lifecycle verification still requires the original authorized hosted workflow. Setup jobs never enter the5850 measured denominator.                                      |
+| Failed/partial diagnostics and cleanup           | Existing actual finalizer, independent owned SQL reads, observer restoration, app/pool cleanup, throttle trace retention and all prior guards retained.                    | Actual19-case harness preserves red/partial/absent/SQL/write/restoration/cleanup faults and legal synthetic positive; corrected complete input fixture rerun exits0.                                                                                                                                              | `E/verified-harness-95b56.log` and final exact-source replay. Earlier missing `input-identity.json` attempt remains excluded.                                                                 | External app/HTTP/producer-output/SQL boundaries controlled; no application/server/database runs on this VM.                                                                                    |
+| capacity_failed_summary_rejected                 | Formal original gate continues rejecting the exact24/74/14 error payload and every missing/invalid/red field.                                                              | Actual25/25 contract decisions and original hosted negative receipt remain preserved; no receipt is transferred to this new source.                                                                                                                                                                               | Original task evidence plus final manifest gate command/log/hash.                                                                                                                             | OPEN until matching new-candidate lifecycle evidence is recorded.                                                                                                                               |
+| capacity_same_candidate_full_900s_valid_baseline | OPEN. Source timing controls now pass; actual112/current375429 causality and complete new same-candidate hosted baseline remain unverified.                                | No new real full900s capacity result or acceptance receipt is claimed by these controlled regressions.                                                                                                                                                                                                            | Exact final review/CI/merge and Supervisor-authorized ORIGINAL `ops-capacity-acceptance.yml` remain required.                                                                                 | Preserve actual singleton inbound/key/hit/expiry/reset correlation; full900/4500/450, real50intake/50reports/500owned backlog, all latency/error/security/degradation/SQL/cleanup requirements. |
+
+Original Claude/Claude2/Gemini credit, published source history, F1–F6, original
+112/current375 raw errors and all original source/acceptance floors remain.
+All runtime CPU/billing/scaling/idle/recovery/PG-loss/cross-instance and
+full-system/native Android AND iOS/provider/financial/legal/manual/public-entry/
+H3F2/HOLD/F2/ZEROremoved requirements retain their prior state. This source
+checkpoint adds no policy/profile waiver, provider/cloud/production operation,
+VM runtime, history rewrite, alternative workflow or unchanged hosted retry.
