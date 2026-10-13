@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- The isolated CommonJS loader executes actual Driver TS/TSX modules with their own alias and React instance. */
 /* Task-local Node loader isolates Driver's @ alias from root Tenant tests.
  * Only native/location/router/storage/network boundaries are fixtures.
  * Trip, Canvas Field/Input/Btn, parser, proof, workflow, replay hook, client and SDK are real. */
@@ -10,6 +11,7 @@ const root = path.resolve(__dirname, "../../..");
 const app = path.join(root, "apps/driver-app");
 const appRequire = Module.createRequire(path.join(app, "package.json"));
 const React = appRequire("react");
+const JSXRuntime = appRequire("react/jsx-runtime");
 const { act, create } = appRequire("react-test-renderer");
 const ts = require("typescript");
 const [scenario, baseline] = process.argv.slice(2);
@@ -82,7 +84,7 @@ for (const ext of [".ts", ".tsx"])
 const originalLoad = Module._load;
 Module._load = function (request, parent, isMain) {
   if (request === "react") return React;
-  if (request === "react/jsx-runtime") return appRequire(request);
+  if (request === "react/jsx-runtime") return JSXRuntime;
   if (request === "react-native") return native;
   if (request === "@expo/vector-icons") return { Ionicons: "Ionicons" };
   if (request === "react-native-safe-area-context")
@@ -136,8 +138,11 @@ let task = {
 };
 let order = {
   orderId: "order-1",
-  fixedPrice: scenario === "fixed" || scenario === "order-switch",
-  quotedFare: { currency: "NTD", amountMinor: 12000 },
+  fixedPrice: scenario.startsWith("fixed") || scenario === "order-switch",
+  quotedFare: {
+    currency: scenario === "fixed-invalid" ? "USD" : "NTD",
+    amountMinor: 12000,
+  },
   pickup: { address: "fixture pickup" },
   dropoff: { address: "fixture dropoff" },
   proofRequirements: {
@@ -243,7 +248,7 @@ async function fill(r) {
     nightMinor: "0",
     aggregate: zeros ? "0" : "107",
   })) {
-    if (scenario === "fixed" && field === "aggregate") continue;
+    if (scenario.startsWith("fixed") && field === "aggregate") continue;
     await enter(r, field, value);
   }
   if (order.proofRequirements.expenseProofRequired) {
@@ -328,12 +333,42 @@ function assertCapture(command) {
     });
     if (scenario === "forwarded") {
       assert.equal(fields(r).length, 0);
-      assert.equal(
-        r.root.findAll(
-          (n) => n.type === "Pressable" && flatten(n) === "完成行程",
-        ).length,
-        0,
+      // Existing confirmed forwarded tasks retain their original permitted action.
+      // They do not get local actual-fare inputs or inferred amounts.
+      await press(r, "完成行程");
+      assert.equal(requests.length, 1);
+      assert.ok(!Object.hasOwn(requests[0].body, "actualFareBreakdown"));
+      assert.ok(!Object.hasOwn(requests[0].body, "fare"));
+    } else if (
+      ["remount", "identity-clear", "same-task-refresh"].includes(scenario)
+    ) {
+      await fill(r);
+      if (scenario === "remount") {
+        await act(async () => {
+          r.unmount();
+        });
+        await act(async () => {
+          r = create(React.createElement(Trip));
+        });
+      } else if (scenario === "identity-clear") {
+        await act(async () => {
+          await api.clearDriverProvisioning();
+        });
+        assert.equal(fields(r).length, 0);
+        await press(r, "重新整理");
+      } else await press(r, "重新整理");
+      if (scenario === "same-task-refresh")
+        assert.equal(fields(r)[0].props.value, "35");
+      else assert.ok(fields(r).every((n) => n.props.value === ""));
+      assert.equal(requests.length, 0);
+    } else if (scenario === "fixed-invalid") {
+      await fill(r);
+      assert.equal(fields(r).length, 4);
+      assert.equal(button(r, "完成行程").props.disabled, true);
+      assert.ok(
+        text(r).includes(driverStrings.trip.actualFare.errors.fixedFare),
       );
+      assert.equal(requests.length, 0);
     } else if (
       ["partial", "invalid", "missing-total", "overflow"].includes(scenario)
     ) {
@@ -368,10 +403,18 @@ function assertCapture(command) {
       });
       assert.equal(requests.length, 0);
       assert.ok(!store.has(pendingKey));
-    } else if (scenario === "tracking" || scenario === "proof") {
+    } else if (scenario === "tracking") {
       await fill(r);
       assert.equal(button(r, "完成行程").props.disabled, true);
       assert.equal(requests.length, 0);
+    } else if (scenario === "proof") {
+      await fill(r);
+      assert.ok(text(r).includes("完單前仍需補上 1 張佐證照片。"));
+      // Existing photo/signoff gaps are sent to server proof_pending handling;
+      // new fare capture must preserve that path and never invent evidence.
+      await press(r, "完成行程");
+      assertCapture(requests[0].body);
+      assert.ok(!Object.hasOwn(requests[0].body, "proof"));
     } else if (scenario === "reset" || scenario === "order-switch") {
       if (scenario === "reset") await fill(r);
       else {
@@ -394,14 +437,35 @@ function assertCapture(command) {
       await press(r, "重新整理");
       assert.ok(fields(r).every((n) => n.props.value === ""));
       if (scenario === "order-switch") {
-        assert.equal(button(r, "完成行程").props.disabled, true);
-        assert.ok(fields(r).every((n) => n.props.editable === false));
+        assert.equal(
+          fields(r).length,
+          0,
+          "refresh hides controls while matching order is unavailable",
+        );
+        assert.equal(
+          r.root.findAll(
+            (n) => n.type === "Pressable" && flatten(n) === "完成行程",
+          ).length,
+          0,
+        );
         await act(async () => {
           deferredOrder = null;
           release();
         });
         assert.equal(fields(r).length, 5);
         assert.equal(button(r, "完成行程").props.disabled, false);
+        for (const field of [
+          "startMinor",
+          "distanceMinor",
+          "delayMinor",
+          "nightMinor",
+        ])
+          await enter(r, field, "1");
+        assert.equal(
+          button(r, "完成行程").props.disabled,
+          true,
+          "new metered order requires its own explicit aggregate",
+        );
       }
       assert.equal(requests.length, 0);
     } else {
@@ -426,7 +490,9 @@ function assertCapture(command) {
           assert.ok(!Object.hasOwn(requests[0].body, "actualFareBreakdown"));
         } else assertCapture(requests[0].body);
         if (scenario.includes("replay") || scenario === "server-error") {
-          assert.ok(text(r).includes("fixture completion rejected"));
+          assert.ok(
+            alerts.some((args) => args.includes("fixture completion rejected")),
+          );
           const raw = store.get(pendingKey);
           const pending = JSON.parse(raw);
           assert.equal(pending.taskId, "task-1");
@@ -450,18 +516,39 @@ function assertCapture(command) {
           ];
           api = require(path.join(app, "lib/api-client.ts"));
           await api.initializeDriverIdentity();
-          await assert.rejects(
-            api.replayPendingDriverTaskCompletion(),
-            /fixture completion rejected/,
-          );
-          assert.equal(
-            store.get(pendingKey),
-            raw,
-            "failed replay preserves original JSON",
-          );
-          failCompletion = false;
-          await api.replayPendingDriverTaskCompletion();
-          assert.ok(!store.has(pendingKey));
+          if (scenario === "auto-replay") {
+            task = { ...task, taskId: "task-1", orderId: "order-1" };
+            order = { ...order, orderId: "order-1" };
+            failCompletion = false;
+            delete require.cache[require.resolve(filename)];
+            Trip = require(filename).default;
+            await act(async () => {
+              r = create(React.createElement(Trip));
+            });
+            assert.equal(
+              requests.length,
+              2,
+              "real mounted hook replays only the queued request",
+            );
+            assert.ok(!store.has(pendingKey));
+            assert.ok(
+              fields(r).every((n) => n.props.value === ""),
+              "completed replay clears draft",
+            );
+          } else {
+            await assert.rejects(
+              api.replayPendingDriverTaskCompletion(),
+              /fixture completion rejected/,
+            );
+            assert.equal(
+              store.get(pendingKey),
+              raw,
+              "failed replay preserves original JSON",
+            );
+            failCompletion = false;
+            await api.replayPendingDriverTaskCompletion();
+            assert.ok(!store.has(pendingKey));
+          }
           for (const request of requests) {
             assert.equal(
               new URL(request.url).pathname,

@@ -65,16 +65,19 @@ export function readActualFareInput(
     return { issue: null, command: {} };
   }
   if (values.some((value) => !value)) return { issue: "partial" };
-  const minors = values.map(parseActualFareMinor);
-  if (minors.some((value) => value === null)) return { issue: "invalid" };
-  const actualFareBreakdown = Object.fromEntries(
-    actualFareFields.map((field, index) => [field, minors[index]]),
-  ) as unknown as ActualTripFareBreakdown;
-  if (
-    !Number.isSafeInteger(
-      minors.reduce<number>((sum, value) => sum + value!, 0),
-    )
-  ) {
+  const minors: number[] = [];
+  for (const value of values) {
+    const minor = parseActualFareMinor(value);
+    if (minor === null) return { issue: "invalid" };
+    minors.push(minor);
+  }
+  const actualFareBreakdown: ActualTripFareBreakdown = {
+    startMinor: minors[0]!,
+    distanceMinor: minors[1]!,
+    delayMinor: minors[2]!,
+    nightMinor: minors[3]!,
+  };
+  if (!Number.isSafeInteger(minors.reduce((sum, value) => sum + value, 0))) {
     return { issue: "overflow" };
   }
   if (fixedPrice) {
