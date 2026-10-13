@@ -378,3 +378,39 @@ it("refuses measured key rotation rather than gaining a fresh admission budget",
   ).toBe(true);
   expect(summary.result).toBe("failed");
 });
+
+it("timestamps the genuine count after variable observation work before increment", async () => {
+  const requestId = `${runTag}-booking-prefix`;
+  expect(observer.admission.tryReserve("booking", requestId).allowed).toBe(
+    true,
+  );
+  let reads = 0;
+  const request = {
+    headers: { "x-request-id": requestId },
+    url: "/api/tenant/bookings",
+    get identity() {
+      // External clock boundary: synchronous identity observation delays the
+      // real native increment. No count, expiry or admission logic is mocked.
+      if (++reads === 3) vi.setSystemTime(25);
+      return {
+        realm: "tenant",
+        actorType: "user",
+        actorId: "booking",
+        tenantId: "tenant",
+      };
+    },
+  };
+  const response = Object.assign(new EventEmitter(), { statusCode: 201 });
+  await observer.middleware(request, response, () =>
+    storage.increment("native-key", 60000, 60, 1000, "default"),
+  );
+  response.emit("finish");
+  const feedback = observer.admission.complete(requestId);
+  expect(storage.storage.get("native-key")!.expiresAt).toBe(60025);
+  expect(feedback).toMatchObject({
+    guardMs: 25,
+    guardCountedMs: 25,
+    error: null,
+    result: { totalHits: 1, isBlocked: false },
+  });
+});
