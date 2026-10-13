@@ -842,59 +842,92 @@ export async function loadBankStatementsData(
   }
 }
 
+export type BankProgram = {
+  id: string;
+  name: string;
+  definition: TenantServiceProgramRecord | null;
+  usage: TenantProgramUsageRecord[];
+};
+
+export type BankProgramsData = BankLoadState<{
+  programs: BankProgram[];
+  programsAvailable: boolean;
+  usageAvailable: boolean;
+}>;
+
+// These two API records are flat. The HTTP interceptor returns snake_case;
+// in-process adapters can still return the TypeScript camelCase contract.
+function normalizeBankProgramRecord<T>(record: Record<string, unknown>): T {
+  const normalized = Object.fromEntries(
+    Object.entries(record).map(([key, value]) => [
+      key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()),
+      value,
+    ]),
+  );
+  if (typeof normalized.programId !== "string" || !normalized.programId) {
+    throw new Error("Program response is missing programId.");
+  }
+  return normalized as T;
+}
+
 export async function loadBankProgramsData(
   tenantId: string,
   role: BankConsoleRole,
-): Promise<
-  BankLoadState<{
-    programs: Array<{
-      id: string;
-      name: string;
-      code: string;
-      period: string;
-      served: number;
-      used: number;
-      total: number;
-      remaining: number;
-      exceptionCount: number;
-    }>;
-  }>
-> {
-  try {
-    const core = await loadCoreBankData(tenantId, role);
-    const exceptionCount = core.contracts.reduce(
-      (sum, contract) =>
-        sum +
-        (contract.exceptions ?? []).filter((item) => item.status === "open")
-          .length,
-      0,
-    );
-    const byId = new Map(
-      core.programs.map((program) => [program.programId, program]),
-    );
-    return {
-      data: {
-        programs: core.usage.map((record) => ({
-          id: record.programId,
-          name: byId.get(record.programId)?.displayName ?? record.programCode,
-          code: record.programCode,
-          period: record.period,
-          served: record.cardholdersServed,
-          used: record.tripsConsumed,
-          total: record.quotaTotal ?? 0,
-          remaining: record.quotaRemaining ?? 0,
-          exceptionCount,
-        })),
-      },
-      degradedMessage: core.degradedMessage,
-    };
-  } catch (error) {
-    return {
-      data: { programs: [] },
-      degradedMessage:
-        error instanceof Error ? error.message : "Failed to load programs.",
-    };
+): Promise<BankProgramsData> {
+  const actorId = `bank-console:${tenantId}:${role}`;
+  const [definitions, usage] = await Promise.allSettled([
+    bankApiGetList<Record<string, unknown>>(
+      "api/tenant/service-programs",
+      tenantId,
+      actorId,
+    ).then((records) =>
+      records.map(normalizeBankProgramRecord<TenantServiceProgramRecord>),
+    ),
+    bankApiGetList<Record<string, unknown>>(
+      "api/tenant/program-usage",
+      tenantId,
+      actorId,
+    ).then((records) =>
+      records.map(normalizeBankProgramRecord<TenantProgramUsageRecord>),
+    ),
+  ]);
+  const byId = new Map<string, BankProgram>();
+  if (definitions.status === "fulfilled") {
+    for (const definition of definitions.value) {
+      byId.set(definition.programId, {
+        id: definition.programId,
+        name: definition.displayName,
+        definition,
+        usage: [],
+      });
+    }
   }
+  if (usage.status === "fulfilled") {
+    for (const record of usage.value) {
+      const program = byId.get(record.programId) ?? {
+        id: record.programId,
+        name: record.programCode,
+        definition: null,
+        usage: [],
+      };
+      program.usage.push(record);
+      byId.set(record.programId, program);
+    }
+  }
+  const unavailable = [
+    definitions.status === "rejected" ? "service-programs" : null,
+    usage.status === "rejected" ? "program-usage" : null,
+  ].filter(Boolean);
+  return {
+    data: {
+      programs: [...byId.values()],
+      programsAvailable: definitions.status === "fulfilled",
+      usageAvailable: usage.status === "fulfilled",
+    },
+    degradedMessage: unavailable.length
+      ? `Program data unavailable: ${unavailable.join(", ")}.`
+      : null,
+  };
 }
 
 export async function loadBankUsersData(
