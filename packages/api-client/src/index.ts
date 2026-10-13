@@ -1,4 +1,13 @@
 import type { TenantInvoiceMailView } from "@drts/contracts";
+import type {
+  CreatePlatformFareVersionCommand,
+  UpdatePlatformFareVersionCommand,
+  RecordPlatformFareVersionFilingCommand,
+  SchedulePlatformFareVersionCommand,
+  RetirePlatformFareVersionCommand,
+  MultiTaxiFareManagementList,
+  MultiTaxiManagedFareVersion,
+} from "@drts/contracts";
 /**
  * @drts/api-client - Shared API client for DRTS client surfaces
  *
@@ -4144,6 +4153,90 @@ export class ApiClient {
       "/api/platform-admin/maintenance-mode",
       { body: command },
     );
+  }
+
+  async listPlatformFareVersions(): Promise<MultiTaxiFareManagementList> {
+    const result = await this.fetchEnvelope<MultiTaxiFareManagementList>(
+      "GET",
+      "/api/platform-admin/multi-taxi/fare-versions",
+    );
+    // These routes emit the typed camelCase contract. Preserve arbitrary fee
+    // map keys instead of recursively rewriting operator-defined identifiers.
+    return result.data;
+  }
+
+  async getPlatformFareVersion(
+    id: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareVersion>(
+      "GET",
+      `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}`,
+    );
+    return result.data;
+  }
+
+  async createPlatformFareVersion(
+    command: CreatePlatformFareVersionCommand,
+    idempotencyKey: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareVersion>(
+      "POST",
+      "/api/platform-admin/multi-taxi/fare-versions",
+      { body: command, idempotencyKey },
+    );
+    return result.data;
+  }
+
+  async updatePlatformFareVersion(
+    id: string,
+    command: UpdatePlatformFareVersionCommand,
+    idempotencyKey: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareVersion>(
+      "PUT",
+      `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}`,
+      { body: command, idempotencyKey },
+    );
+    return result.data;
+  }
+
+  async recordPlatformFareVersionFiling(
+    id: string,
+    command: RecordPlatformFareVersionFilingCommand,
+    idempotencyKey: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareVersion>(
+      "POST",
+      `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}/file`,
+      { body: command, idempotencyKey },
+    );
+    return result.data;
+  }
+
+  async schedulePlatformFareVersion(
+    id: string,
+    command: SchedulePlatformFareVersionCommand,
+    idempotencyKey: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareVersion>(
+      "POST",
+      `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}/schedule`,
+      { body: command, idempotencyKey },
+    );
+    return result.data;
+  }
+
+  async retirePlatformFareVersion(
+    id: string,
+    command: RetirePlatformFareVersionCommand,
+    idempotencyKey: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareVersion>(
+      "POST",
+      `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}/retire`,
+      { body: command, idempotencyKey },
+    );
+    return result.data;
   }
 
   async listPlatformPricingRules(): Promise<PlatformPricingRuleRecord[]> {
