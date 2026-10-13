@@ -88,7 +88,11 @@ elif kind == "gcloud":
         return next(a.split("=", 1)[1] for a in args if a.startswith("--" + name + "="))
 
     if args[:2] == ["projects", "get-ancestors"]:
-        emit([{"type": "project", "id": "drts-dev-devcc-20260825"}, {"type": "organization", "id": "123"}])
+        emit([{"type": "project", "id": "drts-dev-devcc-20260825"},
+              *([{"type": "folder", "id": "456"}] if scenario == "inherited_create_folder" else []),
+              {"type": "organization", "id": "123"}])
+    if (args[:3] == ["resource-manager", "folders", "get-iam-policy"] and scenario == "inherited_create_folder") or (args[:2] == ["organizations", "get-iam-policy"] and scenario == "inherited_create_org"):
+        emit({"bindings": [b for b in iam["project"]["bindings"] if b["role"].endswith("/drtsOpsDrillCloneCreate")]})
     if args[:2] == ["organizations", "get-iam-policy"]:
         if scenario == "ancestor_denied":
             fail()

@@ -294,10 +294,11 @@ class RestoreDrillTest(unittest.TestCase):
         create = next(b for b in iam["project"]["bindings"] if b["role"].endswith("/drtsOpsDrillCloneCreate"))
         wanted = json.loads(json.dumps(create))
         wanted.pop("condition", None)
-        legacy = dict(wanted, condition={
+        legacy = json.loads(json.dumps(wanted))
+        legacy["condition"] = {
             "title": "drtsOpsDrillCloneCreate",
             "expression": f"resource.service == 'sqladmin.googleapis.com' && resource.name == 'projects/{drill.PROJECT}'",
-        })
+        }
         iam["project"]["bindings"].remove(create)
         iam["project"]["bindings"].append(legacy)
         if shared:
@@ -369,6 +370,37 @@ class RestoreDrillTest(unittest.TestCase):
                 self.assertNotIn(legacy, state["project_policy"]["bindings"])
                 self.assertEqual(state["project_policy"]["bindings"].count(wanted), 1)
 
+    def test_legacy_create_readiness_rejects_before_and_after_unconditional_add(self):
+        for coexist in (False, True):
+            with self.subTest(coexist=coexist):
+                design, _, _, _ = self.seed_legacy_create(coexist=coexist)
+                writes = self.iam_writes()
+                original_command = provision.command
+                def boundary(args, **kwargs):
+                    return "" if args[:2] == ["git", "status"] else original_command(args, **kwargs)
+                with patch.object(provision, "command", boundary), patch.object(provision, "confirm") as confirm, patch.object(sys, "argv", ["provision", "--check-ready", "--output", str(self.root / "plan.json")]):
+                    self.assertEqual(provision.main(), 2)
+                    confirm.assert_not_called()
+                self.assertEqual(self.iam_writes(), writes)
+                self.assertFalse((self.root / "ready.json").exists())
+                provision.apply(design, provision.inventory(design))
+                provision.inventory(design, complete=True)
+
+    def test_create_inheritance_at_folder_or_organization_blocks_migration_and_readiness(self):
+        design = provision.plan()
+        provision.apply(design, provision.inventory(design))
+        writes = self.iam_writes()
+        for scenario in ("inherited_create_folder", "inherited_create_org"):
+            for complete in (False, True):
+                with self.subTest(scenario=scenario, complete=complete), patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": scenario}), self.assertRaisesRegex(drill.DrillError, "unexpected_sa_grant"):
+                    provision.inventory(design, complete=complete)
+        # The exact legacy condition is no exception to the inherited boundary.
+        self.seed_legacy_create()
+        for scenario in ("inherited_create_folder", "inherited_create_org"):
+            with self.subTest(legacy=scenario), patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": scenario}), self.assertRaisesRegex(drill.DrillError, "unexpected_sa_grant"):
+                provision.inventory(design)
+        self.assertEqual(self.iam_writes(), writes)
+
     def test_create_grant_drift_blocks_apply_inventory_and_readiness_without_writes(self):
         design = provision.plan()
         provision.apply(design, provision.inventory(design))
@@ -379,7 +411,7 @@ class RestoreDrillTest(unittest.TestCase):
                       f"resource.name == 'projects/{drill.PROJECT}'",
                       f"resource.service == 'sqladmin.googleapis.com' && resource.name.startsWith('projects/{drill.PROJECT}')",
                       "resource.service == 'sqladmin.googleapis.com' && resource.name == 'projects/other-project'"]
-        for change in [*conditions, "extra_permission", "extra_grant", "missing_binding", "inherited"]:
+        for change in [*conditions, "legacy_title_drift", "legacy_description_drift", "extra_permission", "extra_grant", "predefined_viewer", "other_create_role", "unconditional_source_clone", "unconditional_source_read", "unconditional_temporary", "missing_binding", "inherited"]:
             iam = json.loads(original)
             create = next(b for b in iam["project"]["bindings"] if b["role"].endswith("/drtsOpsDrillCloneCreate"))
             error = "unexpected_sa_grant"
@@ -388,6 +420,19 @@ class RestoreDrillTest(unittest.TestCase):
                 error = "existing_custom_role_drift"
             elif change == "extra_grant":
                 iam["project"]["bindings"].append(dict(create, role="roles/cloudsql.admin"))
+            elif change == "predefined_viewer":
+                iam["project"]["bindings"].append(dict(create, role="roles/cloudsql.viewer"))
+            elif change == "other_create_role":
+                iam["project"]["bindings"].append(dict(create, role=f"projects/{drill.PROJECT}/roles/otherCreate"))
+            elif change.startswith("unconditional_"):
+                role_id = {"unconditional_source_clone": "drtsOpsDrillSourceClone", "unconditional_source_read": "drtsOpsDrillSourceRead", "unconditional_temporary": "drtsOpsDrillTemporary"}[change]
+                next(b for b in iam["project"]["bindings"] if b["role"].endswith("/" + role_id)).pop("condition")
+            elif change.startswith("legacy_"):
+                create["condition"] = {"title": "drtsOpsDrillCloneCreate", "expression": f"resource.service == 'sqladmin.googleapis.com' && resource.name == 'projects/{drill.PROJECT}'"}
+                if change == "legacy_title_drift":
+                    create["condition"]["title"] = "other"
+                else:
+                    create["condition"]["description"] = "unreviewed variant"
             elif change == "missing_binding":
                 iam["project"]["bindings"].remove(create)
                 error = "project_binding_missing"
