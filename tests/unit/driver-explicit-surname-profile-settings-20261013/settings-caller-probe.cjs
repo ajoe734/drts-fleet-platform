@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- Isolated loader preserves Driver aliases and its React version. */
 // Real SettingsScreen, UI components, helper, identity/client, SDK and profile service.
-// Fixtures replace native/router/SecureStore and fetch only; no HTTP server or DB.
+// Fixtures replace native/router/SecureStore, fetch and the external DB query only.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -131,13 +131,38 @@ const { AuditNotificationService } = require(
     "apps/api/src/modules/audit-notification/audit-notification.service.ts",
   ),
 );
-const service = new DriverProfileService(new AuditNotificationService());
-service.createProfile("fixture-driver", {
-  name: "Unrelated Display Fixture",
-  ...(scenario === "preserve" || scenario === "clear"
-    ? { driverSurname: "歐陽" }
-    : {}),
+const { DriverProfileRepository } = require(
+  path.join(
+    root,
+    "apps/api/src/modules/driver-profile/driver-profile.repository.ts",
+  ),
+);
+const records = new Map();
+const repository = new DriverProfileRepository({
+  isEnabled: () => true,
+  query: async (sql, params) => {
+    if (!params) {
+      assert.ok(sql.includes("FROM ops.phase1_driver_profiles"));
+      return {
+        rows: [...records.values()].map((json) => ({
+          record: JSON.parse(json),
+        })),
+      };
+    }
+    assert.ok(sql.includes("INSERT INTO ops.phase1_driver_profiles"));
+    assert.ok(sql.includes("$3::jsonb"));
+    assert.equal(params.length, 3);
+    const record = JSON.parse(params[2]);
+    assert.equal(record.driverId, params[0]);
+    assert.equal(record.updatedAt, params[1]);
+    records.set(params[0], params[2]);
+    return { rows: [] };
+  },
 });
+const service = new DriverProfileService(
+  new AuditNotificationService(),
+  repository,
+);
 const response = (data) =>
   new Response(JSON.stringify({ data, meta: {} }), { status: 200 });
 const rejected = (code = "FIXTURE_PROFILE_REJECTED", status = 400) =>
@@ -188,7 +213,7 @@ globalThis.fetch = async (url, init = {}) => {
       });
     if (failPatch) return rejected();
     try {
-      return response(service.updateProfile("fixture-driver", body));
+      return response(await service.updateProfile("fixture-driver", body));
     } catch (e) {
       return new Response(JSON.stringify(e.getResponse()), {
         status: e.getStatus(),
@@ -253,6 +278,12 @@ async function press(r) {
   });
 }
 (async () => {
+  await service.createProfile("fixture-driver", {
+    name: "Unrelated Display Fixture",
+    ...(scenario === "preserve" || scenario === "clear"
+      ? { driverSurname: "歐陽" }
+      : {}),
+  });
   const api = require(path.join(app, "lib/api-client.ts"));
   await api.initializeDriverIdentity();
   const Screen = require(path.join(app, "app/settings.tsx")).default;

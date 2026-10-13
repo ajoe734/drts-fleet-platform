@@ -265,7 +265,8 @@ export class DriverProfileService implements OnModuleInit {
   ) {
     const normalizedDriverId = driverId.trim();
     this.assertDriverId(normalizedDriverId);
-    return this.enqueueProfileWrite(normalizedDriverId, async () => {
+    const storageDriverId = this.resolveDriverId(normalizedDriverId);
+    return this.enqueueProfileWrite(storageDriverId, async () => {
       const hadExistingProfile = this.profileExists(normalizedDriverId);
       const current = this.resolveBaseProfile(normalizedDriverId);
       const updated: DriverProfileRecord = {

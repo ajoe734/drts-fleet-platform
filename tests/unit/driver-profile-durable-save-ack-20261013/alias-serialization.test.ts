@@ -150,6 +150,10 @@ describe("R1 admin and canonical writers share the resolved storage ID", () => {
       else f.writes[0]!.reject(error);
       await admin.settled;
       await flush();
+      if (outcome === "reject") {
+        expect(f.registry.listDrivers()).toEqual(before);
+        expect(f.auditWrites).not.toHaveBeenCalled();
+      }
       f.writes[1]!.commit();
       await patch.settled;
       expect(f.writes[1]!.record).toMatchObject({
@@ -167,7 +171,6 @@ describe("R1 admin and canonical writers share the resolved storage ID", () => {
         });
       } else {
         expect(admin.state.error).toBe(error);
-        expect(f.registry.listDrivers()).toEqual(before);
       }
     },
   );
