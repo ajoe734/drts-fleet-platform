@@ -55,7 +55,13 @@ type NestApplication = {
   init: () => Promise<unknown>;
   listen: (port: number, host: string) => Promise<unknown>;
   getHttpServer: () => { address: () => unknown };
-  get: <T>(token: new (...args: never[]) => T) => T;
+  get: {
+    <T>(token: new (...args: never[]) => T): T;
+    (token: string | symbol): unknown;
+  };
+  use: (
+    middleware: import("../../../../tools/system-remediation/ops-capacity/throttle-observation.mjs").CapacityThrottleObserver["middleware"],
+  ) => unknown;
   close: () => Promise<unknown>;
 };
 
@@ -146,293 +152,325 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
       );
       mkdirSync(evidenceDir, { recursive: true });
       const runTag = `sr-ops-capacity-${Date.now()}`;
-
+      const recordsPath = resolve(evidenceDir, `${runTag}.jsonl`);
+      const { finalizeCapacityRun, describeCapacityFailure } =
+        await import("../../../../tools/system-remediation/ops-capacity/finalization.mjs");
+      const { observeCapacityThrottle } =
+        await import("../../../../tools/system-remediation/ops-capacity/throttle-observation.mjs");
+      const { getStorageToken } =
+        require("@nestjs/throttler") as typeof import("../../../../apps/api/node_modules/@nestjs/throttler");
+      let throttleObserver:
+        | import("../../../../tools/system-remediation/ops-capacity/throttle-observation.mjs").CapacityThrottleObserver
+        | undefined;
       const pool = new Pool({ connectionString: DATABASE_URL });
-      const app = await NestFactory.create(AppModule, { logger: false });
-      app.setGlobalPrefix("api", { exclude: ["health", "metrics"] });
-      await app.init();
-      await app.listen(0, "127.0.0.1");
+      let app: NestApplication | null = null;
+      let summary: CapacitySummary | null = null;
+      let initialReportJobIds: string[] = [];
+      let initialReportSnapshot: ReportRow[] = [];
+      let initialReportSnapshotAt: string | null = null;
+      let peakReport = 0;
+      let peakDispatchable = 0;
+      await finalizeCapacityRun({
+        execute: async () => {
+          app = await NestFactory.create(AppModule, { logger: false });
+          app.setGlobalPrefix("api", { exclude: ["health", "metrics"] });
+          // Resolve the token used by the real global guard, including the
+          // reviewed upstream storage once ordinarily integrated. Observe this
+          // instance only; preserve its methods, promise/errors, keys and TTLs.
+          throttleObserver = observeCapacityThrottle(
+            app.get(getStorageToken()),
+            runTag,
+          );
+          app.use(throttleObserver.middleware);
+          await app.init();
+          await app.listen(0, "127.0.0.1");
+          const address = app.getHttpServer().address() as AddressInfo;
+          const baseUrl = `http://127.0.0.1:${address.port}`;
 
-      try {
-        const address = app.getHttpServer().address() as AddressInfo;
-        const baseUrl = `http://127.0.0.1:${address.port}`;
-
-        // --- Setup phase (not part of the measured burst): pre-provision
-        // real dispatchable orders over real HTTP, using a legitimate
-        // ops_user bootstrap identity (non-strict test environment). Each
-        // seed request carries its own distinct actor-id: the real
-        // `BootstrapThrottlerGuard` (apps/api/src/common/throttling) tracks
-        // the global 60-req/min limit per actor-id, and a single shared
-        // seed identity across dozens of concurrent workers would collapse
-        // onto one throttle bucket and trip the app's own real rate limiter
-        // before the (unrelated, unmeasured) seed phase even finishes --
-        // that's a false negative from the harness, not a signal about the
-        // measured booking/dispatch/report burst.
-        const dispatchCount = countsForDuration(DURATION_SECONDS).dispatch;
-        const initialBacklogCount = 500;
-        const orderIds: string[] = new Array(initialBacklogCount);
-        let nextIndex = 0;
-        async function seedWorker() {
-          for (;;) {
-            const index = nextIndex;
-            nextIndex += 1;
-            if (index >= initialBacklogCount) {
-              return;
-            }
-            const response = await fetch(`${baseUrl}/api/orders`, {
-              method: "POST",
-              headers: {
-                "content-type": "application/json",
-                "x-actor-type": "ops_user",
-                "x-actor-id": `sr-ops-capacity-seed-${index}`,
-                "x-request-id": `${runTag}-seed-req-${index}`,
-                "idempotency-key": `${runTag}-seed-${index}`,
-              },
-              body: JSON.stringify({
-                pickup: {
-                  address: `SR-OPS-CAPACITY seed pickup ${index}`,
-                  lat: 25.042,
-                  lng: 121.552,
+          // --- Setup phase (not part of the measured burst): pre-provision
+          // real dispatchable orders over real HTTP, using a legitimate
+          // ops_user bootstrap identity (non-strict test environment). Each
+          // seed request carries its own distinct actor-id: the real
+          // `BootstrapThrottlerGuard` (apps/api/src/common/throttling) tracks
+          // the global 60-req/min limit per actor-id, and a single shared
+          // seed identity across dozens of concurrent workers would collapse
+          // onto one throttle bucket and trip the app's own real rate limiter
+          // before the (unrelated, unmeasured) seed phase even finishes --
+          // that's a false negative from the harness, not a signal about the
+          // measured booking/dispatch/report burst.
+          const dispatchCount = countsForDuration(DURATION_SECONDS).dispatch;
+          const initialBacklogCount = 500;
+          const orderIds: string[] = new Array(initialBacklogCount);
+          let nextIndex = 0;
+          async function seedWorker() {
+            for (;;) {
+              const index = nextIndex;
+              nextIndex += 1;
+              if (index >= initialBacklogCount) {
+                return;
+              }
+              const response = await fetch(`${baseUrl}/api/orders`, {
+                method: "POST",
+                headers: {
+                  "content-type": "application/json",
+                  "x-actor-type": "ops_user",
+                  "x-actor-id": `sr-ops-capacity-seed-${index}`,
+                  "x-request-id": `${runTag}-seed-req-${index}`,
+                  "idempotency-key": `${runTag}-seed-${index}`,
                 },
-                dropoff: {
-                  address: `SR-OPS-CAPACITY seed dropoff ${index}`,
-                  lat: 25.045,
-                  lng: 121.555,
-                },
-                passenger: {
-                  name: `SR-OPS-CAPACITY seed passenger ${index}`,
-                  phone: `08${String(index % 100000000).padStart(8, "0")}`,
-                },
-              }),
-            });
-            if (!response.ok) {
-              throw new Error(
-                `Dispatchable order seed #${index} failed: HTTP ${response.status} ${await response.text()}`,
-              );
+                body: JSON.stringify({
+                  pickup: {
+                    address: `SR-OPS-CAPACITY seed pickup ${index}`,
+                    lat: 25.042,
+                    lng: 121.552,
+                  },
+                  dropoff: {
+                    address: `SR-OPS-CAPACITY seed dropoff ${index}`,
+                    lat: 25.045,
+                    lng: 121.555,
+                  },
+                  passenger: {
+                    name: `SR-OPS-CAPACITY seed passenger ${index}`,
+                    phone: `08${String(index % 100000000).padStart(8, "0")}`,
+                  },
+                }),
+              });
+              if (!response.ok) {
+                throw new Error(
+                  `Dispatchable order seed #${index} failed: HTTP ${response.status} ${await response.text()}`,
+                );
+              }
+              const rawBody = await response.text();
+              // The API's global snake-case interceptor
+              // (apps/api/src/common/snake-case.interceptor.ts) rewrites every
+              // response body key from camelCase to snake_case, so the wire
+              // field is `order_id`, not the controller's in-code `orderId`.
+              let body: { data?: { order_id?: unknown } };
+              try {
+                body = JSON.parse(rawBody) as { data?: { order_id?: unknown } };
+              } catch (parseError) {
+                throw new Error(
+                  `Dispatchable order seed #${index} returned HTTP ${response.status} with unparseable JSON body: ${rawBody.slice(0, 500)} (${
+                    parseError instanceof Error
+                      ? parseError.message
+                      : String(parseError)
+                  })`,
+                );
+              }
+              const orderId = body?.data?.order_id;
+              if (typeof orderId !== "string" || orderId.length === 0) {
+                throw new Error(
+                  `Dispatchable order seed #${index} returned HTTP ${response.status} but no valid orderId in body: ${rawBody.slice(0, 500)}`,
+                );
+              }
+              orderIds[index] = orderId;
             }
-            const rawBody = await response.text();
-            // The API's global snake-case interceptor
-            // (apps/api/src/common/snake-case.interceptor.ts) rewrites every
-            // response body key from camelCase to snake_case, so the wire
-            // field is `order_id`, not the controller's in-code `orderId`.
-            let body: { data?: { order_id?: unknown } };
-            try {
-              body = JSON.parse(rawBody) as { data?: { order_id?: unknown } };
-            } catch (parseError) {
-              throw new Error(
-                `Dispatchable order seed #${index} returned HTTP ${response.status} with unparseable JSON body: ${rawBody.slice(0, 500)} (${
-                  parseError instanceof Error
-                    ? parseError.message
-                    : String(parseError)
-                })`,
-              );
-            }
-            const orderId = body?.data?.order_id;
-            if (typeof orderId !== "string" || orderId.length === 0) {
-              throw new Error(
-                `Dispatchable order seed #${index} returned HTTP ${response.status} but no valid orderId in body: ${rawBody.slice(0, 500)}`,
-              );
-            }
-            orderIds[index] = orderId;
           }
-        }
-        await Promise.all(
-          Array.from({ length: Math.min(40, initialBacklogCount) }, seedWorker),
-        );
-        expect(orderIds).toHaveLength(initialBacklogCount);
-        expect(
-          orderIds.every((id) => typeof id === "string" && id.length > 0),
-        ).toBe(true);
-
-        // --- Mint a real tenant JWT via the real HTTP bootstrap-session route.
-        const tenantSessionResponse = await fetch(
-          `${baseUrl}/api/auth/tenant/bootstrap-session`,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              email: TENANT_DISPATCH_EMAIL,
-              tenantId: TENANT_ID,
-            }),
-          },
-        );
-        if (!tenantSessionResponse.ok) {
-          // The controller deliberately collapses every internal failure
-          // reason into the same public AUTH_SESSION_EXCHANGE_DENIED 403 for
-          // this open, unauthenticated route (see
-          // apps/api/src/common/iam-error-codes.ts toPublicTenantAuthError),
-          // AND both of the controller's own denial branches (fixture mode
-          // disabled vs. tenant user not found/ineligible, see
-          // apps/api/src/modules/auth/auth.controller.ts
-          // assertTenantBootstrapFixtureModeEnabled /
-          // buildTenantBootstrapDeniedError) construct the exact same
-          // "AUTH_SESSION_EXCHANGE_DENIED" code, so the unmasked security
-          // event reasonCode alone cannot distinguish which branch fired.
-          // Inspect the same running app instance's own state directly to
-          // tell them apart instead of guessing.
-          const securityEventsService = app.get(SecurityEventsService);
-          const recentDenials = await securityEventsService.listEvents(null, {
-            eventType: "tenant_bootstrap_session.denied",
-            limit: 5,
-          });
-          const tenantPartnerService = app.get(TenantPartnerService);
-          const tenantUsers = tenantPartnerService.listTenantUsers(TENANT_ID);
-          const matchingUser = tenantUsers.find(
-            (user: { email: string }) => user.email === TENANT_DISPATCH_EMAIL,
+          const seedResults = await Promise.allSettled(
+            Array.from(
+              { length: Math.min(40, initialBacklogCount) },
+              seedWorker,
+            ),
           );
-          throw new Error(
-            `tenant bootstrap-session failed: HTTP ${tenantSessionResponse.status} ${await tenantSessionResponse.text()} | unmasked reasonCode(s): ${JSON.stringify(
-              recentDenials.map((event) => ({
-                reasonCode: event.reasonCode,
-                occurredAt: event.occurredAt,
-              })),
-            )} | authEnvironment=${detectAuthEnvironment(process.env)} DRTS_TENANT_BOOTSTRAP_MODE=${JSON.stringify(process.env.DRTS_TENANT_BOOTSTRAP_MODE)} CI=${JSON.stringify(process.env.CI)} NODE_ENV=${JSON.stringify(process.env.NODE_ENV)} | tenantUserCount=${tenantUsers.length} matchingUser=${JSON.stringify(matchingUser ?? null)}`,
-          );
-        }
-        // Same global snake-case interceptor as above: the wire field is
-        // `access_token`, not the service layer's in-code `accessToken`.
-        const tenantSessionBody = (await tenantSessionResponse.json()) as {
-          data: { access_token: string };
-        };
-        const tenantJwt = tenantSessionBody.data.access_token;
+          const seedFailures = seedResults
+            .filter((result) => result.status === "rejected")
+            .map((result) => result.reason);
+          if (seedFailures.length)
+            throw new AggregateError(
+              seedFailures,
+              "Initial capacity seeds failed",
+            );
+          expect(orderIds).toHaveLength(initialBacklogCount);
+          expect(
+            orderIds.every((id) => typeof id === "string" && id.length > 0),
+          ).toBe(true);
 
-        // --- Mint a real platform JWT in-process, via the SAME running
-        // AppModule's own JwtAuthService, against the durable default
-        // platform admin account IdentityRepository provisions at boot.
-        const jwtAuthService = app.get(JwtAuthService);
-        const identityRepository = app.get(IdentityRepository);
-        const platformPrincipal = await identityRepository.findPrincipalById(
-          "principal_platform_admin_default",
-        );
-        const platformMemberships =
-          await identityRepository.findMembershipsByPrincipalId(
+          // --- Mint a real tenant JWT via the real HTTP bootstrap-session route.
+          const tenantSessionResponse = await fetch(
+            `${baseUrl}/api/auth/tenant/bootstrap-session`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                email: TENANT_DISPATCH_EMAIL,
+                tenantId: TENANT_ID,
+              }),
+            },
+          );
+          if (!tenantSessionResponse.ok) {
+            // The controller deliberately collapses every internal failure
+            // reason into the same public AUTH_SESSION_EXCHANGE_DENIED 403 for
+            // this open, unauthenticated route (see
+            // apps/api/src/common/iam-error-codes.ts toPublicTenantAuthError),
+            // AND both of the controller's own denial branches (fixture mode
+            // disabled vs. tenant user not found/ineligible, see
+            // apps/api/src/modules/auth/auth.controller.ts
+            // assertTenantBootstrapFixtureModeEnabled /
+            // buildTenantBootstrapDeniedError) construct the exact same
+            // "AUTH_SESSION_EXCHANGE_DENIED" code, so the unmasked security
+            // event reasonCode alone cannot distinguish which branch fired.
+            // Inspect the same running app instance's own state directly to
+            // tell them apart instead of guessing.
+            const securityEventsService = app.get(SecurityEventsService);
+            const recentDenials = await securityEventsService.listEvents(null, {
+              eventType: "tenant_bootstrap_session.denied",
+              limit: 5,
+            });
+            const tenantPartnerService = app.get(TenantPartnerService);
+            const tenantUsers = tenantPartnerService.listTenantUsers(TENANT_ID);
+            const matchingUser = tenantUsers.find(
+              (user: { email: string }) => user.email === TENANT_DISPATCH_EMAIL,
+            );
+            throw new Error(
+              `tenant bootstrap-session failed: HTTP ${tenantSessionResponse.status} ${await tenantSessionResponse.text()} | unmasked reasonCode(s): ${JSON.stringify(
+                recentDenials.map((event) => ({
+                  reasonCode: event.reasonCode,
+                  occurredAt: event.occurredAt,
+                })),
+              )} | authEnvironment=${detectAuthEnvironment(process.env)} DRTS_TENANT_BOOTSTRAP_MODE=${JSON.stringify(process.env.DRTS_TENANT_BOOTSTRAP_MODE)} CI=${JSON.stringify(process.env.CI)} NODE_ENV=${JSON.stringify(process.env.NODE_ENV)} | tenantUserCount=${tenantUsers.length} matchingUser=${JSON.stringify(matchingUser ?? null)}`,
+            );
+          }
+          // Same global snake-case interceptor as above: the wire field is
+          // `access_token`, not the service layer's in-code `accessToken`.
+          const tenantSessionBody = (await tenantSessionResponse.json()) as {
+            data: { access_token: string };
+          };
+          const tenantJwt = tenantSessionBody.data.access_token;
+
+          // --- Mint a real platform JWT in-process, via the SAME running
+          // AppModule's own JwtAuthService, against the durable default
+          // platform admin account IdentityRepository provisions at boot.
+          const jwtAuthService = app.get(JwtAuthService);
+          const identityRepository = app.get(IdentityRepository);
+          const platformPrincipal = await identityRepository.findPrincipalById(
             "principal_platform_admin_default",
           );
-        const platformMembership = platformMemberships.find(
-          (membership: { membershipId: string }) =>
-            membership.membershipId === "membership_platform_admin_default",
-        );
-        if (!platformPrincipal || !platformMembership) {
-          throw new Error(
-            "Default platform admin account was not durably provisioned by IdentityRepository.onModuleInit; cannot mint a real platform-realm JWT.",
-          );
-        }
-        const platformRoleBindings =
-          await identityRepository.findRoleBindingsByMembershipId(
-            platformMembership.membershipId,
-          );
-        const platformTokenVersion = Math.max(
-          Date.parse(platformPrincipal.updatedAt),
-          Date.parse(platformMembership.updatedAt),
-          ...platformRoleBindings.map((binding: { updatedAt: string }) =>
-            Date.parse(binding.updatedAt),
-          ),
-        );
-        const issuedPlatformSession = await jwtAuthService.issueSessionToken(
-          {
-            authMode: "jwt_bearer",
-            actorType: "platform_admin",
-            actorId: platformPrincipal.principalId,
-            principalId: platformPrincipal.principalId,
-            membershipId: platformMembership.membershipId,
-            subject: platformPrincipal.subject,
-            realm: "platform",
-            tenantId: null,
-            roleFamilies: ["platform"],
-            roles: platformRoleBindings.map(
-              (binding: { roleCode: string }) => binding.roleCode,
-            ),
-            scopes: [...AUTH_SCOPE_PRESETS.platform_admin],
-            requestId: null,
-          },
-          {
-            tokenVersion: platformTokenVersion,
-            ensurePrincipal: false,
-            principalId: platformPrincipal.principalId,
-            membershipId: platformMembership.membershipId,
-            subject: platformPrincipal.subject,
-          },
-        );
-        const platformJwt = issuedPlatformSession.token;
-
-        // --- Build and execute the real, full 900-second accepted baseline.
-        const plan = buildCapacityPlan({
-          origin: `${baseUrl}/`,
-          durationSeconds: DURATION_SECONDS,
-          maxInFlight: MAX_IN_FLIGHT,
-          isolatedResourceId: runTag,
-          tenantId: TENANT_ID,
-          tenantJwt,
-          dispatchJwt: tenantJwt,
-          reportJwt: platformJwt,
-          orderIds,
-          runTag,
-          profile: "concurrent",
-          stagedDispatch: true,
-        });
-
-        const recordsPath = resolve(evidenceDir, `${runTag}.jsonl`);
-        let initialReportJobIds: string[] = [];
-        let initialReportSnapshot: ReportRow[] = [];
-        let initialReportSnapshotAt: string | null = null;
-        let peakReport = 0;
-        let peakDispatchable = 0;
-        const { pollCapacityResources, runWithCapacityPolling } =
-          await import("../../../../tools/system-remediation/ops-capacity/observations.mjs");
-        const pollDb = async () => {
-          const currentJobIds: string[] = [...initialReportJobIds];
-          const currentOrderIds = [...orderIds];
-          try {
-            // appendFileSync writes complete records on the same JS thread;
-            // parse errors are failures, not a normal partially-written line.
-            const content = readFileSync(recordsPath, "utf8");
-            const currentRecords = content
-              .trim()
-              .split("\n")
-              .filter(Boolean)
-              .map((line) => JSON.parse(line));
-            currentOrderIds.push(
-              ...currentRecords
-                .filter(
-                  (row) =>
-                    row.kind === "capacity_seed" &&
-                    !row.error &&
-                    row.resourceIds?.orderId,
-                )
-                .map((row) => row.resourceIds.orderId),
+          const platformMemberships =
+            await identityRepository.findMembershipsByPrincipalId(
+              "principal_platform_admin_default",
             );
-            currentJobIds.push(
-              ...currentRecords
-                .filter(
-                  (row) =>
-                    row.workload === "report" &&
-                    !row.error &&
-                    row.resourceIds?.jobId,
-                )
-                .map((row) => row.resourceIds.jobId),
+          const platformMembership = platformMemberships.find(
+            (membership: { membershipId: string }) =>
+              membership.membershipId === "membership_platform_admin_default",
+          );
+          if (!platformPrincipal || !platformMembership) {
+            throw new Error(
+              "Default platform admin account was not durably provisioned by IdentityRepository.onModuleInit; cannot mint a real platform-realm JWT.",
             );
-          } catch (error) {
-            if (
-              !(error instanceof Error) ||
-              !("code" in error) ||
-              error.code !== "ENOENT"
-            )
-              throw error;
           }
-          const observation = await pollCapacityResources(
-            pool,
-            currentOrderIds,
-            currentJobIds,
+          const platformRoleBindings =
+            await identityRepository.findRoleBindingsByMembershipId(
+              platformMembership.membershipId,
+            );
+          const platformTokenVersion = Math.max(
+            Date.parse(platformPrincipal.updatedAt),
+            Date.parse(platformMembership.updatedAt),
+            ...platformRoleBindings.map((binding: { updatedAt: string }) =>
+              Date.parse(binding.updatedAt),
+            ),
           );
-          peakReport = Math.max(peakReport, observation.report);
-          peakDispatchable = Math.max(
-            peakDispatchable,
-            observation.dispatchable,
+          const issuedPlatformSession = await jwtAuthService.issueSessionToken(
+            {
+              authMode: "jwt_bearer",
+              actorType: "platform_admin",
+              actorId: platformPrincipal.principalId,
+              principalId: platformPrincipal.principalId,
+              membershipId: platformMembership.membershipId,
+              subject: platformPrincipal.subject,
+              realm: "platform",
+              tenantId: null,
+              roleFamilies: ["platform"],
+              roles: platformRoleBindings.map(
+                (binding: { roleCode: string }) => binding.roleCode,
+              ),
+              scopes: [...AUTH_SCOPE_PRESETS.platform_admin],
+              requestId: null,
+            },
+            {
+              tokenVersion: platformTokenVersion,
+              ensurePrincipal: false,
+              principalId: platformPrincipal.principalId,
+              membershipId: platformMembership.membershipId,
+              subject: platformPrincipal.subject,
+            },
           );
-        };
-        const summary = await runWithCapacityPolling<CapacitySummary>(
-          () =>
-            runPlan(
+          const platformJwt = issuedPlatformSession.token;
+
+          // --- Build and execute the real, full 900-second accepted baseline.
+          const plan = buildCapacityPlan({
+            origin: `${baseUrl}/`,
+            durationSeconds: DURATION_SECONDS,
+            maxInFlight: MAX_IN_FLIGHT,
+            isolatedResourceId: runTag,
+            tenantId: TENANT_ID,
+            tenantJwt,
+            dispatchJwt: tenantJwt,
+            reportJwt: platformJwt,
+            orderIds,
+            runTag,
+            profile: "budgeted_dispatch_burst",
+            stagedDispatch: true,
+          });
+
+          const { pollCapacityResources, runWithCapacityPolling } =
+            await import("../../../../tools/system-remediation/ops-capacity/observations.mjs");
+          const pollDb = async () => {
+            const currentJobIds: string[] = [...initialReportJobIds];
+            const currentOrderIds = [...orderIds];
+            try {
+              // appendFileSync writes complete records on the same JS thread;
+              // parse errors are failures, not a normal partially-written line.
+              const content = readFileSync(recordsPath, "utf8");
+              const currentRecords = content
+                .trim()
+                .split("\n")
+                .filter(Boolean)
+                .map((line) => JSON.parse(line));
+              currentOrderIds.push(
+                ...currentRecords
+                  .filter(
+                    (row) =>
+                      row.kind === "capacity_seed" &&
+                      !row.error &&
+                      row.resourceIds?.orderId,
+                  )
+                  .map((row) => row.resourceIds.orderId),
+              );
+              currentJobIds.push(
+                ...currentRecords
+                  .filter(
+                    (row) =>
+                      row.workload === "report" &&
+                      !row.error &&
+                      row.resourceIds?.jobId,
+                  )
+                  .map((row) => row.resourceIds.jobId),
+              );
+            } catch (error) {
+              if (
+                !(error instanceof Error) ||
+                !("code" in error) ||
+                error.code !== "ENOENT"
+              )
+                throw error;
+            }
+            const observation = await pollCapacityResources(
+              pool,
+              currentOrderIds,
+              currentJobIds,
+            );
+            peakReport = Math.max(peakReport, observation.report);
+            peakDispatchable = Math.max(
+              peakDispatchable,
+              observation.dispatchable,
+            );
+          };
+          expect(plan.workloads.booking).toHaveLength(900);
+          expect(plan.workloads.dispatch).toHaveLength(dispatchCount);
+          expect(plan.workloads.report).toHaveLength(450);
+          await runWithCapacityPolling<CapacitySummary>(async () => {
+            // Keep the producer result even when the joined observer fails.
+            summary = await runPlan(
               plan,
               recordsPath,
               {
@@ -444,7 +482,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
                   // A real run-owned recovery workload, not extra measured
                   // HTTP requests or a fixed delay. All50 valid commands commit
                   // atomically via the same producer used by the HTTP callers.
-                  const reporting = app.get(ReportingFilingService);
+                  const reporting = app!.get(ReportingFilingService);
                   const commands = Array.from({ length: 50 }, () => ({
                     jobType: "trip_summary",
                     format: "csv" as const,
@@ -483,170 +521,254 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
                   );
                 },
               },
-            ),
-          pollDb,
-        );
-
-        // The run must be the full accepted 15-minute baseline burst, never
-        // a short/mock/skipped stand-in.
-        expect(summary.durationSeconds).toBe(DURATION_SECONDS);
-        expect(summary.fullBurstSchedule).toBe(true);
-        expect(summary.workflows.booking.requests).toBe(
-          plan.workloads.booking.length,
-        );
-        expect(summary.workflows.dispatch.requests).toBe(
-          plan.workloads.dispatch.length,
-        );
-        expect(summary.workflows.report.requests).toBe(
-          plan.workloads.report.length,
-        );
-        expect(plan.workloads.booking).toHaveLength(900);
-        expect(plan.workloads.dispatch).toHaveLength(dispatchCount);
-        expect(plan.workloads.report).toHaveLength(450);
-
-        type CapacityRecord = {
-          workload: "booking" | "dispatch" | "report";
-          path: string;
-          error: string | null;
-          resourceIds?: Record<string, string>;
-          latencyMs?: number | null;
-          launchedMs: number;
-        };
-        const records: CapacityRecord[] = readFileSync(recordsPath, "utf8")
-          .trim()
-          .split("\n")
-          .filter(Boolean)
-          .map((line) => JSON.parse(line));
-
-        // --- Independent, direct-SQL durable readback: every resource ID
-        // the HTTP layer's success response claimed to have created must
-        // exist as a real row. A response the load generator itself marked
-        // as `error` never enters this claim -- an honestly reported
-        // failure is not a fabricated success.
-        const claimedBookingOrderIds = records
-          .filter(
-            (row) =>
-              row.workload === "booking" &&
-              !row.error &&
-              row.resourceIds?.orderId,
-          )
-          .map((row) => row.resourceIds!.orderId!);
-        const claimedDispatchOrderIds = records
-          .filter((row) => row.workload === "dispatch" && !row.error)
-          .map((row) => row.path.split("/")[3]!);
-        const claimedReportJobIds = records
-          .filter(
-            (row) =>
-              row.workload === "report" && !row.error && row.resourceIds?.jobId,
-          )
-          .map((row) => row.resourceIds!.jobId!);
-
-        const bookingReadback = await readBackOwnedOrders(
-          pool,
-          claimedBookingOrderIds,
-        );
-        const dispatchReadback = await readBackOwnedOrders(
-          pool,
-          claimedDispatchOrderIds,
-        );
-        const allReportReadback = await collectReportCompletions(pool, [
-          ...initialReportJobIds,
-          ...claimedReportJobIds,
-        ]);
-        const reportReadback = allReportReadback.filter((row) =>
-          claimedReportJobIds.includes(row.jobId),
-        );
-        const initialReportReadback = allReportReadback.filter((row) =>
-          initialReportJobIds.includes(row.jobId),
-        );
-
-        const bookingSummary = summarizeReadback(
-          claimedBookingOrderIds,
-          bookingReadback,
-          (row: { orderId: string }) => row.orderId,
-        );
-        const dispatchSummary = summarizeReadback(
-          claimedDispatchOrderIds,
-          dispatchReadback,
-          (row: { orderId: string }) => row.orderId,
-        );
-        const reportSummary = summarizeReadback(
-          claimedReportJobIds,
-          reportReadback,
-          (row: { jobId: string }) => row.jobId,
-        );
-
-        const events: { time: number; delta: number }[] = [];
-        for (const record of records) {
-          if (
-            record.workload === "booking" &&
-            typeof record.latencyMs === "number"
-          ) {
-            events.push({ time: record.launchedMs, delta: 1 });
-            events.push({
-              time: record.launchedMs + record.latencyMs,
-              delta: -1,
+            );
+            return summary!;
+          }, pollDb);
+        },
+        collect: async (attempt) => {
+          type CapacityRecord = {
+            workload: "booking" | "dispatch" | "report";
+            path: string;
+            error: string | null;
+            resourceIds?: Record<string, string>;
+            latencyMs?: number | null;
+            attemptedMs?: number;
+            launchedMs: number | null;
+          };
+          // Parse independent rows without changing the original file. A corrupt
+          // line remains an error, while other owned claims still get read back.
+          const raw = await attempt("records-read", () =>
+            readFileSync(recordsPath, "utf8"),
+          );
+          const records: CapacityRecord[] = [];
+          for (const [index, line] of (raw ?? "").split("\n").entries()) {
+            if (!line.trim()) continue;
+            const row = await attempt(`record-${index + 1}`, () => {
+              const parsed = JSON.parse(line);
+              if (
+                !parsed ||
+                typeof parsed !== "object" ||
+                Array.isArray(parsed)
+              )
+                throw new Error("Invalid capacity record");
+              if (
+                parsed.workload &&
+                (!["booking", "dispatch", "report"].includes(parsed.workload) ||
+                  typeof parsed.path !== "string" ||
+                  !(
+                    Number.isFinite(parsed.launchedMs) ||
+                    (parsed.launchedMs === null &&
+                      Number.isFinite(parsed.attemptedMs) &&
+                      typeof parsed.error === "string" &&
+                      parsed.error.length > 0)
+                  ) ||
+                  !(parsed.error === null || typeof parsed.error === "string"))
+              )
+                throw new Error("Invalid measured capacity record");
+              return parsed as CapacityRecord;
             });
+            if (row) records.push(row);
           }
-        }
-        events.sort((a, b) => a.time - b.time || a.delta - b.delta);
-        let peakIntake = 0;
-        let currentInFlight = 0;
-        for (const ev of events) {
-          currentInFlight += ev.delta;
-          if (currentInFlight > peakIntake) peakIntake = currentInFlight;
-        }
+          if (!summary) {
+            summary = await attempt(
+              "summary-read",
+              () =>
+                JSON.parse(
+                  readFileSync(`${recordsPath}.summary.json`, "utf8"),
+                ) as CapacitySummary,
+            );
+          }
+          const { readBackBudgetedDispatchArrivals } =
+            await import("../../../../tools/system-remediation/ops-capacity/plan-builder.mjs");
+          const arrivalReadback = await attempt("actual-arrival-readback", () =>
+            readBackBudgetedDispatchArrivals(records),
+          );
 
-        const acceptance = {
-          taskId: "SR-OPS-CAPACITY-RUNNER-20260911",
-          capability: "C123",
-          runTag,
-          candidateSha: process.env.CANDIDATE_SHA ?? "local",
-          workflowSha: process.env.WORKFLOW_SHA ?? "local",
-          summary,
-          reportWorkload: {
-            initialJobIds: initialReportJobIds,
-            measuredJobIds: claimedReportJobIds,
-            initialSnapshot: initialReportSnapshot,
-            initialSnapshotAt: initialReportSnapshotAt,
-            initialEvidence: initialReportReadback,
-            measuredEvidence: reportReadback,
-          },
-          concurrency: {
-            intake: peakIntake,
-            report: peakReport,
-          },
-          backlog: {
-            dispatchable: peakDispatchable,
-          },
-          dispatchOrderIds: claimedDispatchOrderIds,
-          dispatchEvidence: dispatchReadback,
-          degradation: summarizeDispatchEvidence(dispatchReadback).degradation,
-          readback: {
-            booking: bookingSummary,
-            dispatch: dispatchSummary,
-            report: reportSummary,
-          },
-          queueLag: {
-            report: summarizeLag(reportReadback, "queueLagMs"),
-            dispatchOrderQueueLag: summarizeLag(dispatchReadback, "lagMs"),
-          },
-          dispatchOrderStatusDistribution:
-            summarizeDispatchEvidence(dispatchReadback).distribution,
-          dispatchAttemptCoverage:
-            summarizeDispatchEvidence(dispatchReadback).coverage,
-        };
-        writeFileSync(
-          resolve(evidenceDir, `${runTag}.acceptance.json`),
-          `${JSON.stringify(acceptance, null, 2)}\n`,
-        );
+          // --- Independent, direct-SQL durable readback: every resource ID
+          // the HTTP layer's success response claimed to have created must
+          // exist as a real row. A response the load generator itself marked
+          // as `error` never enters this claim -- an honestly reported
+          // failure is not a fabricated success.
+          const claimedBookingOrderIds = records
+            .filter(
+              (row) =>
+                row.workload === "booking" &&
+                !row.error &&
+                row.resourceIds?.orderId,
+            )
+            .map((row) => row.resourceIds!.orderId!);
+          const claimedDispatchOrderIds = records
+            .filter((row) => row.workload === "dispatch" && !row.error)
+            .map((row) => row.path.split("/")[3]!);
+          const claimedReportJobIds = records
+            .filter(
+              (row) =>
+                row.workload === "report" &&
+                !row.error &&
+                row.resourceIds?.jobId,
+            )
+            .map((row) => row.resourceIds!.jobId!);
 
-        // The core acceptance gate: workload must pass latency/error targets, and no claimed success without a durable row.
-        assertAcceptancePassed(acceptance);
-      } finally {
-        await app.close();
-        await pool.end();
-      }
+          const bookingReadback = await attempt("booking-readback", () =>
+            readBackOwnedOrders(pool, claimedBookingOrderIds),
+          );
+          const dispatchReadback = await attempt("dispatch-readback", () =>
+            readBackOwnedOrders(pool, claimedDispatchOrderIds),
+          );
+          const allReportReadback = await attempt("report-readback", () =>
+            collectReportCompletions(pool, [
+              ...initialReportJobIds,
+              ...claimedReportJobIds,
+            ]),
+          );
+          const reportReadback =
+            allReportReadback?.filter((row) =>
+              claimedReportJobIds.includes(row.jobId),
+            ) ?? null;
+          const initialReportReadback =
+            allReportReadback?.filter((row) =>
+              initialReportJobIds.includes(row.jobId),
+            ) ?? null;
+
+          const bookingSummary =
+            bookingReadback &&
+            summarizeReadback(
+              claimedBookingOrderIds,
+              bookingReadback,
+              (row: { orderId: string }) => row.orderId,
+            );
+          const dispatchSummary =
+            dispatchReadback &&
+            summarizeReadback(
+              claimedDispatchOrderIds,
+              dispatchReadback,
+              (row: { orderId: string }) => row.orderId,
+            );
+          const reportSummary =
+            reportReadback &&
+            summarizeReadback(
+              claimedReportJobIds,
+              reportReadback,
+              (row: { jobId: string }) => row.jobId,
+            );
+
+          const events: { time: number; delta: number }[] = [];
+          for (const record of records) {
+            if (
+              record.workload === "booking" &&
+              typeof record.launchedMs === "number" &&
+              typeof record.latencyMs === "number"
+            ) {
+              events.push({ time: record.launchedMs, delta: 1 });
+              events.push({
+                time: record.launchedMs + record.latencyMs,
+                delta: -1,
+              });
+            }
+          }
+          events.sort((a, b) => a.time - b.time || a.delta - b.delta);
+          let peakIntake = 0;
+          let currentInFlight = 0;
+          for (const ev of events) {
+            currentInFlight += ev.delta;
+            if (currentInFlight > peakIntake) peakIntake = currentInFlight;
+          }
+
+          const dispatchObservation =
+            dispatchReadback && summarizeDispatchEvidence(dispatchReadback);
+          return {
+            taskId: "SR-OPS-CAPACITY-RUNNER-20260911",
+            capability: "C123",
+            runTag,
+            candidateSha: process.env.CANDIDATE_SHA ?? "local",
+            workflowSha: process.env.WORKFLOW_SHA ?? "local",
+            summary,
+            reportWorkload: {
+              initialJobIds: initialReportJobIds,
+              measuredJobIds: claimedReportJobIds,
+              initialSnapshot: initialReportSnapshot,
+              initialSnapshotAt: initialReportSnapshotAt,
+              initialEvidence: initialReportReadback,
+              measuredEvidence: reportReadback,
+            },
+            arrivalReadback,
+            concurrency: {
+              intake: peakIntake,
+              report: peakReport,
+            },
+            backlog: {
+              dispatchable: peakDispatchable,
+            },
+            dispatchOrderIds: claimedDispatchOrderIds,
+            dispatchEvidence: dispatchReadback,
+            degradation: dispatchObservation?.degradation ?? null,
+            readback: {
+              booking: bookingSummary,
+              dispatch: dispatchSummary,
+              report: reportSummary,
+            },
+            queueLag: {
+              report:
+                reportReadback && summarizeLag(reportReadback, "queueLagMs"),
+              dispatchOrderQueueLag:
+                dispatchReadback && summarizeLag(dispatchReadback, "lagMs"),
+            },
+            dispatchOrderStatusDistribution:
+              dispatchObservation?.distribution ?? null,
+            dispatchAttemptCoverage: dispatchObservation?.coverage ?? null,
+          };
+        },
+        cleanup: [
+          {
+            stage: "throttle-observer.restore",
+            run: () => throttleObserver?.stop(),
+          },
+          {
+            stage: "throttle-observer.write",
+            run: () => {
+              if (throttleObserver)
+                writeFileSync(
+                  resolve(evidenceDir, `${runTag}.throttle.json`),
+                  `${JSON.stringify(throttleObserver.snapshot(), null, 2)}\n`,
+                );
+            },
+          },
+          {
+            stage: "throttle-observer.complete",
+            run: () =>
+              throttleObserver?.assertComplete({ requireOwnedTraffic: true }),
+          },
+          { stage: "app.close", run: () => app?.close() },
+          { stage: "pool.end", run: () => pool.end() },
+        ],
+        validate: assertAcceptancePassed,
+        write: (acceptance, failures) =>
+          writeFileSync(
+            resolve(evidenceDir, `${runTag}.acceptance.json`),
+            `${JSON.stringify(
+              {
+                ...acceptance,
+                taskId: "SR-OPS-CAPACITY-RUNNER-20260911",
+                capability: "C123",
+                runTag,
+                candidateSha: process.env.CANDIDATE_SHA ?? "local",
+                workflowSha: process.env.WORKFLOW_SHA ?? "local",
+                diagnostics: {
+                  throttleObservation: throttleObserver?.summary() ?? null,
+                  acceptance: failures.length
+                    ? "not_established"
+                    : "established",
+                  failures: failures.map(({ stage, error }) => ({
+                    stage,
+                    ...describeCapacityFailure(error),
+                  })),
+                },
+              },
+              null,
+              2,
+            )}\n`,
+          ),
+      });
     },
     52 * 60 * 1000,
   );
