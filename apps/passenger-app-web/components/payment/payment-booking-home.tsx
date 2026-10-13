@@ -1,4 +1,5 @@
 "use client";
+import { passengerFetch } from "../../lib/runtime-fetch";
 import { useEffect, useRef, useState } from "react";
 import type { PassengerPaymentMethod } from "@drts/contracts";
 import {
@@ -29,13 +30,13 @@ export function PaymentBookingHome() {
     () =>
       new PassengerPaymentClient({
         baseUrl: "",
-        fetchFn: (url, options) => fetch(url, options),
+        fetchFn: passengerFetch,
       }),
   );
   const [bookingClient] = useState(
     () =>
       new PaymentAwareBookingClient(
-        { baseUrl: "", fetchFn: (url, options) => fetch(url, options) },
+        { baseUrl: "", fetchFn: passengerFetch },
         {
           account: (account) => {
             if (!alive.current) return;

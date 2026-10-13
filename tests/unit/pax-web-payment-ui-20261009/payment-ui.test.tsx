@@ -357,7 +357,7 @@ describe("actual A20-A21 component → client → bounded BFF → serializer; ex
       ),
     ).toHaveLength(0);
     expect(document.body.textContent).not.toContain(
-      "pax_synthetic_field_alpha",
+      "synthetic_credential_field__alpha",
     );
   });
   it("actual PUT/default acknowledged and reloads authority before reflecting new default", async () => {
@@ -412,10 +412,10 @@ describe("actual A20-A21 component → client → bounded BFF → serializer; ex
     fireEvent.click(screen.getByRole("button", { name: "綁定卡片" }));
     await screen.findByText("SYNTHETIC •••• 0003");
     expect(commands.find((row) => row.method === "POST")?.body).toEqual({
-      providerToken: "pax_synthetic_field_alpha",
+      providerToken: "synthetic_credential_field__alpha",
     });
     expect(document.body.textContent).not.toContain(
-      "pax_synthetic_field_alpha",
+      "synthetic_credential_field__alpha",
     );
   });
   it("missing contracted fields is disabled, not an implicit successful fake", async () => {
@@ -701,7 +701,7 @@ describe("actual A20-A21 component → client → bounded BFF → serializer; ex
           providerToken: string;
         }
       ).providerToken,
-    ).toMatch(/^pax_synthetic_/);
+    ).toMatch(/^synthetic_credential_[A-Za-z_-]+$/);
   });
   it("delete confirmation focus and cancel restore the actual list heading", async () => {
     mount();

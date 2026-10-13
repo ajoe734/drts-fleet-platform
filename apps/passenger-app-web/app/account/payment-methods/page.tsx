@@ -1,4 +1,6 @@
 "use client";
+import { isDemoMode } from "../../../lib/demo/store";
+import { demoPaymentFields } from "../../../lib/demo/payment-fields";
 import { useEffect, useState } from "react";
 import type { PassengerPaymentFieldsAvailability } from "@drts/passenger-client";
 import { PaymentMethodsScreen } from "../../../components/payment/payment-methods-screen";
@@ -13,7 +15,9 @@ export default function PaymentMethodsPage() {
     status: "unavailable",
   });
   useEffect(() => {
-    const owned = paymentFieldsForRuntime();
+    const owned = isDemoMode()
+      ? demoPaymentFields()
+      : paymentFieldsForRuntime();
     setFields(owned);
     return () => {
       if (owned.status === "ready") owned.port.dispose();
