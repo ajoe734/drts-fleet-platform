@@ -3517,11 +3517,21 @@ export interface DriverStartTaskCommand {
   startedAt: string;
 }
 
+/** Actual driver-reported NTD fare components, never reconstructed from a quote. */
+export interface ActualTripFareBreakdown {
+  startMinor: number;
+  distanceMinor: number;
+  delayMinor: number;
+  nightMinor: number;
+}
+
 export interface DriverCompleteTaskCommand {
   completedAt: string;
   actualDistanceKm: number;
   actualDurationSec: number;
   fare?: MoneyAmount;
+  /** Optional for legacy callers; all four actual components are required when supplied. */
+  actualFareBreakdown?: ActualTripFareBreakdown;
   proof?: CompletionProofBundle;
 }
 
@@ -4045,6 +4055,8 @@ export interface DriverTaskRecord {
   actualDistanceKm: number | null;
   actualDurationSec: number | null;
   fare: MoneyAmount | null;
+  /** Immutable completion input; absence means actual components were not captured. */
+  actualFareBreakdown?: ActualTripFareBreakdown;
   proof: CompletionProofBundle | null;
   complianceGates?: ComplianceGateRecord[];
   forwardedStatus?: string | null;

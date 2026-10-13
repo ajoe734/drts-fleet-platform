@@ -30,6 +30,7 @@ import {
 import { EventEmitter2 } from "@nestjs/event-emitter";
 
 import type {
+  ActualTripFareBreakdown,
   DriverTaskStatus,
   AddressPayload,
   ApplyManualFareOverrideCommand,
@@ -6891,6 +6892,16 @@ export class OwnedMobilityService
     command: DriverCompleteTaskCommand,
     requestId?: string,
   ) {
+    // Snapshot supplied facts before a database lock/other asynchronous work.
+    // Malformed shapes remain malformed so validation cannot invent fields.
+    command = {
+      ...command,
+      ...(command.actualFareBreakdown &&
+      typeof command.actualFareBreakdown === "object" &&
+      !Array.isArray(command.actualFareBreakdown)
+        ? { actualFareBreakdown: { ...command.actualFareBreakdown } }
+        : {}),
+    };
     const proof = {
       photos: [...(command.proof?.photos ?? [])],
       signatureId: command.proof?.signatureId ?? null,
@@ -6955,6 +6966,8 @@ export class OwnedMobilityService
       );
     }
 
+    const actualFareBreakdown = this.captureActualFareBreakdown(order, command);
+
     if (proof.photos.length < order.proofRequirements.minPhotoCount) {
       await this.markDriverTaskProofPending(
         task,
@@ -7014,7 +7027,15 @@ export class OwnedMobilityService
 
     const certificateEvent =
       order.runtimeProfileCode === "multi_taxi_direct"
-        ? this.buildMultiTaxiCertificateEvent(order, task, command, proof)
+        ? this.buildMultiTaxiCertificateEvent(
+            order,
+            task,
+            {
+              ...command,
+              ...(actualFareBreakdown ? { actualFareBreakdown } : {}),
+            },
+            proof,
+          )
         : null;
 
     const finalizeCompletion = async () => {
@@ -7024,6 +7045,9 @@ export class OwnedMobilityService
       task.actualDistanceKm = command.actualDistanceKm;
       task.actualDurationSec = command.actualDurationSec;
       task.fare = order.fixedPrice ? order.quotedFare : (command.fare ?? null);
+      if (actualFareBreakdown) {
+        task.actualFareBreakdown = { ...actualFareBreakdown };
+      }
       task.proof = proofHasEvidence ? proof : null;
       assignment.status = "completed";
       assignment.updatedAt = now;
@@ -7238,6 +7262,10 @@ export class OwnedMobilityService
       );
     }
 
+    const actualFareBreakdown = this.captureActualFareBreakdown(
+      order,
+      params.command,
+    );
     const proofPendingError = this.buildDriverTaskProofPendingError(
       order,
       params.proof,
@@ -7307,7 +7335,10 @@ export class OwnedMobilityService
         ? this.buildMultiTaxiCertificateEvent(
             order,
             task,
-            params.command,
+            {
+              ...params.command,
+              ...(actualFareBreakdown ? { actualFareBreakdown } : {}),
+            },
             params.proof,
           )
         : null;
@@ -7320,6 +7351,9 @@ export class OwnedMobilityService
     task.fare = order.fixedPrice
       ? order.quotedFare
       : (params.command.fare ?? null);
+    if (actualFareBreakdown) {
+      task.actualFareBreakdown = { ...actualFareBreakdown };
+    }
     task.proof = params.proofHasEvidence ? params.proof : null;
     assignment.status = "completed";
     assignment.updatedAt = now;
@@ -7509,6 +7543,60 @@ export class OwnedMobilityService
     ];
   }
 
+  private captureActualFareBreakdown(
+    order: OwnedOrderRecord,
+    command: DriverCompleteTaskCommand,
+  ): ActualTripFareBreakdown | undefined {
+    const candidate = command.actualFareBreakdown;
+    if (candidate === undefined) {
+      return undefined;
+    }
+    const fields = [
+      "startMinor",
+      "distanceMinor",
+      "delayMinor",
+      "nightMinor",
+    ] as const;
+    const fare = order.fixedPrice ? order.quotedFare : command.fare;
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate) ||
+      fields.some(
+        (field) =>
+          !Object.prototype.hasOwnProperty.call(candidate, field) ||
+          !Number.isSafeInteger(candidate[field]) ||
+          candidate[field] < 0,
+      ) ||
+      !fare ||
+      normalisePlatformCurrency(fare.currency) !== PLATFORM_CURRENCY ||
+      !Number.isSafeInteger(fare.amountMinor) ||
+      fare.amountMinor < 0
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        "ACTUAL_FARE_BREAKDOWN_INVALID",
+        "Actual fare components require all four nonnegative safe integers and a canonical NTD fare.",
+      );
+    }
+    const total = fields.reduce((sum, field) => sum + candidate[field], 0);
+    if (!Number.isSafeInteger(total)) {
+      throw new ApiRequestError(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        "ACTUAL_FARE_BREAKDOWN_INVALID",
+        "Actual fare component total must be a safe integer.",
+      );
+    }
+    // Do not impose a fare/toll total convention. The Receipt task still needs
+    // an authoritative convention; this producer only captures supplied facts.
+    return {
+      startMinor: candidate.startMinor,
+      distanceMinor: candidate.distanceMinor,
+      delayMinor: candidate.delayMinor,
+      nightMinor: candidate.nightMinor,
+    };
+  }
+
   private buildMultiTaxiCertificateEvent(
     order: OwnedOrderRecord,
     task: DriverTaskRecord,
@@ -7545,6 +7633,7 @@ export class OwnedMobilityService
         },
       );
     }
+    const actualFareBreakdown = this.captureActualFareBreakdown(order, command);
     const tollMinor = proof.expenseItems
       .filter((item) => item.type.trim().toLowerCase() === "toll")
       .reduce((sum, item) => sum + item.amountMinor, 0);
@@ -7559,6 +7648,7 @@ export class OwnedMobilityService
       routeSummary: `${order.pickup.address} → ${order.dropoff.address}`,
       distanceMeters: Math.round(command.actualDistanceKm * 1000),
       fareMinor: fare.amountMinor,
+      ...(actualFareBreakdown ? { actualFareBreakdown } : {}),
       tollMinor,
       currency: PLATFORM_CURRENCY,
       consumerServicePhone:
@@ -14569,6 +14659,9 @@ export class OwnedMobilityService
         ? { bookingRequirements: structuredClone(task.bookingRequirements) }
         : {}),
       fare: task.fare ? { ...task.fare } : null,
+      ...(task.actualFareBreakdown
+        ? { actualFareBreakdown: { ...task.actualFareBreakdown } }
+        : {}),
       proof: task.proof
         ? {
             photos: [...task.proof.photos],
