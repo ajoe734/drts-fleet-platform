@@ -2,6 +2,8 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { PassengerPaymentClient } from "../../../packages/passenger-client/src/payment/client";
 import { approvedPaymentActionUrl } from "../../../apps/passenger-app-web/lib/payment/action-url";
 import { createSyntheticPaymentFields } from "../../../apps/passenger-app-web/lib/payment/synthetic-fields";
+import { paymentFieldsForRuntime } from "../../../apps/passenger-app-web/lib/payment/runtime-fields";
+import { FakePaymentProvider } from "../../../apps/api/src/modules/passenger-app/payment/fake-payment-provider";
 import type { FetchFn } from "../../../packages/passenger-client/src/client";
 
 const method = {
@@ -236,7 +238,7 @@ describe("replaceable one-use field port, synthetic nonproduction only", () => {
       issueSyntheticNonce,
     });
     expect(await port.collectCredential()).toEqual({
-      providerToken: "pax_synthetic_field_alpha",
+      providerToken: "synthetic_credential_field__alpha",
     });
     port.dispose();
     await expect(port.collectCredential()).rejects.toThrow("unavailable");
@@ -251,5 +253,52 @@ describe("replaceable one-use field port, synthetic nonproduction only", () => {
     await expect(port.collectCredential()).rejects.toThrow(
       "synthetic_payment_fields_invalid",
     );
+  });
+  it("preserves digit and underscore nonce distinctions through the actual fake provider", async () => {
+    vi.stubEnv("NODE_ENV", "test");
+    const provider = new FakePaymentProvider({ DRTS_ENV: "test" });
+    const nonces = [
+      "synthetic_12345678-1234-4234-8234-123456789abc",
+      "synthetic_12345678-1234-4234-8234-123456789abd",
+      "synthetic_0",
+      "synthetic_a",
+      "synthetic__a",
+      "synthetic___a",
+    ];
+    const credentials: string[] = [];
+    for (const nonce of nonces) {
+      const port = createSyntheticPaymentFields({
+        runtime: "nonproduction",
+        issueSyntheticNonce: () => nonce,
+      });
+      const { providerToken } = await port.collectCredential();
+      credentials.push(providerToken);
+      expect(await provider.bind(providerToken, `bind-${nonce}`)).toMatchObject(
+        {
+          status: "completed",
+          card: { cardType: "synthetic", last4: "0000" },
+        },
+      );
+      port.dispose();
+    }
+    expect(new Set(credentials).size).toBe(nonces.length);
+  });
+  it("runtime UUID credentials bind with the actual fake provider on successive requests", async () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("NEXT_PUBLIC_PAYMENT_FIELDS_PROVIDER", "synthetic");
+    const fields = paymentFieldsForRuntime();
+    expect(fields.status).toBe("ready");
+    if (fields.status !== "ready") throw new Error("expected_synthetic_fields");
+    const first = await fields.port.collectCredential();
+    const second = await fields.port.collectCredential();
+    expect(first.providerToken).not.toBe(second.providerToken);
+    const provider = new FakePaymentProvider({ DRTS_ENV: "test" });
+    expect(
+      await provider.bind(first.providerToken, "first-bind"),
+    ).toMatchObject({ status: "completed" });
+    expect(
+      await provider.bind(second.providerToken, "second-bind"),
+    ).toMatchObject({ status: "completed" });
+    fields.port.dispose();
   });
 });

@@ -223,17 +223,14 @@ class RestoreDrillTest(unittest.TestCase):
         with patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": "bad_trust"}), self.assertRaises(drill.DrillError):
             provision.plan()
 
-    def test_plan_includes_only_project_sql_create_with_exact_condition(self):
+    def test_plan_includes_only_project_sql_create_unconditionally(self):
         design = provision.plan()
         create = next(s for s in design["roles"] if s["id"] == "drtsOpsDrillCloneCreate")
         self.assertEqual(create["permissions"], ["cloudsql.instances.create"])
+        self.assertIsNone(create["expression"])
         expected = {
             "role": f"projects/{drill.PROJECT}/roles/drtsOpsDrillCloneCreate",
             "members": [provision.MEMBER],
-            "condition": {
-                "title": "drtsOpsDrillCloneCreate",
-                "expression": f"resource.service == 'sqladmin.googleapis.com' && resource.name == 'projects/{drill.PROJECT}'",
-            },
         }
         self.assertIn(expected, design["project_bindings"])
         provision.audit_policy({"bindings": [expected]}, design["project_bindings"])
@@ -245,7 +242,7 @@ class RestoreDrillTest(unittest.TestCase):
         self.assertFalse(self.iam_writes())
 
     def iam_writes(self):
-        return [c for c in self.calls() if "create" in c or "add-iam-policy-binding" in c or c[1:3] == ["variable", "set"]]
+        return [c for c in self.calls() if "create" in c or "add-iam-policy-binding" in c or "remove-iam-policy-binding" in c or c[1:3] == ["variable", "set"]]
 
     def test_apply_real_orchestrator_is_additive_idempotent_and_readiness_is_separate(self):
         design = provision.plan()
@@ -266,7 +263,7 @@ class RestoreDrillTest(unittest.TestCase):
                 self.assertIn("resource.name == 'projects/drts-dev-devcc-20260825/instances/drts-dev-db'", item["condition"]["expression"])
             if "cloudsql.instances.create" in permissions:
                 self.assertEqual(permissions, ["cloudsql.instances.create"])
-                self.assertEqual(item["condition"], {"title": "drtsOpsDrillCloneCreate", "expression": f"resource.service == 'sqladmin.googleapis.com' && resource.name == 'projects/{drill.PROJECT}'"})
+                self.assertNotIn("condition", item)
         self.assertFalse(any(p in json.dumps(iam["roles"]) for p in ("restoreBackup", "instances.update", "users.update")))
 
     def test_existing_provisioning_adds_only_create_role_and_binding(self):
@@ -289,17 +286,132 @@ class RestoreDrillTest(unittest.TestCase):
         after["project"]["bindings"] = [b for b in after["project"]["bindings"] if not b["role"].endswith("/drtsOpsDrillCloneCreate")]
         self.assertEqual(after, before)  # Preserve all previously provisioned IAM.
 
+    def seed_legacy_create(self, *, coexist=False, shared=False):
+        design = provision.plan()
+        provision.apply(design, provision.inventory(design))
+        statefile = self.root / "iam.json"
+        iam = json.loads(statefile.read_text())
+        create = next(b for b in iam["project"]["bindings"] if b["role"].endswith("/drtsOpsDrillCloneCreate"))
+        wanted = json.loads(json.dumps(create))
+        wanted.pop("condition", None)
+        legacy = json.loads(json.dumps(wanted))
+        legacy["condition"] = {
+            "title": "drtsOpsDrillCloneCreate",
+            "expression": f"resource.service == 'sqladmin.googleapis.com' && resource.name == 'projects/{drill.PROJECT}'",
+        }
+        iam["project"]["bindings"].remove(create)
+        iam["project"]["bindings"].append(legacy)
+        if shared:
+            legacy["members"].append("user:operator@example.test")
+            iam["project"]["bindings"].append(dict(wanted, members=["user:other@example.test"], condition={"title": "other", "expression": "false"}))
+        if coexist:
+            iam["project"]["bindings"].append(wanted)
+        statefile.write_text(json.dumps(iam))
+        return design, iam, wanted, legacy
+
+    def test_legacy_create_is_replaced_exactly_preserving_other_members_and_grants(self):
+        design, before, wanted, legacy = self.seed_legacy_create(shared=True)
+        writes = self.iam_writes()
+        provision.apply(design, provision.inventory(design))
+        state = provision.inventory(design, complete=True)
+        added = self.iam_writes()[len(writes):]
+        self.assertEqual(len(added), 2)
+        self.assertEqual(added[0][1:4], ["projects", "remove-iam-policy-binding", drill.PROJECT])
+        self.assertIn("--member=" + provision.MEMBER, added[0])
+        self.assertIn("--role=" + wanted["role"], added[0])
+        self.assertIn("--condition=title=drtsOpsDrillCloneCreate,expression=" + legacy["condition"]["expression"], added[0])
+        self.assertNotIn("--all", added[0])
+        self.assertEqual(added[1][1:4], ["projects", "add-iam-policy-binding", drill.PROJECT])
+        self.assertIn("--condition=None", added[1])
+        legacy["members"].remove(provision.MEMBER)
+        before["project"]["bindings"].append(wanted)
+        self.assertEqual(json.loads((self.root / "iam.json").read_text()), before)
+        provision.apply(design, state)
+        self.assertEqual(self.iam_writes(), writes + added)
+        self.assertFalse((self.root / "ready.json").exists())
+
+    def test_legacy_create_left_alongside_unconditional_is_removed_without_duplicate(self):
+        design, before, wanted, legacy = self.seed_legacy_create(coexist=True)
+        with self.assertRaisesRegex(drill.DrillError, "unexpected_sa_grant"):
+            provision.inventory(design, complete=True)
+        writes = self.iam_writes()
+        provision.apply(design, provision.inventory(design))
+        state = provision.inventory(design, complete=True)
+        added = self.iam_writes()[len(writes):]
+        self.assertEqual(len(added), 1)
+        self.assertIn("remove-iam-policy-binding", added[0])
+        before["project"]["bindings"].remove(legacy)
+        self.assertEqual(json.loads((self.root / "iam.json").read_text()), before)
+        self.assertEqual(state["project_policy"]["bindings"].count(wanted), 1)
+
+    def test_legacy_create_partial_replacement_fails_closed_and_retries(self):
+        design, before, wanted, legacy = self.seed_legacy_create()
+        original_gc = provision.gc
+        for failed_operation in ("remove-iam-policy-binding", "add-iam-policy-binding"):
+            (self.root / "iam.json").write_text(json.dumps(before))
+            def denied(*args, **kwargs):
+                if args[:2] == ("projects", failed_operation):
+                    raise drill.DrillError("simulated_replacement_failure")
+                return original_gc(*args, **kwargs)
+            with self.subTest(operation=failed_operation):
+                writes = self.iam_writes()
+                with patch.object(provision, "gc", denied), self.assertRaisesRegex(drill.DrillError, "simulated_replacement_failure"):
+                    provision.apply(design, provision.inventory(design))
+                remaining = json.loads((self.root / "iam.json").read_text())["project"]["bindings"]
+                self.assertNotIn(wanted, remaining)
+                self.assertEqual(legacy in remaining, failed_operation == "remove-iam-policy-binding")
+                if failed_operation == "remove-iam-policy-binding":
+                    self.assertEqual(self.iam_writes(), writes)  # Never add after a failed remove.
+                with self.assertRaises(drill.DrillError):
+                    provision.inventory(design, complete=True)
+                self.assertFalse((self.root / "ready.json").exists())
+                provision.apply(design, provision.inventory(design))
+                state = provision.inventory(design, complete=True)
+                self.assertNotIn(legacy, state["project_policy"]["bindings"])
+                self.assertEqual(state["project_policy"]["bindings"].count(wanted), 1)
+
+    def test_legacy_create_readiness_rejects_before_and_after_unconditional_add(self):
+        for coexist in (False, True):
+            with self.subTest(coexist=coexist):
+                design, _, _, _ = self.seed_legacy_create(coexist=coexist)
+                writes = self.iam_writes()
+                original_command = provision.command
+                def boundary(args, **kwargs):
+                    return "" if args[:2] == ["git", "status"] else original_command(args, **kwargs)
+                with patch.object(provision, "command", boundary), patch.object(provision, "confirm") as confirm, patch.object(sys, "argv", ["provision", "--check-ready", "--output", str(self.root / "plan.json")]):
+                    self.assertEqual(provision.main(), 2)
+                    confirm.assert_not_called()
+                self.assertEqual(self.iam_writes(), writes)
+                self.assertFalse((self.root / "ready.json").exists())
+                provision.apply(design, provision.inventory(design))
+                provision.inventory(design, complete=True)
+
+    def test_create_inheritance_at_folder_or_organization_blocks_migration_and_readiness(self):
+        design = provision.plan()
+        provision.apply(design, provision.inventory(design))
+        writes = self.iam_writes()
+        for scenario in ("inherited_create_folder", "inherited_create_org"):
+            for complete in (False, True):
+                with self.subTest(scenario=scenario, complete=complete), patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": scenario}), self.assertRaisesRegex(drill.DrillError, "unexpected_sa_grant"):
+                    provision.inventory(design, complete=complete)
+        # The exact legacy condition is no exception to the inherited boundary.
+        self.seed_legacy_create()
+        for scenario in ("inherited_create_folder", "inherited_create_org"):
+            with self.subTest(legacy=scenario), patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": scenario}), self.assertRaisesRegex(drill.DrillError, "unexpected_sa_grant"):
+                provision.inventory(design)
+        self.assertEqual(self.iam_writes(), writes)
+
     def test_create_grant_drift_blocks_apply_inventory_and_readiness_without_writes(self):
         design = provision.plan()
         provision.apply(design, provision.inventory(design))
         statefile = self.root / "iam.json"
         original = statefile.read_text()
         writes = self.iam_writes()
-        conditions = [None, "true", "resource.service == 'sqladmin.googleapis.com'",
+        conditions = ["true", "resource.service == 'sqladmin.googleapis.com'",
                       f"resource.name == 'projects/{drill.PROJECT}'",
                       f"resource.service == 'sqladmin.googleapis.com' && resource.name.startsWith('projects/{drill.PROJECT}')",
                       "resource.service == 'sqladmin.googleapis.com' && resource.name == 'projects/other-project'"]
-        for change in [*conditions, "extra_permission", "extra_grant", "missing_binding", "inherited"]:
+        for change in [*conditions, "legacy_title_drift", "legacy_description_drift", "extra_permission", "extra_grant", "predefined_viewer", "other_create_role", "unconditional_source_clone", "unconditional_source_read", "unconditional_temporary", "missing_binding", "inherited"]:
             iam = json.loads(original)
             create = next(b for b in iam["project"]["bindings"] if b["role"].endswith("/drtsOpsDrillCloneCreate"))
             error = "unexpected_sa_grant"
@@ -308,6 +420,19 @@ class RestoreDrillTest(unittest.TestCase):
                 error = "existing_custom_role_drift"
             elif change == "extra_grant":
                 iam["project"]["bindings"].append(dict(create, role="roles/cloudsql.admin"))
+            elif change == "predefined_viewer":
+                iam["project"]["bindings"].append(dict(create, role="roles/cloudsql.viewer"))
+            elif change == "other_create_role":
+                iam["project"]["bindings"].append(dict(create, role=f"projects/{drill.PROJECT}/roles/otherCreate"))
+            elif change.startswith("unconditional_"):
+                role_id = {"unconditional_source_clone": "drtsOpsDrillSourceClone", "unconditional_source_read": "drtsOpsDrillSourceRead", "unconditional_temporary": "drtsOpsDrillTemporary"}[change]
+                next(b for b in iam["project"]["bindings"] if b["role"].endswith("/" + role_id)).pop("condition")
+            elif change.startswith("legacy_"):
+                create["condition"] = {"title": "drtsOpsDrillCloneCreate", "expression": f"resource.service == 'sqladmin.googleapis.com' && resource.name == 'projects/{drill.PROJECT}'"}
+                if change == "legacy_title_drift":
+                    create["condition"]["title"] = "other"
+                else:
+                    create["condition"]["description"] = "unreviewed variant"
             elif change == "missing_binding":
                 iam["project"]["bindings"].remove(create)
                 error = "project_binding_missing"
@@ -315,10 +440,8 @@ class RestoreDrillTest(unittest.TestCase):
                 with self.assertRaisesRegex(drill.DrillError, error):
                     provision.audit_policy({"bindings": [create]}, design["project_bindings"], inherited=True)
                 continue
-            elif change is None:
-                create.pop("condition")
             else:
-                create["condition"]["expression"] = change
+                create["condition"] = {"title": "drtsOpsDrillCloneCreate", "expression": change}
             statefile.write_text(json.dumps(iam))
             with self.subTest(change=change), self.assertRaisesRegex(drill.DrillError, error):
                 provision.inventory(design, complete=True)

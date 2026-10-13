@@ -18,6 +18,22 @@ export function resolveAuthoritativeFleetShellEnv(
 type Dict = Record<string, string>;
 
 const en: Dict = {
+  "cases.action.export": "Export case (JSON)",
+  "cases.exportFailed":
+    "The case file could not be downloaded. Please try again.",
+  "cases.errorGuide": "Case error guide",
+  "cases.accessStates": "Attachment and history access status",
+  "cases.detailUnavailable": "Unable to load this case",
+  "cases.detailUnavailableBody":
+    "The case service did not return this case. Return to the list and try again.",
+  "cases.backToList": "Back to cases",
+  "cases.replyContent": "Reply content",
+  "actions.reason.caseClosed": "case closed",
+  "actions.reason.caseUnavailable": "Replies are currently unavailable",
+  "case.status.closed": "Closed",
+  "case.status.resolved": "Resolved",
+  "case.status.reopened": "Reopened",
+  "case.status.under_investigation": "Under investigation",
   "app.name": "Fleet Partner Portal",
   "app.sub": "Fleet Partner Workspace",
   "app.brandMark": "FLP",
@@ -577,6 +593,20 @@ const en: Dict = {
 };
 
 const zh: Dict = {
+  "cases.action.export": "匯出案件（JSON）",
+  "cases.exportFailed": "無法下載案件檔案，請再試一次。",
+  "cases.errorGuide": "案件錯誤指引",
+  "cases.accessStates": "附件/歷程讀取狀態",
+  "cases.detailUnavailable": "無法載入此案件",
+  "cases.detailUnavailableBody": "案件服務尚未回傳此案件，請返回列表後再試。",
+  "cases.backToList": "返回案件列表",
+  "cases.replyContent": "回覆內容",
+  "actions.reason.caseClosed": "案件已結案",
+  "actions.reason.caseUnavailable": "目前無法回覆此案件",
+  "case.status.closed": "已結案",
+  "case.status.resolved": "已解決",
+  "case.status.reopened": "重新開啟",
+  "case.status.under_investigation": "調查中",
   "app.name": "車行夥伴入口",
   "app.sub": "車行夥伴工作台",
   "app.brandMark": "FLP",

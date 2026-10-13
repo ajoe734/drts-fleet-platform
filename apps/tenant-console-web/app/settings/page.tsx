@@ -60,6 +60,7 @@ const APP_BASE_URLS: Record<CrossAppResourceLink["targetApp"], string> = {
 };
 const LOCAL_TENANT_ROUTES = new Set([
   "/settings",
+  "/billing",
   "/users",
   "/audit",
   "/api-keys",
@@ -1377,13 +1378,13 @@ export default async function SettingsPage() {
   const consentValue = getConsentValue(data.preferences.item, locale);
   const settingsModuleRoutes = [
     "/settings",
+    "/billing",
     "/users",
     "/audit",
     "/api-keys",
     "/webhooks",
   ];
   const deferredModuleRoutes = [
-    "/billing",
     "/notifications",
     "/sla",
     "/integration-governance",
@@ -1431,7 +1432,8 @@ export default async function SettingsPage() {
     {
       surface: {
         label: t("settings.surface.billingData", locale),
-        note: "module-route-pending",
+        href: "/billing",
+        note: "same-tab",
       },
       descriptors: getSurfaceActionDescriptors(data.billingProfile),
     },
@@ -1487,7 +1489,8 @@ export default async function SettingsPage() {
     {
       surface: {
         label: t("settings.surface.billingData", locale),
-        note: "module-route-pending",
+        href: "/billing",
+        note: "same-tab",
       },
       descriptors: getSurfaceActionDescriptors(data.billingProfile),
     },
@@ -1885,6 +1888,11 @@ export default async function SettingsPage() {
             <CanvasCard
               theme={th}
               title={t("settings.tab.general", locale)}
+              actions={
+                <a href="/billing" style={{ color: th.accent }}>
+                  {t("billing.form.open", locale)}
+                </a>
+              }
               style={generalCardStyle}
             >
               <div style={generalGridStyle}>

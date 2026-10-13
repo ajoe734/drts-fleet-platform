@@ -1,4 +1,4 @@
-"""Operator-only additive IAM provisioning; default is a read-only plan.
+"""Operator-only IAM provisioning; default is a read-only plan.
 
 Supervisor decision 2026-10-03T02:20Z accepts the non-enforceable clone
 destination. Never broaden source clone or prefix delete on an API failure.
@@ -35,10 +35,12 @@ def role_specs():
         # uses instances.get above; no invented cloudsql.operations permission.
         {"id": "drtsOpsDrillInventory", "permissions": ["cloudsql.instances.list", "logging.logEntries.list"],
          "expression": None},
-        # User-approved 2026-10-10: clone checks create on the project resource.
-        # This also permits new SQL instances; it cannot constrain their names.
+        # User-approved 2026-10-10: create only in this dev project. The old
+        # condition never matched Cloud SQL's project-level authorization.
+        # This one SQL permission is project-bound without a condition; it
+        # permits new instances of any name and cannot limit size or cost.
         {"id": "drtsOpsDrillCloneCreate", "permissions": ["cloudsql.instances.create"],
-         "expression": sql + f"resource.name == 'projects/{PROJECT}'"},
+         "expression": None},
     ]
 
 
@@ -47,6 +49,12 @@ def binding(spec):
     if spec["expression"]:
         result["condition"] = {"title": spec["id"], "expression": spec["expression"]}
     return result
+
+
+def legacy_create_binding():
+    """Exact obsolete binding, accepted only for operator replacement."""
+    return binding({"id": "drtsOpsDrillCloneCreate",
+                    "expression": f"resource.service == 'sqladmin.googleapis.com' && resource.name == 'projects/{PROJECT}'"})
 
 
 def plan():
@@ -67,7 +75,7 @@ def plan():
         "roles": role_specs(), "project_bindings": [binding(s) for s in role_specs()],
         "secret_binding": {"secret": SECRET, "role": "roles/secretmanager.secretAccessor"},
         "readiness_variable": READY_VAR,
-        "residual_risk": "Clone destination is NOT IAM-enforceable. The drill SA can now create new Cloud SQL instances in this dev project, as well as extra clones copying dev data, with cost risk and no IAM-enforced destination name or size limit. Impersonation is reachable only through the repository-only WIF trust, which is repository-wide, not workflow-specific. No SQL Admin API overwrite/update/restore or non-drill delete is granted. Existing DB credentials retain their database privileges; read-only SQL is a runner control, not a database authorization boundary.",
+        "residual_risk": "Clone destination is NOT IAM-enforceable. The unconditional project binding grants only cloudsql.instances.create in this dev project; the old condition never matched Cloud SQL's project-level create check. The drill SA can create new Cloud SQL instances of any name in this project, as well as extra clones copying dev data, with cost risk and no IAM-enforced destination name or size limit. Impersonation is reachable only through the repository-only WIF trust, which is repository-wide, not workflow-specific. No SQL Admin API overwrite/update/restore or non-drill delete is granted. Existing DB credentials retain their database privileges; read-only SQL is a runner control, not a database authorization boundary.",
         "source_condition": "Source-only clone condition retained. If Cloud SQL rejects it, stop for operator/Supervisor evidence; no automatic unconditional fallback.",
     }
 
@@ -81,6 +89,8 @@ def audit_policy(policy, allowed, *, inherited=False):
 
     A conservative audit: it never assumes a group excludes the SA. Unknown
     grants require operator investigation, not automatic removal or acceptance.
+    Exact project allowlists include the one-permission unconditional create
+    role; the obsolete condition is allowlisted only by pre-apply inventory.
     """
     for entry in policy.get("bindings", []):
         members = entry.get("members", [])
@@ -107,7 +117,12 @@ def inventory(design, complete=False):
         require(kind in ("project", "folder", "organization"), "unknown_ancestor")
         prefix = ("projects",) if kind == "project" else ("resource-manager", "folders") if kind == "folder" else ("organizations",)
         policy = obj(gc(*prefix, "get-iam-policy", str(ancestor["id"])))
-        audit_policy(policy, design["project_bindings"], inherited=kind != "project")
+        allowed = design["project_bindings"]
+        if kind == "project" and not complete:
+            # Migration is not readiness. All other unknown grants still fail
+            # before any write, including altered versions of the old condition.
+            allowed = [*allowed, legacy_create_binding()]
+        audit_policy(policy, allowed, inherited=kind != "project")
         policies.append(policy)
     project_policy = policies[next(i for i, a in enumerate(ancestors) if a["type"] == "project")]
     accounts = obj(gc("iam", "service-accounts", "list"))
@@ -160,6 +175,14 @@ def apply(design, state):
     for spec, wanted in zip(design["roles"], design["project_bindings"]):
         if spec["id"] not in state["roles"]:
             gc("iam", "roles", "create", spec["id"], "--title=" + spec["id"], "--stage=GA", "--permissions=" + ",".join(spec["permissions"]))
+        legacy = legacy_create_binding()
+        if wanted["role"] == legacy["role"] and any(MEMBER in b.get("members", []) and same_binding(b, legacy) for b in state["project_policy"].get("bindings", [])):
+            # Remove only this member from the exact old binding. Other members
+            # and all other role/condition pairs survive. A failed remove stops
+            # before add; a failed add leaves no create grant and is retryable.
+            condition = legacy["condition"]
+            gc("projects", "remove-iam-policy-binding", PROJECT, "--member=" + MEMBER,
+               "--role=" + legacy["role"], "--condition=title=" + condition["title"] + ",expression=" + condition["expression"])
         if not any(MEMBER in b.get("members", []) and same_binding(b, wanted) for b in state["project_policy"].get("bindings", [])):
             condition = "None" if not spec["expression"] else "title=" + spec["id"] + ",expression=" + spec["expression"]
             gc("projects", "add-iam-policy-binding", PROJECT, "--member=" + MEMBER, "--role=" + wanted["role"], "--condition=" + condition)

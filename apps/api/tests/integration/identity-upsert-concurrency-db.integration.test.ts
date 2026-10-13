@@ -1260,7 +1260,11 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
         invitedByPrincipalId: null,
         invitationId: null,
         createdAt: new Date(Date.now() - 60_000).toISOString(),
-        updatedAt: new Date().toISOString(),
+        // PostgreSQL NOW() retains microseconds; Date.now() can still be in
+        // the fixture's millisecond. Exercise the collision with a definitively
+        // newer record instead of accidentally taking the stale-write path.
+        updatedAt: new Date(beforeRow.rows[0]!.updated_at.getTime() + 1_000)
+          .toISOString(),
       }),
     ).rejects.toThrow();
 

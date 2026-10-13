@@ -16,6 +16,28 @@ export const BASELINE_PER_MINUTE = {
   report: 30,
 };
 
+// An explicit scenario, distinct from the ordinary uniform cadence. Intake
+// launches 50 requests together and the remaining ten later in each minute;
+// reports launch a budgeted cohort of 30. This can exercise intake overlap,
+// but does not claim a measured 50-job running/queued report backlog.
+export function buildWorkloadSchedule(profile, counts) {
+  if (!["uniform", "concurrent"].includes(profile))
+    throw new Error("Unknown capacity profile");
+  return Object.fromEntries(
+    Object.entries(BASELINE_PER_MINUTE).map(([family, perMinute]) => [
+      family,
+      Array.from({ length: counts[family] }, (_, index) => {
+        if (profile === "uniform" || family === "dispatch")
+          return (index * 60000) / perMinute;
+        const minute = Math.floor(index / perMinute) * 60000;
+        const within = index % perMinute;
+        if (family === "report") return minute;
+        return minute + (within < 50 ? 0 : 50000 + (within - 50) * 1000);
+      }),
+    ]),
+  );
+}
+
 export function countForFamily(family, durationSeconds) {
   const perMinute = BASELINE_PER_MINUTE[family];
   if (!perMinute) {
@@ -28,7 +50,13 @@ function pad(value, length) {
   return String(value).padStart(length, "0");
 }
 
-export function buildBookingItems({ count, tenantId, tenantJwt, runTag, windowStartMs }) {
+export function buildBookingItems({
+  count,
+  tenantId,
+  tenantJwt,
+  runTag,
+  windowStartMs,
+}) {
   const items = [];
   for (let index = 0; index < count; index += 1) {
     // Stagger reservation windows so every booking is a distinct,
@@ -60,10 +88,18 @@ export function buildBookingItems({ count, tenantId, tenantJwt, runTag, windowSt
   return items;
 }
 
-export function buildDispatchItems({ orderIds, dispatchJwt, runTag }) {
-  return orderIds.map((orderId, index) => ({
+export function buildDispatchItems({
+  orderIds,
+  dispatchJwt,
+  runTag,
+  count = orderIds.length,
+  stagedDispatch = false,
+}) {
+  return Array.from({ length: count }, (_, index) => ({
     method: "POST",
-    path: `/api/orders/${orderId}/dispatch`,
+    path: orderIds[index]
+      ? `/api/orders/${orderIds[index]}/dispatch`
+      : "/api/orders/{orderId}/dispatch",
     headers: {
       authorization: `Bearer ${dispatchJwt}`,
       "idempotency-key": `${runTag}-dispatch-${index}`,
@@ -72,6 +108,36 @@ export function buildDispatchItems({ orderIds, dispatchJwt, runTag }) {
     body: {
       mode: "auto",
     },
+    ...(!orderIds[index] && stagedDispatch
+      ? {
+          stageOrder: {
+            method: "POST",
+            path: "/api/orders",
+            headers: {
+              "x-actor-type": "ops_user",
+              "x-actor-id": `sr-ops-capacity-seed-${index}`,
+              "x-request-id": `${runTag}-seed-req-${index}`,
+              "idempotency-key": `${runTag}-seed-${index}`,
+            },
+            body: {
+              pickup: {
+                address: `SR-OPS-CAPACITY seed pickup ${index}`,
+                lat: 25.042,
+                lng: 121.552,
+              },
+              dropoff: {
+                address: `SR-OPS-CAPACITY seed dropoff ${index}`,
+                lat: 25.045,
+                lng: 121.555,
+              },
+              passenger: {
+                name: `SR-OPS-CAPACITY seed passenger ${index}`,
+                phone: `08${pad(index % 100000000, 8)}`,
+              },
+            },
+          },
+        }
+      : {}),
   }));
 }
 
@@ -89,6 +155,7 @@ export function buildReportItems({ count, reportJwt, runTag }) {
       body: {
         jobType: "trip_summary",
         format: "csv",
+        filters: { runTag },
       },
     });
   }
@@ -111,13 +178,18 @@ export function buildCapacityPlan({
   reportJwt,
   orderIds,
   runTag,
+  profile = "uniform",
+  stagedDispatch = false,
   windowStartMs = Date.now() + 2 * 60 * 60 * 1000,
 }) {
   const bookingCount = countForFamily("booking", durationSeconds);
   const dispatchCount = countForFamily("dispatch", durationSeconds);
   const reportCount = countForFamily("report", durationSeconds);
 
-  if (orderIds.length !== dispatchCount) {
+  if (
+    orderIds.length !== (stagedDispatch ? 500 : dispatchCount) ||
+    (stagedDispatch && (durationSeconds !== 900 || profile !== "concurrent"))
+  ) {
     throw new Error(
       `orderIds must contain exactly ${dispatchCount} pre-provisioned dispatchable order IDs for a ${durationSeconds}s burst; received ${orderIds.length}`,
     );
@@ -128,9 +200,27 @@ export function buildCapacityPlan({
     durationSeconds,
     maxInFlight,
     isolatedResourceId,
+    profile,
+    scheduleMs: buildWorkloadSchedule(profile, {
+      booking: bookingCount,
+      dispatch: dispatchCount,
+      report: reportCount,
+    }),
     workloads: {
-      booking: buildBookingItems({ count: bookingCount, tenantId, tenantJwt, runTag, windowStartMs }),
-      dispatch: buildDispatchItems({ orderIds, dispatchJwt, runTag }),
+      booking: buildBookingItems({
+        count: bookingCount,
+        tenantId,
+        tenantJwt,
+        runTag,
+        windowStartMs,
+      }),
+      dispatch: buildDispatchItems({
+        orderIds,
+        dispatchJwt,
+        runTag,
+        count: dispatchCount,
+        stagedDispatch,
+      }),
       report: buildReportItems({ count: reportCount, reportJwt, runTag }),
     },
   };

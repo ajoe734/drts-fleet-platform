@@ -18,6 +18,7 @@ import { LlmGatewayModule } from "./common/llm-gateway";
 import { SnakeCaseExceptionFilter } from "./common/snake-case.exception-filter";
 import { SnakeCaseInterceptor } from "./common/snake-case.interceptor";
 import { BootstrapThrottlerGuard } from "./common/throttling/bootstrap-throttler.guard";
+import { KeyScopedThrottlerStorage } from "./common/throttling/key-scoped-throttler.storage";
 import { GLOBAL_RATE_LIMIT } from "./common/throttling/rate-limit.constants";
 import { HealthModule } from "./health/health.module";
 import { AuditNotificationModule } from "./modules/audit-notification/audit-notification.module";
@@ -79,7 +80,10 @@ import { PassengerAppModule } from "./modules/passenger-app/passenger-app.module
 @Module({
   imports: [
     EventEmitterModule.forRoot(),
-    ThrottlerModule.forRoot([...GLOBAL_RATE_LIMIT]),
+    ThrottlerModule.forRoot({
+      throttlers: [...GLOBAL_RATE_LIMIT],
+      storage: new KeyScopedThrottlerStorage(),
+    }),
     LlmGatewayModule,
     AuthModule,
     PassengerAppModule,

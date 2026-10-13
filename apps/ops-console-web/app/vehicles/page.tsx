@@ -709,8 +709,7 @@ function synthesizeAvailableActions(
   const actions: ResourceActionDescriptor[] = [
     {
       action: "open_vehicle_detail",
-      enabled: false,
-      disabledReasonCode: "vehicle_detail_pending",
+      enabled: true,
       riskLevel: "low",
     },
   ];
@@ -1243,7 +1242,7 @@ export default async function VehiclesPage({
       lastSeenLabel,
       crossAppLinks,
       offboardingActive: vehicle.supplyLifecycle.offboarding.status !== "none",
-      syntheticDetailPending: true,
+      syntheticDetailPending: false,
     };
 
     const actionSeed = {

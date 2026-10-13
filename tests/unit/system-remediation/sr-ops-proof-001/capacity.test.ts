@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -31,7 +31,9 @@ describe("capacity harness mechanics, not business capacity acceptance", () => {
           authorization: scenario === "invalid-header" ? "invalid\u0000header" : "test-only" } });
       const plan = {
         origin: scenario === "remote" ? "http://example.com" : `http://127.0.0.1:${address.port}`,
-        isolatedResourceId: "unit-test-loopback-listener", durationSeconds: 0.21,
+        // This mechanics fixture still schedules four requests, including dispatch at 200 ms.
+        // Allow host timer jitter here; the real 900-second baseline and its checks are unchanged.
+        isolatedResourceId: "unit-test-loopback-listener", durationSeconds: 0.4,
         maxInFlight: scenario === "overload" ? 1 : 10,
         workloads: {
           booking: [item("/api/tenant/bookings", { businessDispatchSubtype: "test", pickup: {}, dropoff: {},
@@ -53,14 +55,23 @@ describe("capacity harness mechanics, not business capacity acceptance", () => {
         expect(received).toHaveLength(0);
         return;
       }
-      expect(code).toBe(scenario === "success" ? 0 : 1);
-      const rows = readFileSync(output, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      const raw = existsSync(output) ? readFileSync(output, "utf8").trim() : "";
+      const rows = raw ? raw.split("\n").map((line) => JSON.parse(line)) : [];
+      const summary = existsSync(`${output}.summary.json`)
+        ? JSON.parse(readFileSync(`${output}.summary.json`, "utf8")) : null;
+      // Show scheduling evidence on failure, without request bodies or auth headers.
+      expect(code, JSON.stringify({
+        scenario,
+        raw: rows.map(({ workload, sequence, scheduledMs, launchedMs, schedulingLagMs, latencyMs, httpStatus, error }) =>
+          ({ workload, sequence, scheduledMs, launchedMs, schedulingLagMs, latencyMs, httpStatus, error })),
+        summary: summary && { result: summary.result, durationSeconds: summary.durationSeconds,
+          fullBurstSchedule: summary.fullBurstSchedule, workflows: summary.workflows },
+      }, null, 2)).toBe(scenario === "success" ? 0 : 1);
       expect(rows).toHaveLength(4);
       expect(new Set(rows.map((row) => row.workload))).toEqual(new Set(["booking", "dispatch", "report"]));
       expect(rows.find((row) => row.workload === "dispatch" && row.sequence === 2).scheduledMs).toBe(200);
       expect(rows.every((row) => /^[a-f0-9]{40}$/.test(row.candidateSha))).toBe(true);
       expect(readFileSync(output, "utf8")).not.toContain("test-only");
-      const summary = JSON.parse(readFileSync(`${output}.summary.json`, "utf8"));
       expect(summary.acceptance).toBe("not_established");
       expect(summary.fullBurstSchedule).toBe(false);
       if (scenario === "success") {

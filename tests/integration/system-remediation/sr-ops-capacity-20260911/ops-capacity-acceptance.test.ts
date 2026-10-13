@@ -1,8 +1,14 @@
 import { createRequire } from "node:module";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import type { AddressInfo } from "node:net";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { CapacitySummary } from "../../../../tools/system-remediation/ops-capacity/plan-builder.mjs";
 
 // SR-OPS-CAPACITY-RUNNER-20260911 (C123): real, GitHub-hosted-only capacity
 // acceptance. This VM never hosts Postgres, so DATABASE_URL is unset locally
@@ -101,34 +107,37 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         };
       };
       const { AppModule } = await import("../../../../apps/api/src/app.module");
-      const { JwtAuthService } = await import(
-        "../../../../apps/api/src/common/auth/jwt-auth.service"
-      );
-      const { IdentityRepository } = await import(
-        "../../../../apps/api/src/modules/identity/identity.repository"
-      );
-      const { AUTH_SCOPE_PRESETS } = await import(
-        "../../../../apps/api/src/common/auth/auth.constants"
-      );
-      const { SecurityEventsService } = await import(
-        "../../../../apps/api/src/modules/security-events/security-events.service"
-      );
-      const { TenantPartnerService } = await import(
-        "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service"
-      );
-      const { detectAuthEnvironment } = await import(
-        "../../../../apps/api/src/config/auth-startup-config"
-      );
-      const { buildCapacityPlan, countsForDuration } = await import(
-        "../../../../tools/system-remediation/ops-capacity/plan-builder.mjs"
-      );
-      // capacity.mjs belongs to the already-accepted SR-OPS-PROOF-001 (C122)
-      // task and is out of this task's write scope, so it has no .d.mts
-      // declaration file; suppress the resulting no-declaration error here
-      // rather than adding one outside this task's owned paths.
-      // @ts-expect-error -- TS7016: no declaration file for capacity.mjs
+      const { JwtAuthService } =
+        await import("../../../../apps/api/src/common/auth/jwt-auth.service");
+      const { IdentityRepository } =
+        await import("../../../../apps/api/src/modules/identity/identity.repository");
+      const { AUTH_SCOPE_PRESETS } =
+        await import("../../../../apps/api/src/common/auth/auth.constants");
+      const { SecurityEventsService } =
+        await import("../../../../apps/api/src/modules/security-events/security-events.service");
+      const { TenantPartnerService } =
+        await import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.service");
+      const { detectAuthEnvironment } =
+        await import("../../../../apps/api/src/config/auth-startup-config");
+      const { ReportingFilingService } =
+        await import("../../../../apps/api/src/modules/reporting-filing/reporting-filing.service");
+      type ReportRow =
+        import("../../../../tools/system-remediation/ops-capacity/durable-readback.mjs").ReportJobReadbackRow;
+      const { buildCapacityPlan, countsForDuration } =
+        await import("../../../../tools/system-remediation/ops-capacity/plan-builder.mjs");
+      // The Supervisor allocated this exact producer file, not a shared declaration.
+      // prettier-ignore
+      // @ts-expect-error -- TS7016: no declaration file for the allocated capacity.mjs
       const { runPlan } = await import("../../../../tools/system-remediation/ops-proof/capacity.mjs");
-      const { readBackOwnedOrders, readBackReportJobs, summarizeReadback, summarizeLag } =
+      const {
+        readBackOwnedOrders,
+        readBackReportJobs,
+        collectReportCompletions,
+        summarizeReadback,
+        summarizeLag,
+        summarizeDispatchEvidence,
+        assertAcceptancePassed,
+      } =
         await import("../../../../tools/system-remediation/ops-capacity/durable-readback.mjs");
 
       const evidenceDir = resolve(
@@ -160,13 +169,14 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         // that's a false negative from the harness, not a signal about the
         // measured booking/dispatch/report burst.
         const dispatchCount = countsForDuration(DURATION_SECONDS).dispatch;
-        const orderIds: string[] = new Array(dispatchCount);
+        const initialBacklogCount = 500;
+        const orderIds: string[] = new Array(initialBacklogCount);
         let nextIndex = 0;
         async function seedWorker() {
           for (;;) {
             const index = nextIndex;
             nextIndex += 1;
-            if (index >= dispatchCount) {
+            if (index >= initialBacklogCount) {
               return;
             }
             const response = await fetch(`${baseUrl}/api/orders`, {
@@ -211,7 +221,9 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
             } catch (parseError) {
               throw new Error(
                 `Dispatchable order seed #${index} returned HTTP ${response.status} with unparseable JSON body: ${rawBody.slice(0, 500)} (${
-                  parseError instanceof Error ? parseError.message : String(parseError)
+                  parseError instanceof Error
+                    ? parseError.message
+                    : String(parseError)
                 })`,
               );
             }
@@ -225,10 +237,12 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           }
         }
         await Promise.all(
-          Array.from({ length: Math.min(40, dispatchCount) }, seedWorker),
+          Array.from({ length: Math.min(40, initialBacklogCount) }, seedWorker),
         );
-        expect(orderIds).toHaveLength(dispatchCount);
-        expect(orderIds.every((id) => typeof id === "string" && id.length > 0)).toBe(true);
+        expect(orderIds).toHaveLength(initialBacklogCount);
+        expect(
+          orderIds.every((id) => typeof id === "string" && id.length > 0),
+        ).toBe(true);
 
         // --- Mint a real tenant JWT via the real HTTP bootstrap-session route.
         const tenantSessionResponse = await fetch(
@@ -236,7 +250,10 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ email: TENANT_DISPATCH_EMAIL, tenantId: TENANT_ID }),
+            body: JSON.stringify({
+              email: TENANT_DISPATCH_EMAIL,
+              tenantId: TENANT_ID,
+            }),
           },
         );
         if (!tenantSessionResponse.ok) {
@@ -287,9 +304,10 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         const platformPrincipal = await identityRepository.findPrincipalById(
           "principal_platform_admin_default",
         );
-        const platformMemberships = await identityRepository.findMembershipsByPrincipalId(
-          "principal_platform_admin_default",
-        );
+        const platformMemberships =
+          await identityRepository.findMembershipsByPrincipalId(
+            "principal_platform_admin_default",
+          );
         const platformMembership = platformMemberships.find(
           (membership: { membershipId: string }) =>
             membership.membershipId === "membership_platform_admin_default",
@@ -299,9 +317,10 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
             "Default platform admin account was not durably provisioned by IdentityRepository.onModuleInit; cannot mint a real platform-realm JWT.",
           );
         }
-        const platformRoleBindings = await identityRepository.findRoleBindingsByMembershipId(
-          platformMembership.membershipId,
-        );
+        const platformRoleBindings =
+          await identityRepository.findRoleBindingsByMembershipId(
+            platformMembership.membershipId,
+          );
         const platformTokenVersion = Math.max(
           Date.parse(platformPrincipal.updatedAt),
           Date.parse(platformMembership.updatedAt),
@@ -348,23 +367,141 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           reportJwt: platformJwt,
           orderIds,
           runTag,
+          profile: "concurrent",
+          stagedDispatch: true,
         });
 
         const recordsPath = resolve(evidenceDir, `${runTag}.jsonl`);
-        const summary = await runPlan(plan, recordsPath, {
-          baseSha: process.env.WORKFLOW_SHA ?? "local",
-          candidateSha: process.env.CANDIDATE_SHA ?? "local",
-        });
+        let initialReportJobIds: string[] = [];
+        let initialReportSnapshot: ReportRow[] = [];
+        let initialReportSnapshotAt: string | null = null;
+        let peakReport = 0;
+        let peakDispatchable = 0;
+        const { pollCapacityResources, runWithCapacityPolling } =
+          await import("../../../../tools/system-remediation/ops-capacity/observations.mjs");
+        const pollDb = async () => {
+          const currentJobIds: string[] = [...initialReportJobIds];
+          const currentOrderIds = [...orderIds];
+          try {
+            // appendFileSync writes complete records on the same JS thread;
+            // parse errors are failures, not a normal partially-written line.
+            const content = readFileSync(recordsPath, "utf8");
+            const currentRecords = content
+              .trim()
+              .split("\n")
+              .filter(Boolean)
+              .map((line) => JSON.parse(line));
+            currentOrderIds.push(
+              ...currentRecords
+                .filter(
+                  (row) =>
+                    row.kind === "capacity_seed" &&
+                    !row.error &&
+                    row.resourceIds?.orderId,
+                )
+                .map((row) => row.resourceIds.orderId),
+            );
+            currentJobIds.push(
+              ...currentRecords
+                .filter(
+                  (row) =>
+                    row.workload === "report" &&
+                    !row.error &&
+                    row.resourceIds?.jobId,
+                )
+                .map((row) => row.resourceIds.jobId),
+            );
+          } catch (error) {
+            if (
+              !(error instanceof Error) ||
+              !("code" in error) ||
+              error.code !== "ENOENT"
+            )
+              throw error;
+          }
+          const observation = await pollCapacityResources(
+            pool,
+            currentOrderIds,
+            currentJobIds,
+          );
+          peakReport = Math.max(peakReport, observation.report);
+          peakDispatchable = Math.max(
+            peakDispatchable,
+            observation.dispatchable,
+          );
+        };
+        const summary = await runWithCapacityPolling<CapacitySummary>(
+          () =>
+            runPlan(
+              plan,
+              recordsPath,
+              {
+                baseSha: process.env.WORKFLOW_SHA ?? "local",
+                candidateSha: process.env.CANDIDATE_SHA ?? "local",
+              },
+              {
+                initialize: async () => {
+                  // A real run-owned recovery workload, not extra measured
+                  // HTTP requests or a fixed delay. All50 valid commands commit
+                  // atomically via the same producer used by the HTTP callers.
+                  const reporting = app.get(ReportingFilingService);
+                  const commands = Array.from({ length: 50 }, () => ({
+                    jobType: "trip_summary",
+                    format: "csv" as const,
+                    filters: { runTag, capacityRole: "initial_backlog" },
+                  }));
+                  const accepted = await reporting.createReportJobsDurably(
+                    commands,
+                    `${runTag}-report-backlog`,
+                  );
+                  initialReportJobIds = accepted.map((job) => job.jobId);
+                  initialReportSnapshot = await readBackReportJobs(
+                    pool,
+                    initialReportJobIds,
+                  );
+                  initialReportSnapshotAt = new Date().toISOString();
+                  // Only actual SQL rows establish the queue observation. If a
+                  // fast worker already drained it, the acceptance remains red.
+                  peakReport = Math.max(
+                    peakReport,
+                    initialReportSnapshot.filter(
+                      (job) =>
+                        job.status === "queued" || job.status === "running",
+                    ).length,
+                  );
+                  appendFileSync(
+                    recordsPath,
+                    `${JSON.stringify({
+                      kind: "capacity_report_backlog",
+                      runTag,
+                      commands,
+                      observedAt: initialReportSnapshotAt,
+                      jobIds: initialReportJobIds,
+                      rows: initialReportSnapshot,
+                      error: null,
+                    })}\n`,
+                  );
+                },
+              },
+            ),
+          pollDb,
+        );
 
         // The run must be the full accepted 15-minute baseline burst, never
         // a short/mock/skipped stand-in.
         expect(summary.durationSeconds).toBe(DURATION_SECONDS);
         expect(summary.fullBurstSchedule).toBe(true);
-        expect(summary.workflows.booking.requests).toBe(plan.workloads.booking.length);
-        expect(summary.workflows.dispatch.requests).toBe(plan.workloads.dispatch.length);
-        expect(summary.workflows.report.requests).toBe(plan.workloads.report.length);
+        expect(summary.workflows.booking.requests).toBe(
+          plan.workloads.booking.length,
+        );
+        expect(summary.workflows.dispatch.requests).toBe(
+          plan.workloads.dispatch.length,
+        );
+        expect(summary.workflows.report.requests).toBe(
+          plan.workloads.report.length,
+        );
         expect(plan.workloads.booking).toHaveLength(900);
-        expect(plan.workloads.dispatch).toHaveLength(4500);
+        expect(plan.workloads.dispatch).toHaveLength(dispatchCount);
         expect(plan.workloads.report).toHaveLength(450);
 
         type CapacityRecord = {
@@ -372,6 +509,8 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           path: string;
           error: string | null;
           resourceIds?: Record<string, string>;
+          latencyMs?: number | null;
+          launchedMs: number;
         };
         const records: CapacityRecord[] = readFileSync(recordsPath, "utf8")
           .trim()
@@ -385,18 +524,41 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         // as `error` never enters this claim -- an honestly reported
         // failure is not a fabricated success.
         const claimedBookingOrderIds = records
-          .filter((row) => row.workload === "booking" && !row.error && row.resourceIds?.orderId)
+          .filter(
+            (row) =>
+              row.workload === "booking" &&
+              !row.error &&
+              row.resourceIds?.orderId,
+          )
           .map((row) => row.resourceIds!.orderId!);
         const claimedDispatchOrderIds = records
           .filter((row) => row.workload === "dispatch" && !row.error)
           .map((row) => row.path.split("/")[3]!);
         const claimedReportJobIds = records
-          .filter((row) => row.workload === "report" && !row.error && row.resourceIds?.jobId)
+          .filter(
+            (row) =>
+              row.workload === "report" && !row.error && row.resourceIds?.jobId,
+          )
           .map((row) => row.resourceIds!.jobId!);
 
-        const bookingReadback = await readBackOwnedOrders(pool, claimedBookingOrderIds);
-        const dispatchReadback = await readBackOwnedOrders(pool, claimedDispatchOrderIds);
-        const reportReadback = await readBackReportJobs(pool, claimedReportJobIds);
+        const bookingReadback = await readBackOwnedOrders(
+          pool,
+          claimedBookingOrderIds,
+        );
+        const dispatchReadback = await readBackOwnedOrders(
+          pool,
+          claimedDispatchOrderIds,
+        );
+        const allReportReadback = await collectReportCompletions(pool, [
+          ...initialReportJobIds,
+          ...claimedReportJobIds,
+        ]);
+        const reportReadback = allReportReadback.filter((row) =>
+          claimedReportJobIds.includes(row.jobId),
+        );
+        const initialReportReadback = allReportReadback.filter((row) =>
+          initialReportJobIds.includes(row.jobId),
+        );
 
         const bookingSummary = summarizeReadback(
           claimedBookingOrderIds,
@@ -414,6 +576,27 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           (row: { jobId: string }) => row.jobId,
         );
 
+        const events: { time: number; delta: number }[] = [];
+        for (const record of records) {
+          if (
+            record.workload === "booking" &&
+            typeof record.latencyMs === "number"
+          ) {
+            events.push({ time: record.launchedMs, delta: 1 });
+            events.push({
+              time: record.launchedMs + record.latencyMs,
+              delta: -1,
+            });
+          }
+        }
+        events.sort((a, b) => a.time - b.time || a.delta - b.delta);
+        let peakIntake = 0;
+        let currentInFlight = 0;
+        for (const ev of events) {
+          currentInFlight += ev.delta;
+          if (currentInFlight > peakIntake) peakIntake = currentInFlight;
+        }
+
         const acceptance = {
           taskId: "SR-OPS-CAPACITY-RUNNER-20260911",
           capability: "C123",
@@ -421,6 +604,24 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           candidateSha: process.env.CANDIDATE_SHA ?? "local",
           workflowSha: process.env.WORKFLOW_SHA ?? "local",
           summary,
+          reportWorkload: {
+            initialJobIds: initialReportJobIds,
+            measuredJobIds: claimedReportJobIds,
+            initialSnapshot: initialReportSnapshot,
+            initialSnapshotAt: initialReportSnapshotAt,
+            initialEvidence: initialReportReadback,
+            measuredEvidence: reportReadback,
+          },
+          concurrency: {
+            intake: peakIntake,
+            report: peakReport,
+          },
+          backlog: {
+            dispatchable: peakDispatchable,
+          },
+          dispatchOrderIds: claimedDispatchOrderIds,
+          dispatchEvidence: dispatchReadback,
+          degradation: summarizeDispatchEvidence(dispatchReadback).degradation,
           readback: {
             booking: bookingSummary,
             dispatch: dispatchSummary,
@@ -428,33 +629,25 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           },
           queueLag: {
             report: summarizeLag(reportReadback, "queueLagMs"),
-            dispatchOrderWriteLag: summarizeLag(dispatchReadback, "lagMs"),
+            dispatchOrderQueueLag: summarizeLag(dispatchReadback, "lagMs"),
           },
-          dispatchOrderStatusDistribution: dispatchReadback.reduce(
-            (acc: Record<string, number>, row: { status: string }) => {
-              acc[row.status] = (acc[row.status] ?? 0) + 1;
-              return acc;
-            },
-            {} as Record<string, number>,
-          ),
+          dispatchOrderStatusDistribution:
+            summarizeDispatchEvidence(dispatchReadback).distribution,
+          dispatchAttemptCoverage:
+            summarizeDispatchEvidence(dispatchReadback).coverage,
         };
         writeFileSync(
           resolve(evidenceDir, `${runTag}.acceptance.json`),
           `${JSON.stringify(acceptance, null, 2)}\n`,
         );
 
-        // The core acceptance gate: no claimed success without a durable row.
-        expect(bookingSummary.missing).toEqual([]);
-        expect(dispatchSummary.missing).toEqual([]);
-        expect(reportSummary.missing).toEqual([]);
-        expect(bookingSummary.matched).toBe(true);
-        expect(dispatchSummary.matched).toBe(true);
-        expect(reportSummary.matched).toBe(true);
+        // The core acceptance gate: workload must pass latency/error targets, and no claimed success without a durable row.
+        assertAcceptancePassed(acceptance);
       } finally {
         await app.close();
         await pool.end();
       }
     },
-    22 * 60 * 1000,
+    52 * 60 * 1000,
   );
 });

@@ -126,7 +126,8 @@ export type FleetCase = {
   driver: string;
   severity: "high" | "medium" | "low";
   responsibility: "fleet" | "shared" | "platform";
-  status: "in_review" | "open" | "pending";
+  status: string;
+  actionDescriptor?: FleetCaseItem["actionDescriptor"];
   sla: "breached" | "on_track";
   date: string;
 };
@@ -1640,13 +1641,11 @@ export async function loadCases(): Promise<CasesView> {
         r.severity === "high"
           ? "high"
           : r.severity === "normal" || r.severity === "medium"
-          ? "medium"
-          : "low",
+            ? "medium"
+            : "low",
       responsibility: r.responsibility,
-      status:
-        r.status === "resolved" || r.status === "closed"
-          ? "pending"
-          : "in_review",
+      status: r.status,
+      ...(r.actionDescriptor ? { actionDescriptor: r.actionDescriptor } : {}),
       sla: r.slaBreach ? "breached" : "on_track",
       date: r.openedAt ? r.openedAt.slice(0, 10) : "",
     }));
