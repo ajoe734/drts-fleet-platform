@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { statementDisplayStatus } from "../../../lib/fleet-portal-statement-actions";
 import {
   loadStatementDetail,
   loadStatements,
@@ -35,7 +36,8 @@ function toCsv(rows: string[][]): string {
 }
 
 export async function GET(request: NextRequest) {
-  const statementId = request.nextUrl.searchParams.get("statementId") ?? undefined;
+  const statementId =
+    request.nextUrl.searchParams.get("statementId") ?? undefined;
 
   if (statementId) {
     const { statement } = await loadStatementDetail(statementId);
@@ -83,14 +85,22 @@ export async function GET(request: NextRequest) {
 
   const { rows } = await loadStatements();
   const csv = toCsv([
-    ["StatementID", "Period", "Trips", "Payable", "Reimbursement", "Status", "Issued"],
+    [
+      "StatementID",
+      "Period",
+      "Trips",
+      "Payable",
+      "Reimbursement",
+      "Status",
+      "Issued",
+    ],
     ...rows.map((row) => [
       row.id,
       row.period,
       String(row.trips),
       row.payable,
       row.reimbursement ?? "",
-      row.status,
+      statementDisplayStatus(row),
       row.issued,
     ]),
   ]);

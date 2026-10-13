@@ -4760,6 +4760,7 @@ export const COMPLAINT_CATEGORIES = [
   "vehicle_condition",
   "route_issue",
   "fare_dispute",
+  "settlement_dispute",
   "safety_concern",
   "lost_and_found",
   "other",
@@ -4838,6 +4839,15 @@ export const COMPLAINT_CATEGORY_VALID_RESOLUTIONS: Record<
     "resolved_other",
   ],
   fare_dispute: [
+    "resolved_with_refund",
+    "resolved_with_credit",
+    "resolved_with_corrective_action",
+    "resolved_no_fault",
+    "resolved_duplicate",
+    "resolved_withdrawn",
+    "resolved_other",
+  ],
+  settlement_dispute: [
     "resolved_with_refund",
     "resolved_with_credit",
     "resolved_with_corrective_action",
@@ -4942,6 +4952,9 @@ export interface LinkComplaintToIncidentCommand {
 
 export interface ComplaintCaseRecord {
   caseNo: string;
+  /** Present on cases created from the fleet settlement workflow. */
+  fleetPartnerId?: string;
+  relatedStatementId?: string;
   caseSource: "phone" | "web" | "app" | "ops";
   relatedOrderId: string | null;
   relatedCallId: string | null;
@@ -5343,8 +5356,29 @@ export interface FleetPartnerStatementLineRecord {
   };
 }
 
+export type FleetPartnerStatementDecisionStatus =
+  | "unreviewed"
+  | "confirmed"
+  | "disputed";
+
+export interface ConfirmFleetPartnerStatementCommand {
+  note?: string;
+}
+
+export interface DisputeFleetPartnerStatementCommand {
+  reason: string;
+}
+
 export interface FleetPartnerStatementRecord {
   statementId: string;
+  decisionStatus?: FleetPartnerStatementDecisionStatus;
+  confirmedAt?: string | null;
+  confirmedBy?: string | null;
+  confirmNote?: string | null;
+  disputedAt?: string | null;
+  disputedBy?: string | null;
+  disputeReason?: string | null;
+  disputeCaseId?: string | null;
   fleetPartnerId: string;
   periodMonth: string;
   payoutStatus: DriverPayoutStatus;
