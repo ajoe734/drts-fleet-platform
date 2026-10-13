@@ -142,3 +142,99 @@ full-system acceptance are not proved by this source unit. GET seed/fallback
 semantics and module initialization remain inherited. The original blocked
 parent tasks/roles/acceptance keys are unchanged. No VM product environment,
 browser/PG/HTTP/Docker server, deployment or direct workflow dispatch.
+
+## R1 rework after independent review of 48358fd3 (2026-10-13)
+
+Historical evidence above remains the first candidate's owner record. Codex2
+reopened `48358fd3a0c9168ec7535cdba09992c486edf4c7` at
+`2026-10-13T14:58:50Z`, generation `ab54e27b8c864133a7d771bcc140ea53`, for
+**R1 [P2]: admin aliases bypass canonical per-row serialization and lose
+acknowledged fields**. The actual path also includes
+`RegulatoryRegistryController.createDriver -> RegulatoryRegistryService.createDriver -> upsertAdminProfile`.
+Admin input `driver-demo-001` queued under that literal ID while
+`resolveBaseProfile` wrote `drv-demo-001`; canonical profile/device writers used
+the latter queue. Two pending queries could target the same record, and a
+phone-only patch or device write reverted a successfully acknowledged admin
+name/surname. The reviewer found the canonical-ID control passed.
+
+The repair only resolves the admin's queue key through the existing
+`resolveDriverId` before enqueueing. Current record lookup, input validation,
+returned canonical identity, and the inherited admin audit resource/action
+policy keep their original implementation. Aliases and bootstrap prefixes now
+share the same queue as canonical profile and device writes. No new identity,
+device persistence, or registry-wide transaction policy is introduced.
+
+The new `alias-serialization.test.ts` calls actual production services,
+repository and registry controller. External query commit/rejection alone is
+controlled, using the existing dedicated fixture. Twenty cases cover both demo
+aliases, a trimmed bootstrap prefix, canonical-ID controls, admin success and
+rejection followed by a canonical phone patch/device write, registry alias
+callers, and identity rejection. It checks queue timing, committed surname own
+property, memory, repository reload, audit identity and recovery after failure.
+
+Before source modification, these cases against exact HEAD `48358fd3` exited 1:
+**14 business assertion failures, 6 controls passed, zero skips**. The initial
+after run was 19/20: one new test incorrectly compared decorated registry
+`profileUpdatedAt` after the separate successful phone PATCH. Its no-master-
+publication assertion moved before that patch commits. The **final unchanged
+20 cases** were then rerun with the complete immutable `48358fd3` service source
+loaded from a git object at its real module path: again **14 failures + 6
+controls**, exit 1. Production controller/registry/repository source matches the
+reviewed SHA; no business function is mocked or active worktree reset. Final
+source passes all **20/20** within the affected-root report.
+
+Supervisor's V2 spec at
+`/home/lupin/workspace/drts-fleet-platform/.local/driver-profile-durable-save-ack-20261013-root/task-spec-v2.json`
+(SHA256 `664ffbfffc32cc232791958f69368f4bff192d2ed0961438d2a06e5c954103f8`)
+also reserves the exact Settings fixture adapter. The accepted Settings merge
+`ed7afc8d5825befbbc9c3c5c48cef7c8de0cce27` was merged normally into this task
+branch in `84bc7761b`; inherited Settings product files/helper/cases are unchanged
+from that merge. The actual unadapted `legacy-control` probe exited 1 with
+`DRIVER_PROFILE_STORAGE_UNAVAILABLE`, confirming the missing enabled repository
+and asynchronous seed obstruction. The CJS fixture now constructs the actual
+repository with a controlled enabled external query, awaits its original seed
+before mounting, and awaits PATCH inside its existing catch before JSON response.
+All **16 original Settings caller scenarios** and **7 helper cases** pass;
+their assertions/values and accepted source history are preserved. This is a
+test adapter, not a production Settings change or real PG evidence.
+
+Rework evidence is append-only under the existing artifact directory:
+`/home/lupin/workspace/drts-fleet-platform/.local/driver-profile-durable-save-ack-20261013-root/evidence/r1/`.
+`candidate-evidence.json` supplies the final full SHA, PR head, source/report
+hashes, exact commands, execution SHA and results. Previous candidate manifests
+and raw logs remain immutable. The source checks ran on anchored `675f0b0c0`;
+the final closeout adds this report only, with identical tested source hashes.
+
+| Finding / required acceptance                                                              | Source and change                                                                                  | Before → after                                                                                     | Commands / results / evidence                                                                                                                                                        | Remaining limits                                                                                              |
+| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| R1 / `driver_profile_durable_failure_and_existing_caller_regressions`                      | `DriverProfileService.upsertAdminProfile` resolved queue key; dedicated alias cases                | Reviewed 48358: 14 failures + 6 controls → final 20/20                                             | `before-48358-final-cases.json` / `.log`, `before-driver.service.ts`, loader config; `affected-root.json`; Vitest 4.1.4, Node 22.23.2, pnpm 10.33.0; before exit 1, after exit 0     | Process-local queue; no distributed writer/PG/restart claim                                                   |
+| S1/S2 V2 caller adapter / `driver_profile_durable_failure_and_existing_caller_regressions` | Settings CJS actual repository, seed await, PATCH await/catch                                      | Unadapted `legacy-control` exits 1 storage unavailable → original 16 callers + 7 helper cases pass | `settings-before-adapter.log`, `affected-root.json`; affected root **214**, API **131**, all pass, zero skips, exit 0; all **37** prior surname cases retained                       | Native/router/store/fetch and external query are controlled; no actual HTTP/native acceptance                 |
+| `driver_profile_saved_ack_waits_real_storage`                                              | Existing saved producers/controller awaits/storage guard and device/caller coordination retained   | Original 4671 failure proof retained; original dedicated 26 plus new R1 20 all pass                | Dedicated **46** cases included in affected-root 214; pending/success/rejection/missing-disabled/query serialization/load checks are production logic with external query controlled | Actual repository boundary proof only; original genuine hosted PG/role/mobile/manual gates remain outstanding |
+| `driver_profile_durable_ack_same_candidate_review_ci_merge`                                | Normal immutable commits, merge of accepted dev, non-force pushes, exact final candidate to Codex2 | Old candidate reopened; new independent review / hosted same-head CI / protected merge pending     | Final `r1/candidate-evidence.json`, PR #2617 and canonical lifecycle generation; predecessor CI is not credited                                                                      | No owner approve/merge/done or parent acceptance inference                                                    |
+
+Rework commands:
+
+```bash
+# Final cases against the archived, unmodified reviewed production service:
+pnpm exec vitest run --config .local/r1-before.config.ts \
+  tests/unit/driver-profile-durable-save-ack-20261013/alias-serialization.test.ts
+# Original affected-root command above, additionally includes all accepted Settings cases:
+# tests/unit/driver-explicit-surname-profile-settings-20261013
+# Original affected API command above remains unchanged.
+pnpm --filter @drts/contracts build
+pnpm --filter @drts/control-plane-auth build
+pnpm --filter @drts/api typecheck
+pnpm exec tsc -p .local/profile-ack-typecheck.json --noEmit
+# Scoped ESLint/Prettier and diff check use the manifest's exact paths/commands.
+```
+
+ESLint, scoped source/test typecheck and API typecheck pass, exit 0. API typecheck
+first exited 2 because fresh worker setup again linked nodemailer to a deleted
+unrelated worktree. Repair changed only this task's ignored API dependency
+symlink into a local symlink farm, reconstructed the pinned packages from
+SHA512-verified pnpm cache files, and linked its own built contract/auth packages;
+shared dependencies/manifests were untouched (`dependency-repair.json`). The
+inherited registry-test private/public cast remains outside the scoped typecheck;
+its 27 runtime tests pass. Full workspace checks and original external gates
+remain unverified. Every local check launched in this round finished and its
+result was read before handoff; hosted checks for the final candidate are pending.
