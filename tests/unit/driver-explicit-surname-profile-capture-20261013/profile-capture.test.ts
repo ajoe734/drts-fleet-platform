@@ -1,5 +1,3 @@
-import "reflect-metadata";
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
