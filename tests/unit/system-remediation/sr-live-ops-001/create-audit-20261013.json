@@ -2,23 +2,36 @@
   {
     "insertId": "sanitized-clone-first",
     "timestamp": "2026-10-13T09:53:39.479Z",
-    "operation": {"id": "616d39b0-33fa-494f-a2da-36c000000032", "first": true},
+    "operation": {
+      "id": "616d39b0-33fa-494f-a2da-36c000000032",
+      "first": true
+    },
     "protoPayload": {
       "serviceName": "cloudsql.googleapis.com",
       "methodName": "cloudsql.instances.clone",
-      "authenticationInfo": {"principalEmail": "drts-dev-ops-drill@drts-dev-devcc-20260825.iam.gserviceaccount.com"},
+      "authenticationInfo": {
+        "principalEmail": "drts-dev-ops-drill@drts-dev-devcc-20260825.iam.gserviceaccount.com"
+      },
       "resourceName": "projects/drts-dev-devcc-20260825/instances/drts-dev-db",
-      "request": {"body": {"cloneContext": {"destinationInstanceName": "drts-dev-db-drill-38379371905-1"}}}
+      "request": {
+        "body": {
+          "cloneContext": {
+            "destinationInstanceName": "drts-dev-db-drill-38379371905-1"
+          }
+        }
+      }
     }
   },
   {
     "insertId": "sanitized-clone-last",
     "timestamp": "2026-10-13T10:01:59.177Z",
-    "operation": {"id": "616d39b0-33fa-494f-a2da-36c000000032", "last": true},
+    "operation": { "id": "616d39b0-33fa-494f-a2da-36c000000032", "last": true },
     "protoPayload": {
       "serviceName": "cloudsql.googleapis.com",
       "methodName": "cloudsql.instances.clone",
-      "authenticationInfo": {"principalEmail": "drts-dev-ops-drill@drts-dev-devcc-20260825.iam.gserviceaccount.com"},
+      "authenticationInfo": {
+        "principalEmail": "drts-dev-ops-drill@drts-dev-devcc-20260825.iam.gserviceaccount.com"
+      },
       "resourceName": "projects/drts-dev-devcc-20260825/instances/drts-dev-db",
       "request": null
     }
@@ -26,19 +39,31 @@
   {
     "insertId": "sanitized-create-check",
     "timestamp": "2026-10-13T09:53:39.822Z",
-    "resource": {"type": "cloudsql_database", "labels": {"database_id": "drts-dev-devcc-20260825:drts-dev-db-drill-38379371905-1"}},
+    "resource": {
+      "type": "cloudsql_database",
+      "labels": {
+        "database_id": "drts-dev-devcc-20260825:drts-dev-db-drill-38379371905-1"
+      }
+    },
     "protoPayload": {
       "serviceName": "cloudsql.googleapis.com",
       "methodName": "cloudsql.instances.create",
-      "authenticationInfo": {"principalEmail": "drts-dev-ops-drill@drts-dev-devcc-20260825.iam.gserviceaccount.com"},
+      "authenticationInfo": {
+        "principalEmail": "drts-dev-ops-drill@drts-dev-devcc-20260825.iam.gserviceaccount.com"
+      },
       "resourceName": "projects/drts-dev-devcc-20260825",
       "request": null,
-      "authorizationInfo": [{
-        "permission": "cloudsql.instances.create",
-        "granted": true,
-        "resource": "projects/drts-dev-devcc-20260825",
-        "resourceAttributes": {"name": "projects/drts-dev-devcc-20260825/instances/drts-dev-db-drill-38379371905-1", "service": "sqladmin.googleapis.com"}
-      }]
+      "authorizationInfo": [
+        {
+          "permission": "cloudsql.instances.create",
+          "granted": true,
+          "resource": "projects/drts-dev-devcc-20260825",
+          "resourceAttributes": {
+            "name": "projects/drts-dev-devcc-20260825/instances/drts-dev-db-drill-38379371905-1",
+            "service": "sqladmin.googleapis.com"
+          }
+        }
+      ]
     }
   }
 ]
