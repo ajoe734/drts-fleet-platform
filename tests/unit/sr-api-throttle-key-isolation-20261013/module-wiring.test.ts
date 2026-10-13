@@ -5,10 +5,11 @@ import type {
 import { expect, it } from "vitest";
 import { apiRequire, production } from "./production-loader";
 
+const { AppModule } = production<
+  typeof import("../../../apps/api/src/app.module")
+>("apps/api/src/app.module.ts");
+
 it("actual AppModule registers one repaired storage and preserves its guard chain", () => {
-  const { AppModule } = production<
-    typeof import("../../../apps/api/src/app.module")
-  >("apps/api/src/app.module.ts");
   const { KeyScopedThrottlerStorage } = production<
     typeof import("../../../apps/api/src/common/throttling/key-scoped-throttler.storage")
   >("apps/api/src/common/throttling/key-scoped-throttler.storage.ts");

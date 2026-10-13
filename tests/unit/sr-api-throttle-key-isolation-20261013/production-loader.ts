@@ -27,6 +27,14 @@ export function production<T>(relative: string): T {
     },
   });
   const requireSource = (id: string): unknown => {
+    // Match the root unit configuration's workspace-source resolution; CI's
+    // unit job need not build package dist files to evaluate these definitions.
+    if (id === "@drts/contracts") {
+      return production("packages/contracts/src/index.ts");
+    }
+    if (id === "@drts/control-plane-auth") {
+      return production("packages/control-plane-auth/src/index.ts");
+    }
     if (id.startsWith(".")) {
       const base = resolve(dirname(file), id);
       for (const candidate of [base + ".ts", resolve(base, "index.ts")]) {

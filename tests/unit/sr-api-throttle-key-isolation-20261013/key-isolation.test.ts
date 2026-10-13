@@ -138,6 +138,74 @@ async function exhaust(
 }
 
 describe("actual BootstrapThrottlerGuard / locked 6.5.0 protocol", () => {
+  it.each([
+    { name: "default", ttl: 60000, limit: 2, block: 1000 },
+    { name: "burst", ttl: 1000, limit: 2, block: 5000 },
+  ])(
+    "single-key return records match upstream through expiry and reblocking ($name)",
+    async ({ name, ttl, limit, block }) => {
+      const old = (await fixture(true)).storage;
+      const repaired = (await fixture()).storage;
+      for (const elapsed of [
+        0,
+        100,
+        0,
+        0,
+        block - 1,
+        1,
+        0,
+        0,
+        block,
+        ttl,
+        ttl,
+      ]) {
+        await vi.advanceTimersByTimeAsync(elapsed);
+        const oldRecord = await old.increment(
+          "parity",
+          ttl,
+          limit,
+          block,
+          name,
+        );
+        const newRecord = await repaired.increment(
+          "parity",
+          ttl,
+          limit,
+          block,
+          name,
+        );
+        expect(newRecord).toEqual(oldRecord);
+      }
+    },
+  );
+
+  it("multiple configured names keep their original guard ordering and headers", async () => {
+    class MultipleController {
+      route() {}
+    }
+    const route = {
+      controller: MultipleController,
+      handler: MultipleController.prototype.route,
+    };
+    const { call } = await fixture(false, [
+      { name: "default", ttl: 1000, limit: 3, blockDuration: 1000 },
+      { name: "burst", ttl: 2000, limit: 2, blockDuration: 1000 },
+    ]);
+    expect((await call(route)).headers).toEqual({
+      "X-RateLimit-Limit": 3,
+      "X-RateLimit-Remaining": 2,
+      "X-RateLimit-Reset": 1,
+      "X-RateLimit-Limit-burst": 2,
+      "X-RateLimit-Remaining-burst": 1,
+      "X-RateLimit-Reset-burst": 2,
+    });
+    expect((await call(route)).accepted).toBe(true);
+    expect((await call(route)).headers["Retry-After-burst"]).toBe(1);
+    expect((await call(route, actor("other"))).accepted).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((await call(route)).accepted).toBe(true);
+  });
+
   it.each([true, false])(
     "legal report expiry control (old=%s)",
     async (old) => {
