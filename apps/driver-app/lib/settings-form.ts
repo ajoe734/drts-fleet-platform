@@ -4,6 +4,7 @@ import type {
   UpdateDriverProfileCommand,
   UpdateDriverSettingsCommand,
 } from "@drts/contracts";
+import { driverStrings } from "./strings";
 
 export interface SettingsFormValues {
   language: string;
@@ -14,6 +15,7 @@ export interface SettingsFormValues {
 
 export interface ProfileFormValues {
   profileName: string;
+  profileSurname?: string;
   profilePhone: string;
   profileEmail: string;
   emergencyName: string;
@@ -40,6 +42,7 @@ export const DEFAULT_SETTINGS_VALUES: SettingsFormValues = {
 
 export const DEFAULT_PROFILE_VALUES: ProfileFormValues = {
   profileName: "",
+  profileSurname: "",
   profilePhone: "",
   profileEmail: "",
   emergencyName: "",
@@ -64,6 +67,7 @@ export function profileValuesFromRecord(
 ): ProfileFormValues {
   return {
     profileName: record.name ?? "",
+    profileSurname: record.driverSurname ?? "",
     profilePhone: record.phone ?? "",
     profileEmail: record.email ?? "",
     emergencyName: record.emergencyContact?.name ?? "",
@@ -90,6 +94,7 @@ export function profileValuesEqual(
 ): boolean {
   return (
     a.profileName.trim() === b.profileName.trim() &&
+    (a.profileSurname ?? "").trim() === (b.profileSurname ?? "").trim() &&
     a.profilePhone.trim() === b.profilePhone.trim() &&
     a.profileEmail.trim() === b.profileEmail.trim() &&
     a.emergencyName.trim() === b.emergencyName.trim() &&
@@ -134,8 +139,18 @@ export function hasEmergencyInput(values: ProfileFormValues): boolean {
 
 export function validateProfileValues(
   values: ProfileFormValues,
+  initial?: ProfileFormValues,
 ): ProfileFieldErrors {
   const errors: ProfileFieldErrors = {};
+
+  const surname = values.profileSurname ?? "";
+  if (!surname.trim()) {
+    if ((initial?.profileSurname ?? "").trim()) {
+      errors.profileSurname = driverStrings.settings.surname.errors.clear;
+    } else if (surname.length > 0) {
+      errors.profileSurname = driverStrings.settings.surname.errors.blank;
+    }
+  }
 
   if (!values.profileName.trim()) {
     errors.profileName = "司機個人資料需要填寫姓名。";
@@ -178,7 +193,11 @@ export function buildSettingsCommand(
 
 export function buildProfileCommand(
   values: ProfileFormValues,
+  initial?: ProfileFormValues,
 ): UpdateDriverProfileCommand {
+  const surnameError = validateProfileValues(values, initial).profileSurname;
+  if (surnameError) throw new Error(surnameError);
+  const trimmedSurname = (values.profileSurname ?? "").trim();
   const trimmedName = values.profileName.trim();
   const trimmedPhone = values.profilePhone.trim();
   const trimmedEmail = values.profileEmail.trim();
@@ -188,6 +207,7 @@ export function buildProfileCommand(
 
   return {
     name: trimmedName,
+    ...(trimmedSurname ? { driverSurname: trimmedSurname } : {}),
     phone: trimmedPhone || null,
     email: trimmedEmail || null,
     emergencyContact: hasEmergencyInput(values)
