@@ -554,6 +554,42 @@ class RestoreDrillTest(unittest.TestCase):
         self.assertEqual(json.loads(output.read_text())["status"], "sweep_passed")
         self.assertFalse(self.deleted())
 
+    def real_create_records(self):
+        return json.loads(Path(__file__).with_name("create-audit-20261013.json").read_text())
+
+    def sweep_real_records(self, records, *, success=False):
+        target = "drts-dev-db-drill-38379371905-1"
+        output = self.root / "sweep.json"
+        (self.root / "audit.json").write_text(json.dumps(records))
+        with patch.dict(os.environ, {"GITHUB_RUN_ID": "38379371905"}):
+            prior = drill.context(target)
+            prior["clone_operation_id"] = "616d39b0-33fa-494f-a2da-36c000000032"
+            drill.write(self.output, prior)
+            if success:
+                sweep.sweep(target, self.output, output)
+            else:
+                with self.assertRaises(drill.DrillError):
+                    sweep.sweep(target, self.output, output)
+        self.assertFalse(self.deleted())
+        return json.loads(output.read_text())
+
+    def test_sweep_real_clone_completion_and_create_check_pass(self):
+        records = self.real_create_records()
+        result = self.sweep_real_records(records, success=True)
+        self.assertEqual(result["status"], "sweep_passed")
+        self.assertEqual(len(result["create_audit_records"]), 3)
+        self.assertEqual({r["destination"] for r in result["create_audit_records"]}, {"drts-dev-db-drill-38379371905-1"})
+
+    def test_plan_limits_sql_create_to_drill_prefix(self):
+        design = provision.plan()
+        create = next(s for s in design["roles"] if s["id"] == "drtsOpsDrillCloneCreate")
+        temporary = next(s for s in design["roles"] if s["id"] == "drtsOpsDrillTemporary")
+        self.assertEqual(create["permissions"], ["cloudsql.instances.create"])
+        self.assertEqual(create["expression"], temporary["expression"])
+        self.assertIn("resource.service == 'sqladmin.googleapis.com'", create["expression"])
+        self.assertIn("resource.name.startsWith('projects/drts-dev-devcc-20260825/instances/drts-dev-db-drill-')", create["expression"])
+        self.assertFalse(self.iam_writes())
+
     def test_sweep_audits_create_destinations_with_existing_safety_boundary(self):
         prior = drill.context(self.target)
         prior["clone_operation_id"] = "op1"
