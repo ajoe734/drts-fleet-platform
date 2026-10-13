@@ -32,7 +32,7 @@ export function DriverStatementRow({
   onLoaded: (record: DriverStatementRecord) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [detail, setDetail] = useState<DriverStatementRecord | null>(null);
+  const [hasDetail, setHasDetail] = useState(false);
   const [busy, setBusy] = useState<"detail" | "download" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false);
@@ -44,7 +44,9 @@ export function DriverStatementRow({
     [],
   );
 
-  const current = detail ?? statement;
+  // onLoaded publishes detail into Earnings' statement list. Keep that parent
+  // record authoritative so a normal refresh also updates an already viewed row.
+  const current = statement;
   const download = resolveDriverStatementDownload(current);
   const load = async (operation: "detail" | "download") => {
     if (inFlight.current) return;
@@ -61,12 +63,11 @@ export function DriverStatementRow({
         statement.statementId,
       );
       if (generation.current !== requestGeneration) return;
-      setDetail(record);
+      setHasDetail(true);
       onLoaded(record);
       if (operation === "download") {
         const target = resolveDriverStatementDownload(record);
         if (target.state !== "ready") {
-          setError(copy[target.state]);
           return;
         }
         try {
@@ -79,7 +80,7 @@ export function DriverStatementRow({
       }
     } catch (readError) {
       if (generation.current === requestGeneration) {
-        setDetail(null);
+        setHasDetail(false);
         setError(formatDriverError(readError, copy.errorFallback));
       }
     } finally {
@@ -198,23 +199,23 @@ export function DriverStatementRow({
           {!busy && !error && download.state !== "ready" ? (
             <Text style={styles.note}>{copy[download.state]}</Text>
           ) : null}
-          {detail ? (
+          {hasDetail ? (
             <>
               <Text style={[styles.title, { color: theme.text }]}>
-                {copy.net}：{formatMoney(detail.netAmount)}
+                {copy.net}：{formatMoney(current.netAmount)}
               </Text>
               <Text style={styles.note}>
-                {copy.gross}：{formatMoney(detail.grossEarning)} · {copy.fee}：
-                {formatMoney(detail.serviceFee)} · {copy.subsidy}：
-                {formatMoney(detail.subsidy)}
+                {copy.gross}：{formatMoney(current.grossEarning)} · {copy.fee}：
+                {formatMoney(current.serviceFee)} · {copy.subsidy}：
+                {formatMoney(current.subsidy)}
               </Text>
               <Text style={[styles.title, { color: theme.text }]}>
                 {copy.lineItems}
               </Text>
-              {detail.lines.length === 0 ? (
+              {current.lines.length === 0 ? (
                 <Text style={styles.note}>{copy.noLines}</Text>
               ) : (
-                detail.lines.map((line) => (
+                current.lines.map((line) => (
                   <View
                     key={line.lineId}
                     style={[styles.line, { borderTopColor: theme.border }]}

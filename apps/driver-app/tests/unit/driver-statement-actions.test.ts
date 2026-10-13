@@ -50,6 +50,7 @@ vi.mock("@/lib/api-client", () => ({
 
 import EarningsScreen from "../../app/earnings";
 import { DriverStatementRow } from "../../components/earnings/driver-statement-row";
+import { formatMoney } from "../../lib/money";
 import { driverStrings } from "../../lib/strings";
 
 type Node = {
@@ -234,7 +235,9 @@ describe("Driver monthly statement detail and download", () => {
       if (collapsed) {
         expect(rendered).not.toContain("order-refreshed");
       } else {
-        expect(rendered).toContain(`${copy.net}：TWD 245.00`);
+        expect(rendered).toContain(
+          `${copy.net}：${formatMoney(refreshed.netAmount)}`,
+        );
         expect(rendered).toContain("260.00");
         expect(rendered).toContain("20.00");
         expect(rendered).toContain("5.00");
