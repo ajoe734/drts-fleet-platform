@@ -203,4 +203,3 @@ class ManagedAcceptanceReviewRuntime(DispatchEnvironmentIsolation, unittest.Test
         self.assertIn("ACCEPTANCE_REVIEW_SNAPSHOT_JSON", request.message)
         runtime.attach_workspace_metadata(self.config, request, workspace, sha, "dev", worker["workspace_source"])
         self.assertEqual(request.message.count("Acceptance reviewer decision (original task only)"), 1)
-

@@ -1,6 +1,8 @@
 # ORCH-ACCEPTANCE-REVIEW-ROUTING-20261013
 
-Owner: Codex2. Reviewer: Gemini. Source base:
+Owner: Codex2. Current assigned reviewer: Codex (the initial specification
+named Gemini; the canonical task assignment and formal rework now name Codex).
+Source base:
 `1fba7476925bb29e6f2eeff7acbeb0ba16d0afb4`.
 
 ## Findings and repair boundary
@@ -21,6 +23,36 @@ grant source authority. Reuse `review_ready_dispatch`, detached candidate
 workspace and current task/role/candidate fences. Decline is reviewer-only;
 actual rework uses existing reviewer `reopen`. Preserve dependency, external,
 CI, merge and acceptance floors, and never overlap an active original worker.
+
+### ROUTING-REOPEN-ACTOR-FINDING: reproduced, repair pending
+
+The Supervisor probe at checkpoint
+`5854e3071d59869a9dc39da819e02dc323f84f92` and Codex's formal review of
+candidate `dff3ceed068ab2942ba8dbf4ee7183517e1312dc` both confirm the same
+unresolved trigger. The review source and precise repair boundary are in
+`/home/lupin/workspace/drts-fleet-platform/.local/continue-unfinished-20261013T0144/ROUTING-REOPEN-ACTOR-FINDING.md`
+and the canonical task's 2026-10-13T02:00:50Z reopen receipt.
+
+Actual call path: `run_task_board_command` →
+`TaskBoardCommandExecutor.execute_with_result` → `_guard_worker_command` →
+`ai_status.command_reopen` → `_require_pending_acceptance_review` →
+`_resolve_acceptance_review` → existing candidate/evidence clearing. The guard
+checks `AI_NAME` against `ORCH_DISPATCH_AGENT` for request/decline only; reopen
+trusts the claimed actor. With role owner, agent Codex2, claimed actor Codex,
+and the exact public request ID/snapshot, the forbidden reopen exits 0,
+consumes the request and removes candidate evidence. Expected: command exit 1
+and byte-identical board/activity log.
+
+This continuation first reproduced the locked candidate using a tooling-only
+Git archive in the isolated evidence directory
+`actor-repair-round2/baseline-dff3ceed`; `old-candidate-probe.log` records probe
+exit 1 because the forbidden command succeeded. The existing 1,037-test pass
+did not cover this case. New committed transaction regressions use the real
+CLI/guard/persistence, with only the filesystem root isolated. Required repair:
+pending acceptance-review reopen must use the actual reviewer dispatch with
+a matching actor, before any handler/log mutation. Keep genuine unfenced
+reviewer reopen, original nonacceptance permissions, same-owner request,
+decline, foreign-task and stale candidate/generation/merge controls.
 
 ## Implementation and protocol
 
@@ -102,7 +134,12 @@ python3 -m unittest discover -s . -p 'test_*.py'
   full **1,037 tests passed** (exit 0, 24.224 seconds; `full-final.log`).
   The closeout commit changes only this evidence ledger; the candidate receipt
   verifies unchanged tooling source and records candidate/file/log hashes.
-  Python compileall, Markdown Prettier and `git diff --check` passed.
+  Python compileall and Markdown Prettier passed. The prior `git diff --check`
+  pass claim was incomplete: Codex's formal review and this continuation both
+  ran `git diff --check 1fba7476925bb29e6f2eeff7acbeb0ba16d0afb4..dff3ceed068ab2942ba8dbf4ee7183517e1312dc`
+  and got exit 2 for extra EOF blank lines in routing `test_runtime.py:206`
+  and `test_transactions.py:232`. Those lines are corrected in this repair;
+  the final full-range check must be recorded separately.
 - During test authoring, incomplete temporary fixture fields, missing log
   message, a wrong mock symbol and one root-cwd invocation caused check
   failures. Those are setup/development failures, not old-policy defect

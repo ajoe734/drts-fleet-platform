@@ -138,6 +138,51 @@ class AcceptanceReviewTransactions(DispatchEnvironmentIsolation, unittest.TestCa
                                       ("reopen", "Supervisor", "Unknown agent: Supervisor")):
             self.unchanged_rejection(lambda: self.command(command, [self.task_id, "Repair"], actor), error)
 
+    def test_acceptance_reopen_requires_reviewer_dispatch_and_matching_actor(self):
+        self.assertTrue(self.request().ok)
+        request_id = self.task()["acceptance_review_request"]["request_id"]
+        requested_board = self.path.read_bytes()
+        for role, actor, error in (("owner", "Codex", "actor must match"),
+                                   ("reviewer", "Codex2", "actor must match"),
+                                   ("reviewer", "Supervisor", "actor must match"),
+                                   ("owner", "Codex2", "Only a reviewer dispatch")):
+            with self.subTest(role=role, actor=actor):
+                # Keep cases independent if an old implementation wrongly reopens.
+                self.path.write_bytes(requested_board)
+                self.unchanged_rejection(
+                    lambda: self.command("reopen", [self.task_id, "Repair"], actor,
+                                         ACCEPTANCE_REVIEW_REQUEST_ID=request_id, **self.fence(role)),
+                    error,
+                )
+
+    def test_unfenced_current_reviewer_can_reopen_pending_acceptance_review(self):
+        self.assertTrue(self.request().ok)
+        request_id = self.task()["acceptance_review_request"]["request_id"]
+        result = self.command("reopen", [self.task_id, "Precise acceptance finding"], "Codex",
+                              ACCEPTANCE_REVIEW_REQUEST_ID=request_id)
+        self.assertTrue(result.ok, result.error)
+        task = self.task()
+        self.assertEqual(task["status"], "in_progress")
+        self.assertNotIn("candidate_sha", task)
+        self.assertEqual(task["acceptance_review_request"]["state"], "reopened")
+        self.assertEqual(task["acceptance_review_request"]["resolved_by"], "Codex")
+
+    def test_nonacceptance_owner_and_reviewer_reopen_permissions_are_retained(self):
+        for status in ("in_progress", "review"):
+            for role, actor in (("owner", "Codex2"), ("reviewer", "Codex")):
+                with self.subTest(status=status, role=role):
+                    state = json.loads(self.path.read_text())
+                    state["tasks"][0] = {**self.original, "status": status}
+                    self.path.write_text(json.dumps(state))
+                    result = self.command("reopen", [self.task_id, "Existing rework permission"], actor,
+                                          **self.fence(role))
+                    self.assertTrue(result.ok, result.error)
+                    task = self.task()
+                    self.assertEqual(task["status"], "in_progress")
+                    self.assertNotIn("candidate_sha", task)
+                    self.assertEqual(task["owner"], self.original["owner"])
+                    self.assertEqual(task["reviewer"], self.original["reviewer"])
+
     def test_current_original_task_reviewer_reopen_consumes_request(self):
         self.assertTrue(self.request().ok)
         request_id = self.task()["acceptance_review_request"]["request_id"]
@@ -229,4 +274,3 @@ class AcceptanceReviewTransactions(DispatchEnvironmentIsolation, unittest.TestCa
         self.assertEqual(task["status"], "in_progress")
         self.assertNotIn("acceptance_review_request", task)
         self.assertEqual(task["required_acceptance"], self.original["required_acceptance"])
-
