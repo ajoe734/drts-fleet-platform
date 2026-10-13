@@ -260,6 +260,13 @@ describe("tenant passenger form", () => {
     await screen.findByRole("alert");
     expect(name.value).toBe("Updated name");
     expect(mocks.refresh).not.toHaveBeenCalled();
+    // The error can render before React settles the pending transition.
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Save" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await screen.findByRole("status");
     expect(mocks.refresh).toHaveBeenCalledOnce();
