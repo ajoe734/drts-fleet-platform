@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { DriverProfileService } from "../../../apps/api/src/modules/driver-profile/driver-profile.service";
 import { fixture, flush, identity, invoke, observe } from "./fixture";
 
@@ -186,6 +185,41 @@ describe("actual registry admin-profile caller", () => {
       }
     },
   );
+});
+
+describe("registry duplicate-create policy across the awaited profile boundary", () => {
+  it("rejects concurrent duplicate before profile effects and releases a failed reservation for retry", async () => {
+    const f = fixture();
+    const command = {
+      driverId: identity.actorId,
+      name: "First Registry Fixture",
+    };
+    const first = observe(f.registryController.createDriver(command));
+    await flush();
+    await expect(
+      f.registryController.createDriver({ ...command, name: "Duplicate" }),
+    ).rejects.toMatchObject({ code: "DRIVER_ALREADY_EXISTS" });
+    expect(f.writes).toHaveLength(1);
+    const error = new Error("Failed first registry attempt");
+    f.writes[0]!.reject(error);
+    await first.settled;
+    expect(first.state.error).toBe(error);
+    expect(
+      f.registry.listDrivers().some((d) => d.driverId === identity.actorId),
+    ).toBe(false);
+    expect(f.auditWrites).not.toHaveBeenCalled();
+    f.autoCommit();
+    const retried = await f.registryController.createDriver(command);
+    expect(retried.data).toMatchObject(command);
+    expect(
+      f.registry.listDrivers().filter((d) => d.driverId === identity.actorId),
+    ).toHaveLength(1);
+    await expect(
+      f.registryController.createDriver(command),
+    ).rejects.toMatchObject({ code: "DRIVER_ALREADY_EXISTS" });
+    expect(f.writes).toHaveLength(2);
+    expect(f.auditWrites).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("bounded per-driver whole-record write coordination", () => {

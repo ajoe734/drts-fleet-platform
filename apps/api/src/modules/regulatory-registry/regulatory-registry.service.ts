@@ -554,6 +554,9 @@ export class RegulatoryRegistryService
 
   private drivers = DRIVER_SEED.map((driver) => ({ ...driver }));
 
+  // Preserve duplicate-create rejection while the linked profile save awaits.
+  private readonly pendingDriverCreations = new Set<string>();
+
   private latestDriverLocations = new Map<string, DriverLocationSnapshot>();
 
   private latestDriverHeartbeatUploads = new Map<
@@ -1071,7 +1074,10 @@ export class RegulatoryRegistryService
   async createDriver(command: CreateDriverMasterCommand, requestId?: string) {
     const driverId = command.driverId?.trim() || `drv_${randomUUID()}`;
     this.assertNonBlank(driverId, "driverId");
-    if (this.drivers.some((candidate) => candidate.driverId === driverId)) {
+    if (
+      this.pendingDriverCreations.has(driverId) ||
+      this.drivers.some((candidate) => candidate.driverId === driverId)
+    ) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "DRIVER_ALREADY_EXISTS",
@@ -1120,36 +1126,41 @@ export class RegulatoryRegistryService
         ? {}
         : { bankAccount: command.bankAccount }),
     };
-    const profile = await this.driverProfileService.upsertAdminProfile(
-      driverId,
-      profileCommand,
-      requestId,
-    );
-    created.profileUpdatedAt = profile.updatedAt;
-    created.deviceBindings = profile.deviceBindings.map((binding) => ({
-      ...binding,
-    }));
+    this.pendingDriverCreations.add(driverId);
+    try {
+      const profile = await this.driverProfileService.upsertAdminProfile(
+        driverId,
+        profileCommand,
+        requestId,
+      );
+      created.profileUpdatedAt = profile.updatedAt;
+      created.deviceBindings = profile.deviceBindings.map((binding) => ({
+        ...binding,
+      }));
 
-    this.drivers = [this.cloneDriver(created), ...this.drivers];
-    this.persistChanges(
-      { drivers: [this.cloneDriver(created)] },
-      "create_driver",
-    );
-    this.recordAudit(
-      {
-        actorId: "platform-admin",
-        actorType: "platform_admin",
-        tenantId: null,
-        moduleName: "regulatory-registry",
-        actionName: "create_driver_master",
-        resourceType: "driver_master",
-        resourceId: driverId,
-        newValuesSummary: this.buildDriverAuditSummary(created, null),
-      },
-      requestId,
-    );
+      this.drivers = [this.cloneDriver(created), ...this.drivers];
+      this.persistChanges(
+        { drivers: [this.cloneDriver(created)] },
+        "create_driver",
+      );
+      this.recordAudit(
+        {
+          actorId: "platform-admin",
+          actorType: "platform_admin",
+          tenantId: null,
+          moduleName: "regulatory-registry",
+          actionName: "create_driver_master",
+          resourceType: "driver_master",
+          resourceId: driverId,
+          newValuesSummary: this.buildDriverAuditSummary(created, null),
+        },
+        requestId,
+      );
 
-    return this.cloneDriver(created);
+      return this.cloneDriver(created);
+    } finally {
+      this.pendingDriverCreations.delete(driverId);
+    }
   }
 
   /**
