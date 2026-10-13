@@ -967,9 +967,11 @@ Evidence appendix `E` is
 `.local/c123-report-worker-20261012/budgeted-burst-continuation-20261013/`.
 Pre-extension source is `93103c708c9575ad895ba4a3d993688fda9d33cf`;
 verified code checkpoint is `1b4bab18934a2fa76bf8dc33d73a384db61ad901`.
-Final immutable candidate/publication and completed checks are recorded in
-`E/publication.json`, `E/final-checks/verification-manifest.json` and
-`E/ci-result.json`; candidate handoff references these actual records. Earlier
+The first full snapshot at4eabb5d1298810d11aea2119aabc57b9c260d087 is recorded
+in `E/final-checks/verification-manifest.json`. It was never handed off: the
+seed-readback correction below requires a new final candidate. Final publication
+and CI records remain `E/publication.json` and `E/ci-result.json`; the subsequent
+appendix records the final same-source checks. Earlier
 results, raw controls and failures are retained separately, including the
 missing-dependency worktree typecheck, no-TTY install abort, inherited formatting
 warning and evidence-verifier quoted-Unicode path error. The formatting-only
@@ -995,3 +997,48 @@ manual/public-entry/H3F2/HOLD/F2/ZEROremoved requirements retain their prior
 state. Source handoff is not completion or a capacity receipt. No new workflow,
 VM runtime, cloud/provider/production mutation, unchanged retry, history rewrite,
 error filtering or silent legacy interval waiver occurs.
+
+### Seed evidence completeness correction before handoff (2026-10-13)
+
+The final raw-evidence audit found that the additional profile's first arrival
+checker accepted5850 genuine measured rows after all4000 actual seed rows were
+removed. No candidate handoff or acceptance receipt had occurred. The exact
+old4eabb5d1298810d11aea2119aabc57b9c260d087 function reproduction and seven-case
+old/new probe are retained in
+`E/seed-readback-continuation/{old-reproduction.json,old-contract.log,new-contract.log}`.
+The old contract exits1 with six seed-observation escapes; new
+43b2a69d596e8ec64d5fa189686772876ea6aee4 exits0, seven decisions correct.
+These are actual exported-function calls with unchanged actual controlled
+producer output, not an HTTP/PG/capacity claim.
+
+The same readback now requires4000 seed observations and correlates each
+sequence501–4500 to its measured dispatch: distinct sequence, successful seed,
+actual finite start/readiness, readiness preceding launch, matching scheduled
+dispatch time and actual created resource ID/path. The gate additionally
+requires exactly4000 independently observed staged creations. Missing,
+duplicate, unready, inverted/late readiness and foreign-order evidence remain
+rejections. Later lawful intake remains accepted with every original arrival
+and rolling-budget rule intact. No failed/raw row is filtered or retried.
+
+The actual harness's external positive input now contains its complete modeled
+4000 seed observations; the preceding incomplete input remains archived and
+does not establish this stronger guard. Five additional actual-callback controls
+prove that seed refusal still attempts both order readbacks, report readback,
+diagnostic write, observer restoration and app/pool cleanup. Source logic is
+unmocked; app/HTTP/SQL/producer-output/clock/timer boundaries remain controlled.
+
+| Finding / acceptance                                            | Actual source / repair                                                                                                                          | Old → new observed result                                                                                                                                                                                                     | Commands / evidence                                                                                                                                                 | Remaining limits                                                                                                                                                   |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Missing/corrupt staged evidence could pass new arrival readback | Actual `readBackBudgetedDispatchArrivals` and formal `stagedCreations` guard.                                                                   | Old4e seven-case contract exits1 (six escapes);43b seven/seven exits0. Real full-count control retains5850 requests/4000 seeds. Actual scheduler/gate76/76 narrow regressions and original25-case gate pass, exit0.           | `node E/seed-readback-continuation/actual-seed-readback.mjs <source-root> <explicit-full-SHA>`; old/new logs and per-version JSON/hashes, first-unit.log, gate.log. | Controlled producer HTTP/clock/timers; no seed, SQL or capacity receipt is invented.                                                                               |
+| Refusal must not suppress final owned diagnostics               | Actual original harness/finalizer, with complete positive external input and five corrupt-seed controls.                                        | Actual43b harness24/24 exits0: legal synthetic positive, five seed refusals and all original18 failed-workload/cleanup controls. Every seed refusal retains2 final-order/1 final-report reads and failed diagnostics/cleanup. | `E/seed-readback-continuation/harness.log`, verified-harness/harness-finalization-result.json and per-case query/diagnostic output.                                 | Real original same-candidate HTTP/AppModule/migratedPG and every ownership/security/SLO observation still required.                                                |
+| capacity_failed_summary_rejected                                | Actual exported formal gate retains exact24/74/14 and original missing/invalid/red cases.                                                       | 25/25 exits0; historical negative receipts remain separate.                                                                                                                                                                   | Original immutable evidence and subsequent final exact-source gate log/manifest.                                                                                    | OPEN for matching new-candidate lifecycle; no old receipt transfer.                                                                                                |
+| capacity_same_candidate_full_900s_valid_baseline                | Original900s/5850/4000, real50intake/50reports/500backlog, all latency/error/report/degradation/security/SQL/readiness/cleanup floors retained. | OPEN; no new real hosted capacity result or acceptance receipt.                                                                                                                                                               | Final exact source checks in `E/seed-readback-continuation/final-checks/verification-manifest.json`; final publication/CI records in E.                             | Original Codex review/CI/merge then Supervisor-authorized ORIGINAL changed-source same-candidate full900s workflow, including actual112/current375429 correlation. |
+
+All earlier successful, failed, canceled and skipped checks remain separately
+recorded. Source revisions and PR-ready events cancel obsolete generic CI; a
+cancellation is never a pass. The final SHA must have its own finished/read
+checks before handoff. All original source credit/history/F1–F6, legacy floors,
+native-both/runtime/provider/financial/legal/manual/H3F2/HOLD/F2/ZEROremoved and
+both required acceptance keys retain their prior state. No product VM runtime,
+policy/cloud/provider mutation, source/history rewrite, alternative workflow,
+unchanged hosted capacity retry or acceptance waiver is introduced.
