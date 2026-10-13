@@ -6,7 +6,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const Module = require("node:module");
-const { execFileSync } = require("node:child_process");
+const { createHash } = require("node:crypto");
 const root = path.resolve(__dirname, "../../..");
 const app = path.join(root, "apps/driver-app");
 const appRequire = Module.createRequire(path.join(app, "package.json"));
@@ -312,18 +312,32 @@ function assertCapture(command) {
   const filename = path.join(app, "app/trip.tsx");
   let Trip;
   if (baseline) {
+    // Load the exact historical caller without requiring Git history in CI.
+    // Keep the production filename so its imports still use the real Driver modules.
+    const provenance = require("./fixtures/trip-116132.provenance.json");
+    assert.equal(baseline, provenance.sourceCommit, "unsupported baseline");
+    assert.equal(provenance.sourcePath, "apps/driver-app/app/trip.tsx");
+    const source = fs.readFileSync(
+      path.join(__dirname, "fixtures", provenance.fixture),
+    );
+    assert.equal(source.length, provenance.bytes, "baseline size changed");
+    assert.equal(
+      createHash("sha256").update(source).digest("hex"),
+      provenance.sha256,
+      "baseline source changed",
+    );
+    assert.equal(
+      createHash("sha1")
+        .update(`blob ${source.length}\0`)
+        .update(source)
+        .digest("hex"),
+      provenance.gitBlob,
+      "baseline no longer matches the recorded Git blob",
+    );
     const m = new Module(filename, module);
     m.filename = filename;
     m.paths = Module._nodeModulePaths(path.dirname(filename));
-    compile(
-      m,
-      filename,
-      execFileSync(
-        "git",
-        ["show", baseline + ":apps/driver-app/app/trip.tsx"],
-        { encoding: "utf8" },
-      ),
-    );
+    compile(m, filename, source.toString("utf8"));
     Trip = m.exports.default;
   } else Trip = require(filename).default;
   let r;
