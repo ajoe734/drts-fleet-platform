@@ -860,10 +860,18 @@ function assertReportWorkload(acceptance) {
   const { reportWorkload: workload, summary, runTag } = acceptance;
   const start = reportInstant(summary.startedAt);
   const end = reportInstant(summary.endedAt);
+  // Only the run-owned initial50 backlog may precede measured t0. Its real
+  // readiness origin is recorded separately; measured450 jobs retain t0.
+  const preparationStart =
+    summary.preparationStartedAt === undefined
+      ? start
+      : reportInstant(summary.preparationStartedAt);
   if (
     !nonblank(runTag) ||
     !workload ||
     start === null ||
+    preparationStart === null ||
+    preparationStart > start ||
     end === null ||
     end < start ||
     Math.abs(end - start - summary.elapsedMs) > 1000
@@ -914,7 +922,7 @@ function assertReportWorkload(acceptance) {
         (role === "measured" &&
           record.filters?.capacityRole === "initial_backlog") ||
         created === null ||
-        created < start ||
+        created < (role === "initial" ? preparationStart : start) ||
         created > end
       )
         throw new Error("Report workload foreign/inconsistent SQL authority");
@@ -941,7 +949,7 @@ function assertReportWorkload(acceptance) {
     }
   };
   const observed = reportInstant(initialSnapshotAt);
-  if (observed === null || observed < start || observed > end)
+  if (observed === null || observed < preparationStart || observed > end)
     throw new Error("Report initial snapshot outside the actual window");
   validateRows(initialJobIds, initialSnapshot, "initial", true);
   validateRows(initialJobIds, initialEvidence, "initial");

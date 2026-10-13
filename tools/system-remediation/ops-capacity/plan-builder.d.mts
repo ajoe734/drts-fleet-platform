@@ -88,6 +88,7 @@ export function countsForDuration(
 ): Record<WorkloadFamily, number>;
 
 export type CapacitySummary = {
+  preparationStartedAt?: string;
   startedAt: string;
   endedAt: string;
   durationSeconds: number;

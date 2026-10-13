@@ -78,6 +78,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
   const validAcceptance = {
     runTag: "synthetic-valid-capacity",
     summary: {
+      preparationStartedAt: "2026-10-12T00:00:00.000Z",
       startedAt: "2026-10-12T00:00:00.000Z",
       endedAt: "2026-10-12T00:14:59.800Z",
       result: "measurements_within_targets",
@@ -290,6 +291,60 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
   it("passes a valid full schedule summary with zero errors and perfect readback", () => {
     expect(() => assertAcceptancePassed(validAcceptance)).not.toThrow();
   });
+
+  function preparedBacklog() {
+    const valid = structuredClone(validAcceptance);
+    valid.summary.preparationStartedAt = "2026-10-11T23:59:58.000Z";
+    valid.reportWorkload.initialSnapshotAt = "2026-10-11T23:59:59.500Z";
+    for (const row of [
+      ...valid.reportWorkload.initialSnapshot,
+      ...valid.reportWorkload.initialEvidence,
+    ]) {
+      for (const field of ["createdAt", "updatedAt"] as const) {
+        row[field] = row.record[field] = new Date(
+          Date.parse(row[field]) - 1000,
+        ).toISOString();
+      }
+      if (row.startedAt) {
+        row.startedAt = row.record.startedAt = new Date(
+          Date.parse(row.startedAt) - 1000,
+        ).toISOString();
+      }
+    }
+    return valid;
+  }
+  it("accepts genuinely owned initial readiness before t0 with all450 measured reports inside t0", () => {
+    expect(() => assertAcceptancePassed(preparedBacklog())).not.toThrow();
+  });
+  it.each([
+    "invalid-origin",
+    "future-origin",
+    "initial-before-readiness",
+    "snapshot-before-readiness",
+    "measured-before-t0",
+  ] as const)(
+    "rejects %s while preserving real pre-ready backlog authority",
+    (defect) => {
+      const invalid = preparedBacklog();
+      if (defect === "invalid-origin")
+        invalid.summary.preparationStartedAt = "invalid";
+      if (defect === "future-origin")
+        invalid.summary.preparationStartedAt = "2026-10-12T00:00:01.000Z";
+      if (defect === "initial-before-readiness")
+        invalid.summary.preparationStartedAt = "2026-10-11T23:59:59.200Z";
+      if (defect === "snapshot-before-readiness")
+        invalid.reportWorkload.initialSnapshotAt = "2026-10-11T23:59:57.999Z";
+      if (defect === "measured-before-t0") {
+        const row = invalid.reportWorkload.measuredEvidence[0]!;
+        for (const field of ["createdAt", "startedAt", "updatedAt"] as const) {
+          row[field] = row.record[field] = new Date(
+            Date.parse(row[field]) - 1000,
+          ).toISOString();
+        }
+      }
+      expect(() => assertAcceptancePassed(invalid)).toThrow(/Report /);
+    },
+  );
 
   it.each(["booking", "dispatch", "report"] as const)(
     "%s requires complete finite actual arrival measurements inside900s even with a green summary",
