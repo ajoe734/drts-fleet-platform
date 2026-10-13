@@ -659,6 +659,19 @@ jobs:
           pnpm exec playwright test -c playwright.tenant-map-booking.config.ts
           pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts
           pnpm exec playwright test -c playwright.concierge-map-booking.config.ts
+          pnpm --filter @drts/passenger-app-web... build
+          pnpm exec playwright test -c playwright.passenger-demo.config.ts
+      - name: Upload passenger demonstration browser results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: passenger-demo-browser-${{ github.run_id }}
+          path: |
+            .artifacts/passenger-demo-e2e
+            .artifacts/passenger-demo-report
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
 
   e2e:
     needs: [candidate, changes, cross-surface-e2e, ui-route-e2e]

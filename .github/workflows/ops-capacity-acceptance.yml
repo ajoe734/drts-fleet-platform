@@ -42,7 +42,8 @@ env:
 jobs:
   acceptance:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    #900s arrivals plus up to30min actual async completion and setup/checks.
+    timeout-minutes: 65
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -136,7 +137,7 @@ jobs:
           set -o pipefail
           pnpm exec vitest run \
             tests/integration/system-remediation/sr-ops-capacity-20260911/ops-capacity-acceptance.test.ts \
-            --no-file-parallelism --maxConcurrency=1 --testTimeout=1320000 \
+            --no-file-parallelism --maxConcurrency=1 --testTimeout=3120000 \
             --reporter=default --reporter=json \
             --outputFile.json=.artifacts/ops-capacity-acceptance/capacity-report.json \
             2>&1 | tee -a .artifacts/ops-capacity-acceptance/execution-log.txt
@@ -168,8 +169,22 @@ jobs:
           if capacity.get("numTotalTests", 0) != 1 or capacity.get("numPassedTests", 0) != 1 or not capacity.get("success"):
               raise SystemExit(f"Capacity acceptance did not pass: {capacity}")
 
-          print("Ops capacity acceptance: unit regression and the real full 900s capacity + durable readback run both passed with zero skips.")
+          print("Test reports passed with zero skips; checking the actual workload payload independently.")
           PY_GATE
+
+          node --input-type=module <<'JS_GATE'
+          import { readdirSync, readFileSync } from 'node:fs';
+          import { assertAcceptancePassed } from './tools/system-remediation/ops-capacity/durable-readback.mjs';
+          const directory = '.artifacts/ops-capacity-acceptance';
+          const files = readdirSync(directory).filter((name) => name.endsWith('.acceptance.json'));
+          if (files.length !== 1) throw new Error('Exactly one full workload acceptance payload is required');
+          const payload = JSON.parse(readFileSync(`${directory}/${files[0]}`, 'utf8'));
+          if (payload.candidateSha !== process.env.CANDIDATE_SHA || payload.workflowSha !== process.env.WORKFLOW_SHA) {
+            throw new Error('Workload evidence does not belong to this immutable candidate/workflow');
+          }
+          assertAcceptancePassed(payload);
+          console.log('Actual full workload payload passed the formal acceptance gate.');
+          JS_GATE
 
       - name: Record run status
         if: always()

@@ -1,5 +1,5 @@
 "use client";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PassengerBookingClient } from "@drts/passenger-client";
 import type { PassengerBookingSettingsResponse } from "@drts/contracts";
@@ -12,6 +12,8 @@ import {
 import { REALM_COLORS } from "@drts/ui-tokens";
 import { P5Btn, P5Card, inputStyle } from "../auth/ui";
 import { BOOK_T as T } from "../../lib/booking/translations";
+import { DEMO_ADDRESSES, isDemoMode } from "../../lib/demo/store";
+import { DEMO_T } from "../../lib/demo/translations";
 
 export interface BookingDraft {
   origin: AddressPayload | null;
@@ -48,6 +50,8 @@ export function BookingForm({
   // Optional provider health/evaluator operations are deliberately omitted.
   // Real search/resolve/reverse failures surface through the real shared picker.
   const router = useRouter();
+  const [demo, setDemo] = useState<boolean | null>(null);
+  useEffect(() => setDemo(isDemoMode()), []);
   const provider = useMemo(() => {
     async function authenticated<T>(operation: Promise<T>): Promise<T> {
       try {
@@ -67,41 +71,79 @@ export function BookingForm({
         authenticated(client.reverse(command)),
     };
   }, [client, router]);
+  if (demo === null) return <p>{DEMO_T.addressLoading}</p>;
+  function demoAddress(field: "origin" | "destination") {
+    return (
+      <>
+        <p>{DEMO_T.addressHint}</p>
+        <select
+          aria-label={field === "origin" ? DEMO_T.pickup : DEMO_T.dropoff}
+          style={inputStyle}
+          disabled={busy}
+          value={draft[field]?.addressId ?? ""}
+          onChange={(event) =>
+            onChange({
+              ...draft,
+              [field]:
+                DEMO_ADDRESSES.find(
+                  (address) => address.addressId === event.target.value,
+                ) ?? null,
+            })
+          }
+        >
+          <option value="">{DEMO_T.selectAddress}</option>
+          {DEMO_ADDRESSES.map((address) => (
+            <option key={address.addressId} value={address.addressId ?? ""}>
+              {address.address}
+            </option>
+          ))}
+        </select>
+      </>
+    );
+  }
   return (
     <>
       <P5Card title={T.pickup}>
-        <AddressMapPicker
-          id="booking-origin"
-          provider={provider}
-          surface="passenger_entry"
-          theme={theme}
-          labels={labels}
-          value={draft.origin}
-          onChange={(change) =>
-            onChange({
-              ...draft,
-              origin: change.dispatchReady ? change.address : null,
-            })
-          }
-          enableServiceabilityPreview={false}
-        />
+        {demo ? (
+          demoAddress("origin")
+        ) : (
+          <AddressMapPicker
+            id="booking-origin"
+            provider={provider}
+            surface="passenger_entry"
+            theme={theme}
+            labels={labels}
+            value={draft.origin}
+            onChange={(change) =>
+              onChange({
+                ...draft,
+                origin: change.dispatchReady ? change.address : null,
+              })
+            }
+            enableServiceabilityPreview={false}
+          />
+        )}
       </P5Card>
       <P5Card title={T.dropoff}>
-        <AddressMapPicker
-          id="booking-destination"
-          provider={provider}
-          surface="passenger_entry"
-          theme={theme}
-          labels={labels}
-          value={draft.destination}
-          onChange={(change) =>
-            onChange({
-              ...draft,
-              destination: change.dispatchReady ? change.address : null,
-            })
-          }
-          enableServiceabilityPreview={false}
-        />
+        {demo ? (
+          demoAddress("destination")
+        ) : (
+          <AddressMapPicker
+            id="booking-destination"
+            provider={provider}
+            surface="passenger_entry"
+            theme={theme}
+            labels={labels}
+            value={draft.destination}
+            onChange={(change) =>
+              onChange({
+                ...draft,
+                destination: change.dispatchReady ? change.address : null,
+              })
+            }
+            enableServiceabilityPreview={false}
+          />
+        )}
       </P5Card>
       <P5Card title={T.time}>
         <label>

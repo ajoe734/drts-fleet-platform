@@ -12,17 +12,30 @@ type PgPoolLike = {
 export type OwnedOrderReadbackRow = {
   orderId: string;
   status: string;
-  createdAt: string;
-  updatedAt: string;
-  lagMs: number;
+  createdAt: string | null;
+  lagMs: number | null;
+  authorityKnown: boolean;
+  voiceCreationVerified?: boolean;
+  readyAt: string | null;
+  readySource: string | null;
+  hasAttempt: boolean;
+  firstAttemptAt: string | null;
+  firstAttemptId: string | null;
+  firstAttemptJobId: string | null;
+  assignmentCount: number;
+  attempts: Record<string, unknown>[];
+  record: Record<string, unknown>;
+  traces: Record<string, unknown>[];
 };
 
 export type ReportJobReadbackRow = {
   jobId: string;
   status: string;
   createdAt: string;
-  updatedAt: string;
-  queueLagMs: number;
+  queueLagMs: number | null;
+  startedAt: string | null;
+  updatedAt: string | null;
+  record: Record<string, unknown> | null;
 };
 
 export type ReadbackSummary = {
@@ -37,6 +50,7 @@ export type LagSummary = {
   minMs: number | null;
   maxMs: number | null;
   avgMs: number | null;
+  p95Ms: number | null;
 };
 
 export function readBackOwnedOrders(
@@ -45,6 +59,11 @@ export function readBackOwnedOrders(
 ): Promise<OwnedOrderReadbackRow[]>;
 
 export function readBackReportJobs(
+  pool: PgPoolLike,
+  jobIds: string[],
+): Promise<ReportJobReadbackRow[]>;
+
+export function collectReportCompletions(
   pool: PgPoolLike,
   jobIds: string[],
 ): Promise<ReportJobReadbackRow[]>;
@@ -59,3 +78,32 @@ export function summarizeLag<T extends Record<string, unknown>>(
   rows: T[],
   lagKey: keyof T,
 ): LagSummary;
+
+export type LawfulReason = {
+  orderId: string;
+  status: string;
+  reasonCode: string;
+  traceId: string;
+  source: string;
+  observedAt: string;
+  dispatchJobId?: string;
+};
+
+export function lawfulReasonForOrder(
+  row: OwnedOrderReadbackRow,
+): LawfulReason | null;
+export function summarizeDispatchEvidence(rows: OwnedOrderReadbackRow[]): {
+  coverage: {
+    attempted: number;
+    unattemptedLawful: number;
+    unattemptedUnlawful: number;
+    unattemptedLawfulReasons: LawfulReason[];
+  };
+  distribution: Record<string, number>;
+  degradation: {
+    isLawful: boolean;
+    reasons: LawfulReason[];
+    unsafeOrderIds: string[];
+  };
+};
+export function assertAcceptancePassed(acceptance: unknown): void;

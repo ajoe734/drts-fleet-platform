@@ -8,11 +8,7 @@
 // crashes SSR. So the column definitions live here, in a client module, and
 // the server pages pass only the serializable `rows`.
 
-import {
-  CanvasPill,
-  CanvasTable,
-  type CanvasTableColumn,
-} from "@drts/ui-web";
+import { CanvasPill, CanvasTable, type CanvasTableColumn } from "@drts/ui-web";
 import { FleetActionButton } from "@/components/fleet-action-button";
 import {
   FleetStatementActions,
@@ -20,13 +16,15 @@ import {
 } from "@/components/fleet-statement-actions";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 import {
-  type FleetCase,
   type FleetDoc,
   type FleetDriver,
   type FleetStatement,
   type FleetTrip,
   type FleetVehicle,
 } from "@/lib/fleet-portal-fixtures";
+import Link from "next/link";
+import type { FleetCase } from "@/lib/fleet-portal-data.server";
+import { CaseResponseAction } from "@/app/cases/case-response-action";
 import { useTranslation } from "@/lib/i18n";
 import {
   BiLabel,
@@ -403,7 +401,9 @@ export function StatementsTable({
     {
       h: t("table.actions"),
       w: 260,
-      r: (r) => <FleetStatementActions fleetPartnerId={fleetPartnerId} statement={r} />,
+      r: (r) => (
+        <FleetStatementActions fleetPartnerId={fleetPartnerId} statement={r} />
+      ),
     },
   ];
   return <CanvasTable theme={theme} columns={columns} rows={rows} />;
@@ -522,7 +522,12 @@ export function CasesTable({ rows }: { rows: FleetCase[] }) {
       w: 110,
       mono: true,
       r: (r) => (
-        <span style={{ color: theme.accent, fontWeight: 600 }}>{r.id}</span>
+        <Link
+          href={`/cases/${encodeURIComponent(r.id)}`}
+          style={{ color: theme.accent, fontWeight: 600 }}
+        >
+          {r.id}
+        </Link>
       ),
     },
     {
@@ -616,19 +621,11 @@ export function CasesTable({ rows }: { rows: FleetCase[] }) {
       h: t("table.actions"),
       w: 160,
       r: (r) => (
-        <FleetActionButton
-          descriptor={{
-            action: "respond",
-            enabled: false,
-            disabledReasonCode:
-              r.responsibility === "platform"
-                ? t("actions.reason.casePlatformOwned")
-                : t("actions.reason.caseResponsePending"),
-            riskLevel: "medium",
-          }}
-          label={t("cases.action.respond")}
-          {...(locale === "zh" ? { en: "respond" } : {})}
-          size="xs"
+        <CaseResponseAction
+          caseId={r.id}
+          responsibility={r.responsibility}
+          status={r.status}
+          {...(r.actionDescriptor ? { availability: r.actionDescriptor } : {})}
         />
       ),
     },
