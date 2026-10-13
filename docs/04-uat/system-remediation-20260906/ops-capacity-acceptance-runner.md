@@ -721,3 +721,34 @@ Checkpoints are ordinary append-only commits/pushes on the original branch.
 There is no new candidate/handoff or inherited approval/CI/acceptance credit.
 All original112/current375HTTP429 and prior finding/full-system/HOLD/F2/native/
 provider/legal/manual/ZEROremoved requirements remain visible and unchanged.
+
+### Exact checkpoint verification and next repair boundary
+
+Tested source: `97114cd55f2ab6eacef6584387dd0ea7493896c9`. Node22.23.2,
+pnpm10.33.0, TypeScript5.9.3, Vitest4.1.4. The two strict test typing findings
+are repaired with a discriminated request/seed record union and a typed generic
+payload; no cast through unknown or assertion weakening. Independent frozen
+snapshot `exact-source-97114cd55f2a` matches all6363 tracked git blobs after
+installation/checks (`snapshot-and-feasibility.json`). Every started local
+check completed and was read. This following documentation-only checkpoint
+preserves all tested production/test bytes.
+
+| Finding / acceptance                                            | Exact result / command                                                                                                                                                                                                                                                  | Evidence / remaining                                                                                                                                                                                                                                                                  |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Diagnostic finalization, independent readbacks and full cleanup | Actual harness callback16-case replay exit0, including initial seed rejection with all setup requests joined before app.close. One complete synthetic full-evidence positive;15 red/fault controls preserve errors and failed outcomes.                                 | `harness-97114cd55f2a/actual-harness-finalization.mjs`, `harness-finalization-result.json`, `final-harness.log`. Only external boundaries are controlled; no real API/JWT/PG/load acceptance.                                                                                         |
+| Bounded seed readiness and negative guards                      | `pnpm exec vitest run tests/unit/system-remediation/sr-ops-capacity-20260911 --maxWorkers=2`, exit0:11files122tests.                                                                                                                                                    | `final-affected-regression.log`; actual production producer, mapper, SQL helpers, polling/join, gate, finalizer and report-service/repository source tests. No listener/browser/PG infrastructure.                                                                                    |
+| Strict types / lint / source integrity                          | Frozen/offline install exit0; `pnpm exec tsc -p tsconfig.json --noEmit --incremental false` exit0; scoped ESLint with max-warnings0 exit0.                                                                                                                              | `final-frozen-install.log`, `final-root-types.log`, `final-lint.log`, `snapshot-and-feasibility.json`. Earlier shared-link and new-test type failures remain retained separately.                                                                                                     |
+| Remaining exact producer timing defect                          | Final actual producer12-case replay exits1:8 cases stay within900s; uniform0.05/0.1ms lateness and added uniform/concurrent1ms controls remain red. Both1ms controls end dispatch at904299ms with every count/error/deadline/minimum interval/rolling budget preserved. | `timing-97114cd55f2a/actual-timing-boundary.mjs`, `timing-boundary-result.json`, `final-timing.log`; complete raw requests/seeds retained per case. This is a failed required timing contract, not a passing matrix or capacity receipt.                                              |
+| capacity_failed_summary_rejected                                | Actual exported gate/owner-fixture25-case contract exit0,25/25; original112/current375 red payloads and prior negative receipt remain unchanged.                                                                                                                        | `contract-25.json`, current source/tests preserve the checked gate/fixture bytes. No acceptance key is recorded by this checkpoint.                                                                                                                                                   |
+| capacity_same_candidate_full_900s_valid_baseline                | OPEN; no new candidate, hosted workflow, merge or positive receipt.                                                                                                                                                                                                     | Remaining source timing/profile reconciliation, bounded actual singleton/inbound/key/hit/expiry/reset observation and normal reviewed upstream storage integration with Supervisor coordination precede a fresh full900s run. All original runtime/full-system gates remain required. |
+
+Next owner unit must resolve the explicit accepted profile's timing strategy
+while preserving the strict uniform controls and accepted per-minute budgets,
+counts, deadlines, security and all raw failures. The original accepted
+burst/concurrency allocation is the authority; there is no authority to silently
+remove an existing spacing floor or turn these known-red traces into successes.
+Supervisor/reviewer must coordinate this precise remaining boundary and ordinary
+upstream integration. Source-only upstream repair/component parity cannot prove
+original112/current375HTTP429 causality or a real full baseline. No unchanged
+hosted retry or alternative workflow is requested. This checkpoint stays
+`in_progress` and is not ready for candidate handoff.
