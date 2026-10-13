@@ -37,6 +37,7 @@ from control_plane.domain.dispatch_policy import (
     ReadyDispatchPolicy,
     build_dispatch_event as build_domain_dispatch_event,
     material_task_fingerprint,
+    pending_acceptance_review,
     ready_dispatch_signature as domain_ready_dispatch_signature,
     resolve_dispatch_target as resolve_domain_dispatch_target,
 )
@@ -1455,6 +1456,23 @@ def attach_workspace_metadata(
     status_cli = task_board_cli_path()
     task_payload = request.metadata.get("task")
     task_payload = task_payload if isinstance(task_payload, dict) else {}
+    review_request = task_payload.get("acceptance_review_request")
+    acceptance_review_notice = ""
+    if is_reviewer and isinstance(review_request, dict) and review_request.get("state") == "pending":
+        snapshot = {key: review_request[key] for key in (
+            "task_id", "candidate_sha", "candidate_generation", "reviewed_sha", "merge_sha", "reviewer"
+        )}
+        acceptance_review_notice = (
+            "\nAcceptance reviewer decision (original task only):\n"
+            f"- Request `{review_request['request_id']}`: {review_request['reason']}\n"
+            f"- Evidence: `{review_request['evidence_ref']}`. Review the frozen candidate read-only; "
+            "do not edit, commit, push, switch branches or approve it again.\n"
+            f"- Set `ACCEPTANCE_REVIEW_SNAPSHOT_JSON` to `{json.dumps(snapshot, sort_keys=True)}` "
+            f"and `ACCEPTANCE_REVIEW_REQUEST_ID` to `{review_request['request_id']}` for your decision.\n"
+            f"- If source repair is required, use existing `reopen {request.task_id} <findings>`; "
+            f"otherwise use `decline-acceptance-review {request.task_id} {review_request['request_id']} <reason>`. "
+            "Only the assigned reviewer decides; the request grants no acceptance credit.\n"
+        )
     if (
         request.task_id
         and is_reviewer
@@ -1563,7 +1581,7 @@ def attach_workspace_metadata(
     marker = "\n\nSupervisor-assigned workspace:"
     marker_index = request.message.find(marker)
     base_message = request.message[:marker_index] if marker_index != -1 else request.message
-    request.message = base_message.rstrip() + notice
+    request.message = base_message.rstrip() + notice + acceptance_review_notice
 
 
 def summarize_runtime(state: dict[str, Any], approval_state: dict[str, Any]) -> dict[str, Any]:
@@ -2180,15 +2198,30 @@ def start_worker_for_request(
     request_metadata = request.metadata if isinstance(request.metadata, dict) else {}
     role = task_role_for_dispatch_reason(request.reason)
     if request.task_id and role:
-        task = task_index_from_status(config, load_status(config)).get(request.task_id)
+        task_map = task_index_from_status(config, load_status(config))
+        task = task_map.get(request.task_id)
+        snapshot_task = request_metadata.get("task") or {}
+        if task is None and snapshot_task.get("acceptance_review_request") is not None:
+            return False, "dispatch_acceptance_review_changed", None
         if task is not None:
             target = display_name_for(config, agent["id"])
             if task.get(role) != target or not task_is_dispatch_eligible_for_agent(task, target, role):
                 return False, "dispatch_role_contract_changed", None
-            snapshot_task = request_metadata.get("task") or {}
             if role == "reviewer" and any(snapshot_task.get(key) != task.get(key)
                                           for key in ("candidate_sha", "candidate_generation")):
                 return False, "dispatch_candidate_changed", None
+            review_request = snapshot_task.get("acceptance_review_request")
+            if role == "reviewer" and (task.get("status") == "acceptance" or (
+                    isinstance(review_request, dict) and review_request.get("state") == "pending")):
+                current_request = pending_acceptance_review(task)
+                decision = resolve_domain_dispatch_target(task, task_map,
+                                                          ReadyDispatchPolicy.from_config(config))
+                if (current_request is None or review_request != current_request or decision is None
+                        or decision.reason.value != request.reason or decision.target_agent != target):
+                    return False, "dispatch_acceptance_review_changed", None
+                if any(w.get("task_id") == request.task_id and is_active_worker(w)
+                       for w in (state.get("workers") or {}).values()):
+                    return False, "dispatch_original_task_active", None
             request.metadata.update({"dispatch_role": role, "dispatch_task_id": request.task_id,
                                      "dispatch_agent": target,
                                      "dispatch_candidate_sha": task.get("candidate_sha") or "",
@@ -4032,6 +4065,8 @@ def proactive_claim_plan_for_idle_agent(
 ) -> dict[str, str] | None:
     if not helper_settings.get("enabled", True):
         return None
+    if task.get("status") == "acceptance" and task.get("acceptance_review_request") is not None:
+        return None
 
     allowed_statuses = {str(value).lower() for value in helper_settings.get("task_statuses", ["backlog", "todo", "in_progress", "review"])}
     task_status = str(task.get("status") or "").lower()
@@ -4690,6 +4725,10 @@ def worker_expected_completion_statuses(
         statuses.update(review_statuses)
         return statuses
     if reason == "review_ready_dispatch":
+        snapshot_task = ((worker.get("request_snapshot") or {}).get("metadata") or {}).get("task") or {}
+        if (snapshot_task.get("acceptance_review_request") or {}).get("state") == "pending":
+            statuses.update({"acceptance", "in_progress"})
+            return statuses
         statuses.update(integrating_statuses)
         return statuses
     if reason == "acceptance_ready_dispatch":
@@ -7932,6 +7971,8 @@ def apply_chair_task_action(
     _pending_agents, pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
     if (task_id, agent_id) in active_task_agents or (task_id, agent_id) in pending_task_agents:
         return False
+    if pending_acceptance_review(task) and any(tid == task_id for tid, _ in active_task_agents | pending_task_agents):
+        return False
     if not task_is_dispatch_eligible_for_agent(task, target_agent):
         return False
 
@@ -8413,6 +8454,8 @@ def dispatch_ready_tasks(
                 task_reviewer = task.get(reviewer_field)
 
                 if (task_id, agent_id) in active_task_agents or (task_id, agent_id) in pending_task_agents:
+                    continue
+                if pending_acceptance_review(task) and (task_id in active_task_ids or task_id in pending_task_ids):
                     continue
                 if not task_is_dispatch_eligible_for_agent(task, target_agent):
                     continue

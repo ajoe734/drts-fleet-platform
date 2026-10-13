@@ -84,7 +84,7 @@ class TaskBoardCommandExecutor:
         if role not in {"owner", "reviewer"} or not os.environ.get("ORCH_RUN_ID"):
             return
         task_id = os.environ.get("ORCH_DISPATCH_TASK_ID", "")
-        if command not in {"start", "progress", "note", "handoff", "approve", "reopen", "blocker", "system-block", "record-acceptance"}:
+        if command not in {"start", "progress", "note", "handoff", "approve", "reopen", "blocker", "system-block", "record-acceptance", "request-acceptance-review", "decline-acceptance-review"}:
             raise SystemExit("Dispatched workers must use their assigned task lifecycle commands")
         if not args or args[0] != task_id:
             raise SystemExit("Dispatched worker cannot mutate a different task")
@@ -92,6 +92,11 @@ class TaskBoardCommandExecutor:
         agent = os.environ.get("ORCH_DISPATCH_AGENT", "")
         if task.get(role) != agent or not task_is_dispatch_eligible_for_agent(task, agent, role):
             raise SystemExit("Worker assignment changed; discard stale attempt")
+        if command in {"request-acceptance-review", "decline-acceptance-review"}:
+            if os.environ.get("AI_NAME", "") != agent:
+                raise SystemExit("Acceptance review command actor must match the dispatched agent")
+            if command == "decline-acceptance-review" and role != "reviewer":
+                raise SystemExit("Only a reviewer dispatch can decline acceptance review")
         if role == "reviewer":
             for key in ("candidate_sha", "candidate_generation"):
                 if str(task.get(key) or "") != os.environ.get(f"ORCH_DISPATCH_{key.upper()}", ""):
@@ -102,6 +107,7 @@ class TaskBoardCommandExecutor:
         # Store evidence with the canonical transaction, never infer success from
         # the activity log (which may survive a rolled-back command).
         outcomes = {"handoff": "advanced", "approve": "advanced", "reopen": "advanced",
+                    "request-acceptance-review": "progress", "decline-acceptance-review": "advanced",
                     "progress": "progress", "blocker": "blocked", "system-block": "blocked"}
         run_id = os.environ.get("ORCH_RUN_ID", "")
         if not run_id or command not in outcomes or not args:

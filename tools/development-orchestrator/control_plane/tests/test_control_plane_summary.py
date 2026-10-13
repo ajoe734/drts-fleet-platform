@@ -12,6 +12,16 @@ from control_plane.projections.control_plane_summary import (
 
 
 class ControlPlaneSummaryTests(unittest.TestCase):
+    def test_summary_uses_original_task_reviewer_request_policy(self) -> None:
+        from control_plane.tests.acceptance_review_routing.fixtures import requested_task
+
+        task = requested_task()
+        summary = build_control_plane_summary({}, {"tasks": [task]}, {}, {}, [], {})
+        preview = summary["tasks"]["dispatch_previews"][task["id"]]
+        self.assertEqual(preview["target_agent"], "Codex")
+        self.assertEqual(preview["reason"], "review_ready_dispatch")
+        self.assertEqual(summary["tasks"]["by_status"], {"acceptance": 1})
+
     def test_builds_bounded_operational_projection(self) -> None:
         summary = build_control_plane_summary(
             {"agents": {"codex": {"name": "Codex", "provider": "codex"}}},

@@ -4,6 +4,10 @@ from copy import deepcopy
 def acceptance_task():
     return {
         "id": "SR-OPS-CAPACITY-FAILCLOSED-20261012",
+        "title": "Original C123 acceptance reviewer decision",
+        "phase": "uat",
+        "artifacts": [],
+        "acceptance": [],
         "status": "acceptance",
         "owner": "Codex2",
         "reviewer": "Codex",

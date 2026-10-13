@@ -36,6 +36,7 @@ from control_plane.usecases.task_board_commands import (  # noqa: E402
     TaskBoardCommandRuntime,
 )
 from control_plane.domain.task_records import validate_task_eligibility
+from control_plane.domain.dispatch_policy import acceptance_review_snapshot, pending_acceptance_review
 from control_plane.domain.unblock_resolution import parent_resume_blocker  # noqa: E402
 
 
@@ -2011,6 +2012,69 @@ def command_note(state: dict[str, Any], args: list[str]) -> None:
     append_log({"ts": timestamp, "agent": actor, "type": "note", "task_id": task_id, "message": message})
 
 
+def _require_acceptance_review_snapshot(task: dict[str, Any]) -> dict[str, str]:
+    snapshot = acceptance_review_snapshot(task)
+    if snapshot is None:
+        raise SystemExit("Acceptance review requires a locked acceptance candidate with same-SHA review/CI and merge")
+    try:
+        supplied_snapshot = parse_json_env("ACCEPTANCE_REVIEW_SNAPSHOT_JSON")
+    except (ValueError, TypeError) as exc:
+        raise SystemExit(f"Invalid ACCEPTANCE_REVIEW_SNAPSHOT_JSON: {exc}") from exc
+    if supplied_snapshot != snapshot:
+        raise SystemExit("ACCEPTANCE_REVIEW_SNAPSHOT_JSON must exactly match the current original-task snapshot")
+    return snapshot
+
+
+def command_request_acceptance_review(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) != 3 or any(not value.strip() for value in args):
+        raise SystemExit("Usage: request-acceptance-review <task-id> <reason> <evidence-ref>")
+    task_id, reason, evidence_ref = args
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    actor = current_actor()
+    if actor not in {task.get("owner"), task.get("reviewer"), "Supervisor"}:
+        raise SystemExit("Only the owner, reviewer, or Supervisor can request acceptance review")
+    snapshot = _require_acceptance_review_snapshot(task)
+    if pending_acceptance_review(task):
+        raise SystemExit("An acceptance review request is already pending; await the assigned reviewer")
+    request = {
+        **snapshot, "request_id": uuid.uuid4().hex, "state": "pending",
+        "requested_by": actor, "requested_at": iso_now(), "reason": reason, "evidence_ref": evidence_ref,
+    }
+    task["acceptance_review_request"] = request
+    append_log({"ts": request["requested_at"], "agent": actor, "type": "acceptance_review_requested",
+                "task_id": task_id, "message": reason, "request": dict(request)})
+
+
+def _require_pending_acceptance_review(task: dict[str, Any], request_id: str) -> dict[str, Any]:
+    _require_acceptance_review_snapshot(task)
+    request = pending_acceptance_review(task)
+    if request is None or request_id != request["request_id"]:
+        raise SystemExit("Acceptance review request changed; discard stale decision")
+    return dict(request)
+
+
+def _resolve_acceptance_review(task: dict[str, Any], request: dict[str, Any], state: str, message: str) -> None:
+    resolved = {**request, "state": state, "resolved_by": current_actor(), "resolved_at": iso_now(),
+                "resolution": message}
+    task["acceptance_review_request"] = resolved
+    append_log({"ts": resolved["resolved_at"], "agent": current_actor(), "type": "acceptance_review_resolved",
+                "task_id": task["id"], "message": message, "request": dict(resolved)})
+
+
+def command_decline_acceptance_review(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) != 3 or any(not value.strip() for value in args):
+        raise SystemExit("Usage: decline-acceptance-review <task-id> <request-id> <message>")
+    task = get_task(state, args[0])
+    if task is None:
+        raise SystemExit(f"Unknown task: {args[0]}")
+    if current_actor() != task.get("reviewer") or current_actor() == task.get("owner"):
+        raise SystemExit("Only the assigned reviewer can decline acceptance review")
+    request = _require_pending_acceptance_review(task, args[1])
+    _resolve_acceptance_review(task, request, "declined", args[2])
+
+
 def command_reopen(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 2:
         raise SystemExit("Usage: reopen <task-id> <message>")
@@ -2029,6 +2093,11 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
     reviewed_sha = os.environ.get("REVIEWED_SHA", "").strip()
     if reviewed_sha and reviewed_sha != str(task.get("candidate_sha") or ""):
         raise SystemExit("REVIEWED_SHA must match the candidate being reopened")
+    request = task.get("acceptance_review_request")
+    if task.get("status") == "acceptance" and request is not None:
+        if not isinstance(request, dict) or request.get("state") == "pending":
+            request = _require_pending_acceptance_review(task, os.environ.get("ACCEPTANCE_REVIEW_REQUEST_ID", ""))
+            _resolve_acceptance_review(task, request, "reopened", message)
     timestamp = iso_now()
     task["status"] = "in_progress"
     clear_candidate_evidence(task)
@@ -2601,6 +2670,8 @@ def _command_runtime() -> TaskBoardCommandRuntime:
         "progress": command_progress,
         "note": command_note,
         "reopen": command_reopen,
+        "request-acceptance-review": command_request_acceptance_review,
+        "decline-acceptance-review": command_decline_acceptance_review,
         "handoff": command_handoff,
         "blocker": command_blocker,
         "system-block": command_system_block,
