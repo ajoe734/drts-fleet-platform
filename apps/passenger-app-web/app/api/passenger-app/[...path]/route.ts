@@ -112,7 +112,17 @@ function isAllowedPassengerPath(path: string[], method: string) {
         ["resolve", "reverse", "route"].includes(path[1] ?? "")))
   )
     return true;
-  if (method === "POST" && fullPath === "rides") return true;
+  if (["GET", "POST"].includes(method) && fullPath === "rides") return true;
+  if (
+    path[0] === "rides" &&
+    /^[A-Za-z0-9._:-]{1,128}$/.test(path[1] ?? "") &&
+    ((method === "GET" && path.length === 2) ||
+      (path.length === 3 &&
+        ((method === "GET" && ["events", "receipt"].includes(path[2] ?? "")) ||
+          (method === "POST" &&
+            ["cancel", "ratings"].includes(path[2] ?? "")))))
+  )
+    return true;
   if (["GET", "POST"].includes(method) && fullPath === "payment-methods")
     return true;
   if (

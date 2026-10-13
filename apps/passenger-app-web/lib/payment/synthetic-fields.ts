@@ -19,7 +19,16 @@ export function createSyntheticPaymentFields(options: {
       const nonce = options.issueSyntheticNonce();
       if (!/^synthetic_[a-zA-Z0-9_-]+$/.test(nonce))
         throw new Error("synthetic_payment_fields_invalid");
-      return { providerToken: `pax_${nonce}` };
+      // The existing fake provider accepts letters, underscores and hyphens.
+      // Escape underscores before digits so UUID nonces retain their uniqueness.
+      const encodedNonce = nonce
+        .slice("synthetic_".length)
+        .replace(/_/g, "__")
+        .replace(
+          /[0-9]/g,
+          (digit) => `_${String.fromCharCode(97 + Number(digit))}`,
+        );
+      return { providerToken: `synthetic_credential_${encodedNonce}` };
     },
     dispose() {
       disposed = true;

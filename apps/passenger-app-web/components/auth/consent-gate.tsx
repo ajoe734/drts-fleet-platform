@@ -5,8 +5,19 @@ import type { PassengerAuthClient } from "../../lib/auth/client";
 import { clearOtpState } from "../../lib/auth/otp-state";
 import { t } from "../../lib/auth/translations";
 import { AuthScreen, AuthAlert, P5Btn, P5 } from "./ui";
+import { isDemoMode } from "../../lib/demo/store";
+import { DEMO_T } from "../../lib/demo/translations";
 
 function legalConfig() {
+  if (isDemoMode())
+    return {
+      termsUrl: "/demo/terms",
+      privacyUrl: "/demo/privacy",
+      termsVersion: "demo-terms-v1",
+      privacyVersion: "demo-privacy-v1",
+      ready: true,
+      demo: true,
+    };
   const termsUrl = process.env.NEXT_PUBLIC_TERMS_URL ?? "";
   const privacyUrl = process.env.NEXT_PUBLIC_PRIVACY_URL ?? "";
   const termsVersion = process.env.NEXT_PUBLIC_TERMS_VERSION ?? "";
@@ -19,6 +30,7 @@ function legalConfig() {
     }
   };
   return {
+    demo: false,
     termsUrl,
     privacyUrl,
     termsVersion,
@@ -120,6 +132,7 @@ export function ConsentGate({
   };
   return (
     <AuthScreen title={t("firstLogin")}>
+      {config.demo && <AuthAlert kind="warn">{DEMO_T.consentNotice}</AuthAlert>}
       <div style={{ fontSize: 16, fontWeight: 700 }}>{t("consentHeading")}</div>
       <div style={{ flex: 1, fontSize: 14, lineHeight: 1.6 }}>
         {t("consentIntro")}
