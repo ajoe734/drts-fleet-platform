@@ -163,7 +163,7 @@ globalThis.fetch = async (url, init = {}) => {
   const body = init.body ? JSON.parse(init.body) : undefined;
   const headers = Object.fromEntries(new Headers(init.headers));
   requests.push({ route, method, body, headers });
-  if (route.includes("/session/refresh"))
+  if (route === "/api/auth/driver/device/refresh")
     return rejected("DRIVER_SESSION_EXPIRED", 401);
   assert.equal(
     headers.authorization,
@@ -172,13 +172,17 @@ globalThis.fetch = async (url, init = {}) => {
   );
   if (route === "/api/driver/profile") {
     assert.ok(method === "GET" || method === "PATCH", "no create fallback");
-    if (scenario === "expired") return rejected("DRIVER_SESSION_EXPIRED", 401);
+    if (
+      scenario === "expired" ||
+      (scenario === "patch-expired" && method === "PATCH")
+    )
+      return rejected("DRIVER_SESSION_EXPIRED", 401);
     if (method === "GET") {
       if (scenario === "load-failure")
         return rejected("DRIVER_PROFILE_NOT_FOUND", 404);
       return response(service.getProfile("fixture-driver"));
     }
-    if (scenario === "saving")
+    if (scenario === "saving" && !releasePatch)
       await new Promise((resolve) => {
         releasePatch = resolve;
       });
@@ -223,12 +227,17 @@ const field = (r, placeholder) =>
   r.root.findAll(
     (n) => n.type === "TextInput" && n.props.placeholder === placeholder,
   )[0];
+const { ActionButton } = require(
+  path.join(app, "components/ui/ActionButton.tsx"),
+);
 const save = (r) =>
-  r.root.findAll(
-    (n) =>
-      n.type === "TouchableOpacity" &&
-      /^(儲存設定|目前無變更|請先修正欄位|正在儲存…)$/.test(flatten(n)),
-  )[0];
+  r.root
+    .findAll(
+      (n) =>
+        n.type === ActionButton &&
+        /^(儲存設定|目前無變更|請先修正欄位|正在儲存…)$/.test(n.props.title),
+    )[0]
+    .findByType("TouchableOpacity");
 const patches = () =>
   requests.filter(
     (r) => r.route === "/api/driver/profile" && r.method === "PATCH",
@@ -308,6 +317,18 @@ async function press(r) {
         await enter(field(r, "driver@example.com"), "legacy@example.com");
         await press(r);
         assert.ok(!Object.hasOwn(patches()[0].body, "driverSurname"));
+      } else if (scenario === "patch-expired") {
+        await enter(initial, "歐陽");
+        await press(r);
+        assert.equal(patches().length, 1);
+        assert.equal(patches()[0].body.driverSurname, "歐陽");
+        assert.ok(routes.includes("/onboarding"));
+        assert.equal(api.isDriverIdentityProvisioned(), false);
+        assert.equal(
+          service.getProfile("fixture-driver").driverSurname,
+          undefined,
+        );
+        assert.ok(!alerts.some((a) => a[0] === "儲存成功"));
       } else if (scenario === "existing-validation") {
         await enter(initial, "歐陽");
         await enter(field(r, "driver@example.com"), "invalid email");
@@ -321,7 +342,7 @@ async function press(r) {
         await act(async () => {
           await api.clearDriverProvisioning();
         });
-        assert.equal(surname(r).props.value, "");
+        assert.equal(r.root.findAll((n) => n.type === "TextInput").length, 0);
         await act(async () => {
           r.update(React.createElement(Screen));
         });
@@ -410,6 +431,7 @@ async function press(r) {
     }
     console.log("PASS " + scenario);
   } finally {
+    if (releasePatch) releasePatch();
     if (r) await act(async () => r.unmount());
   }
 })().catch((e) => {

@@ -385,7 +385,9 @@ export default function SettingsScreen() {
     if (profileDirty) {
       tasks.push(
         client
-          .updateDriverProfile(buildProfileCommand(profileValues, initialProfile))
+          .updateDriverProfile(
+            buildProfileCommand(profileValues, initialProfile),
+          )
           .then(() => ({ section: "個人資料" })),
       );
     }

@@ -19,6 +19,7 @@ describe("actual SettingsScreen explicit surname and SDK PATCH/readback", () => 
     "existing-validation",
     "unprovisioned",
     "expired",
+    "patch-expired",
     "identity-clear",
   ])(
     "%s through real caller and native input props",
