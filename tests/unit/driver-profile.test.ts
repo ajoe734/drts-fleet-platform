@@ -7,7 +7,11 @@ import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/
 
 function createService() {
   const auditService = new AuditNotificationService();
-  const repository = new DriverProfileRepository();
+  // Only the external database boundary is controlled; use the actual repository.
+  const repository = new DriverProfileRepository({
+    isEnabled: () => true,
+    query: async () => ({ rows: [] }),
+  } as never);
   const service = new DriverProfileService(auditService, repository);
 
   return { auditService, service };
@@ -25,10 +29,10 @@ describe("driver profile service", () => {
     expect(profile.emergencyContact?.name).toBe("Demo Contact One");
   });
 
-  it("creates a new profile for an unseeded driver", () => {
+  it("creates a new profile for an unseeded driver", async () => {
     const { auditService, service } = createService();
 
-    const created = service.createProfile(
+    const created = await service.createProfile(
       "driver-new-001",
       {
         name: "Driver New",
@@ -59,13 +63,13 @@ describe("driver profile service", () => {
     );
   });
 
-  it("rejects creating a profile when a seeded driver profile already exists", () => {
+  it("rejects creating a profile when a seeded driver profile already exists", async () => {
     const { auditService, service } = createService();
     const beforeCount = auditService.listAuditLogs().filter((entry) => {
       return entry.actionName === "create_driver_profile";
     }).length;
 
-    expect(() =>
+    await expect(
       service.createProfile(
         "driver-demo-001",
         {
@@ -73,7 +77,7 @@ describe("driver profile service", () => {
         },
         "req-driver-profile-seeded-create",
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
 
     const afterCount = auditService.listAuditLogs().filter((entry) => {
       return entry.actionName === "create_driver_profile";
@@ -81,10 +85,10 @@ describe("driver profile service", () => {
     expect(afterCount).toBe(beforeCount);
   });
 
-  it("updates the current profile while preserving unchanged fields", () => {
+  it("updates the current profile while preserving unchanged fields", async () => {
     const { auditService, service } = createService();
 
-    const updated = service.updateProfile(
+    const updated = await service.updateProfile(
       "driver-demo-001",
       {
         photoUrl: " https://cdn.example.com/driver-001.jpg ",
@@ -109,10 +113,10 @@ describe("driver profile service", () => {
     expect(() => service.getProfile(null)).toThrowError(ApiRequestError);
   });
 
-  it("rejects creates when bootstrap identity has no actorId", () => {
+  it("rejects creates when bootstrap identity has no actorId", async () => {
     const { service } = createService();
 
-    expect(() =>
+    await expect(
       service.createProfile(
         undefined,
         {
@@ -120,13 +124,13 @@ describe("driver profile service", () => {
         },
         "req-driver-profile-create-missing-actor",
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
   });
 
-  it("rejects updates when bootstrap identity has no actorId", () => {
+  it("rejects updates when bootstrap identity has no actorId", async () => {
     const { service } = createService();
 
-    expect(() =>
+    await expect(
       service.updateProfile(
         "   ",
         {
@@ -134,6 +138,6 @@ describe("driver profile service", () => {
         },
         "req-driver-profile-update-missing-actor",
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
   });
 });

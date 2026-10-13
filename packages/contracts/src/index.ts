@@ -3517,11 +3517,29 @@ export interface DriverStartTaskCommand {
   startedAt: string;
 }
 
+/** Immutable self-declared profile-view facts, not verified/legal driver identity. */
+export interface DriverDeclaredSurnameSnapshot {
+  driverSurname: string;
+  driverSurnameSource: "driver_profile_declared";
+  /** Existing whole-profile revision time, not an invented surname-verification time. */
+  driverSurnameProfileUpdatedAt: string;
+}
+
+/** Actual driver-reported NTD fare components, never reconstructed from a quote. */
+export interface ActualTripFareBreakdown {
+  startMinor: number;
+  distanceMinor: number;
+  delayMinor: number;
+  nightMinor: number;
+}
+
 export interface DriverCompleteTaskCommand {
   completedAt: string;
   actualDistanceKm: number;
   actualDurationSec: number;
   fare?: MoneyAmount;
+  /** Optional for legacy callers; all four actual components are required when supplied. */
+  actualFareBreakdown?: ActualTripFareBreakdown;
   proof?: CompletionProofBundle;
 }
 
@@ -4023,7 +4041,7 @@ export interface WaypointRecord {
   departedAt: string | null;
 }
 
-export interface DriverTaskRecord {
+export interface DriverTaskRecord extends Partial<DriverDeclaredSurnameSnapshot> {
   bookingRequirements?: BookingRequirements;
   bookingQualification?: BookingQualification;
   taskId: string;
@@ -4045,6 +4063,8 @@ export interface DriverTaskRecord {
   actualDistanceKm: number | null;
   actualDurationSec: number | null;
   fare: MoneyAmount | null;
+  /** Immutable completion input; absence means actual components were not captured. */
+  actualFareBreakdown?: ActualTripFareBreakdown;
   proof: CompletionProofBundle | null;
   complianceGates?: ComplianceGateRecord[];
   forwardedStatus?: string | null;
@@ -7115,6 +7135,8 @@ export interface DriverProfileBankAccount {
 export interface DriverProfileRecord {
   driverId: string;
   name: string;
+  /** Explicitly supplied surname; absent on legacy profiles, never inferred from name. */
+  driverSurname?: string;
   phone: string | null;
   email: string | null;
   photoUrl: string | null;
@@ -7126,6 +7148,8 @@ export interface DriverProfileRecord {
 
 export interface CreateDriverProfileCommand {
   name: string;
+  /** Nonempty text, trimmed like name with no length cap; omission leaves surname absent. */
+  driverSurname?: string;
   phone?: string | null;
   email?: string | null;
   photoUrl?: string | null;
@@ -7135,6 +7159,8 @@ export interface CreateDriverProfileCommand {
 
 export interface UpdateDriverProfileCommand {
   name?: string;
+  /** Nonempty text, trimmed like name with no length cap; omission preserves surname. No clear/null. */
+  driverSurname?: string;
   phone?: string | null;
   email?: string | null;
   photoUrl?: string | null;
