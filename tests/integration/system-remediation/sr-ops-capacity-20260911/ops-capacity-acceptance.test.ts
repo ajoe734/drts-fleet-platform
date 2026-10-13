@@ -408,7 +408,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
             reportJwt: platformJwt,
             orderIds,
             runTag,
-            profile: "concurrent",
+            profile: "budgeted_dispatch_burst",
             stagedDispatch: true,
           });
 
@@ -578,6 +578,11 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
                 ) as CapacitySummary,
             );
           }
+          const { readBackBudgetedDispatchArrivals } =
+            await import("../../../../tools/system-remediation/ops-capacity/plan-builder.mjs");
+          const arrivalReadback = await attempt("actual-arrival-readback", () =>
+            readBackBudgetedDispatchArrivals(records),
+          );
 
           // --- Independent, direct-SQL durable readback: every resource ID
           // the HTTP layer's success response claimed to have created must
@@ -686,6 +691,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
               initialEvidence: initialReportReadback,
               measuredEvidence: reportReadback,
             },
+            arrivalReadback,
             concurrency: {
               intake: peakIntake,
               report: peakReport,

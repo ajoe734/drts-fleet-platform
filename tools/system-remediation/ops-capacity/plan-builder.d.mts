@@ -23,7 +23,7 @@ export type CapacityPlan = {
   durationSeconds: number;
   maxInFlight: number;
   isolatedResourceId: string;
-  profile: "uniform" | "concurrent";
+  profile: "uniform" | "concurrent" | "budgeted_dispatch_burst";
   scheduleMs: Record<WorkloadFamily, number[]>;
   workloads: {
     booking: WorkloadRequestItem[];
@@ -35,6 +35,14 @@ export type CapacityPlan = {
 export type WorkloadFamily = "booking" | "dispatch" | "report";
 
 export const BASELINE_PER_MINUTE: Record<WorkloadFamily, number>;
+export function minimumSpacingMs(
+  profile: CapacityPlan["profile"],
+  family: WorkloadFamily,
+): number;
+export function readBackBudgetedDispatchArrivals(records: unknown[]): {
+  profile: "budgeted_dispatch_burst";
+  finalArrivalMs: number;
+};
 export function buildWorkloadSchedule(
   profile: CapacityPlan["profile"],
   counts: Record<WorkloadFamily, number>,

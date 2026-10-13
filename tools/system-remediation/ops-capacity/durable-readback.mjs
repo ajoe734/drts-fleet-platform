@@ -504,6 +504,17 @@ export function assertAcceptancePassed(acceptance) {
       `Workload failed: invalid elapsedMs, must be at least 899800 for a 900s run, got ${summary.elapsedMs}`,
     );
   }
+  if (
+    summary.profile === "budgeted_dispatch_burst" &&
+    (acceptance.arrivalReadback?.profile !== summary.profile ||
+      !Number.isFinite(acceptance.arrivalReadback.finalArrivalMs) ||
+      acceptance.arrivalReadback.finalArrivalMs < 899800 ||
+      acceptance.arrivalReadback.finalArrivalMs >= 900000 ||
+      acceptance.arrivalReadback.finalArrivalMs > summary.elapsedMs ||
+      acceptance.arrivalReadback.finalArrivalMs !==
+        summary.workflows?.dispatch?.arrivals?.lastMs)
+  )
+    throw new Error("Budgeted burst missing valid independent final arrival");
 
   if (!Number.isFinite(summary.maxInFlight) || summary.maxInFlight <= 0) {
     throw new Error(`Workload failed: invalid maxInFlight`);

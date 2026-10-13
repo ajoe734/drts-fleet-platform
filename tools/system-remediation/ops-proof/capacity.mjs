@@ -2,7 +2,10 @@ import { request } from "node:http";
 import { createHash } from "node:crypto";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
-import { buildWorkloadSchedule } from "../ops-capacity/plan-builder.mjs";
+import {
+  buildWorkloadSchedule,
+  minimumSpacingMs,
+} from "../ops-capacity/plan-builder.mjs";
 
 const baselinePath =
   "docs/02-architecture/phase1-operational-workload-sla-degradation-baseline-20260430.md";
@@ -69,6 +72,8 @@ export function validatePlan(plan) {
     ]),
   );
   const canonicalSchedule = buildWorkloadSchedule(profile, counts);
+  if (profile === "budgeted_dispatch_burst" && plan.durationSeconds !== 900)
+    throw new Error("budgeted_dispatch_burst requires the full 900s window");
   const schedule = plan.scheduleMs ?? canonicalSchedule;
   for (const family of Object.keys(baseline)) {
     const times = schedule[family];
@@ -158,7 +163,7 @@ export function validatePlan(plan) {
         const stage = item.stageOrder;
         if (
           family !== "dispatch" ||
-          profile !== "concurrent" ||
+          !["concurrent", "budgeted_dispatch_burst"].includes(profile) ||
           plan.durationSeconds !== 900 ||
           item.path !== "/api/orders/{orderId}/dispatch" ||
           stage.method !== "POST" ||
@@ -520,10 +525,10 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
         // spacing and rolling-budget floors. Anchoring every sleep to the prior
         // wakeup would accumulate even constant timer lateness across4500 starts.
         await waitUntil(entry.scheduledMs, clock);
-        const spacing = 60000 / baseline[entry.family].perMinute;
+        const spacing = minimumSpacingMs(profile, entry.family);
         let targetMs = entry.scheduledMs;
         if (
-          (profile === "uniform" || entry.family === "dispatch") &&
+          spacing > 0 &&
           familyLastLaunch[entry.family] !== undefined
         ) {
           targetMs = Math.max(
@@ -547,7 +552,7 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
           const now = performance.now() - start;
           const prior = familyLastLaunch[entry.family];
           const spacingWait =
-            (profile === "uniform" || entry.family === "dispatch") &&
+            spacing > 0 &&
             prior !== undefined
               ? spacing - (now - prior)
               : 0;
