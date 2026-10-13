@@ -877,7 +877,7 @@ The durable Supervisor clarification in the original task specification records
 its04:27 decision:900seconds is the measured arrival/admission window, with
 real readiness before measured t0 and bounded response/report completion after
 it under the original deadlines. This supersedes the pending proposal above;
-no additional dispatch-burst profile or spacing waiver was adopted. The original
+at that checkpoint no additional dispatch-burst profile or spacing waiver was adopted. The original
 uniform/concurrent schedules, hard floors and rolling budgets are retained.
 
 This owner unit uses independent family admission lanes with one measured t0,
@@ -906,8 +906,9 @@ Evidence appendix `E` extends the original task tree:
 `.local/c123-report-worker-20261012/absolute-start-continuation-20261013/`.
 Published pre-change head was `425f2c24d289c48889dbdbaf0b1bee10f3a70674`.
 Final code checkpoint is `b02e58da384440266d936731bee586a92c5f612d`;
-exact subsequent verification/publication identity is recorded in
-`E/verification-manifest.json` and `E/publication.json`. All intermediate
+the subsequent frozen source identity is retained in `E/final-source-sha.txt`
+and its `final-*.log` files. The following continuation adds serialized final
+verification/publication records. All intermediate
 failures remain retained, including the incomplete harness input-identity copy,
 canonical dependency-link typecheck failure, feasible0/2ms fixture initially
 mislabeled as a refusal case, and strict fractional timing failures before wake
@@ -929,3 +930,68 @@ full-system/native Android AND iOS/provider/financial/legal/manual/public-entry/
 H3F2/HOLD/F2/ZEROremoved requirements retain their prior state. This source
 checkpoint adds no policy/profile waiver, provider/cloud/production operation,
 VM runtime, history rewrite, alternative workflow or unchanged hosted retry.
+
+### Explicit budgeted dispatch burst and independent arrival readback (2026-10-13)
+
+Supervisor's subsequent05:34 decision in the original task specification permits
+evaluation of the explicitly named `budgeted_dispatch_burst` profile within the
+existing accepted burst/concurrency scenario. Its immutable qualification and
+decision remain at
+`.local/shared-dev-release-resumption-20261013-root/c123-supported-additional-burst-decision.json`
+and the adjacent qualification/proposal files. This extends the prior arrival
+clarification; it does not waive either legacy profile's intervals or adopt a
+product throttle/auth change. Independent original Codex review is still required.
+
+The additional full900s profile declares299 dispatch arrivals at each minute's
+start and one at minute+59800ms. Repeated offsets satisfy the unchanged nominal
+rolling300/min budget, with a genuinely scheduled last dispatch at899800ms.
+Actual dispatch waits for real seed readiness and the existing rolling budget;
+the original eight-slot preparation, maxInFlight refusal,30s HTTP deadline and
+900s admission cutoff remain. Intake and report use the existing concurrent
+schedule. The legacy uniform1000/200/2000ms intervals and concurrent200ms
+dispatch interval remain separately declared and enforced. The new profile is
+typed, validated against its own canonical schedule, and restricted to the
+original full900s counts. It cannot be labeled a uniform interval pass.
+
+`readBackBudgetedDispatchArrivals` independently checks the raw5850 measured
+request rows: exact family/sequence/profile/scheduled time, actual launch time,
+all errors, every rolling60000ms budget and the genuine final dispatch admission.
+The harness attempts that readback before independently collecting all owned
+SQL diagnostics; a refusal does not suppress later readbacks or cleanup. The
+formal gate requires its final dispatch timestamp to match the actual summary,
+remain within900s and reach899800ms. A later lawful intake arrival does not
+change that dispatch observation, and response drain elapsed time cannot replace
+it. All original count/latency/report/backlog/degradation/security/SQL gates remain.
+
+Evidence appendix `E` is
+`.local/c123-report-worker-20261012/budgeted-burst-continuation-20261013/`.
+Pre-extension source is `93103c708c9575ad895ba4a3d993688fda9d33cf`;
+verified code checkpoint is `1b4bab18934a2fa76bf8dc33d73a384db61ad901`.
+Final immutable candidate/publication and completed checks are recorded in
+`E/publication.json`, `E/final-checks/verification-manifest.json` and
+`E/ci-result.json`; candidate handoff references these actual records. Earlier
+results, raw controls and failures are retained separately, including the
+missing-dependency worktree typecheck, no-TTY install abort, inherited formatting
+warning and evidence-verifier quoted-Unicode path error. The formatting-only
+change to the existing report-completion fixture preserves its behavior; the
+verifier now reads NUL-delimited git paths. None of those failed attempts earns
+acceptance credit.
+
+| Finding / acceptance                             | Source / repair                                                                                                                      | Observed result                                                                                                                                                                                                                                                                       | Commands / evidence                                                                                                                                                               | Remaining limits                                                                                                                                                                             |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Explicit profile and legacy controls             | Actual planner/type declaration, `validatePlan`, `runPlan`, `minimumSpacingMs`; original rolling windows and refusal paths retained. | Checkpoint1b4 affected regression184/184, ROOT/API strict types and scoped lint exit0. Actual full-count15-case timing probe exits0; original12 legacy cases remain, with three separately labeled burst cases. Old425f four failures and every intermediate failure remain archived. | `E/verified-{regression,root-types,api-types,lint,timing}.json` records exact commands/exits/SHA/hashes; final same-source checks in `E/final-checks/verification-manifest.json`. | Pure HTTP/clock/timer boundaries controlled; successful timing is not actual capacity or archived429 causality.                                                                              |
+| Variable timing and real seed boundary           | Actual `measure`, `prepareDispatchItem`, eight-slot preparation and new burst admission.                                             | Full5850/4000 regressions pass at0/2ms variable timer lateness and5/201ms seed responses; all actual rolling budgets independently checked. Raw429, seed failure, overload and250ms infeasible lateness remain rejected with every outcome retained.                                  | Scheduler suite and actual15-case producer probe; raw/summary paths and hashes in `E/verified-timing/timing-boundary-result.json` and final check logs.                           | Modeled response/seed timing; actual hosted HTTP/PG readiness, resource contention,50intake/50reports/500backlog and SLOs remain required.                                                   |
+| Independent final admission                      | Actual raw-arrival readback, harness diagnostic attempt and formal gate.                                                             | Complete legal burst plus lawful later intake accepted; missing rows, wrong profile, compressed actual rolling boundary and missing/invalid/mismatched/late final arrival rejected. Response drain cannot fill the899800ms floor.                                                     | Actual planner/scheduler/gate tests; original25-case contract still25/25, exit0.                                                                                                  | Synthetic positive proves gate behavior only. Every real raw request/seed, summary and direct-SQL readback must belong to the final candidate.                                               |
+| Final SQL, observer and cleanup retention        | Original diagnostic finalizer and actual harness callback retain all prior repairs.                                                  | Updated complete external input fixture: actual19-case harness exits0, preserving failed/partial/absent producer/poll/readback/write/restoration/app/pool faults and legal synthetic positive.                                                                                        | `E/verified-harness.json`, per-case actual SQL query/diagnostic logs and final exact-source replay.                                                                               | App/JWT/HTTP/SQL/producer-output boundaries controlled; no product server or database runs on this VM.                                                                                       |
+| Original112/current375 HTTP429                   | Immutable failed archives and integrated actual key-scoped singleton plus bounded restored inbound/key/hit/expiry/reset observation. | Source instrumentation and raw throttle retention remain. No new real server causal result is asserted.                                                                                                                                                                               | Original run38208300314/artifact11729270836 and failed run38326823141; all earlier observer/upstream evidence preserved.                                                          | Supervisor-authorized ORIGINAL changed-source same-candidate hosted workflow must establish actual correlation. No unchanged retry or policy relaxation.                                     |
+| capacity_failed_summary_rejected                 | Actual exported gate, exact24/74/14 payload and all original missing/invalid/red cases.                                              | Fresh25/25 control decisions exit0; negative source guard retained. Historical receipt remains separate.                                                                                                                                                                              | `E/verified-gate.json` and final gate log/manifest, original immutable negative evidence.                                                                                         | OPEN for matching new-candidate lifecycle evidence; no receipt transfer.                                                                                                                     |
+| capacity_same_candidate_full_900s_valid_baseline | ORIGINAL full900s HTTP/AppModule/migratedPG route and all original requirements.                                                     | OPEN. No new real capacity result, independent approval, matching merge or positive acceptance receipt is supplied by these source checks.                                                                                                                                            | Final candidate/publication/CI records plus subsequent Supervisor-authorized original workflow evidence.                                                                          | Exact independent review/CI/merge followed by genuine same-candidate full900s baseline and complete actual SQL/security/concurrency/report/degradation/cleanup measurements remain required. |
+
+All original Claude/Claude2/Gemini source credit, published history, F1–F6,
+112/current375 raw errors, full900/4500/450 measured requests and4000 separate
+staged creations remain. Runtime CPU/billing/scaling/idle/recovery/PG-loss/
+cross-instance and full-system/native Android AND iOS/provider/financial/legal/
+manual/public-entry/H3F2/HOLD/F2/ZEROremoved requirements retain their prior
+state. Source handoff is not completion or a capacity receipt. No new workflow,
+VM runtime, cloud/provider/production mutation, unchanged retry, history rewrite,
+error filtering or silent legacy interval waiver occurs.
