@@ -491,7 +491,7 @@ describe("actual capacity scheduler boundaries across all families", () => {
       callback: () => void,
       ms: number,
     ) => {
-      const jitter = ms > 20 && ms < 30000 ? (++wakes % 2) * 2 : 0;
+      const jitter = ms > 20 && ms < 30000 ? (++wakes % 2) * 250 : 0;
       return timer(callback, ms + jitter);
     }) as typeof setTimeout);
     const output = resolve(directory, "variable-lateness.jsonl");
