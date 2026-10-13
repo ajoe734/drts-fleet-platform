@@ -51,6 +51,61 @@ class CandidateDispatchPolicyTest(unittest.TestCase):
         self.assertEqual(decision.target_agent, "Codex")
         self.assertEqual(decision.reason, DispatchReason.ACCEPTANCE_READY)
 
+    def test_requested_original_acceptance_routes_current_reviewer(self) -> None:
+        from control_plane.tests.acceptance_review_routing.fixtures import requested_task
+
+        task = requested_task()
+        decision = resolve_dispatch_target(task, {task["id"]: task}, self.policy)
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.task_id, task["id"])
+        self.assertEqual(decision.target_agent, "Codex")
+        self.assertEqual(decision.reason, DispatchReason.REVIEW_READY)
+
+    def test_stale_or_malformed_acceptance_requests_fail_closed(self) -> None:
+        from control_plane.tests.acceptance_review_routing.fixtures import requested_task
+
+        changes = [{key: "drifted"} for key in (
+            "candidate_sha", "candidate_generation", "reviewed_sha", "merge_sha", "reviewer", "task_id"
+        )] + [{key: ""} for key in ("request_id", "requested_at", "reason", "evidence_ref")] + [
+            {"requested_by": "Gemini"}, {"requested_by": []}, {"requested_at": "invalid"},
+            {"requested_at": "2026-10-13T01:28:18"}
+        ]
+        for change in changes:
+            with self.subTest(change=change):
+                task = requested_task()
+                task["acceptance_review_request"].update(change)
+                self.assertIsNone(resolve_dispatch_target(task, {task["id"]: task}, self.policy))
+        for malformed in ("pending", [], {}, {"state": "bogus"}, {"state": []}):
+            task = requested_task()
+            task["acceptance_review_request"] = malformed
+            self.assertIsNone(resolve_dispatch_target(task, {task["id"]: task}, self.policy))
+
+    def test_requested_acceptance_preserves_dependency_external_and_ci_floors(self) -> None:
+        from control_plane.tests.acceptance_review_routing.fixtures import requested_task
+
+        for changes in ({"depends_on": ["DEP"]}, {"external_gate": True}, {"ci_status": "failure"},
+                        {"ci_sha": "a" * 40}, {"mutates_canonical": False}):
+            task = {**requested_task(), **changes}
+            self.assertIsNone(resolve_dispatch_target(task, {task["id"]: task, "DEP": {"id": "DEP", "status": "blocked"}}, self.policy))
+
+    def test_request_and_resolution_change_signatures_without_progress_noise(self) -> None:
+        from control_plane.tests.acceptance_review_routing.fixtures import acceptance_task, requested_task
+        from control_plane.domain.dispatch_policy import material_task_fingerprint, ready_dispatch_signature
+
+        task = acceptance_task()
+        task_map = {task["id"]: task}
+        original_fingerprint = material_task_fingerprint(task, task_map)
+        original_signature = ready_dispatch_signature(task, DispatchReason.ACCEPTANCE_READY, task_map)
+        task["acceptance_review_request"] = requested_task()["acceptance_review_request"]
+        requested_fingerprint = material_task_fingerprint(task, task_map)
+        self.assertNotEqual(requested_fingerprint, original_fingerprint)
+        self.assertNotEqual(ready_dispatch_signature(task, DispatchReason.ACCEPTANCE_READY, task_map), original_signature)
+        task["next"] = "Progress only"
+        task["last_update"] = "Later timestamp"
+        self.assertEqual(material_task_fingerprint(task, task_map), requested_fingerprint)
+        task["acceptance_review_request"]["state"] = "declined"
+        self.assertNotEqual(material_task_fingerprint(task, task_map), requested_fingerprint)
+
     def test_external_acceptance_waits_until_existing_gate_is_released(self) -> None:
         task = self.task("acceptance", merge_sha="abc123", external_gate=True)
         for update in ("first verification", "same missing phone resources"):
