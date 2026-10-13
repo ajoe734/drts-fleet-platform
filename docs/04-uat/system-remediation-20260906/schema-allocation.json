@@ -572,5 +572,27 @@
         "A disputed decision, its linked crm complaint and initial timeline commit or roll back together. Existing payout amounts and calculation algorithms are unchanged."
       ]
     }
+  ],
+  "public_fare_management_allocations": [
+    {
+      "task_id": "P5-FARE-MANAGEMENT-20261013",
+      "version": "V0118",
+      "migration_filename": "V0118__public_fare_version_management.sql",
+      "domain": "public_fare_management",
+      "target_schema": "passenger",
+      "primary_tables": [
+        "passenger.fare_version_management",
+        "passenger.fare_version_command_receipts"
+      ],
+      "referenced_tables": ["passenger.fare_versions", "admin.audit_logs"],
+      "description": "公開運價管理 metadata 與同交易命令收據；唯一運價權威沿用 passenger.fare_versions，原 seed／試算快照與計價算法不改。",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "Management metadata contains no second copy of price fields.",
+        "Filing metadata records actual operator evidence; simulations never write official authority.",
+        "Schedule splits one covered published interval; historical published rows and immutable quote snapshots remain available.",
+        "Tariff mutation, audit and command receipt commit or roll back together; receipt retry returns current row without replaying interval changes."
+      ]
+    }
   ]
 }

@@ -22,6 +22,8 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 
+import { PublicFareManagement } from "./fares/public-fare-management";
+
 type P5View = "disclosure" | "queue" | "fares" | "records";
 
 type CorrectionQueueRow = Record<string, unknown> & {
@@ -36,21 +38,6 @@ type CorrectionQueueRow = Record<string, unknown> & {
   vehiclePlate: string;
   driverName: string;
   queueNote: string;
-};
-
-type FareVersionRow = Record<string, unknown> & {
-  id: string;
-  name: string;
-  status: "draft" | "filed" | "active" | "retired";
-  effectiveFrom: string;
-  filingRef: string;
-  preview: {
-    startingFare: string;
-    distanceFare: string;
-    waitingFare: string;
-    nightSurcharge: string;
-    note: string;
-  };
 };
 
 type TripOperationalRow = MultiTaxiTripOperationalAdminView &
@@ -163,65 +150,6 @@ const queueSeed: CorrectionQueueRow[] = [
   },
 ];
 
-const fareSeed: FareVersionRow[] = [
-  {
-    id: "F-2026-04",
-    name: "2026 Q4 調整版",
-    status: "filed",
-    effectiveFrom: "2026-10-01",
-    filingRef: "北市交運字第1130077號",
-    preview: {
-      startingFare: "NT$ 90",
-      distanceFare: "NT$ 5 / 200m",
-      waitingFare: "NT$ 5 / 80s",
-      nightSurcharge: "+20% · 23:00–06:00",
-      note: "已備查版本可先公開預覽；生效前訂單仍沿用已生效版本。",
-    },
-  },
-  {
-    id: "F-2026-03",
-    name: "現行計費表",
-    status: "active",
-    effectiveFrom: "2026-07-01",
-    filingRef: "北市交運字第1130042號",
-    preview: {
-      startingFare: "NT$ 85",
-      distanceFare: "NT$ 5 / 200m",
-      waitingFare: "NT$ 5 / 80s",
-      nightSurcharge: "+20% · 23:00–06:00",
-      note: "現行已生效版本供乘客公開查閱，正式訂單一律使用此版本計費。",
-    },
-  },
-  {
-    id: "F-2026-05",
-    name: "夜間費率研議",
-    status: "draft",
-    effectiveFrom: "—",
-    filingRef: "—",
-    preview: {
-      startingFare: "NT$ 85",
-      distanceFare: "NT$ 5 / 200m",
-      waitingFare: "NT$ 5 / 80s",
-      nightSurcharge: "+25% · 23:00–06:00",
-      note: "草稿版本僅供內部檢視，尚未送備查，不可套用到任何訂單。",
-    },
-  },
-  {
-    id: "F-2025-11",
-    name: "2025 舊版",
-    status: "retired",
-    effectiveFrom: "2025-11-01",
-    filingRef: "北市交運字第1120198號",
-    preview: {
-      startingFare: "NT$ 80",
-      distanceFare: "NT$ 5 / 250m",
-      waitingFare: "NT$ 5 / 100s",
-      nightSurcharge: "+15% · 23:00–06:00",
-      note: "停用版本僅保留對照，不可再次啟用到現行公開頁。",
-    },
-  },
-];
-
 const fallbackVehicle: VehiclePassengerDisclosureProfile = {
   vehicleId: "vehicle-001",
   make: "Toyota",
@@ -260,22 +188,16 @@ function getMaskedRegistrationDisplay(
   return masked.length > 0 ? masked : "—";
 }
 
-function statusTone(
-  status: CorrectionQueueRow["status"] | FareVersionRow["status"],
-): CanvasTone {
+function statusTone(status: CorrectionQueueRow["status"]): CanvasTone {
   switch (status) {
     case "approved":
-    case "active":
       return "success";
     case "pending":
-    case "draft":
       return "warn";
     case "reviewing":
-    case "filed":
       return "info";
     case "returned":
       return "danger";
-    case "retired":
     default:
       return "neutral";
   }
@@ -332,9 +254,8 @@ export function P5AdminConsole({ view }: { view: P5View }) {
     useState<DriverPublicRegistrationCredential>(fallbackDriver);
   const [loading, setLoading] = useState(view === "disclosure");
   const [queueRows, setQueueRows] = useState(queueSeed);
-  const [selectedQueueId, setSelectedQueueId] = useState(queueSeed[0]?.id ?? "");
-  const [selectedFareId, setSelectedFareId] = useState(
-    fareSeed.find((row) => row.status === "active")?.id ?? fareSeed[0]?.id ?? "",
+  const [selectedQueueId, setSelectedQueueId] = useState(
+    queueSeed[0]?.id ?? "",
   );
   const [recordsRows, setRecordsRows] = useState<TripOperationalRow[]>([]);
   const [recordsMonthOptions, setRecordsMonthOptions] = useState<string[]>([]);
@@ -344,13 +265,14 @@ export function P5AdminConsole({ view }: { view: P5View }) {
   const maskedRegistrationDisplay = getMaskedRegistrationDisplay(driver);
   const selectedQueueRow =
     queueRows.find((row) => row.id === selectedQueueId) ?? queueRows[0] ?? null;
-  const selectedFare =
-    fareSeed.find((row) => row.id === selectedFareId) ??
-    fareSeed.find((row) => row.status === "active") ??
-    fareSeed[0]!;
   const disclosureVehiclePlate = queueSeed[0]?.vehiclePlate ?? "—";
   const disclosureDriverName = queueSeed[0]?.driverName ?? "—";
-  const canAccessView = view === "records" ? canReadTripRecords : canReadRegistry;
+  const canAccessView =
+    view === "records"
+      ? canReadTripRecords
+      : view === "fares"
+        ? scopeSet.has("foundation:read")
+        : canReadRegistry;
 
   useEffect(() => {
     if (view !== "disclosure" || !canReadRegistry) {
@@ -438,9 +360,7 @@ export function P5AdminConsole({ view }: { view: P5View }) {
           return;
         }
         setRecordsRows([]);
-        setRecordsError(
-          error instanceof Error ? error.message : String(error),
-        );
+        setRecordsError(error instanceof Error ? error.message : String(error));
       } finally {
         if (active) {
           setRecordsLoading(false);
@@ -765,7 +685,9 @@ export function P5AdminConsole({ view }: { view: P5View }) {
                   items={[
                     {
                       k: t("p5.queue.detail.subjectType"),
-                      v: t(`p5.queue.subjectType.${selectedQueueRow.subjectType}`),
+                      v: t(
+                        `p5.queue.subjectType.${selectedQueueRow.subjectType}`,
+                      ),
                     },
                     {
                       k: t("p5.queue.detail.plate"),
@@ -795,14 +717,14 @@ export function P5AdminConsole({ view }: { view: P5View }) {
                     {t("p5.queue.detail.missingTitle")}
                   </strong>
                   {selectedQueueRow.missing === "—" ? (
-                    <div style={{ color: theme.textMuted, fontSize: 12 }}>—</div>
+                    <div style={{ color: theme.textMuted, fontSize: 12 }}>
+                      —
+                    </div>
                   ) : (
                     <ul style={queueDetailListStyle}>
-                      {selectedQueueRow.missing
-                        .split(" · ")
-                        .map((item) => (
-                          <li key={item}>{item}</li>
-                        ))}
+                      {selectedQueueRow.missing.split(" · ").map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
                     </ul>
                   )}
                 </div>
@@ -961,7 +883,12 @@ export function P5AdminConsole({ view }: { view: P5View }) {
             columns={recordColumns}
             rows={recordsLoading ? [] : recordsRows}
           />
-          <div style={{ padding: "10px 16px", borderTop: `1px solid ${theme.border}` }}>
+          <div
+            style={{
+              padding: "10px 16px",
+              borderTop: `1px solid ${theme.border}`,
+            }}
+          >
             <span style={{ fontSize: 11, color: theme.textMuted }}>
               {t("p5.records.footer")}
             </span>
@@ -971,100 +898,5 @@ export function P5AdminConsole({ view }: { view: P5View }) {
     );
   }
 
-  const fareColumns: CanvasTableColumn<FareVersionRow>[] = [
-    { h: t("p5.fares.col.id"), k: "id", w: 120, mono: true },
-    { h: t("p5.fares.col.name"), k: "name", w: 160 },
-    {
-      h: t("p5.fares.col.status"),
-      w: 110,
-      r: (row) => (
-        <CanvasPill theme={theme} tone={statusTone(row.status)} dot>
-          {t(`p5.status.${row.status}`)}
-        </CanvasPill>
-      ),
-    },
-    {
-      h: t("p5.fares.col.effectiveFrom"),
-      k: "effectiveFrom",
-      w: 120,
-      mono: true,
-    },
-    { h: t("p5.fares.col.filingRef"), k: "filingRef", w: 220, mono: true },
-    {
-      h: "",
-      w: 120,
-      r: (row) => (
-        <CanvasBtn
-          theme={theme}
-          size="xs"
-          variant={row.status === "filed" ? "primary" : "ghost"}
-          onClick={() => setSelectedFareId(row.id)}
-        >
-          {row.status === "filed"
-            ? t("p5.fares.schedule")
-            : t("p5.fares.preview")}
-        </CanvasBtn>
-      ),
-    },
-  ];
-
-  return (
-    <div style={pageBodyStyle}>
-      <CanvasPageHeader
-        theme={theme}
-        title={t("p5.fares.title")}
-        subtitle={t("p5.fares.subtitle")}
-        actions={
-          <CanvasBtn theme={theme} variant="primary" icon="plus">
-            {t("p5.fares.create")}
-          </CanvasBtn>
-        }
-      />
-      <div style={splitStyle}>
-        <CanvasCard theme={theme} padding={0}>
-          <CanvasTable theme={theme} columns={fareColumns} rows={fareSeed} />
-        </CanvasCard>
-        <CanvasCard
-          theme={theme}
-          title={t("p5.fares.previewCard")}
-          subtitle={`${selectedFare.id} · ${t(`p5.status.${selectedFare.status}`)}`}
-        >
-          <CanvasDL
-            theme={theme}
-            cols={1}
-            items={[
-              {
-                k: t("p5.fares.startingFare"),
-                v: selectedFare.preview.startingFare,
-                mono: true,
-              },
-              {
-                k: t("p5.fares.distanceFare"),
-                v: selectedFare.preview.distanceFare,
-                mono: true,
-              },
-              {
-                k: t("p5.fares.waitingFare"),
-                v: selectedFare.preview.waitingFare,
-                mono: true,
-              },
-              {
-                k: t("p5.fares.nightSurcharge"),
-                v: selectedFare.preview.nightSurcharge,
-                mono: true,
-              },
-            ]}
-          />
-          <div style={{ marginTop: 10 }}>
-            <CanvasBanner
-              theme={theme}
-              tone="info"
-              icon="info"
-              body={selectedFare.preview.note}
-            />
-          </div>
-        </CanvasCard>
-      </div>
-    </div>
-  );
+  return <PublicFareManagement />;
 }
