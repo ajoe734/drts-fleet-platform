@@ -14,7 +14,11 @@ function readSelectedProjects() {
       continue;
     }
     const nextValue = argv[index + 1];
-    if (value === "--project" && typeof nextValue === "string" && nextValue.length > 0) {
+    if (
+      value === "--project" &&
+      typeof nextValue === "string" &&
+      nextValue.length > 0
+    ) {
       selectedProjects.add(nextValue);
     }
   }
