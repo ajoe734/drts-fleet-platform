@@ -34,13 +34,13 @@ export class DriverProfileController {
 
   @Post()
   @RequireScopes("driver:write")
-  createProfile(
+  async createProfile(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Body() command: CreateDriverProfileCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope<DriverProfileRecord>(
-      this.driverProfileService.createProfile(
+      await this.driverProfileService.createProfile(
         identity?.actorId,
         command,
         requestId,
@@ -51,13 +51,13 @@ export class DriverProfileController {
 
   @Patch()
   @RequireScopes("driver:write")
-  updateProfile(
+  async updateProfile(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Body() command: UpdateDriverProfileCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope<DriverProfileRecord>(
-      this.driverProfileService.updateProfile(
+      await this.driverProfileService.updateProfile(
         identity?.actorId,
         command,
         requestId,

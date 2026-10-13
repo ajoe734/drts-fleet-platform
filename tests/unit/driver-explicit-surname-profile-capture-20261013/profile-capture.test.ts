@@ -76,7 +76,7 @@ describe("explicit driver surname production profile capture", () => {
         name: "Unrelated synthetic display name",
         driverSurname: ` \t${surname}\n `,
       };
-      const created = f.service.createProfile(
+      const created = await f.service.createProfile(
         "drv-surname-new",
         command,
         "req-create",
@@ -109,24 +109,26 @@ describe("explicit driver surname production profile capture", () => {
 
   it("captures explicit update and admin upsert; omission preserves it across reload", async () => {
     const f = fixture();
-    const updated = f.service.updateProfile("driver-demo-001", {
+    const updated = await f.service.updateProfile("driver-demo-001", {
       driverSurname: "Compound Fixture",
     });
     expect(updated.driverId).toBe("drv-demo-001");
     expect(updated.driverSurname).toBe("Compound Fixture");
-    const renamed = f.service.updateProfile("driver-demo-001", {
+    const renamed = await f.service.updateProfile("driver-demo-001", {
       name: "Other Display Fixture",
     });
     expect(renamed.driverSurname).toBe("Compound Fixture");
-    const admin = f.service.upsertAdminProfile(" drv-demo-001 ", {
+    const admin = await f.service.upsertAdminProfile(" drv-demo-001 ", {
       name: "Admin Fixture",
     });
     expect(admin.driverSurname).toBe("Compound Fixture");
     expect(
-      f.service.upsertAdminProfile("drv-demo-001", {
-        name: "Admin Fixture",
-        driverSurname: "Explicit Admin Fixture",
-      }).driverSurname,
+      (
+        await f.service.upsertAdminProfile("drv-demo-001", {
+          name: "Admin Fixture",
+          driverSurname: "Explicit Admin Fixture",
+        })
+      ).driverSurname,
     ).toBe("Explicit Admin Fixture");
     const fresh = await f.reload();
     expect(fresh.getProfile("driver-demo-001").driverSurname).toBe(
@@ -140,25 +142,32 @@ describe("explicit driver surname production profile capture", () => {
     absent(f.service.getProfile("driver-demo-001"));
     absent(f.service.getProfile("drv-empty"));
     absent(
-      f.service.createProfile("drv-legacy", { name: "歐陽 Synthetic Fixture" }),
+      await f.service.createProfile("drv-legacy", {
+        name: "歐陽 Synthetic Fixture",
+      }),
     );
     absent(
-      f.service.updateProfile("drv-legacy", { name: "Changed legacy name" }),
+      await f.service.updateProfile("drv-legacy", {
+        name: "Changed legacy name",
+      }),
     );
     absent(
-      f.service.upsertAdminProfile("drv-legacy", {
+      await f.service.upsertAdminProfile("drv-legacy", {
         name: "Legacy Admin Fixture",
       }),
     );
     absent((await f.reload()).getProfile("drv-legacy"));
   });
 
-  it("keeps supplied internal whitespace and existing no-length-cap profile handling", () => {
+  it("keeps supplied internal whitespace and existing no-length-cap profile handling", async () => {
     const f = fixture();
     const surname = `van  der ${"Synthetic".repeat(40)}`;
     expect(
-      f.service.updateProfile("drv-demo-001", { driverSurname: surname })
-        .driverSurname,
+      (
+        await f.service.updateProfile("drv-demo-001", {
+          driverSurname: surname,
+        })
+      ).driverSurname,
     ).toBe(surname);
   });
 
@@ -183,7 +192,7 @@ describe("explicit driver surname production profile capture", () => {
           const auditWrites = vi.spyOn(f.audit, "recordAuditLog");
           const driverId = "drv-invalid-fixture";
           if (operation !== "create") {
-            f.service.createProfile(driverId, {
+            await f.service.createProfile(driverId, {
               name: "Before",
               driverSurname: "Retained Fixture",
             });
@@ -198,15 +207,15 @@ describe("explicit driver surname production profile capture", () => {
             phone: "changed",
             driverSurname: value,
           } as unknown as CreateDriverProfileCommand;
-          const act = () =>
+          const act = async () =>
             operation === "create"
-              ? f.service.createProfile(driverId, command)
+              ? await f.service.createProfile(driverId, command)
               : operation === "update"
-                ? f.service.updateProfile(driverId, command)
-                : f.service.upsertAdminProfile(driverId, command);
-          expect(act).toThrowError(ApiRequestError);
+                ? await f.service.updateProfile(driverId, command)
+                : await f.service.upsertAdminProfile(driverId, command);
+          await expect(act()).rejects.toThrowError(ApiRequestError);
           try {
-            act();
+            await act();
           } catch (error) {
             expect(error).toMatchObject({ code: "INVALID_DRIVER_PROFILE" });
             expect((error as ApiRequestError).getStatus()).toBe(400);
@@ -226,30 +235,30 @@ describe("explicit driver surname production profile capture", () => {
     },
   );
 
-  it("retains driver identity binding and rejects missing identity", () => {
+  it("retains driver identity binding and rejects missing identity", async () => {
     const f = fixture();
     const command = {
       name: "Fixture",
       driverSurname: "Explicit Fixture",
       driverId: "drv-victim",
     };
-    expect(f.service.createProfile("drv-bound", command).driverId).toBe(
+    expect((await f.service.createProfile("drv-bound", command)).driverId).toBe(
       "drv-bound",
     );
     absent(f.service.getProfile("drv-victim"));
     for (const actor of [null, undefined, " "]) {
-      expect(() => f.service.createProfile(actor, command)).toThrowError(
-        ApiRequestError,
-      );
-      expect(() => f.service.updateProfile(actor, command)).toThrowError(
-        ApiRequestError,
-      );
+      await expect(
+        f.service.createProfile(actor, command),
+      ).rejects.toThrowError(ApiRequestError);
+      await expect(
+        f.service.updateProfile(actor, command),
+      ).rejects.toThrowError(ApiRequestError);
     }
   });
 
-  it("preserves captured surname across existing device operations and returned clones", () => {
+  it("preserves captured surname across existing device operations and returned clones", async () => {
     const f = fixture();
-    f.service.updateProfile("drv-demo-001", {
+    await f.service.updateProfile("drv-demo-001", {
       driverSurname: "Device Fixture",
     });
     const bound = f.service.recordDeviceBinding("drv-demo-001", {
@@ -277,7 +286,7 @@ describe("explicit driver surname production profile capture", () => {
     );
   });
 
-  it("discloses asynchronous persist: response precedes write; failure is reported", async () => {
+  it("awaits asynchronous persist: failure is propagated and reported", async () => {
     let rejectWrite!: (error: Error) => void;
     const pending = new Promise<void>((_resolve, reject) => {
       rejectWrite = reject;
@@ -293,17 +302,19 @@ describe("explicit driver surname production profile capture", () => {
       new AuditNotificationService(),
       repository,
     );
-    expect(
-      service.createProfile("drv-async", {
-        name: "Fixture",
-        driverSurname: "Async Fixture",
-      }).driverSurname,
-    ).toBe("Async Fixture");
+    // Historical 96f6099e asserted early success here. This task fixes that
+    // exact false-ACK boundary; preserve the same input/error/logging contract.
+    const saved = service.createProfile("drv-async", {
+      name: "Fixture",
+      driverSurname: "Async Fixture",
+    });
+    await Promise.resolve();
+    expect(service.findProfileForDriver("drv-async")).toBeNull();
     expect(report).not.toHaveBeenCalled();
     const error = new Error("Synthetic DB unavailable");
     rejectWrite(error);
-    await pending.catch(() => {});
-    await Promise.resolve();
+    await expect(saved).rejects.toBe(error);
+    expect(service.findProfileForDriver("drv-async")).toBeNull();
     expect(report).toHaveBeenCalledWith(error, "create_profile");
   });
 });
@@ -335,9 +346,9 @@ describe("actual SDK JSON transport to typed controller and repository", () => {
         try {
           const result =
             init.method === "POST"
-              ? controller.createProfile(identity, body, "req-wire")
+              ? await controller.createProfile(identity, body, "req-wire")
               : init.method === "PATCH"
-                ? controller.updateProfile(identity, body, "req-wire")
+                ? await controller.updateProfile(identity, body, "req-wire")
                 : controller.getProfile(identity, "req-wire");
           return new Response(JSON.stringify(result), { status: 200 });
         } catch (error) {
