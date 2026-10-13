@@ -1118,3 +1118,25 @@ financial/legal/manual/public-entry/H3F2/HOLD/F2/ZEROremoved and all full-system
 gates keep their previous state. No VM product server, Docker, browser, cloud,
 provider, production deployment, history rewrite, limiter reset/bypass,
 count/error filtering, policy increase or unchanged hosted retry is performed.
+
+The final code checkpoint41e6f1b53 passes194/194 affected regressions in15 files,
+including all original184 controls and ten actual-storage admission cases.
+`G/final-regression.log` records the full sequential command with zero skips;
+`G/final-regression/` retains each producer raw file, summary and actual
+singleton trace. The native-count timestamp case additionally delays only
+external identity-observation clock work before the unmocked increment, proving
+the observer wrapper's earlier entry is not used as the genuine count time.
+The complete positive retains5850 requests/4000 seeds and no429; actual guard
+rolling peaks remain within60/300/30 and the final counted admission is inside
+the900s window. The impossible-delay case remains red with every outcome.
+
+Root/API strict types, scoped lint, formatting, syntax and diff checks pass.
+The actual original25-case gate replay passes25/25. The original harness
+replay passes24/24, with its external producer boundary also asserting that
+the real admission methods are supplied. Both actual formal gate and raw
+arrival readback reject the retained real d73 payload (expected negative
+wrapper2/2, exit0). All commands, exits, exact source/blob hashes, versions and
+raw evidence digests are retained in `G/verification-manifest.json`; publication
+and matching CI are separate in `G/publication.json` and `G/ci-result.json`.
+The final documentation-only closeout preserves these verified code bytes.
+Both required acceptance keys remain OPEN for the next matching generation.
