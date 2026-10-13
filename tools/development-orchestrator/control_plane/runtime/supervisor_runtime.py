@@ -2197,6 +2197,7 @@ def start_worker_for_request(
     agent = agent_config_for(config, request.agent_id)
     request_metadata = request.metadata if isinstance(request.metadata, dict) else {}
     role = task_role_for_dispatch_reason(request.reason)
+    acceptance_review_dispatch = False
     if request.task_id and role:
         task_map = task_index_from_status(config, load_status(config))
         task = task_map.get(request.task_id)
@@ -2211,6 +2212,10 @@ def start_worker_for_request(
                                           for key in ("candidate_sha", "candidate_generation")):
                 return False, "dispatch_candidate_changed", None
             review_request = snapshot_task.get("acceptance_review_request")
+            if role == "owner" and request.reason == "acceptance_ready_dispatch" and task.get("acceptance_review_request") is not None:
+                decision = resolve_domain_dispatch_target(task, task_map, ReadyDispatchPolicy.from_config(config))
+                if decision is None or decision.reason.value != request.reason or decision.target_agent != target:
+                    return False, "dispatch_acceptance_review_changed", None
             if role == "reviewer" and (task.get("status") == "acceptance" or (
                     isinstance(review_request, dict) and review_request.get("state") == "pending")):
                 current_request = pending_acceptance_review(task)
@@ -2222,6 +2227,7 @@ def start_worker_for_request(
                 if any(w.get("task_id") == request.task_id and is_active_worker(w)
                        for w in (state.get("workers") or {}).values()):
                     return False, "dispatch_original_task_active", None
+                acceptance_review_dispatch = True
             request.metadata.update({"dispatch_role": role, "dispatch_task_id": request.task_id,
                                      "dispatch_agent": target,
                                      "dispatch_candidate_sha": task.get("candidate_sha") or "",
@@ -2306,6 +2312,26 @@ def start_worker_for_request(
 
     task_payload = request_metadata.get("task")
     task_payload = task_payload if isinstance(task_payload, dict) else {}
+    if acceptance_review_dispatch and (
+            workspace_root == config_path(config, "status_file").parent.resolve()
+            or workspace_source not in {"existing_review_worktree", "created_review_worktree"}
+            or task_branch != task_payload.get("candidate_sha")):
+        return False, "reviewer_workspace_unavailable:acceptance_review_requires_pinned_workspace", None
+    if acceptance_review_dispatch:
+        # Provisioning can fetch/create a worktree. Revalidate immediately at
+        # delivery so a request resolved/reassigned during that I/O cannot run.
+        current_map = task_index_from_status(config, load_status(config))
+        current_task = current_map.get(request.task_id) or {}
+        current_request = pending_acceptance_review(current_task)
+        current_decision = resolve_domain_dispatch_target(current_task, current_map, ReadyDispatchPolicy.from_config(config))
+        if (current_request is None or current_request != task_payload.get("acceptance_review_request")
+                or current_decision is None or current_decision.reason.value != request.reason
+                or current_decision.target_agent != request.metadata["dispatch_agent"]
+                or not task_is_dispatch_eligible_for_agent(current_task, current_decision.target_agent, "reviewer")):
+            return False, "dispatch_acceptance_review_changed", None
+        if any(w.get("task_id") == request.task_id and is_active_worker(w)
+               for w in (state.get("workers") or {}).values()):
+            return False, "dispatch_original_task_active", None
     if (
         role == "reviewer"
         and workspace_source in ("unresolvable_pinned_candidate", "fallback_canonical")

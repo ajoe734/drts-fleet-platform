@@ -30,6 +30,42 @@ Only the assigned reviewer may `reopen` from `acceptance` or `done`; an owner
 attempt is rejected without changing state or recording a log entry. Other
 implementation states retain the existing owner/reviewer reopen permissions.
 
+When acceptance findings need the original reviewer to decide, the owner,
+assigned reviewer or Supervisor can request that decision through the normal
+status CLI. This records routing metadata only; it does not reopen source,
+approve a candidate or grant acceptance credit. Scope is merged canonical
+`acceptance` tasks with matching candidate/review/green CI and a merge SHA.
+
+1. Read the single task using `show`. Set `ACCEPTANCE_REVIEW_SNAPSHOT_JSON`
+   to a JSON object containing exactly `task_id`, `candidate_sha`,
+   `candidate_generation`, `reviewed_sha`, `merge_sha`, and `reviewer` from
+   that task. Use the full frozen SHAs and current assigned reviewer.
+2. With your actual `AI_NAME`, run
+   `request-acceptance-review <task-id> <reason> <evidence-ref>`. A second
+   valid pending request is rejected. Stale metadata may be replaced only
+   with a new exact current snapshot through this transaction; prior requests
+   remain in the append-only log. No task status, roles, dependencies, CI,
+   merge or acceptance evidence changes.
+3. Normal dispatch routes the same original task through `review_ready_dispatch`
+   to its current reviewer in a detached candidate workspace. It waits for any
+   active/pending original-task worker, retains eligibility and dependency/
+   external gates, and rejects stale queued requests and retries. Reviewers
+   remain read-only: do not edit, commit, push or change branches.
+4. The reviewer reads the request evidence and keeps the dispatched task/role/
+   candidate fence intact. For a decision set the exact snapshot above and
+   `ACCEPTANCE_REVIEW_REQUEST_ID` to the pending `request_id` supplied in the
+   prompt. Source repair uses existing `reopen <task-id> <findings>`, which
+   consumes the request and clears candidate/acceptance evidence under the
+   existing contract. If no repair is needed, use
+   `decline-acceptance-review <task-id> <request-id> <reason>`; it resolves only
+   routing metadata and restores ordinary acceptance-owner routing. Owners and
+   Supervisor cannot decline or substitute for the reviewer decision.
+
+Invalid/stale pending requests hold dispatch closed; never change task status,
+global `review_statuses`, or another worker's task/fence to route a review.
+Requests and decisions are recorded in the existing append-only activity log.
+`done` reopen permissions and all review/CI/merge/acceptance gates stay intact.
+
 For an unblock helper, completing the helper does not erase later parent
 blockers. If a planning or recovery delivery leaves routing or implementation
 work outstanding, record `resolved_parent_status: blocked`,

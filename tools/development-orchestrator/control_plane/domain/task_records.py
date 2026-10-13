@@ -166,7 +166,7 @@ def task_role_for_dispatch_reason(reason: str | None) -> str | None:
     normalized = str(reason or "").strip()
     if normalized == "review_ready_dispatch":
         return "reviewer"
-    if normalized in {"owned_in_progress_dispatch", "owned_ready_dispatch"}:
+    if normalized in {"owned_in_progress_dispatch", "owned_ready_dispatch", "acceptance_ready_dispatch"}:
         return "owner"
     return None
 
