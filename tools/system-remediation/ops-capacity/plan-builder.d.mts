@@ -42,6 +42,7 @@ export function minimumSpacingMs(
 export function readBackBudgetedDispatchArrivals(records: unknown[]): {
   profile: "budgeted_dispatch_burst";
   finalArrivalMs: number;
+  stagedCreations: number;
 };
 export function buildWorkloadSchedule(
   profile: CapacityPlan["profile"],

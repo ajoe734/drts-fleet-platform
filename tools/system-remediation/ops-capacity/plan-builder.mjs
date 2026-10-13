@@ -77,6 +77,11 @@ export function readBackBudgetedDispatchArrivals(records) {
   const requests = records.filter((row) => row.kind === "capacity_request");
   if (requests.length !== 5850)
     throw new Error("Budgeted burst requires all 5850 actual request records");
+  const seeds = records
+    .filter((row) => row.kind === "capacity_seed")
+    .sort((a, b) => a.sequence - b.sequence);
+  if (seeds.length !== 4000)
+    throw new Error("Budgeted burst requires all 4000 actual seed records");
   let finalArrivalMs = 0;
   for (const [family, count] of Object.entries(counts)) {
     const rows = requests
@@ -104,6 +109,24 @@ export function readBackBudgetedDispatchArrivals(records) {
         throw new Error(
           `Budgeted burst ${family} exceeds actual rolling budget`,
         );
+      if (family === "dispatch" && index >= 500) {
+        const seed = seeds[index - 500];
+        if (
+          seed.sequence !== row.sequence ||
+          seed.error !== null ||
+          !Number.isFinite(seed.startedMs) ||
+          !Number.isFinite(seed.readyMs) ||
+          seed.startedMs < 0 ||
+          seed.readyMs < seed.startedMs ||
+          seed.readyMs > row.launchedMs ||
+          seed.scheduledDispatchMs !== row.scheduledMs ||
+          typeof seed.resourceIds?.orderId !== "string" ||
+          row.path !== `/api/orders/${seed.resourceIds.orderId}/dispatch`
+        )
+          throw new Error(
+            `Budgeted burst invalid seed readiness ${row.sequence}`,
+          );
+      }
       if (family === "dispatch") finalArrivalMs = row.launchedMs;
     }
   }
@@ -111,7 +134,7 @@ export function readBackBudgetedDispatchArrivals(records) {
     throw new Error(
       "Budgeted burst missing genuine final admission at899800ms",
     );
-  return { profile, finalArrivalMs };
+  return { profile, finalArrivalMs, stagedCreations: seeds.length };
 }
 
 export function countForFamily(family, durationSeconds) {

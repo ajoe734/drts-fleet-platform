@@ -507,6 +507,7 @@ export function assertAcceptancePassed(acceptance) {
   if (
     summary.profile === "budgeted_dispatch_burst" &&
     (acceptance.arrivalReadback?.profile !== summary.profile ||
+      acceptance.arrivalReadback.stagedCreations !== 4000 ||
       !Number.isFinite(acceptance.arrivalReadback.finalArrivalMs) ||
       acceptance.arrivalReadback.finalArrivalMs < 899800 ||
       acceptance.arrivalReadback.finalArrivalMs >= 900000 ||

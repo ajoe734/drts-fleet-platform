@@ -302,6 +302,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
       arrivalReadback: {
         profile: "budgeted_dispatch_burst",
         finalArrivalMs: 899800,
+        stagedCreations: 4000,
       },
     };
     expect(() => assertAcceptancePassed(valid)).not.toThrow();
@@ -314,7 +315,20 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
       { profile: "budgeted_dispatch_burst", finalArrivalMs: 899801 },
     ])
       expect(() =>
-        assertAcceptancePassed({ ...valid, arrivalReadback }),
+        assertAcceptancePassed({
+          ...valid,
+          arrivalReadback: arrivalReadback && {
+            ...valid.arrivalReadback,
+            ...arrivalReadback,
+          },
+        }),
+      ).toThrow(/independent final arrival/);
+    for (const stagedCreations of [undefined, null, 3999, 4001, 4000.5])
+      expect(() =>
+        assertAcceptancePassed({
+          ...valid,
+          arrivalReadback: { ...valid.arrivalReadback, stagedCreations },
+        }),
       ).toThrow(/independent final arrival/);
   });
 

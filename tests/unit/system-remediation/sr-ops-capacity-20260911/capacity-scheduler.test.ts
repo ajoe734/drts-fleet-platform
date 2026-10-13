@@ -88,6 +88,7 @@ type RecordedRow =
       error: string | null;
       startedMs: number;
       readyMs: number | null;
+      resourceIds?: { orderId?: string };
     };
 const readRecords = (output: string): RecordedRow[] =>
   readFileSync(output, "utf8")
@@ -263,26 +264,50 @@ describe("actual capacity scheduler boundaries across all families", () => {
       expect(readBackBudgetedDispatchArrivals(allRows)).toEqual({
         profile: "budgeted_dispatch_burst",
         finalArrivalMs: summary.workflows.dispatch.arrivals.lastMs,
+        stagedCreations: 4000,
       });
-      const laterIntake = structuredClone(requests);
-      laterIntake.find(
-        (row) => row.workload === "booking" && row.sequence === 900,
-      )!.launchedMs = 899999;
+      const laterIntake = structuredClone(allRows);
+      laterIntake
+        .filter((row) => row.kind === "capacity_request")
+        .find(
+          (row) => row.workload === "booking" && row.sequence === 900,
+        )!.launchedMs = 899999;
       expect(readBackBudgetedDispatchArrivals(laterIntake).finalArrivalMs).toBe(
         summary.workflows.dispatch.arrivals.lastMs,
       );
       expect(() => readBackBudgetedDispatchArrivals(requests.slice(1))).toThrow(
         /5850/,
       );
-      const changed = structuredClone(requests);
-      changed[0]!.profile = "concurrent";
+      expect(() => readBackBudgetedDispatchArrivals(requests)).toThrow(/4000/);
+      for (const fault of [
+        "duplicate",
+        "missing-ready",
+        "late-ready",
+        "foreign-order",
+      ] as const) {
+        const invalid = structuredClone(allRows);
+        const seed = invalid
+          .filter((row) => row.kind === "capacity_seed")
+          .find((row) => row.sequence === 501)!;
+        if (fault === "duplicate") seed.sequence = 502;
+        if (fault === "missing-ready") seed.readyMs = null;
+        if (fault === "late-ready") seed.readyMs = 900000;
+        if (fault === "foreign-order")
+          seed.resourceIds = { orderId: "unowned" };
+        expect(() => readBackBudgetedDispatchArrivals(invalid)).toThrow(
+          /seed readiness/,
+        );
+      }
+      const changed = structuredClone(allRows);
+      changed.filter((row) => row.kind === "capacity_request")[0]!.profile =
+        "concurrent";
       expect(() => readBackBudgetedDispatchArrivals(changed)).toThrow(
         /invalid/,
       );
-      const compressed = structuredClone(requests);
-      for (const row of compressed.filter(
-        (row) => row.workload === "dispatch" && row.sequence <= 299,
-      ))
+      const compressed = structuredClone(allRows);
+      for (const row of compressed
+        .filter((row) => row.kind === "capacity_request")
+        .filter((row) => row.workload === "dispatch" && row.sequence <= 299))
         row.launchedMs = 100;
       expect(() => readBackBudgetedDispatchArrivals(compressed)).toThrow(
         /rolling budget/,
