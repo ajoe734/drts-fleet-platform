@@ -473,10 +473,9 @@ it("observes the actual AppModule storage provider singleton without starting an
   const { AppModule } = production<
     typeof import("../../../../apps/api/src/app.module")
   >("apps/api/src/app.module.ts");
-  const { ThrottlerModule, getThrottlerStorageToken, getOptionsToken } =
-    requireApi(
-      "@nestjs/throttler",
-    ) as typeof import("../../../../apps/api/node_modules/@nestjs/throttler");
+  const { ThrottlerModule, getStorageToken, getOptionsToken } = requireApi(
+    "@nestjs/throttler",
+  ) as typeof import("../../../../apps/api/node_modules/@nestjs/throttler");
   const imports = Reflect.getMetadata("imports", AppModule) as Array<
     | import("../../../../apps/api/node_modules/@nestjs/common").DynamicModule
     | object
@@ -499,7 +498,7 @@ it("observes the actual AppModule storage provider singleton without starting an
     (value) =>
       typeof value === "object" &&
       "provide" in value &&
-      value.provide === getThrottlerStorageToken(),
+      value.provide === getStorageToken(),
   );
   if (
     !options ||

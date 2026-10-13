@@ -157,9 +157,8 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         await import("../../../../tools/system-remediation/ops-capacity/finalization.mjs");
       const { observeCapacityThrottle } =
         await import("../../../../tools/system-remediation/ops-capacity/throttle-observation.mjs");
-      const { getThrottlerStorageToken } = require("@nestjs/throttler") as {
-        getThrottlerStorageToken: () => string | symbol;
-      };
+      const { getStorageToken } =
+        require("@nestjs/throttler") as typeof import("../../../../apps/api/node_modules/@nestjs/throttler");
       let throttleObserver:
         | import("../../../../tools/system-remediation/ops-capacity/throttle-observation.mjs").CapacityThrottleObserver
         | undefined;
@@ -179,7 +178,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           // reviewed upstream storage once ordinarily integrated. Observe this
           // instance only; preserve its methods, promise/errors, keys and TTLs.
           throttleObserver = observeCapacityThrottle(
-            app.get(getThrottlerStorageToken()),
+            app.get(getStorageToken()),
             runTag,
           );
           app.use(throttleObserver.middleware);
