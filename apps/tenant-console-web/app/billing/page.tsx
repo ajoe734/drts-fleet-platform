@@ -12,7 +12,6 @@ import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
-  CanvasDL,
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
@@ -21,10 +20,11 @@ import {
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import { getTenantClient } from "@/lib/api-client";
-import { formatDateInput, formatDateTime } from "@/lib/formatters";
-import { getServerLocale } from "@/lib/server-locale";
-import { t } from "@/lib/translations";
+import { getTenantClient } from "../../lib/api-client";
+import { formatDateInput, formatDateTime } from "../../lib/formatters";
+import { getServerLocale } from "../../lib/server-locale";
+import { t } from "../../lib/translations";
+import { BillingProfileForm } from "./billing-profile-form";
 
 export const dynamic = "force-dynamic";
 
@@ -526,33 +526,6 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
     ? getEmptyStateCopy(data.emptyReason, locale)
     : null;
 
-  const profileItems = data.profile
-    ? [
-        {
-          k: t("billing.profile.invoiceTitle", locale),
-          v: data.profile.invoiceTitle,
-        },
-        { k: t("billing.profile.taxId", locale), v: data.profile.taxId ?? "—", mono: true },
-        {
-          k: t("billing.profile.contact", locale),
-          v: data.profile.contactName
-            ? `${data.profile.contactName} · ${data.profile.email}`
-            : data.profile.email,
-        },
-        { k: t("billing.profile.address", locale), v: data.profile.address ?? "—" },
-        {
-          k: t("billing.profile.settlementMethod", locale),
-          v: t("billing.profile.settlementMethodValue", locale),
-          mono: true,
-        },
-        {
-          k: t("billing.profile.updatedAt", locale),
-          v: formatDateTime(data.profile.updatedAt),
-          mono: true,
-        },
-      ]
-    : [];
-
   const invoiceColumns: CanvasTableColumn<InvoiceRow>[] = [
     {
       h: t("billing.col.invoice", locale),
@@ -679,7 +652,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
           <>
             <ActionCta
               descriptor={editProfileAction}
-              href="/settings"
+              href="#billing-profile-editor"
               icon="billing"
             >
               {t("billing.action.editProfile", locale)}
@@ -735,7 +708,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
               data.emptyReason === "not_provisioned" ? (
                 <ActionCta
                   descriptor={editProfileAction}
-                  href="/settings"
+                  href="#billing-profile-editor"
                   icon="billing"
                 >
                   {t("billing.action.editProfile", locale)}
@@ -779,13 +752,11 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
 
         <div style={splitGridStyle}>
           <CanvasCard theme={th} title={t("billing.section.profile", locale)}>
-            {data.profile ? (
-              <CanvasDL theme={th} cols={1} items={profileItems} />
-            ) : (
-              <div style={emptyStateStyle}>
-                {t("billing.section.profileEmpty", locale)}
-              </div>
-            )}
+            <BillingProfileForm
+              profile={data.profile}
+              descriptor={editProfileAction}
+              locale={locale}
+            />
           </CanvasCard>
 
           <CanvasCard

@@ -3334,6 +3334,16 @@ const en = {
 
   // ── billing (i18n-fullsweep 20260614) ──
 
+  "billing.form.email": "Billing email",
+  "billing.form.save": "Save billing profile",
+  "billing.form.saving": "Saving…",
+  "billing.form.reset": "Reset changes",
+  "billing.form.required": "Enter the invoice title and billing email.",
+  "billing.form.saved": "Billing profile saved.",
+  "billing.form.failed":
+    "Unable to save the billing profile. Your entries have been kept; please try again.",
+  "billing.form.unavailable": "Billing profile editing is currently unavailable.",
+  "billing.form.open": "Open billing profile",
   "billing.action.editProfile": "Edit billing profile",
   "billing.action.openInvoices": "Open invoices",
   "billing.action.refresh": "Refresh",
@@ -7242,6 +7252,15 @@ const zh: Record<keyof typeof en, string> = {
 
   // ── billing (i18n-fullsweep 20260614) ──
 
+  "billing.form.email": "帳務電子郵件",
+  "billing.form.save": "儲存帳務資料",
+  "billing.form.saving": "儲存中…",
+  "billing.form.reset": "還原變更",
+  "billing.form.required": "請填寫發票抬頭與帳務電子郵件。",
+  "billing.form.saved": "已儲存帳務資料。",
+  "billing.form.failed": "無法儲存帳務資料。已保留填寫內容，請稍後重試。",
+  "billing.form.unavailable": "目前無法編輯帳務資料。",
+  "billing.form.open": "開啟帳務資料",
   "billing.action.editProfile": "編輯帳務資料",
   "billing.action.openInvoices": "前往發票",
   "billing.action.refresh": "重新整理",
