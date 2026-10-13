@@ -302,6 +302,15 @@ export const driverStrings = {
   },
   settings: {
     title: "設定",
+    surname: {
+      label: "姓氏（自行提供）",
+      placeholder: "尚未提供；請自行輸入姓氏",
+      help: "可填寫複姓或外文姓氏，不會從姓名推定；此資料不代表身分或法律驗證。已保存的姓氏目前不能清空。",
+      errors: {
+        blank: "姓氏不可只含空白；尚未提供時可保留空欄。",
+        clear: "已保存的姓氏不能清空；請保留原值或填寫正確姓氏。",
+      },
+    },
     sections: {
       identity: "司機身份",
       emergency: "緊急聯絡人",
