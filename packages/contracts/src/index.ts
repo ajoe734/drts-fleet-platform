@@ -3517,6 +3517,14 @@ export interface DriverStartTaskCommand {
   startedAt: string;
 }
 
+/** Immutable self-declared profile-view facts, not verified/legal driver identity. */
+export interface DriverDeclaredSurnameSnapshot {
+  driverSurname: string;
+  driverSurnameSource: "driver_profile_declared";
+  /** Existing whole-profile revision time, not an invented surname-verification time. */
+  driverSurnameProfileUpdatedAt: string;
+}
+
 /** Actual driver-reported NTD fare components, never reconstructed from a quote. */
 export interface ActualTripFareBreakdown {
   startMinor: number;
@@ -4033,7 +4041,7 @@ export interface WaypointRecord {
   departedAt: string | null;
 }
 
-export interface DriverTaskRecord {
+export interface DriverTaskRecord extends Partial<DriverDeclaredSurnameSnapshot> {
   bookingRequirements?: BookingRequirements;
   bookingQualification?: BookingQualification;
   taskId: string;

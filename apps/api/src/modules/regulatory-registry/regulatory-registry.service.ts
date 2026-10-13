@@ -21,6 +21,7 @@ import type {
   CreateVehicleContractCommand,
   DispatchExclusivityLifecycleStatus,
   DispatchExclusivityRecord,
+  DriverDeclaredSurnameSnapshot,
   DriverEligibilityBlockReason,
   DriverEtaResponse,
   DriverLocationHeartbeatAck,
@@ -3718,6 +3719,30 @@ export class RegulatoryRegistryService
       (p) => p.vehicleId === vehicleId,
     );
     return profile ? { ...profile } : null;
+  }
+
+  getDriverDeclaredSurnameSnapshot(
+    driverId: string,
+  ): DriverDeclaredSurnameSnapshot | null {
+    // This is a declared profile-view snapshot, never an inferred surname or
+    // proof of legal identity/current cross-replica database revision.
+    const profile = this.driverProfileService.findProfileForDriver(driverId);
+    if (
+      !profile ||
+      !Object.prototype.hasOwnProperty.call(profile, "driverSurname") ||
+      typeof profile.driverSurname !== "string" ||
+      !profile.driverSurname.trim() ||
+      typeof profile.updatedAt !== "string" ||
+      !profile.updatedAt.trim() ||
+      !Number.isFinite(Date.parse(profile.updatedAt))
+    ) {
+      return null;
+    }
+    return {
+      driverSurname: profile.driverSurname,
+      driverSurnameSource: "driver_profile_declared",
+      driverSurnameProfileUpdatedAt: profile.updatedAt,
+    };
   }
 
   getDriverPublicRegistrationCredential(

@@ -1,6 +1,7 @@
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import type {
   ActualTripFareBreakdown,
+  DriverDeclaredSurnameSnapshot,
   FulfillmentSegmentRecord,
   MoneyAmount,
   OwnedOrderRecord,
@@ -57,4 +58,4 @@ export type OwnedMobilityMultiTaxiTripCompletedEvent = {
   consumerServicePhone: string;
   authorityComplaintPhone: string;
   completedAt: string;
-};
+} & Partial<DriverDeclaredSurnameSnapshot>;
