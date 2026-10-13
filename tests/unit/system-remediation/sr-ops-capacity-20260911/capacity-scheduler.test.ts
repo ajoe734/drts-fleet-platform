@@ -24,6 +24,11 @@ let directory: string;
 let responseMode: "success" | "429" | "hang";
 let responseDelay: number;
 let nextResource: number;
+let seedResponseDelay: number;
+let activeSeeds: number;
+let peakSeeds: number;
+let nextSeed: number;
+let rejectedSeed: number | null;
 function plan(
   durationSeconds = 6,
   maxInFlight = 500,
@@ -44,6 +49,22 @@ function plan(
       { length: countsForDuration(durationSeconds).dispatch },
       (_, i) => `order-${i}`,
     ),
+  });
+}
+function stagedPlan() {
+  return buildCapacityPlan({
+    origin: "http://127.0.0.1:4010/",
+    durationSeconds: 900,
+    maxInFlight: 500,
+    isolatedResourceId: "stage-http-boundary",
+    tenantId: "tenant",
+    tenantJwt: "fixture",
+    dispatchJwt: "fixture",
+    reportJwt: "fixture",
+    runTag: "stage-fixture",
+    profile: "concurrent",
+    stagedDispatch: true,
+    orderIds: Array.from({ length: 500 }, (_, i) => `actual-initial-${i}`),
   });
 }
 type Row = {
@@ -87,6 +108,11 @@ beforeEach(() => {
   responseMode = "success";
   responseDelay = 5;
   nextResource = 0;
+  seedResponseDelay = 5;
+  activeSeeds = 0;
+  peakSeeds = 0;
+  nextSeed = 0;
+  rejectedSeed = null;
   boundary.request.mockImplementation(
     (
       _url: URL,
@@ -94,29 +120,54 @@ beforeEach(() => {
       callback: (response: EventEmitter & { statusCode: number }) => void,
     ) => {
       const req = new EventEmitter();
+      const isSeed = _url.pathname === "/api/orders";
+      let seedIndex: number | null = null;
+      let seedSettled = false;
+      const settleSeed = () => {
+        if (isSeed && !seedSettled) {
+          activeSeeds--;
+          seedSettled = true;
+        }
+      };
       Object.assign(req, {
         end: () => {
+          if (isSeed) {
+            seedIndex = nextSeed++;
+            activeSeeds++;
+            peakSeeds = Math.max(peakSeeds, activeSeeds);
+          }
           if (responseMode === "hang") return;
-          setTimeout(() => {
-            const response = Object.assign(new EventEmitter(), {
-              statusCode: responseMode === "429" ? 429 : 201,
-            });
-            callback(response);
-            response.emit(
-              "data",
-              Buffer.from(
-                JSON.stringify({
-                  data: {
-                    order_id: `fixture-order-${nextResource++}`,
-                    job_id: "fixture-job",
-                  },
-                }),
-              ),
-            );
-            response.emit("end");
-          }, responseDelay);
+          setTimeout(
+            () => {
+              const response = Object.assign(new EventEmitter(), {
+                statusCode:
+                  responseMode === "429" ||
+                  (isSeed && seedIndex === rejectedSeed)
+                    ? 429
+                    : 201,
+              });
+              settleSeed();
+              callback(response);
+              response.emit(
+                "data",
+                Buffer.from(
+                  JSON.stringify({
+                    data: {
+                      order_id: `fixture-order-${nextResource++}`,
+                      job_id: "fixture-job",
+                    },
+                  }),
+                ),
+              );
+              response.emit("end");
+            },
+            isSeed ? seedResponseDelay : responseDelay,
+          );
         },
-        destroy: (error: Error) => req.emit("error", error),
+        destroy: (error: Error) => {
+          settleSeed();
+          req.emit("error", error);
+        },
       });
       return req;
     },
@@ -246,45 +297,98 @@ describe("actual capacity scheduler boundaries across all families", () => {
     ]);
   });
 
-  it("runs every scheduled stage through the actual producer and retains 5850 measured and 4000 seed records", async () => {
-    const staged = buildCapacityPlan({
-      origin: "http://127.0.0.1:4010/",
-      durationSeconds: 900,
-      maxInFlight: 500,
-      isolatedResourceId: "stage-http-boundary",
-      tenantId: "tenant",
-      tenantJwt: "fixture",
-      dispatchJwt: "fixture",
-      reportJwt: "fixture",
-      runTag: "stage-fixture",
-      profile: "concurrent",
-      stagedDispatch: true,
-      orderIds: Array.from({ length: 500 }, (_, i) => `actual-initial-${i}`),
-    });
-    const output = resolve(directory, "staged.jsonl");
-    const run = runPlan(staged, output, {});
+  it.each([5, 200, 201])(
+    "retains all 5850 requests/4000 seeds with bounded actual %sms seed readiness",
+    async (seedMs) => {
+      seedResponseDelay = seedMs;
+      const staged = stagedPlan();
+      const output = resolve(directory, "staged.jsonl");
+      const run = runPlan(staged, output, {});
+      await vi.advanceTimersByTimeAsync(910000);
+      const summary = await run;
+      const allRows: (Row & { kind: string; path: string })[] = readFileSync(
+        output,
+        "utf8",
+      )
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      const requests = allRows.filter((row) => row.kind === "capacity_request");
+      expect(requests).toHaveLength(5850);
+      expect(
+        allRows.filter((row) => row.kind === "capacity_seed"),
+      ).toHaveLength(4000);
+      const dispatch = requests.filter((row) => row.workload === "dispatch");
+      expect(new Set(dispatch.map((row) => row.path)).size).toBe(4500);
+      expect(dispatch.at(-1)!.launchedMs).toBe(899800);
+      expect(summary.workflows.dispatch.requests).toBe(4500);
+      expect(summary.workflows.booking.requests).toBe(900);
+      expect(summary.workflows.report.requests).toBe(450);
+      expect(summary.result).toBe("measurements_within_targets");
+      expect(boundary.request).toHaveBeenCalledTimes(9850);
+      expect(peakSeeds).toBeLessThanOrEqual(8);
+      expect(activeSeeds).toBe(0);
+      const seeds = allRows.filter(
+        (row) => row.kind === "capacity_seed",
+      ) as (Row & { startedMs: number; readyMs: number })[];
+      for (const seed of seeds) {
+        expect(seed.startedMs).toBeGreaterThanOrEqual(0);
+        expect(seed.readyMs - seed.startedMs).toBe(seedMs);
+        const dispatched = dispatch.find(
+          (row) => row.sequence === seed.sequence,
+        )!;
+        expect(dispatched.launchedMs).toBeGreaterThanOrEqual(seed.readyMs);
+      }
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+  it("retains a failed staged seed without retrying or dispatching its uncreated order", async () => {
+    rejectedSeed = 0;
+    seedResponseDelay = 201;
+    const output = resolve(directory, "seed-error.jsonl");
+    const run = runPlan(stagedPlan(), output, {});
     await vi.advanceTimersByTimeAsync(910000);
     const summary = await run;
-    const allRows: (Row & { kind: string; path: string })[] = readFileSync(
-      output,
-      "utf8",
-    )
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-    const requests = allRows.filter((row) => row.kind === "capacity_request");
+    const rows = read(output) as (Row & {
+      kind: string;
+      readyMs: number | null;
+    })[];
+    const seeds = rows.filter((row) => row.kind === "capacity_seed");
+    const requests = rows.filter((row) => row.kind === "capacity_request");
+    expect(seeds).toHaveLength(4000);
     expect(requests).toHaveLength(5850);
-    expect(allRows.filter((row) => row.kind === "capacity_seed")).toHaveLength(
+    expect(seeds.filter((row) => row.error)).toMatchObject([
+      { error: "HTTP 429", readyMs: null },
+    ]);
+    expect(requests.filter((row) => row.error)).toMatchObject([
+      { workload: "dispatch", error: "Dispatch stage failed: HTTP 429" },
+    ]);
+    expect(summary.workflows.dispatch.errors).toBe(1);
+    expect(summary.result).toBe("failed");
+    expect(boundary.request).toHaveBeenCalledTimes(9849);
+    expect(peakSeeds).toBeLessThanOrEqual(8);
+    expect(activeSeeds).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("keeps slow readiness outside900s red instead of forging readiness or dropping requests", async () => {
+    seedResponseDelay = 2001;
+    const output = resolve(directory, "slow-seeds.jsonl");
+    const run = runPlan(stagedPlan(), output, {});
+    await vi.advanceTimersByTimeAsync(1400000);
+    const summary = await run;
+    const rows = read(output) as (Row & { kind: string })[];
+    expect(rows.filter((row) => row.kind === "capacity_seed")).toHaveLength(
       4000,
     );
-    const dispatch = requests.filter((row) => row.workload === "dispatch");
-    expect(new Set(dispatch.map((row) => row.path)).size).toBe(4500);
-    expect(dispatch.at(-1)!.launchedMs).toBe(899805);
-    expect(summary.workflows.dispatch.requests).toBe(4500);
-    expect(summary.workflows.booking.requests).toBe(900);
-    expect(summary.workflows.report.requests).toBe(450);
-    expect(summary.result).toBe("measurements_within_targets");
-    expect(boundary.request).toHaveBeenCalledTimes(9850);
+    expect(rows.filter((row) => row.kind === "capacity_request")).toHaveLength(
+      5850,
+    );
+    expect(summary.workflows.dispatch.arrivals.late).toBeGreaterThan(0);
+    expect(summary.fullBurstSchedule).toBe(false);
+    expect(summary.result).toBe("failed");
+    expect(peakSeeds).toBeLessThanOrEqual(8);
+    expect(activeSeeds).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
   });
   it("resolves a deferred dispatch through real HTTP measure and refuses a failed fixture seed", async () => {
     const deferred = {

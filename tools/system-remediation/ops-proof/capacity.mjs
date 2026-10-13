@@ -395,16 +395,23 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
     try {
       await lifecycle.initialize({ startedAt });
     } catch (error) {
-      appendFileSync(
-        output,
-        `${JSON.stringify({
-          kind: "capacity_preparation_failure",
-          ...provenance,
-          isolatedResourceId: plan.isolatedResourceId,
-          observedAt: new Date().toISOString(),
-          error: error instanceof Error ? error.message : String(error),
-        })}\n`,
-      );
+      try {
+        appendFileSync(
+          output,
+          `${JSON.stringify({
+            kind: "capacity_preparation_failure",
+            ...provenance,
+            isolatedResourceId: plan.isolatedResourceId,
+            observedAt: new Date().toISOString(),
+            error: error instanceof Error ? error.message : String(error),
+          })}\n`,
+        );
+      } catch (writeError) {
+        throw new AggregateError(
+          [error, writeError],
+          "Capacity preparation and evidence write failed",
+        );
+      }
       throw error;
     }
   }
@@ -425,15 +432,18 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
       const entry = stagedEntries[nextSeed++];
       const startedMs = performance.now() - start;
       const preparation = prepareDispatchItem(plan.origin, entry.item)
-        .catch((error) => ({
-          item: entry.item,
-          error: `Dispatch stage failed: ${error?.message ?? String(error)}`,
-          seed: {
-            httpStatus: null,
-            latencyMs: performance.now() - start - startedMs,
-            error: error?.message ?? String(error),
-          },
-        }))
+        .catch((error) => {
+          producerFailures.push(error);
+          return {
+            item: entry.item,
+            error: `Dispatch stage failed: ${error?.message ?? String(error)}`,
+            seed: {
+              httpStatus: null,
+              latencyMs: performance.now() - start - startedMs,
+              error: error?.message ?? String(error),
+            },
+          };
+        })
         .then((prepared) => {
           appendFileSync(
             output,
