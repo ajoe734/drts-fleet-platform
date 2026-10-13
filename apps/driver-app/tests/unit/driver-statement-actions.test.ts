@@ -189,6 +189,88 @@ describe("Driver monthly statement detail and download", () => {
     expect(boundary.openURL).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])(
+    "refreshes viewed statement summary and detail from the actual Earnings screen (collapsed=%s)",
+    async (collapsed) => {
+      boundary.get.mockResolvedValue(record());
+      const renderer = await mount(React.createElement(EarningsScreen));
+      await press(renderer, copy.view);
+      if (collapsed) await press(renderer, copy.close);
+      const refreshed = record({
+        receiptNo: "RECEIPT-REFRESHED",
+        feePlanVersion: "plan-refreshed",
+        payoutStatus: "paid",
+        grossEarning: money(26000),
+        serviceFee: money(2000),
+        subsidy: money(500),
+        netAmount: money(24500),
+        lines: [
+          {
+            ...record().lines[0]!,
+            orderId: "order-refreshed",
+            netAmount: money(24500),
+          },
+        ],
+        updatedAt: "2026-10-13T00:00:00Z",
+      });
+      boundary.getList.mockResolvedValue([refreshed]);
+      await press(renderer, driverStrings.common.refresh);
+      expect(boundary.getList).toHaveBeenCalledTimes(2);
+      expect(boundary.get).toHaveBeenCalledTimes(1);
+      const row = renderer.root.findAll(
+        (node) => node.type === DriverStatementRow,
+      )[0]!;
+      expect(row.props.statement).toEqual(refreshed);
+      const rendered = text(row);
+      expect(rendered).toContain("已撥款");
+      expect(rendered).not.toContain("待撥款");
+      expect(rendered).toContain("RECEIPT-REFRESHED");
+      expect(rendered).not.toContain("RECEIPT-OLD");
+      expect(rendered).toContain("plan-refreshed");
+      expect(rendered).toContain("245.00");
+      expect(
+        button(renderer, collapsed ? copy.view : copy.close).props.disabled,
+      ).toBe(false);
+      if (collapsed) {
+        expect(rendered).not.toContain("order-refreshed");
+      } else {
+        expect(rendered).toContain(`${copy.net}：TWD 245.00`);
+        expect(rendered).toContain("260.00");
+        expect(rendered).toContain("20.00");
+        expect(rendered).toContain("5.00");
+        expect(rendered).toContain("order-refreshed");
+        expect(rendered).not.toContain("order-detail");
+        expect(rendered).not.toContain("140.00");
+      }
+    },
+  );
+
+  it.each(["detail", "download"] as const)(
+    "enables a newly available artifact after actual screen refresh following a missing %s read, then re-reads before opening",
+    async (operation) => {
+      const missing = record({ artifactUrl: null });
+      boundary.get.mockResolvedValue(missing);
+      const renderer = await mount(React.createElement(EarningsScreen));
+      await press(renderer, operation === "detail" ? copy.view : copy.download);
+      expect(allText(renderer)).toContain(copy.missing);
+      expect(button(renderer, copy.download).props.disabled).toBe(true);
+      boundary.getList.mockResolvedValue([freshRecord()]);
+      await press(renderer, driverStrings.common.refresh);
+      expect(boundary.getList).toHaveBeenCalledTimes(2);
+      expect(button(renderer, copy.download).props.disabled).toBe(false);
+      expect(allText(renderer)).not.toContain(copy.missing);
+      expect(boundary.openURL).not.toHaveBeenCalled();
+      boundary.get.mockResolvedValue(
+        record({ artifactUrl: "https://example.invalid/fresh-read.pdf" }),
+      );
+      await press(renderer, copy.download);
+      expect(boundary.get).toHaveBeenCalledTimes(2);
+      expect(boundary.openURL).toHaveBeenCalledExactlyOnceWith(
+        "https://example.invalid/fresh-read.pdf",
+      );
+    },
+  );
+
   it("keeps a deferred detail read visibly loading and prevents duplicate requests", async () => {
     const pending = deferred<DriverStatementRecord>();
     boundary.get.mockReturnValue(pending.promise);
@@ -285,13 +367,8 @@ describe("Driver monthly statement detail and download", () => {
     boundary.get
       .mockResolvedValueOnce(record({ artifactUrl: null }))
       .mockResolvedValueOnce(freshRecord());
-    const renderer = await mount(
-      React.createElement(DriverStatementRow, {
-        statement: record({ artifactUrl: null }),
-        last: true,
-        onLoaded: vi.fn(),
-      }),
-    );
+    boundary.getList.mockResolvedValue([record({ artifactUrl: null })]);
+    const renderer = await mount(React.createElement(EarningsScreen));
     expect(button(renderer, copy.download).props.disabled).toBe(true);
     await press(renderer, copy.view);
     expect(allText(renderer)).toContain(copy.missing);
