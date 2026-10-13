@@ -481,20 +481,34 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
       preparations.set(entry.sequence, preparation);
     }
   };
-  const waitUntil = async (targetMs) => {
+  const sleepFor = async (wait, clock, compensate = false) => {
+    // A floor re-check can otherwise add the same observed timer lateness to
+    // every gap. Wake ahead using the previous real wake's latency, then check
+    // the hard boundary again. A positive1us delay bias avoids arithmetic
+    // rounding down; it never permits an early admission or a shorter gap.
+    const delay = Math.max(
+      1,
+      compensate ? wait - clock.wakeLatenessMs + 0.001 : wait,
+    );
+    const before = performance.now();
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    clock.wakeLatenessMs = Math.max(0, performance.now() - before - delay);
+  };
+  const waitUntil = async (targetMs, clock, compensate = false) => {
     while (true) {
       const wait = targetMs - (performance.now() - start);
       if (wait <= 0) return;
       // Pass the remaining absolute delay, without rounding it up on each
       // interval. Hosts may truncate or wake early: always re-check the actual
       // clock, with a minimum1ms sleep and no busy-spin.
-      await new Promise((resolve) => setTimeout(resolve, Math.max(1, wait)));
+      await sleepFor(wait, clock, compensate);
     }
   };
   // Independent family lanes share one actual t0 and one in-flight bound.
   // Awaiting a real dispatch seed must not hold up duly scheduled intake or
   // reports. Each family still admits sequentially under its own hard floors.
   const runFamily = async (family) => {
+    const clock = { wakeLatenessMs: 0 };
     try {
       for (const entry of schedule.filter((row) => row.family === family)) {
         if (family === "dispatch") primeSeeds(entry.scheduledMs);
@@ -505,7 +519,7 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
         // Wake for the absolute START due time first. Only then apply actual
         // spacing and rolling-budget floors. Anchoring every sleep to the prior
         // wakeup would accumulate even constant timer lateness across4500 starts.
-        await waitUntil(entry.scheduledMs);
+        await waitUntil(entry.scheduledMs, clock);
         const spacing = 60000 / baseline[entry.family].perMinute;
         let targetMs = entry.scheduledMs;
         if (
@@ -525,7 +539,7 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
               60000,
           );
         }
-        await waitUntil(targetMs);
+        await waitUntil(targetMs, clock, true);
         // Compare actual differences as well as absolute sums: floating-point
         // addition can round last+60000 down while now-last is still below60000.
         // Never tolerate even that early rolling boundary or spacing deficit.
@@ -545,9 +559,7 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
               : 0;
           const wait = Math.max(spacingWait, budgetWait);
           if (wait <= 0) break;
-          await new Promise((resolve) =>
-            setTimeout(resolve, Math.max(1, wait)),
-          );
+          await sleepFor(wait, clock, true);
         }
         // Do not queue and then falsely report the requested arrival rate as met.
         const overloaded = active.size >= plan.maxInFlight;
