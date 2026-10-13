@@ -7,6 +7,8 @@ import {
   buildCapacityPlan,
   countsForDuration,
   type WorkloadFamily,
+  type CapacityPlan,
+  readBackBudgetedDispatchArrivals,
 } from "../../../../tools/system-remediation/ops-capacity/plan-builder.mjs";
 
 const boundary = vi.hoisted(() => ({ request: vi.fn(), offset: 0 }));
@@ -32,7 +34,7 @@ let rejectedSeed: number | null;
 function plan(
   durationSeconds = 6,
   maxInFlight = 500,
-  profile: "uniform" | "concurrent" = "uniform",
+  profile: CapacityPlan["profile"] = "uniform",
 ) {
   return buildCapacityPlan({
     origin: "http://127.0.0.1:4010/",
@@ -51,7 +53,7 @@ function plan(
     ),
   });
 }
-function stagedPlan() {
+function stagedPlan(profile: CapacityPlan["profile"] = "concurrent") {
   return buildCapacityPlan({
     origin: "http://127.0.0.1:4010/",
     durationSeconds: 900,
@@ -62,7 +64,7 @@ function stagedPlan() {
     dispatchJwt: "fixture",
     reportJwt: "fixture",
     runTag: "stage-fixture",
-    profile: "concurrent",
+    profile,
     stagedDispatch: true,
     orderIds: Array.from({ length: 500 }, (_, i) => `actual-initial-${i}`),
   });
@@ -75,6 +77,8 @@ type Row = {
   scheduledMs: number;
   error: string | null;
   requestId: string;
+  profile: CapacityPlan["profile"];
+  finishedMs: number | null;
 };
 type RecordedRow =
   | (Row & { kind: "capacity_request"; path: string })
@@ -196,6 +200,131 @@ afterEach(() => {
 });
 
 describe("actual capacity scheduler boundaries across all families", () => {
+  it.each([
+    [0, 5],
+    [0, 201],
+    [2, 201],
+  ])(
+    "runs the separately named burst with variable0/%sms timer lateness and %sms real seed readiness",
+    async (jitter, seedMs) => {
+      seedResponseDelay = seedMs;
+      const timer = globalThis.setTimeout;
+      let wakes = 0;
+      vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+        callback: () => void,
+        ms: number,
+      ) => timer(callback, ms + (++wakes % 2) * jitter)) as typeof setTimeout);
+      const output = resolve(directory, "budgeted-burst.jsonl");
+      const run = runPlan(stagedPlan("budgeted_dispatch_burst"), output, {});
+      await vi.advanceTimersByTimeAsync(920000);
+      const summary = await run;
+      const allRows = readRecords(output);
+      const requests = allRows.filter((row) => row.kind === "capacity_request");
+      const seeds = allRows.filter((row) => row.kind === "capacity_seed");
+      expect(requests).toHaveLength(5850);
+      expect(seeds).toHaveLength(4000);
+      expect(boundary.request).toHaveBeenCalledTimes(9850);
+      expect(summary.profile).toBe("budgeted_dispatch_burst");
+      expect(summary.result).toBe("measurements_within_targets");
+      expect(summary.fullBurstSchedule).toBe(true);
+      expect(summary.workflows.dispatch.arrivals.lastMs).toBeGreaterThanOrEqual(
+        899800,
+      );
+      expect(summary.workflows.dispatch.arrivals.lastMs).toBeLessThan(900000);
+      const dispatch = requests.filter((row) => row.workload === "dispatch");
+      expect(new Set(dispatch.map((row) => row.path)).size).toBe(4500);
+      for (const family of ["booking", "dispatch", "report"] as const) {
+        const rows = requests
+          .filter((row) => row.workload === family)
+          .sort((a, b) => a.sequence - b.sequence);
+        expect(rows).toHaveLength(
+          { booking: 900, dispatch: 4500, report: 450 }[family],
+        );
+        let first = 0;
+        rows.forEach((row, i) => {
+          expect(row.error).toBeNull();
+          expect(row.launchedMs).toBeGreaterThanOrEqual(row.scheduledMs);
+          expect(row.launchedMs).toBeLessThan(900000);
+          while (row.launchedMs! - rows[first]!.launchedMs! >= 60000) first++;
+          expect(i - first + 1).toBeLessThanOrEqual(
+            { booking: 60, dispatch: 300, report: 30 }[family],
+          );
+        });
+      }
+      for (const seed of seeds) {
+        const request = dispatch.find((row) => row.sequence === seed.sequence)!;
+        expect(request.launchedMs).toBeGreaterThanOrEqual(seed.readyMs!);
+      }
+      const intake = requests.filter((row) => row.workload === "booking");
+      expect(intake.filter((row) => row.launchedMs === 0)).toHaveLength(50);
+      expect(intake.slice(0, 50).every((row) => row.finishedMs! > 0)).toBe(
+        true,
+      );
+      expect(readBackBudgetedDispatchArrivals(allRows)).toEqual({
+        profile: "budgeted_dispatch_burst",
+        finalArrivalMs: summary.workflows.dispatch.arrivals.lastMs,
+      });
+      expect(() => readBackBudgetedDispatchArrivals(requests.slice(1))).toThrow(
+        /5850/,
+      );
+      const changed = structuredClone(requests);
+      changed[0]!.profile = "concurrent";
+      expect(() => readBackBudgetedDispatchArrivals(changed)).toThrow(
+        /invalid/,
+      );
+      const compressed = structuredClone(requests);
+      for (const row of compressed.filter(
+        (row) => row.workload === "dispatch" && row.sequence <= 299,
+      ))
+        row.launchedMs = 100;
+      expect(() => readBackBudgetedDispatchArrivals(compressed)).toThrow(
+        /rolling budget/,
+      );
+      expect(peakSeeds).toBeLessThanOrEqual(8);
+      expect(activeSeeds).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it.each(["429", "overload", "seed-failure", "late"] as const)(
+    "keeps every outcome and rejects the budgeted burst on %s",
+    async (fault) => {
+      const burst = stagedPlan("budgeted_dispatch_burst");
+      if (fault === "429") responseMode = "429";
+      if (fault === "overload") burst.maxInFlight = 1;
+      if (fault === "seed-failure") rejectedSeed = 0;
+      if (fault === "late") {
+        const timer = globalThis.setTimeout;
+        vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+          callback: () => void,
+          ms: number,
+        ) => timer(callback, ms + 250)) as typeof setTimeout);
+      }
+      const output = resolve(directory, `${fault}-budgeted-burst.jsonl`);
+      const run = runPlan(burst, output, {});
+      await vi.advanceTimersByTimeAsync(1000000);
+      const summary = await run;
+      const allRows = readRecords(output);
+      const rows = allRows.filter((row) => row.kind === "capacity_request");
+      expect(rows).toHaveLength(5850);
+      expect(
+        allRows.filter((row) => row.kind === "capacity_seed"),
+      ).toHaveLength(4000);
+      expect(rows.filter((row) => row.error).length).toBeGreaterThan(0);
+      expect(summary.result).toBe("failed");
+      expect(() => readBackBudgetedDispatchArrivals(allRows)).toThrow(
+        /invalid/,
+      );
+      expect(
+        rows
+          .filter((row) => row.launchedMs !== null)
+          .every((row) => row.launchedMs! < 900000),
+      ).toBe(true);
+      expect(peakSeeds).toBeLessThanOrEqual(8);
+      expect(activeSeeds).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
   it("refuses late admissions, preserves all 5850 outcomes and drains every sent request", async () => {
     const original = boundary.request.getMockImplementation()!;
     let first = true;

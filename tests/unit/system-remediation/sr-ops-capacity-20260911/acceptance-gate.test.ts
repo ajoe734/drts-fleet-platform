@@ -292,6 +292,32 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
     expect(() => assertAcceptancePassed(validAcceptance)).not.toThrow();
   });
 
+  it("requires a genuine independently read final burst arrival instead of response-drain elapsed time", () => {
+    const valid = {
+      ...structuredClone(validAcceptance),
+      summary: {
+        ...structuredClone(validAcceptance.summary),
+        profile: "budgeted_dispatch_burst",
+      },
+      arrivalReadback: {
+        profile: "budgeted_dispatch_burst",
+        finalArrivalMs: 899800,
+      },
+    };
+    expect(() => assertAcceptancePassed(valid)).not.toThrow();
+    for (const arrivalReadback of [
+      null,
+      { profile: "concurrent", finalArrivalMs: 899800 },
+      { profile: "budgeted_dispatch_burst", finalArrivalMs: 899799 },
+      { profile: "budgeted_dispatch_burst", finalArrivalMs: 900000 },
+      { profile: "budgeted_dispatch_burst", finalArrivalMs: Number.NaN },
+      { profile: "budgeted_dispatch_burst", finalArrivalMs: 899801 },
+    ])
+      expect(() =>
+        assertAcceptancePassed({ ...valid, arrivalReadback }),
+      ).toThrow(/independent final arrival/);
+  });
+
   function preparedBacklog() {
     const valid = structuredClone(validAcceptance);
     valid.summary.preparationStartedAt = "2026-10-11T23:59:58.000Z";

@@ -527,10 +527,7 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
         await waitUntil(entry.scheduledMs, clock);
         const spacing = minimumSpacingMs(profile, entry.family);
         let targetMs = entry.scheduledMs;
-        if (
-          spacing > 0 &&
-          familyLastLaunch[entry.family] !== undefined
-        ) {
+        if (spacing > 0 && familyLastLaunch[entry.family] !== undefined) {
           targetMs = Math.max(
             targetMs,
             familyLastLaunch[entry.family] + spacing,
@@ -552,10 +549,7 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
           const now = performance.now() - start;
           const prior = familyLastLaunch[entry.family];
           const spacingWait =
-            spacing > 0 &&
-            prior !== undefined
-              ? spacing - (now - prior)
-              : 0;
+            spacing > 0 && prior !== undefined ? spacing - (now - prior) : 0;
           const budgetWait =
             launches.length >= baseline[entry.family].perMinute
               ? 60000 -

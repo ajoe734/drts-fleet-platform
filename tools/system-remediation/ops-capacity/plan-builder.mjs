@@ -96,15 +96,21 @@ export function readBackBudgetedDispatchArrivals(records) {
         (index > 0 && row.launchedMs < rows[index - 1].launchedMs) ||
         row.error !== null
       )
-        throw new Error(`Budgeted burst invalid ${family} arrival ${index + 1}`);
+        throw new Error(
+          `Budgeted burst invalid ${family} arrival ${index + 1}`,
+        );
       while (row.launchedMs - rows[first].launchedMs >= 60000) first++;
       if (index - first + 1 > BASELINE_PER_MINUTE[family])
-        throw new Error(`Budgeted burst ${family} exceeds actual rolling budget`);
+        throw new Error(
+          `Budgeted burst ${family} exceeds actual rolling budget`,
+        );
       finalArrivalMs = Math.max(finalArrivalMs, row.launchedMs);
     }
   }
   if (finalArrivalMs < 899800)
-    throw new Error("Budgeted burst missing genuine final admission at899800ms");
+    throw new Error(
+      "Budgeted burst missing genuine final admission at899800ms",
+    );
   return { profile, finalArrivalMs };
 }
 

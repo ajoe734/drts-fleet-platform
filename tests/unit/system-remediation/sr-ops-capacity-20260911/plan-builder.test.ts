@@ -5,6 +5,7 @@ import {
   countForFamily,
   countsForDuration,
   buildWorkloadSchedule,
+  minimumSpacingMs,
 } from "../../../../tools/system-remediation/ops-capacity/plan-builder.mjs";
 // capacity.mjs belongs to the already-accepted SR-OPS-PROOF-001 (C122) task
 // and is out of this task's write scope, so it has no .d.mts declaration
@@ -43,6 +44,43 @@ function buildPlan(durationSeconds: number) {
 }
 
 describe("SR-OPS-CAPACITY-RUNNER-20260911 plan-builder", () => {
+  it("independently validates a named full budgeted dispatch burst while preserving legacy intervals", () => {
+    const plan = buildPlan(900);
+    plan.profile = "budgeted_dispatch_burst";
+    plan.scheduleMs = buildWorkloadSchedule(
+      plan.profile,
+      countsForDuration(900),
+    );
+    expect(() => validatePlan(plan)).not.toThrow();
+    expect(plan.scheduleMs.dispatch.slice(0, 299)).toEqual(Array(299).fill(0));
+    expect(plan.scheduleMs.dispatch[299]).toBe(59800);
+    expect(plan.scheduleMs.dispatch.at(-1)).toBe(899800);
+    for (const family of ["booking", "dispatch", "report"] as const) {
+      const times = plan.scheduleMs[family];
+      let first = 0;
+      times.forEach((time, i) => {
+        while (time - times[first]! >= 60000) first++;
+        expect(i - first + 1).toBeLessThanOrEqual(
+          { booking: 60, dispatch: 300, report: 30 }[family],
+        );
+      });
+      expect(minimumSpacingMs("uniform", family)).toBe(
+        { booking: 1000, dispatch: 200, report: 2000 }[family],
+      );
+      expect(minimumSpacingMs(plan.profile, family)).toBe(0);
+    }
+    expect(minimumSpacingMs("concurrent", "dispatch")).toBe(200);
+    expect(minimumSpacingMs("concurrent", "booking")).toBe(0);
+    const altered = structuredClone(plan);
+    altered.scheduleMs.dispatch[300] = 59800;
+    expect(() => validatePlan(altered)).toThrow(/profile schedule|budget/);
+    expect(() => validatePlan({ ...plan, durationSeconds: 899.9 })).toThrow(
+      /full 900s/,
+    );
+    expect(() =>
+      buildWorkloadSchedule("budgeted_dispatch_burst", countsForDuration(60)),
+    ).toThrow(/full 900s/);
+  });
   it("keeps 500 genuine initial IDs and defers the remaining 4000 through the canonical creation route", () => {
     const plan = buildCapacityPlan({
       origin: ORIGIN,
