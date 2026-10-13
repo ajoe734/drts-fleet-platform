@@ -15,6 +15,9 @@ export type ThrottleResponse = {
 export type ThrottleObservationSummary = {
   storageType: string;
   calls: number;
+  inboundRequests: number;
+  completedResponses: number;
+  correlatedCalls: number;
   events: number;
   observedEntries: number;
   dropped: number;
@@ -31,7 +34,7 @@ export type CapacityThrottleObserver = {
     next: () => unknown,
   ): unknown;
   stop(): void;
-  assertComplete(): void;
+  assertComplete(options?: { requireOwnedTraffic?: boolean }): void;
   summary(): ThrottleObservationSummary;
   snapshot(): ThrottleObservationSummary & { trace: Record<string, unknown>[] };
 };

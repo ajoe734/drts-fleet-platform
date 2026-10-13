@@ -722,7 +722,8 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           },
           {
             stage: "throttle-observer.complete",
-            run: () => throttleObserver?.assertComplete(),
+            run: () =>
+              throttleObserver?.assertComplete({ requireOwnedTraffic: true }),
           },
           { stage: "app.close", run: () => app?.close() },
           { stage: "pool.end", run: () => pool.end() },

@@ -73,6 +73,7 @@ type Row = {
   launchedMs: number;
   scheduledMs: number;
   error: string | null;
+  requestId: string;
 };
 type RecordedRow =
   | (Row & { kind: "capacity_request"; path: string })
@@ -209,6 +210,10 @@ describe("actual capacity scheduler boundaries across all families", () => {
     const summary = await run;
     const rows = read(output);
     expect(rows).toHaveLength(5850);
+    for (const row of rows)
+      expect(row.requestId).toBe(
+        `scheduler-fixture-${row.workload}-req-${row.sequence - 1}`,
+      );
     expect(rows.every((row) => row.error === null)).toBe(true);
     expect(Math.max(...rows.map((row) => row.launchedMs))).toBe(900800);
     for (const family of ["booking", "dispatch", "report"] as const) {

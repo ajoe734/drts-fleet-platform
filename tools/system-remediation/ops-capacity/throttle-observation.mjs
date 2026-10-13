@@ -5,7 +5,7 @@ import { performance } from "node:perf_hooks";
 // Observe the existing application's singleton, never substitute a storage or
 // guard. Only this disposable hosted acceptance app installs these hooks. No
 // global timers, policy, request headers, counters or return values are changed.
-export function observeCapacityThrottle(storage, runTag, maxEvents = 60000) {
+export function observeCapacityThrottle(storage, runTag, maxEvents = 100000) {
   if (
     !(storage?.storage instanceof Map) ||
     typeof storage.increment !== "function" ||
@@ -24,6 +24,9 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 60000) {
   const watched = new WeakSet();
   let generation = 0;
   let calls = 0;
+  let inboundRequests = 0;
+  let completedResponses = 0;
+  let correlatedCalls = 0;
   let dropped = 0;
   let recordingFailures = 0;
   let restorationFailures = 0;
@@ -149,6 +152,7 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 60000) {
     replace(storage, "increment", function (...args) {
       const [key, ttl, limit, blockDuration, name] = args;
       const call = ++calls;
+      if (context.getStore()) correlatedCalls++;
       record(() => ({
         kind: "capacity_throttle_call",
         call,
@@ -170,6 +174,11 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 60000) {
       } finally {
         depth--;
       }
+      record(() => ({
+        kind: "capacity_throttle_return",
+        call,
+        afterCall: state(key, name),
+      }));
       // Preserve the exact original promise and rejection. The tap has no
       // asynchronous work, no new timer, and cannot throw into the application.
       try {
@@ -184,7 +193,7 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 60000) {
                 isBlocked: value.isBlocked,
                 timeToBlockExpire: value.timeToBlockExpire,
               },
-              after: state(key, name),
+              atSettlement: state(key, name),
             })),
           () => record(() => ({ kind: "capacity_throttle_rejection", call })),
         );
@@ -208,6 +217,9 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 60000) {
   const summary = () => ({
     storageType: storage.constructor.name,
     calls,
+    inboundRequests,
+    completedResponses,
+    correlatedCalls,
     events: events.length,
     observedEntries: generation,
     dropped,
@@ -216,6 +228,7 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 60000) {
     stopped,
     complete:
       stopped &&
+      calls > 0 &&
       dropped === 0 &&
       recordingFailures === 0 &&
       restorationFailures === 0,
@@ -232,6 +245,7 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 60000) {
         requestId.length > 200
       )
         return next();
+      inboundRequests++;
       const route = (request.url ?? "").split("?")[0];
       const incoming = {
         request,
@@ -249,13 +263,14 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 60000) {
       };
       return context.run(incoming, () => {
         record(() => ({ kind: "capacity_inbound", context: requestContext() }));
-        response.once("finish", () =>
+        response.once("finish", () => {
+          if (!stopped) completedResponses++;
           record(() => ({
             kind: "capacity_response",
             requestId,
             httpStatus: response.statusCode,
-          })),
-        );
+          }));
+        });
         return next();
       });
     },
@@ -278,8 +293,14 @@ export function observeCapacityThrottle(storage, runTag, maxEvents = 60000) {
           "Capacity observer restoration failed",
         );
     },
-    assertComplete() {
-      if (!summary().complete)
+    assertComplete({ requireOwnedTraffic = false } = {}) {
+      if (
+        !summary().complete ||
+        (requireOwnedTraffic &&
+          (inboundRequests === 0 ||
+            correlatedCalls === 0 ||
+            completedResponses !== inboundRequests))
+      )
         throw new Error("Capacity throttle observation incomplete");
     },
     summary,

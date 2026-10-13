@@ -1,5 +1,7 @@
 import { createRequire } from "node:module";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
+import { transpileModule, ModuleKind, ScriptTarget } from "typescript";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   observeCapacityThrottle,
@@ -39,6 +41,48 @@ type Storage = {
 // hosted harness resolves its singleton token rather than this test constructor.
 const { ThrottlerStorageService } = requireApi("@nestjs/throttler") as {
   ThrottlerStorageService: new () => Storage;
+};
+type GuardContext = {
+  getClass(): typeof CapacityController;
+  getHandler(): typeof create;
+  switchToHttp(): {
+    getRequest(): ThrottleRequest;
+    getResponse(): { header: (key: string, value: unknown) => void };
+  };
+};
+class CapacityController {}
+function create() {}
+type Guard = {
+  onModuleInit(): Promise<void>;
+  canActivate(context: GuardContext): Promise<boolean>;
+};
+// Compile the actual production subclass; no tracker/key/guard logic is copied.
+const guardModule = {
+  exports: {} as { BootstrapThrottlerGuard: new (...args: unknown[]) => Guard },
+};
+const compiledGuard = transpileModule(
+  readFileSync(
+    new URL(
+      "../../../../apps/api/src/common/throttling/bootstrap-throttler.guard.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+  {
+    compilerOptions: {
+      module: ModuleKind.CommonJS,
+      target: ScriptTarget.ES2022,
+      experimentalDecorators: true,
+    },
+  },
+).outputText;
+new Function("require", "module", "exports", compiledGuard)(
+  requireApi,
+  guardModule,
+  guardModule.exports,
+);
+const { Reflector } = requireApi("@nestjs/core") as {
+  Reflector: new () => unknown;
 };
 const observers: CapacityThrottleObserver[] = [];
 const storages: Storage[] = [];
@@ -84,6 +128,105 @@ function inbound<T>(observer: CapacityThrottleObserver, action: () => T) {
 }
 
 describe("bounded actual singleton throttle observation", () => {
+  it("observes actual BootstrapThrottlerGuard decisions, generated keys and headers unchanged", async () => {
+    const plain = storage();
+    const observed = storage();
+    const observer = observe(observed);
+    async function decision(
+      value: Storage,
+      observedRequest: boolean,
+      index: number,
+    ) {
+      const guard = new guardModule.exports.BootstrapThrottlerGuard(
+        [{ ttl: 60000, limit: 2 }],
+        value,
+        new Reflector(),
+      );
+      await guard.onModuleInit();
+      const headers: Record<string, unknown> = {};
+      const request = {
+        headers: { "x-request-id": `owned-booking-req-${index}` },
+        identity: {
+          realm: "tenant",
+          actorType: "tenant_user",
+          actorId: "same-actor",
+        },
+        url: "/api/tenant/bookings",
+      };
+      const response = Object.assign(new EventEmitter(), {
+        statusCode: 201,
+        header: (key: string, val: unknown) => {
+          headers[key] = val;
+        },
+      });
+      const context: GuardContext = {
+        getClass: () => CapacityController,
+        getHandler: () => create,
+        switchToHttp: () => ({
+          getRequest: () => request,
+          getResponse: () => response,
+        }),
+      };
+      const execute = async () => {
+        try {
+          return {
+            allowed: await guard.canActivate(context),
+            status: 201,
+            headers,
+          };
+        } catch (error) {
+          return {
+            allowed: false,
+            status: (error as { getStatus(): number }).getStatus(),
+            headers,
+          };
+        }
+      };
+      const result = (await (observedRequest
+        ? observer.middleware(request, response, execute)
+        : execute())) as Awaited<ReturnType<typeof execute>>;
+      response.statusCode = result.status;
+      response.emit("finish");
+      return result;
+    }
+    for (let index = 0; index < 4; index++)
+      expect(await decision(observed, true, index)).toEqual(
+        await decision(plain, false, index),
+      );
+    const trace = observer.snapshot().trace;
+    const calls = trace.filter((row) => row.kind === "capacity_throttle_call");
+    expect(calls).toHaveLength(4);
+    expect(new Set(calls.map((row) => row.keyHash)).size).toBe(1);
+    expect(
+      trace
+        .filter((row) => row.kind === "capacity_response")
+        .map((row) => row.httpStatus),
+    ).toEqual([201, 201, 429, 429]);
+    expect(
+      trace
+        .filter((row) => row.kind === "capacity_throttle_return")
+        .map((row) => (row.afterCall as { totalHits: number }).totalHits),
+    ).toEqual([1, 2, 3, 3]);
+  });
+
+  it("records genuine nonzero block resets without replacing the expiry mechanism", async () => {
+    const value = storage();
+    const observer = observe(value);
+    await value.increment("reset-key", 60000, 1, 1000, "default");
+    await value.increment("reset-key", 60000, 1, 1000, "default");
+    await vi.advanceTimersByTimeAsync(1001);
+    expect(
+      (await value.increment("reset-key", 60000, 1, 1000, "default")).totalHits,
+    ).toBe(1);
+    expect(observer.snapshot().trace).toContainEqual(
+      expect.objectContaining({
+        cause: "block_reset",
+        previous: 2,
+        totalHits: 0,
+      }),
+    );
+    expect(vi.getTimerCount()).toBe(1);
+  });
   it("preserves actual storage results, blocks and expiry/reset protocol", async () => {
     const plain = storage();
     const observed = storage();
@@ -158,6 +301,8 @@ describe("bounded actual singleton throttle observation", () => {
       "secret=query",
     ])
       expect(bytes).not.toContain(secret);
+    observer.stop();
+    observer.assertComplete({ requireOwnedTraffic: true });
   });
 
   it("returns the original promise and preserves synchronous/asynchronous failures", async () => {
@@ -265,5 +410,39 @@ describe("bounded actual singleton throttle observation", () => {
         "Unsupported",
       );
     expect(value.increment).toBe(increment);
+  });
+
+  it("rejects an empty observation and missing owned-response correlation", async () => {
+    const empty = observe(storage());
+    empty.stop();
+    expect(() => empty.assertComplete()).toThrow("incomplete");
+    const value = storage();
+    const observer = observe(value);
+    const request = inbound(observer, () => hit(value));
+    await request.result;
+    observer.stop();
+    expect(() =>
+      observer.assertComplete({ requireOwnedTraffic: true }),
+    ).toThrow("incomplete");
+  });
+
+  it("attempts all restorations and fails diagnostics when another hook replaced an observed method", async () => {
+    const value = storage();
+    const original = value.increment;
+    const observer = observe(value);
+    await hit(value);
+    value.increment = original;
+    expect(() => observer.stop()).toThrow("restoration failed");
+    expect(
+      Object.getOwnPropertyDescriptor(value.storage, "set"),
+    ).toBeUndefined();
+    expect(
+      Object.getOwnPropertyDescriptor(
+        value.storage.get("private-key")!.totalHits,
+        "set",
+      ),
+    ).toBeUndefined();
+    expect(observer.summary().restorationFailures).toBe(1);
+    expect(() => observer.assertComplete()).toThrow("incomplete");
   });
 });
