@@ -518,6 +518,27 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
         );
       }
       await waitUntil(targetMs);
+      // Compare actual differences as well as absolute sums: floating-point
+      // addition can round last+60000 down while now-last is still below60000.
+      // Never tolerate even that early rolling boundary or spacing deficit.
+      while (true) {
+        const now = performance.now() - start;
+        const prior = familyLastLaunch[entry.family];
+        const spacingWait =
+          (profile === "uniform" || entry.family === "dispatch") &&
+          prior !== undefined
+            ? spacing - (now - prior)
+            : 0;
+        const budgetWait =
+          launches.length >= baseline[entry.family].perMinute
+            ? 60000 -
+              (now -
+                launches[launches.length - baseline[entry.family].perMinute])
+            : 0;
+        const wait = Math.max(spacingWait, budgetWait);
+        if (wait <= 0) break;
+        await new Promise((resolve) => setTimeout(resolve, Math.max(1, wait)));
+      }
       // Do not queue and then falsely report the requested arrival rate as met.
       const overloaded = active.size >= plan.maxInFlight;
       const attemptedMs = performance.now() - start;
@@ -569,6 +590,7 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
           clockOriginMs: start,
           attemptedMs,
           launchedMs,
+          finishedMs: launchedMs === null ? null : performance.now() - start,
           schedulingLagMs: attemptedMs - entry.scheduledMs,
           profile,
           ...result,

@@ -434,6 +434,90 @@ describe("actual capacity scheduler boundaries across all families", () => {
     expect(summary.result).toBe("measurements_within_targets");
     expect(boundary.request).toHaveBeenCalledTimes(390);
   });
+  it.each(["uniform", "concurrent"] as const)(
+    "%s retains the full strict900s schedule under constant1ms timer lateness",
+    async (profile) => {
+      const timer = globalThis.setTimeout;
+      vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+        callback: () => void,
+        ms: number,
+      ) => timer(callback, ms + 1)) as typeof setTimeout);
+      const output = resolve(directory, "constant-lateness.jsonl");
+      const run = runPlan(
+        profile === "uniform" ? plan(900) : stagedPlan(),
+        output,
+        {},
+      );
+      await vi.advanceTimersByTimeAsync(910000);
+      const summary = await run;
+      const allRows = readRecords(output);
+      const rows = allRows.filter((row) => row.kind === "capacity_request");
+      expect(rows).toHaveLength(5850);
+      expect(
+        allRows.filter((row) => row.kind === "capacity_seed"),
+      ).toHaveLength(profile === "concurrent" ? 4000 : 0);
+      expect(summary.result).toBe("measurements_within_targets");
+      expect(summary.fullBurstSchedule).toBe(true);
+      expect(summary.workflows.dispatch.arrivals.lastMs).toBe(899801);
+      for (const family of ["booking", "dispatch", "report"] as const) {
+        const launches = rows
+          .filter((row) => row.workload === family)
+          .sort((a, b) => a.sequence - b.sequence)
+          .map((row) => row.launchedMs!);
+        let first = 0;
+        launches.forEach((time, i) => {
+          expect(time).toBeGreaterThanOrEqual(0);
+          expect(time).toBeLessThan(900000);
+          if (i && (profile === "uniform" || family === "dispatch"))
+            expect(time - launches[i - 1]!).toBeGreaterThanOrEqual(
+              spacing[family],
+            );
+          while (time - launches[first]! >= 60000) first++;
+          expect(i - first + 1).toBeLessThanOrEqual(
+            { booking: 60, dispatch: 300, report: 30 }[family],
+          );
+        });
+      }
+      expect(rows.every((row) => row.error === null)).toBe(true);
+      expect(activeSeeds).toBe(0);
+      expect(peakSeeds).toBeLessThanOrEqual(8);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+  it("refuses infeasible variable timer lateness without weakening actual spacing or dropping outcomes", async () => {
+    const timer = globalThis.setTimeout;
+    let wakes = 0;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+      callback: () => void,
+      ms: number,
+    ) => {
+      const jitter = ms > 20 && ms < 30000 ? (++wakes % 2) * 2 : 0;
+      return timer(callback, ms + jitter);
+    }) as typeof setTimeout);
+    const output = resolve(directory, "variable-lateness.jsonl");
+    const run = runPlan(plan(900), output, {});
+    await vi.advanceTimersByTimeAsync(950000);
+    const summary = await run;
+    const rows = read(output);
+    expect(rows).toHaveLength(5850);
+    expect(summary.result).toBe("failed");
+    expect(summary.fullBurstSchedule).toBe(false);
+    expect(
+      rows.filter((row) => row.launchedMs === null).length,
+    ).toBeGreaterThan(0);
+    expect(
+      rows
+        .filter((row) => row.launchedMs !== null)
+        .every((row) => row.launchedMs! < 900000),
+    ).toBe(true);
+    assertUniformCadence(rows);
+    expect(
+      boundary.request.mock.calls.length +
+        rows.filter((row) => row.launchedMs === null).length,
+    ).toBe(5850);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("preserves exact minimum intervals and deadlines through early timer callbacks", async () => {
     const timer = globalThis.setTimeout;
     // A host timer can return early; scheduler must re-check its own clock.
