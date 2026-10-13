@@ -14,6 +14,7 @@ import {
   FleetStatementActions,
   StatementDecisionNote,
 } from "@/components/fleet-statement-actions";
+import { statementDisplayStatus } from "@/lib/fleet-portal-statement-actions";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 import {
   type FleetDoc,
@@ -345,9 +346,11 @@ export function RecentTripsTable({ rows }: { rows: FleetTrip[] }) {
 export function StatementsTable({
   fleetPartnerId,
   rows,
+  available = true,
 }: {
   fleetPartnerId: string;
   rows: FleetStatement[];
+  available?: boolean;
 }) {
   const theme = buildFleetTheme();
   const { locale, t } = useTranslation();
@@ -366,10 +369,7 @@ export function StatementsTable({
           >
             {r.id}
           </div>
-          <StatementDecisionNote
-            fleetPartnerId={fleetPartnerId}
-            statementId={r.id}
-          />
+          <StatementDecisionNote statement={r} />
           {(r.sponsorFundedTrips || r.reimbursement) && (
             <div style={{ fontSize: 11, color: theme.textDim }}>
               {t("table.statementSponsorSummary", {
@@ -390,10 +390,18 @@ export function StatementsTable({
       r: (r) => (
         <CanvasPill
           theme={theme}
-          tone={r.status === "paid" ? "success" : "warn"}
+          tone={
+            r.status === "paid" || r.decisionStatus === "confirmed"
+              ? "success"
+              : "warn"
+          }
           dot
         >
-          {formatFleetCodeLabel(locale, "statement.status", r.status)}
+          {formatFleetCodeLabel(
+            locale,
+            "statement.status",
+            statementDisplayStatus(r),
+          )}
         </CanvasPill>
       ),
     },
@@ -402,7 +410,11 @@ export function StatementsTable({
       h: t("table.actions"),
       w: 260,
       r: (r) => (
-        <FleetStatementActions fleetPartnerId={fleetPartnerId} statement={r} />
+        <FleetStatementActions
+          fleetPartnerId={fleetPartnerId}
+          statement={r}
+          available={available}
+        />
       ),
     },
   ];

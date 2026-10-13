@@ -24,11 +24,13 @@ export async function pollCapacityResources(pool, orderIds, reportIds) {
 export async function runWithCapacityPolling(produce, poll, intervalMs = 2000) {
   let polling = true;
   let pollError;
+  let pollFailed = false;
   const loop = (async () => {
     while (polling) {
       try {
         await poll();
       } catch (error) {
+        pollFailed = true;
         pollError = error;
         break;
       }
@@ -38,20 +40,22 @@ export async function runWithCapacityPolling(produce, poll, intervalMs = 2000) {
   })();
   let value;
   let producerError;
+  let producerFailed = false;
   try {
     value = await produce();
   } catch (error) {
+    producerFailed = true;
     producerError = error;
   } finally {
     polling = false;
     await loop;
   }
-  if (producerError && pollError)
+  if (producerFailed && pollFailed)
     throw new AggregateError(
       [producerError, pollError],
       "Capacity producer and SQL polling failed",
     );
-  if (producerError) throw producerError;
-  if (pollError) throw pollError;
+  if (producerFailed) throw producerError;
+  if (pollFailed) throw pollError;
   return value;
 }

@@ -243,4 +243,5 @@ jobs:
             .artifacts/ops-capacity-acceptance/*.jsonl
             .artifacts/ops-capacity-acceptance/*.jsonl.summary.json
             .artifacts/ops-capacity-acceptance/*.acceptance.json
+            .artifacts/ops-capacity-acceptance/*.throttle.json
           if-no-files-found: warn

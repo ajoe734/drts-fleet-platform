@@ -468,6 +468,14 @@ export function summarizeLag(rows, lagKey) {
 }
 
 export function assertAcceptancePassed(acceptance) {
+  if (
+    acceptance?.diagnostics &&
+    (acceptance.diagnostics.acceptance !== "established" ||
+      !Array.isArray(acceptance.diagnostics.failures) ||
+      acceptance.diagnostics.failures.length)
+  ) {
+    throw new Error("Capacity diagnostic/cleanup failures prevent acceptance");
+  }
   if (!acceptance?.summary) {
     throw new Error("Missing workload summary");
   }
@@ -496,6 +504,18 @@ export function assertAcceptancePassed(acceptance) {
       `Workload failed: invalid elapsedMs, must be at least 899800 for a 900s run, got ${summary.elapsedMs}`,
     );
   }
+  if (
+    summary.profile === "budgeted_dispatch_burst" &&
+    (acceptance.arrivalReadback?.profile !== summary.profile ||
+      acceptance.arrivalReadback.stagedCreations !== 4000 ||
+      !Number.isFinite(acceptance.arrivalReadback.finalArrivalMs) ||
+      acceptance.arrivalReadback.finalArrivalMs < 899800 ||
+      acceptance.arrivalReadback.finalArrivalMs >= 900000 ||
+      acceptance.arrivalReadback.finalArrivalMs > summary.elapsedMs ||
+      acceptance.arrivalReadback.finalArrivalMs !==
+        summary.workflows?.dispatch?.arrivals?.lastMs)
+  )
+    throw new Error("Budgeted burst missing valid independent final arrival");
 
   if (!Number.isFinite(summary.maxInFlight) || summary.maxInFlight <= 0) {
     throw new Error(`Workload failed: invalid maxInFlight`);
@@ -852,10 +872,18 @@ function assertReportWorkload(acceptance) {
   const { reportWorkload: workload, summary, runTag } = acceptance;
   const start = reportInstant(summary.startedAt);
   const end = reportInstant(summary.endedAt);
+  // Only the run-owned initial50 backlog may precede measured t0. Its real
+  // readiness origin is recorded separately; measured450 jobs retain t0.
+  const preparationStart =
+    summary.preparationStartedAt === undefined
+      ? start
+      : reportInstant(summary.preparationStartedAt);
   if (
     !nonblank(runTag) ||
     !workload ||
     start === null ||
+    preparationStart === null ||
+    preparationStart > start ||
     end === null ||
     end < start ||
     Math.abs(end - start - summary.elapsedMs) > 1000
@@ -906,7 +934,7 @@ function assertReportWorkload(acceptance) {
         (role === "measured" &&
           record.filters?.capacityRole === "initial_backlog") ||
         created === null ||
-        created < start ||
+        created < (role === "initial" ? preparationStart : start) ||
         created > end
       )
         throw new Error("Report workload foreign/inconsistent SQL authority");
@@ -933,7 +961,7 @@ function assertReportWorkload(acceptance) {
     }
   };
   const observed = reportInstant(initialSnapshotAt);
-  if (observed === null || observed < start || observed > end)
+  if (observed === null || observed < preparationStart || observed > end)
     throw new Error("Report initial snapshot outside the actual window");
   validateRows(initialJobIds, initialSnapshot, "initial", true);
   validateRows(initialJobIds, initialEvidence, "initial");
