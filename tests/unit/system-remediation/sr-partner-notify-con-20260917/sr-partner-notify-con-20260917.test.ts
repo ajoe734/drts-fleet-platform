@@ -510,6 +510,7 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
         ...(content.voice_application_allocations || []),
         ...(content.passenger_push_channel_allocations || []),
         ...(content.passenger_app_allocations || []),
+        ...(content.fleet_statement_decision_allocations || []),
       ];
       const maxAllocated = Math.max(
         100,
