@@ -894,6 +894,14 @@ export async function loadBankProgramsData(
   const byId = new Map<string, BankProgram>();
   if (definitions.status === "fulfilled") {
     for (const definition of definitions.value) {
+      // The tenant catalog also includes enterprise dispatch and other partner
+      // products. This issuer surface only covers airport card benefits.
+      if (
+        definition.programType !== "credit_card_airport_transfer" &&
+        definition.programType !== "card_benefit_airport"
+      ) {
+        continue;
+      }
       byId.set(definition.programId, {
         id: definition.programId,
         name: definition.displayName,

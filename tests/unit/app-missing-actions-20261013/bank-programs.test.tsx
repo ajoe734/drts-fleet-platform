@@ -201,6 +201,67 @@ describe("bank program live list, detail and usage download", () => {
     }
   });
 
+  it("limits a mixed tenant catalog to airport card benefits while retaining eligible programs with no usage", async () => {
+    const otherProgramTypes = [
+      "enterprise_dispatch",
+      "insurance_replacement_vehicle",
+      "travel_agency_transfer",
+      "taxi_platform_forwarding",
+    ];
+    const { data, listPage } = harness({
+      definitions: [
+        ...otherProgramTypes.map((programType) => ({
+          ...definitions[2],
+          program_id: `${programType}-default`,
+          display_name: programType,
+          program_type: programType,
+          allowed_service_products: [programType],
+        })),
+        ...definitions,
+        {
+          ...definitions[2],
+          program_id: "airport-card-benefit-no-usage",
+          display_name: "Airport card benefit without usage",
+          program_type: "card_benefit_airport",
+          allowed_service_products: ["credit_card_airport_transfer"],
+        },
+      ],
+    });
+    const result = await data.loadBankProgramsData(
+      "tenant-contoso-001",
+      "bank_finance",
+    );
+    expect(result.degradedMessage).toBeNull();
+    expect(result.data.programs.map((program) => program.id)).toEqual([
+      "live-program-alpha",
+      "live-program-beta",
+      "live-program-new",
+      "airport-card-benefit-no-usage",
+    ]);
+    expect(result.data.programs[2].usage).toEqual([]);
+    expect(result.data.programs[3].usage).toEqual([]);
+    render(await listPage({ searchParams: Promise.resolve(query) }));
+    expect(screen.getAllByRole("link", { name: "View details" })).toHaveLength(
+      4,
+    );
+    for (const programType of otherProgramTypes) {
+      expect(screen.queryByRole("heading", { name: programType })).toBeNull();
+    }
+    const card = screen
+      .getByRole("heading", {
+        name: "Airport card benefit without usage",
+      })
+      .closest("article")!;
+    expect(
+      within(card).getByText(
+        "No usage records are available for these programs yet.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(card).queryByRole("link", { name: "Export usage" }),
+    ).toBeNull();
+  });
+
   it("navigates by actual program ID with bank, locale and role intact, and downloads only that program's periods", async () => {
     const { listPage, detailPage } = harness();
     const list = render(
