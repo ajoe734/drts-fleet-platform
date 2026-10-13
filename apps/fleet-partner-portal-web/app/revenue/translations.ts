@@ -13,6 +13,34 @@ import type { Locale } from "../../lib/translations";
 type RevenueDict = Record<string, Record<Locale, string>>;
 
 const revenueTranslations: RevenueDict = {
+  "revenue.applyPeriod": {
+    en: "Apply period",
+    zh: "套用期別",
+  },
+  "revenue.exportUnavailable.noStatement": {
+    en: "No statement to export for this period.",
+    zh: "此期別沒有可匯出的對帳單。",
+  },
+  "revenue.exportUnavailable.readFailed": {
+    en: "Reload the statement before exporting.",
+    zh: "請重新讀取對帳單後再匯出。",
+  },
+  "revenue.readFailed.title": {
+    en: "Unable to load this period",
+    zh: "無法讀取此期別",
+  },
+  "revenue.readFailed.body": {
+    en: "The statement for {period} could not be read. Retry to load its actual amount and decision status.",
+    zh: "目前無法讀取 {period} 對帳單，請重試以取得實際金額與確認狀態。",
+  },
+  "revenue.actionsUnavailable": {
+    en: "Statement actions will be available after a successful read.",
+    zh: "成功讀取對帳單後即可使用相關動作。",
+  },
+  "revenue.retry": {
+    en: "Retry",
+    zh: "重試",
+  },
   "revenue.confirmedStatement.body": {
     en: "The {period} statement has been confirmed. The saved note and confirmation time appear below.",
     zh: "{period} 對帳單已確認，儲存的備註與確認時間顯示於下方。",

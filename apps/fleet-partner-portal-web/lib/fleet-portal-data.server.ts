@@ -39,7 +39,10 @@ import type {
 } from "@drts/contracts";
 
 import type { FleetStatement } from "./fleet-portal-fixtures";
-import { mapStatementDecision } from "./fleet-portal-statement-actions";
+import {
+  mapStatementDecision,
+  statementDisplayStatus,
+} from "./fleet-portal-statement-actions";
 export type { FleetStatement } from "./fleet-portal-fixtures";
 
 import { getServerFleetPartnerClient } from "./api-client.server";
@@ -857,6 +860,10 @@ export interface RevenueView {
   payable: string;
   lines: StatementLine[];
   source: DataSource;
+  statement: FleetStatement | null;
+  availablePeriods: string[];
+  fleetPartnerId: string | null;
+  error: string | null;
 }
 
 function mapStatementLines(
@@ -945,42 +952,53 @@ export function filterTripsForService(
   return scopedRows;
 }
 
-export async function loadRevenue(): Promise<RevenueView> {
-  const currentPeriod = getCurrentPeriodMonth();
-  const fallback: RevenueView = {
-    period: currentPeriod,
-    status: FX_FLEET_STATEMENT.status,
-    payable: FX_FLEET_STATEMENT.payable,
-    lines: FX_FLEET_STATEMENT.lines,
-    source: "fallback",
+export async function loadRevenue(periodMonth?: string): Promise<RevenueView> {
+  const empty: RevenueView = {
+    period: periodMonth ?? getCurrentPeriodMonth(),
+    status: "—",
+    payable: "—",
+    lines: [],
+    source: "live",
+    statement: null,
+    availablePeriods: [],
+    fleetPartnerId: null,
+    error: null,
   };
   try {
-    const { client } = await getServerFleetPartnerClient();
+    const { client, fleetPartnerId } = await getServerFleetPartnerClient();
+    empty.fleetPartnerId = fleetPartnerId;
+    // One scoped read supplies the month choices, total, lines and decision.
+    // A requested missing month must never fall through to another statement.
     const records = await client.listFleetPortalStatements();
-    const latest = records[0];
-    if (!latest) {
-      // Endpoint is reachable but the partner has no statements yet — this is
-      // legitimate zero data, so show an empty live revenue, not the demo one.
-      return {
-        period: currentPeriod,
-        status: "—",
-        payable: formatMoney(null),
-        lines: [],
-        source: "live",
-      };
+    const availablePeriods = [
+      ...new Set(records.map((record) => record.periodMonth)),
+    ].sort((a, b) => b.localeCompare(a));
+    const period = periodMonth ?? availablePeriods[0] ?? empty.period;
+    const selected = records.find((record) => record.periodMonth === period);
+    if (!selected) {
+      return { ...empty, period, availablePeriods };
     }
+    const statement = mapStatement(selected);
     return {
-      period: latest.periodMonth,
-      status: latest.payoutStatus === "paid" ? "paid" : "pending_confirm",
-      payable: formatMoney(latest.shareAmount),
-      lines: mapStatementLines(latest),
+      period,
+      status: statementDisplayStatus(statement),
+      payable: statement.payable,
+      lines: mapStatementLines(selected),
       source: "live",
+      statement,
+      availablePeriods,
+      fleetPartnerId,
+      error: null,
     };
   } catch (err) {
     if (isConfigError(err)) {
       throw err;
     }
-    return fallback;
+    return {
+      ...empty,
+      source: "fallback",
+      error: err instanceof Error ? err.message : "READ_FAILED",
+    };
   }
 }
 
