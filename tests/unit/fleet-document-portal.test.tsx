@@ -12,6 +12,9 @@ import { CaseReplyComposer } from "../../apps/fleet-partner-portal-web/app/cases
 import type { FleetCaseItem } from "../../apps/fleet-partner-portal-web/lib/fleet-portal-data.server";
 import { putFleetDocument } from "../../apps/fleet-partner-portal-web/lib/fleet-document-upload";
 
+const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
+
 vi.mock("@drts/ui-web", () => ({
   CanvasCard: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CanvasField: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -50,6 +53,7 @@ vi.mock(
 
 afterEach(() => {
   cleanup();
+  refresh.mockClear();
   vi.unstubAllGlobals();
 });
 const caseDetail = {
@@ -118,6 +122,7 @@ describe("C125 actual portal file interactions", () => {
       { method: "PUT", headers: intent.headers, body: file },
     ]);
     expect(screen.getByText("上傳中")).toBeDefined();
+    expect(refresh).not.toHaveBeenCalled();
     completeScan(Response.json({ data: { scan_state: "clean" } }));
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3));
     expect(JSON.parse(fetcher.mock.calls[2][1].body)).toMatchObject({
@@ -127,6 +132,7 @@ describe("C125 actual portal file interactions", () => {
       fileSize: 8,
     });
     await waitFor(() => expect(screen.getByText("已上傳")).toBeDefined());
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a failed scan out of confirmation and retries the actual selected bytes", async () => {
@@ -154,10 +160,39 @@ describe("C125 actual portal file interactions", () => {
     });
     await waitFor(() => expect(screen.getByText("上傳失敗")).toBeDefined());
     expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(refresh).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText("重試"));
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(5));
     expect(fetcher.mock.calls[3][1].body).toBe(file);
     await waitFor(() => expect(screen.getByText("已上傳")).toBeDefined());
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not refresh when the uploaded attachment cannot be confirmed", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(apiIntent())
+      .mockResolvedValueOnce(Response.json({ data: { scan_state: "clean" } }))
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { message: "confirmation unavailable" } },
+          { status: 503 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetcher);
+    render(
+      <CaseReplyComposer caseDetail={caseDetail} initialAttachments={[]} />,
+    );
+    fireEvent.change(screen.getByLabelText("檔名"), {
+      target: {
+        files: [
+          new File(["evidence"], "evidence.pdf", { type: "application/pdf" }),
+        ],
+      },
+    });
+    await waitFor(() => expect(screen.getByText("上傳失敗")).toBeDefined());
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("shared supply/case PUT helper rejects invalid paths and oversized files before transmission", async () => {
