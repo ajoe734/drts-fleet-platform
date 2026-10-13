@@ -48,6 +48,7 @@ export interface DemoRide {
   driver: { name: string; plate: string; vehicle: string };
   operator: string;
   rating: number | null;
+  ratingTags: string[];
   ratingComment: string;
   contactRequested: boolean;
   complaints: DemoComplaint[];

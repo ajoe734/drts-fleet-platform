@@ -121,12 +121,36 @@ test("production passenger demo completes login, booking, payment, receipt and h
     contentType: "text/html",
   });
 
-  await page.getByRole("radio", { name: "4 星", exact: true }).check();
+  await page.getByRole("button", { name: "2 星", exact: true }).click();
+  await page.getByRole("button", { name: "駕駛態度", exact: true }).click();
+  const contactSwitch = page.getByRole("switch", {
+    name: "希望客服聯絡我（示範不會實際聯絡）",
+  });
+  await contactSwitch.click();
+  await expect(contactSwitch).toHaveAttribute("aria-checked", "true");
+  await testInfo.attach("low-score-feedback-controls", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await page.getByRole("button", { name: "4 星", exact: true }).click();
+  await expect(contactSwitch).toHaveCount(0);
+  await page.getByRole("button", { name: "車內整潔", exact: true }).click();
+  await page.getByRole("button", { name: "準時到達", exact: true }).click();
+  await expect(page.getByLabel("評價內容", { exact: true })).toHaveAttribute(
+    "maxlength",
+    "200",
+  );
   await page.getByLabel("評價內容", { exact: true }).fill("完整示範旅程測試");
   await page.getByRole("button", { name: "儲存示範評價" }).click();
   await expect(
     page.getByText("已儲存評價：4 顆星", { exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("list", { name: "已儲存評價標籤" }),
+  ).toContainText("準時到達");
+  await expect(page.getByRole("button", { name: "儲存示範評價" })).toHaveCount(
+    0,
+  );
   await page.getByLabel("案件類型", { exact: true }).selectOption("lost_item");
   await page
     .getByLabel("遺失物描述", { exact: true })
@@ -153,6 +177,12 @@ test("production passenger demo completes login, booking, payment, receipt and h
   await page
     .getByRole("link", { name: "查看行程 DEMO-0001", exact: true })
     .click();
+  await expect(
+    page.getByRole("list", { name: "已儲存評價標籤" }),
+  ).toContainText("車內整潔");
+  await expect(page.getByRole("button", { name: "儲存示範評價" })).toHaveCount(
+    0,
+  );
   await expect(
     page.getByRole("list", { name: "已送出的示範案件" }),
   ).toContainText("虛構藍色雨傘，僅供功能示範");

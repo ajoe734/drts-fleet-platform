@@ -12,7 +12,7 @@ import {
   P5,
   inputStyle,
 } from "../auth/ui";
-import { P5Eta, P5VehicleCard } from "../p5-ui";
+import { P5Eta, P5VehicleCard, P5Icon } from "../p5-ui";
 import {
   getDemoState,
   getDemoReceipt,
@@ -341,7 +341,7 @@ function DemoReceiptCard({ ride }: { ride: DemoRide }) {
         `<tr><th>${escapeHtml(line.label)}</th><td>${escapeHtml(money(line.amount))}</td></tr>`,
     )
     .join("");
-  const html = `<!doctype html><html lang="zh-TW"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(T.message052)}</title><style>body{font-family:system-ui,sans-serif;max-width:720px;margin:32px auto;padding:16px;color:#182638}h1{font-size:22px}table{width:100%;border-collapse:collapse;margin:24px 0}th,td{text-align:left;border-bottom:1px solid #ddd;padding:10px}th{width:40%}.notice{border:2px solid #315c9e;padding:12px}@media print{body{margin:0}}</style><h1>${escapeHtml(T.message052)}</h1><p class="notice">${escapeHtml(receipt.notice)}</p><table>${htmlRows}${htmlFees}<tr><th>${escapeHtml(T.receiptTotal)}</th><td>${escapeHtml(money(receipt.amount))}</td></tr></table><p>${escapeHtml(T.receiptPrintHint)}</p></html>`;
+  const html = `<!doctype html><html lang="zh-TW"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(T.message052)}</title><style>body{font-family:system-ui,sans-serif;max-width:720px;margin:32px auto;padding:16px;color:${P5.ink}}h1{font-size:22px}table{width:100%;border-collapse:collapse;margin:24px 0}th,td{text-align:left;border-bottom:1px solid ${P5.line};padding:10px}th{width:40%}.notice{border:2px solid ${P5.brand};padding:12px}@media print{body{margin:0}}</style><h1>${escapeHtml(T.message052)}</h1><p class="notice">${escapeHtml(receipt.notice)}</p><table>${htmlRows}${htmlFees}<tr><th>${escapeHtml(T.receiptTotal)}</th><td>${escapeHtml(money(receipt.amount))}</td></tr></table><p>${escapeHtml(T.receiptPrintHint)}</p></html>`;
   return (
     <P5Card title={T.message062}>
       <p>{T.message063}</p>
@@ -383,60 +383,265 @@ function DemoReceiptCard({ ride }: { ride: DemoRide }) {
 }
 
 function DemoRatingCard({ ride }: { ride: DemoRide }) {
-  const [rating, setRating] = useState(ride.rating ?? 5);
+  const [rating, setRating] = useState(ride.rating ?? 4);
+  const [tags, setTags] = useState(
+    ride.ratingTags.length ? ride.ratingTags : T.ratingPositiveTags.slice(0, 3),
+  );
   const [comment, setComment] = useState(ride.ratingComment);
   const [contact, setContact] = useState(ride.contactRequested);
-  const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  return (
-    <P5Card title={T.message065}>
-      {ride.rating !== null && (
+  const low = rating <= 2;
+  const star = (score: number, selected: number) => (
+    <P5Icon
+      name="star"
+      size={34}
+      style={{
+        color: score <= selected ? P5.warn : P5.line,
+        fill: score <= selected ? P5.warn : "none",
+      }}
+    />
+  );
+  if (ride.rating !== null)
+    return (
+      <P5Card title={T.message065}>
         <p>
           {T.message066}
           {ride.rating} {T.message067}
         </p>
-      )}
-      <fieldset style={{ border: 0, padding: 0, margin: "0 0 12px" }}>
-        <legend>{T.message068}</legend>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <div
+          role="img"
+          aria-label={`${ride.rating} ${T.message069}`}
+          style={{ display: "flex", justifyContent: "center", gap: 10 }}
+        >
           {[1, 2, 3, 4, 5].map((score) => (
-            <label key={score}>
-              <input
-                type="radio"
-                name="ride-rating"
-                value={score}
-                checked={rating === score}
-                onChange={() => setRating(score)}
-              />
-              {score} {T.message069}
-            </label>
+            <span key={score}>{star(score, ride.rating!)}</span>
           ))}
         </div>
+        <ul
+          aria-label={T.ratingSavedTags}
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 7,
+            listStyle: "none",
+            padding: 0,
+          }}
+        >
+          {ride.ratingTags.map((tag) => (
+            <li
+              key={tag}
+              style={{
+                color: P5.brand,
+                background: P5.brandBg,
+                border: `1px solid ${P5.brand}`,
+                borderRadius: 999,
+                padding: "7px 12px",
+                fontSize: 12,
+              }}
+            >
+              {tag}
+            </li>
+          ))}
+        </ul>
+        <p>{ride.ratingComment || T.ratingNoComment}</p>
+        {ride.rating <= 2 && (
+          <p>
+            {ride.contactRequested
+              ? T.ratingContactRequested
+              : T.ratingContactNotRequested}
+          </p>
+        )}
+        <p style={{ color: P5.mut, fontSize: 12 }}>{T.ratingImmutable}</p>
+      </P5Card>
+    );
+  const positive = { title: T.ratingPositive, options: T.ratingPositiveTags };
+  const improvement = {
+    title: T.ratingImprovement,
+    options: T.ratingImprovementTags,
+  };
+  return (
+    <P5Card title={T.message065}>
+      <fieldset style={{ border: 0, padding: 0, margin: "0 0 12px" }}>
+        <legend>{T.message068}</legend>
+        <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
+          {[1, 2, 3, 4, 5].map((score) => (
+            <button
+              key={score}
+              type="button"
+              aria-label={`${score} ${T.message069}`}
+              aria-pressed={rating === score}
+              onClick={() => {
+                const nextLow = score <= 2;
+                setRating(score);
+                if (nextLow !== low) {
+                  const preferred = nextLow
+                    ? T.ratingImprovementTags
+                    : T.ratingPositiveTags;
+                  setTags((current) =>
+                    current.filter((tag) => preferred.includes(tag)),
+                  );
+                }
+                if (score > 2) setContact(false);
+              }}
+              style={{
+                width: 46,
+                height: 46,
+                padding: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                border: 0,
+                background: "transparent",
+                cursor: "pointer",
+              }}
+            >
+              {star(score, rating)}
+            </button>
+          ))}
+        </div>
+        <p
+          style={{
+            textAlign: "center",
+            fontSize: 12.5,
+            fontWeight: 700,
+            color: low ? P5.danger : P5.warn,
+            marginTop: 4,
+          }}
+        >
+          {rating} {T.ratingLevels[rating - 1]}
+        </p>
       </fieldset>
+      {(low ? [improvement, positive] : [positive, improvement]).map(
+        (group) => (
+          <fieldset
+            key={group.title}
+            style={{ border: 0, padding: 0, margin: "12px 0" }}
+          >
+            <legend
+              style={{
+                fontSize: 11.5,
+                fontWeight: 700,
+                color: P5.mut,
+                marginBottom: 6,
+              }}
+            >
+              {group.title}
+            </legend>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+              {group.options.map((tag) => {
+                const selected = tags.includes(tag);
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() =>
+                      setTags((current) =>
+                        selected
+                          ? current.filter((value) => value !== tag)
+                          : [...current, tag],
+                      )
+                    }
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      padding: "7px 12px",
+                      borderRadius: 999,
+                      border: `1px solid ${selected ? P5.brand : P5.line}`,
+                      color: selected ? P5.brand : P5.mut,
+                      background: selected ? P5.brandBg : P5.surface,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {tag}
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
+        ),
+      )}
       <label style={{ display: "grid", gap: 8 }}>
         {T.message070}
         <textarea
           value={comment}
-          onChange={(event) => setComment(event.target.value)}
-          maxLength={1000}
+          onChange={(event) => setComment(event.target.value.slice(0, 200))}
+          maxLength={200}
           rows={3}
           style={inputStyle}
         />
       </label>
-      <label style={{ display: "flex", gap: 8, margin: "12px 0" }}>
-        <input
-          type="checkbox"
-          checked={contact}
-          onChange={(event) => setContact(event.target.checked)}
-        />
-        {T.message071}
-      </label>
+      <p
+        style={{
+          textAlign: "right",
+          fontSize: 10.5,
+          color: P5.dim,
+          marginTop: 3,
+        }}
+      >
+        {comment.length} / 200
+      </p>
+      {low && (
+        <div
+          style={{
+            margin: "10px 0",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            background: P5.warnBg,
+            border: `1px solid ${P5.warnBd}`,
+            borderRadius: 10,
+            padding: "10px 12px",
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700 }}>
+              {T.ratingContactTitle}
+            </div>
+            <div style={{ fontSize: 10.5, color: P5.mut, marginTop: 1 }}>
+              {T.ratingContactHint}
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-label={T.message071}
+            aria-checked={contact}
+            onClick={() => setContact((value) => !value)}
+            style={{
+              width: 40,
+              height: 22,
+              borderRadius: 11,
+              background: contact ? P5.brand : P5.line,
+              position: "relative",
+              flexShrink: 0,
+              border: 0,
+              padding: 0,
+              cursor: "pointer",
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                position: "absolute",
+                left: contact ? 20 : 2,
+                top: 2,
+                width: 18,
+                height: 18,
+                borderRadius: 9,
+                background: P5.surface,
+              }}
+            />
+          </button>
+        </div>
+      )}
       <P5Btn
+        kind="primary"
+        icon="check"
         onClick={() => {
           setError("");
           try {
-            rateDemoRide(ride.id, rating, comment, contact);
-            setNotice(T.message072);
+            rateDemoRide(ride.id, rating, comment, low && contact, tags);
           } catch {
             setError(T.message073);
           }
@@ -444,7 +649,7 @@ function DemoRatingCard({ ride }: { ride: DemoRide }) {
       >
         {T.message074}
       </P5Btn>
-      {notice && <p role="status">{notice}</p>}
+      <p style={{ color: P5.mut, fontSize: 12 }}>{T.ratingImmutable}</p>
       {error && <AuthAlert>{error}</AuthAlert>}
     </P5Card>
   );
@@ -460,9 +665,12 @@ function DemoComplaintCard({ ride }: { ride: DemoRide }) {
   return (
     <P5Card title={T.message075}>
       <p>{T.message076}</p>
-      <label style={{ display: "grid", gap: 8 }}>
-        {T.message077}
+      <div style={{ display: "grid", gap: 8 }}>
+        <label htmlFor={`demo-complaint-category-${ride.id}`}>
+          {T.message077}
+        </label>
         <select
+          id={`demo-complaint-category-${ride.id}`}
           value={category}
           onChange={(event) =>
             setCategory(event.target.value as DemoComplaint["category"])
@@ -472,7 +680,7 @@ function DemoComplaintCard({ ride }: { ride: DemoRide }) {
           <option value="service">{T.message078}</option>
           <option value="lost_item">{T.message079}</option>
         </select>
-      </label>
+      </div>
       <label style={{ display: "grid", gap: 8, marginTop: 12 }}>
         {category === "lost_item" ? T.message080 : T.message081}
         <textarea

@@ -23,6 +23,7 @@ import {
   updateDemoState,
 } from "../../../apps/passenger-app-web/lib/demo/store";
 import type { DemoRide } from "../../../apps/passenger-app-web/lib/demo/types";
+import { P5 } from "../../../apps/passenger-app-web/components/auth/ui";
 
 const rideId = "demo-ride-unit";
 function seedRide(): DemoRide {
@@ -44,6 +45,7 @@ function seedRide(): DemoRide {
     driver: { name: "示範司機", plate: "DEMO-001", vehicle: "示意轎車" },
     operator: "示範營運者",
     rating: null,
+    ratingTags: [],
     ratingComment: "",
     contactRequested: false,
     complaints: [],
@@ -101,6 +103,10 @@ describe("explicit passenger demonstration: ride and history", () => {
     expect(receipt).toContain("示意延滯費");
     expect(receipt).toContain("示意夜間加成");
     expect(receipt).toContain("DEMO-***001");
+    expect(receipt).toContain(`color:${P5.ink}`);
+    expect(receipt).toContain(`border-bottom:1px solid ${P5.line}`);
+    expect(receipt).toContain(`border:2px solid ${P5.brand}`);
+    expect(receipt).not.toMatch(/#182638|#ddd|#315c9e/);
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -114,7 +120,9 @@ describe("explicit passenger demonstration: ride and history", () => {
     expect(screen.getByText("完成示範付款後即可下載乘車紀錄。")).toBeTruthy();
     click("重試示範付款");
     expect(screen.getByRole("link", { name: "下載示範乘車紀錄" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("radio", { name: "2 星" }));
+    click("2 星");
+    click("駕駛態度");
+    click("繞路");
     fireEvent.change(screen.getByLabelText("評價內容"), {
       target: { value: "希望車內更安靜" },
     });
@@ -125,6 +133,7 @@ describe("explicit passenger demonstration: ride and history", () => {
     expect(getDemoState()?.rides[0]).toMatchObject({
       paymentStatus: "paid",
       rating: 2,
+      ratingTags: ["繞路", "駕駛態度"],
       ratingComment: "希望車內更安靜",
       contactRequested: true,
     });
@@ -137,17 +146,77 @@ describe("explicit passenger demonstration: ride and history", () => {
     expect(screen.getByText(/模擬付款成功/)).toBeTruthy();
     history.unmount();
     render(<DemoRideScreen rideId={rideId} />);
-    expect(await screen.findByLabelText("評價內容")).toHaveProperty(
-      "value",
-      "希望車內更安靜",
-    );
-    expect(screen.getByRole("radio", { name: "2 星" })).toHaveProperty(
-      "checked",
-      true,
-    );
+    await screen.findByRole("img", { name: "2 星" });
+    expect(screen.getAllByText("希望車內更安靜").length).toBeGreaterThan(0);
     expect(
-      screen.getByLabelText("希望客服聯絡我（示範不會實際聯絡）"),
-    ).toHaveProperty("checked", true);
+      screen.getByRole("list", { name: "已儲存評價標籤" }).textContent,
+    ).toContain("駕駛態度");
+    expect(
+      screen.getByText("已要求示範客服聯繫，示範客訴案件已建立。"),
+    ).toBeTruthy();
+    expect(screen.queryByLabelText("評價內容")).toBeNull();
+    expect(screen.queryByRole("button", { name: "儲存示範評價" })).toBeNull();
+    expect(screen.queryByRole("switch")).toBeNull();
+  });
+
+  it("uses canonical stars, persistent selectable tags and the 200-character comment boundary", async () => {
+    render(<DemoRideScreen rideId={rideId} />);
+    await screen.findByRole("button", { name: "模擬司機接單" });
+    finishRide();
+    const fourStars = screen.getByRole("button", { name: "4 星" });
+    expect(fourStars.getAttribute("aria-pressed")).toBe("true");
+    expect(fourStars.querySelector("svg path")).not.toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: "車內整潔" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.queryByRole("switch")).toBeNull();
+    click("2 星");
+    expect(screen.getByText("2 不滿意")).toBeTruthy();
+    expect(
+      screen.getByText("開啟後送出將自動建立示範客訴案件，不會通知實際客服。"),
+    ).toBeTruthy();
+    expect(
+      screen
+        .getByRole("button", { name: "車內整潔" })
+        .getAttribute("aria-pressed"),
+    ).toBe("false");
+    fireEvent.click(
+      screen.getByRole("switch", {
+        name: "希望客服聯絡我（示範不會實際聯絡）",
+      }),
+    );
+    click("駕駛態度");
+    click("5 星");
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: "駕駛態度" })
+        .getAttribute("aria-pressed"),
+    ).toBe("false");
+    click("車內整潔");
+    click("準時到達");
+    click("路線順暢");
+    click("路線順暢");
+    const comment = screen.getByLabelText("評價內容") as HTMLTextAreaElement;
+    expect(comment.maxLength).toBe(200);
+    fireEvent.change(comment, { target: { value: "好".repeat(201) } });
+    expect(comment.value).toBe("好".repeat(200));
+    expect(screen.getByText("200 / 200")).toBeTruthy();
+    click("儲存示範評價");
+    expect(getDemoState()?.rides[0]).toMatchObject({
+      rating: 5,
+      ratingTags: ["準時到達", "車內整潔"],
+      ratingComment: "好".repeat(200),
+      contactRequested: false,
+      complaints: [],
+    });
+    expect(
+      screen.getByRole("list", { name: "已儲存評價標籤" }).textContent,
+    ).toContain("準時到達");
+    expect(screen.queryByRole("button", { name: "5 星" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "儲存示範評價" })).toBeNull();
   });
 
   it("acknowledges service and lost-item intake with persisted identifiers", async () => {
@@ -168,7 +237,11 @@ describe("explicit passenger demonstration: ride and history", () => {
       contactConsent: false,
     });
     expect(screen.getByText(`示範案件已受理：${first?.id}`)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("案件類型"), {
+    const category = screen.getByLabelText("案件類型", {
+      exact: true,
+    }) as HTMLSelectElement;
+    expect(category.labels?.[0]?.textContent).toBe("案件類型");
+    fireEvent.change(category, {
       target: { value: "lost_item" },
     });
     fireEvent.change(screen.getByLabelText("遺失物描述"), {

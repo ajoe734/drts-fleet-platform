@@ -556,6 +556,7 @@ export async function demoFetch(
         },
         operator: "示意交通服務公司（虛構）",
         rating: null,
+        ratingTags: [],
         ratingComment: "",
         contactRequested: false,
         complaints: [],
@@ -601,6 +602,7 @@ export async function demoFetch(
             Number(data.rating ?? data.score),
             String(data.comments ?? data.comment ?? ""),
             data.contactRequested === true,
+            (data.tags ?? []) as string[],
           );
           return result({ success: true });
         }
@@ -638,7 +640,13 @@ export async function demoFetch(
     }
     fail(404, "demo_route_not_found", "此功能尚未提供示範操作。");
   } catch (error) {
-    const status = error instanceof DemoRequestError ? error.status : 400;
+    const status =
+      error instanceof DemoRequestError
+        ? error.status
+        : error instanceof Error &&
+            error.message === "demo_rating_already_submitted"
+          ? 409
+          : 400;
     const code =
       error instanceof DemoRequestError
         ? error.code

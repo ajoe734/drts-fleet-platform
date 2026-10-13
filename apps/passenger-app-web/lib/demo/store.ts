@@ -106,6 +106,7 @@ export function getDemoState(): DemoState | null {
       const state = JSON.parse(saved) as DemoState;
       if (state.version === 1 && Array.isArray(state.rides) && state.account) {
         state.bindingMethods ??= {};
+        for (const ride of state.rides) ride.ratingTags ??= [];
         browserMemory = state;
         return clone(state);
       }
@@ -216,17 +217,35 @@ export function rateDemoRide(
   rating: number,
   comment = "",
   contactRequested = false,
+  tags: string[] = [],
 ): DemoRide {
   return changeRide(id, (ride) => {
     if (
       ride.status !== "completed" ||
       !Number.isInteger(rating) ||
       rating < 1 ||
-      rating > 5
+      rating > 5 ||
+      comment.length > 200
     )
       throw new Error("demo_rating_invalid");
+    const normalizedComment = comment.trim();
+    const normalizedTags = [
+      ...new Set(tags.map((tag) => tag.trim()).filter(Boolean)),
+    ].sort();
+    if (ride.rating !== null) {
+      if (
+        ride.rating !== rating ||
+        ride.ratingComment.trim() !== normalizedComment ||
+        ride.contactRequested !== contactRequested ||
+        JSON.stringify([...ride.ratingTags].sort()) !==
+          JSON.stringify(normalizedTags)
+      )
+        throw new Error("demo_rating_already_submitted");
+      return;
+    }
     ride.rating = rating;
-    ride.ratingComment = comment;
+    ride.ratingTags = normalizedTags;
+    ride.ratingComment = normalizedComment;
     ride.contactRequested = contactRequested;
     if (
       rating <= 2 &&
@@ -236,7 +255,7 @@ export function rateDemoRide(
       ride.complaints.push({
         id: `demo-rating-${ride.id}`,
         category: "service",
-        content: comment || "示意低評價協助請求",
+        content: normalizedComment || "示意低評價協助請求",
         contactConsent: true,
         createdAt: new Date().toISOString(),
         status: "received",

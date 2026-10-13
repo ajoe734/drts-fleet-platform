@@ -1,5 +1,18 @@
 /** Traditional Chinese copy for the explicit passenger demonstration and live trip summaries. */
 export const RIDE_T = {
+  ratingPositive: "做得好（可複選）",
+  ratingImprovement: "待改善（可複選）",
+  ratingPositiveTags: ["車內整潔", "駕駛親切", "路線順暢", "準時到達"],
+  ratingImprovementTags: ["駕駛態度", "車內氣味", "繞路", "遲到", "駕駛違規"],
+  ratingLevels: ["很差", "不滿意", "普通", "滿意", "非常滿意"],
+  ratingContactTitle: "需要客服與您聯繫嗎？",
+  ratingContactHint: "開啟後送出將自動建立示範客訴案件，不會通知實際客服。",
+  ratingImmutable:
+    "示範評分送出後不可修改；資料僅保留於此瀏覽器，不會送給駕駛。",
+  ratingSavedTags: "已儲存評價標籤",
+  ratingNoComment: "未填寫補充意見",
+  ratingContactRequested: "已要求示範客服聯繫，示範客訴案件已建立。",
+  ratingContactNotRequested: "未要求示範客服聯繫。",
   receiptWaitingForPayment: "完成示範付款後即可下載乘車紀錄。",
   receiptNumber: "示範憑證編號",
   receiptOrder: "行程編號",

@@ -182,6 +182,76 @@ describe("Passenger functional demo transport", () => {
     expect(history.data.rides[0].order.orderId).toBe(id);
   });
 
+  it("retains the first submitted rating and one low-score complaint while allowing identical replay", async () => {
+    await login();
+    const { id } = await reserve();
+    for (let stage = 0; stage < 4; stage++) advanceDemoRide(id);
+    const submit = (command: Record<string, unknown>) =>
+      demoFetch(`/api/passenger-app/rides/${id}/ratings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(command),
+      });
+    const original = {
+      rating: 2,
+      comments: " 原始評價 ",
+      tags: ["繞路", " 駕駛態度 ", "繞路"],
+      contactRequested: true,
+    };
+    expect((await submit(original)).status).toBe(200);
+    const saved = getDemoState()?.rides[0];
+    expect(saved).toMatchObject({
+      rating: 2,
+      ratingComment: "原始評價",
+      ratingTags: ["繞路", "駕駛態度"],
+      contactRequested: true,
+    });
+    expect(saved?.complaints).toHaveLength(1);
+    expect(
+      (
+        await submit({
+          ...original,
+          tags: ["駕駛態度", "繞路"],
+          comments: "原始評價",
+        })
+      ).status,
+    ).toBe(200);
+    expect(getDemoState()?.rides[0]).toEqual(saved);
+    for (const changed of [
+      { ...original, rating: 5 },
+      { ...original, comments: "changed" },
+      { ...original, tags: ["準時到達"] },
+      { ...original, contactRequested: false },
+    ]) {
+      const rejected = await submit(changed);
+      expect(rejected.status).toBe(409);
+      expect(await rejected.json()).toMatchObject({
+        error: { code: "demo_rating_already_submitted" },
+      });
+      expect(getDemoState()?.rides[0]).toEqual(saved);
+    }
+    expect(() => rateDemoRide(id, 5, "changed", false)).toThrow(
+      "demo_rating_already_submitted",
+    );
+    expect(getDemoState()?.rides[0]).toEqual(saved);
+  });
+
+  it("accepts 200 comment characters and rejects a longer first submission without saving it", async () => {
+    await login();
+    const { id } = await reserve();
+    for (let stage = 0; stage < 4; stage++) advanceDemoRide(id);
+    expect(() => rateDemoRide(id, 4, "好".repeat(201))).toThrow(
+      "demo_rating_invalid",
+    );
+    expect(getDemoState()?.rides[0]?.rating).toBeNull();
+    const saved = rateDemoRide(id, 4, "好".repeat(200), false, ["準時到達"]);
+    expect(saved.ratingComment).toHaveLength(200);
+    expect(saved.ratingTags).toEqual(["準時到達"]);
+    expect(rateDemoRide(id, 4, "好".repeat(200), false, ["準時到達"])).toEqual(
+      saved,
+    );
+  });
+
   it("binds, changes default and removes demo cards without duplicate credential replays", async () => {
     await login();
     const client = payment();
