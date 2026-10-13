@@ -5,7 +5,10 @@ import {
   CanvasDL,
   CanvasPageHeader,
 } from "@drts/ui-web";
-import { FleetStatementActions, StatementDecisionNote } from "@/components/fleet-statement-actions";
+import {
+  FleetStatementActions,
+  StatementDecisionNote,
+} from "@/components/fleet-statement-actions";
 import { getServerFleetPartnerClient } from "@/lib/api-client.server";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 import { loadRevenue, loadStatements } from "@/lib/fleet-portal-data.server";
@@ -206,6 +209,20 @@ export default async function FleetRevenuePage() {
                   payable: currentStatement!.payable,
                 })}
               />
+            ) : bannerState === "confirmed" || bannerState === "disputed" ? (
+              <CanvasBanner
+                theme={theme}
+                tone={bannerState === "confirmed" ? "success" : "warn"}
+                icon="notices"
+                title={t(`statements.request.${bannerState}`, locale)}
+                body={trRevenue(
+                  `revenue.${bannerState}Statement.body`,
+                  locale,
+                  {
+                    period: currentStatement!.period,
+                  },
+                )}
+              />
             ) : (
               <CanvasBanner
                 theme={theme}
@@ -222,15 +239,15 @@ export default async function FleetRevenuePage() {
                 <FleetStatementActions
                   fleetPartnerId={fleetPartnerId}
                   statement={currentStatement}
+                  available={statementsView.source === "live"}
                   size="sm"
                 />
-                <StatementDecisionNote
-                  fleetPartnerId={fleetPartnerId}
-                  statementId={currentStatement.id}
-                />
+                <StatementDecisionNote statement={currentStatement} />
               </div>
             ) : (
-              <div style={{ marginTop: 12, fontSize: 12, color: theme.textDim }}>
+              <div
+                style={{ marginTop: 12, fontSize: 12, color: theme.textDim }}
+              >
                 {t("actions.reason.noCurrentStatement", locale)}
               </div>
             )}

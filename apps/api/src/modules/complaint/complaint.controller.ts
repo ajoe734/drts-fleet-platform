@@ -60,7 +60,8 @@ export class ComplaintController {
   }
 
   @Get()
-  listComplaintCases(@Headers("x-request-id") requestId?: string) {
+  async listComplaintCases(@Headers("x-request-id") requestId?: string) {
+    await this.complaintService.refreshSettlementCases();
     return toApiSuccessEnvelope(
       {
         items: this.complaintService.listComplaintCases(),
@@ -70,7 +71,8 @@ export class ComplaintController {
   }
 
   @Post("evaluate-sla-breach")
-  evaluateAllSlaBreach(@Headers("x-request-id") requestId?: string) {
+  async evaluateAllSlaBreach(@Headers("x-request-id") requestId?: string) {
+    await this.complaintService.refreshSettlementCases();
     const breached = this.complaintService.evaluateAllSlaBreach(requestId);
     return toApiSuccessEnvelope(
       { breachedCount: breached.length, items: breached },
@@ -93,10 +95,11 @@ export class ComplaintController {
   }
 
   @Get(":caseNo")
-  getComplaintCase(
+  async getComplaintCase(
     @Param("caseNo") caseNo: string,
     @Headers("x-request-id") requestId?: string,
   ) {
+    await this.complaintService.refreshSettlementCases();
     return toApiSuccessEnvelope(
       this.complaintService.getComplaintCase(caseNo),
       requestId,
@@ -104,10 +107,11 @@ export class ComplaintController {
   }
 
   @Get(":caseNo/timeline")
-  getComplaintTimeline(
+  async getComplaintTimeline(
     @Param("caseNo") caseNo: string,
     @Headers("x-request-id") requestId?: string,
   ) {
+    await this.complaintService.refreshSettlementCases();
     return toApiSuccessEnvelope(
       {
         items: this.complaintService.getComplaintTimeline(caseNo),
@@ -117,11 +121,12 @@ export class ComplaintController {
   }
 
   @Post(":caseNo/assign")
-  assignComplaintCase(
+  async assignComplaintCase(
     @Param("caseNo") caseNo: string,
     @Body() command: AssignComplaintCaseCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
+    await this.complaintService.refreshSettlementCases();
     return toApiSuccessEnvelope(
       this.complaintService.assignComplaintCase(caseNo, command, requestId),
       requestId,
@@ -129,11 +134,12 @@ export class ComplaintController {
   }
 
   @Post(":caseNo/notes")
-  addComplaintCaseNote(
+  async addComplaintCaseNote(
     @Param("caseNo") caseNo: string,
     @Body() command: AddComplaintCaseNoteCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
+    await this.complaintService.refreshSettlementCases();
     return toApiSuccessEnvelope(
       this.complaintService.addComplaintCaseNote(caseNo, command, requestId),
       requestId,
@@ -141,10 +147,11 @@ export class ComplaintController {
   }
 
   @Get(":caseNo/export")
-  getComplaintExportView(
+  async getComplaintExportView(
     @Param("caseNo") caseNo: string,
     @Headers("x-request-id") requestId?: string,
   ) {
+    await this.complaintService.refreshSettlementCases();
     return toApiSuccessEnvelope(
       this.complaintService.getComplaintExportView(caseNo),
       requestId,
@@ -152,11 +159,12 @@ export class ComplaintController {
   }
 
   @Post(":caseNo/reopen")
-  reopenComplaintCase(
+  async reopenComplaintCase(
     @Param("caseNo") caseNo: string,
     @Body() command: ReopenComplaintCaseCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
+    await this.complaintService.refreshSettlementCases();
     return toApiSuccessEnvelope(
       this.complaintService.reopenComplaintCase(caseNo, command, requestId),
       requestId,
@@ -164,11 +172,12 @@ export class ComplaintController {
   }
 
   @Post(":caseNo/resolve")
-  resolveComplaintCase(
+  async resolveComplaintCase(
     @Param("caseNo") caseNo: string,
     @Body() command: ResolveComplaintCaseCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
+    await this.complaintService.refreshSettlementCases();
     return toApiSuccessEnvelope(
       this.complaintService.resolveComplaintCase(caseNo, command, requestId),
       requestId,
@@ -176,11 +185,12 @@ export class ComplaintController {
   }
 
   @Post(":caseNo/close")
-  closeComplaintCase(
+  async closeComplaintCase(
     @Param("caseNo") caseNo: string,
     @Body() command: ResolveComplaintCaseCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
+    await this.complaintService.refreshSettlementCases();
     return toApiSuccessEnvelope(
       this.complaintService.closeComplaintCase(caseNo, command, requestId),
       requestId,
@@ -188,11 +198,12 @@ export class ComplaintController {
   }
 
   @Post(":caseNo/escalate-to-incident")
-  escalateToIncident(
+  async escalateToIncident(
     @Param("caseNo") caseNo: string,
     @Body() command: EscalateComplaintToIncidentCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
+    await this.complaintService.refreshSettlementCases();
     const complaintCase = this.complaintService.getComplaintCase(caseNo);
     if (complaintCase.relatedIncidentId) {
       throw new ApiRequestError(
@@ -245,11 +256,12 @@ export class ComplaintController {
   }
 
   @Post(":caseNo/link-incident")
-  linkIncident(
+  async linkIncident(
     @Param("caseNo") caseNo: string,
     @Body() command: LinkComplaintToIncidentCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
+    await this.complaintService.refreshSettlementCases();
     const complaintCase = this.complaintService.getComplaintCase(caseNo);
     const incident = this.incidentService.getIncident(command.incidentId);
     if (
@@ -292,10 +304,11 @@ export class ComplaintController {
   }
 
   @Post(":caseNo/sla-breach")
-  markComplaintSlaBreach(
+  async markComplaintSlaBreach(
     @Param("caseNo") caseNo: string,
     @Headers("x-request-id") requestId?: string,
   ) {
+    await this.complaintService.refreshSettlementCases();
     return toApiSuccessEnvelope(
       this.complaintService.markComplaintSlaBreach(caseNo, requestId),
       requestId,

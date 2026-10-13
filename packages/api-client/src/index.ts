@@ -122,6 +122,8 @@ import type {
   FleetPartnerRevenueShareRuleRecord,
   DriverSupplyDraft,
   FleetPartnerStatementRecord,
+  ConfirmFleetPartnerStatementCommand,
+  DisputeFleetPartnerStatementCommand,
   HostVehicleCaseItem,
   HostVehicleEarningsSummary,
   HostVehicleMaintenanceItem,
@@ -2277,6 +2279,26 @@ export class ApiClient {
       : "";
     return this.getList<FleetPartnerStatementRecord>(
       `/api/fleet-partner/statements${query}`,
+    );
+  }
+
+  async confirmFleetPartnerStatement(
+    statementId: string,
+    command: ConfirmFleetPartnerStatementCommand,
+  ): Promise<FleetPartnerStatementRecord> {
+    return this.post<FleetPartnerStatementRecord>(
+      `/api/fleet-partner/statements/${encodeURIComponent(statementId)}/confirm`,
+      { body: command },
+    );
+  }
+
+  async disputeFleetPartnerStatement(
+    statementId: string,
+    command: DisputeFleetPartnerStatementCommand,
+  ): Promise<FleetPartnerStatementRecord> {
+    return this.post<FleetPartnerStatementRecord>(
+      `/api/fleet-partner/statements/${encodeURIComponent(statementId)}/dispute`,
+      { body: command },
     );
   }
 

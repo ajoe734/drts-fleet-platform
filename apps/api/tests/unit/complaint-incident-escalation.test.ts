@@ -132,7 +132,7 @@ describe("Complaint → Incident escalation", () => {
     expect(linkEntry!.note).toContain(incident.incidentId);
   });
 
-  it("keeps complaint and incident links in sync from the complaint endpoint", () => {
+  it("keeps complaint and incident links in sync from the complaint endpoint", async () => {
     const { complaintController, complaintService, incidentService } =
       createServices();
 
@@ -150,7 +150,7 @@ describe("Complaint → Incident escalation", () => {
       reportedBy: "ops-agent-010",
     });
 
-    complaintController.linkIncident(
+    await complaintController.linkIncident(
       complaint.caseNo,
       { incidentId: incident.incidentId },
       "req-link-complaint-incident-001",
@@ -196,7 +196,7 @@ describe("Complaint → Incident escalation", () => {
     ).toBe(incident.incidentId);
   });
 
-  it("assigns escalated incidents to the current complaint owner", () => {
+  it("assigns escalated incidents to the current complaint owner", async () => {
     const { complaintController, complaintService } = createServices();
 
     const complaint = complaintService.createComplaintCase({
@@ -209,7 +209,7 @@ describe("Complaint → Incident escalation", () => {
       assigneeId: "ops-specialist-007",
     });
 
-    const response = complaintController.escalateToIncident(
+    const response = await complaintController.escalateToIncident(
       complaint.caseNo,
       {
         title: "Escalated safety investigation",
@@ -222,7 +222,7 @@ describe("Complaint → Incident escalation", () => {
     expect(response.data.incident.assignedTo).toBe("ops-specialist-007");
   });
 
-  it("does not create an orphan incident when the complaint is already escalated", () => {
+  it("does not create an orphan incident when the complaint is already escalated", async () => {
     const { complaintController, complaintService, incidentService } =
       createServices();
 
@@ -233,7 +233,7 @@ describe("Complaint → Incident escalation", () => {
       description: "Complaint already linked to an incident.",
     });
 
-    const firstResponse = complaintController.escalateToIncident(
+    const firstResponse = await complaintController.escalateToIncident(
       complaint.caseNo,
       {
         title: "Primary incident",
@@ -243,7 +243,7 @@ describe("Complaint → Incident escalation", () => {
       "req-escalate-primary-001",
     );
 
-    expect(() =>
+    await expect(
       complaintController.escalateToIncident(
         complaint.caseNo,
         {
@@ -253,7 +253,7 @@ describe("Complaint → Incident escalation", () => {
         },
         "req-escalate-duplicate-001",
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
 
     expect(incidentService.listIncidents()).toHaveLength(1);
     expect(
@@ -261,7 +261,7 @@ describe("Complaint → Incident escalation", () => {
     ).toBe(firstResponse.data.incident.incidentId);
   });
 
-  it("does not mutate the complaint when linking to a missing incident", () => {
+  it("does not mutate the complaint when linking to a missing incident", async () => {
     const { complaintController, complaintService } = createServices();
 
     const complaint = complaintService.createComplaintCase({
@@ -271,13 +271,13 @@ describe("Complaint → Incident escalation", () => {
       description: "Keep complaint untouched on failed link.",
     });
 
-    expect(() =>
+    await expect(
       complaintController.linkIncident(
         complaint.caseNo,
         { incidentId: "INC-404404" },
         "req-link-missing-incident-001",
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
 
     expect(
       complaintService.getComplaintCase(complaint.caseNo).relatedIncidentId,
@@ -308,7 +308,7 @@ describe("Complaint → Incident escalation", () => {
     ).toBeNull();
   });
 
-  it("rejects relinking a complaint or incident to a different counterpart", () => {
+  it("rejects relinking a complaint or incident to a different counterpart", async () => {
     const {
       complaintController,
       complaintService,
@@ -343,19 +343,19 @@ describe("Complaint → Incident escalation", () => {
       reportedBy: "ops-agent-201",
     });
 
-    complaintController.linkIncident(
+    await complaintController.linkIncident(
       complaintA.caseNo,
       { incidentId: incidentA.incidentId },
       "req-link-primary-pair-001",
     );
 
-    expect(() =>
+    await expect(
       complaintController.linkIncident(
         complaintA.caseNo,
         { incidentId: incidentB.incidentId },
         "req-link-complaint-reassign-001",
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
     expect(() =>
       incidentController.linkComplaint(
         incidentA.incidentId,

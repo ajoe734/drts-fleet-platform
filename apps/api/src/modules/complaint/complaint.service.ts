@@ -34,6 +34,7 @@ const COMPLAINT_CATEGORY_VALUES = [
   "vehicle_condition",
   "route_issue",
   "fare_dispute",
+  "settlement_dispute",
   "safety_concern",
   "lost_and_found",
   "other",
@@ -46,6 +47,7 @@ const DEFAULT_SLA_HOURS_BY_CATEGORY: Record<ComplaintCategory, number> = {
   vehicle_condition: 48,
   route_issue: 48,
   fare_dispute: 48,
+  settlement_dispute: 48,
   safety_concern: 4,
   lost_and_found: 72,
   other: 48,
@@ -102,6 +104,26 @@ export class ComplaintService implements OnModuleInit {
       );
     } catch (error) {
       this.complaintRepository.reportPersistenceFailure(error, "module init");
+    }
+  }
+
+  /** Read the committed settlement cases on every request, including cases
+   * submitted through another API replica. Other complaint state is untouched. */
+  async refreshSettlementCases(): Promise<void> {
+    if (!this.complaintRepository?.isEnabled()) return;
+    const state = await this.complaintRepository.loadSettlementState();
+    this.complaintCases = [
+      ...this.complaintCases.filter(
+        (item) => item.category !== "settlement_dispute",
+      ),
+      ...state.complaintCases.map((item) => this.cloneComplaintCase(item)),
+    ];
+    const timelines = this.buildTimelineMap(state.complaintTimelines);
+    for (const item of state.complaintCases) {
+      this.complaintTimelines.set(
+        item.caseNo,
+        timelines.get(item.caseNo) ?? [],
+      );
     }
   }
 
@@ -749,6 +771,7 @@ export class ComplaintService implements OnModuleInit {
     complaintCases: readonly ComplaintCaseRecord[],
   ) {
     const maxSequence = complaintCases.reduce((currentMax, complaintCase) => {
+      if (complaintCase.category === "settlement_dispute") return currentMax;
       const rawSequence = complaintCase.caseNo.split("-").at(-1) ?? "0";
       const parsedSequence = Number.parseInt(rawSequence, 10);
       if (!Number.isInteger(parsedSequence)) {

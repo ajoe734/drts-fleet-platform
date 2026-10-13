@@ -36,11 +36,25 @@
 本 VM 僅執行純單元、元件、型別與靜態檢查。實際 PostgreSQL 交易測試由
 既有 GitHub CI integration 工作套用正式 migrations 後執行，沒有新增 CI gate。
 
-| 驗收項                       | 原始碼／案例                                    | 本機與 hosted 結果 | 限制                           |
-| ---------------------------- | ----------------------------------------------- | ------------------ | ------------------------------ |
-| 確認、爭議、重試與回讀       | 新 decision repository、API、SDK 與既有對帳元件 | 實作中，待記錄     | 尚無候選 SHA／部署證据         |
-| 重建後保存、多實例及交易回滾 | 正式 migration 與 PostgreSQL integration suite  | 待 hosted CI       | 不在 VM 啟動 PostgreSQL        |
-| 異議案件關聯與舊流程相容     | Complaint 與 Fleet case 讀取、相關回歸          | 待記錄             | 不表示真實金流或外部服務已驗收 |
+| 驗收項                                  | 原始碼／案例                                                                           | 本機結果                                                                 | hosted 證據／限制                                                                                 |
+| --------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| 確認、爭議、重試、真實回讀及舊案件行為  | `tests/unit/fleet-statement-decisions-20261013/`、既有 Fleet 與 Complaint suites       | root 後端相關 50、API unit 36、前端／SDK 相關 39、Fleet app 21：全部通過 | 具體命令與 exit 0 在 `.local/fleet-statement-decisions-20261013/`；沒有真實供應商操作             |
+| 重建後保存、多實例、paid 狀態及交易回滾 | 正式 V0117、`apps/api/tests/integration/fleet-statement-decisions.integration.test.ts` | TypeScript／lint 通過；15 個案例未在 VM 執行                             | 由同候選 PR 的既有 integration 工作實際套用 migrations 並執行，結果以該 SHA 的 GitHub checks 為準 |
+| 配號與共用契約相容                      | 既有 recovery-contracts／partner-notify-contracts suites                               | 58 通過                                                                  | 原配號值保留，新增 V0117，不取代實際 DB 測試                                                      |
+| 靜態檢查                                | API／Fleet／SDK／root TypeScript、scoped ESLint、i18n、classification、diff check      | 全部通過                                                                 | hosted build／CI 與獨立審查另由既有 candidate lifecycle 記錄                                      |
 
-本文件在交候選前更新實際命令、結果及證據；通過單元測試不等於真實供應商、
+相關回歸共 204 項本機通過。原失敗與修正證據也保留於同一 `.local` 目錄：
+
+- 既有 repository 測試假定第二個 SQL 必為 DELETE；新增交易讀取／鎖定後，
+  改為驗證 BEGIN、正確車行的 DELETE、INSERT、COMMIT 次序及參數。
+- 既有 service mock 補齊正式 repository 新讀取介面；Complaint controller
+  因需等待 DB 回讀改為 async，舊測試改為 await 與 rejects，保留案件結果斷言。
+- Fleet 供給文件測試用今日時間判斷固定 2026 年 8 月到期資料，原本為
+  20 通過／1 失敗。只在該測試固定 Date 為 8 月 1 日，驗證精確到期文件 ID，
+  修正後 21 通過；未更動供給產品邏輯。
+- 新增讀回測試確認已決定的金額快照不被 clone 的再計算改動，並確認最新
+  paid 狀態不被舊快照或月份重建覆蓋。
+
+候選 SHA、獨立審查、hosted PostgreSQL 與完整 CI 結果以本任務的正式
+candidate lifecycle／同 SHA PR checks 為準。本機通過不表示真實供應商、
 正式環境或全系統驗收完成。

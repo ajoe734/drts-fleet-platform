@@ -20,6 +20,7 @@ describe("fleet portal supply loaders", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     if (originalEnv !== undefined) {
       process.env.DRTS_FLEET_PARTNER_ID = originalEnv;
     } else {
@@ -28,6 +29,9 @@ describe("fleet portal supply loaders", () => {
   });
 
   it("builds fallback dashboard groups with expiring and not-ready lanes", async () => {
+    // The fixture documents expire on August 18 and 30, independent of today.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-01T12:00:00Z"));
     const result = await loadSupplyDashboard();
 
     expect(result.source).toBe("fallback");
@@ -35,7 +39,10 @@ describe("fleet portal supply loaders", () => {
     expect(result.groups.review.length).toBeGreaterThan(0);
     expect(result.groups.revision.length).toBeGreaterThan(0);
     expect(result.groups.approved.length).toBeGreaterThan(0);
-    expect(result.groups.expiring.length).toBeGreaterThan(0);
+    expect(result.groups.expiring.map((item) => item.id)).toEqual([
+      "doc_02",
+      "doc_05",
+    ]);
     expect(result.groups.not_ready[0]?.reasons?.length).toBeGreaterThan(0);
   });
 

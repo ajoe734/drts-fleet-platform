@@ -21,6 +21,8 @@ interface HttpResponseLike {
 }
 
 import type {
+  ConfirmFleetPartnerStatementCommand,
+  DisputeFleetPartnerStatementCommand,
   CreateDriverFleetAffiliationCommand,
   CreateFleetPartnerCommand,
   CreateFleetPartnerRevenueShareRuleCommand,
@@ -420,6 +422,44 @@ export class FleetPartnerController {
       periodMonth,
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Post("fleet-partner/statements/:statementId/confirm")
+  async confirmPortalStatement(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    @Headers("x-actor-id") actorId: string | undefined,
+    @Param("statementId") statementId: string,
+    @Body() command: ConfirmFleetPartnerStatementCommand,
+    @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+  ) {
+    const statement = await this.fleetPartnerService.recordStatementDecision(
+      this.documentPartner(fleetPartnerId, identity),
+      statementId,
+      this.actorId(identity?.actorId ?? actorId),
+      "confirmed",
+      command?.note,
+    );
+    return toApiSuccessEnvelope(statement, requestId);
+  }
+
+  @Post("fleet-partner/statements/:statementId/dispute")
+  async disputePortalStatement(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    @Headers("x-actor-id") actorId: string | undefined,
+    @Param("statementId") statementId: string,
+    @Body() command: DisputeFleetPartnerStatementCommand,
+    @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+  ) {
+    const statement = await this.fleetPartnerService.recordStatementDecision(
+      this.documentPartner(fleetPartnerId, identity),
+      statementId,
+      this.actorId(identity?.actorId ?? actorId),
+      "disputed",
+      command?.reason,
+    );
+    return toApiSuccessEnvelope(statement, requestId);
   }
 
   @Get("fleet-partner/dashboard")

@@ -13,6 +13,14 @@ import type { Locale } from "../../lib/translations";
 type RevenueDict = Record<string, Record<Locale, string>>;
 
 const revenueTranslations: RevenueDict = {
+  "revenue.confirmedStatement.body": {
+    en: "The {period} statement has been confirmed. The saved note and confirmation time appear below.",
+    zh: "{period} 對帳單已確認，儲存的備註與確認時間顯示於下方。",
+  },
+  "revenue.disputedStatement.body": {
+    en: "A dispute has been filed for the {period} statement. Follow the linked case below for handling progress.",
+    zh: "{period} 對帳單已提出異議，請由下方案件連結查看處理進度。",
+  },
   "revenue.noStatement.title": {
     en: "No statement for this period yet",
     zh: "本期尚無對帳單",

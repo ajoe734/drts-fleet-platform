@@ -5,6 +5,8 @@ import type {
   ComplaintTimelineEntry,
 } from "@drts/contracts";
 
+import type { PoolClient } from "pg";
+
 import { DatabaseService } from "../../common/db";
 
 type JsonRecordRow = {
@@ -72,16 +74,22 @@ export class ComplaintRepository {
     };
   }
 
-  async persistChanges(changes: PersistComplaintChanges) {
-    if (!this.isEnabled()) {
+  async persistChanges(
+    changes: PersistComplaintChanges,
+    transaction?: PoolClient,
+  ) {
+    if (!this.isEnabled() && !transaction) {
       return;
     }
 
+    const queryable: {
+      query(text: string, values: unknown[]): Promise<unknown>;
+    } = transaction ?? this.databaseService!;
     const writes: Promise<unknown>[] = [];
 
     for (const complaintCase of changes.complaintCases ?? []) {
       writes.push(
-        this.databaseService!.query(
+        queryable.query(
           `
             INSERT INTO crm.phase1_complaint_cases (
               case_no,
@@ -114,7 +122,7 @@ export class ComplaintRepository {
 
     for (const timelineEntry of changes.complaintTimelines ?? []) {
       writes.push(
-        this.databaseService!.query(
+        queryable.query(
           `
             INSERT INTO crm.phase1_complaint_timelines (
               entry_id,
@@ -143,6 +151,33 @@ export class ComplaintRepository {
     }
 
     await Promise.all(writes);
+  }
+
+  async loadSettlementState(): Promise<ComplaintState> {
+    if (!this.isEnabled())
+      return { complaintCases: [], complaintTimelines: [] };
+    const cases = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM crm.phase1_complaint_cases WHERE record->>'category' = 'settlement_dispute'`,
+    );
+    const timelines = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT timeline.record FROM crm.phase1_complaint_timelines timeline
+       JOIN crm.phase1_complaint_cases c ON c.case_no = timeline.case_no
+       WHERE c.record->>'category' = 'settlement_dispute' ORDER BY timeline.created_at`,
+    );
+    return {
+      complaintCases: cases.rows.map((row) =>
+        this.parseRecord<ComplaintCaseRecord>(
+          row.record,
+          "settlement complaint",
+        ),
+      ),
+      complaintTimelines: timelines.rows.map((row) =>
+        this.parseRecord<ComplaintTimelineEntry>(
+          row.record,
+          "settlement timeline",
+        ),
+      ),
+    };
   }
 
   reportPersistenceFailure(error: unknown, context: string) {
