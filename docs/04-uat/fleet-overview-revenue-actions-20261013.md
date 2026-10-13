@@ -45,3 +45,11 @@ The Fleet app unit suite passes **21 tests across 5 files**. Fleet and root type
 ## Verification boundary
 
 These are repository unit/jsdom checks of the production pages, loaders, components and route handler. They do not start a product server, browser/E2E server, database or Docker infrastructure on the VM. Formal independent review, exact-candidate hosted CI and immutable cloud deployment follow the existing task/release workflow; this document does not substitute local checks for those results or for full production/provider acceptance.
+
+# 既有提交檢查初始化
+
+離線安裝使用 `--ignore-scripts`，初始工作目錄尚無 Husky dispatcher。
+未推送的實作 anchor `e666c7854` 建立後，補執行既有 `pnpm exec husky`，
+再對完整任務 diff 執行原 lint-staged 的 Prettier／ESLint，全部通過。
+此紀錄以正常 Git hooks 建立後續 closeout commit；anchor 保留，未冒充
+已交審候選或沿用其不存在的 hooks 結果。沒有新增提交規則或檢查。
