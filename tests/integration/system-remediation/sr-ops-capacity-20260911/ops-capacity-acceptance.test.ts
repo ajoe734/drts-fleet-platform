@@ -55,7 +55,13 @@ type NestApplication = {
   init: () => Promise<unknown>;
   listen: (port: number, host: string) => Promise<unknown>;
   getHttpServer: () => { address: () => unknown };
-  get: <T>(token: new (...args: never[]) => T) => T;
+  get: {
+    <T>(token: new (...args: never[]) => T): T;
+    (token: string | symbol): unknown;
+  };
+  use: (
+    middleware: import("../../../../tools/system-remediation/ops-capacity/throttle-observation.mjs").CapacityThrottleObserver["middleware"],
+  ) => unknown;
   close: () => Promise<unknown>;
 };
 
@@ -149,6 +155,14 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
       const recordsPath = resolve(evidenceDir, `${runTag}.jsonl`);
       const { finalizeCapacityRun, describeCapacityFailure } =
         await import("../../../../tools/system-remediation/ops-capacity/finalization.mjs");
+      const { observeCapacityThrottle } =
+        await import("../../../../tools/system-remediation/ops-capacity/throttle-observation.mjs");
+      const { getThrottlerStorageToken } = require("@nestjs/throttler") as {
+        getThrottlerStorageToken: () => string | symbol;
+      };
+      let throttleObserver:
+        | import("../../../../tools/system-remediation/ops-capacity/throttle-observation.mjs").CapacityThrottleObserver
+        | undefined;
       const pool = new Pool({ connectionString: DATABASE_URL });
       let app: NestApplication | null = null;
       let summary: CapacitySummary | null = null;
@@ -161,6 +175,14 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
         execute: async () => {
           app = await NestFactory.create(AppModule, { logger: false });
           app.setGlobalPrefix("api", { exclude: ["health", "metrics"] });
+          // Resolve the token used by the real global guard, including the
+          // reviewed upstream storage once ordinarily integrated. Observe this
+          // instance only; preserve its methods, promise/errors, keys and TTLs.
+          throttleObserver = observeCapacityThrottle(
+            app.get(getThrottlerStorageToken()),
+            runTag,
+          );
+          app.use(throttleObserver.middleware);
           await app.init();
           await app.listen(0, "127.0.0.1");
           const address = app.getHttpServer().address() as AddressInfo;
@@ -684,6 +706,24 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
           };
         },
         cleanup: [
+          {
+            stage: "throttle-observer.restore",
+            run: () => throttleObserver?.stop(),
+          },
+          {
+            stage: "throttle-observer.write",
+            run: () => {
+              if (throttleObserver)
+                writeFileSync(
+                  resolve(evidenceDir, `${runTag}.throttle.json`),
+                  `${JSON.stringify(throttleObserver.snapshot(), null, 2)}\n`,
+                );
+            },
+          },
+          {
+            stage: "throttle-observer.complete",
+            run: () => throttleObserver?.assertComplete(),
+          },
           { stage: "app.close", run: () => app?.close() },
           { stage: "pool.end", run: () => pool.end() },
         ],
@@ -700,6 +740,7 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 real capacity + durable readback accep
                 candidateSha: process.env.CANDIDATE_SHA ?? "local",
                 workflowSha: process.env.WORKFLOW_SHA ?? "local",
                 diagnostics: {
+                  throttleObservation: throttleObserver?.summary() ?? null,
                   acceptance: failures.length
                     ? "not_established"
                     : "established",

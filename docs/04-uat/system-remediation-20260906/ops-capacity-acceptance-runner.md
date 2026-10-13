@@ -752,3 +752,17 @@ upstream integration. Source-only upstream repair/component parity cannot prove
 original112/current375HTTP429 causality or a real full baseline. No unchanged
 hosted retry or alternative workflow is requested. This checkpoint stays
 `in_progress` and is not ready for candidate handoff.
+
+### Actual singleton observation repair (continuation of the same findings)
+
+Starting checkpoint `7eb5fb2f9afb65ff783c3b4e493ae4cd7efb5b20` retains
+the original Claude/Claude2 source credit, F1–F6, original112/current375 HTTP429,
+all5850 measured/4000 staged rows, full900s, security/SQL/runtime/full-system and
+every existing OPEN/HOLD requirement. This unit adds diagnostic observation;
+neither required acceptance key has new evidence or credit.
+
+| Finding / acceptance | Actual source and repair boundary | Verification / evidence | Remaining |
+| --- | --- | --- | --- |
+| Missing actual singleton/inbound/key/hit/expiry/reset correlation | Harness resolves `getThrottlerStorageToken()` from its real `AppModule`; `throttle-observation.mjs:observeCapacityThrottle` observes the existing singleton's actual `increment` and entry hit-map mutations. Run-owned middleware links inbound/request/HTTP status; keys/identities are salted hashes, with no JWT or raw actor/tenant/order identity. Exact promises/rejections, arguments, timers and state writes remain owned by production storage. | Checkpoint implementation; checks pending, not passed. Trace is bounded60000 events and12000 entry hooks; truncation or recording/restoration/write failure stays red. `finalizeCapacityRun` independently restores hooks, writes `.throttle.json`, checks completeness, closes app and pool. | Actual guard/hosted correlation, original112/current375 causal explanation and real full baseline remain OPEN. Controlled probes cannot retroactively establish archived causes. |
+| Strict pacing feasibility / upstream integration | Existing producer and every spacing/rolling/count/deadline guard unchanged. Fresh `origin/dev=2198f21f982e232abff150387f136224c12950c0` contains reviewed `deb6a6cd`; `git merge-tree --write-tree HEAD origin/dev` exits1 with conflicts in the original runner, harness, scheduler, gate, polling and producer. | Read-only merge preview retained in canonical `.local/c123-report-worker-20261012/finalization-continuation-20261013/upstream-merge-preview.txt`; no worktree merge/reset/rewrite. Supervisor coordination requested through original task `progress`. | Explicit accepted-profile timing boundary and ordinary reviewed upstream integration require Supervisor/reviewer coordination. No unchanged hosted retry. |
+| Checks / both required keys | Initial in-worktree offline install exited1 (`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`); worktree dependencies were shared symlinks, so their targets were preserved and only these isolated worktree links pointed at the prior verified frozen97114 snapshot for scoped checks. | `observer-install.log` retained in the same original evidence appendix. No install/type/unit/runtime result inferred from that failure. | Narrow and affected checks must finish/read before further delivery. Both keys remain OPEN; this is an anchor, not a handoff. |
