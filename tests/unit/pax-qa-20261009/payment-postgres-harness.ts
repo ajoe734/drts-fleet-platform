@@ -4,6 +4,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { vi } from "vitest";
+import type { PoolClient } from "pg";
 import type { DriverTaskRecord } from "@drts/contracts";
 import { DatabaseService } from "../../../apps/api/src/common/db/database.service";
 import { PassengerJwtService } from "../../../apps/api/src/common/auth/passenger-jwt.service";
@@ -39,6 +40,45 @@ const { Pool } = require("pg") as typeof import("pg");
 export const hostedPaymentEnabled = process.env.GITHUB_ACTIONS === "true";
 const databaseUrl = process.env.DATABASE_URL;
 const runFile = promisify(execFile);
+
+/** Observe real PG errors without changing rows, SQL, parameters or rejection.
+ * Production deliberately sanitizes persistence errors; code/position/hash
+ * identify an SQL defect without logging a token, credential or raw message. */
+class DiagnosedDatabaseService extends DatabaseService {
+  private readonly observed = new WeakSet<PoolClient>();
+  override async connect(): Promise<PoolClient> {
+    const client = await super.connect();
+    if (!this.observed.has(client)) {
+      this.observed.add(client);
+      const query = client.query.bind(client);
+      client.query = ((sql: string, values?: unknown[]) =>
+        query(sql, values).catch((error: unknown) => {
+          const fields =
+            error && typeof error === "object"
+              ? (error as Record<string, unknown>)
+              : {};
+          const metadata: Record<string, string> = {
+            sqlSha256: createHash("sha256").update(sql).digest("hex"),
+          };
+          for (const key of [
+            "code",
+            "position",
+            "schema",
+            "table",
+            "column",
+            "constraint",
+          ]) {
+            if (typeof fields[key] === "string") metadata[key] = fields[key];
+          }
+          process.stderr.write(
+            `Payment QA SQL failure ${JSON.stringify(metadata)}\n`,
+          );
+          throw error;
+        })) as typeof client.query;
+    }
+    return client;
+  }
+}
 export const syntheticPolicy: PaymentCapturePolicy = {
   retryDelaysMs: [0],
   retryDefinitiveDeclines: false,
@@ -248,7 +288,7 @@ export class PaymentPostgresHarness {
     const previous = process.env.DATABASE_URL;
     try {
       process.env.DATABASE_URL = this.url(name);
-      this.database = new DatabaseService();
+      this.database = new DiagnosedDatabaseService();
     } finally {
       if (previous === undefined) delete process.env.DATABASE_URL;
       else process.env.DATABASE_URL = previous;
