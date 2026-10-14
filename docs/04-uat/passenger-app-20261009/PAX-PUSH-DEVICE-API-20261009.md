@@ -96,3 +96,34 @@ Firebase/APNs or real provider was run on this VM. Firebase/Apple/Play/provider
 inputs and true device delivery remain external work. V0108 delivery tenant is
 still nonnull; enabled tenantless FCM is unsupported. No Native/Store/full-system
 or release completion credit is implied by this source delivery.
+
+## First published source CI result and unresolved scope boundary
+
+Source SHA `32045171ffd9919313d4686cbff03f61276b153f`, [PR #2636](https://github.com/ajoe734/drts-fleet-platform/pull/2636).
+Both started runs completed and were read:
+
+- [CI 38605990630](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38605990630):
+  root unit **9317 pass / 1 fail / 47 skip**. The downloaded `test-results`
+  artifact contains actual native results: **new PG 5/0/0**, original push
+  registry/delivery/referral **30/0/0**, new atomic/device unit **27/0/0**,
+  dormant **3/0/0**. These supersede the local PG pending limitation for this
+  source SHA. They do not make the full CI green.
+- [Integration CI 38605990395](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38605990395):
+  root unit **9289 pass / 1 fail / 75 skip**, with the same sole inventory
+  failure; new PG **5 pass / 0 fail / 0 skip**. Other candidate jobs including
+  lint/typecheck/build/integration/IAM/browser checks passed. Run/job skips
+  and test skips remain distinct from passed evidence.
+
+| Unresolved finding                                             | Exact trigger and source                                                                                                                                                                                                                                                                  | Reproduction/result                                                                                                                                                                                                                                                         | Boundary and next action                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Existing idempotency inventory rejects new device registration | `tests/security/idempotency-regression-guard.test.ts:classifyRouteCommand`: transactional verb `register` and root POST+Body produce `unprotected_mutation`; line 497 expects no unexpected rows. The one new row is `PassengerPushController#register POST /passenger-app/push-devices`. | Both CI runs fail this one case. `pnpm exec vitest run tests/security/idempotency-regression-guard.test.ts --reporter=default --reporter=json --outputFile.json=.local/pax-push-device-api-20261014/idempotency-repro.json` exits 1 with the same row (4 other cases pass). | Security inventory is outside task scopes; frozen R1 also forbids a new idempotency mechanism. Supervisor must reconcile the existing registry's native token-key upsert/replay with the platform create-command policy and freeze any exact continuation/test adapter grant. No whitelist/count change, test weakening, new mechanism or evasive method rename was applied. |
+
+Detailed machine evidence stays under `.local/pax-push-device-api-20261014/`:
+`ci-failed.log`, `ci-integ-failed.log`, downloaded
+`ci-artifacts/unit-test-results.json`, `hosted-evidence.json`,
+`idempotency-repro.json`, and `supervisor-scope-coordination.md`.
+The source SHA above is preserved. This later documentation-only checkpoint
+records the failure and scope request; its auto-triggered CI is not source
+acceptance evidence. No failing candidate was handed off, no done was called,
+and no independent review/merge/acceptance completion is claimed. Original
+owner/reviewer, dependencies and acceptance key remain unchanged.
