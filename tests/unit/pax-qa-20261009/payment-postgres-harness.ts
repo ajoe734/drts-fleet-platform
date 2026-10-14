@@ -116,6 +116,8 @@ export class DiagnosedDatabaseService extends DatabaseService {
           key: string;
           holder: number;
           waiter?: number;
+          acquired: Promise<void>;
+          signalAcquired: () => void;
           entered: Promise<void>;
           signal: () => void;
         };
@@ -143,16 +145,21 @@ export class DiagnosedDatabaseService extends DatabaseService {
           probe && sql.includes("pg_advisory_xact_lock")
             ? createHash("sha256").update(String(values?.[0])).digest("hex")
             : undefined;
-        const execution = query(sql, values);
         if (probe?.proveContention && lockKeyHash && pid !== undefined) {
           if (!probe.firstLock) {
             let signal!: () => void;
+            let signalAcquired!: () => void;
             const entered = new Promise<void>((resolve) => {
               signal = resolve;
+            });
+            const acquired = new Promise<void>((resolve) => {
+              signalAcquired = resolve;
             });
             probe.firstLock = {
               key: lockKeyHash,
               holder: pid,
+              acquired,
+              signalAcquired,
               entered,
               signal,
             };
@@ -160,11 +167,31 @@ export class DiagnosedDatabaseService extends DatabaseService {
             probe.firstLock.key === lockKeyHash &&
             probe.firstLock.holder !== pid
           ) {
-            probe.firstLock.waiter = pid;
-            probe.firstLock.signal();
+            // Independent pools can deliver packets in a different order
+            // from JS dispatch. Send the second unchanged native lock query
+            // only after the first client actually acquired its lock.
+            await probe.firstLock.acquired;
           }
         }
+        const execution = query(sql, values);
+        if (
+          probe?.proveContention &&
+          probe.firstLock &&
+          probe.firstLock.key === lockKeyHash &&
+          probe.firstLock.holder !== pid
+        ) {
+          probe.firstLock.waiter = pid!;
+          probe.firstLock.signal();
+        }
+        const releaseAcquisition = () => {
+          const lock = probe?.firstLock;
+          if (lock && lock.key === lockKeyHash && lock.holder === pid)
+            lock.signalAcquired();
+        };
         const result = await execution.catch((error: unknown) => {
+          // Release the dispatch latch on native failure too; retain the
+          // original rejection and avoid leaving the second executor hung.
+          releaseAcquisition();
           const fields =
             error && typeof error === "object"
               ? (error as Record<string, unknown>)
@@ -187,6 +214,7 @@ export class DiagnosedDatabaseService extends DatabaseService {
           );
           throw error;
         });
+        releaseAcquisition();
         if (probe && pid !== undefined) {
           probe.statements.push({
             pid,
