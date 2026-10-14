@@ -137,7 +137,8 @@ export class PaymentPostgresHarness {
     await this.admin.query(`CREATE DATABASE "${this.template}"`);
     this.created.add(this.template);
     // Require the native client: never take the runner's Docker fallback.
-    await runFile("psql", ["--version"]);
+    const { stdout: psqlVersion } = await runFile("psql", ["--version"]);
+    const { stdout: checkout } = await runFile("git", ["rev-parse", "HEAD"]);
     const { stdout } = await runFile(
       "bash",
       ["operations/database/db-apply.sh"],
@@ -146,6 +147,19 @@ export class PaymentPostgresHarness {
         timeout: 180000,
         maxBuffer: 16 * 1024 * 1024,
       },
+    );
+    process.stdout.write(
+      `Payment QA migration execution ${JSON.stringify({
+        argv: ["bash", "operations/database/db-apply.sh"],
+        cwd: process.cwd(),
+        utc: new Date().toISOString(),
+        checkoutSha: checkout.trim(),
+        node: process.version,
+        psql: psqlVersion.trim(),
+        runId: process.env.GITHUB_RUN_ID,
+        ownedDatabase: this.template,
+        exitCode: 0,
+      })}\n${stdout}\n`,
     );
     const verifier = new Pool({ connectionString: this.url(this.template) });
     try {
