@@ -13,6 +13,7 @@ import { notificationExpiresAt } from "./partner-notification.transport";
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import type { PassengerReceiptResponse } from "@drts/contracts";
 import { CertificateSupportService } from "../certificate-support/certificate-support.service";
+import { ComplaintService } from "../complaint/complaint.service";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { DatabaseService } from "../../common/db/database.service";
 import type { OwnedMobilityQueryExecutor } from "../owned-mobility/owned-mobility.repository";
@@ -197,6 +198,8 @@ export class MultiTaxiService implements OnModuleInit {
     private readonly firstPartyTransport?: FirstPartyNotificationTransport,
     @Optional()
     private readonly certificateSupportService?: CertificateSupportService,
+    @Optional()
+    private readonly complaintService?: ComplaintService,
   ) {}
 
   async onModuleInit() {
@@ -942,6 +945,8 @@ export class MultiTaxiService implements OnModuleInit {
   ) {
     const token = await this.requireAccessToken(accessToken, "ride:rate");
     const order = this.requireMultiTaxiOrder(token.orderId);
+    if (this.resolvePassengerSubjectRef(order) !== token.passengerSubjectRef)
+      throw this.invalidPassengerToken();
     if (order.status !== "completed") {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -966,14 +971,47 @@ export class MultiTaxiService implements OnModuleInit {
     const score = this.requireRatingScore(command.score);
     const tags = this.normalizeRatingTags(command.tags);
     const comment = command.comment?.trim() || null;
-    const existing = await this.findPassengerRating(
-      order.orderId,
-      token.passengerSubjectRef,
-    );
-    if (existing) {
-      this.assertIdempotentRating(existing, score, tags, comment);
-      return existing;
+    if (
+      command.contactRequested !== undefined &&
+      typeof command.contactRequested !== "boolean"
+    )
+      throw new ApiRequestError(
+        400,
+        "PASSENGER_RATING_CONTACT_INVALID",
+        "contactRequested must be a boolean when provided.",
+      );
+    const durable = this.repository?.isEnabled?.() ?? false;
+    if (!durable && command.contactRequested !== undefined)
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_RATING_STORAGE_UNAVAILABLE",
+        "Rating contact choices require durable storage.",
+      );
+    if (durable && !this.complaintService)
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Rating consent storage is unavailable.",
+      );
+    // Durable retries always enter the transaction and read the original choice.
+    // Keep the existing server-free legacy behavior for omitted-contact callers.
+    if (!durable) {
+      const existing = await this.findPassengerRating(
+        order.orderId,
+        token.passengerSubjectRef,
+      );
+      if (existing) {
+        this.assertIdempotentRating(existing, score, tags, comment);
+        return existing;
+      }
     }
+    const consent = durable
+      ? this.complaintService!.preparePassengerRideRatingHook(
+          token,
+          command.contactRequested,
+          { score, tags, comment },
+        )
+      : undefined;
 
     const now = new Date().toISOString();
     const rating: PassengerTripRatingRecord = {
@@ -991,11 +1029,20 @@ export class MultiTaxiService implements OnModuleInit {
     };
     const persisted = (await this.repository?.persistPassengerRating(
       rating,
+      undefined,
+      consent
+        ? {
+            token,
+            tokenDigest: this.digestAccessToken(accessToken.trim()),
+            execute: consent.execute,
+          }
+        : undefined,
     )) ?? {
       rating,
       summary: null,
     };
     this.assertIdempotentRating(persisted.rating, score, tags, comment);
+    await consent?.afterCommit();
     this.ratingsByPassengerOrder.set(
       this.ratingKey(order.orderId, token.passengerSubjectRef),
       persisted.rating,

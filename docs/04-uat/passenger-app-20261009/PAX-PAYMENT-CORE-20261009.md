@@ -1110,3 +1110,77 @@ worktree; Supervisor hooksPath and original hook chain are preserved. Inherited
 canonical dependency symlinks were not installed/relinked/removed; unit runners
 may write their shared results cache. No VM product/dev/preview/API/PG/browser/
 Docker runtime, real provider, secrets or deployment was started.
+
+## 2026-10-14 continuation: actual PostgreSQL binding parameter inference
+
+Original owner Codex normally reopened the original task before editing, then
+started this precise repair under the frozen source specification
+`PAX-PAYMENT-CORE-ACTUAL-PG-BINDING-SQL-REPAIR-20261014.md` (SHA256
+`e0a025dd3216a8ae4aa60579642bd76afb43f627a09d9c44ff48481cd7530c9f`).
+Independent reviewer remains Codex2. The accepted old candidate
+`bed2fa8baafefeaa243283a68915eb36374165f7`, generation
+`764b3e32d40248f892938258fbf24eda`, PR #2555 and protected merge
+`fc77f579d087c019660128d85c6ec4a8644a989e` remain historical evidence;
+their review/CI credit does not apply to this new candidate.
+This isolated branch starts at accepted dev
+`32eb87f19e2a7ccb978057785bfad4116246916f`.
+
+The real call path is `PaymentMethodService.bind` → committed
+`PaymentMethodRepository.claimBinding` → external PSP exchange → encrypted
+`PaymentMethodRepository.completeBinding` → account-first transaction → token
+INSERT and completed journal UPDATE. V0115 declares
+`passenger.psp_tokens.drts_passenger_id varchar(100)` referencing the V0109
+account. In the INSERT, the same unknown `$2` occurred in the varchar target
+assignment and the default-card comparison inside `NOT EXISTS`. PostgreSQL
+deduced incompatible text/varchar types before executing the INSERT; the
+repository sanitized the exception and the lawful mounted bind returned 503.
+
+Immutable QA source `7c65bc2ab66922d97997eebe31ab2b320763fe1d`, hosted run
+[38507808648](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38507808648),
+job `115669387402`, executed 27 cases: **2 PASS / 25 FAIL / 0 SKIP** after
+verifying all **115 formal files / 114 distinct checksum payloads**.
+Production checkout was synthetic merge
+`ddbe6e74e2536cdc1d6de589724a761a8655fa7c`, tree-equal to 7c65.
+The first binding/default PG case and lawful mounted POST both failed at this
+SQL prerequisite. Twenty-six log occurrences are not 26 cases; downstream
+charge/refund behavior was not proved. The earlier migration-beforeAll failure
+with 27 skips is separate history. Qualification is retained at canonical
+`.local/goal-continuation-20261014T0238-root/qa-payment-prerequisite/hosted-ci/corrected-H1/genuine-binding-SQL-failure-qualification.json`.
+
+The only production change explicitly types both occurrences as `$2::varchar`.
+There is no length typmod on either cast; the existing column still enforces
+100 characters rather than silently truncating an identifier. The statement's
+nine columns, eight parameter values, default predicate, encrypted envelope,
+account/claim locks, replay branch, journal outcome and rollback/error handling
+are retained. No schema, migration, financial policy, PSP interface, QA harness,
+workflow, notice or security mechanism changes accompany this repair.
+
+`tests/unit/pax-payment-core-20261009/binding.postgres.test.ts` calls the actual
+service, repository, DatabaseService and cipher with the existing nonproduction
+fake provider as the external PSP boundary. It uses the formal `db-apply.sh`
+runner in a randomly named, owned hosted database, verifies every checkout
+migration signature and checks filename/version provenance. It neither copies
+business SQL nor creates substitute tables. Native psql is required before the
+runner, preventing Docker fallback. Each case has distinct synthetic accounts;
+cleanup drops only the successfully created test database. On this VM the whole
+file skips before opening any connection, even with an inherited database URL.
+On GitHub Actions missing DATABASE_URL or psql is a failure.
+
+| Finding / acceptance                          | Source and old → repaired result                                                                                                                                                                                                                                                                                                                                           | Commands / completed evidence                                                                                                                                                                                                                                                                            | Remaining limits                                                                                                                                                       |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Lawful bind rejected by mixed `$2` inference  | `PaymentMethodRepository.completeBinding` INSERT, V0115 varchar(100); actual old hosted failure above → six own repaired-source PG cases pending hosted execution                                                                                                                                                                                                          | New PG file tests first/default + second/nondefault encrypted storage, same-key service/repository replay after default change, foreign claim refusal, inactive-account refusal, real V0115 CHECK rollback with pending-claim retry, full 100-character owner. VM result: **6 SKIP**, no PG pass claimed | New hosted results must identify actual production checkout and executed cases; original QA owns unchanged 19 PG / 8 HTTP predicates after accepted source integration |
+| Existing affected Payment regression          | Actual original binding/charge/refund/guards/cipher/notice units; DB/provider responses remain disclosed external mocks                                                                                                                                                                                                                                                    | `pnpm exec vitest run tests/unit/pax-payment-core-20261009`: exit 0, **15 files / 305 PASS**, new PG file **6 SKIP**; `payment-units.log`                                                                                                                                                                | Unit pass does not prove PostgreSQL or HTTP behavior                                                                                                                   |
+| Existing API config regression                | Actual module factories/injection with mocked external dependencies                                                                                                                                                                                                                                                                                                        | `pnpm --filter @drts/api exec vitest run tests/unit/payment-capture-config.test.ts tests/unit/payment-recovery-notice-config.test.ts`: exit 0, **2 files / 26 PASS / 0 SKIP**; `api-units.log`                                                                                                           | No real financial policy or notice expiry supplied                                                                                                                     |
+| Static checks / inherited build prerequisites | Scoped ESLint exit 0; first API typecheck exit 2 from absent/stale branch-local contract/auth dist outputs → own-worktree package builds and API typecheck exit 0. Original root typecheck exit 2 from inherited foreign-worktree ApiClient type identity / missing passenger-client output → identical root include/options with explicit own-source package paths exit 0 | `lint.log`, `api-typecheck.log`, `contracts-build.log`, `auth-build.log`, `api-typecheck-fixed.log`, `root-typecheck.log`, `source-typecheck.log`, `tsconfig.source-check.json` in the sidecar                                                                                                           | Both initial compiler failures retained; the own-source follow-up is not a claim that the original unmodified root command passed                                      |
+| `pax-payment_bind_charge_and_states`          | **Unrecorded**, original source/SQL/fault matrix preserved                                                                                                                                                                                                                                                                                                                 | Exact new SHA, remote/PR identity, completed checks and matching CI are retained in canonical `.local/pax-payment-binding-sql-20261014/`                                                                                                                                                                 | Codex2 independent review, protected merge, unchanged full Payment PG/HTTP/PSP acceptance still required                                                               |
+| `pax-payment_security_and_recovery`           | **Unrecorded**, existing account/claim/encryption/refusal/unknown/readback controls retained                                                                                                                                                                                                                                                                               | Original rejection/rollback tests plus new hosted binding cases above; full result sidecar preserves fail/pass/skip separately                                                                                                                                                                           | Approved actual financial policy/explicit notice expiry/lawful captured route/device/provider and genuine native/manual/global acceptance remain open                  |
+
+Commands run in the assigned isolated worker cwd on 2026-10-14 UTC using
+Node 22.23.2, pnpm 10.33.0, Vitest 4.1.4 and TypeScript 5.9.3. Publication
+identity and final result logs/hashes are recorded in the canonical sidecar to
+avoid a self-referential commit SHA. Existing generated Husky wrappers were
+copied into this worktree so the original hook chain executes; hooksPath,
+canonical dependency symlinks and guard configuration remain intact. Package
+builds generate ignored outputs only in this worktree. Unit runners may write
+shared caches. No VM product/API/PG/preview/browser/Docker runtime, real
+provider call, deployment, acceptance credit or owner self-review occurred.
