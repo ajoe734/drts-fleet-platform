@@ -1,3 +1,4 @@
+import { enabledRegistryRepository } from "../registry-driver-master-durable-ack-20261014/storage-fixture";
 import { expect, vi } from "vitest";
 
 import type { DriverProfileRecord } from "@drts/contracts";
@@ -84,6 +85,7 @@ export function fixture() {
     { publishSupplyLifecycleUpdated: vi.fn() } as never,
     audit,
     service,
+    enabledRegistryRepository(),
   );
   const registryController = new RegulatoryRegistryController(registry);
   const reload = async () => {

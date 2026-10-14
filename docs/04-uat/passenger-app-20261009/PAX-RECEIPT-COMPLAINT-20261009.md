@@ -895,7 +895,7 @@ resource-bound confirmation／idempotency conflict 保留。正式 V0056 第65�
 aggregates／active filter／version／time、transaction／rollback、moderation audit、
 replay、consent／CRM。沒有 migration／schema／契約／auth／workflow／provider 變更。
 source anchor `63b85caf665038d4b2c09620b25c3742cca3a4aa` 已普通 non-force push；
-final candidate 只再增加本節證據，publication receipt 綁定 final SHA／remote／PR。
+pre-sync35e146ebb 僅增加本節證據；因 PR merge conflict，在尚未 handoff 且無 CI run 時普通 merge 已接受的 origin/dev，保留所有 published commits。最終對 dev 的產品差異仍只有這兩處 casts，publication receipt 綁定 final SHA／remote／PR。
 
 本輪 machine evidence 保存在 canonical root 的
 `.local/pax-receipt-complaint-20261009/r6-20261014T075651-owner/`，
