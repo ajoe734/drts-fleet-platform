@@ -102,4 +102,9 @@ export const t = {
   IssueCategory: "問題類別",
   LostItemDesc: "遺失物描述",
   DetailDescription: "詳細說明",
+  RideCancelledDetail: "此行程已取消。如需乘車請重新預約，或聯絡客服協助。",
+  OrderNumber: "訂單編號",
+  CancellationTime: "取消時間",
+  PickupLocation: "上車地點",
+  DropoffLocation: "下車地點",
 };

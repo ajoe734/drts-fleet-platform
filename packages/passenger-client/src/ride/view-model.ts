@@ -78,6 +78,7 @@ export interface PassengerRideFixture {
   etaSub?: string;
   etaTone?: "accent" | "success";
   requestedPickupText?: string;
+  cancelledAtText?: string;
   routeDistanceKm?: string;
   routeDurationMinutes?: string;
   routeFareMode?: "range" | "anomaly";

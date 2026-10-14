@@ -1734,6 +1734,137 @@ function ActionGroup({ children }: { children: ReactNode }) {
   );
 }
 
+function CancelledCard({ fixture }: { fixture: PassengerRideFixture }) {
+  return (
+    <Card>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+          fontSize: 13,
+        }}
+      >
+        <div
+          style={{
+            color: passengerChrome.muted,
+            fontSize: 12.5,
+            lineHeight: 1.6,
+          }}
+        >
+          {t.RideCancelledDetail}
+        </div>
+        {fixture.orderNo ? (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              paddingTop: 8,
+              borderTop: `1px solid ${passengerChrome.borderSoft}`,
+            }}
+          >
+            <span style={{ color: passengerChrome.muted }}>{t.OrderNumber}</span>
+            <span style={{ fontFamily: monoFont, fontWeight: 600 }}>
+              {fixture.orderNo}
+            </span>
+          </div>
+        ) : null}
+        {fixture.cancelledAtText ? (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span style={{ color: passengerChrome.muted }}>{t.CancellationTime}</span>
+            <span>{fixture.cancelledAtText}</span>
+          </div>
+        ) : null}
+        {fixture.pickupLabel ? (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span style={{ color: passengerChrome.muted }}>{t.PickupLocation}</span>
+            <span
+              style={{
+                fontWeight: 600,
+                maxWidth: "65%",
+                textAlign: "right",
+              }}
+            >
+              {fixture.pickupLabel}
+            </span>
+          </div>
+        ) : null}
+        {fixture.dropoffLabel ? (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span style={{ color: passengerChrome.muted }}>{t.DropoffLocation}</span>
+            <span
+              style={{
+                fontWeight: 600,
+                maxWidth: "65%",
+                textAlign: "right",
+              }}
+            >
+              {fixture.dropoffLabel}
+            </span>
+          </div>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
+function CancelledActions({
+  authMode,
+}: {
+  token?: string | undefined;
+  authMode?: "id" | "token" | undefined;
+  onOpenComplaint?: (() => void) | undefined;
+}) {
+  return (
+    <ActionGroup>
+      {authMode === "token" ? (
+        <a
+          href="tel:02-2944-0985"
+          style={{
+            ...buttonStyle("secondary"),
+            display: "block",
+            textAlign: "center",
+            textDecoration: "none",
+          }}
+        >
+          {t.ContactSupportPhone}
+        </a>
+      ) : (
+        <Link
+          href="/rides"
+          style={{
+            ...buttonStyle("secondary"),
+            display: "block",
+            textAlign: "center",
+            textDecoration: "none",
+          }}
+        >
+          {t.RideHistory}
+        </Link>
+      )}
+    </ActionGroup>
+  );
+}
+
 function Actions({
   fixture,
   token,
@@ -1750,6 +1881,15 @@ function Actions({
   onFixtureUpdate?: ((fixture: PassengerRideFixture) => void) | undefined;
 }) {
   const [actionPending, setActionPending] = useState(false);
+  if (fixture.status === "行程已取消") {
+    return (
+      <CancelledActions
+        token={token}
+        authMode={authMode}
+      />
+    );
+  }
+
   const runLiveAction = (
     action: "cancel" | "contact",
     callback: (() => void) | undefined,
@@ -2083,13 +2223,20 @@ function RideContent({
   if (fixture.status === "行程已取消") {
     return (
       <>
-        <MapCard fixture={fixture} />
-        <FareCard fixture={fixture} />
-        <Actions
-          fixture={fixture}
+        <CancelledCard fixture={fixture} />
+        <ComplaintForm
           token={token}
           authMode={authMode}
-          onFixtureUpdate={onFixtureUpdate}
+          orderNo={fixture.orderNo}
+          isOpen={false}
+          onOpenChange={(open) => {
+            if (open) onOpenComplaint?.();
+          }}
+        />
+        <CancelledActions
+          token={token}
+          authMode={authMode}
+          onOpenComplaint={onOpenComplaint}
         />
       </>
     );
@@ -2443,7 +2590,9 @@ export function PassengerRidePage({
             mapPassengerRideAuthorityToFixture(nextView.data, token, kind),
           );
           const newCalculatedAt =
-            nextView.data.assignment?.eta?.calculatedAt;
+            nextView.data.order?.status !== "cancelled"
+              ? nextView.data.assignment?.eta?.calculatedAt
+              : null;
           if (newCalculatedAt) {
             const ts = new Date(newCalculatedAt).getTime();
             setLastEventTime(Number.isNaN(ts) ? 0 : ts);
@@ -2463,7 +2612,10 @@ export function PassengerRidePage({
     (next: PassengerRideFixture) => {
       startTransition(() => {
         setLiveFixture(next);
-        const calculatedAt = next.assignment?.eta?.calculatedAt;
+        const calculatedAt =
+          next.status !== "行程已取消"
+            ? next.assignment?.eta?.calculatedAt
+            : null;
         if (calculatedAt) {
           const ts = new Date(calculatedAt).getTime();
           setLastEventTime(Number.isNaN(ts) ? 0 : ts);
@@ -2501,11 +2653,14 @@ export function PassengerRidePage({
         startTransition(() => {
           setLiveFixture(mapPassengerRideAuthorityToFixture(view, token, kind));
           setAuthorityError(null);
-          if (view.assignment?.eta?.calculatedAt) {
+          if (
+            view.order?.status !== "cancelled" &&
+            view.assignment?.eta?.calculatedAt
+          ) {
             const ts = new Date(view.assignment.eta.calculatedAt).getTime();
             setLastEventTime(Number.isNaN(ts) ? 0 : ts);
           } else {
-            setLastEventTime(0); // Make it stale if missing
+            setLastEventTime(0); // Make it stale if missing or cancelled
           }
         });
         startSubscription();

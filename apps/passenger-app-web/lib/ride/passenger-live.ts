@@ -323,7 +323,10 @@ export function mapPassengerRideAuthorityToFixture(
     token,
     orderNo: view.order.orderNo,
     screenId,
-    title: screenTitle(screenId),
+    title:
+      view.order.status === "cancelled"
+        ? "Cancelled Ride"
+        : screenTitle(screenId),
     status: statusLabel(view.order.status),
     ...(quoteAnomalyCode && screenId === "A04" ? { quoteAnomalyCode } : {}),
     ...(view.order.status === "created"
@@ -333,6 +336,9 @@ export function mapPassengerRideAuthorityToFixture(
       ? {
           requestedPickupText: `預約時間 ${formatDateTime(view.order.requestedPickupAt)}`,
         }
+      : {}),
+    ...(view.order.status === "cancelled" && view.order.cancelledAt
+      ? { cancelledAtText: formatDateTime(view.order.cancelledAt) }
       : {}),
     ...(view.order.status === "cancelled" ||
     assignment?.eta.minutes === null ||
@@ -351,17 +357,22 @@ export function mapPassengerRideAuthorityToFixture(
           routeDurationMinutes: `約 ${Math.ceil(durationSeconds / 60)} 分鐘`,
         }),
     routeFareMode: screenId === "A04" ? "anomaly" : "range",
-    routeFareText:
-      screenId === "A04"
-        ? "目前無法取得正式報價"
-        : payableFareMinor !== null
-          ? `應付 ${formatMoney(payableFareMinor)}`
-          : fareMinor === null
-            ? "依計費表實際金額收費"
-            : `預估 ${formatMoney(fareMinor)}`,
+    ...(view.order.status === "cancelled"
+      ? {}
+      : {
+          routeFareText:
+            screenId === "A04"
+              ? "目前無法取得正式報價"
+              : payableFareMinor !== null
+                ? `應付 ${formatMoney(payableFareMinor)}`
+                : fareMinor === null
+                  ? "依計費表實際金額收費"
+                  : `預估 ${formatMoney(fareMinor)}`,
+        }),
     ...(screenId === "A04"
       ? { routeFareHint: "正式報價完成前不會為您確認訂單" }
-      : assignment?.routeFare?.fareChangeRuleDisplayText
+      : view.order.status !== "cancelled" &&
+          assignment?.routeFare?.fareChangeRuleDisplayText
         ? {
             routeFareHint: assignment.routeFare.fareChangeRuleDisplayText,
           }
@@ -375,11 +386,13 @@ export function mapPassengerRideAuthorityToFixture(
       view.order.dropoff?.address ||
       "",
     mapState:
-      assignment?.eta.locationFreshness === "fresh"
-        ? "fresh"
-        : assignment
-          ? "stale"
-          : "missing",
+      view.order.status === "cancelled"
+        ? "missing"
+        : assignment?.eta.locationFreshness === "fresh"
+          ? "fresh"
+          : assignment
+            ? "stale"
+            : "missing",
     actionMode: view.actions.canContact
       ? "driver_contact_ready"
       : "support_only",
@@ -397,11 +410,15 @@ export function mapPassengerRideAuthorityToFixture(
           contactSafetyNote: "目前無法直接聯絡司機，請改聯絡客服協助轉達。",
         }
       : {}),
-    canCancel: view.actions.canCancel,
-    canRate: view.actions.canRate,
-    canContact: view.actions.canContact,
-    canReadReceipt: view.actions.canReadReceipt,
-    ...(view.actions.canCancel
+    canCancel:
+      view.order.status === "cancelled" ? false : view.actions.canCancel,
+    canRate:
+      view.order.status === "cancelled" ? false : view.actions.canRate,
+    canContact:
+      view.order.status === "cancelled" ? false : view.actions.canContact,
+    canReadReceipt:
+      view.order.status === "cancelled" ? false : view.actions.canReadReceipt,
+    ...(view.order.status !== "cancelled" && view.actions.canCancel
       ? {
           cancelNote: "取消條件依目前訂單狀態計算",
           actionLabel: "取消行程",
@@ -698,7 +715,7 @@ function resolveScreenId(
   if (kind === "fares") return "A03";
   if (kind === "receipt") return "P5-10";
   if (view.order.status === "cancelled") {
-    return !view.assignment ? "P5-01" : "P5-11";
+    return "P5-01";
   }
   if (view.order.status === "completed") return view.rating ? "P5-09" : "P5-08";
   const effectiveAnomaly =
