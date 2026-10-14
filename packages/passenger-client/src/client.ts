@@ -279,4 +279,99 @@ export class PassengerClient implements PassengerViewModel {
       return this.sessionStatus;
     }
   }
+
+  async getRides(
+    query?: import("./types.js").GetPassengerRidesQuery,
+  ): Promise<import("./types.js").PassengerRideListResponse> {
+    const qs = query
+      ? "?" +
+        Object.entries(query)
+          .filter(([, v]) => v !== undefined)
+          .map(
+            ([k, v]) =>
+              `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`,
+          )
+          .join("&")
+      : "";
+    return this.request<import("./types.js").PassengerRideListResponse>(
+      `/api/passenger-app/rides${qs}`,
+    );
+  }
+
+  async getActiveRides(): Promise<
+    import("./types.js").PassengerRideListResponse
+  > {
+    return this.request<import("./types.js").PassengerRideListResponse>(
+      "/api/passenger-app/rides/active",
+    );
+  }
+
+  async getRide(
+    id: string,
+  ): Promise<import("./types.js").PassengerRideResponse> {
+    return this.request<import("./types.js").PassengerRideResponse>(
+      `/api/passenger-app/rides/${encodeURIComponent(id)}`,
+    );
+  }
+
+  async cancelRide(
+    id: string,
+    command: import("./types.js").CancelPassengerRideCommand,
+  ): Promise<import("./types.js").CancelPassengerRideResponse> {
+    return this.request<import("./types.js").CancelPassengerRideResponse>(
+      `/api/passenger-app/rides/${encodeURIComponent(id)}/cancel`,
+      {
+        method: "POST",
+        body: JSON.stringify(command),
+      },
+    );
+  }
+
+  async rateRide(
+    id: string,
+    command: import("./types.js").RatePassengerRideCommand,
+  ): Promise<import("./types.js").RatePassengerRideResponse> {
+    return this.request<import("./types.js").RatePassengerRideResponse>(
+      `/api/passenger-app/rides/${encodeURIComponent(id)}/ratings`,
+      {
+        method: "POST",
+        body: JSON.stringify(command),
+      },
+    );
+  }
+
+  async getReceipt(
+    id: string,
+  ): Promise<import("./types.js").PassengerReceiptResponse> {
+    return this.request<import("./types.js").PassengerReceiptResponse>(
+      `/api/passenger-app/rides/${encodeURIComponent(id)}/receipt`,
+    );
+  }
+
+  async createComplaint(
+    id: string,
+    command: import("./types.js").CreatePassengerComplaintCommand,
+    idempotencyKey?: string,
+  ): Promise<import("./types.js").CreatePassengerComplaintResponse> {
+    const cryptoObj =
+      typeof globalThis !== "undefined"
+        ? (globalThis as { crypto?: { randomUUID?: () => string } }).crypto
+        : undefined;
+    const key =
+      idempotencyKey ||
+      (command as any).idempotencyKey ||
+      (typeof cryptoObj?.randomUUID === "function"
+        ? `complaint-${cryptoObj.randomUUID()}`
+        : `complaint-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+    return this.request<import("./types.js").CreatePassengerComplaintResponse>(
+      `/api/passenger-app/rides/${encodeURIComponent(id)}/complaints`,
+      {
+        method: "POST",
+        headers: {
+          "idempotency-key": key,
+        },
+        body: JSON.stringify(command),
+      },
+    );
+  }
 }

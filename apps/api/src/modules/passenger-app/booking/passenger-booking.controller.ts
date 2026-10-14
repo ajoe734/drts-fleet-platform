@@ -8,8 +8,10 @@ import {
   HttpStatus,
   Headers,
   Sse,
+  UseGuards,
 } from "@nestjs/common";
 import { PassengerBookingService } from "./passenger-booking.service";
+import { PassengerRideEventsGuard } from "./passenger-ride-events.guard";
 import {
   CurrentIdentity,
   RequireRealms,
@@ -137,6 +139,7 @@ export class PassengerBookingController {
   }
 
   @Sse(":id/events")
+  @UseGuards(PassengerRideEventsGuard)
   getRideEvents(
     @CurrentIdentity() identity: RequestIdentity,
     @Param("id") orderId: string,

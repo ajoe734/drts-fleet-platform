@@ -55,3 +55,19 @@ export interface PassengerViewModel {
   refreshSession(): Promise<void>;
   getSessionStatus(): Promise<SessionStatus>;
 }
+
+export type {
+  GetPassengerRidesQuery,
+  PassengerRideListResponse,
+  GetActivePassengerRidesQuery,
+  GetPassengerRideQuery,
+  PassengerRideResponse,
+  CancelPassengerRideCommand,
+  CancelPassengerRideResponse,
+  RatePassengerRideCommand,
+  RatePassengerRideResponse,
+  GetPassengerReceiptQuery,
+  PassengerReceiptResponse,
+  CreatePassengerComplaintCommand,
+  CreatePassengerComplaintResponse,
+} from "@drts/contracts";
