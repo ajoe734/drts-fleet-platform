@@ -30,7 +30,7 @@ export function observe<T>(result: T) {
   return { state, settled };
 }
 
-export function fixture() {
+export function fixture(storage: "enabled" | "missing" = "enabled") {
   // Production service/controller/repositories/audit; only external queries
   // are controlled. These maps model query ACKs, not PostgreSQL behavior.
   const records = new Map<string, string>();
@@ -104,7 +104,7 @@ export function fixture() {
     ops,
     audit,
     profile,
-    repository,
+    storage === "missing" ? undefined : repository,
   );
   const controller = new RegulatoryRegistryController(service);
   const reload = async () => {

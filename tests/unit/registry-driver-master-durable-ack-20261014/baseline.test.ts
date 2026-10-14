@@ -67,6 +67,7 @@ describe.each(operations)("%s actual driver master ACK", (operation) => {
     f.writes[0].commit();
     await call.settled;
     expect(call.state.status).toBe("fulfilled");
+    expect(call.state.value?.data).toEqual(read(f, operation));
     expect(JSON.parse(f.records.get(driverId(operation))!)).toEqual(
       read(f, operation),
     );

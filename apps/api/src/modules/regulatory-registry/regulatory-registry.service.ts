@@ -1208,7 +1208,7 @@ export class RegulatoryRegistryService
 
       const updated = this.decorateDriver(driver);
       await this.saveDriverMaster(updated, "update_driver_service_buckets");
-      this.publishDriverMaster(updated);
+      this.publishDriverMaster(driver);
       this.recordAudit(
         {
           actorId: "platform-admin",
@@ -1284,7 +1284,7 @@ export class RegulatoryRegistryService
 
       const updated = this.decorateDriver(driver);
       await this.saveDriverMaster(updated, "update_driver_lifecycle");
-      this.publishDriverMaster(updated);
+      this.publishDriverMaster(driver);
       this.recordAudit(
         {
           actorId: "platform-admin",
@@ -1335,7 +1335,7 @@ export class RegulatoryRegistryService
 
       const updated = this.decorateDriver(driver);
       await this.saveDriverMaster(updated, "update_driver_licenses");
-      this.publishDriverMaster(updated);
+      this.publishDriverMaster(driver);
       this.recordAudit(
         {
           actorId: "platform-admin",
@@ -1403,6 +1403,8 @@ export class RegulatoryRegistryService
   }
 
   private publishDriverMaster(driver: DriverRegistryRecord) {
+    // Keep the declared validity flag in local master state; expiry validity
+    // remains derived by decorateDriver, including after a later renewal.
     this.drivers = this.drivers.map((current) =>
       current.driverId === driver.driverId ? this.cloneDriver(driver) : current,
     );

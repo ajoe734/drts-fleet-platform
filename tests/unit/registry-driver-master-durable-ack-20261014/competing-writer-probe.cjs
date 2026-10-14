@@ -1,0 +1,127 @@
+// Diagnostic only: inherited non-master full-row writer is outside task scope.
+// Run from apps/api with node -r ts-node/register/transpile-only <this file>.
+// This intentionally detects the obstruction; exit 0 is NOT acceptance credit.
+const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
+const path = require("node:path");
+const sourceRoot = path.resolve(__dirname, "../../..");
+const apiSource = path.join(sourceRoot, "apps/api/src");
+// Worker node_modules is shared; resolve this checkout's built contracts.
+const Module = require("node:module");
+const originalLoad = Module._load;
+Module._load = function (request, parent, isMain) {
+  return originalLoad.call(
+    this,
+    request === "@drts/contracts" || request === "@drts/control-plane-auth"
+      ? path.join(sourceRoot, "packages", request.slice(6), "dist/index.js")
+      : request,
+    parent,
+    isMain,
+  );
+};
+const { OpsDispatchEventsService } = require(
+  path.join(apiSource, "common/ops-dispatch-events.service.ts"),
+);
+const { AuditNotificationService } = require(
+  path.join(
+    apiSource,
+    "modules/audit-notification/audit-notification.service.ts",
+  ),
+);
+const { DriverProfileService } = require(
+  path.join(apiSource, "modules/driver-profile/driver-profile.service.ts"),
+);
+const { RegulatoryRegistryRepository } = require(
+  path.join(
+    apiSource,
+    "modules/regulatory-registry/regulatory-registry.repository.ts",
+  ),
+);
+const { RegulatoryRegistryService } = require(
+  path.join(
+    apiSource,
+    "modules/regulatory-registry/regulatory-registry.service.ts",
+  ),
+);
+
+async function run() {
+  const writes = [];
+  let stored;
+  const query = async (sql, params) => {
+    if (!sql.includes("INSERT INTO reg.phase1_registry_drivers"))
+      return { rows: [] };
+    const record = JSON.parse(params[5]);
+    return new Promise((resolve) =>
+      writes.push({
+        record,
+        commit: () => {
+          stored = record;
+          resolve({ rows: [] });
+        },
+      }),
+    );
+  };
+  const repository = new RegulatoryRegistryRepository({
+    isEnabled: () => true,
+    query,
+  });
+  const audit = new AuditNotificationService();
+  const service = new RegulatoryRegistryService(
+    new OpsDispatchEventsService(new EventEmitter()),
+    audit,
+    new DriverProfileService(audit),
+    repository,
+  );
+  const master = service.updateDriverLicenses("drv-demo-001", {
+    licensesValid: false,
+  });
+  for (let i = 0; i < 40; i++) await Promise.resolve();
+  const workState = service.updateDriverWorkState("drv-demo-001", {
+    workState: "paused",
+  });
+  assert.equal(
+    writes.length,
+    2,
+    "inherited work-state bypasses the master queue",
+  );
+  assert.equal(workState.workState, "paused");
+  writes[0].commit();
+  const acknowledgedMaster = await master;
+  assert.equal(acknowledgedMaster.licensesValid, false);
+  writes[1].commit();
+  for (let i = 0; i < 40; i++) await Promise.resolve();
+  const current = service
+    .listDrivers()
+    .find((driver) => driver.driverId === "drv-demo-001");
+  assert.equal(
+    stored.licensesValid,
+    true,
+    "stale inherited full-row query reverts acknowledged master licenses",
+  );
+  assert.equal(current.licensesValid, false);
+  assert.equal(
+    current.workState,
+    "available",
+    "master publication overwrites inherited local work-state side effect",
+  );
+  process.stdout.write(
+    JSON.stringify(
+      {
+        diagnostic: "outside-scope updateDriverWorkState full-row race",
+        obstructionConfirmed: true,
+        acknowledgedMaster,
+        inheritedResponse: workState,
+        finalStored: stored,
+        finalMemory: current,
+        storageBoundary:
+          "controlled external query; no real PostgreSQL or HTTP",
+      },
+      null,
+      2,
+    ) + "\n",
+  );
+}
+run().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
