@@ -6,6 +6,7 @@ import type {
   ComplaintCaseRecord,
   ComplaintTimelineEntry,
   PassengerTripRatingRecord,
+  PassengerRideAccessToken,
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
@@ -415,15 +416,122 @@ export class ComplaintRepository {
     return stored;
   }
 
-  /** Keyset pages of this source only; no global CRM snapshot refresh. */
+  /** Runs on the rating owner's client; the token consent row is the durable intake. */
+  async persistRideTokenRatingConsent(
+    client: PoolClient,
+    rating: PassengerTripRatingRecord,
+    token: PassengerRideAccessToken,
+    contactRequested: boolean,
+    choiceProvided: boolean,
+    requestHash: string,
+    isNew: boolean,
+    draft?: {
+      complaintCase: ComplaintCaseRecord;
+      timeline: ComplaintTimelineEntry;
+    },
+  ): Promise<PassengerIntakeResult | null> {
+    const existing = await client.query<{
+      request_hash: string;
+      rating_id: string;
+      contact_requested: boolean;
+      complaint_case_no: string | null;
+      record: unknown;
+      timeline: unknown;
+    }>(
+      `SELECT p.request_hash, p.rating_id, p.contact_requested, p.complaint_case_no,
+              c.record, t.record AS timeline
+       FROM ops.passenger_ride_rating_consents p
+       LEFT JOIN crm.phase1_complaint_cases c ON c.case_no = p.complaint_case_no
+       LEFT JOIN crm.phase1_complaint_timelines t
+         ON t.case_no = p.complaint_case_no AND t.action = 'case_created'
+       WHERE p.order_id = $1 AND p.passenger_subject_ref = $2 FOR UPDATE OF p`,
+      [rating.orderId, rating.passengerSubjectRef],
+    );
+    const row = existing.rows[0];
+    if (row) {
+      if (
+        row.request_hash !== requestHash ||
+        row.rating_id !== rating.ratingId ||
+        row.contact_requested !== contactRequested
+      )
+        throw new ApiRequestError(
+          409,
+          "PASSENGER_RATING_ALREADY_SUBMITTED",
+          "The original rating and contact choice cannot be changed.",
+        );
+      if (
+        Boolean(row.complaint_case_no) !==
+          (contactRequested && rating.score <= 2) ||
+        (row.complaint_case_no && (!row.record || !row.timeline))
+      )
+        throw new ApiRequestError(
+          409,
+          "PASSENGER_RATING_CONSENT_INCONSISTENT",
+          "The persisted rating contact source is inconsistent.",
+        );
+      return row.complaint_case_no
+        ? {
+            complaintCase: this.parseRecord<ComplaintCaseRecord>(
+              row.record,
+              "crm.phase1_complaint_cases",
+            ),
+            timeline: this.parseRecord<ComplaintTimelineEntry>(
+              row.timeline,
+              "crm.phase1_complaint_timelines",
+            ),
+            replayed: true,
+          }
+        : null;
+    }
+    if (!isNew) {
+      // An old omitted-contact retry is still a valid rating retry. Never infer
+      // historical consent, accept a new explicit choice, or retroactively open CRM.
+      if (!choiceProvided) return null;
+      throw new ApiRequestError(
+        409,
+        "PASSENGER_RATING_CONSENT_UNAVAILABLE",
+        "The original rating has no captured contact choice.",
+      );
+    }
+    if (draft)
+      await this.persistChanges(
+        {
+          complaintCases: [draft.complaintCase],
+          complaintTimelines: [draft.timeline],
+        },
+        client,
+      );
+    await client.query(
+      `INSERT INTO ops.passenger_ride_rating_consents
+       (order_id, passenger_subject_ref, rating_id, original_token_id, rating_score,
+        contact_requested, request_hash, complaint_case_no, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        rating.orderId,
+        rating.passengerSubjectRef,
+        rating.ratingId,
+        token.tokenId,
+        rating.score,
+        contactRequested,
+        requestHash,
+        draft?.complaintCase.caseNo ?? null,
+        rating.submittedAt,
+      ],
+    );
+    return draft ? { ...draft, replayed: false } : null;
+  }
+
+  /** Keyset pages of these intake sources only; no global CRM snapshot refresh. */
   async listPassengerCases(
     afterCaseNo: string,
   ): Promise<ComplaintCaseRecord[]> {
     if (!this.isEnabled()) return [];
     const result = await this.databaseService!.query<JsonRecordRow>(
-      `SELECT c.record FROM passenger.complaints p
-       JOIN crm.phase1_complaint_cases c ON c.case_no = p.case_no
-       WHERE p.case_no > $1 ORDER BY p.case_no ASC LIMIT $2`,
+      `SELECT c.record FROM crm.phase1_complaint_cases c
+       WHERE c.case_no > $1 AND (
+         EXISTS (SELECT 1 FROM passenger.complaints p WHERE p.case_no = c.case_no)
+         OR EXISTS (SELECT 1 FROM ops.passenger_ride_rating_consents r WHERE r.complaint_case_no = c.case_no)
+       ) ORDER BY c.case_no ASC LIMIT $2`,
       [afterCaseNo, 500],
     );
     return result.rows.map((row) =>
@@ -437,8 +545,10 @@ export class ComplaintRepository {
   async getPassengerCase(caseNo: string): Promise<ComplaintCaseRecord | null> {
     if (!this.isEnabled()) return null;
     const result = await this.databaseService!.query<JsonRecordRow>(
-      `SELECT c.record FROM passenger.complaints p
-       JOIN crm.phase1_complaint_cases c ON c.case_no = p.case_no WHERE p.case_no = $1`,
+      `SELECT c.record FROM crm.phase1_complaint_cases c WHERE c.case_no = $1 AND (
+         EXISTS (SELECT 1 FROM passenger.complaints p WHERE p.case_no = c.case_no)
+         OR EXISTS (SELECT 1 FROM ops.passenger_ride_rating_consents r WHERE r.complaint_case_no = c.case_no)
+       )`,
       [caseNo],
     );
     return result.rows[0]
@@ -454,9 +564,10 @@ export class ComplaintRepository {
   ): Promise<ComplaintTimelineEntry[]> {
     if (!this.isEnabled()) return [];
     const result = await this.databaseService!.query<JsonRecordRow>(
-      `SELECT t.record FROM passenger.complaints p
-       JOIN crm.phase1_complaint_timelines t ON t.case_no = p.case_no
-       WHERE p.case_no = $1 ORDER BY t.created_at ASC, t.entry_id ASC`,
+      `SELECT t.record FROM crm.phase1_complaint_timelines t WHERE t.case_no = $1 AND (
+         EXISTS (SELECT 1 FROM passenger.complaints p WHERE p.case_no = t.case_no)
+         OR EXISTS (SELECT 1 FROM ops.passenger_ride_rating_consents r WHERE r.complaint_case_no = t.case_no)
+       ) ORDER BY t.created_at ASC, t.entry_id ASC`,
       [caseNo],
     );
     return result.rows.map((row) =>
