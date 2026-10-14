@@ -286,32 +286,32 @@ describe.skipIf(!hostedPaymentEnabled)(
         contactPhone: target,
         contactPhoneVerified: true,
       });
+    });
 
-      it("revocation between OTP request and verification prevents downstream binding", async () => {
-        const f = await h.authenticatedAccount();
-        const target = "+886912345678";
-        const requested = await auth.otp.request(
-          { provider: "phone", purpose: "link", target },
+    it("revocation between OTP request and verification prevents downstream binding", async () => {
+      const f = await h.authenticatedAccount();
+      const target = "+886912345678";
+      const requested = await auth.otp.request(
+        { provider: "phone", purpose: "link", target },
+        f.identity,
+        "192.0.2.1",
+      );
+      const code = auth.lastCode();
+      await h.accounts.logout(f.session.refreshToken);
+      await expect(
+        auth.otp.verify(
+          { provider: "phone", target, code, challenge: requested.challenge },
           f.identity,
-          "192.0.2.1",
-        );
-        const code = auth.lastCode();
-        await h.accounts.logout(f.session.refreshToken);
-        await expect(
-          auth.otp.verify(
-            { provider: "phone", target, code, challenge: requested.challenge },
-            f.identity,
-          ),
-        ).rejects.toMatchObject({ code: "unauthorized" });
-        expect((await otpRows())[0]!.consumed_at).toBeNull();
-        expect(
-          (
-            await h.pool!.query(
-              "SELECT * FROM passenger.logins WHERE provider='phone'",
-            )
-          ).rows,
-        ).toHaveLength(0);
-      });
+        ),
+      ).rejects.toMatchObject({ code: "unauthorized" });
+      expect((await otpRows())[0]!.consumed_at).toBeNull();
+      expect(
+        (
+          await h.pool!.query(
+            "SELECT * FROM passenger.logins WHERE provider='phone'",
+          )
+        ).rows,
+      ).toHaveLength(0);
     });
 
     it("actual OTP insert failure sends nothing and provider delivery failure durably invalidates", async () => {
