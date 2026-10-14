@@ -600,6 +600,9 @@ describe.skipIf(!hostedPaymentEnabled)(
         h.methods.remove(owner, method.paymentMethodId),
       ).rejects.toMatchObject({ code: "pending_payment_block" });
       await h.chargeService.onTripCompleted(event);
+      await h.methods.withAccount(owner, (client) =>
+        assertPassengerCanBook(client, owner, method.paymentMethodId),
+      );
       await h.methods.remove(owner, method.paymentMethodId);
       const row = (
         await h.pool!.query(

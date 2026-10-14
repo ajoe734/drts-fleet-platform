@@ -1,7 +1,5 @@
-import "reflect-metadata";
-import type { INestApplication } from "@nestjs/common";
-import { Module } from "@nestjs/common";
-import { NestFactory, Reflector } from "@nestjs/core";
+import { createRequire } from "node:module";
+import type { INestApplication } from "../../../apps/api/node_modules/@nestjs/common";
 import {
   afterAll,
   afterEach,
@@ -24,6 +22,17 @@ import {
   hostedPaymentEnabled,
   PaymentPostgresHarness,
 } from "./payment-postgres-harness";
+
+const requireApi = createRequire(
+  new URL("../../../apps/api/package.json", import.meta.url),
+);
+requireApi("reflect-metadata");
+const { Module } = requireApi(
+  "@nestjs/common",
+) as typeof import("../../../apps/api/node_modules/@nestjs/common");
+const { NestFactory, Reflector } = requireApi(
+  "@nestjs/core",
+) as typeof import("../../../apps/api/node_modules/@nestjs/core");
 
 const opsHeaders = {
   "x-realm": "platform",
@@ -64,14 +73,11 @@ describe.skipIf(!hostedPaymentEnabled)(
       await h.reset();
       owner = await h.account();
       foreign = await h.account();
-      const session = await h.accounts.createSession(
-        owner,
-        "synthetic-http-qa",
-      );
+      const session = await h.accounts.issueSession(owner, "synthetic-http-qa");
       token = session.accessToken;
       refresh = session.refreshToken;
       foreignToken = (
-        await h.accounts.createSession(foreign, "synthetic-http-qa")
+        await h.accounts.issueSession(foreign, "synthetic-http-qa")
       ).accessToken;
       // Root Vitest's esbuild does not emit constructor metadata. These are the
       // actual production constructor types, not alternate controller methods.
@@ -142,7 +148,7 @@ describe.skipIf(!hostedPaymentEnabled)(
           ...(body ? { "content-type": "application/json" } : {}),
           ...extra,
         },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: AbortSignal.timeout(10000),
       });
       const text = await response.text();
@@ -301,7 +307,8 @@ describe.skipIf(!hostedPaymentEnabled)(
       const passenger = await request("POST", path, token, {
         reason: "synthetic",
       });
-      expect(passenger.status).toBeGreaterThanOrEqual(400);
+      expect(passenger.status).toBe(401);
+      expect(passenger.json.error.code).toBe("AUTH_REQUIRED");
       const noScope = await request(
         "POST",
         path,

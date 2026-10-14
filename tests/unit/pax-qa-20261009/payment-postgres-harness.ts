@@ -1,4 +1,3 @@
-import "reflect-metadata";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
@@ -34,6 +33,7 @@ import { buildOrderFixture } from "../../../apps/api/tests/integration/voice-ord
 const require = createRequire(
   new URL("../../../apps/api/package.json", import.meta.url),
 );
+require("reflect-metadata");
 const { Pool } = require("pg") as typeof import("pg");
 // Never open a DB or socket on the worker VM, even with an inherited DB URL.
 export const hostedPaymentEnabled = process.env.GITHUB_ACTIONS === "true";
