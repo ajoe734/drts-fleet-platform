@@ -408,7 +408,13 @@ describe.skipIf(!hostedPaymentEnabled)(
           expect(reader.contentType).toContain("application/json");
           const json = JSON.parse(reader.body);
           expect(json.error.code).toBe("PASSENGER_RIDE_NOT_FOUND");
-          denials.push(json.error);
+          // Production gives every failed request a new correlation UUID. The
+          // complete remaining error contract must conceal ownership/existence.
+          const { trace_id: traceId, ...denial } = json.error;
+          expect(traceId).toMatch(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+          );
+          denials.push(denial);
           expect(producerCalls).toBe(0);
           expect(subscriptions).toBe(0);
           evidence("delayed owner denial", {

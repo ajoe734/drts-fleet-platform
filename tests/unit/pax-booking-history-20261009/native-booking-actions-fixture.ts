@@ -118,6 +118,29 @@ export async function bookingActor(
       updatedAt: now,
     });
   }
+  // Eligibility is external, but production assignment also checks the native
+  // authorization membership. Seed it through the real repository before
+  // hydration; never replace isActiveMultiTaxiAuthorizedVehicle or its SQL.
+  const authorizationState = await taxi.loadState();
+  for (const authorization of authorizationState.authorizations) {
+    if (
+      authorization.status === "approved" &&
+      !authorizationState.vehicles.some(
+        (vehicle) =>
+          vehicle.authorizationId === authorization.authorizationId &&
+          vehicle.vehicleId === candidate.vehicleId,
+      )
+    ) {
+      await taxi.persistVehicle({
+        authorizationVehicleId: randomUUID(),
+        authorizationId: authorization.authorizationId,
+        vehicleId: candidate.vehicleId,
+        status: "active",
+        effectiveFrom: authorization.effectiveFrom,
+        effectiveUntil: authorization.effectiveUntil,
+      });
+    }
+  }
   const repository = new OwnedMobilityRepository(database, taxi);
   const owned = new OwnedMobilityService(
     registry as never,
