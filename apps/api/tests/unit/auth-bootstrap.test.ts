@@ -1,3 +1,4 @@
+import { enabledRegistryRepository } from "../../../../tests/unit/registry-driver-master-durable-ack-20261014/storage-fixture";
 import { generateKeyPairSync } from "node:crypto";
 
 import { Logger } from "@nestjs/common";
@@ -58,6 +59,7 @@ function createAuthFixture() {
     new OpsDispatchEventsService(new EventEmitter2()),
     auditNotificationService,
     driverProfileService,
+    enabledRegistryRepository(),
   );
   const tenantPartnerService = new TenantPartnerService(
     auditNotificationService,

@@ -1,3 +1,4 @@
+import { enabledRegistryRepository } from "../../registry-driver-master-durable-ack-20261014/storage-fixture";
 // SR-QA-DRIVER-001 -- C051 (值勤司機: 上／下線、班次歷史與出勤計時).
 //
 // `tests/unit/shift-attendance.test.ts` already covers clock-in/out,
@@ -44,7 +45,7 @@ function setupServices() {
     { emit: () => {} } as never,
     auditService,
     new DriverProfileService(new AuditNotificationService()),
-    undefined,
+    enabledRegistryRepository(),
   );
   const shiftService = new ShiftAttendanceService(
     auditService,
@@ -60,9 +61,12 @@ describe("SR-QA-DRIVER-001 C051: shift clock-in vs. driver suspension (fixed beh
     const { shiftService, regulatoryService } = setupServices();
 
     // drv-demo-003 is one of RegulatoryRegistryService's seeded drivers.
-    const suspended = regulatoryService.updateDriverLifecycle("drv-demo-003", {
-      lifecycleStatus: "suspended",
-    });
+    const suspended = await regulatoryService.updateDriverLifecycle(
+      "drv-demo-003",
+      {
+        lifecycleStatus: "suspended",
+      },
+    );
     expect(suspended.lifecycleStatus).toBe("suspended");
     expect(suspended.dispatchEligible).toBe(false);
 
@@ -86,7 +90,7 @@ describe("SR-QA-DRIVER-001 C051: shift clock-in vs. driver suspension (fixed beh
   it("rejects clock-in when driver is suspended WITH a fully dispatch-eligible vehicle attached", async () => {
     const { shiftService, regulatoryService } = setupServices();
 
-    regulatoryService.updateDriverLifecycle("drv-demo-004", {
+    await regulatoryService.updateDriverLifecycle("drv-demo-004", {
       lifecycleStatus: "suspended",
     });
 
