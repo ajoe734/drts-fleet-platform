@@ -83,6 +83,7 @@ export interface PassengerRideFixture {
   routeFareMode?: "range" | "anomaly";
   routeFareText?: string;
   routeFareHint?: string;
+  quoteAnomalyCode?: string;
   pickupLabel: string;
   dropoffLabel?: string;
   mapState: PassengerMapState;

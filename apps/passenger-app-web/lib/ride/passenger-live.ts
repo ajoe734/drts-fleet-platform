@@ -323,6 +323,7 @@ export function mapPassengerRideAuthorityToFixture(
     screenId,
     title: screenTitle(screenId),
     status: statusLabel(view.order.status),
+    ...(quoteAnomalyCode ? { quoteAnomalyCode } : {}),
     ...(view.order.status === "created"
       ? { statusSubline: "系統正在安排可派車輛" }
       : {}),

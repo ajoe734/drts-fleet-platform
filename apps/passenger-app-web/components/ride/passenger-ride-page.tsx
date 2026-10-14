@@ -5,7 +5,9 @@ import { t } from "./translations";
 import Link from "next/link";
 import {
   startTransition,
+  useCallback,
   useEffect,
+  useRef,
   useState,
   type CSSProperties,
   type ReactNode,
@@ -1781,65 +1783,16 @@ function Actions({
   const requote = () => {
     if (actionPending) return;
     setActionPending(true);
-    if (fixture.screenId === "A04") {
-      if (authMode === "token") {
-        window.alert("此行程不支援重新計算報價，請聯絡客服。");
-        setActionPending(false);
-        return;
-      }
-      const scheduledAt =
-        (fixture as any)?.scheduledAt ||
-        new Date(Date.now() + 86400000).toISOString();
-      const quotePayload = {
-        originLat: (fixture as any)?.originLat ?? 25.033,
-        originLng: (fixture as any)?.originLng ?? 121.565,
-        destinationLat: (fixture as any)?.destinationLat ?? 25.04,
-        destinationLng: (fixture as any)?.destinationLng ?? 121.56,
-        scheduledAt,
-      };
-      void fetch("/api/passenger-app/quotes", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(quotePayload),
-      })
-        .then(async (res) => {
-          if (!res.ok) {
-            const errData = await res.json().catch(() => ({}));
-            throw new Error(
-              errData?.error?.message || "QUOTE_RECALCULATION_FAILED",
-            );
-          }
-          const data = await res.json().catch(() => ({}));
-          if (data?.data?.ride) {
-            return data.data.ride;
-          }
-          return fetchPassengerRideAuthority(token, false);
-        })
-        .then((view) => {
-          const next = mapPassengerRideAuthorityToFixture(
-            view,
-            token,
-            fixture.screenId === "A03"
-              ? "fares"
-              : fixture.screenId === "P5-10"
-                ? "receipt"
-                : "ride",
-          );
-          onFixtureUpdate?.(next);
-          setActionPending(false);
-        })
-        .catch((err: unknown) => {
-          console.error("Requote error", err);
-          window.alert(
-            err instanceof Error ? err.message : "QUOTE_RECALCULATION_FAILED",
-          );
-          setActionPending(false);
-        });
-      return;
-    }
-
     void fetchPassengerRideAuthority(token, authMode === "token")
       .then((view) => {
+        const hasValidQuote = Boolean(
+          view.assignment?.routeFare?.payableFareMinor != null ||
+          view.assignment?.routeFare?.estimatedFareMinor != null,
+        );
+        const anomalyCode =
+          !hasValidQuote && fixture.screenId === "A04"
+            ? (fixture as any).quoteAnomalyCode || "P5_QUOTE_PROVIDER_UNAVAILABLE"
+            : undefined;
         const next = mapPassengerRideAuthorityToFixture(
           view,
           token,
@@ -1848,15 +1801,24 @@ function Actions({
             : fixture.screenId === "P5-10"
               ? "receipt"
               : "ride",
+          anomalyCode,
         );
         onFixtureUpdate?.(next);
         setActionPending(false);
       })
       .catch((err: unknown) => {
         console.error("Requote error", err);
-        window.alert(
-          err instanceof Error ? err.message : "AUTHORITY_REFRESH_FAILED",
-        );
+        const errCode =
+          (err as any)?.code ||
+          (err instanceof Error ? err.message : "AUTHORITY_REFRESH_FAILED");
+        if (
+          fixture.screenId === "A04" &&
+          P5_QUOTE_ANOMALY_ERROR_CODES.includes(errCode as any)
+        ) {
+          onFixtureUpdate?.(createFareQuoteAnomalyFixture(token, errCode));
+        } else {
+          window.alert(errCode);
+        }
         setActionPending(false);
       });
   };
@@ -2461,13 +2423,65 @@ export function PassengerRidePage({
     "connecting" | "connected" | "disconnected"
   >("connecting");
   const [lastEventTime, setLastEventTime] = useState<number>(Date.now());
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+
+  const startSubscription = useCallback(() => {
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+    unsubscribeRef.current = subscribePassengerRideAuthority(
+      token,
+      (nextView) => {
+        startTransition(() => {
+          setLiveFixture(
+            mapPassengerRideAuthorityToFixture(nextView.data, token, kind),
+          );
+          const newCalculatedAt =
+            nextView.data.assignment?.eta?.calculatedAt;
+          if (newCalculatedAt) {
+            const ts = new Date(newCalculatedAt).getTime();
+            if (!Number.isNaN(ts)) {
+              setLastEventTime(ts);
+            }
+          }
+        });
+      },
+      authMode === "token",
+      (state) => {
+        setConnectionState(state);
+      },
+    );
+  }, [token, authMode, kind]);
+
+  const handleFixtureUpdate = useCallback(
+    (next: PassengerRideFixture) => {
+      startTransition(() => {
+        setLiveFixture(next);
+      });
+      if (next.screenId !== "A04") {
+        if (!unsubscribeRef.current) {
+          startSubscription();
+        }
+      } else {
+        if (unsubscribeRef.current) {
+          unsubscribeRef.current();
+          unsubscribeRef.current = null;
+        }
+      }
+    },
+    [startSubscription],
+  );
 
   useEffect(() => {
     let active = true;
     setLiveFixture(null);
     setAuthorityError(null);
-    let unsubscribe: () => void = () => {};
     setConnectionState("connecting");
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
     void fetchPassengerRideAuthority(token, authMode === "token")
       .then((view) => {
         if (!active) return;
@@ -2482,29 +2496,7 @@ export function PassengerRidePage({
             setLastEventTime(0); // Make it stale if missing
           }
         });
-        unsubscribe = subscribePassengerRideAuthority(
-          token,
-          (nextView) => {
-            if (!active) return;
-            startTransition(() => {
-              setLiveFixture(
-                mapPassengerRideAuthorityToFixture(nextView.data, token, kind),
-              );
-              const newCalculatedAt =
-                nextView.data.assignment?.eta?.calculatedAt;
-              if (newCalculatedAt) {
-                const ts = new Date(newCalculatedAt).getTime();
-                if (!Number.isNaN(ts)) {
-                  setLastEventTime(ts);
-                }
-              }
-            });
-          },
-          authMode === "token",
-          (state) => {
-            if (active) setConnectionState(state);
-          },
-        );
+        startSubscription();
       })
       .catch((error: unknown) => {
         if (!active) return;
@@ -2513,10 +2505,7 @@ export function PassengerRidePage({
           (error instanceof Error
             ? error.message
             : "PASSENGER_AUTHORITY_UNAVAILABLE");
-        if (
-          P5_QUOTE_ANOMALY_ERROR_CODES.includes(errCode as any) ||
-          (error as any)?.status === 409
-        ) {
+        if (P5_QUOTE_ANOMALY_ERROR_CODES.includes(errCode as any)) {
           startTransition(() => {
             setLiveFixture(createFareQuoteAnomalyFixture(token, errCode));
             setAuthorityError(null);
@@ -2528,9 +2517,12 @@ export function PassengerRidePage({
       });
     return () => {
       active = false;
-      unsubscribe();
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
     };
-  }, [kind, token, authMode]);
+  }, [kind, token, authMode, startSubscription]);
 
   const fixture = liveFixture;
 
@@ -2566,7 +2558,7 @@ export function PassengerRidePage({
           token={token}
           authMode={authMode}
           onCertificateUpdate={handleCertificateUpdate}
-          onFixtureUpdate={setLiveFixture}
+          onFixtureUpdate={handleFixtureUpdate}
         />
       </ConnectionContext.Provider>
     </Shell>
