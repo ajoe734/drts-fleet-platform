@@ -150,28 +150,49 @@ export class PaymentPostgresHarness {
     const verifier = new Pool({ connectionString: this.url(this.template) });
     try {
       const files = (await readdir("infra/migrations"))
-        .filter((name) => /^V\d+__.*\.sql$/.test(name))
+        .filter((name) => /^V[0-9A-Z]+__.+\.sql$/.test(name))
         .sort();
+      const checksums = new Map<string, string>();
+      for (const file of files) {
+        checksums.set(
+          file,
+          createHash("sha256")
+            .update(await readFile(`infra/migrations/${file}`))
+            .digest("hex"),
+        );
+      }
       const applied = await verifier.query(
         "SELECT version,file_name,checksum FROM admin.schema_migrations ORDER BY version",
       );
-      if (applied.rows.length !== files.length)
-        throw new Error("Production migration count differs from checkout.");
-      for (const file of files) {
-        const checksum = createHash("sha256")
-          .update(await readFile(`infra/migrations/${file}`))
-          .digest("hex");
-        const row = applied.rows.find((entry) => entry.file_name === file);
+      // db-apply intentionally canonicalizes identical signatures (V0036 and
+      // V0047 are byte-identical). Include V0018A and require every distinct
+      // checkout checksum, plus an actual source filename/version for each row.
+      // Do not require a second ledger row for a runner-deduplicated file.
+      const distinct = new Set(checksums.values());
+      if (applied.rows.length !== distinct.size)
+        throw new Error(
+          "Production migration signature count differs from checkout.",
+        );
+      for (const row of applied.rows) {
         if (
-          !row ||
-          row.checksum !== checksum ||
-          row.version !== file.split("__")[0]
+          checksums.get(row.file_name) !== row.checksum ||
+          row.version !== row.file_name.split("__")[0]
         ) {
-          throw new Error(`Production migration provenance differs: ${file}`);
+          throw new Error(
+            `Production migration provenance differs: ${row.file_name}`,
+          );
         }
       }
+      const recorded = new Set(applied.rows.map((row) => row.checksum));
+      if (
+        recorded.size !== distinct.size ||
+        [...distinct].some((checksum) => !recorded.has(checksum))
+      )
+        throw new Error(
+          "A production migration checksum is missing from the runner ledger.",
+        );
       process.stdout.write(
-        `Payment QA: full db-apply exit=0; ${files.length} migration checksums verified; runner stdout SHA256=${createHash("sha256").update(stdout).digest("hex")}\n`,
+        `Payment QA: full db-apply exit=0; ${files.length} source files / ${distinct.size} distinct migration checksums verified; runner stdout SHA256=${createHash("sha256").update(stdout).digest("hex")}\n`,
       );
     } finally {
       await verifier.end();
