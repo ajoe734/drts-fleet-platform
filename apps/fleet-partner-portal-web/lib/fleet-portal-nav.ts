@@ -1,6 +1,7 @@
 import type { CanvasShellNavItem } from "@drts/ui-web";
 import { t, type Locale } from "./translations";
 import type { NavBadges } from "./fleet-portal-data.server";
+import { documentDemoCopy } from "../app/demo/translations";
 
 // A nav badge is shown only when its live/seam-derived count is > 0; a zero or
 // absent count renders no badge (rather than a hardcoded design number).
@@ -74,6 +75,12 @@ export function buildFleetPortalNav(
       label: t("nav.documents", locale),
       badge: badgeFor(badges?.documents),
       badgeTone: "warn",
+    },
+    {
+      key: "document-demo",
+      href: "/demo",
+      icon: "audit",
+      label: documentDemoCopy(locale).nav,
     },
     {
       key: "training",
