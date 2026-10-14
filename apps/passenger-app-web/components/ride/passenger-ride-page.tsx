@@ -27,6 +27,7 @@ import {
   P5_QUOTE_ANOMALY_ERROR_CODES,
   PassengerAuthorityError,
   requestPassengerRideAction,
+  retainFixtureQuoteAnomaly,
   subscribePassengerRideAuthority,
 } from "../../lib/ride/passenger-live";
 import { ComplaintForm } from "./complaint-form";
@@ -34,7 +35,7 @@ import { ComplaintForm } from "./complaint-form";
 const ConnectionContext = React.createContext<{
   connectionState: "connecting" | "connected" | "disconnected";
   lastEventTime: number;
-}>({ connectionState: "connected", lastEventTime: Date.now() });
+}>({ connectionState: "connected", lastEventTime: 0 });
 
 
 const monoFont = '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace';
@@ -348,9 +349,13 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
     return () => clearInterval(timer);
   }, [fixture.mapState]);
 
-  const elapsedSeconds = Math.max(0, Math.floor((now - lastEventTime) / 1000));
+  const elapsedSeconds =
+    lastEventTime > 0
+      ? Math.max(0, Math.floor((now - lastEventTime) / 1000))
+      : Infinity;
   const _isFresh =
     fixture.mapState === "fresh" &&
+    lastEventTime > 0 &&
     elapsedSeconds < 60 &&
     connectionState === "connected";
   const _isStale =
@@ -1785,12 +1790,15 @@ function Actions({
     setActionPending(true);
     void fetchPassengerRideAuthority(token, authMode === "token")
       .then((view) => {
+        const isTerminal =
+          view.order.status === "completed" ||
+          view.order.status === "cancelled";
         const hasValidQuote = Boolean(
           view.assignment?.routeFare?.payableFareMinor != null ||
           view.assignment?.routeFare?.estimatedFareMinor != null,
         );
         const anomalyCode =
-          !hasValidQuote && fixture.screenId === "A04"
+          !isTerminal && !hasValidQuote && fixture.screenId === "A04"
             ? (fixture as any).quoteAnomalyCode || "P5_QUOTE_PROVIDER_UNAVAILABLE"
             : undefined;
         const next = mapPassengerRideAuthorityToFixture(
@@ -1811,11 +1819,8 @@ function Actions({
         const errCode =
           (err as any)?.code ||
           (err instanceof Error ? err.message : "AUTHORITY_REFRESH_FAILED");
-        if (
-          fixture.screenId === "A04" &&
-          P5_QUOTE_ANOMALY_ERROR_CODES.includes(errCode as any)
-        ) {
-          onFixtureUpdate?.(createFareQuoteAnomalyFixture(token, errCode));
+        if (P5_QUOTE_ANOMALY_ERROR_CODES.includes(errCode as any)) {
+          onFixtureUpdate?.(retainFixtureQuoteAnomaly(fixture, errCode));
         } else {
           window.alert(errCode);
         }
@@ -2422,7 +2427,7 @@ export function PassengerRidePage({
   const [connectionState, setConnectionState] = useState<
     "connecting" | "connected" | "disconnected"
   >("connecting");
-  const [lastEventTime, setLastEventTime] = useState<number>(Date.now());
+  const [lastEventTime, setLastEventTime] = useState<number>(0);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
   const startSubscription = useCallback(() => {
@@ -2441,9 +2446,9 @@ export function PassengerRidePage({
             nextView.data.assignment?.eta?.calculatedAt;
           if (newCalculatedAt) {
             const ts = new Date(newCalculatedAt).getTime();
-            if (!Number.isNaN(ts)) {
-              setLastEventTime(ts);
-            }
+            setLastEventTime(Number.isNaN(ts) ? 0 : ts);
+          } else {
+            setLastEventTime(0);
           }
         });
       },
@@ -2458,6 +2463,13 @@ export function PassengerRidePage({
     (next: PassengerRideFixture) => {
       startTransition(() => {
         setLiveFixture(next);
+        const calculatedAt = next.assignment?.eta?.calculatedAt;
+        if (calculatedAt) {
+          const ts = new Date(calculatedAt).getTime();
+          setLastEventTime(Number.isNaN(ts) ? 0 : ts);
+        } else {
+          setLastEventTime(0);
+        }
       });
       if (next.screenId !== "A04") {
         if (!unsubscribeRef.current) {
@@ -2478,6 +2490,7 @@ export function PassengerRidePage({
     setLiveFixture(null);
     setAuthorityError(null);
     setConnectionState("connecting");
+    setLastEventTime(0);
     if (unsubscribeRef.current) {
       unsubscribeRef.current();
       unsubscribeRef.current = null;
@@ -2489,9 +2502,8 @@ export function PassengerRidePage({
           setLiveFixture(mapPassengerRideAuthorityToFixture(view, token, kind));
           setAuthorityError(null);
           if (view.assignment?.eta?.calculatedAt) {
-            setLastEventTime(
-              new Date(view.assignment.eta.calculatedAt).getTime(),
-            );
+            const ts = new Date(view.assignment.eta.calculatedAt).getTime();
+            setLastEventTime(Number.isNaN(ts) ? 0 : ts);
           } else {
             setLastEventTime(0); // Make it stale if missing
           }
@@ -2509,11 +2521,13 @@ export function PassengerRidePage({
           startTransition(() => {
             setLiveFixture(createFareQuoteAnomalyFixture(token, errCode));
             setAuthorityError(null);
+            setLastEventTime(0);
           });
           return;
         }
         setAuthorityError(errCode);
         setConnectionState("disconnected");
+        setLastEventTime(0);
       });
     return () => {
       active = false;

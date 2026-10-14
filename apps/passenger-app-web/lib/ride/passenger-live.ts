@@ -325,7 +325,7 @@ export function mapPassengerRideAuthorityToFixture(
     screenId,
     title: screenTitle(screenId),
     status: statusLabel(view.order.status),
-    ...(quoteAnomalyCode ? { quoteAnomalyCode } : {}),
+    ...(quoteAnomalyCode && screenId === "A04" ? { quoteAnomalyCode } : {}),
     ...(view.order.status === "created"
       ? { statusSubline: "系統正在安排可派車輛" }
       : {}),
@@ -700,6 +700,7 @@ function resolveScreenId(
   if (view.order.status === "cancelled") {
     return !view.assignment ? "P5-01" : "P5-11";
   }
+  if (view.order.status === "completed") return view.rating ? "P5-09" : "P5-08";
   const effectiveAnomaly =
     quoteAnomalyCode ||
     (view as any).quoteAnomalyCode ||
@@ -712,7 +713,6 @@ function resolveScreenId(
   ) {
     return "A04";
   }
-  if (view.order.status === "completed") return view.rating ? "P5-09" : "P5-08";
   if (view.receipt) return "P5-10";
   if (view.order.status === "on_trip") return "P5-07";
   if (view.order.status === "arrived_pickup") return "P5-06";
@@ -735,7 +735,7 @@ function resolveScreenId(
     : "P5-02";
 }
 
-function screenTitle(screenId: PassengerScreenId) {
+export function screenTitle(screenId: PassengerScreenId) {
   const titles: Partial<Record<PassengerScreenId, string>> = {
     "P5-01": "Awaiting Assignment",
     "P5-02": "Driver En Route",
@@ -840,4 +840,24 @@ export function createFareQuoteAnomalyFixture(
     "ride",
     errorCode,
   );
+}
+
+export function retainFixtureQuoteAnomaly(
+  fixture: PassengerRideFixture,
+  errorCode: string = "P5_QUOTE_PROVIDER_UNAVAILABLE",
+): PassengerRideFixture {
+  return {
+    ...fixture,
+    screenId: "A04",
+    title: screenTitle("A04"),
+    routeFareMode: "anomaly",
+    routeFareText: "目前無法取得正式報價",
+    routeFareHint: "正式報價完成前不會為您確認訂單",
+    quoteAnomalyCode: errorCode,
+    banner: {
+      tone: "warning",
+      title: "請稍後重試或聯絡客服",
+      detail: errorCode.toLowerCase(),
+    },
+  };
 }

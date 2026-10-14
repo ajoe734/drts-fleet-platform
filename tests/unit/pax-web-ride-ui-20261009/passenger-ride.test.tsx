@@ -478,4 +478,229 @@ describe("Passenger Ride UI Acceptance", () => {
     expect(screen.queryByText("正在為您安排合適的車輛")).toBeNull();
     expect(screen.queryByText("目前無法取得正式報價")).toBeNull();
   });
+
+  it("R1 - A04 recovery freshness distinguishes old, missing, and current timestamps", async () => {
+    for (const [label, stamp, expectFresh] of [
+      ["old timestamp", new Date(Date.now() - 3600000).toISOString(), false],
+      ["missing timestamp", null, false],
+      ["current timestamp", new Date().toISOString(), true],
+    ] as const) {
+      let callCount = 0;
+      MockEventSource.instances = [];
+      const readyView = {
+        order: {
+          orderId: "ride-r1",
+          orderNo: "ORD-R1",
+          status: "enroute_pickup",
+          timingMode: "scheduled",
+          requestedPickupAt: new Date().toISOString(),
+          pickup: { address: "Pickup A" },
+          dropoff: { address: "Dropoff B" },
+        },
+        assignment: {
+          driver: { displayName: "Driver Fresh" },
+          vehicle: { plateNo: "FRESH-888" },
+          eta: {
+            minutes: 5,
+            calculatedAt: stamp,
+            locationFreshness: "fresh",
+          },
+          routeFare: {
+            payableFareMinor: 20000,
+            estimatedFareMinor: 20000,
+          },
+        },
+        actions: { canCancel: true, canContact: true },
+      };
+
+      const mockFetch = vi.fn().mockImplementation(async () => {
+        if (++callCount === 1) {
+          return {
+            ok: false,
+            status: 409,
+            json: async () => ({
+              error: { code: "P5_QUOTE_PROVIDER_UNAVAILABLE" },
+            }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ data: { ride: readyView } }),
+        };
+      });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const { unmount } = render(
+        <PassengerRidePage token="ride-r1" authMode="id" kind="ride" />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("重新取得報價")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByText("重新取得報價"));
+
+      await waitFor(() => {
+        expect(screen.getByText(/FRESH-888/)).toBeTruthy();
+        expect(MockEventSource.instances.length).toBe(1);
+      });
+
+      await act(async () => {
+        MockEventSource.instances[0].onopen?.();
+        await Promise.resolve();
+      });
+
+      const badge = screen.queryByText(/^位置更新於 .* 秒前$/);
+      const stale = screen.queryByText("司機位置更新稍有延遲");
+
+      if (expectFresh) {
+        expect(badge).not.toBeNull();
+        expect(stale).toBeNull();
+      } else {
+        expect(badge).toBeNull();
+        expect(stale).not.toBeNull();
+      }
+
+      unmount();
+      cleanup();
+    }
+  });
+
+  it("R9/R12 - A04 quote retry error retains actual known authority facts", async () => {
+    const { Actions } = await import(
+      "../../../apps/passenger-app-web/components/ride/passenger-ride-page"
+    );
+    const { mapPassengerRideAuthorityToFixture } = await import(
+      "../../../apps/passenger-app-web/lib/ride/passenger-live"
+    );
+
+    const holdAuthority = {
+      order: {
+        orderId: "ride-known",
+        orderNo: "ORD-KNOWN",
+        status: "exception_hold",
+        timingMode: "scheduled",
+        requestedPickupAt: "2026-10-15T12:00:00Z",
+        pickup: { address: "Actual known pickup" },
+        dropoff: { address: "Dropoff Known" },
+      },
+      assignment: null,
+      rating: null,
+      payment: null,
+      receipt: null,
+      actions: { canCancel: true, canContact: true, canRate: false },
+    };
+
+    const knownFixture = mapPassengerRideAuthorityToFixture(
+      holdAuthority as any,
+      "ride-known",
+      "ride",
+      "P5_QUOTE_PROVIDER_UNAVAILABLE",
+    );
+
+    let updated: any = null;
+    const mockFetch = vi.fn().mockImplementation(async () => ({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: { code: "P5_QUOTE_PROVIDER_UNAVAILABLE" },
+      }),
+    }));
+    vi.stubGlobal("fetch", mockFetch);
+
+    render(
+      <Actions
+        fixture={knownFixture}
+        token="ride-known"
+        authMode="id"
+        onFixtureUpdate={(f) => {
+          updated = f;
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("重新取得報價"));
+    await waitFor(() => {
+      expect(updated).not.toBeNull();
+    });
+
+    expect(updated.orderNo).toBe("ORD-KNOWN");
+    expect(updated.pickupLabel).toBe("Actual known pickup");
+    expect(updated.status).toBe(knownFixture.status);
+    expect(updated.requestedPickupText).toBe(knownFixture.requestedPickupText);
+    expect(updated.screenId).toBe("A04");
+  });
+
+  it("R9/R12 - Supported retry applies authoritative completed terminal state over quote anomaly", async () => {
+    const { Actions } = await import(
+      "../../../apps/passenger-app-web/components/ride/passenger-ride-page"
+    );
+    const { mapPassengerRideAuthorityToFixture } = await import(
+      "../../../apps/passenger-app-web/lib/ride/passenger-live"
+    );
+
+    const holdAuthority = {
+      order: {
+        orderId: "ride-term",
+        orderNo: "ORD-TERM",
+        status: "exception_hold",
+        timingMode: "scheduled",
+        requestedPickupAt: "2026-10-15T12:00:00Z",
+        pickup: { address: "Pickup Term" },
+        dropoff: { address: "Dropoff Term" },
+      },
+      assignment: null,
+      rating: null,
+      payment: null,
+      receipt: null,
+      actions: { canCancel: false, canContact: false, canRate: true },
+    };
+
+    const knownFixture = mapPassengerRideAuthorityToFixture(
+      holdAuthority as any,
+      "ride-term",
+      "ride",
+      "P5_QUOTE_PROVIDER_UNAVAILABLE",
+    );
+
+    const completedAuthority = {
+      ...holdAuthority,
+      order: {
+        ...holdAuthority.order,
+        status: "completed",
+        completedAt: new Date().toISOString(),
+      },
+      actions: { canCancel: false, canContact: false, canRate: true },
+    };
+
+    let updated: any = null;
+    const mockFetch = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: { ride: completedAuthority } }),
+    }));
+    vi.stubGlobal("fetch", mockFetch);
+
+    render(
+      <Actions
+        fixture={knownFixture}
+        token="ride-term"
+        authMode="id"
+        onFixtureUpdate={(f) => {
+          updated = f;
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("重新取得報價"));
+    await waitFor(() => {
+      expect(updated).not.toBeNull();
+    });
+
+    expect(updated.screenId).toBe("P5-08");
+    expect(updated.status).toBe("行程已完成");
+    expect(updated.routeFareMode).toBe("range");
+    expect(updated.canRate).toBe(true);
+  });
 });
