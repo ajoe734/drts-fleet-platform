@@ -318,6 +318,10 @@ jobs:
 
       - name: Typecheck
         run: pnpm run typecheck
+      - name: Native passenger App typecheck and unit tests
+        run: |
+          pnpm --filter @drts/passenger-app typecheck
+          pnpm --filter @drts/passenger-app test --reporter=default --reporter=json --outputFile.json=native-passenger-app-test-results.json
       - name: Apply migrations
         run: pnpm db:migrate
       - name: Unit tests
@@ -414,6 +418,7 @@ jobs:
           path: |
             unit-test-results.json
             apps/api/api-test-results.json
+            apps/passenger-app/native-passenger-app-test-results.json
 
   smoke-acceptance:
     name: Smoke acceptance
