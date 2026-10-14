@@ -301,27 +301,39 @@ describe.skipIf(!hostedPaymentEnabled)(
       async (operation) => {
         const f = await fixture();
         const peer = await h.receiptServices();
-        const { result, sessions, mutations } = await h.concurrentMutations(
-          () =>
-            Promise.all(
-              [f, peer].map((service) =>
-                operation === "complaint"
-                  ? service.passengerComplaints.create(
-                      f.owner,
-                      f.event.orderId,
-                      f.command,
-                      "qa-concurrent",
-                    )
-                  : service.booking.rateRide(f.owner, f.event.orderId, {
-                      rideId: f.event.orderId,
-                      rating: 2,
-                      contactRequested: true,
-                    }),
+        const { result, sessions, statements, contention, mutations } =
+          await h.concurrentMutations(
+            () =>
+              Promise.all(
+                [f, peer].map((service) =>
+                  operation === "complaint"
+                    ? service.passengerComplaints.create(
+                        f.owner,
+                        f.event.orderId,
+                        f.command,
+                        "qa-concurrent",
+                      )
+                    : service.booking.rateRide(f.owner, f.event.orderId, {
+                        rideId: f.event.orderId,
+                        rating: 2,
+                        contactRequested: true,
+                      }),
+                ),
               ),
-            ),
-        );
+            true,
+          );
         expect(result[0]).toEqual(result[1]);
         expect(new Set(sessions).size).toBe(2);
+        expect(contention).toHaveLength(1);
+        expect(contention[0]!.holder).not.toBe(contention[0]!.waiter);
+        const locks = statements.filter(
+          (row) => row.lockKeyHash === contention[0]!.key,
+        );
+        expect(new Set(locks.map((row) => row.pid)).size).toBe(2);
+        for (const pid of sessions)
+          expect(
+            statements.filter((row) => row.pid === pid).map((row) => row.verb),
+          ).toEqual(expect.arrayContaining(["BEGIN", "SELECT", "COMMIT"]));
         expect(mutations.every((row) => sessions.includes(row.pid))).toBe(true);
         // A complaint replay reads the original committed case without writing
         // again. Ratings use a real ON CONFLICT update on both executor leases.

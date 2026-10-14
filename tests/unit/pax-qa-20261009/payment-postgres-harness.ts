@@ -55,6 +55,24 @@ export const hostedPaymentEnabled = process.env.GITHUB_ACTIONS === "true";
 const databaseUrl = process.env.DATABASE_URL;
 const runFile = promisify(execFile);
 
+/** Public fixture keys, used only by guarded tests; never deployment config. */
+export function accountSigningFixture() {
+  vi.stubEnv("APP_ENV", "test");
+  vi.stubEnv(
+    "JWT_KEY_RING_JSON",
+    JSON.stringify([
+      {
+        kid: "qa-account-fixture",
+        status: "active",
+        algorithm: "HS256",
+        publicKey: "public-synthetic-account-fixture-never-for-deployment",
+        privateKey: "public-synthetic-account-fixture-never-for-deployment",
+      },
+    ]),
+  );
+  vi.stubEnv("JWT_RETIRED_KIDS", "");
+}
+
 /** Observe real PG errors without changing rows, SQL, parameters or rejection.
  * Production deliberately sanitizes persistence errors; code/position/hash
  * identify an SQL defect without logging a token, credential or raw message. */
@@ -63,6 +81,21 @@ export class DiagnosedDatabaseService extends DatabaseService {
     | {
         begin: () => Promise<void>;
         sessions: Set<number>;
+        statements: {
+          pid: number;
+          verb: string;
+          sqlSha256: string;
+          lockKeyHash?: string;
+        }[];
+        proveContention: boolean;
+        firstLock?: {
+          key: string;
+          holder: number;
+          waiter?: number;
+          entered: Promise<void>;
+          signal: () => void;
+        };
+        contention: { key: string; holder: number; waiter: number }[];
         mutations: { pid: number; sqlSha256: string }[];
       }
     | undefined;
@@ -75,17 +108,39 @@ export class DiagnosedDatabaseService extends DatabaseService {
       const nativeQuery = client.query;
       const query = client.query.bind(client);
       const release = client.release.bind(client);
+      let backendPid: number | undefined;
       const observe = async (sql: string, values?: unknown[]) => {
         const probe = this.probe;
-        let pid: number | undefined;
-        if (
-          probe &&
-          (sql.trim() === "BEGIN" || /^\s*(INSERT|UPDATE)/i.test(sql))
-        ) {
-          pid = (await query("SELECT pg_backend_pid() AS pid")).rows[0]
+        if (probe && backendPid === undefined)
+          backendPid = (await query("SELECT pg_backend_pid() AS pid")).rows[0]
             .pid as number;
+        const pid = backendPid;
+        const lockKeyHash =
+          probe && sql.includes("pg_advisory_xact_lock")
+            ? createHash("sha256").update(String(values?.[0])).digest("hex")
+            : undefined;
+        const execution = query(sql, values);
+        if (probe?.proveContention && lockKeyHash && pid !== undefined) {
+          if (!probe.firstLock) {
+            let signal!: () => void;
+            const entered = new Promise<void>((resolve) => {
+              signal = resolve;
+            });
+            probe.firstLock = {
+              key: lockKeyHash,
+              holder: pid,
+              entered,
+              signal,
+            };
+          } else if (
+            probe.firstLock.key === lockKeyHash &&
+            probe.firstLock.holder !== pid
+          ) {
+            probe.firstLock.waiter = pid;
+            probe.firstLock.signal();
+          }
         }
-        const result = await query(sql, values).catch((error: unknown) => {
+        const result = await execution.catch((error: unknown) => {
           const fields =
             error && typeof error === "object"
               ? (error as Record<string, unknown>)
@@ -108,6 +163,66 @@ export class DiagnosedDatabaseService extends DatabaseService {
           );
           throw error;
         });
+        if (probe && pid !== undefined) {
+          probe.statements.push({
+            pid,
+            verb: sql.trim().split(/\s+/)[0]!,
+            sqlSha256: createHash("sha256").update(sql).digest("hex"),
+            ...(lockKeyHash ? { lockKeyHash } : {}),
+          });
+          const lock = probe.firstLock;
+          if (
+            probe.proveContention &&
+            lock &&
+            lock.key === lockKeyHash &&
+            lock.holder === pid &&
+            !probe.contention.length
+          ) {
+            let timeout: ReturnType<typeof setTimeout> | undefined;
+            try {
+              await Promise.race([
+                lock.entered,
+                new Promise<never>((_, reject) => {
+                  timeout = setTimeout(
+                    () =>
+                      reject(
+                        new Error(
+                          "Second production lock attempt was not issued.",
+                        ),
+                      ),
+                    2000,
+                  );
+                }),
+              ]);
+              const deadline = performance.now() + 1000;
+              let blocked = false;
+              do {
+                // Observe on the real holder client; no third connection,
+                // fabricated result or business SQL changes.
+                const observation = await query(
+                  "SELECT pg_blocking_pids($1::integer) AS blockers",
+                  [lock.waiter!],
+                );
+                blocked = (observation.rows[0].blockers as number[]).includes(
+                  pid,
+                );
+                if (!blocked)
+                  await new Promise((resolve) => setTimeout(resolve, 10));
+              } while (!blocked && performance.now() < deadline);
+              if (!blocked)
+                throw new Error(
+                  "Actual production clients did not contend on the same advisory key.",
+                );
+              probe.contention.push({
+                key: lock.key,
+                holder: pid,
+                waiter: lock.waiter!,
+              });
+            } finally {
+              if (timeout) clearTimeout(timeout);
+            }
+          }
+        }
         if (probe && sql.trim() === "BEGIN") {
           probe.sessions.add(pid!);
           await probe.begin();
@@ -231,6 +346,7 @@ export class PaymentPostgresHarness {
   cipher!: PaymentTokenCipher;
   taxi!: MultiTaxiRepository;
   owned!: OwnedMobilityRepository;
+  private peers: DiagnosedDatabaseService[] = [];
 
   async open(): Promise<void> {
     if (!hostedPaymentEnabled)
@@ -335,6 +451,9 @@ export class PaymentPostgresHarness {
     // pool twice and obscure the original failure on subsequent cases.
     this.database = undefined as unknown as DatabaseService;
     this.pool = undefined;
+    const peers = this.peers;
+    this.peers = [];
+    await Promise.all(peers.map((peer) => peer.onModuleDestroy()));
     await database?.onModuleDestroy();
     await pool?.end();
     if (this.activeName) {
@@ -417,6 +536,82 @@ export class PaymentPostgresHarness {
       }),
     );
     return id;
+  }
+
+  async authenticatedAccount(
+    provider: "email" | "google" | "line" = "email",
+    subject = `qa-${randomUUID()}@example.invalid`,
+  ) {
+    const account = await this.accounts.findOrCreateByIdentity(
+      provider,
+      subject,
+    );
+    const session = await this.accounts.issueSession(
+      account.drtsPassengerId,
+      "QA synthetic UA",
+      { provider, subject },
+    );
+    const identity = await this.accounts.authenticateAccessToken(
+      session.accessToken,
+    );
+    if (!identity)
+      throw new Error(
+        "Fixture session did not authenticate through production storage.",
+      );
+    return {
+      owner: account.drtsPassengerId,
+      account,
+      session,
+      identity,
+      provider,
+      subject,
+    };
+  }
+
+  peerDatabase(): DatabaseService {
+    if (!hostedPaymentEnabled || !this.activeName)
+      throw new Error("Peer DB requires an opened hosted-owned case.");
+    const previous = process.env.DATABASE_URL;
+    try {
+      process.env.DATABASE_URL = this.url(this.activeName);
+      const peer = new DiagnosedDatabaseService();
+      this.peers.push(peer);
+      return peer;
+    } finally {
+      if (previous === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = previous;
+    }
+  }
+
+  /** Pool acquire hook observes the exact clients that execute native Pool.query
+   * (OAuth CAS uses that API). Diagnostic PID reads use those same clients. */
+  async nativeQuerySessions<T>(
+    databases: DatabaseService[],
+    work: () => Promise<T>,
+  ) {
+    const pending: Promise<number>[] = [];
+    const listeners = databases.map((database) => {
+      const pool = Reflect.get(database, "pool") as InstanceType<typeof Pool>;
+      const handler = (client: PoolClient) => {
+        pending.push(
+          client
+            .query("SELECT pg_backend_pid() AS pid")
+            .then((result) => result.rows[0].pid as number),
+        );
+      };
+      pool.on("acquire", handler);
+      return { pool, handler };
+    });
+    try {
+      const result = await work();
+      const sessions = await Promise.all(pending);
+      process.stdout.write(
+        `PAX QA native Pool.query executor PIDs ${JSON.stringify({ sessions })}\n`,
+      );
+      return { result, sessions };
+    } finally {
+      for (const { pool, handler } of listeners) pool.off("acquire", handler);
+    }
   }
 
   async method(owner: string, credential = `qa.credential.${randomUUID()}`) {
@@ -673,7 +868,10 @@ export class PaymentPostgresHarness {
 
   /** Barrier on BEGIN of the actual production submission executors. Mutation
    * logs distinguish writes from replay; PIDs never use unrelated pool clients. */
-  async concurrentMutations<T>(work: () => Promise<T>) {
+  async concurrentMutations<T>(
+    work: () => Promise<T>,
+    proveContention = false,
+  ) {
     const database = this.database as DiagnosedDatabaseService;
     let arrivals = 0;
     let release!: () => void;
@@ -686,25 +884,32 @@ export class PaymentPostgresHarness {
       () => fail(new Error("Two production transactions did not reach BEGIN.")),
       5000,
     );
-    database.probe = {
+    const probe: NonNullable<DiagnosedDatabaseService["probe"]> = {
       sessions: new Set(),
+      statements: [],
+      proveContention,
+      contention: [],
       mutations: [],
       begin: async () => {
         if (++arrivals === 2) release();
         await barrier;
       },
     };
+    const databases = [database, ...this.peers];
+    for (const service of databases) service.probe = probe;
     try {
       const result = await work();
-      const mutations = database.probe.mutations;
-      const sessions = [...database.probe.sessions];
+      const mutations = probe.mutations;
+      const sessions = [...probe.sessions];
+      const statements = probe.statements;
+      const contention = probe.contention;
       process.stdout.write(
-        `Receipt CRM QA production session provenance ${JSON.stringify({ sessions, mutations })}\n`,
+        `PAX QA production session provenance ${JSON.stringify({ sessions, statements, contention, mutations })}\n`,
       );
-      return { result, sessions, mutations };
+      return { result, sessions, statements, contention, mutations };
     } finally {
       clearTimeout(timer);
-      database.probe = undefined;
+      for (const service of databases) service.probe = undefined;
     }
   }
 
