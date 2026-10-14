@@ -520,7 +520,7 @@ describe("token choice transaction, original replay and durable Ops source", () 
     ]);
     await expect(
       ops.getComplaintCaseForOps("PAX-22222222-2222-4222-8222-222222222222"),
-    ).rejects.toMatchObject({ code: "COMPLAINT_CASE_NOT_FOUND" });
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it.each([
