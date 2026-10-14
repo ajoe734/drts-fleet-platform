@@ -11,6 +11,8 @@ import {
   Query,
   Put,
   Sse,
+  Res,
+  StreamableFile,
 } from "@nestjs/common";
 import type { MessageEvent } from "@nestjs/common";
 import type { Observable } from "rxjs";
@@ -45,6 +47,7 @@ import type { BootstrapRequestIdentity } from "../../common/auth";
 import { ReportingFilingService } from "../reporting-filing/reporting-filing.service";
 import { MultiTaxiService } from "./multi-taxi.service";
 import type { RegisterPassengerPushSubscriptionCommand } from "./passenger-push.repository";
+import type { PassthroughResponseLike } from "../../common/idempotency-http";
 
 @Controller()
 export class MultiTaxiController {
@@ -150,6 +153,62 @@ export class MultiTaxiController {
     return toApiSuccessEnvelope(
       await this.multiTaxiService.getPassengerReceipt(accessToken),
       requestId,
+    );
+  }
+
+  @Get("passenger-rides/:accessToken/receipt/downloads")
+  @OpenRoute()
+  async getPassengerReceiptDownloads(
+    @Param("accessToken") accessToken: string,
+    @Res({ passthrough: true }) response: PassthroughResponseLike,
+  ) {
+    this.setPrivateReceiptHeaders(response);
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.getPassengerReceiptDownloads(accessToken),
+    );
+  }
+
+  @Get("passenger-rides/:accessToken/receipt/artifacts/html")
+  @OpenRoute()
+  async getPassengerReceiptHtml(
+    @Param("accessToken") accessToken: string,
+    @Res({ passthrough: true }) response: PassthroughResponseLike,
+  ) {
+    this.setPrivateReceiptHeaders(response);
+    const artifact = await this.multiTaxiService.getPassengerReceiptArtifact(
+      accessToken,
+      "html",
+    );
+    return new StreamableFile(artifact.buffer, {
+      type: artifact.contentType,
+      disposition: `attachment; filename="${artifact.fileName}"`,
+    });
+  }
+
+  @Get("passenger-rides/:accessToken/receipt/artifacts/pdf")
+  @OpenRoute()
+  async getPassengerReceiptPdf(
+    @Param("accessToken") accessToken: string,
+    @Res({ passthrough: true }) response: PassthroughResponseLike,
+  ) {
+    this.setPrivateReceiptHeaders(response);
+    const artifact = await this.multiTaxiService.getPassengerReceiptArtifact(
+      accessToken,
+      "pdf",
+    );
+    return new StreamableFile(artifact.buffer, {
+      type: artifact.contentType,
+      disposition: `attachment; filename="${artifact.fileName}"`,
+    });
+  }
+
+  private setPrivateReceiptHeaders(response: PassthroughResponseLike) {
+    response.setHeader("Cache-Control", "private, no-store");
+    response.setHeader("Referrer-Policy", "no-referrer");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader(
+      "Content-Security-Policy",
+      "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
     );
   }
 
@@ -451,7 +510,7 @@ export class MultiTaxiController {
       command.scope ?? {},
     );
     return toApiSuccessEnvelope(
-      this.requireReportingFilingService().createMultiTaxiTripExportJob(
+      await this.requireReportingFilingService().createMultiTaxiTripExportJobDurably(
         command,
         payload.rows,
         identity,

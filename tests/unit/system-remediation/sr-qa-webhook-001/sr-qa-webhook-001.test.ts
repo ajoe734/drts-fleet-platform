@@ -1,3 +1,4 @@
+import { enabledRegistryRepository } from "../../registry-driver-master-durable-ack-20261014/storage-fixture";
 import { createHmac } from "node:crypto";
 import { EventEmitter } from "node:events";
 import http from "node:http";
@@ -1292,7 +1293,9 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         "order-sandbox-mapped-001",
       );
       expect(treatments.length).toBe(1);
-      expect(treatments[0]!.sandboxBillingTreatmentId).toBe("treat-sandbox-001");
+      expect(treatments[0]!.sandboxBillingTreatmentId).toBe(
+        "treat-sandbox-001",
+      );
       expect(treatments[0]!.treatmentType).toBe("normal_av");
 
       // Isolation check: querying another order returns empty array
@@ -1740,7 +1743,10 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       const { ownedMobilityService, sandboxWebhookAdapter } =
         createMobilityAndCallServices();
 
-      sandboxWebhookAdapter.ingest(sandboxFixtures.callStarted, "req-start-idem");
+      sandboxWebhookAdapter.ingest(
+        sandboxFixtures.callStarted,
+        "req-start-idem",
+      );
       sandboxWebhookAdapter.ingest(sandboxFixtures.callEnded, "req-end-idem");
       sandboxWebhookAdapter.ingest(
         sandboxFixtures.recordingPending,
@@ -1795,6 +1801,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         opsDispatchEventsService,
         auditService,
         driverProfileService,
+        enabledRegistryRepository(),
       );
 
       const initialDriver = regulatoryRegistryService
@@ -1805,12 +1812,10 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(initialDriver!.licensesValid).toBe(true);
 
       // Degrade status: expire license in the past
-      const expiredDriver = regulatoryRegistryService.updateDriverLicenses(
-        "drv-demo-001",
-        {
+      const expiredDriver =
+        await regulatoryRegistryService.updateDriverLicenses("drv-demo-001", {
           licenseExpiry: "2025-01-01T00:00:00.000Z",
-        },
-      );
+        });
       expect(expiredDriver.dispatchEligible).toBe(false);
       expect(expiredDriver.licensesValid).toBe(false);
       expect(expiredDriver.eligibilityBlockedReasons).toContain(
@@ -1826,17 +1831,16 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(expiringDrivers.length).toBeGreaterThan(0);
 
       // Expiring policies scan
-      const expiringPolicies =
-        regulatoryRegistryService.listExpiringPolicies(365 * 5);
+      const expiringPolicies = regulatoryRegistryService.listExpiringPolicies(
+        365 * 5,
+      );
       expect(expiringPolicies.length).toBeGreaterThan(0);
 
       // Renew driver license with future date: restores dispatch eligibility
-      const renewedDriver = regulatoryRegistryService.updateDriverLicenses(
-        "drv-demo-001",
-        {
+      const renewedDriver =
+        await regulatoryRegistryService.updateDriverLicenses("drv-demo-001", {
           licenseExpiry: "2028-12-31T23:59:59.000Z",
-        },
-      );
+        });
       expect(renewedDriver.dispatchEligible).toBe(true);
       expect(renewedDriver.licensesValid).toBe(true);
       expect(renewedDriver.eligibilityBlockedReasons).not.toContain(

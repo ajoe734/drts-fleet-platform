@@ -31,10 +31,42 @@ import { PassengerBookingRepository } from "./booking/passenger-booking.reposito
 import { PassengerRideEventsGuard } from "./booking/passenger-ride-events.guard";
 import { PassengerBookingSettingsController } from "./booking/passenger-booking-settings.controller";
 import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
+import { ComplaintModule } from "../complaint/complaint.module";
+import { PassengerComplaintController } from "./complaint/passenger-complaint.controller";
+import { PassengerComplaintService } from "./complaint/passenger-complaint.service";
+import { PassengerReceiptController } from "./receipt/passenger-receipt.controller";
+import { PaymentMethodController } from "./payment/payment-method.controller";
+import { PaymentMethodRepository } from "./payment/payment-method.repository";
+import {
+  PAYMENT_RUNTIME,
+  PaymentMethodService,
+} from "./payment/payment-method.service";
+import { paymentRuntimeFromEnv } from "./payment/payment-runtime.config";
+import { PaymentChargeRepository } from "./payment/payment-charge.repository";
+import { PaymentChargeService } from "./payment/payment-charge.service";
+import { PaymentChargeWorker } from "./payment/payment-charge.worker";
+import { PaymentRefundController } from "./payment/payment-refund.controller";
+import { PaymentRefundRepository } from "./payment/payment-refund.repository";
+import { PaymentRefundService } from "./payment/payment-refund.service";
+import { PAYMENT_CAPTURE_POLICY } from "./payment/payment-capture.policy";
+import { paymentCapturePolicyFromEnv } from "./payment/payment-capture.config";
+import type { PaymentRuntime } from "./payment/payment-runtime.config";
+import { MultiTaxiRepository } from "../multi-taxi/multi-taxi.repository";
+import {
+  PAYMENT_RECOVERY_NOTICE_EXPIRY,
+  PAYMENT_RECOVERY_NOTICE_OUTBOX,
+  paymentRecoveryNoticeExpiryFromEnv,
+} from "./payment/payment-recovery-notice.config";
 
 @Global()
 @Module({
-  imports: [DatabaseModule, GeoModule, ServiceAreaModule, MultiTaxiModule],
+  imports: [
+    DatabaseModule,
+    GeoModule,
+    ServiceAreaModule,
+    MultiTaxiModule,
+    ComplaintModule,
+  ],
   controllers: [
     PassengerAccountController,
     PassengerOtpController,
@@ -43,6 +75,10 @@ import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
     FacebookDataDeletionController,
     PassengerBookingController,
     PassengerBookingSettingsController,
+    PassengerComplaintController,
+    PassengerReceiptController,
+    PaymentMethodController,
+    PaymentRefundController,
   ],
   providers: [
     PassengerJwtService,
@@ -58,6 +94,36 @@ import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
     PassengerBookingRepository,
     PassengerBookingService,
     PassengerRideEventsGuard,
+    PassengerComplaintService,
+    PaymentMethodRepository,
+    PaymentMethodService,
+    PaymentChargeRepository,
+    PaymentChargeService,
+    PaymentChargeWorker,
+    PaymentRefundRepository,
+    PaymentRefundService,
+    {
+      provide: PAYMENT_RUNTIME,
+      useFactory: () => paymentRuntimeFromEnv(process.env),
+    },
+    {
+      provide: PAYMENT_CAPTURE_POLICY,
+      inject: [PAYMENT_RUNTIME],
+      useFactory: (runtime: PaymentRuntime) =>
+        paymentCapturePolicyFromEnv(process.env, runtime),
+    },
+    {
+      provide: PAYMENT_RECOVERY_NOTICE_EXPIRY,
+      useFactory: () => paymentRecoveryNoticeExpiryFromEnv(process.env),
+    },
+    {
+      provide: PAYMENT_RECOVERY_NOTICE_OUTBOX,
+      inject: [DatabaseService],
+      // A stateless production repository adapter. MultiTaxiModule exports its
+      // service only; no foreign export or a second worker/claim is introduced.
+      useFactory: (database: DatabaseService) =>
+        new MultiTaxiRepository(database),
+    },
     { provide: SMS_PORT, useClass: UnconfiguredSmsPort },
     { provide: OTP_OPTIONS, useFactory: () => otpOptionsFromEnv(process.env) },
     {
@@ -68,6 +134,7 @@ import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
     },
   ],
   exports: [
+    PaymentChargeService,
     PassengerAccountService,
     PassengerJwtService,
     PassengerFareRepository,

@@ -1,4 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  readOAuthBinding,
+  sessionFingerprint,
+  type OAuthBinding,
+} from "../../../../lib/auth/bff-binding";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 const METADATA_IDENTITY_TOKEN_URL =
@@ -83,8 +88,61 @@ function isAllowedPassengerPath(path: string[], method: string) {
   if (method === "POST" && fullPath === "auth/refresh") return true;
   if (method === "POST" && fullPath === "auth/logout") return true;
   if (method === "GET" && fullPath === "me") return true;
+  if (method === "PATCH" && fullPath === "me") return true;
+  if (method === "DELETE" && fullPath === "me") return true;
+  if (method === "GET" && fullPath === "me/identities") return true;
+  if (
+    method === "DELETE" &&
+    path.length === 3 &&
+    path[0] === "me" &&
+    path[1] === "identities" &&
+    /^[A-Za-z0-9_-]{1,128}$/.test(path[2] ?? "")
+  ) {
+    // me/identities/:id
+    return true;
+  }
   if (method === "GET" && fullPath === "fares") return true;
-  if (method === "POST" && fullPath === "rides") return true;
+  if (method === "GET" && ["settings", "booking-settings"].includes(fullPath))
+    return true;
+  if (
+    path.length === 2 &&
+    path[0] === "geo" &&
+    ((method === "GET" && path[1] === "search") ||
+      (method === "POST" &&
+        ["resolve", "reverse", "route"].includes(path[1] ?? "")))
+  )
+    return true;
+  if (["GET", "POST"].includes(method) && fullPath === "rides") return true;
+  if (
+    path[0] === "rides" &&
+    /^[A-Za-z0-9._:-]{1,128}$/.test(path[1] ?? "") &&
+    ((method === "GET" && path.length === 2) ||
+      (path.length === 3 &&
+        ((method === "GET" && ["events", "receipt"].includes(path[2] ?? "")) ||
+          (method === "POST" &&
+            ["cancel", "ratings", "contact", "complaints"].includes(
+              path[2] ?? "",
+            )))) ||
+      (method === "GET" &&
+        path.length === 4 &&
+        path[2] === "receipt" &&
+        path[3] === "downloads") ||
+      (method === "GET" &&
+        path.length === 5 &&
+        path[2] === "receipt" &&
+        path[3] === "artifacts" &&
+        ["html", "pdf"].includes(path[4] ?? "")))
+  )
+    return true;
+  if (["GET", "POST"].includes(method) && fullPath === "payment-methods")
+    return true;
+  if (
+    path[0] === "payment-methods" &&
+    /^[A-Za-z0-9._:-]{1,128}$/.test(path[1] ?? "") &&
+    ((method === "DELETE" && path.length === 2) ||
+      (method === "PUT" && path.length === 3 && path[2] === "default"))
+  )
+    return true;
   return false;
 }
 
@@ -94,7 +152,10 @@ function resolveTargetOrigin() {
 
 function buildTargetUrl(request: NextRequest, path: string[]) {
   const targetUrl = new URL(
-    ["api", "passenger-app", ...path].join("/"),
+    (path[0] === "geo"
+      ? ["api", ...path]
+      : ["api", "passenger-app", ...path]
+    ).join("/"),
     `${resolveTargetOrigin()}/`,
   );
   targetUrl.search = request.nextUrl.search;
@@ -186,6 +247,18 @@ function deleteCookies(resp: NextResponse) {
     expires: new Date(0),
     path: "/",
   });
+  clearOAuthCookie(resp);
+}
+
+function clearOAuthCookie(resp: NextResponse) {
+  resp.cookies.set("pax_oauth_txn", "", {
+    maxAge: 0,
+    expires: new Date(0),
+    path: "/",
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+  });
 }
 
 async function forward(
@@ -193,11 +266,17 @@ async function forward(
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   let isLogout = false;
+  let isOAuthCallback = false;
   try {
     const { path } = await params;
     const method = request.method.toUpperCase();
     const fullPath = path.join("/");
     isLogout = fullPath === "auth/logout" && method === "POST";
+    isOAuthCallback =
+      path[0] === "auth" &&
+      path[1] === "oauth" &&
+      path[3] === "callback" &&
+      method === "POST";
 
     if (!(await checkCSRF(request))) {
       return withSecurityHeaders(
@@ -217,7 +296,10 @@ async function forward(
     let refreshToken = request.cookies.get("pax_refresh")?.value;
 
     const targetUrl = buildTargetUrl(request, path);
-    if (!targetUrl.pathname.startsWith("/api/passenger-app/")) {
+    if (
+      !targetUrl.pathname.startsWith("/api/passenger-app/") &&
+      !(path[0] === "geo" && targetUrl.pathname.startsWith("/api/geo/"))
+    ) {
       return withSecurityHeaders(
         NextResponse.json(
           { error: "PASSENGER_PROXY_PATH_NOT_ALLOWED" },
@@ -231,6 +313,129 @@ async function forward(
       initialBodyData = await request.arrayBuffer();
     }
 
+    const isOAuthStart =
+      path[0] === "auth" &&
+      path[1] === "oauth" &&
+      path[3] === "start" &&
+      method === "POST";
+    const isOtpRequest = fullPath === "auth/otp/request" && method === "POST";
+    let command: Record<string, any> | null = null;
+    if (isOAuthStart || isOAuthCallback || isOtpRequest) {
+      try {
+        command = JSON.parse(
+          new TextDecoder().decode(initialBodyData as ArrayBuffer),
+        );
+      } catch {
+        /* Reject malformed input below. */
+      }
+      if (!command || typeof command !== "object" || Array.isArray(command)) {
+        const resp = NextResponse.json(
+          {
+            error: {
+              code: "validation_error",
+              message: "Invalid auth command.",
+            },
+          },
+          { status: 400 },
+        );
+        if (isOAuthCallback) clearOAuthCookie(resp);
+        return withSecurityHeaders(resp);
+      }
+    }
+    let oauthBinding: OAuthBinding | null = null;
+    if (isOAuthCallback) {
+      oauthBinding = readOAuthBinding(
+        request.cookies.get("pax_oauth_txn")?.value,
+      );
+      if (
+        !oauthBinding ||
+        oauthBinding.provider !== path[2] ||
+        command!.provider !== path[2] ||
+        command!.state !== oauthBinding.state ||
+        oauthBinding.expiresAt <= Date.now() ||
+        oauthBinding.session !== sessionFingerprint(token, refreshToken) ||
+        (oauthBinding.purpose === "link" && !token) ||
+        Object.keys(command!).some(
+          (key) => !["provider", "code", "state", "error"].includes(key),
+        )
+      ) {
+        const resp = NextResponse.json(
+          {
+            error: {
+              code: "invalid_grant",
+              message: "Missing, expired or mismatched callback binding.",
+            },
+          },
+          { status: 401 },
+        );
+        clearOAuthCookie(resp);
+        return withSecurityHeaders(resp);
+      }
+      if (
+        command!.error ||
+        typeof command!.code !== "string" ||
+        !command!.code.trim()
+      ) {
+        const resp = NextResponse.json(
+          {
+            error: {
+              code:
+                command!.error === "access_denied"
+                  ? "access_denied"
+                  : "invalid_grant",
+              message: "Authorization was refused or failed.",
+            },
+          },
+          { status: 400 },
+        );
+        clearOAuthCookie(resp);
+        return withSecurityHeaders(resp);
+      }
+      initialBodyData = JSON.stringify({
+        provider: oauthBinding.provider,
+        code: command!.code,
+        state: oauthBinding.state,
+        transactionId: oauthBinding.transactionId,
+      });
+    }
+    if (
+      isOAuthStart &&
+      (command!.provider !== path[2] ||
+        !["login", "link"].includes(command!.purpose))
+    ) {
+      return withSecurityHeaders(
+        NextResponse.json(
+          {
+            error: {
+              code: "validation_error",
+              message: "Invalid OAuth provider or purpose.",
+            },
+          },
+          { status: 400 },
+        ),
+      );
+    }
+    const requiresPassenger =
+      (isOAuthStart && command!.purpose === "link") ||
+      (isOtpRequest && command!.purpose !== "login") ||
+      (isOAuthCallback && oauthBinding?.purpose === "link") ||
+      (path[0] === "me" && (method !== "GET" || path.length > 1)) ||
+      path[0] === "payment-methods";
+    if (requiresPassenger && !token) {
+      // Never turn an authenticated link/update into an anonymous bootstrap request.
+      return withSecurityHeaders(
+        NextResponse.json(
+          {
+            error: {
+              code: "unauthorized",
+              message: "An active passenger session is required.",
+            },
+          },
+          { status: 401 },
+        ),
+      );
+    }
+
     function extractTokens(
       parsed: any,
     ): { accessToken: string; refreshToken: string; redacted: any } | null {
@@ -238,8 +443,8 @@ async function forward(
 
       // Check snake_case in envelope
       if (parsed.data && typeof parsed.data === "object") {
-        const acc = parsed.data.access_token;
-        const ref = parsed.data.refresh_token;
+        const acc = parsed.data.access_token ?? parsed.data.accessToken;
+        const ref = parsed.data.refresh_token ?? parsed.data.refreshToken;
         if (
           typeof acc === "string" &&
           typeof ref === "string" &&
@@ -249,6 +454,8 @@ async function forward(
           const redacted = { ...parsed, data: { ...parsed.data } };
           delete redacted.data.access_token;
           delete redacted.data.refresh_token;
+          delete redacted.data.accessToken;
+          delete redacted.data.refreshToken;
           return { accessToken: acc, refreshToken: ref, redacted };
         }
         if (acc !== undefined || ref !== undefined) {
@@ -313,6 +520,20 @@ async function forward(
       if (fullPath === "auth/logout" && method === "POST") {
         headers.set("Content-Type", "application/json");
       }
+      if (
+        path[0] === "rides" &&
+        path[2] === "complaints" &&
+        method === "POST" &&
+        !headers.has("idempotency-key")
+      ) {
+        headers.set(
+          "idempotency-key",
+          typeof crypto !== "undefined" &&
+            typeof crypto.randomUUID === "function"
+            ? `bff-complaint-${crypto.randomUUID()}`
+            : `bff-complaint-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        );
+      }
       await applyUpstreamAuth(headers, targetUrl, currentToken);
       const init: RequestInit = {
         method,
@@ -354,6 +575,7 @@ async function forward(
     }
 
     // Normal forward path
+
     let init = await buildInit(token, refreshToken);
     let upstream = await fetch(targetUrl.toString(), init);
 
@@ -361,7 +583,7 @@ async function forward(
       null;
     let didClearTokens = false;
 
-    if (upstream.status === 401 && refreshToken) {
+    if (upstream.status === 401 && refreshToken && !isOAuthCallback) {
       try {
         const newTokens = await doRefresh(refreshToken);
         token = newTokens.accessToken;
@@ -399,6 +621,42 @@ async function forward(
       fullPath.startsWith("auth/otp") ||
       fullPath === "auth/mfa/verify" ||
       fullPath.startsWith("auth/oauth");
+
+    let oauthTxn: OAuthBinding | null = null;
+    if (isOAuthStart && upstream.ok) {
+      try {
+        const text = await upstream.clone().text();
+        const parsed = JSON.parse(text);
+        const data = parsed.data ?? parsed;
+        oauthTxn = readOAuthBinding(
+          JSON.stringify({
+            provider: path[2],
+            purpose: command!.purpose,
+            transactionId: data.transactionId ?? data.transaction_id,
+            state: data.state,
+            expiresAt: Math.min(
+              Date.parse(data.expiresAt ?? data.expires_at),
+              Date.now() + 600000,
+            ),
+            session: sessionFingerprint(token, refreshToken),
+          }),
+        );
+        if (!oauthTxn || oauthTxn.expiresAt <= Date.now())
+          throw new Error("Invalid binding");
+      } catch {
+        const resp = NextResponse.json(
+          {
+            error: {
+              code: "invalid_grant",
+              message: "Invalid OAuth start response.",
+            },
+          },
+          { status: 503 },
+        );
+        clearOAuthCookie(resp);
+        return withSecurityHeaders(resp);
+      }
+    }
 
     let loginData = null;
     if (isLogin && upstream.ok && (method === "POST" || method === "GET")) {
@@ -444,6 +702,17 @@ async function forward(
       path: "/",
     };
 
+    if (oauthTxn) {
+      nextResponse.cookies.set("pax_oauth_txn", JSON.stringify(oauthTxn), {
+        ...opts,
+        maxAge: 600,
+      });
+    }
+
+    // The formal upstream transaction repository is the durable one-use authority.
+    // Clear browser binding on every callback outcome, including refusal/failure.
+    if (isOAuthCallback) clearOAuthCookie(nextResponse);
+
     if (didClearTokens) {
       deleteCookies(nextResponse);
     } else if (loginData && loginData.accessToken && loginData.refreshToken) {
@@ -462,6 +731,9 @@ async function forward(
       );
     }
 
+    if (fullPath === "me" && method === "DELETE" && upstream.ok)
+      deleteCookies(nextResponse);
+
     return nextResponse;
   } catch {
     // Top-level catch for any unhandled errors (e.g. metadata text read fail on normal requests, arrayBuffer errors)
@@ -472,6 +744,7 @@ async function forward(
     if (isLogout) {
       deleteCookies(resp);
     }
+    if (isOAuthCallback) clearOAuthCookie(resp);
     return withSecurityHeaders(resp);
   }
 }
@@ -491,6 +764,20 @@ export async function POST(
 }
 
 export async function DELETE(
+  request: NextRequest,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  return forward(request, context);
+}
+
+export async function PATCH(
+  request: NextRequest,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  return forward(request, context);
+}
+
+export async function PUT(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
 ) {

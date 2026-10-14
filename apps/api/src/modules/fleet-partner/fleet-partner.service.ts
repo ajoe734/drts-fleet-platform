@@ -35,6 +35,7 @@ import {
 import { settlementChannelKeyForTrip } from "../billing-settlement/settlement-matrix";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
+import { FleetStatementDecisionRepository } from "./fleet-statement-decision.repository";
 import {
   FleetPartnerRepository,
   type PersistFleetPartnerChanges,
@@ -111,6 +112,8 @@ export class FleetPartnerService implements OnModuleInit {
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
     @Optional()
     private readonly fleetPartnerRepository?: FleetPartnerRepository,
+    @Optional()
+    private readonly statementDecisions?: FleetStatementDecisionRepository,
   ) {}
 
   async onModuleInit() {
@@ -424,14 +427,66 @@ export class FleetPartnerService implements OnModuleInit {
       await this.rebuildStatementsForPeriodMonth(periodMonth, fleetPartnerId);
     }
 
-    return this.statements
+    const statements = this.fleetPartnerRepository?.isEnabled()
+      ? await this.fleetPartnerRepository.loadStatements(
+          fleetPartnerId,
+          periodMonth,
+        )
+      : this.statements;
+    const decisions =
+      (await this.statementDecisions?.listDecisions(
+        fleetPartnerId,
+        periodMonth,
+      )) ?? [];
+    const combined = new Map(
+      statements.map((statement) => [statement.statementId, statement]),
+    );
+    for (const statement of decisions) {
+      const current = combined.get(statement.statementId);
+      combined.set(statement.statementId, {
+        ...statement,
+        payoutStatus:
+          current?.payoutStatus === "paid" || statement.payoutStatus === "paid"
+            ? "paid"
+            : statement.payoutStatus,
+      });
+    }
+    return [...combined.values()]
       .filter(
         (statement) =>
           statement.fleetPartnerId === fleetPartnerId &&
           (!periodMonth || statement.periodMonth === periodMonth),
       )
       .sort((left, right) => right.periodMonth.localeCompare(left.periodMonth))
-      .map((statement) => this.cloneStatement(statement));
+      .map((statement) =>
+        statement.decisionStatus === "confirmed" ||
+        statement.decisionStatus === "disputed"
+          ? structuredClone(statement)
+          : this.cloneStatement(statement),
+      );
+  }
+
+  async recordStatementDecision(
+    fleetPartnerId: string,
+    statementId: string,
+    actorId: string,
+    decision: "confirmed" | "disputed",
+    note: unknown,
+  ): Promise<FleetPartnerStatementRecord> {
+    if (!this.statementDecisions) {
+      throw new ApiRequestError(
+        503,
+        "STATEMENT_DECISION_UNAVAILABLE",
+        "Statement persistence is unavailable.",
+      );
+    }
+    return this.statementDecisions.decide(
+      fleetPartnerId,
+      statementId,
+      actorId,
+      decision,
+      note,
+    );
   }
 
   async getPortalDashboard(

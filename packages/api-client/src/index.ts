@@ -1,4 +1,15 @@
 import type { TenantInvoiceMailView } from "@drts/contracts";
+import type {
+  CreatePlatformFareVersionCommand,
+  UpdatePlatformFareVersionCommand,
+  RecordPlatformFareVersionFilingCommand,
+  SchedulePlatformFareVersionCommand,
+  RetirePlatformFareVersionCommand,
+  MultiTaxiFareManagementList,
+  MultiTaxiManagedFareVersion,
+  MultiTaxiManagedFareWireVersion,
+  MultiTaxiFareManagementWireList,
+} from "@drts/contracts";
 /**
  * @drts/api-client - Shared API client for DRTS client surfaces
  *
@@ -122,6 +133,8 @@ import type {
   FleetPartnerRevenueShareRuleRecord,
   DriverSupplyDraft,
   FleetPartnerStatementRecord,
+  ConfirmFleetPartnerStatementCommand,
+  DisputeFleetPartnerStatementCommand,
   HostVehicleCaseItem,
   HostVehicleEarningsSummary,
   HostVehicleMaintenanceItem,
@@ -588,13 +601,35 @@ function hasHeader(headers: Record<string, string>, key: string): boolean {
   return Object.keys(headers).some((header) => header.toLowerCase() === target);
 }
 
+// Fee identifiers are transported as string values because the HTTP serializer
+// converts every object key. Decode DTO fields first, then reconstruct the map.
+function decodeManagedFareVersion(value: unknown): MultiTaxiManagedFareVersion {
+  const wire = deepToCamelCase(value) as MultiTaxiManagedFareWireVersion;
+  const { additionalFeeEntries, ...tariff } = wire.tariff;
+  return {
+    ...wire,
+    tariff: {
+      ...tariff,
+      additionalFees: Object.fromEntries(
+        additionalFeeEntries.map(({ key, amount }) => [key, amount]),
+      ),
+    },
+  };
+}
+
 function parseApiErrorEnvelope(body: string): ApiErrorEnvelope["error"] | null {
   if (!body.trim()) {
     return null;
   }
 
   try {
-    const parsed = JSON.parse(body) as ApiErrorEnvelope;
+    const parsed = JSON.parse(body) as ApiErrorEnvelope & {
+      error: { trace_id?: unknown };
+    };
+    const traceId =
+      typeof parsed?.error?.traceId === "string"
+        ? parsed.error.traceId
+        : parsed?.error?.trace_id;
     if (
       parsed &&
       typeof parsed === "object" &&
@@ -603,9 +638,11 @@ function parseApiErrorEnvelope(body: string): ApiErrorEnvelope["error"] | null {
       typeof parsed.error.code === "string" &&
       typeof parsed.error.message === "string" &&
       typeof parsed.error.retryable === "boolean" &&
-      typeof parsed.error.traceId === "string"
+      typeof traceId === "string"
     ) {
-      return parsed.error;
+      // Keep details and business metadata intact; the global exception filter
+      // serializes trace_id while existing camelCase callers send traceId.
+      return { ...parsed.error, traceId };
     }
   } catch {
     return null;
@@ -2277,6 +2314,26 @@ export class ApiClient {
       : "";
     return this.getList<FleetPartnerStatementRecord>(
       `/api/fleet-partner/statements${query}`,
+    );
+  }
+
+  async confirmFleetPartnerStatement(
+    statementId: string,
+    command: ConfirmFleetPartnerStatementCommand,
+  ): Promise<FleetPartnerStatementRecord> {
+    return this.post<FleetPartnerStatementRecord>(
+      `/api/fleet-partner/statements/${encodeURIComponent(statementId)}/confirm`,
+      { body: command },
+    );
+  }
+
+  async disputeFleetPartnerStatement(
+    statementId: string,
+    command: DisputeFleetPartnerStatementCommand,
+  ): Promise<FleetPartnerStatementRecord> {
+    return this.post<FleetPartnerStatementRecord>(
+      `/api/fleet-partner/statements/${encodeURIComponent(statementId)}/dispute`,
+      { body: command },
     );
   }
 
@@ -4122,6 +4179,91 @@ export class ApiClient {
       "/api/platform-admin/maintenance-mode",
       { body: command },
     );
+  }
+
+  async listPlatformFareVersions(): Promise<MultiTaxiFareManagementList> {
+    const result = await this.fetchEnvelope<MultiTaxiFareManagementWireList>(
+      "GET",
+      "/api/platform-admin/multi-taxi/fare-versions",
+    );
+    const wire = deepToCamelCase(
+      result.data,
+    ) as MultiTaxiFareManagementWireList;
+    return { ...wire, items: wire.items.map(decodeManagedFareVersion) };
+  }
+
+  async getPlatformFareVersion(
+    id: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
+      "GET",
+      `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}`,
+    );
+    return decodeManagedFareVersion(result.data);
+  }
+
+  async createPlatformFareVersion(
+    command: CreatePlatformFareVersionCommand,
+    idempotencyKey: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
+      "POST",
+      "/api/platform-admin/multi-taxi/fare-versions",
+      { body: command, idempotencyKey },
+    );
+    return decodeManagedFareVersion(result.data);
+  }
+
+  async updatePlatformFareVersion(
+    id: string,
+    command: UpdatePlatformFareVersionCommand,
+    idempotencyKey: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
+      "PUT",
+      `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}`,
+      { body: command, idempotencyKey },
+    );
+    return decodeManagedFareVersion(result.data);
+  }
+
+  async recordPlatformFareVersionFiling(
+    id: string,
+    command: RecordPlatformFareVersionFilingCommand,
+    idempotencyKey: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
+      "POST",
+      `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}/file`,
+      { body: command, idempotencyKey },
+    );
+    return decodeManagedFareVersion(result.data);
+  }
+
+  async schedulePlatformFareVersion(
+    id: string,
+    command: SchedulePlatformFareVersionCommand,
+    idempotencyKey: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
+      "POST",
+      `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}/schedule`,
+      { body: command, idempotencyKey },
+    );
+    return decodeManagedFareVersion(result.data);
+  }
+
+  async retirePlatformFareVersion(
+    id: string,
+    command: RetirePlatformFareVersionCommand,
+    idempotencyKey: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
+      "POST",
+      `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}/retire`,
+      { body: command, idempotencyKey },
+    );
+    return decodeManagedFareVersion(result.data);
   }
 
   async listPlatformPricingRules(): Promise<PlatformPricingRuleRecord[]> {

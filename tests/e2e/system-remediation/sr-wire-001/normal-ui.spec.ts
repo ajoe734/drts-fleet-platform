@@ -199,7 +199,11 @@ test("OPS navigation opens a real leave review queue including valid empty resul
   await expect(page).toHaveURL(/\/leave(?:[?#]|$)/);
   const items = await listItems(await response);
   await expect(
-    page.getByText("請假審核 · Leave Requests", { exact: true }),
+    page.getByRole("heading", {
+      name: "請假審核 · Leave Requests",
+      level: 1,
+      exact: true,
+    }),
   ).toBeVisible();
   const pending = items.filter((item) => item.status === "pending");
   if (pending.length === 0) {

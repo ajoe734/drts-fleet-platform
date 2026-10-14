@@ -1,138 +1,101 @@
 name: Deploy — Prod
 
-# T11 of the v4 branch strategy: operator picks a prod-* tag and deploys it.
-# No auto-triggering — production deploys are deliberate, traceable decisions
-# tied to a specific previously-published version.
-
+# Operator-only protected production release. Partner Booking remains PAUSED;
+# retired passenger-web/concierge/assisted-entry surfaces are excluded.
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "prod/v<date> tag produced by hourly-promote (e.g. prod/v2026.05.18.0)"
+        description: "Immutable prod/v<YYYY.MM.DD>.<N> from hourly-promote"
         required: true
         type: string
       skip_migration:
-        description: "Skip DB migration step (use only if migrations already applied)"
+        description: "Skip only when migrations already applied / approved application rollback"
         required: false
         default: "false"
         type: choice
-        options:
-          - "false"
-          - "true"
-
+        options: ["false", "true"]
 permissions:
   contents: read
   id-token: write
   deployments: write
-
 concurrency:
   group: deploy-prod
   cancel-in-progress: false
-
 env:
   PROJECT_ID: ${{ vars.PROD_GCP_PROJECT_ID }}
   REGION: ${{ vars.PROD_GCP_REGION }}
-  ARTIFACT_REGISTRY: ${{ vars.PROD_ARTIFACT_REGISTRY }}
-  ARTIFACT_PROJECT_ID: ${{ vars.PROD_ARTIFACT_PROJECT_ID || vars.PROD_GCP_PROJECT_ID }}
-  ARTIFACT_REGION: ${{ vars.PROD_ARTIFACT_REGION || vars.PROD_GCP_REGION }}
-  ARTIFACT_REPOSITORY: ${{ vars.PROD_ARTIFACT_REPOSITORY || 'drts' }}
-  REGISTRY: ${{ vars.PROD_ARTIFACT_REGISTRY || format('{0}-docker.pkg.dev/{1}/{2}', vars.PROD_ARTIFACT_REGION || vars.PROD_GCP_REGION, vars.PROD_ARTIFACT_PROJECT_ID || vars.PROD_GCP_PROJECT_ID, vars.PROD_ARTIFACT_REPOSITORY || 'drts') }}
-  API_SERVICE: ${{ vars.PROD_GCP_API_SERVICE || 'drts-api' }}
-  PLATFORM_ADMIN_SERVICE: ${{ vars.PROD_GCP_PLATFORM_ADMIN_SERVICE || 'drts-platform-admin-web' }}
-  OPS_CONSOLE_SERVICE: ${{ vars.PROD_GCP_OPS_CONSOLE_SERVICE || 'drts-ops-console-web' }}
-  MIGRATION_JOB: ${{ vars.PROD_GCP_MIGRATION_JOB || 'drts-migrate' }}
-  CLOUDSQL: ${{ vars.PROD_GCP_CLOUDSQL_INSTANCE }}
-  DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.PROD_WIF_SERVICE_ACCOUNT }}
-  RUNTIME_SERVICE_ACCOUNT: ${{ vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT }}
-  WIF_PROVIDER_VALUE: ${{ secrets.PROD_WIF_PROVIDER }}
   SECRET_PREFIX: ${{ vars.PROD_SECRET_PREFIX || 'drts-prod' }}
-  MAP_PROVIDER_BACKEND: ${{ vars.PROD_MAP_PROVIDER_BACKEND || 'mock' }}
-  NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE: ${{ vars.PROD_MAP_TILE_URL_TEMPLATE }}
-  MAP_PROVIDER_ALLOWED_ORIGINS: ${{ vars.PROD_MAP_PROVIDER_ALLOWED_ORIGINS || vars.MAP_PROVIDER_ALLOWED_ORIGINS || '' }}
-  MAP_PROVIDER_MONTHLY_BUDGET_USD: ${{ vars.PROD_MAP_PROVIDER_MONTHLY_BUDGET_USD || vars.MAP_PROVIDER_MONTHLY_BUDGET_USD || '' }}
-  MAP_PROVIDER_BUDGET_ALERT_PCT: ${{ vars.PROD_MAP_PROVIDER_BUDGET_ALERT_PCT || vars.MAP_PROVIDER_BUDGET_ALERT_PCT || '50;80;95' }}
-  PLATFORM_ADMIN_ORIGIN: ${{ vars.PROD_PLATFORM_ADMIN_ORIGIN }}
-  OPS_CONSOLE_ORIGIN: ${{ vars.PROD_OPS_CONSOLE_ORIGIN }}
-  CONTROL_PLANE_API_ORIGIN_ENV: ${{ vars.PROD_CONTROL_PLANE_API_ORIGIN }}
+  DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.PROD_WIF_SERVICE_ACCOUNT }}
+  WIF_PROVIDER_VALUE: ${{ secrets.PROD_WIF_PROVIDER }}
   IAP_CLIENT_ID_ENV: ${{ vars.PROD_IAP_CLIENT_ID }}
-  WORKLOAD_IDENTITY_ISSUER_ENV: ${{ vars.PROD_WORKLOAD_IDENTITY_ISSUER || vars.WORKLOAD_IDENTITY_ISSUER }}
-  WORKLOAD_IDENTITY_AUDIENCE_ENV: ${{ vars.PROD_WORKLOAD_IDENTITY_AUDIENCE || vars.WORKLOAD_IDENTITY_AUDIENCE }}
+  RELEASE_TAG: ${{ inputs.tag }}
+  MAP_PROVIDER_BACKEND: ${{ vars.PROD_MAP_PROVIDER_BACKEND }}
+  NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE: ${{ vars.PROD_MAP_TILE_URL_TEMPLATE }}
+  MAP_PROVIDER_ALLOWED_ORIGINS: ${{ vars.PROD_MAP_PROVIDER_ALLOWED_ORIGINS }}
+  MAP_PROVIDER_MONTHLY_BUDGET_USD: ${{ vars.PROD_MAP_PROVIDER_MONTHLY_BUDGET_USD }}
+  MAP_PROVIDER_BUDGET_ALERT_PCT: ${{ vars.PROD_MAP_PROVIDER_BUDGET_ALERT_PCT }}
 
 jobs:
-  validate-config:
-    name: Validate production tag and config
+  resolve-tag:
+    name: Resolve protected immutable production source
     runs-on: ubuntu-latest
-    environment:
-      name: production
+    timeout-minutes: 10
+    environment: production
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
     steps:
-      - name: Checkout default branch metadata
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-
-      - name: Validate tag shape and origin presence
-        id: tag
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: true
+      - id: source
+        name: Resolve the production tag once
         run: |
           set -euo pipefail
-
-          tag="${{ inputs.tag }}"
-          if ! [[ "$tag" =~ ^prod/v[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$ ]]; then
-            echo "::error::Tag '$tag' does not match prod/v<YYYY.MM.DD>.<N>."
-            echo "::error::Prod deploys only accept tags produced by hourly-promote.yml."
-            echo "::error::Find a valid tag: gh api repos/${{ github.repository }}/tags --jq '.[].name' | grep ^prod/"
+          if ! [[ "$RELEASE_TAG" =~ ^prod/v[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$ ]]; then
+            echo "::error::Expected a prod/v<YYYY.MM.DD>.<N> tag from hourly-promote."
             exit 1
           fi
+          git fetch --no-tags origin "refs/tags/${RELEASE_TAG}"
+          sha="$(git rev-parse 'FETCH_HEAD^{commit}')"
+          [[ "$sha" =~ ^[a-f0-9]{40}$ ]]
+          echo "source_sha=$sha" >> "$GITHUB_OUTPUT"
 
-          if ! git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
-            echo "::error::Tag $tag does not exist on origin."
-            exit 1
-          fi
-
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "Tag validated: $tag"
-
-      - name: Validate prod GitHub config is wired
+  validate-config:
+    name: Validate complete production configuration before mutation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    needs: resolve-tag
+    env:
+      SOURCE_SHA: ${{ needs.resolve-tag.outputs.source_sha }}
+      PROD_VARIABLES_JSON: ${{ toJSON(vars) }}
+    outputs:
+      source_sha: ${{ needs.resolve-tag.outputs.source_sha }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      registry: ${{ steps.plan.outputs.registry }}
+      registry_host: ${{ steps.plan.outputs.registry_host }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-tag.outputs.source_sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Validate non-secret configuration without cloud calls
         run: |
-          set -euo pipefail
-
-          missing=()
-          [[ -n "${PROJECT_ID:-}" ]] || missing+=("vars.PROD_GCP_PROJECT_ID")
-          [[ -n "${REGION:-}" ]] || missing+=("vars.PROD_GCP_REGION")
-          [[ -n "${CLOUDSQL:-}" ]] || missing+=("vars.PROD_GCP_CLOUDSQL_INSTANCE")
-          [[ -n "${REGISTRY:-}" ]] || missing+=("vars.PROD_ARTIFACT_REGISTRY or vars.PROD_ARTIFACT_PROJECT_ID + vars.PROD_ARTIFACT_REGION + vars.PROD_ARTIFACT_REPOSITORY")
-          [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.PROD_WIF_PROVIDER")
-          [[ -n "${DEPLOYER_SERVICE_ACCOUNT:-}" ]] || missing+=("secrets.PROD_WIF_SERVICE_ACCOUNT")
-          [[ -n "${RUNTIME_SERVICE_ACCOUNT:-}" ]] || missing+=("vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT")
-          [[ -n "${WORKLOAD_IDENTITY_ISSUER_ENV:-}" ]] || missing+=("vars.PROD_WORKLOAD_IDENTITY_ISSUER or vars.WORKLOAD_IDENTITY_ISSUER")
-          [[ -n "${WORKLOAD_IDENTITY_AUDIENCE_ENV:-}" ]] || missing+=("vars.PROD_WORKLOAD_IDENTITY_AUDIENCE or vars.WORKLOAD_IDENTITY_AUDIENCE")
-          [[ -n "${PLATFORM_ADMIN_ORIGIN:-}" ]] || missing+=("vars.PROD_PLATFORM_ADMIN_ORIGIN")
-          [[ -n "${OPS_CONSOLE_ORIGIN:-}" ]] || missing+=("vars.PROD_OPS_CONSOLE_ORIGIN")
-          [[ -n "${CONTROL_PLANE_API_ORIGIN_ENV:-}" ]] || missing+=("vars.PROD_CONTROL_PLANE_API_ORIGIN")
-          [[ -n "${IAP_CLIENT_ID_ENV:-}" ]] || missing+=("vars.PROD_IAP_CLIENT_ID")
-          [[ -n "${API_SERVICE:-}" ]] || missing+=("vars.PROD_GCP_API_SERVICE")
-          [[ -n "${PLATFORM_ADMIN_SERVICE:-}" ]] || missing+=("vars.PROD_GCP_PLATFORM_ADMIN_SERVICE")
-          [[ -n "${OPS_CONSOLE_SERVICE:-}" ]] || missing+=("vars.PROD_GCP_OPS_CONSOLE_SERVICE")
-          [[ -n "${MIGRATION_JOB:-}" ]] || missing+=("vars.PROD_GCP_MIGRATION_JOB")
-
-          if (( ${#missing[@]} > 0 )); then
-            echo "::error::Missing GitHub Actions production configuration: ${missing[*]}."
-            echo "::error::Configure the required repo variables/secrets before rerunning Deploy — Prod."
-            exit 1
-          fi
-
-      - name: Validate required Secret Manager entries exist
-        uses: google-github-actions/auth@v2
+          node -e 'const {buildPlan}=require("./operations/verification/production-release-rail/rail.cjs"); try {buildPlan(JSON.parse(process.env.PROD_VARIABLES_JSON),process.env.SOURCE_SHA,process.env.RELEASE_TAG,process.env.DEPLOYER_SERVICE_ACCOUNT); if (!process.env.WIF_PROVIDER_VALUE) throw Error("Missing secrets.PROD_WIF_PROVIDER");} catch(e) {console.error(e.message);process.exit(1)}'
+      - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
           service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ env.PROJECT_ID }}
-
+      - uses: google-github-actions/setup-gcloud@v2
+        with: { project_id: "${{ env.PROJECT_ID }}" }
       - name: Validate map provider runtime config
         run: |
           MAP_PROVIDER_DEPLOYMENT_TIER=production \
@@ -140,580 +103,216 @@ jobs:
           MAP_PROVIDER_PROJECT_ID="$PROJECT_ID" \
           MAP_PROVIDER_SECRET_PREFIX="$SECRET_PREFIX" \
           ./operations/verification/check-map-provider-config.sh
-
-      - name: Check production secrets
+      - name: Resolve API secret mounts
+        id: registry
         run: |
           set -euo pipefail
-
-          required=(
-            "${SECRET_PREFIX}-db-url"
-            "${SECRET_PREFIX}-api-key-salt"
-            "${SECRET_PREFIX}-jwt-secret"
-            "${SECRET_PREFIX}-controlled-download-signing-secret"
-          )
-
-          missing=()
-          for secret in "${required[@]}"; do
-            if ! gcloud secrets describe "$secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
-              missing+=("$secret")
-            fi
-          done
-
-          if (( ${#missing[@]} > 0 )); then
-            echo "::error::Missing required Secret Manager entries in project ${PROJECT_ID}: ${missing[*]}"
+          workload_google_registry_secret="${SECRET_PREFIX}-workload-identity-google-service-principals"
+          if ! gcloud secrets describe "$workload_google_registry_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            echo "::error::Required secret ${workload_google_registry_secret} is absent; production Google workload assertions have no internal-key fallback."
             exit 1
           fi
-
-          if gcloud secrets describe "${SECRET_PREFIX}-internal-key" --project "$PROJECT_ID" >/dev/null 2>&1; then
-            echo "::notice::Optional secret ${SECRET_PREFIX}-internal-key detected and will be mounted into drts-api."
-          else
-            echo "::warning::Optional secret ${SECRET_PREFIX}-internal-key not found; drts-api will deploy without DRTS_INTERNAL_KEY."
-          fi
+          # Checked by preflight and resolved to a numeric enabled version before
+          # the plan is emitted. No deploy uses the mutable latest reference.
+          secret_args="WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=${workload_google_registry_secret}:latest"
+          echo "GOOGLE_REGISTRY_REFERENCE=$secret_args" >> "$GITHUB_ENV"
+      - name: Validate public-entry policies and strict startup; freeze secret versions
+        id: plan
+        run: node operations/verification/production-release-rail/preflight.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-plan-${{ env.SOURCE_SHA }}
+          path: production-plan.json
+          if-no-files-found: error
+          retention-days: 30
 
   build-push:
-    name: Build & push images
+    name: Build immutable production image (${{ matrix.id }})
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
     needs: validate-config
-    outputs:
-      image_tag: ${{ steps.tag.outputs.tag }}
-      source_ref: ${{ steps.tag.outputs.source_ref }}
-
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.validate-config.outputs.matrix) }}
+    env:
+      SOURCE_SHA: ${{ needs.validate-config.outputs.source_sha }}
     steps:
-      - name: Checkout prod tag
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
-
-      - name: Derive image tag
-        id: tag
-        run: |
-          sha="$(git rev-parse HEAD)"
-          echo "tag=${sha:0:12}" >> "$GITHUB_OUTPUT"
-          echo "source_ref=$sha" >> "$GITHUB_OUTPUT"
-          echo "Deploying tag=${{ inputs.tag }} resolved to $sha"
-
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@v2
+          ref: ${{ needs.validate-config.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: production-plan-${{ env.SOURCE_SHA }}
+      - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
           service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ env.PROJECT_ID }}
-
-      - name: Resolve Artifact Registry host
-        id: registry_host
+      - uses: google-github-actions/setup-gcloud@v2
+        with: { project_id: "${{ env.PROJECT_ID }}" }
+      - name: Configure Artifact Registry
+        env:
+          REGISTRY_HOST: ${{ needs.validate-config.outputs.registry_host }}
+        run: gcloud auth configure-docker "$REGISTRY_HOST" --quiet
+      - uses: docker/setup-buildx-action@v3
+      - name: Resolve frozen build inputs
+        id: inputs
         run: |
-          set -euo pipefail
-
-          registry="${REGISTRY}"
-          host="${registry%%/*}"
-
-          if [[ -z "$host" || "$host" == "$registry" ]]; then
-            echo "::error::REGISTRY must include an Artifact Registry host and repository path. Got: ${registry}"
-            exit 1
-          fi
-
-          echo "host=$host" >> "$GITHUB_OUTPUT"
-
-      - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker ${{ steps.registry_host.outputs.host }} --quiet
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build & push — api
+          node -e 'const fs=require("node:fs"); const p=JSON.parse(fs.readFileSync("production-plan.json")); if(p.sha!==process.env.SOURCE_SHA) process.exit(1); fs.appendFileSync(process.env.GITHUB_OUTPUT,`tile=${p.tile}\n`);'
+      - name: Build and push exact source
+        id: image
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: apps/api/Dockerfile
+          file: ${{ matrix.dockerfile }}
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/api:${{ steps.tag.outputs.tag }}
-          cache-from: type=gha,scope=api
-          cache-to: type=gha,scope=api,mode=min
-
-      - name: Build & push — migrate
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: Dockerfile.migrate
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/migrate:${{ steps.tag.outputs.tag }}
-          cache-from: type=gha,scope=migrate
-          cache-to: type=gha,scope=migrate,mode=min
-
-      - name: Build & push — platform-admin-web
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: apps/platform-admin-web/Dockerfile
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/platform-admin-web:${{ steps.tag.outputs.tag }}
-          cache-from: type=gha,scope=platform-admin-web
-          cache-to: type=gha,scope=platform-admin-web,mode=min
-
-      - name: Build & push — ops-console-web
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: apps/ops-console-web/Dockerfile
-          push: true
+          tags: ${{ needs.validate-config.outputs.registry }}/${{ matrix.id }}:${{ env.SOURCE_SHA }}
+          labels: org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
           build-args: |
-            NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE=${{ env.NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE }}
-          tags: |
-            ${{ env.REGISTRY }}/ops-console-web:${{ steps.tag.outputs.tag }}
-          cache-from: type=gha,scope=ops-console-web
-          cache-to: type=gha,scope=ops-console-web,mode=min
+            DRTS_CANDIDATE_SHA=${{ env.SOURCE_SHA }}
+            NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE=${{ steps.inputs.outputs.tile }}
+          cache-from: type=gha,scope=prod-${{ matrix.id }}
+          cache-to: type=gha,scope=prod-${{ matrix.id }},mode=min
+      - name: Record immutable image digest
+        env:
+          IMAGE_ID: ${{ matrix.id }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          node -e 'const fs=require("node:fs");if(!/^sha256:[a-f0-9]{64}$/.test(process.env.IMAGE_DIGEST))process.exit(1); fs.writeFileSync("image.json",JSON.stringify({id:process.env.IMAGE_ID,sha:process.env.SOURCE_SHA,digest:process.env.IMAGE_DIGEST}));'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-image-${{ matrix.id }}-${{ env.SOURCE_SHA }}
+          path: image.json
+          if-no-files-found: error
+          retention-days: 30
 
   migrate:
-    name: DB migration
+    name: Migrate once from the immutable image
     runs-on: ubuntu-latest
-    needs: build-push
+    timeout-minutes: 20
+    environment: production
+    needs: [validate-config, build-push]
     if: ${{ inputs.skip_migration != 'true' }}
-
+    env:
+      SOURCE_SHA: ${{ needs.validate-config.outputs.source_sha }}
+      SKIP_MIGRATION: ${{ inputs.skip_migration }}
     steps:
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@v2
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate-config.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/download-artifact@v4
+        with:
+          name: production-plan-${{ env.SOURCE_SHA }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: production-image-*-${{ env.SOURCE_SHA }}
+          path: production-images
+          merge-multiple: false
+      - name: Flatten digest metadata with distinct image names
+        run: |
+          for directory in production-images/production-image-*; do
+            mv "$directory/image.json" "$directory.json"
+            rmdir "$directory"
+          done
+      - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
           service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ env.PROJECT_ID }}
-
-      - name: Resolve Cloud Run runtime service account
-        id: runtime_sa
-        run: |
-          set -euo pipefail
-
-          RUNTIME_SA="${RUNTIME_SERVICE_ACCOUNT:-}"
-          if [[ -z "$RUNTIME_SA" ]]; then
-            echo "::error::Missing Cloud Run runtime identity. Set vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT."
-            exit 1
-          fi
-          if [[ "$RUNTIME_SA" == "$DEPLOYER_SERVICE_ACCOUNT" ]]; then
-            echo "::error::Cloud Run runtime identity resolves to the GitHub WIF deployer service account. Configure a separate runtime service account with roles/cloudsql.client and roles/secretmanager.secretAccessor."
-            exit 1
-          fi
-          ACT_AS_PERMISSIONS="$(gcloud iam service-accounts test-iam-permissions "$RUNTIME_SA" \
-            --project "$PROJECT_ID" \
-            --permissions iam.serviceAccounts.actAs \
-            --format='csv[no-heading](permissions)' \
-            2>/dev/null || true)"
-          if [[ "$ACT_AS_PERMISSIONS" != *"iam.serviceAccounts.actAs"* ]]; then
-            echo "::warning::test-iam-permissions could not confirm iam.serviceAccounts.actAs on ${RUNTIME_SA} — proceeding anyway (roles/iam.serviceAccountUser may be granted at project level)."
-          fi
-
-          echo "email=$RUNTIME_SA" >> "$GITHUB_OUTPUT"
-
-      - name: Create / update migration job definition
-        run: |
-          IMAGE="${{ env.REGISTRY }}/migrate:${{ needs.build-push.outputs.image_tag }}"
-          gcloud run jobs update "${MIGRATION_JOB}" \
-            --region "$REGION" \
-            --image "$IMAGE" \
-            --set-cloudsql-instances "$CLOUDSQL" \
-            --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-secrets "DATABASE_URL=${SECRET_PREFIX}-db-url:latest" \
-            --max-retries 0 \
-            --project "$PROJECT_ID" \
-          || gcloud run jobs create "${MIGRATION_JOB}" \
-            --region "$REGION" \
-            --image "$IMAGE" \
-            --set-cloudsql-instances "$CLOUDSQL" \
-            --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-secrets "DATABASE_URL=${SECRET_PREFIX}-db-url:latest" \
-            --max-retries 0 \
-            --project "$PROJECT_ID"
-
-      - name: Execute migration job and wait for completion
-        run: |
-          set -euo pipefail
-
-          if gcloud run jobs execute "${MIGRATION_JOB}" \
-            --region "$REGION" \
-            --wait \
-            --project "$PROJECT_ID"; then
-            exit 0
-          fi
-
-          echo "::error::${MIGRATION_JOB} execution failed. Capturing latest execution metadata for triage."
-          EXECUTION_NAME="$(gcloud run jobs describe "${MIGRATION_JOB}" \
-            --region "$REGION" \
-            --project "$PROJECT_ID" \
-            --format='value(status.latestCreatedExecution.name)' \
-            2>/dev/null || true)"
-
-          if [[ -n "$EXECUTION_NAME" ]]; then
-            echo "Latest execution: $EXECUTION_NAME"
-            gcloud run jobs executions describe "$EXECUTION_NAME" \
-              --region "$REGION" \
-              --project "$PROJECT_ID" \
-              --format='yaml(metadata.name,status.startTime,status.completionTime,status.logUri,status.conditions,status.failedCount,status.runningCount,status.succeededCount)' \
-              || true
-            gcloud run jobs executions tasks list \
-              --execution="$EXECUTION_NAME" \
-              --region "$REGION" \
-              --project "$PROJECT_ID" \
-              --format='yaml(metadata.name,status.conditions,status.lastAttemptResult,status.logUri)' \
-              || true
-
-            FAILED_TASK="$(gcloud run jobs executions tasks list \
-              --execution="$EXECUTION_NAME" \
-              --region "$REGION" \
-              --project "$PROJECT_ID" \
-              --filter='status.conditions.type=Completed AND status.conditions.status=False' \
-              --format='value(metadata.name)' \
-              2>/dev/null | head -n 1 || true)"
-
-            if [[ -n "$FAILED_TASK" ]]; then
-              echo "Failed task: $FAILED_TASK"
-              gcloud run jobs executions tasks describe "$FAILED_TASK" \
-                --region "$REGION" \
-                --project "$PROJECT_ID" \
-                --format='yaml(metadata.name,status.conditions,status.lastAttemptResult,status.logUri)' \
-                || true
-            fi
-
-            echo "Cloud Run execution logs (best effort):"
-            gcloud logging read \
-              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${MIGRATION_JOB}\" AND resource.labels.location=\"${REGION}\" AND labels.\"run.googleapis.com/execution_name\"=\"${EXECUTION_NAME}\"" \
-              --project "$PROJECT_ID" \
-              --order=asc \
-              --limit 200 \
-              --format='table(timestamp,severity,textPayload,jsonPayload.message)' \
-              || true
-          else
-            echo "Unable to resolve status.latestCreatedExecution.name for drts-migrate." >&2
-          fi
-
-          exit 1
+      - uses: google-github-actions/setup-gcloud@v2
+        with: { project_id: "${{ env.PROJECT_ID }}" }
+      - name: Migrate once from the immutable image
+        run: node operations/verification/production-release-rail/run.cjs migrate
 
   deploy:
-    name: Deploy services
+    name: Deploy all ten production services
     runs-on: ubuntu-latest
-    needs: [build-push, migrate]
-    if: ${{ always() && needs.build-push.result == 'success' && (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') }}
-
+    timeout-minutes: 30
+    environment: production
+    needs: [validate-config, build-push, migrate]
+    if: ${{ always() && needs.validate-config.result == 'success' && needs.build-push.result == 'success' && (needs.migrate.result == 'success' || (needs.migrate.result == 'skipped' && inputs.skip_migration == 'true')) }}
+    env:
+      SOURCE_SHA: ${{ needs.validate-config.outputs.source_sha }}
+      SKIP_MIGRATION: ${{ inputs.skip_migration }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@v2
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate-config.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/download-artifact@v4
+        with:
+          name: production-plan-${{ env.SOURCE_SHA }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: production-image-*-${{ env.SOURCE_SHA }}
+          path: production-images
+          merge-multiple: false
+      - name: Flatten digest metadata with distinct image names
+        run: |
+          for directory in production-images/production-image-*; do
+            mv "$directory/image.json" "$directory.json"
+            rmdir "$directory"
+          done
+      - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
           service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ env.PROJECT_ID }}
-
-      - name: Resolve Cloud Run runtime service account
-        id: runtime_sa
-        run: |
-          set -euo pipefail
-
-          RUNTIME_SA="${RUNTIME_SERVICE_ACCOUNT:-}"
-          if [[ -z "$RUNTIME_SA" ]]; then
-            echo "::error::Missing Cloud Run runtime identity. Set vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT."
-            exit 1
-          fi
-          if [[ "$RUNTIME_SA" == "$DEPLOYER_SERVICE_ACCOUNT" ]]; then
-            echo "::error::Cloud Run runtime identity resolves to the GitHub WIF deployer service account. Configure a separate runtime service account with roles/cloudsql.client and roles/secretmanager.secretAccessor."
-            exit 1
-          fi
-          ACT_AS_PERMISSIONS="$(gcloud iam service-accounts test-iam-permissions "$RUNTIME_SA" \
-            --project "$PROJECT_ID" \
-            --permissions iam.serviceAccounts.actAs \
-            --format='csv[no-heading](permissions)' \
-            2>/dev/null || true)"
-          if [[ "$ACT_AS_PERMISSIONS" != *"iam.serviceAccounts.actAs"* ]]; then
-            echo "::warning::test-iam-permissions could not confirm iam.serviceAccounts.actAs on ${RUNTIME_SA} — proceeding anyway (roles/iam.serviceAccountUser may be granted at project level)."
-          fi
-
-          echo "email=$RUNTIME_SA" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve Cloud Run auth exposure flags
-        id: exposure
-        env:
-          API_ALLOW_UNAUTHENTICATED: ${{ vars.PROD_API_ALLOW_UNAUTHENTICATED }}
-          PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED: ${{ vars.PROD_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED }}
-          OPS_CONSOLE_ALLOW_UNAUTHENTICATED: ${{ vars.PROD_OPS_CONSOLE_ALLOW_UNAUTHENTICATED }}
-        run: |
-          set -euo pipefail
-
-          resolve_flag() {
-            local raw="${1:-}"
-            local default_value="${2:-false}"
-            local normalized="${raw:-$default_value}"
-            normalized="$(echo "$normalized" | tr '[:upper:]' '[:lower:]')"
-            case "$normalized" in
-              true|1|yes|y) echo "--allow-unauthenticated" ;;
-              false|0|no|n) echo "--no-allow-unauthenticated" ;;
-              *)
-                echo "::error::Invalid Cloud Run exposure flag: ${raw}. Use true/false."
-                exit 1
-                ;;
-            esac
-          }
-
-          echo "api=$(resolve_flag "${API_ALLOW_UNAUTHENTICATED:-}" false)" >> "$GITHUB_OUTPUT"
-          echo "platform_admin=$(resolve_flag "${PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" false)" >> "$GITHUB_OUTPUT"
-          echo "ops_console=$(resolve_flag "${OPS_CONSOLE_ALLOW_UNAUTHENTICATED:-}" false)" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve production control-plane endpoints
-        id: control_plane
-        run: |
-          set -euo pipefail
-
-          api_origin="${CONTROL_PLANE_API_ORIGIN_ENV}"
-          iap_client_id="${IAP_CLIENT_ID_ENV}"
-
-          echo "api_origin=${api_origin}" >> "$GITHUB_OUTPUT"
-          echo "iap_client_id=${iap_client_id}" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve API secret mounts
-        id: api_secrets
-        run: |
-          set -euo pipefail
-
-          secret_args="DATABASE_URL=${SECRET_PREFIX}-db-url:latest,API_KEY_SALT=${SECRET_PREFIX}-api-key-salt:latest,JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest,CONTROLLED_DOWNLOAD_SIGNING_SECRET=${SECRET_PREFIX}-controlled-download-signing-secret:latest"
-          ops_secret_args="JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest"
-          workload_key_secret="${SECRET_PREFIX}-workload-identity-jwt-public-key"
-          workload_registry_secret="${SECRET_PREFIX}-workload-identity-service-principals"
-          # SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002: Google-assertion
-          # registry read by GoogleWorkloadIdentityAdapter
-          # (WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS, distinct from
-          # WORKLOAD_IDENTITY_SERVICE_PRINCIPALS above). Dev treats this
-          # secret's absence as a notice and degrades to x-drts-internal-key
-          # (INTERNAL_KEY_EXCP_002 is still active there); production must
-          # not -- once EXCP_002 is retired, an unpopulated registry here
-          # would let the API start and then reject every proxied request at
-          # runtime. Fail the deploy before it reaches drts-api instead.
-          workload_google_registry_secret="${SECRET_PREFIX}-workload-identity-google-service-principals"
-
-          for required_secret in "$workload_key_secret" "$workload_registry_secret"; do
-            if ! gcloud secrets describe "$required_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
-              echo "::error::Required secret ${required_secret} not found in project ${PROJECT_ID}."
-              exit 1
-            fi
-          done
-          if ! gcloud secrets describe "$workload_google_registry_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
-            echo "::error::Required secret ${workload_google_registry_secret} not found in project ${PROJECT_ID}. Populate it with the Google workload identity service principal registry before deploying production (see docs/02-architecture/internal-key-exceptions.md section 10.3); deploying without it risks every proxied request being rejected once INTERNAL_KEY_EXCP_002 is retired."
-            exit 1
-          fi
-          secret_args="${secret_args},WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY=${workload_key_secret}:latest,WORKLOAD_IDENTITY_SERVICE_PRINCIPALS=${workload_registry_secret}:latest,WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=${workload_google_registry_secret}:latest"
-
-          if gcloud secrets describe "${SECRET_PREFIX}-internal-key" --project "$PROJECT_ID" >/dev/null 2>&1; then
-            secret_args="${secret_args},DRTS_INTERNAL_KEY=${SECRET_PREFIX}-internal-key:latest"
-            echo "::notice::Including optional DRTS_INTERNAL_KEY secret in drts-api deploy."
-          else
-            echo "::warning::Optional secret ${SECRET_PREFIX}-internal-key not found; deploying drts-api without DRTS_INTERNAL_KEY."
-          fi
-
-          if [[ "${MAP_PROVIDER_BACKEND}" == "google" ]]; then
-            secret_args="${secret_args},GOOGLE_MAPS_GEOCODING_API_KEY=${SECRET_PREFIX}-google-maps-geocoding-api-key:latest,GOOGLE_MAPS_ROUTES_API_KEY=${SECRET_PREFIX}-google-maps-routes-api-key:latest"
-            for map_secret in "${SECRET_PREFIX}-google-maps-geocoding-api-key" "${SECRET_PREFIX}-google-maps-routes-api-key" "${SECRET_PREFIX}-google-maps-browser-key"; do
-              if ! gcloud secrets describe "$map_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
-                echo "::error::Required secret ${map_secret} not found in project ${PROJECT_ID}."
-                exit 1
-              fi
-            done
-            ops_secret_args="${ops_secret_args},GOOGLE_MAPS_BROWSER_KEY=${SECRET_PREFIX}-google-maps-browser-key:latest"
-          fi
-
-          printf 'api=%s\n' "$secret_args" >> "$GITHUB_OUTPUT"
-          printf 'ops=%s\n' "$ops_secret_args" >> "$GITHUB_OUTPUT"
-
-      - name: Verify live Google Maps provider
-        if: ${{ env.MAP_PROVIDER_BACKEND == 'google' }}
-        run: |
-          set -euo pipefail
-          export GOOGLE_MAPS_GEOCODING_API_KEY="$(gcloud secrets versions access latest --secret="${SECRET_PREFIX}-google-maps-geocoding-api-key" --project="$PROJECT_ID")"
-          export GOOGLE_MAPS_ROUTES_API_KEY="$(gcloud secrets versions access latest --secret="${SECRET_PREFIX}-google-maps-routes-api-key" --project="$PROJECT_ID")"
-          export GOOGLE_MAPS_BROWSER_KEY="$(gcloud secrets versions access latest --secret="${SECRET_PREFIX}-google-maps-browser-key" --project="$PROJECT_ID")"
-          export MAP_PROVIDER_SMOKE_ORIGIN="$OPS_CONSOLE_ORIGIN"
-          echo "::add-mask::${GOOGLE_MAPS_GEOCODING_API_KEY}"
-          echo "::add-mask::${GOOGLE_MAPS_ROUTES_API_KEY}"
-          echo "::add-mask::${GOOGLE_MAPS_BROWSER_KEY}"
-          node operations/verification/verify-google-map-provider-live.mjs
-
-      - name: Deploy — api
-        run: |
-          IMAGE="${{ env.REGISTRY }}/api:${{ needs.build-push.outputs.image_tag }}"
-          map_provider_mode="$([[ "$MAP_PROVIDER_BACKEND" == "google" ]] && echo external || echo mock)"
-          # Use deploy for both create and update so bootstrap flows create the API service
-          # before post-deploy IAM / IAP bindings are applied.
-          gcloud run deploy "${API_SERVICE}" \
-            --region "$REGION" \
-            --image "$IMAGE" \
-            --port 3001 \
-            --ingress internal-and-cloud-load-balancing \
-            --set-cloudsql-instances "$CLOUDSQL" \
-            --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-secrets "${{ steps.api_secrets.outputs.api }}" \
-            --set-env-vars "NODE_ENV=production,APP_ENV=production,DRTS_ENV=production,API_PORT=3001,WORKLOAD_IDENTITY_ISSUER=${WORKLOAD_IDENTITY_ISSUER_ENV},WORKLOAD_IDENTITY_AUDIENCE=${WORKLOAD_IDENTITY_AUDIENCE_ENV},MAP_PROVIDER_MODE=${map_provider_mode},MAP_PROVIDER_NAME=google,MAP_PROVIDER_BACKEND=${MAP_PROVIDER_BACKEND},MAP_PROVIDER_ALLOWED_ORIGINS=${MAP_PROVIDER_ALLOWED_ORIGINS},MAP_PROVIDER_MONTHLY_BUDGET_USD=${MAP_PROVIDER_MONTHLY_BUDGET_USD},MAP_PROVIDER_BUDGET_ALERT_PCT=${MAP_PROVIDER_BUDGET_ALERT_PCT}" \
-            ${{ steps.exposure.outputs.api }} \
-            --min-instances 1 \
-            --max-instances 6 \
-            --project "$PROJECT_ID"
-
-      - name: Ensure control-plane runtime can invoke drts-api
-        run: |
-          gcloud run services add-iam-policy-binding "${API_SERVICE}" \
-            --region "$REGION" \
-            --project "$PROJECT_ID" \
-            --member "serviceAccount:${{ steps.runtime_sa.outputs.email }}" \
-            --role "roles/run.invoker"
-
-      - name: Ensure control-plane runtime can access API IAP
-        id: api_iap_access
-        continue-on-error: true
-        run: |
-          gcloud iap web add-iam-policy-binding \
-            --resource-type=cloud-run \
-            --service="${API_SERVICE}" \
-            --region "$REGION" \
-            --project "$PROJECT_ID" \
-            --member "serviceAccount:${{ steps.runtime_sa.outputs.email }}" \
-            --role "roles/iap.httpsResourceAccessor"
-
-      - name: Note manual API IAP binding fallback
-        if: steps.api_iap_access.outcome == 'failure'
-        run: |
-          echo "::warning::GitHub deploy identity cannot mutate API IAP policy; continuing because runtime access may already be provisioned manually."
-
-      - name: Deploy — platform-admin-web
-        run: |
-          IMAGE="${{ env.REGISTRY }}/platform-admin-web:${{ needs.build-push.outputs.image_tag }}"
-          gcloud run deploy "${PLATFORM_ADMIN_SERVICE}" \
-            --region "$REGION" \
-            --image "$IMAGE" \
-            --port 3002 \
-            --ingress internal-and-cloud-load-balancing \
-            --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-secrets "JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest" \
-            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.control_plane.outputs.api_origin }},DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }},NEXT_PUBLIC_API_URL=/control-plane-proxy" \
-            ${{ steps.exposure.outputs.platform_admin }} \
-            --min-instances 1 \
-            --max-instances 3 \
-            --project "$PROJECT_ID"
-
-      - name: Deploy — ops-console-web
-        run: |
-          IMAGE="${{ env.REGISTRY }}/ops-console-web:${{ needs.build-push.outputs.image_tag }}"
-          map_provider_mode="$([[ "$MAP_PROVIDER_BACKEND" == "google" ]] && echo external || echo mock)"
-          gcloud run deploy "${OPS_CONSOLE_SERVICE}" \
-            --region "$REGION" \
-            --image "$IMAGE" \
-            --port 3003 \
-            --ingress internal-and-cloud-load-balancing \
-            --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-secrets "${{ steps.api_secrets.outputs.ops }}" \
-            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.control_plane.outputs.api_origin }},DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }},NEXT_PUBLIC_API_URL=/control-plane-proxy,MAP_PROVIDER_MODE=${map_provider_mode},MAP_PROVIDER_NAME=google,MAP_PROVIDER_ALLOWED_ORIGINS=${MAP_PROVIDER_ALLOWED_ORIGINS}" \
-            ${{ steps.exposure.outputs.ops_console }} \
-            --min-instances 1 \
-            --max-instances 3 \
-            --project "$PROJECT_ID"
+      - uses: google-github-actions/setup-gcloud@v2
+        with: { project_id: "${{ env.PROJECT_ID }}" }
+      - name: Deploy — api and all active web surfaces
+        run: node operations/verification/production-release-rail/run.cjs deploy
 
   health-check:
-    name: API health check
+    name: Verify exact revisions, public customer entry and protected contracts
     runs-on: ubuntu-latest
-    needs: deploy
-    if: ${{ always() && needs.deploy.result == 'success' }}
-
+    timeout-minutes: 30
+    environment: production
+    needs: [validate-config, deploy]
+    if: ${{ always() && needs.validate-config.result == 'success' && needs.deploy.result == 'success' }}
+    env:
+      SOURCE_SHA: ${{ needs.validate-config.outputs.source_sha }}
+      SKIP_MIGRATION: ${{ inputs.skip_migration }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@v2
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate-config.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/download-artifact@v4
+        with:
+          name: production-plan-${{ env.SOURCE_SHA }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: production-image-*-${{ env.SOURCE_SHA }}
+          path: production-images
+          merge-multiple: false
+      - name: Flatten digest metadata with distinct image names
+        run: |
+          for directory in production-images/production-image-*; do
+            mv "$directory/image.json" "$directory.json"
+            rmdir "$directory"
+          done
+      - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
           service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v2
+        with: { project_id: "${{ env.PROJECT_ID }}" }
+      - name: Verify exact revisions, anonymous entry and authenticated contracts
+        run: node operations/verification/production-release-rail/run.cjs verify
+      - uses: actions/upload-artifact@v4
         with:
-          project_id: ${{ env.PROJECT_ID }}
-
-      - name: Resolve production auth endpoints
-        id: control_plane
-        run: |
-          set -euo pipefail
-
-          echo "api_origin=${CONTROL_PLANE_API_ORIGIN_ENV}" >> "$GITHUB_OUTPUT"
-          echo "iap_client_id=${IAP_CLIENT_ID_ENV}" >> "$GITHUB_OUTPUT"
-
-      - name: Mint IAP verification token
-        id: iap_token
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
-          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
-          token_format: id_token
-          id_token_audience: ${{ steps.control_plane.outputs.iap_client_id }}
-          id_token_include_email: true
-
-      - name: Wait for service to be Ready
-        run: |
-          echo "Waiting for ${API_SERVICE} Cloud Run service to reach Ready=True ..."
-          for i in $(seq 1 24); do
-            READY=$(gcloud run services describe "${API_SERVICE}" \
-              --region "$REGION" \
-              --project "$PROJECT_ID" \
-              --format "value(status.conditions[0].status)" 2>/dev/null || true)
-            echo "  attempt $i: Ready=$READY"
-            if [ "$READY" = "True" ]; then
-              echo "Service is ready."
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "Service did not reach Ready state after 240s." >&2
-          gcloud run services describe "${API_SERVICE}" \
-            --region "$REGION" \
-            --project "$PROJECT_ID" \
-            --format "yaml(status)" || true
-          exit 1
-
-      - name: Verify IAP-protected control-plane API
-        env:
-          CONTROL_PLANE_API_ORIGIN: ${{ steps.control_plane.outputs.api_origin }}
-        run: |
-          set -euo pipefail
-
-          TOKEN="${{ steps.iap_token.outputs.id_token }}"
-
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${TOKEN}" \
-            "${CONTROL_PLANE_API_ORIGIN}/health" >/dev/null
-
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${TOKEN}" \
-            "${PLATFORM_ADMIN_ORIGIN}/control-plane-proxy/identity/context" >/dev/null
-
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${TOKEN}" \
-            "${OPS_CONSOLE_ORIGIN}/control-plane-proxy/identity/context" >/dev/null
-
-      - name: Print production URLs
-        run: |
-          echo "=== Production deployment complete ==="
-          for SVC in "${API_SERVICE}" "${PLATFORM_ADMIN_SERVICE}" "${OPS_CONSOLE_SERVICE}"; do
-            URL=$(gcloud run services describe "$SVC" \
-              --region "$REGION" \
-              --project "$PROJECT_ID" \
-              --format "value(status.url)" 2>/dev/null || echo "(not found)")
-            echo "  $SVC: $URL"
-          done
-          echo "  protected-api-host: ${{ steps.control_plane.outputs.api_origin }}"
+          name: production-release-evidence-${{ env.SOURCE_SHA }}
+          path: |
+            production-plan.json
+            production-images/*.json
+            production-evidence.json
+          if-no-files-found: error
+          retention-days: 90

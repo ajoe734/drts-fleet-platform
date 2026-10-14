@@ -1,10 +1,13 @@
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import type {
+  ActualTripFareBreakdown,
+  DriverDeclaredSurnameSnapshot,
   FulfillmentSegmentRecord,
   MoneyAmount,
   OwnedOrderRecord,
   SandboxBillingTreatmentRecord,
 } from "@drts/contracts";
+import type { CertificateE04Snapshot } from "../certificate-support/certificate-support.types";
 
 export const OWNED_MOBILITY_TRIP_COMPLETED_EVENT =
   "owned-mobility.trip.completed";
@@ -49,9 +52,13 @@ export type OwnedMobilityMultiTaxiTripCompletedEvent = {
   routeSummary: string;
   distanceMeters: number;
   fareMinor: number;
+  /** Driver-reported actual components; no aggregate/toll convention or complete E04 inferred. */
+  actualFareBreakdown?: ActualTripFareBreakdown;
   tollMinor: number;
   currency: typeof PLATFORM_CURRENCY;
   consumerServicePhone: string;
   authorityComplaintPhone: string;
   completedAt: string;
-};
+  /** Only a lawful immutable upstream capture can supply these actual facts. */
+  e04Snapshot?: CertificateE04Snapshot;
+} & Partial<DriverDeclaredSurnameSnapshot>;

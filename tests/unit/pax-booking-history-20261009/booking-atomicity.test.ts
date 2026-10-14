@@ -3,6 +3,7 @@ import {
   createProductionBookingFixture,
   NOW,
   OWNER,
+  PAYMENT_METHOD_ID,
   type Fault,
 } from "./production-booking-fixture";
 
@@ -37,7 +38,7 @@ describe("R2: production booking and repositories commit before dispatch", () =>
         name: "Account Name",
         phone: "0912345678",
       });
-      expect(f.state.order?.paymentMethodTokenRef).toBe("payment-unit");
+      expect(f.state.order?.paymentMethodTokenRef).toBe(PAYMENT_METHOD_ID);
       expect(f.state.order?.pickup.address).toBe("Origin Address");
       expect(f.state.history).toEqual([
         OWNER,
@@ -56,6 +57,30 @@ describe("R2: production booking and repositories commit before dispatch", () =>
           .every((c) => c.transactional),
       ).toBe(true);
       expect(f.release).toEqual([false]);
+      const accountLock = f.calls.findIndex(
+        (c) =>
+          c.sql.startsWith("SELECT status FROM passenger.accounts") &&
+          c.sql.includes("FOR UPDATE"),
+      );
+      const unpaid = f.calls.findIndex((c) =>
+        c.sql.startsWith("SELECT 1 FROM passenger.booking_histories h"),
+      );
+      const methodLock = f.calls.findIndex(
+        (c) =>
+          c.sql.startsWith(
+            "SELECT payment_method_id FROM passenger.psp_tokens",
+          ) && c.sql.includes("FOR UPDATE"),
+      );
+      const firstWrite = f.calls.findIndex((c) => c.sql.startsWith("INSERT"));
+      expect(accountLock).toBeGreaterThan(0);
+      expect(unpaid).toBeGreaterThan(accountLock);
+      expect(methodLock).toBeGreaterThan(unpaid);
+      expect(firstWrite).toBeGreaterThan(methodLock);
+      expect(
+        [accountLock, unpaid, methodLock].every(
+          (i) => f.calls[i]?.transactional,
+        ),
+      ).toBe(true);
       expect(f.published).toHaveLength(1);
       expect(Object.keys(result.ride).sort()).toEqual([
         "actions",
@@ -99,7 +124,33 @@ describe("R2: production booking and repositories commit before dispatch", () =>
       (f.multi as unknown as { accessTokensByDigest: Map<string, unknown> })
         .accessTokensByDigest.size,
     ).toBe(0);
-    expect(f.calls.some((c) => c.sql.includes("FOR UPDATE"))).toBe(false);
+    // Account/method precreate locks are mandatory; compensation must still
+    // never lock/cancel a partially created order after persistence failure.
+    expect(
+      f.calls.some(
+        (c) =>
+          c.sql.includes("FOR UPDATE") &&
+          c.sql.includes("FROM ops.phase1_owned_orders"),
+      ),
+    ).toBe(false);
+    if (!faults.includes("connect")) {
+      expect(
+        f.calls.some(
+          (c) =>
+            c.sql.includes("FROM passenger.accounts") &&
+            c.sql.includes("FOR UPDATE") &&
+            c.transactional,
+        ),
+      ).toBe(true);
+      expect(
+        f.calls.some(
+          (c) =>
+            c.sql.includes("FROM passenger.psp_tokens") &&
+            c.sql.includes("FOR UPDATE") &&
+            c.transactional,
+        ),
+      ).toBe(true);
+    }
     if (!faults.includes("connect")) expect(f.release).toEqual([true]);
   });
 

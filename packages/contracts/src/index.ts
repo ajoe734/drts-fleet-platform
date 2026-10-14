@@ -1341,7 +1341,8 @@ export interface AuditLogRecord {
     | "ops_observer"
     | "partner_api_key"
     | "partner_user"
-    | "referral_passenger";
+    | "referral_passenger"
+    | "first_party_passenger";
   tenantId: string | null;
   moduleName: string;
   actionName: string;
@@ -3517,11 +3518,29 @@ export interface DriverStartTaskCommand {
   startedAt: string;
 }
 
+/** Immutable self-declared profile-view facts, not verified/legal driver identity. */
+export interface DriverDeclaredSurnameSnapshot {
+  driverSurname: string;
+  driverSurnameSource: "driver_profile_declared";
+  /** Existing whole-profile revision time, not an invented surname-verification time. */
+  driverSurnameProfileUpdatedAt: string;
+}
+
+/** Actual driver-reported NTD fare components, never reconstructed from a quote. */
+export interface ActualTripFareBreakdown {
+  startMinor: number;
+  distanceMinor: number;
+  delayMinor: number;
+  nightMinor: number;
+}
+
 export interface DriverCompleteTaskCommand {
   completedAt: string;
   actualDistanceKm: number;
   actualDurationSec: number;
   fare?: MoneyAmount;
+  /** Optional for legacy callers; all four actual components are required when supplied. */
+  actualFareBreakdown?: ActualTripFareBreakdown;
   proof?: CompletionProofBundle;
 }
 
@@ -4023,7 +4042,7 @@ export interface WaypointRecord {
   departedAt: string | null;
 }
 
-export interface DriverTaskRecord {
+export interface DriverTaskRecord extends Partial<DriverDeclaredSurnameSnapshot> {
   bookingRequirements?: BookingRequirements;
   bookingQualification?: BookingQualification;
   taskId: string;
@@ -4045,6 +4064,8 @@ export interface DriverTaskRecord {
   actualDistanceKm: number | null;
   actualDurationSec: number | null;
   fare: MoneyAmount | null;
+  /** Immutable completion input; absence means actual components were not captured. */
+  actualFareBreakdown?: ActualTripFareBreakdown;
   proof: CompletionProofBundle | null;
   complianceGates?: ComplianceGateRecord[];
   forwardedStatus?: string | null;
@@ -4760,6 +4781,7 @@ export const COMPLAINT_CATEGORIES = [
   "vehicle_condition",
   "route_issue",
   "fare_dispute",
+  "settlement_dispute",
   "safety_concern",
   "lost_and_found",
   "other",
@@ -4838,6 +4860,15 @@ export const COMPLAINT_CATEGORY_VALID_RESOLUTIONS: Record<
     "resolved_other",
   ],
   fare_dispute: [
+    "resolved_with_refund",
+    "resolved_with_credit",
+    "resolved_with_corrective_action",
+    "resolved_no_fault",
+    "resolved_duplicate",
+    "resolved_withdrawn",
+    "resolved_other",
+  ],
+  settlement_dispute: [
     "resolved_with_refund",
     "resolved_with_credit",
     "resolved_with_corrective_action",
@@ -4942,6 +4973,9 @@ export interface LinkComplaintToIncidentCommand {
 
 export interface ComplaintCaseRecord {
   caseNo: string;
+  /** Present on cases created from the fleet settlement workflow. */
+  fleetPartnerId?: string;
+  relatedStatementId?: string;
   caseSource: "phone" | "web" | "app" | "ops";
   relatedOrderId: string | null;
   relatedCallId: string | null;
@@ -5343,8 +5377,29 @@ export interface FleetPartnerStatementLineRecord {
   };
 }
 
+export type FleetPartnerStatementDecisionStatus =
+  | "unreviewed"
+  | "confirmed"
+  | "disputed";
+
+export interface ConfirmFleetPartnerStatementCommand {
+  note?: string;
+}
+
+export interface DisputeFleetPartnerStatementCommand {
+  reason: string;
+}
+
 export interface FleetPartnerStatementRecord {
   statementId: string;
+  decisionStatus?: FleetPartnerStatementDecisionStatus;
+  confirmedAt?: string | null;
+  confirmedBy?: string | null;
+  confirmNote?: string | null;
+  disputedAt?: string | null;
+  disputedBy?: string | null;
+  disputeReason?: string | null;
+  disputeCaseId?: string | null;
   fleetPartnerId: string;
   periodMonth: string;
   payoutStatus: DriverPayoutStatus;
@@ -7081,6 +7136,8 @@ export interface DriverProfileBankAccount {
 export interface DriverProfileRecord {
   driverId: string;
   name: string;
+  /** Explicitly supplied surname; absent on legacy profiles, never inferred from name. */
+  driverSurname?: string;
   phone: string | null;
   email: string | null;
   photoUrl: string | null;
@@ -7092,6 +7149,8 @@ export interface DriverProfileRecord {
 
 export interface CreateDriverProfileCommand {
   name: string;
+  /** Nonempty text, trimmed like name with no length cap; omission leaves surname absent. */
+  driverSurname?: string;
   phone?: string | null;
   email?: string | null;
   photoUrl?: string | null;
@@ -7101,6 +7160,8 @@ export interface CreateDriverProfileCommand {
 
 export interface UpdateDriverProfileCommand {
   name?: string;
+  /** Nonempty text, trimmed like name with no length cap; omission preserves surname. No clear/null. */
+  driverSurname?: string;
   phone?: string | null;
   email?: string | null;
   photoUrl?: string | null;

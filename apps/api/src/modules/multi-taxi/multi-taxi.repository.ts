@@ -4,7 +4,22 @@ import {
 } from "@drts/contracts";
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { Injectable, Logger, Optional } from "@nestjs/common";
-import type { QueryResultRow } from "pg";
+import type { PoolClient, QueryResultRow } from "pg";
+import { ApiRequestError } from "../../common/api-envelope";
+import { resolvePassengerSubjectRef } from "../../common/sensitive-data-policy";
+
+export interface PassengerAccountRatingHook {
+  execute(
+    client: PoolClient,
+    rating: PassengerTripRatingRecord,
+    isNew: boolean,
+  ): Promise<void>;
+}
+
+export interface PassengerRideRatingContext extends PassengerAccountRatingHook {
+  token: PassengerRideAccessToken;
+  tokenDigest: string;
+}
 
 import type {
   ConsumerNotificationOutboxRecord,
@@ -21,6 +36,7 @@ import type {
   PassengerRatingReviewListItem,
   PassengerPushDeliveryOutcome,
   PassengerRideAccessToken,
+  OwnedOrderRecord,
   PassengerTripRatingRecord,
   PushProviderAckState,
 } from "@drts/contracts";
@@ -30,7 +46,10 @@ import type {
   PartnerDeliveryMetadata,
   StoredPartnerNotificationContext,
 } from "./partner-notification.types";
-import type { StoredFirstPartyContext, FirstPartyDeliveryMetadata } from "./first-party-notification.transport";
+import type {
+  StoredFirstPartyContext,
+  FirstPartyDeliveryMetadata,
+} from "./first-party-notification.transport";
 import type { PassengerNotificationRouteResolution } from "./passenger-notification-channel-router";
 
 import {
@@ -511,7 +530,7 @@ export class MultiTaxiRepository {
       FROM mobility.phase1_order_first_party_notification_routes
       WHERE order_id = $1
       `,
-      [orderId]
+      [orderId],
     );
     const row = result.rows[0];
     if (!row) return null;
@@ -524,21 +543,37 @@ export class MultiTaxiRepository {
       notificationPolicyVersion: row.notification_policy_version,
       consentVersion: row.consent_version,
       rideRef: row.ride_ref,
-      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+      createdAt:
+        row.created_at instanceof Date
+          ? row.created_at.toISOString()
+          : row.created_at,
     };
   }
 
-  private mapFirstPartyContext(row: Record<string, any>): StoredFirstPartyContext {
+  private mapFirstPartyContext(
+    row: Record<string, any>,
+  ): StoredFirstPartyContext {
     return {
-      outboxId: row.outbox_id, orderId: row.order_id, tenantId: row.tenant_id,
-      routeSnapshot: row.route_snapshot, targetDevices: row.target_devices,
-      wireMessage: row.wire_message, wireMessageHash: row.wire_message_hash,
-      retryPolicySnapshot: row.retry_policy_snapshot, deviceOutcomes: row.device_outcomes,
-      eventSequence: Number(row.event_sequence), expiresAt: new Date(row.expires_at).toISOString(),
-      deliveryTarget: row.delivery_target, deliveryStage: row.delivery_stage,
-      retryDisposition: row.retry_disposition, failureReason: row.failure_reason,
-      receiptId: row.receipt_id, createdAt: new Date(row.created_at).toISOString(),
-      deliveredAt: row.delivered_at ? new Date(row.delivered_at).toISOString() : null,
+      outboxId: row.outbox_id,
+      orderId: row.order_id,
+      tenantId: row.tenant_id,
+      routeSnapshot: row.route_snapshot,
+      targetDevices: row.target_devices,
+      wireMessage: row.wire_message,
+      wireMessageHash: row.wire_message_hash,
+      retryPolicySnapshot: row.retry_policy_snapshot,
+      deviceOutcomes: row.device_outcomes,
+      eventSequence: Number(row.event_sequence),
+      expiresAt: new Date(row.expires_at).toISOString(),
+      deliveryTarget: row.delivery_target,
+      deliveryStage: row.delivery_stage,
+      retryDisposition: row.retry_disposition,
+      failureReason: row.failure_reason,
+      receiptId: row.receipt_id,
+      createdAt: new Date(row.created_at).toISOString(),
+      deliveredAt: row.delivered_at
+        ? new Date(row.delivered_at).toISOString()
+        : null,
     };
   }
 
@@ -549,8 +584,12 @@ export class MultiTaxiRepository {
     // Tokens are resolved separately immediately before each device IO, never
     // bundled into the durable context or a long-lived batch cache.
     const result = await this.databaseService!.query(
-      `SELECT * FROM mobility.phase1_first_party_notification_delivery_contexts WHERE outbox_id=$1`, [outboxId]);
-    return result.rows[0] ? { context: this.mapFirstPartyContext(result.rows[0]) } : null;
+      `SELECT * FROM mobility.phase1_first_party_notification_delivery_contexts WHERE outbox_id=$1`,
+      [outboxId],
+    );
+    return result.rows[0]
+      ? { context: this.mapFirstPartyContext(result.rows[0]) }
+      : null;
   }
 
   async findFirstPartyNotificationDeviceToken(
@@ -558,8 +597,13 @@ export class MultiTaxiRepository {
     target: StoredFirstPartyContext["targetDevices"][number],
     fenceToken: number,
   ): Promise<string | null> {
-    if (!this.isEnabled()) throw new Error("First-party persistence unavailable");
-    const result = await this.databaseService!.query<{ fence_valid: boolean; token: string | null }>(`
+    if (!this.isEnabled())
+      throw new Error("First-party persistence unavailable");
+    const result = await this.databaseService!.query<{
+      fence_valid: boolean;
+      token: string | null;
+    }>(
+      `
       SELECT EXISTS (
         SELECT 1 FROM ops.phase1_push_delivery_claims
         WHERE outbox_id=$1 AND fence_token=$3 AND claim_state='claimed'
@@ -574,8 +618,11 @@ export class MultiTaxiRepository {
           AND d.app_id=c.route_snapshot->>'appId'
           AND d.last_seen_at >= now() - interval '60 days'
       ) AS token
-    `, [context.outboxId, target.deviceId, fenceToken, target.tokenSha256]);
-    if (!result.rows[0]?.fence_valid) throw new Error("First-party notification fence lost before send");
+    `,
+      [context.outboxId, target.deviceId, fenceToken, target.tokenSha256],
+    );
+    if (!result.rows[0]?.fence_valid)
+      throw new Error("First-party notification fence lost before send");
     return result.rows[0].token;
   }
 
@@ -583,37 +630,60 @@ export class MultiTaxiRepository {
     context: Omit<StoredFirstPartyContext, "createdAt" | "deliveredAt">,
     fenceToken: number,
   ): Promise<StoredFirstPartyContext> {
-    if (!this.isEnabled()) throw new Error("First-party persistence unavailable");
+    if (!this.isEnabled())
+      throw new Error("First-party persistence unavailable");
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
       // Match claim/outcome lock order; concurrent preparations serialize here.
       const outbox = await client.query(
         `SELECT outbox_id FROM ops.consumer_notification_outbox WHERE outbox_id=$1 AND order_id=$2 AND status='sending' FOR UPDATE`,
-        [context.outboxId, context.orderId]);
+        [context.outboxId, context.orderId],
+      );
       const claim = await client.query(
         `SELECT fence_token FROM ops.phase1_push_delivery_claims
          WHERE outbox_id=$1 AND fence_token=$2 AND claim_state='claimed'
-           AND lease_expires_at > clock_timestamp() FOR UPDATE`, [context.outboxId, fenceToken]);
-      if (!outbox.rows.length || !claim.rows.length) throw new Error("First-party notification fence lost before preparation");
-      await client.query(`
+           AND lease_expires_at > clock_timestamp() FOR UPDATE`,
+        [context.outboxId, fenceToken],
+      );
+      if (!outbox.rows.length || !claim.rows.length)
+        throw new Error(
+          "First-party notification fence lost before preparation",
+        );
+      await client.query(
+        `
         INSERT INTO mobility.phase1_first_party_notification_delivery_contexts (
           outbox_id, order_id, tenant_id, route_snapshot, target_devices, wire_message, wire_message_hash,
           event_sequence, expires_at, retry_policy_snapshot
         ) VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7,$8,$9,$10::jsonb)
         ON CONFLICT (outbox_id) DO NOTHING
-      `, [context.outboxId, context.orderId, context.tenantId, JSON.stringify(context.routeSnapshot),
-        JSON.stringify(context.targetDevices), JSON.stringify(context.wireMessage), context.wireMessageHash,
-        context.eventSequence, context.expiresAt, JSON.stringify(context.retryPolicySnapshot)]);
+      `,
+        [
+          context.outboxId,
+          context.orderId,
+          context.tenantId,
+          JSON.stringify(context.routeSnapshot),
+          JSON.stringify(context.targetDevices),
+          JSON.stringify(context.wireMessage),
+          context.wireMessageHash,
+          context.eventSequence,
+          context.expiresAt,
+          JSON.stringify(context.retryPolicySnapshot),
+        ],
+      );
       const result = await client.query(
-        `SELECT * FROM mobility.phase1_first_party_notification_delivery_contexts WHERE outbox_id=$1`, [context.outboxId]);
+        `SELECT * FROM mobility.phase1_first_party_notification_delivery_contexts WHERE outbox_id=$1`,
+        [context.outboxId],
+      );
       const stored = this.mapFirstPartyContext(result.rows[0]);
       await client.query("COMMIT");
       return stored;
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
-    } finally { client.release(); }
+    } finally {
+      client.release();
+    }
   }
 
   async findOrderPartnerNotificationRoute(
@@ -648,9 +718,10 @@ export class MultiTaxiRepository {
    */
   async resolvePassengerNotificationChannel(
     orderId: string,
+    executor: Pick<DatabaseService, "query"> = this.databaseService!,
   ): Promise<PassengerNotificationRouteResolution> {
     if (!this.isEnabled()) return { channel: "none" };
-    const result = await this.databaseService!.query<{
+    const result = await executor.query<{
       partner_route: OrderPartnerNotificationRouteRow | null;
       first_party_route: FirstPartyNotificationRouteRow | null;
     }>(
@@ -676,6 +747,120 @@ export class MultiTaxiRepository {
         route: mapFirstPartyNotificationRoute(firstPartyRow),
       };
     return { channel: "none" };
+  }
+
+  async isPaymentRecoveryNoticeRelevant(
+    orderId: string,
+    subjectRef: string,
+    executor: Pick<DatabaseService, "query"> = this.databaseService!,
+  ): Promise<boolean> {
+    if (!this.isEnabled()) return false;
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        orderId,
+      ) ||
+      !subjectRef ||
+      subjectRef.length > 255
+    )
+      return false;
+    const result = await executor.query(
+      `SELECT c.order_id FROM passenger.payment_charge_records c
+       JOIN passenger.booking_histories h ON h.order_id=c.order_id AND h.drts_passenger_id=c.drts_passenger_id
+       JOIN passenger.accounts a ON a.drts_passenger_id=c.drts_passenger_id AND a.status='active'
+       JOIN billing.multi_taxi_passenger_payments p ON p.payment_id=c.payment_id AND p.order_id=c.order_id::text
+       JOIN ops.phase1_owned_orders o ON o.order_id=c.order_id::text
+       JOIN mobility.phase1_order_first_party_notification_routes r
+         ON r.order_id=c.order_id::text AND r.drts_passenger_id=c.drts_passenger_id
+       WHERE c.order_id=$1 AND r.passenger_subject_ref=$2 AND o.status='completed'
+         AND o.record->'passenger'->>'passengerId'=c.drts_passenger_id
+         AND c.status='manual_recovery' AND p.status='manual_recovery'
+         AND c.recovery_notice_requested_at IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM mobility.phase1_order_partner_notification_routes pr WHERE pr.order_id=r.order_id)`,
+      [orderId, subjectRef],
+    );
+    return result.rows.length === 1;
+  }
+
+  /** Called inside the payment account-first transaction on its SAME client.
+   * No route is manufactured and no receipt/delivery status is written here.
+   */
+  async enqueuePaymentRecoveryNotice(
+    executor: Pick<DatabaseService, "query">,
+    orderId: string,
+    expiresAt: string,
+  ): Promise<string | null> {
+    if (
+      !this.isEnabled() ||
+      !Number.isFinite(Date.parse(expiresAt)) ||
+      Date.parse(expiresAt) <= Date.now()
+    )
+      return null;
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        orderId,
+      )
+    )
+      return null;
+    const resolution = await this.resolvePassengerNotificationChannel(
+      orderId,
+      executor,
+    );
+    if (resolution.channel !== "first_party_app") return null;
+    const route = resolution.route;
+    if (
+      !(await this.isPaymentRecoveryNoticeRelevant(
+        orderId,
+        route.passengerSubjectRef,
+        executor,
+      ))
+    )
+      return null;
+    const outboxId = `pax:payment-recovery:${orderId}`;
+    const prior = await executor.query(
+      `SELECT * FROM ops.consumer_notification_outbox WHERE outbox_id=$1 FOR UPDATE`,
+      [outboxId],
+    );
+    if (prior.rows[0]) {
+      const row = prior.rows[0];
+      if (
+        row.order_id !== orderId ||
+        row.passenger_subject_ref !== route.passengerSubjectRef ||
+        row.event_type !== "payment_recovery_required" ||
+        !Number.isSafeInteger(row.payload?.eventSequence) ||
+        row.payload.eventSequence < 1 ||
+        typeof row.payload?.expiresAt !== "string" ||
+        !Number.isFinite(Date.parse(row.payload.expiresAt)) ||
+        Date.parse(row.payload.expiresAt) <= new Date(row.created_at).getTime()
+      )
+        throw new Error("payment_recovery_notice_state_conflict");
+      return outboxId; // Original expiry/sequence/claim/receipt are immutable.
+    }
+    const inserted = await executor.query(
+      `INSERT INTO ops.consumer_notification_outbox (outbox_id,order_id,passenger_subject_ref,event_type,assignment_version,payload,status,attempt_count,next_attempt_at,created_at,delivered_at)
+       VALUES ($1,$2,$3,'payment_recovery_required',NULL,$4::jsonb,'pending',0,now(),now(),NULL)
+       ON CONFLICT (outbox_id) DO NOTHING RETURNING outbox_id`,
+      [
+        outboxId,
+        orderId,
+        route.passengerSubjectRef,
+        JSON.stringify({ expiresAt: new Date(expiresAt).toISOString() }),
+      ],
+    );
+    if (inserted.rowCount !== 1)
+      throw new Error("payment_recovery_notice_state_conflict");
+    const sequence = await this.allocateNotificationEventSequence(
+      orderId,
+      executor,
+    );
+    if (sequence === null || !Number.isSafeInteger(sequence) || sequence < 1)
+      throw new Error("payment_recovery_notice_sequence_unavailable");
+    const updated = await executor.query(
+      `UPDATE ops.consumer_notification_outbox SET payload=jsonb_set(payload,'{eventSequence}',to_jsonb($2::bigint)) WHERE outbox_id=$1 AND order_id=$3 AND event_type='payment_recovery_required' AND passenger_subject_ref=$4`,
+      [outboxId, sequence, orderId, route.passengerSubjectRef],
+    );
+    if (updated.rowCount !== 1)
+      throw new Error("payment_recovery_notice_state_conflict");
+    return outboxId;
   }
 
   /**
@@ -796,7 +981,11 @@ export class MultiTaxiRepository {
       // clears channelRouting, can reopen a row the router has stopped.
       const disposition =
         channelMetadata?.retryDisposition ??
-        (record.payload.firstPartyNotification as FirstPartyDeliveryMetadata | undefined)?.retryDisposition ??
+        (
+          record.payload.firstPartyNotification as
+            | FirstPartyDeliveryMetadata
+            | undefined
+        )?.retryDisposition ??
         context.rows[0]?.retry_disposition ??
         metadata?.retryDisposition;
       if (
@@ -1119,7 +1308,11 @@ export class MultiTaxiRepository {
       // fenced claimPartnerNotification() as the partner path (D7: one
       // shared claim/fence owner for every channel), so they re-validate
       // the lease at write time identically.
-      const fencedClaim = Boolean(input.partnerMetadata || input.firstPartyMetadata || input.channelMetadata);
+      const fencedClaim = Boolean(
+        input.partnerMetadata ||
+        input.firstPartyMetadata ||
+        input.channelMetadata,
+      );
       if (fencedClaim) {
         // Same lock order as claimPartnerNotification (outbox before claim)
         // for every fenced channel, partner or router-sealed, avoids a
@@ -1194,18 +1387,29 @@ export class MultiTaxiRepository {
 
       if (input.firstPartyMetadata) {
         const m = input.firstPartyMetadata;
-        await client.query(`
+        await client.query(
+          `
           UPDATE mobility.phase1_first_party_notification_delivery_contexts
           SET delivery_stage=$2, retry_disposition=$3, failure_reason=$4,
               receipt_id=$5, delivered_at=$6, device_outcomes=$7::jsonb
           WHERE outbox_id=$1
-        `, [input.outboxId, m.deliveryStage, m.retryDisposition, m.failureReason,
-          m.receiptId, input.deliveryOutcome.deliveredAt, JSON.stringify(m.deviceOutcomes)]);
+        `,
+          [
+            input.outboxId,
+            m.deliveryStage,
+            m.retryDisposition,
+            m.failureReason,
+            m.receiptId,
+            input.deliveryOutcome.deliveredAt,
+            JSON.stringify(m.deviceOutcomes),
+          ],
+        );
         // Also persist pre-context configuration/route failures. This metadata
         // is read by the same outbox scheduler/claim path as durable contexts.
         await client.query(
           `UPDATE ops.consumer_notification_outbox SET payload=jsonb_set(payload, '{firstPartyNotification}', $2::jsonb) WHERE outbox_id=$1`,
-          [input.outboxId, JSON.stringify(m)]);
+          [input.outboxId, JSON.stringify(m)],
+        );
       }
 
       if (input.channelMetadata) {
@@ -1456,8 +1660,18 @@ export class MultiTaxiRepository {
     return result.rows[0] ? this.mapDriverRatingSummary(result.rows[0]) : null;
   }
 
-  async persistPassengerRating(rating: PassengerTripRatingRecord) {
+  async persistPassengerRating(
+    rating: PassengerTripRatingRecord,
+    accountHook?: PassengerAccountRatingHook,
+    rideContext?: PassengerRideRatingContext,
+  ) {
     if (!this.isEnabled()) {
+      if (accountHook || rideContext)
+        throw new ApiRequestError(
+          503,
+          "PASSENGER_RATING_STORAGE_UNAVAILABLE",
+          "Rating storage is unavailable.",
+        );
       return {
         rating,
         summary: this.createSingleRatingSummary(rating),
@@ -1465,8 +1679,114 @@ export class MultiTaxiRepository {
     }
 
     const client = await this.databaseService!.connect();
+    let committed = false;
     try {
       await client.query("BEGIN");
+      if (accountHook || rideContext) {
+        await client.query("SET LOCAL lock_timeout = '3s'");
+        await client.query("SET LOCAL statement_timeout = '8s'");
+      }
+      if (rideContext) {
+        const verified = await client.query<{
+          scopes: string[];
+          expires_at: Date | string;
+          revoked_at: Date | string | null;
+          database_now: Date | string;
+        }>(
+          `SELECT scopes, expires_at, revoked_at, clock_timestamp() AS database_now
+           FROM ops.passenger_ride_access_tokens
+           WHERE token_id = $1 AND token_digest = $2 AND order_id = $3
+             AND passenger_subject_ref = $4 FOR SHARE`,
+          [
+            rideContext.token.tokenId,
+            rideContext.tokenDigest,
+            rating.orderId,
+            rating.passengerSubjectRef,
+          ],
+        );
+        const token = verified.rows[0];
+        if (
+          !token ||
+          token.revoked_at !== null ||
+          !Number.isFinite(new Date(token.expires_at).getTime()) ||
+          new Date(token.expires_at).getTime() <=
+            new Date(token.database_now).getTime()
+        )
+          throw new ApiRequestError(
+            404,
+            "PASSENGER_RIDE_TOKEN_INVALID",
+            "The passenger ride link is invalid or expired.",
+          );
+        if (!Array.isArray(token.scopes) || !token.scopes.includes("ride:rate"))
+          throw new ApiRequestError(
+            403,
+            "PASSENGER_RIDE_SCOPE_FORBIDDEN",
+            "The passenger ride token does not grant this action.",
+          );
+        const owned = await client.query<{
+          status: string;
+          record: OwnedOrderRecord;
+        }>(
+          `SELECT o.status, o.record FROM ops.phase1_owned_orders o
+           WHERE o.order_id = $1 FOR SHARE`,
+          [rating.orderId],
+        );
+        const order = owned.rows[0];
+        if (
+          !order ||
+          order.record.runtimeProfileCode !== "multi_taxi_direct" ||
+          resolvePassengerSubjectRef(order.record.passenger) !==
+            rating.passengerSubjectRef
+        )
+          throw new ApiRequestError(
+            404,
+            "PASSENGER_RIDE_NOT_FOUND",
+            "Ride not found.",
+          );
+        if (order.status !== "completed")
+          throw new ApiRequestError(
+            409,
+            "PASSENGER_RATING_TRIP_NOT_COMPLETED",
+            "The trip must be completed.",
+          );
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+          [`passenger-rating:${rating.orderId}:${rating.passengerSubjectRef}`],
+        );
+      }
+      if (accountHook) {
+        const owner = await client.query<{
+          status: string;
+          record: { passenger?: { passengerId?: string } };
+        }>(
+          `SELECT o.status, o.record FROM passenger.booking_histories b
+           JOIN passenger.accounts a ON a.drts_passenger_id = b.drts_passenger_id
+           JOIN ops.phase1_owned_orders o ON o.order_id = b.order_id::text
+           WHERE b.order_id = $1 AND b.drts_passenger_id = $2
+             AND a.status = 'active' AND a.deleted_at IS NULL FOR SHARE OF b, a, o`,
+          [rating.orderId, rating.passengerSubjectRef],
+        );
+        const order = owner.rows[0];
+        if (
+          !order ||
+          order.record.passenger?.passengerId !== rating.passengerSubjectRef
+        )
+          throw new ApiRequestError(
+            404,
+            "PASSENGER_RIDE_NOT_FOUND",
+            "Ride not found.",
+          );
+        if (order.status !== "completed")
+          throw new ApiRequestError(
+            409,
+            "PASSENGER_RATING_TRIP_NOT_COMPLETED",
+            "The trip must be completed.",
+          );
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+          [`passenger-rating:${rating.orderId}:${rating.passengerSubjectRef}`],
+        );
+      }
       const ratingResult = await client.query<PassengerTripRatingRow>(
         `
           INSERT INTO ops.passenger_trip_ratings (
@@ -1501,6 +1821,75 @@ export class MultiTaxiRepository {
         ],
       );
       const storedRating = this.mapPassengerRating(ratingResult.rows[0]!);
+      if (accountHook || rideContext) {
+        if (
+          storedRating.score !== rating.score ||
+          JSON.stringify(
+            rideContext ? [...storedRating.tags].sort() : storedRating.tags,
+          ) !== JSON.stringify(rating.tags) ||
+          storedRating.comment !== rating.comment
+        ) {
+          throw new ApiRequestError(
+            409,
+            "PASSENGER_RATING_ALREADY_SUBMITTED",
+            "The original rating cannot be changed.",
+          );
+        }
+        const isNew = storedRating.ratingId === rating.ratingId;
+        if (
+          rideContext &&
+          (storedRating.tripId !== rating.tripId ||
+            storedRating.driverId !== rating.driverId)
+        )
+          throw new ApiRequestError(
+            409,
+            "PASSENGER_RATING_ASSIGNMENT_MISSING",
+            "The original rating assignment cannot be changed.",
+          );
+        if (isNew) {
+          const task = await client.query<{
+            completed_at: string | null;
+            database_now: Date | string;
+          }>(
+            `SELECT record->>'completedAt' AS completed_at, clock_timestamp() AS database_now
+             FROM ops.phase1_driver_tasks WHERE order_id = $1 AND assignment_id = $2
+               AND status = 'completed' AND record->>'driverId' = $3 FOR SHARE`,
+            [rating.orderId, rating.tripId, rating.driverId],
+          );
+          const completedAt = Date.parse(task.rows[0]?.completed_at ?? "");
+          const databaseNow = new Date(
+            task.rows[0]?.database_now ?? NaN,
+          ).getTime();
+          if (
+            !Number.isFinite(completedAt) ||
+            !Number.isFinite(databaseNow) ||
+            completedAt > databaseNow ||
+            databaseNow - completedAt > 24 * 60 * 60 * 1000
+          ) {
+            throw new ApiRequestError(
+              409,
+              "PASSENGER_RATING_WINDOW_CLOSED",
+              "Ratings require an actual completion within 24 hours.",
+            );
+          }
+          const paid = await client.query(
+            `SELECT payment_id FROM billing.multi_taxi_passenger_payments
+             WHERE order_id = $1 AND status = 'captured' FOR SHARE`,
+            [rating.orderId],
+          );
+          if (!paid.rows.length)
+            throw new ApiRequestError(
+              409,
+              "PASSENGER_RATING_PAYMENT_REQUIRED",
+              "The completed trip must be paid.",
+            );
+        }
+        await (accountHook ?? rideContext)!.execute(
+          client,
+          storedRating,
+          isNew,
+        );
+      }
       const calculatedAt = new Date().toISOString();
       const summaryResult = await client.query<DriverRatingSummaryRow>(
         `
@@ -1514,7 +1903,7 @@ export class MultiTaxiRepository {
             calculated_at
           )
           SELECT
-            $1,
+            $1::varchar,
             CASE WHEN count(*) = 0 THEN 'new_driver' ELSE 'rated' END,
             CASE
               WHEN count(*) = 0 THEN NULL
@@ -1525,7 +1914,7 @@ export class MultiTaxiRepository {
             1,
             $2
           FROM ops.passenger_trip_ratings
-          WHERE driver_id = $1
+          WHERE driver_id = $1::varchar
             AND status = 'active'
           ON CONFLICT (driver_id) DO UPDATE SET
             display_state = EXCLUDED.display_state,
@@ -1537,18 +1926,25 @@ export class MultiTaxiRepository {
             calculated_at = EXCLUDED.calculated_at
           RETURNING *
         `,
-        [rating.driverId, calculatedAt],
+        [storedRating.driverId, calculatedAt],
       );
       await client.query("COMMIT");
+      committed = true;
       return {
         rating: storedRating,
         summary: this.mapDriverRatingSummary(summaryResult.rows[0]!),
       };
     } catch (error) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        this.logger.warn(
+          "Passenger rating rollback failed; discarding the connection.",
+        );
+      }
       throw error;
     } finally {
-      client.release();
+      client.release(!committed);
     }
   }
 
@@ -1641,7 +2037,7 @@ export class MultiTaxiRepository {
             calculated_at
           )
           SELECT
-            $1,
+            $1::varchar,
             CASE WHEN count(*) = 0 THEN 'new_driver' ELSE 'rated' END,
             CASE
               WHEN count(*) = 0 THEN NULL
@@ -1652,7 +2048,7 @@ export class MultiTaxiRepository {
             1,
             $2
           FROM ops.passenger_trip_ratings
-          WHERE driver_id = $1
+          WHERE driver_id = $1::varchar
             AND status = 'active'
           ON CONFLICT (driver_id) DO UPDATE SET
             display_state = EXCLUDED.display_state,
@@ -1753,7 +2149,8 @@ export class MultiTaxiRepository {
       `
         SELECT *
         FROM reporting.multi_taxi_electronic_receipts
-        WHERE order_id = $1
+        WHERE order_id = $1 AND is_current = true
+        ORDER BY receipt_version DESC
         LIMIT 1
       `,
       [orderId],

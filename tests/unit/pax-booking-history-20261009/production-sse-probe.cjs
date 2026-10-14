@@ -397,6 +397,19 @@ const watchdog = setTimeout(() => {
       rxjs: dependencies("rxjs/package.json").version,
       typescript: ts.version,
     },
+    frameworkMembers: [
+      "@nestjs/core/router/router-execution-context",
+      "@nestjs/core/router/router-response-controller",
+      "@nestjs/core/router/sse-stream",
+      "@nestjs/core/guards/guards-context-creator",
+      "@nestjs/core/guards/guards-consumer",
+      "@nestjs/core/interceptors/interceptors-consumer",
+    ].map((id) => ({
+      id,
+      sha256: createHash("sha256")
+        .update(fs.readFileSync(dependencies.resolve(id)))
+        .digest("hex"),
+    })),
     failedCases,
     passedCases: cases.length - failedCases,
     cases,

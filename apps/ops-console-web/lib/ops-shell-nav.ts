@@ -43,6 +43,13 @@ export function buildOpsShellNav(
       icon: "dashboard",
       label: t("nav.dashboard", locale),
     },
+    {
+      key: "external-service-demo",
+      href: "/demo",
+      icon: "reports",
+      label: t("nav.externalServiceDemo", locale),
+      matchPaths: ["/demo"],
+    },
     { divider: t("nav.group.liveOps", locale) },
     {
       key: "dispatch",

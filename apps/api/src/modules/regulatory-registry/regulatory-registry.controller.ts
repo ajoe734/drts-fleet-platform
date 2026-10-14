@@ -189,12 +189,12 @@ export class RegulatoryRegistryController {
   }
 
   @Post("drivers")
-  createDriver(
+  async createDriver(
     @Body() command: CreateDriverMasterCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.createDriver(command, requestId),
+      await this.regulatoryRegistryService.createDriver(command, requestId),
       requestId,
     );
   }
@@ -243,13 +243,13 @@ export class RegulatoryRegistryController {
   // only ever be made at registration -- the one moment the platform knows least
   // about the driver.
   @Post("drivers/:driverId/service-buckets")
-  updateDriverServiceBuckets(
+  async updateDriverServiceBuckets(
     @Param("driverId") driverId: string,
     @Body() command: UpdateDriverServiceBucketsCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.updateDriverServiceBuckets(
+      await this.regulatoryRegistryService.updateDriverServiceBuckets(
         driverId,
         command,
         requestId,
@@ -259,13 +259,13 @@ export class RegulatoryRegistryController {
   }
 
   @Post("drivers/:driverId/lifecycle")
-  updateDriverLifecycle(
+  async updateDriverLifecycle(
     @Param("driverId") driverId: string,
     @Body() command: UpdateDriverMasterLifecycleCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.updateDriverLifecycle(
+      await this.regulatoryRegistryService.updateDriverLifecycle(
         driverId,
         command,
         requestId,
@@ -291,13 +291,13 @@ export class RegulatoryRegistryController {
   }
 
   @Post("drivers/:driverId/licenses")
-  updateDriverLicenses(
+  async updateDriverLicenses(
     @Param("driverId") driverId: string,
     @Body() command: UpdateDriverLicensesCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.updateDriverLicenses(
+      await this.regulatoryRegistryService.updateDriverLicenses(
         driverId,
         command,
         requestId,

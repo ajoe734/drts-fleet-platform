@@ -8,6 +8,99 @@ import { createOpsConsoleAuthentication } from "../e2e/system-remediation/sr-liv
 const GOOGLE_MAP_ERROR =
   /InvalidKeyMapError|RefererNotAllowedMapError|ApiNotActivatedMapError|Google Maps JavaScript API error/i;
 
+// Return our own literals, never CDP source text (which may contain secrets).
+const RESOURCE_TYPES = [
+  "Document",
+  "Stylesheet",
+  "Image",
+  "Media",
+  "Font",
+  "Script",
+  "TextTrack",
+  "XHR",
+  "Fetch",
+  "Prefetch",
+  "EventSource",
+  "WebSocket",
+  "Manifest",
+  "SignedExchange",
+  "Ping",
+  "CSPViolationReport",
+  "Preflight",
+  "Other",
+] as const;
+
+type TransportFailure = {
+  category:
+    | "target-policy-rejected"
+    | "continue-request-failed"
+    | "navigation-failed"
+    | "interception-setup-failed"
+    | "interception-cleanup-failed"
+    | "interception-cleanup-timeout"
+    | "interception-drain-timeout";
+  resource_type: (typeof RESOURCE_TYPES)[number] | "Unknown";
+  block_result: "blocked" | "block-failed" | "pending" | "not-attempted";
+  target_kind?: ReturnType<typeof classifyRequestTarget>;
+};
+
+// These are harness wait budgets, not Google readiness/freshness thresholds.
+const INTERCEPTION_DRAIN_BUDGET_MS = 5_000;
+const INTERCEPTION_DETACH_TIMEOUT_MS = 1_000;
+
+async function finishesWithin(operation: Promise<unknown>, limitMs: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), limitMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+// Diagnostic only: headersFor remains the sole target/credential authority.
+// Fixed scheme/origin classes locate a rejection without retaining its URL.
+function classifyRequestTarget(
+  url: string,
+  opsOrigin: string,
+  allowedTargets: string[],
+):
+  | "credential-bearing"
+  | "ops-https"
+  | "allowed-https"
+  | "unapproved-https"
+  | "insecure-http"
+  | "data"
+  | "blob"
+  | "other-scheme"
+  | "invalid-url" {
+  try {
+    const parsed = new URL(url);
+    if (parsed.username || parsed.password) return "credential-bearing";
+    switch (parsed.protocol) {
+      case "https:":
+        if (parsed.origin === opsOrigin) return "ops-https";
+        return allowedTargets.includes(parsed.origin)
+          ? "allowed-https"
+          : "unapproved-https";
+      case "http:":
+        return "insecure-http";
+      case "data:":
+        return "data";
+      case "blob:":
+        return "blob";
+      default:
+        return "other-scheme";
+    }
+  } catch {
+    return "invalid-url";
+  }
+}
+
 function watchGoogleMapErrors(page: Page) {
   const failures: string[] = [];
   page.on("console", (message) => {
@@ -75,8 +168,36 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
       screenshot: string;
     }>,
     failures,
+    transport_failures: [] as TransportFailure[],
+    pending_interceptions: 0,
   };
   let cdp: CDPSession | undefined;
+  const pendingInterceptions = new Set<Promise<void>>();
+  let drainBudgetMs = INTERCEPTION_DRAIN_BUDGET_MS;
+  let drainExpired = false;
+  const settleInterceptions = async () => {
+    while (pendingInterceptions.size > 0) {
+      if (drainExpired) return;
+      const started = Date.now();
+      const settled = await finishesWithin(
+        Promise.all([...pendingInterceptions]),
+        drainBudgetMs,
+      );
+      // Share one cumulative wait budget across batches and page/final drains.
+      // New callbacks must not renew the deadline indefinitely.
+      drainBudgetMs = Math.max(0, drainBudgetMs - (Date.now() - started));
+      if (!settled || (drainBudgetMs === 0 && pendingInterceptions.size > 0)) {
+        drainExpired = true;
+        failures.push("Browser interception drain deadline expired");
+        evidence.transport_failures.push({
+          category: "interception-drain-timeout",
+          resource_type: "Unknown",
+          block_result: "not-attempted",
+        });
+        return;
+      }
+    }
+  };
   try {
     const authentication = createOpsConsoleAuthentication(process.env);
     evidence.stage = "network-interception";
@@ -89,32 +210,55 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
     });
     interception.on(
       "Fetch.requestPaused",
-      async ({ requestId, request: intercepted }) => {
-        try {
-          const headers = authentication.headersFor(
-            intercepted.url,
-            intercepted.headers,
-          );
-          await interception.send("Fetch.continueRequest", {
-            requestId,
-            headers: Object.entries(headers).map(([name, value]) => ({
-              name,
-              value,
-            })),
-          });
-        } catch {
-          // Protocol errors can contain the request/headers. Retain a fixed code
-          // only, and fail closed on forbidden targets or interception failures.
-          failures.push("Browser request blocked or interception failed");
-          await interception
-            .send("Fetch.failRequest", {
+      ({ requestId, request: intercepted, resourceType }) => {
+        const pending = (async () => {
+          let category: TransportFailure["category"] = "target-policy-rejected";
+          try {
+            const headers = authentication.headersFor(
+              intercepted.url,
+              intercepted.headers,
+            );
+            category = "continue-request-failed";
+            await interception.send("Fetch.continueRequest", {
               requestId,
-              errorReason: "BlockedByClient",
-            })
-            .catch(() => {
-              /* The page may already have closed. */
+              headers: Object.entries(headers).map(([name, value]) => ({
+                name,
+                value,
+              })),
             });
-        }
+          } catch {
+            // Classify by the operation that failed, never by parsing an exception.
+            // A continue failure does not prove cancellation or a harmless request.
+            failures.push("Browser request blocked or interception failed");
+            const failure: TransportFailure = {
+              category,
+              target_kind: classifyRequestTarget(
+                intercepted.url,
+                config.opsOrigin,
+                config.allowedTargets,
+              ),
+              resource_type:
+                RESOURCE_TYPES.find((value) => value === resourceType) ??
+                "Unknown",
+              block_result: "pending",
+            };
+            // One entry per failed request, including duplicates; recovery status
+            // is separate so a failed failRequest cannot disappear or double count.
+            evidence.transport_failures.push(failure);
+            try {
+              await interception.send("Fetch.failRequest", {
+                requestId,
+                errorReason: "BlockedByClient",
+              });
+              failure.block_result = "blocked";
+            } catch {
+              failure.block_result = "block-failed";
+            }
+          }
+        })();
+        pendingInterceptions.add(pending);
+        void pending.finally(() => pendingInterceptions.delete(pending));
+        return pending;
       },
     );
     await context.routeWebSocket("**/*", (socket) => {
@@ -143,9 +287,18 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
     ).toBe(true);
     for (const path of ["/dispatch", "/callcenter"]) {
       evidence.stage = `page:${path}:http`;
-      const response = await page.goto(`${config.opsOrigin}${path}`, {
-        waitUntil: "domcontentloaded",
-      });
+      const response = await page
+        .goto(`${config.opsOrigin}${path}`, {
+          waitUntil: "domcontentloaded",
+        })
+        .catch(() => {
+          evidence.transport_failures.push({
+            category: "navigation-failed",
+            resource_type: "Document",
+            block_result: "not-attempted",
+          });
+          throw new Error("Browser navigation failed");
+        });
       evidence.last_http_status = response?.status() ?? null;
       expect(response?.ok()).toBe(true);
       evidence.stage = `page:${path}:sha`;
@@ -175,23 +328,58 @@ test("deployed Ops and Callcenter render the live Google base map", async ({
         imagery_decoded: true,
         screenshot,
       });
+      await settleInterceptions();
       expect(failures).toEqual([]);
     }
     evidence.stage = "complete";
     evidence.status = "passed";
   } catch {
+    if (evidence.stage === "network-interception") {
+      evidence.transport_failures.push({
+        category: "interception-setup-failed",
+        resource_type: "Unknown",
+        block_result: "not-attempted",
+      });
+    }
     failures.push(
       `Map rendering failed at ${evidence.stage}; only sanitized evidence is retained`,
     );
-    throw new Error("Hosted map rendering failed; see evidence-browser.json");
   } finally {
-    await cdp?.detach().catch(() => {
-      failures.push("Browser interception cleanup failed");
-      evidence.status = "failed";
-    });
+    if (cdp) {
+      try {
+        const detached = await finishesWithin(
+          cdp.detach(),
+          INTERCEPTION_DETACH_TIMEOUT_MS,
+        );
+        if (!detached) {
+          failures.push("Browser interception cleanup deadline expired");
+          evidence.transport_failures.push({
+            category: "interception-cleanup-timeout",
+            resource_type: "Unknown",
+            block_result: "not-attempted",
+          });
+        }
+      } catch {
+        failures.push("Browser interception cleanup failed");
+        evidence.transport_failures.push({
+          category: "interception-cleanup-failed",
+          resource_type: "Unknown",
+          block_result: "not-attempted",
+        });
+      }
+    }
+    // Detach ends new interception events; settle the callbacks already started
+    // before taking the durable snapshot, including their failRequest results.
+    await settleInterceptions();
+    // An unresolved callback is unknown, not a successful request/recovery.
+    evidence.pending_interceptions = pendingInterceptions.size;
+    if (failures.length > 0) evidence.status = "failed";
     writeEvidence(
       ".artifacts/live-map-acceptance/evidence-browser.json",
       evidence,
     );
+  }
+  if (evidence.status !== "passed") {
+    throw new Error("Hosted map rendering failed; see evidence-browser.json");
   }
 });

@@ -313,9 +313,21 @@ function buildColumns(
       w: 200,
       r: (row) => (
         <div style={stackStyle}>
-          <span style={{ ...primaryTextStyle, ...monoTextStyle }}>
-            {row.vehicleId}
-          </span>
+          {row.availableActions.some(
+            (action) =>
+              action.action === "open_vehicle_detail" && action.enabled,
+          ) ? (
+            <Link
+              href={`/vehicles/${encodeURIComponent(row.vehicleId)}`}
+              style={{ ...primaryTextStyle, ...monoTextStyle }}
+            >
+              {row.vehicleId}
+            </Link>
+          ) : (
+            <span style={{ ...primaryTextStyle, ...monoTextStyle }}>
+              {row.vehicleId}
+            </span>
+          )}
           <span style={secondaryTextStyle}>{row.plateNo}</span>
         </div>
       ),

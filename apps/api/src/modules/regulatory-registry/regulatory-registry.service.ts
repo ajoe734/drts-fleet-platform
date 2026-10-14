@@ -21,6 +21,7 @@ import type {
   CreateVehicleContractCommand,
   DispatchExclusivityLifecycleStatus,
   DispatchExclusivityRecord,
+  DriverDeclaredSurnameSnapshot,
   DriverEligibilityBlockReason,
   DriverEtaResponse,
   DriverLocationHeartbeatAck,
@@ -554,6 +555,18 @@ export class RegulatoryRegistryService
 
   private drivers = DRIVER_SEED.map((driver) => ({ ...driver }));
 
+  // Preserve duplicate-create rejection while the linked profile save awaits.
+  private readonly pendingDriverCreations = new Set<string>();
+
+  // The four master commands build their snapshot from the last committed
+  // row, after the preceding command's storage ACK (or rejection).
+  private readonly driverMasterWrites = new Map<string, Promise<void>>();
+
+  private readonly driverWorkStateChanges = new Map<
+    string,
+    Pick<DriverRegistryRecord, "workState" | "updatedAt"> & { revision: number }
+  >();
+
   private latestDriverLocations = new Map<string, DriverLocationSnapshot>();
 
   private latestDriverHeartbeatUploads = new Map<
@@ -1068,10 +1081,13 @@ export class RegulatoryRegistryService
     );
   }
 
-  createDriver(command: CreateDriverMasterCommand, requestId?: string) {
+  async createDriver(command: CreateDriverMasterCommand, requestId?: string) {
     const driverId = command.driverId?.trim() || `drv_${randomUUID()}`;
     this.assertNonBlank(driverId, "driverId");
-    if (this.drivers.some((candidate) => candidate.driverId === driverId)) {
+    if (
+      this.pendingDriverCreations.has(driverId) ||
+      this.drivers.some((candidate) => candidate.driverId === driverId)
+    ) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "DRIVER_ALREADY_EXISTS",
@@ -1120,36 +1136,43 @@ export class RegulatoryRegistryService
         ? {}
         : { bankAccount: command.bankAccount }),
     };
-    const profile = this.driverProfileService.upsertAdminProfile(
-      driverId,
-      profileCommand,
-      requestId,
-    );
-    created.profileUpdatedAt = profile.updatedAt;
-    created.deviceBindings = profile.deviceBindings.map((binding) => ({
-      ...binding,
-    }));
+    this.pendingDriverCreations.add(driverId);
+    try {
+      // Preserve C060's caller ordering: enqueue the profile immediately,
+      // before a later canonical profile/device caller can overtake it.
+      const profileSave = this.driverProfileService.upsertAdminProfile(
+        driverId,
+        profileCommand,
+        requestId,
+      );
+      return await this.enqueueDriverMasterWrite(driverId, async () => {
+        const profile = await profileSave;
+        created.profileUpdatedAt = profile.updatedAt;
+        created.deviceBindings = profile.deviceBindings.map((binding) => ({
+          ...binding,
+        }));
 
-    this.drivers = [this.cloneDriver(created), ...this.drivers];
-    this.persistChanges(
-      { drivers: [this.cloneDriver(created)] },
-      "create_driver",
-    );
-    this.recordAudit(
-      {
-        actorId: "platform-admin",
-        actorType: "platform_admin",
-        tenantId: null,
-        moduleName: "regulatory-registry",
-        actionName: "create_driver_master",
-        resourceType: "driver_master",
-        resourceId: driverId,
-        newValuesSummary: this.buildDriverAuditSummary(created, null),
-      },
-      requestId,
-    );
+        await this.saveDriverMaster(created, "create_driver");
+        this.drivers = [this.cloneDriver(created), ...this.drivers];
+        this.recordAudit(
+          {
+            actorId: "platform-admin",
+            actorType: "platform_admin",
+            tenantId: null,
+            moduleName: "regulatory-registry",
+            actionName: "create_driver_master",
+            resourceType: "driver_master",
+            resourceId: driverId,
+            newValuesSummary: this.buildDriverAuditSummary(created, null),
+          },
+          requestId,
+        );
 
-    return this.cloneDriver(created);
+        return this.cloneDriver(created);
+      });
+    } finally {
+      this.pendingDriverCreations.delete(driverId);
+    }
   }
 
   /**
@@ -1163,59 +1186,64 @@ export class RegulatoryRegistryService
     command: UpdateDriverServiceBucketsCommand,
     requestId?: string,
   ) {
-    const driver = this.requireDriver(driverId);
-    const previous = this.decorateDriver(driver);
-    const buckets = command.supportedServiceBuckets;
+    return this.enqueueDriverMasterWrite(
+      driverId,
+      async (workStateRevision) => {
+        const driver = this.stageDriverMaster(driverId);
+        const previous = this.decorateDriver(driver);
+        const buckets = command.supportedServiceBuckets;
 
-    if (!Array.isArray(buckets) || buckets.length === 0) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "SERVICE_BUCKETS_REQUIRED",
-        "At least one service bucket is required; a driver with none can never be dispatched.",
-        { driverId },
-      );
-    }
-    const unknown = buckets.filter(
-      (bucket) => !PHASE1_SERVICE_BUCKETS.includes(bucket),
-    );
-    if (unknown.length > 0) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "SERVICE_BUCKET_UNKNOWN",
-        `Unknown service bucket(s): ${unknown.join(", ")}.`,
-        { driverId, unknown, supported: [...PHASE1_SERVICE_BUCKETS] },
-      );
-    }
+        if (!Array.isArray(buckets) || buckets.length === 0) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "SERVICE_BUCKETS_REQUIRED",
+            "At least one service bucket is required; a driver with none can never be dispatched.",
+            { driverId },
+          );
+        }
+        const unknown = buckets.filter(
+          (bucket) => !PHASE1_SERVICE_BUCKETS.includes(bucket),
+        );
+        if (unknown.length > 0) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "SERVICE_BUCKET_UNKNOWN",
+            `Unknown service bucket(s): ${unknown.join(", ")}.`,
+            { driverId, unknown, supported: [...PHASE1_SERVICE_BUCKETS] },
+          );
+        }
 
-    driver.supportedServiceBuckets = [...new Set(buckets)];
-    driver.updatedAt = new Date().toISOString();
+        driver.supportedServiceBuckets = [...new Set(buckets)];
+        driver.updatedAt = new Date().toISOString();
 
-    const updated = this.decorateDriver(driver);
-    this.persistChanges(
-      { drivers: [this.cloneDriver(updated)] },
-      "update_driver_service_buckets",
-    );
-    this.recordAudit(
-      {
-        actorId: "platform-admin",
-        actorType: "platform_admin",
-        tenantId: null,
-        moduleName: "regulatory-registry",
-        actionName: "update_driver_service_buckets",
-        resourceType: "driver_master",
-        resourceId: driverId,
-        oldValuesSummary: {
-          supportedServiceBuckets: [...previous.supportedServiceBuckets],
-        },
-        newValuesSummary: {
-          supportedServiceBuckets: [...updated.supportedServiceBuckets],
-          reason: command.reason ?? null,
-        },
+        let updated = this.decorateDriver(driver);
+        await this.saveDriverMaster(updated, "update_driver_service_buckets");
+        updated = this.decorateDriver(
+          this.publishDriverMaster(driver, workStateRevision),
+        );
+        this.recordAudit(
+          {
+            actorId: "platform-admin",
+            actorType: "platform_admin",
+            tenantId: null,
+            moduleName: "regulatory-registry",
+            actionName: "update_driver_service_buckets",
+            resourceType: "driver_master",
+            resourceId: driverId,
+            oldValuesSummary: {
+              supportedServiceBuckets: [...previous.supportedServiceBuckets],
+            },
+            newValuesSummary: {
+              supportedServiceBuckets: [...updated.supportedServiceBuckets],
+              reason: command.reason ?? null,
+            },
+          },
+          requestId,
+        );
+
+        return this.cloneDriver(updated);
       },
-      requestId,
     );
-
-    return this.cloneDriver(updated);
   }
 
   updateDriverLifecycle(
@@ -1223,125 +1251,214 @@ export class RegulatoryRegistryService
     command: UpdateDriverMasterLifecycleCommand,
     requestId?: string,
   ) {
-    const driver = this.requireDriver(driverId);
-    const previous = this.decorateDriver(driver);
-    const now = new Date().toISOString();
+    return this.enqueueDriverMasterWrite(
+      driverId,
+      async (workStateRevision) => {
+        const driver = this.stageDriverMaster(driverId);
+        const previous = this.decorateDriver(driver);
+        const now = new Date().toISOString();
 
-    driver.lifecycleStatus = command.lifecycleStatus;
-    driver.updatedAt = now;
-    if (command.lifecycleStatus === "active") {
-      driver.activatedAt = now;
-      driver.suspendedAt = null;
-      driver.retiredAt = null;
-      if (driver.workState === "suspended" || driver.workState === "offline") {
-        driver.workState = "available";
-      }
-    } else if (command.lifecycleStatus === "suspended") {
-      driver.suspendedAt = now;
-      driver.retiredAt = null;
-      driver.workState = "suspended";
-    } else if (command.lifecycleStatus === "retired") {
-      driver.suspendedAt = null;
-      driver.retiredAt = now;
-      driver.workState = "offline";
-    } else {
-      driver.workState = "offline";
-      driver.activatedAt = null;
-      driver.suspendedAt = null;
-      driver.retiredAt = null;
-    }
+        driver.lifecycleStatus = command.lifecycleStatus;
+        driver.updatedAt = now;
+        if (command.lifecycleStatus === "active") {
+          driver.activatedAt = now;
+          driver.suspendedAt = null;
+          driver.retiredAt = null;
+          if (
+            driver.workState === "suspended" ||
+            driver.workState === "offline"
+          ) {
+            driver.workState = "available";
+          }
+        } else if (command.lifecycleStatus === "suspended") {
+          driver.suspendedAt = now;
+          driver.retiredAt = null;
+          driver.workState = "suspended";
+        } else if (command.lifecycleStatus === "retired") {
+          driver.suspendedAt = null;
+          driver.retiredAt = now;
+          driver.workState = "offline";
+        } else {
+          driver.workState = "offline";
+          driver.activatedAt = null;
+          driver.suspendedAt = null;
+          driver.retiredAt = null;
+        }
 
-    if (command.licenseExpiry !== undefined) {
-      driver.licenseExpiry = command.licenseExpiry;
-    }
-    if (command.professionalDriverLicenseExpiry !== undefined) {
-      driver.professionalDriverLicenseExpiry =
-        command.professionalDriverLicenseExpiry;
-    }
-    if (command.taxiDriverRegistrationExpiry !== undefined) {
-      driver.taxiDriverRegistrationExpiry =
-        command.taxiDriverRegistrationExpiry;
-    }
+        if (command.licenseExpiry !== undefined) {
+          driver.licenseExpiry = command.licenseExpiry;
+        }
+        if (command.professionalDriverLicenseExpiry !== undefined) {
+          driver.professionalDriverLicenseExpiry =
+            command.professionalDriverLicenseExpiry;
+        }
+        if (command.taxiDriverRegistrationExpiry !== undefined) {
+          driver.taxiDriverRegistrationExpiry =
+            command.taxiDriverRegistrationExpiry;
+        }
 
-    const updated = this.decorateDriver(driver);
-    this.persistChanges(
-      { drivers: [this.cloneDriver(updated)] },
-      "update_driver_lifecycle",
-    );
-    this.recordAudit(
-      {
-        actorId: "platform-admin",
-        actorType: "platform_admin",
-        tenantId: null,
-        moduleName: "regulatory-registry",
-        actionName: "update_driver_master_lifecycle",
-        resourceType: "driver_master",
-        resourceId: driverId,
-        oldValuesSummary: this.buildDriverAuditSummary(previous, null),
-        newValuesSummary: this.buildDriverAuditSummary(
-          updated,
-          command.reason ?? null,
-        ),
+        let updated = this.decorateDriver(driver);
+        await this.saveDriverMaster(updated, "update_driver_lifecycle");
+        updated = this.decorateDriver(
+          this.publishDriverMaster(driver, workStateRevision),
+        );
+        this.recordAudit(
+          {
+            actorId: "platform-admin",
+            actorType: "platform_admin",
+            tenantId: null,
+            moduleName: "regulatory-registry",
+            actionName: "update_driver_master_lifecycle",
+            resourceType: "driver_master",
+            resourceId: driverId,
+            oldValuesSummary: this.buildDriverAuditSummary(previous, null),
+            newValuesSummary: this.buildDriverAuditSummary(
+              updated,
+              command.reason ?? null,
+            ),
+          },
+          requestId,
+        );
+
+        return this.cloneDriver(updated);
       },
-      requestId,
     );
-
-    return this.cloneDriver(updated);
   }
 
   updateDriverLicenses(
     driverId: string,
     command: UpdateDriverLicensesCommand,
     requestId?: string,
-  ): DriverRegistryRecord {
-    const driver = this.requireDriver(driverId);
-    const previous = this.decorateDriver(driver);
-    const now = new Date().toISOString();
+  ): Promise<DriverRegistryRecord> {
+    return this.enqueueDriverMasterWrite(
+      driverId,
+      async (workStateRevision) => {
+        const driver = this.stageDriverMaster(driverId);
+        const previous = this.decorateDriver(driver);
+        const now = new Date().toISOString();
 
-    if (command.licenseExpiry !== undefined) {
-      driver.licenseExpiry = command.licenseExpiry;
-    }
-    if (command.professionalDriverLicenseExpiry !== undefined) {
-      driver.professionalDriverLicenseExpiry =
-        command.professionalDriverLicenseExpiry;
-    }
-    if (command.taxiDriverRegistrationExpiry !== undefined) {
-      driver.taxiDriverRegistrationExpiry =
-        command.taxiDriverRegistrationExpiry;
-    }
-    if (command.licensesValid !== undefined) {
-      driver.licensesValid = command.licensesValid;
-    }
-    driver.updatedAt = now;
+        if (command.licenseExpiry !== undefined) {
+          driver.licenseExpiry = command.licenseExpiry;
+        }
+        if (command.professionalDriverLicenseExpiry !== undefined) {
+          driver.professionalDriverLicenseExpiry =
+            command.professionalDriverLicenseExpiry;
+        }
+        if (command.taxiDriverRegistrationExpiry !== undefined) {
+          driver.taxiDriverRegistrationExpiry =
+            command.taxiDriverRegistrationExpiry;
+        }
+        if (command.licensesValid !== undefined) {
+          driver.licensesValid = command.licensesValid;
+        }
+        driver.updatedAt = now;
 
-    const updated = this.decorateDriver(driver);
-    this.persistChanges(
-      { drivers: [this.cloneDriver(updated)] },
-      "update_driver_licenses",
-    );
-    this.recordAudit(
-      {
-        actorId: "platform-admin",
-        actorType: "platform_admin",
-        tenantId: null,
-        moduleName: "regulatory-registry",
-        actionName: "update_driver_licenses",
-        resourceType: "driver_master",
-        resourceId: driverId,
-        oldValuesSummary: this.buildDriverAuditSummary(previous, null),
-        newValuesSummary: this.buildDriverAuditSummary(
-          updated,
-          command.reason ?? null,
-        ),
+        let updated = this.decorateDriver(driver);
+        await this.saveDriverMaster(updated, "update_driver_licenses");
+        updated = this.decorateDriver(
+          this.publishDriverMaster(driver, workStateRevision),
+        );
+        this.recordAudit(
+          {
+            actorId: "platform-admin",
+            actorType: "platform_admin",
+            tenantId: null,
+            moduleName: "regulatory-registry",
+            actionName: "update_driver_licenses",
+            resourceType: "driver_master",
+            resourceId: driverId,
+            oldValuesSummary: this.buildDriverAuditSummary(previous, null),
+            newValuesSummary: this.buildDriverAuditSummary(
+              updated,
+              command.reason ?? null,
+            ),
+          },
+          requestId,
+        );
+
+        if (this.regulatoryRegistryRepository) {
+          void this.handleDriverLicenseRenewal(driverId, command);
+        }
+
+        return this.cloneDriver(updated);
       },
-      requestId,
     );
+  }
 
-    if (this.regulatoryRegistryRepository) {
-      void this.handleDriverLicenseRenewal(driverId, command);
+  private enqueueDriverMasterWrite<T>(
+    driverId: string,
+    operation: (workStateRevision: number) => Promise<T>,
+  ): Promise<T> {
+    // Capture intent order, including a setter made while this command waits
+    // behind an earlier master write, before its snapshot is even built.
+    const workStateRevision =
+      this.driverWorkStateChanges.get(driverId)?.revision ?? 0;
+    const result = (
+      this.driverMasterWrites.get(driverId) ?? Promise.resolve()
+    ).then(() => operation(workStateRevision));
+    const settled = result.then(
+      () => {},
+      () => {},
+    );
+    this.driverMasterWrites.set(driverId, settled);
+    void settled.then(() => {
+      if (this.driverMasterWrites.get(driverId) === settled) {
+        this.driverMasterWrites.delete(driverId);
+      }
+    });
+    return result;
+  }
+
+  private async saveDriverMaster(
+    driver: DriverRegistryRecord,
+    context: string,
+  ) {
+    const repository = this.regulatoryRegistryRepository;
+    if (!repository?.isEnabled()) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "DRIVER_MASTER_STORAGE_UNAVAILABLE",
+        "Driver master storage is unavailable.",
+      );
     }
+    try {
+      await repository.persistChanges({ drivers: [this.cloneDriver(driver)] });
+    } catch (error) {
+      repository.reportPersistenceFailure(error, context);
+      throw error;
+    }
+  }
 
-    return this.cloneDriver(updated);
+  private publishDriverMaster(
+    driver: DriverRegistryRecord,
+    workStateRevision: number,
+  ) {
+    // Keep the declared validity flag in local master state; expiry validity
+    // remains derived by decorateDriver, including after a later renewal.
+    const local = this.driverWorkStateChanges.get(driver.driverId);
+    // Only the inherited synchronous setter's fields may overlay a strict
+    // master publication. Never spread a stale or failed master snapshot back.
+    const published =
+      local && local.revision > workStateRevision
+        ? { ...driver, workState: local.workState, updatedAt: local.updatedAt }
+        : driver;
+    this.drivers = this.drivers.map((current) =>
+      current.driverId === driver.driverId
+        ? this.cloneDriver(published)
+        : current,
+    );
+    return published;
+  }
+
+  private stageDriverMaster(driverId: string): DriverRegistryRecord {
+    const committed = this.requireDriver(driverId);
+    // Historical repository rows can predate derived arrays/profile metadata.
+    // Use the existing decorator to fill those, while retaining the declared
+    // license flag so expiry evaluation never becomes a permanent local flag.
+    return {
+      ...this.cloneDriver(this.decorateDriver(committed)),
+      licensesValid: committed.licensesValid,
+    };
   }
 
   async recordDriverLocation(
@@ -2244,12 +2361,30 @@ export class RegulatoryRegistryService
     driver.workState = command.workState;
     driver.updatedAt = new Date().toISOString();
     const updated = this.decorateDriver(driver);
-    this.persistChanges(
-      {
-        drivers: [this.cloneDriver(updated)],
-      },
-      "update_driver_work_state",
-    );
+    const local = {
+      workState: driver.workState,
+      updatedAt: driver.updatedAt,
+      revision: (this.driverWorkStateChanges.get(driverId)?.revision ?? 0) + 1,
+    };
+    this.driverWorkStateChanges.set(driverId, local);
+    const repository = this.regulatoryRegistryRepository;
+    if (repository) {
+      void this.enqueueDriverMasterWrite(driverId, async () => {
+        // Keep the inherited synchronous local effect and best-effort error
+        // policy; defer only storage, using the last committed master fields.
+        const committed = this.stageDriverMaster(driverId);
+        const snapshot = this.decorateDriver({
+          ...committed,
+          workState: local.workState,
+          updatedAt: local.updatedAt,
+        });
+        await repository.persistChanges({
+          drivers: [this.cloneDriver(snapshot)],
+        });
+      }).catch((error: unknown) => {
+        repository.reportPersistenceFailure(error, "update_driver_work_state");
+      });
+    }
     return this.cloneDriver(updated);
   }
 
@@ -3707,6 +3842,30 @@ export class RegulatoryRegistryService
       (p) => p.vehicleId === vehicleId,
     );
     return profile ? { ...profile } : null;
+  }
+
+  getDriverDeclaredSurnameSnapshot(
+    driverId: string,
+  ): DriverDeclaredSurnameSnapshot | null {
+    // This is a declared profile-view snapshot, never an inferred surname or
+    // proof of legal identity/current cross-replica database revision.
+    const profile = this.driverProfileService.findProfileForDriver(driverId);
+    if (
+      !profile ||
+      !Object.prototype.hasOwnProperty.call(profile, "driverSurname") ||
+      typeof profile.driverSurname !== "string" ||
+      !profile.driverSurname.trim() ||
+      typeof profile.updatedAt !== "string" ||
+      !profile.updatedAt.trim() ||
+      !Number.isFinite(Date.parse(profile.updatedAt))
+    ) {
+      return null;
+    }
+    return {
+      driverSurname: profile.driverSurname,
+      driverSurnameSource: "driver_profile_declared",
+      driverSurnameProfileUpdatedAt: profile.updatedAt,
+    };
   }
 
   getDriverPublicRegistrationCredential(

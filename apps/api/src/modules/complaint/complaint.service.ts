@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
@@ -25,7 +25,17 @@ import {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import type { PoolClient } from "pg";
+import type {
+  PassengerTripRatingRecord,
+  PassengerRideAccessToken,
+} from "@drts/contracts";
+import type { PassengerIntakeResult } from "./complaint.repository";
 import { ComplaintRepository } from "./complaint.repository";
+import {
+  normalizePassengerComplaintIntake,
+  type PassengerComplaintIntake,
+} from "./passenger-complaint-intake";
 
 const COMPLAINT_CATEGORY_VALUES = [
   "late_arrival",
@@ -34,6 +44,7 @@ const COMPLAINT_CATEGORY_VALUES = [
   "vehicle_condition",
   "route_issue",
   "fare_dispute",
+  "settlement_dispute",
   "safety_concern",
   "lost_and_found",
   "other",
@@ -46,6 +57,7 @@ const DEFAULT_SLA_HOURS_BY_CATEGORY: Record<ComplaintCategory, number> = {
   vehicle_condition: 48,
   route_issue: 48,
   fare_dispute: 48,
+  settlement_dispute: 48,
   safety_concern: 4,
   lost_and_found: 72,
   other: 48,
@@ -71,6 +83,15 @@ export class ComplaintService implements OnModuleInit {
   private complaintCases: ComplaintCaseRecord[] = [];
 
   private complaintTimelines = new Map<string, ComplaintTimelineEntry[]>();
+  private readonly auditedPassengerCases = new Set<string>();
+
+  private settlementMutationRevision = 0;
+
+  private settlementPersistence = new Map<string, Promise<void>>();
+
+  private settlementRefresh: Promise<void> | undefined;
+
+  private incidentLinkOperations = new Map<string, Promise<void>>();
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
@@ -102,6 +123,96 @@ export class ComplaintService implements OnModuleInit {
       );
     } catch (error) {
       this.complaintRepository.reportPersistenceFailure(error, "module init");
+    }
+  }
+
+  /** Read the committed settlement cases on every request, including cases
+   * submitted through another API replica. Other complaint state is untouched. */
+  async refreshSettlementCases(): Promise<void> {
+    if (!this.complaintRepository?.isEnabled()) return;
+    if (this.settlementRefresh) return this.settlementRefresh;
+    const refresh = this.reloadSettlementCases();
+    this.settlementRefresh = refresh;
+    try {
+      await refresh;
+    } finally {
+      if (this.settlementRefresh === refresh)
+        this.settlementRefresh = undefined;
+    }
+  }
+
+  /** Settlement endpoints must acknowledge only committed case and timeline
+   * changes. Ordinary complaints retain their existing synchronous behavior. */
+  async awaitSettlementPersistence(caseNo?: string): Promise<void> {
+    // Capture the initiating request's writes once. A later request for the
+    // same case must not turn this successful commit into its own failure.
+    const pending = [...this.settlementPersistence.entries()].filter(
+      ([pendingCaseNo]) => !caseNo || pendingCaseNo === caseNo,
+    );
+    const results = await Promise.allSettled(
+      pending.map(([, persistence]) => persistence),
+    );
+    for (const [pendingCaseNo, persistence] of pending) {
+      if (this.settlementPersistence.get(pendingCaseNo) === persistence) {
+        this.settlementPersistence.delete(pendingCaseNo);
+      }
+    }
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
+  }
+
+  private async reloadSettlementCases(): Promise<void> {
+    while (true) {
+      do {
+        await this.awaitSettlementPersistence();
+      } while (this.settlementPersistence.size > 0);
+      const revision = this.settlementMutationRevision;
+      const state = await this.complaintRepository!.loadSettlementState();
+      // A request may mutate a case while the committed snapshot is being
+      // read. Wait for that write and read again before replacing memory.
+      if (revision !== this.settlementMutationRevision) continue;
+      const previousCaseNos = this.complaintCases
+        .filter((item) => item.category === "settlement_dispute")
+        .map((item) => item.caseNo);
+      this.complaintCases = [
+        ...this.complaintCases.filter(
+          (item) => item.category !== "settlement_dispute",
+        ),
+        ...state.complaintCases.map((item) => this.cloneComplaintCase(item)),
+      ];
+      const timelines = this.buildTimelineMap(state.complaintTimelines);
+      for (const caseNo of previousCaseNos)
+        this.complaintTimelines.delete(caseNo);
+      for (const item of state.complaintCases) {
+        this.complaintTimelines.set(
+          item.caseNo,
+          timelines.get(item.caseNo) ?? [],
+        );
+      }
+      return;
+    }
+  }
+
+  /** Hold the source complaint before an escalation allocates an incident.
+   * Link controllers acquire this queue before the shared incident queue. */
+  async withIncidentLink<T>(
+    caseNo: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.incidentLinkOperations.get(caseNo);
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.incidentLinkOperations.set(caseNo, current);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.incidentLinkOperations.get(caseNo) === current) {
+        this.incidentLinkOperations.delete(caseNo);
+      }
     }
   }
 
@@ -170,6 +281,307 @@ export class ComplaintService implements OnModuleInit {
     );
 
     return this.cloneComplaintCase(complaintCase);
+  }
+
+  async createPassengerComplaintCase(input: PassengerComplaintIntake) {
+    const intake = normalizePassengerComplaintIntake(input);
+    if (!this.complaintRepository?.isEnabled()) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Complaint storage is unavailable.",
+      );
+    }
+    const { complaintCase, timeline } = this.preparePassengerCase(intake);
+    const stored = await this.complaintRepository.persistPassengerIntake(
+      intake,
+      complaintCase,
+      timeline,
+    );
+    await this.publishPassengerCase(stored, intake.passengerId);
+    return { complaintId: stored.complaintCase.caseNo };
+  }
+
+  private preparePassengerCase(
+    intake: Pick<PassengerComplaintIntake, "orderId" | "command">,
+    sourceLabel = "乘客 App",
+  ) {
+    const category: ComplaintCategory = {
+      service: "driver_service" as const,
+      fare: "fare_dispute" as const,
+      lost_item: "lost_and_found" as const,
+      other: "other" as const,
+    }[intake.command.category];
+    const now = new Date();
+    const createdAt = now.toISOString();
+    const caseNo = `PAX-${randomUUID()}`;
+    const description = [
+      `來源：${sourceLabel}`,
+      `同意客服聯繫：${intake.command.contactConsent ? "是" : "否"}`,
+      intake.command.content,
+      ...(intake.command.lostItemDescription
+        ? [`遺失物：${intake.command.lostItemDescription}`]
+        : []),
+    ].join("\n");
+    const complaintCase: ComplaintCaseRecord = {
+      caseNo,
+      caseSource: "app",
+      relatedOrderId: intake.orderId,
+      relatedCallId: null,
+      relatedIncidentId: null,
+      category,
+      severity: "normal",
+      description,
+      assigneeId: null,
+      status: "new",
+      slaDueAt: this.calculateSlaDueAt(category, "normal", now),
+      slaBreach: false,
+      reopenCount: 0,
+      resolutionCode: null,
+      closingNote: null,
+      createdAt,
+      updatedAt: createdAt,
+    };
+    const timeline = this.createTimelineEntry(
+      caseNo,
+      TIMELINE_ACTIONS.created,
+      `來源：${sourceLabel}；同意客服聯繫：${intake.command.contactConsent ? "是" : "否"}`,
+      createdAt,
+    );
+    return { complaintCase, timeline };
+  }
+
+  private async publishPassengerCase(
+    stored: PassengerIntakeResult,
+    passengerId: string,
+    source: "passenger_app" | "passenger_ride_token" = "passenger_app",
+  ) {
+    // Stable audit identity also recovers when COMMIT succeeded but its reply was lost.
+    if (!this.auditedPassengerCases.has(stored.complaintCase.caseNo)) {
+      await this.auditNotificationService.recordAuditLogAsync({
+        actorId: source === "passenger_app" ? passengerId : null,
+        actorType:
+          source === "passenger_app" ? "first_party_passenger" : "system",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: "create_passenger_complaint_case",
+        resourceType: "complaint_case",
+        resourceId: stored.complaintCase.caseNo,
+        requestId: `passenger-complaint:${stored.complaintCase.caseNo}`,
+        newValuesSummary: {
+          source,
+          ...(source === "passenger_app"
+            ? { drtsPassengerId: passengerId }
+            : { passengerSubjectRef: passengerId }),
+          relatedOrderId: stored.complaintCase.relatedOrderId,
+          category: stored.complaintCase.category,
+        },
+      });
+      this.auditedPassengerCases.add(stored.complaintCase.caseNo);
+    }
+    // Publish to the existing Ops authority only after the durable transaction.
+    if (
+      !this.complaintCases.some(
+        (item) => item.caseNo === stored.complaintCase.caseNo,
+      )
+    ) {
+      this.complaintCases = [stored.complaintCase, ...this.complaintCases];
+      this.complaintTimelines.set(stored.complaintCase.caseNo, [
+        stored.timeline,
+      ]);
+    }
+  }
+
+  preparePassengerRatingHook(
+    passengerId: string,
+    orderId: string,
+    contactRequested: boolean,
+    payload: { score: number; tags: string[]; comment: string | null },
+  ) {
+    if (!this.complaintRepository?.isEnabled()) {
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Rating consent storage is unavailable.",
+      );
+    }
+    const intake =
+      payload.score <= 2 && contactRequested
+        ? normalizePassengerComplaintIntake({
+            passengerId,
+            orderId,
+            idempotencyKey: `rating:${orderId}`,
+            origin: "low_rating",
+            command: {
+              rideId: orderId,
+              category: "service",
+              contactConsent: true,
+              content: `乘客評價 ${payload.score} 星，已勾選需要客服聯繫。${payload.comment ? `\n${payload.comment}` : ""}`,
+            },
+          })
+        : null;
+    const draft = intake
+      ? { input: intake, ...this.preparePassengerCase(intake) }
+      : undefined;
+    let stored: PassengerIntakeResult | null = null;
+    return {
+      execute: async (
+        client: PoolClient,
+        rating: PassengerTripRatingRecord,
+        isNew: boolean,
+      ) => {
+        const requestHash = createHash("sha256")
+          .update(
+            JSON.stringify({
+              score: rating.score,
+              tags: rating.tags,
+              comment: rating.comment,
+              contactRequested,
+            }),
+          )
+          .digest("hex");
+        stored = await this.complaintRepository!.persistPassengerRatingConsent(
+          client,
+          rating,
+          contactRequested,
+          requestHash,
+          isNew,
+          draft,
+        );
+      },
+      afterCommit: async () => {
+        if (stored) await this.publishPassengerCase(stored, passengerId);
+      },
+    };
+  }
+
+  /** The existing transaction seam, with verified token authority instead of account intake. */
+  preparePassengerRideRatingHook(
+    token: PassengerRideAccessToken,
+    contactRequested: boolean | undefined,
+    payload: { score: number; tags: string[]; comment: string | null },
+  ) {
+    if (!this.complaintRepository?.isEnabled())
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Rating consent storage is unavailable.",
+      );
+    const choice = contactRequested ?? false;
+    const draft =
+      choice && payload.score <= 2
+        ? this.preparePassengerCase(
+            {
+              orderId: token.orderId,
+              command: {
+                rideId: token.orderId,
+                category: "service",
+                contactConsent: true,
+                content: `乘客評價 ${payload.score} 星，已勾選需要客服聯繫。${payload.comment ? `\n${payload.comment}` : ""}`,
+              },
+            },
+            "乘客行程連結",
+          )
+        : undefined;
+    let stored: PassengerIntakeResult | null = null;
+    return {
+      execute: async (
+        client: PoolClient,
+        rating: PassengerTripRatingRecord,
+        isNew: boolean,
+      ) => {
+        const requestHash = createHash("sha256")
+          .update(
+            JSON.stringify({
+              score: rating.score,
+              tags: rating.tags,
+              comment: rating.comment,
+              contactRequested: choice,
+            }),
+          )
+          .digest("hex");
+        stored = await this.complaintRepository!.persistRideTokenRatingConsent(
+          client,
+          rating,
+          token,
+          choice,
+          contactRequested !== undefined,
+          requestHash,
+          isNew,
+          draft,
+        );
+      },
+      afterCommit: async () => {
+        if (stored)
+          await this.publishPassengerCase(
+            stored,
+            token.passengerSubjectRef,
+            "passenger_ride_token",
+          );
+      },
+    };
+  }
+
+  private mergePassengerCase(record: ComplaintCaseRecord) {
+    const local = this.complaintCases.find(
+      (item) => item.caseNo === record.caseNo,
+    );
+    if (!local)
+      this.complaintCases = [
+        this.cloneComplaintCase(record),
+        ...this.complaintCases,
+      ];
+    else if (Date.parse(record.updatedAt) > Date.parse(local.updatedAt))
+      this.replaceComplaintCase(record);
+  }
+
+  async listComplaintCasesForOps() {
+    if (this.complaintRepository?.isEnabled()) {
+      let cursor = "";
+      while (true) {
+        const page = await this.complaintRepository.listPassengerCases(cursor);
+        for (const record of page) this.mergePassengerCase(record);
+        if (page.length < 500) break;
+        cursor = page[page.length - 1]!.caseNo;
+      }
+    }
+    return this.listComplaintCases();
+  }
+
+  async getComplaintCaseForOps(caseNo: string) {
+    // Passenger intake owns this UUID namespace; other CRM reads keep their original behavior.
+    if (!/^PAX-[0-9a-f-]{36}$/i.test(caseNo))
+      return this.getComplaintCase(caseNo);
+    if (this.complaintRepository?.isEnabled()) {
+      const record = await this.complaintRepository.getPassengerCase(caseNo);
+      if (record) this.mergePassengerCase(record);
+    }
+    return this.getComplaintCase(caseNo);
+  }
+
+  async getComplaintTimelineForOps(caseNo: string) {
+    if (!/^PAX-[0-9a-f-]{36}$/i.test(caseNo))
+      return this.getComplaintTimeline(caseNo);
+    await this.getComplaintCaseForOps(caseNo);
+    if (this.complaintRepository?.isEnabled()) {
+      const persisted =
+        await this.complaintRepository.getPassengerTimeline(caseNo);
+      const entries = new Map(
+        (this.complaintTimelines.get(caseNo) ?? []).map((entry) => [
+          entry.entryId,
+          entry,
+        ]),
+      );
+      for (const entry of persisted)
+        if (!entries.has(entry.entryId)) entries.set(entry.entryId, entry);
+      this.complaintTimelines.set(
+        caseNo,
+        [...entries.values()].sort((a, b) =>
+          a.createdAt.localeCompare(b.createdAt),
+        ),
+      );
+    }
+    return this.getComplaintTimeline(caseNo);
   }
 
   listComplaintCases() {
@@ -244,10 +656,40 @@ export class ComplaintService implements OnModuleInit {
     command: AddComplaintCaseNoteCommand,
     requestId?: string,
   ) {
+    return this.addComplaintCaseNoteInternal(caseNo, command, requestId);
+  }
+
+  /** The Fleet case contract permits replies until closed, including a
+   * resolved settlement case. Such replies keep the resolution intact. */
+  addFleetSettlementCaseNote(
+    caseNo: string,
+    command: AddComplaintCaseNoteCommand,
+    requestId?: string,
+  ) {
+    const complaintCase = this.requireComplaintCase(caseNo);
+    if (complaintCase.category !== "settlement_dispute") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "COMPLAINT_NOT_SETTLEMENT",
+        "Fleet settlement notes require a settlement dispute case.",
+        { caseNo },
+      );
+    }
+    return this.addComplaintCaseNoteInternal(caseNo, command, requestId, true);
+  }
+
+  private addComplaintCaseNoteInternal(
+    caseNo: string,
+    command: AddComplaintCaseNoteCommand,
+    requestId?: string,
+    allowResolvedSettlement = false,
+  ) {
     this.assertNonBlank(command.note, "note");
 
     const complaintCase = this.requireComplaintCase(caseNo);
-    this.assertCaseOpenForAction(complaintCase, "note");
+    if (!(allowResolvedSettlement && complaintCase.status === "resolved")) {
+      this.assertCaseOpenForAction(complaintCase, "note");
+    }
 
     const nextStatus =
       complaintCase.status === "new" ||
@@ -749,6 +1191,7 @@ export class ComplaintService implements OnModuleInit {
     complaintCases: readonly ComplaintCaseRecord[],
   ) {
     const maxSequence = complaintCases.reduce((currentMax, complaintCase) => {
+      if (complaintCase.caseNo.includes("-FS-")) return currentMax;
       const rawSequence = complaintCase.caseNo.split("-").at(-1) ?? "0";
       const parsedSequence = Number.parseInt(rawSequence, 10);
       if (!Number.isInteger(parsedSequence)) {
@@ -873,6 +1316,30 @@ export class ComplaintService implements OnModuleInit {
       persistPayload.complaintTimelines = changes.complaintTimelines.map(
         (entry) => ({ ...entry }),
       );
+    }
+
+    const settlementCaseNos = (changes.complaintCases ?? [])
+      .filter((item) => item.category === "settlement_dispute")
+      .map((item) => item.caseNo);
+    if (settlementCaseNos.length && this.complaintRepository.isEnabled()) {
+      this.settlementMutationRevision += 1;
+      const previous = settlementCaseNos.flatMap((caseNo) => {
+        const persistence = this.settlementPersistence.get(caseNo);
+        return persistence ? [persistence] : [];
+      });
+      const persistence = Promise.all(previous)
+        .then(() => this.complaintRepository!.persistChanges(persistPayload))
+        .catch((error: unknown) => {
+          this.complaintRepository!.reportPersistenceFailure(error, context);
+          throw error;
+        });
+      for (const caseNo of settlementCaseNos) {
+        this.settlementPersistence.set(caseNo, persistence);
+      }
+      // Shared synchronous callers can start a mutation before the HTTP layer
+      // awaits it. Keep its rejection observable without an unhandled promise.
+      void persistence.catch(() => undefined);
+      return;
     }
 
     void this.complaintRepository

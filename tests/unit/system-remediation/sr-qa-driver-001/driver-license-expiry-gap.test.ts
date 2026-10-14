@@ -1,3 +1,4 @@
+import { enabledRegistryRepository } from "../../registry-driver-master-durable-ack-20261014/storage-fixture";
 // SR-QA-DRIVER-001 -- C061 (證照到期司機／主管: 到期提醒與禁止接單).
 //
 // This capability asks for two things: T-30/T-7/到期 reminder delivery, and
@@ -52,7 +53,7 @@ function setupRegistry() {
     } as never,
     auditService,
     new DriverProfileService(new AuditNotificationService()),
-    undefined,
+    enabledRegistryRepository(),
   );
 }
 
@@ -140,7 +141,7 @@ describe("SR-QA-DRIVER-001 C061: driver license/registration expiry (remediated 
 
     // Update driver license expiry date to the past
     const expiredAt = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    registry.updateDriverLicenses("drv-demo-001", {
+    await registry.updateDriverLicenses("drv-demo-001", {
       professionalDriverLicenseExpiry: expiredAt,
     });
 
@@ -167,10 +168,10 @@ describe("SR-QA-DRIVER-001 C061: driver license/registration expiry (remediated 
     const in10Days = new Date(now + 10 * 24 * 60 * 60 * 1000).toISOString();
     const in90Days = new Date(now + 90 * 24 * 60 * 60 * 1000).toISOString();
 
-    registry.updateDriverLicenses("drv-demo-001", {
+    await registry.updateDriverLicenses("drv-demo-001", {
       professionalDriverLicenseExpiry: in10Days,
     });
-    registry.updateDriverLicenses("drv-demo-002", {
+    await registry.updateDriverLicenses("drv-demo-002", {
       professionalDriverLicenseExpiry: in90Days,
     });
 

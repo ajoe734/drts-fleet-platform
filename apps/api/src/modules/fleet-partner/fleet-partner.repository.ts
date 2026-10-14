@@ -10,6 +10,7 @@ import type {
 import type { QueryResult, QueryResultRow } from "pg";
 
 import { DatabaseService } from "../../common/db";
+import { statementDecisionLockKey } from "./fleet-statement-decision.repository";
 
 type JsonRecordRow = {
   record: unknown;
@@ -129,6 +130,20 @@ export class FleetPartnerRepository {
         this.parseStatementRecord(row),
       ),
     };
+  }
+
+  async loadStatements(
+    fleetPartnerId: string,
+    periodMonth?: string,
+  ): Promise<FleetPartnerStatementRecord[]> {
+    if (!this.isEnabled()) return [];
+    const result = await this.databaseService!.query<FleetPartnerStatementRow>(
+      `SELECT * FROM billing.phase1_fleet_partner_statements
+       WHERE fleet_partner_id = $1 AND ($2::text IS NULL OR period_month = $2)
+       ORDER BY period_month DESC`,
+      [fleetPartnerId, periodMonth ?? null],
+    );
+    return result.rows.map((row) => this.parseStatementRecord(row));
   }
 
   async persistChanges(changes: PersistFleetPartnerChanges) {
@@ -265,13 +280,48 @@ export class FleetPartnerRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
+      const existing = await client.query<{ statement_id: string }>(
+        `SELECT statement_id FROM billing.phase1_fleet_partner_statements
+         WHERE period_month = $1 AND ($2::text IS NULL OR fleet_partner_id = $2)`,
+        [periodMonth, fleetPartnerId ?? null],
+      );
+      const statementIds = [
+        ...new Set([
+          ...existing.rows.map((row) => row.statement_id),
+          ...statements.map((statement) => statement.statementId),
+        ]),
+      ].sort();
+      for (const statementId of statementIds) {
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+          [statementDecisionLockKey(statementId)],
+        );
+      }
+      const payoutRows = await client.query<{
+        statement_id: string;
+        payout_status: string;
+      }>(
+        `SELECT statement_id, payout_status FROM billing.phase1_fleet_partner_statements
+         WHERE period_month = $1 AND ($2::text IS NULL OR fleet_partner_id = $2) FOR UPDATE`,
+        [periodMonth, fleetPartnerId ?? null],
+      );
+      const paidIds = new Set(
+        payoutRows.rows
+          .filter((row) => row.payout_status === "paid")
+          .map((row) => row.statement_id),
+      );
       await this.deleteStatementsForPeriodMonth(
         client,
         periodMonth,
         fleetPartnerId,
       );
       for (const statement of statements) {
-        await this.upsertStatement(client, statement);
+        await this.upsertStatement(
+          client,
+          paidIds.has(statement.statementId)
+            ? { ...statement, payoutStatus: "paid" }
+            : statement,
+        );
       }
       await client.query("COMMIT");
     } catch (error) {
@@ -326,6 +376,7 @@ export class FleetPartnerRepository {
           DELETE FROM billing.phase1_fleet_partner_statements
           WHERE period_month = $1
             AND fleet_partner_id = $2
+            AND payout_status <> 'paid'
         `,
         [periodMonth, fleetPartnerId],
       );
@@ -335,7 +386,7 @@ export class FleetPartnerRepository {
     await queryable.query(
       `
         DELETE FROM billing.phase1_fleet_partner_statements
-        WHERE period_month = $1
+        WHERE period_month = $1 AND payout_status <> 'paid'
       `,
       [periodMonth],
     );

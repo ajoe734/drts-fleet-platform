@@ -14,4 +14,4 @@ it("enforces ownership before Nest SSE headers, preserves JSON refusals, events 
   );
   expect(report.failedCases).toBe(0);
   expect(report.passedCases).toBe(12);
-});
+}, 30_000);

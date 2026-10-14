@@ -5,13 +5,25 @@
 // conditionals.
 import type { FleetStatement } from "../../lib/fleet-portal-data.server";
 
-export type StatementBannerState = "no_statement" | "paid" | "pending";
+export type StatementBannerState =
+  | "no_statement"
+  | "paid"
+  | "pending"
+  | "confirmed"
+  | "disputed";
 
 export function resolveStatementBannerState(
-  currentStatement: Pick<FleetStatement, "status"> | null,
+  currentStatement: Pick<FleetStatement, "status" | "decisionStatus"> | null,
 ): StatementBannerState {
   if (!currentStatement) {
     return "no_statement";
   }
-  return currentStatement.status === "paid" ? "paid" : "pending";
+  if (currentStatement.status === "paid") return "paid";
+  if (
+    currentStatement.decisionStatus === "confirmed" ||
+    currentStatement.decisionStatus === "disputed"
+  ) {
+    return currentStatement.decisionStatus;
+  }
+  return "pending";
 }
