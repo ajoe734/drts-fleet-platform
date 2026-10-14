@@ -4,11 +4,29 @@ import { RIDE_T as T } from "../../components/demo/translations";
 
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { RideScreen } from "../../components/demo/demo-ride-screen";
+import {
+  RideScreen,
+  usePassengerMode,
+} from "../../components/demo/demo-ride-screen";
+import { PassengerRidePage } from "../../components/ride/passenger-ride-page";
 
 function RideContent() {
   const params = useSearchParams();
-  return <RideScreen rideId={params.get("rideId") ?? ""} />;
+  const rideId = params.get("rideId") ?? "";
+  const mode = usePassengerMode();
+
+  if (mode === "live" && rideId) {
+    return (
+      <PassengerRidePage
+        token={rideId}
+        authMode="id"
+        kind="ride"
+        searchParams={{ mode: "live" }}
+      />
+    );
+  }
+
+  return <RideScreen rideId={rideId} />;
 }
 
 export default function Ride() {
