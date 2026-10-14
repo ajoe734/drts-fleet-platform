@@ -1189,7 +1189,7 @@ export class RegulatoryRegistryService
     return this.enqueueDriverMasterWrite(
       driverId,
       async (workStateRevision) => {
-        const driver = this.cloneDriver(this.requireDriver(driverId));
+        const driver = this.stageDriverMaster(driverId);
         const previous = this.decorateDriver(driver);
         const buckets = command.supportedServiceBuckets;
 
@@ -1254,7 +1254,7 @@ export class RegulatoryRegistryService
     return this.enqueueDriverMasterWrite(
       driverId,
       async (workStateRevision) => {
-        const driver = this.cloneDriver(this.requireDriver(driverId));
+        const driver = this.stageDriverMaster(driverId);
         const previous = this.decorateDriver(driver);
         const now = new Date().toISOString();
 
@@ -1333,7 +1333,7 @@ export class RegulatoryRegistryService
     return this.enqueueDriverMasterWrite(
       driverId,
       async (workStateRevision) => {
-        const driver = this.cloneDriver(this.requireDriver(driverId));
+        const driver = this.stageDriverMaster(driverId);
         const previous = this.decorateDriver(driver);
         const now = new Date().toISOString();
 
@@ -1448,6 +1448,17 @@ export class RegulatoryRegistryService
         : current,
     );
     return published;
+  }
+
+  private stageDriverMaster(driverId: string): DriverRegistryRecord {
+    const committed = this.requireDriver(driverId);
+    // Historical repository rows can predate derived arrays/profile metadata.
+    // Use the existing decorator to fill those, while retaining the declared
+    // license flag so expiry evaluation never becomes a permanent local flag.
+    return {
+      ...this.cloneDriver(this.decorateDriver(committed)),
+      licensesValid: committed.licensesValid,
+    };
   }
 
   async recordDriverLocation(
@@ -2361,7 +2372,7 @@ export class RegulatoryRegistryService
       void this.enqueueDriverMasterWrite(driverId, async () => {
         // Keep the inherited synchronous local effect and best-effort error
         // policy; defer only storage, using the last committed master fields.
-        const committed = this.cloneDriver(this.requireDriver(driverId));
+        const committed = this.stageDriverMaster(driverId);
         const snapshot = this.decorateDriver({
           ...committed,
           workState: local.workState,

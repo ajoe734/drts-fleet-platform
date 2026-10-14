@@ -32,7 +32,7 @@ describe("F3 inherited synchronous work-state versus durable master queue", () =
 
   it("a later lifecycle intent can still change an earlier work-state setter", async () => {
     const f = fixture();
-    f.service.updateDriverWorkState("drv-demo-001", { workState: "paused" });
+    f.service.updateDriverWorkState("drv-demo-001", { workState: "offline" });
     const master = observe(
       f.controller.updateDriverLifecycle("drv-demo-001", {
         lifecycleStatus: "active",
