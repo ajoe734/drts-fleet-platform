@@ -66,7 +66,7 @@ describe("first-party delivery stays dormant", () => {
     expect(configured).toEqual([]);
   });
 
-  it("no controller or runtime caller exposes the first-party registration seam", () => {
+  it("only the two authorized passenger-app device and booking seams call the existing first-party registry", () => {
     expect(
       Reflect.getMetadata("controllers", PassengerPushDevicesModule) ?? [],
     ).toEqual([]);
@@ -101,6 +101,8 @@ describe("first-party delivery stays dormant", () => {
         );
     }
     expect(callers.sort()).toEqual([
+      "apps/api/src/modules/passenger-app/booking/passenger-booking.service.ts:writeFirstPartyRoute",
+      "apps/api/src/modules/passenger-app/push/passenger-push.service.ts:registerDevice",
       "apps/api/src/modules/passenger-push-devices/passenger-push-devices.service.ts:registerDevice",
       "apps/api/src/modules/passenger-push-devices/passenger-push-devices.service.ts:writeFirstPartyRoute",
     ]);

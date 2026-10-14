@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { Injectable, Optional } from "@nestjs/common";
-import type { QueryResultRow } from "pg";
+import type { PoolClient, QueryResultRow } from "pg";
 
 import {
   FIRST_PARTY_NOTIFICATION_ROUTE_POLICY_VERSION,
@@ -66,7 +66,7 @@ type DeviceRow = QueryResultRow & {
 
 type FirstPartyRouteRow = QueryResultRow & {
   order_id: string;
-  tenant_id: string;
+  tenant_id: string | null;
   drts_passenger_id: string;
   passenger_subject_ref: string;
   app_id: string;
@@ -156,7 +156,9 @@ export class PassengerPushDevicesRepository {
     };
   }
 
-  private mapRouteRow(row: FirstPartyRouteRow): OrderFirstPartyNotificationRoute {
+  private mapRouteRow(
+    row: FirstPartyRouteRow,
+  ): OrderFirstPartyNotificationRoute {
     return {
       orderId: row.order_id,
       tenantId: row.tenant_id,
@@ -193,7 +195,9 @@ export class PassengerPushDevicesRepository {
       throw new Error("DATABASE_URL is not configured");
     }
 
-    const tokenSha256 = createHash("sha256").update(command.token).digest("hex");
+    const tokenSha256 = createHash("sha256")
+      .update(command.token)
+      .digest("hex");
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
@@ -255,7 +259,10 @@ export class PassengerPushDevicesRepository {
 
       let resultRow: DeviceRow;
 
-      if (existingRow && existingRow.drts_passenger_id === command.drtsPassengerId) {
+      if (
+        existingRow &&
+        existingRow.drts_passenger_id === command.drtsPassengerId
+      ) {
         const updated = await client.query<DeviceRow>(
           `
             UPDATE iam.phase1_passenger_push_devices
@@ -265,7 +272,11 @@ export class PassengerPushDevicesRepository {
             WHERE device_id = $1
             RETURNING ${DEVICE_COLUMNS}
           `,
-          [existingRow.device_id, command.appVersion, command.notificationConsentVersion],
+          [
+            existingRow.device_id,
+            command.appVersion,
+            command.notificationConsentVersion,
+          ],
         );
         resultRow = updated.rows[0]!;
       } else {
@@ -379,7 +390,9 @@ export class PassengerPushDevicesRepository {
     );
   }
 
-  async touchDevice(deviceId: string): Promise<PassengerPushDeviceRecord | null> {
+  async touchDevice(
+    deviceId: string,
+  ): Promise<PassengerPushDeviceRecord | null> {
     if (!this.isEnabled()) {
       return null;
     }
@@ -510,40 +523,63 @@ export class PassengerPushDevicesRepository {
    */
   async writeFirstPartyRoute(
     command: WriteFirstPartyRouteCommand,
+    callerClient?: PoolClient,
   ): Promise<WriteFirstPartyRouteResult> {
-    if (!this.isEnabled()) {
-      throw new Error("DATABASE_URL is not configured");
+    if (callerClient) {
+      // Borrow the booking transaction. Its owner alone settles/releases it.
+      try {
+        return await this.writeRouteSql(command, callerClient);
+      } catch (error) {
+        throw toSafeOperationError(error);
+      }
     }
-
+    if (!this.isEnabled()) throw new Error("DATABASE_URL is not configured");
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-
-      // F4 rework: serialize concurrent writes for this order_id behind
-      // one transaction-scoped advisory lock, acquired before the
-      // `FOR UPDATE` row lock below (which locks nothing when no row
-      // exists yet — two concurrent first writes for the same order both
-      // used to pass the partner check and the empty `FOR UPDATE`, then
-      // race a plain INSERT: one succeeds, the other hits the order_id
-      // primary-key violation instead of being compared and treated as an
-      // idempotent replay). With the lock, the second call blocks until
-      // the first commits, then actually sees the just-inserted row.
+      const result = await this.writeRouteSql(command, client);
       await client.query(
-        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-        [`passenger-push-first-party-route:${command.orderId}`],
+        result.outcome === "created" || result.outcome === "idempotent_replay"
+          ? "COMMIT"
+          : "ROLLBACK",
       );
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw toSafeOperationError(error);
+    } finally {
+      client.release();
+    }
+  }
 
-      const partnerRoute = await client.query(
-        `SELECT order_id FROM mobility.phase1_order_partner_notification_routes WHERE order_id = $1`,
-        [command.orderId],
-      );
-      if (partnerRoute.rows[0]) {
-        await client.query("ROLLBACK");
-        return { outcome: "rejected_partner_route_exists" };
-      }
+  private async writeRouteSql(
+    command: WriteFirstPartyRouteCommand,
+    client: PoolClient,
+  ): Promise<WriteFirstPartyRouteResult> {
+    // F4 rework: serialize concurrent writes for this order_id behind
+    // one transaction-scoped advisory lock, acquired before the
+    // `FOR UPDATE` row lock below (which locks nothing when no row
+    // exists yet — two concurrent first writes for the same order both
+    // used to pass the partner check and the empty `FOR UPDATE`, then
+    // race a plain INSERT: one succeeds, the other hits the order_id
+    // primary-key violation instead of being compared and treated as an
+    // idempotent replay). With the lock, the second call blocks until
+    // the first commits, then actually sees the just-inserted row.
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`passenger-push-first-party-route:${command.orderId}`],
+    );
 
-      const existing = await client.query<FirstPartyRouteRow>(
-        `
+    const partnerRoute = await client.query(
+      `SELECT order_id FROM mobility.phase1_order_partner_notification_routes WHERE order_id = $1`,
+      [command.orderId],
+    );
+    if (partnerRoute.rows[0]) {
+      return { outcome: "rejected_partner_route_exists" };
+    }
+
+    const existing = await client.query<FirstPartyRouteRow>(
+      `
           SELECT order_id, tenant_id, drts_passenger_id, passenger_subject_ref,
             app_id, notification_policy_version, consent_version, ride_ref,
             created_at
@@ -551,27 +587,26 @@ export class PassengerPushDevicesRepository {
           WHERE order_id = $1
           FOR UPDATE
         `,
-        [command.orderId],
-      );
-      const existingRow = existing.rows[0];
+      [command.orderId],
+    );
+    const existingRow = existing.rows[0];
 
-      if (existingRow) {
-        const matches =
-          existingRow.tenant_id === command.tenantId &&
-          existingRow.drts_passenger_id === command.drtsPassengerId &&
-          existingRow.passenger_subject_ref === command.passengerSubjectRef &&
-          existingRow.app_id === command.appId &&
-          existingRow.consent_version === command.consentVersion &&
-          existingRow.ride_ref === command.rideRef;
+    if (existingRow) {
+      const matches =
+        existingRow.tenant_id === command.tenantId &&
+        existingRow.drts_passenger_id === command.drtsPassengerId &&
+        existingRow.passenger_subject_ref === command.passengerSubjectRef &&
+        existingRow.app_id === command.appId &&
+        existingRow.consent_version === command.consentVersion &&
+        existingRow.ride_ref === command.rideRef;
 
-        await client.query(matches ? "COMMIT" : "ROLLBACK");
-        return matches
-          ? { outcome: "idempotent_replay", route: this.mapRouteRow(existingRow) }
-          : { outcome: "rejected_content_mismatch" };
-      }
+      return matches
+        ? { outcome: "idempotent_replay", route: this.mapRouteRow(existingRow) }
+        : { outcome: "rejected_content_mismatch" };
+    }
 
-      const inserted = await client.query<FirstPartyRouteRow>(
-        `
+    const inserted = await client.query<FirstPartyRouteRow>(
+      `
           INSERT INTO mobility.phase1_order_first_party_notification_routes (
             order_id, tenant_id, drts_passenger_id, passenger_subject_ref,
             app_id, consent_version, ride_ref
@@ -580,24 +615,17 @@ export class PassengerPushDevicesRepository {
             app_id, notification_policy_version, consent_version, ride_ref,
             created_at
         `,
-        [
-          command.orderId,
-          command.tenantId,
-          command.drtsPassengerId,
-          command.passengerSubjectRef,
-          command.appId,
-          command.consentVersion,
-          command.rideRef,
-        ],
-      );
+      [
+        command.orderId,
+        command.tenantId,
+        command.drtsPassengerId,
+        command.passengerSubjectRef,
+        command.appId,
+        command.consentVersion,
+        command.rideRef,
+      ],
+    );
 
-      await client.query("COMMIT");
-      return { outcome: "created", route: this.mapRouteRow(inserted.rows[0]!) };
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => undefined);
-      throw toSafeOperationError(error);
-    } finally {
-      client.release();
-    }
+    return { outcome: "created", route: this.mapRouteRow(inserted.rows[0]!) };
   }
 }

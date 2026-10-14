@@ -1,3 +1,4 @@
+import { PassengerPushDevicesService } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.service";
 import { randomUUID } from "node:crypto";
 import { firstValueFrom, of } from "../../../apps/api/node_modules/rxjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -91,6 +92,10 @@ describe("pax-booking_trusted_create_and_ownership: production validation", () =
         f.multi,
         f.fareRepository,
         f.accountRepository as never,
+        undefined,
+        {
+          resolveActiveDevices: async () => [],
+        } as unknown as PassengerPushDevicesService,
       );
       await expect(service.createRide(OWNER, f.command)).rejects.toMatchObject({
         code: "FARE_QUOTE_NOT_FOUND",
@@ -381,6 +386,9 @@ describe("pax-booking_history_and_ride_actions: production ownership", () => {
       f.fareRepository,
       f.accountRepository as never,
       complaint,
+      {
+        resolveActiveDevices: async () => [],
+      } as unknown as PassengerPushDevicesService,
     );
     const controller = new PassengerBookingController(service, f.multi);
     const prepareHook = vi.spyOn(complaint, "preparePassengerRatingHook");

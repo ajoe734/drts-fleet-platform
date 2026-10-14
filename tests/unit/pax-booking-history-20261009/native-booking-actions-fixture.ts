@@ -1,3 +1,5 @@
+import { PassengerPushDevicesService } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.service";
+import { PassengerPushDevicesRepository } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.repository";
 import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { vi } from "vitest";
@@ -199,6 +201,10 @@ export async function bookingActor(
     multi,
     new PassengerFareRepository(database),
     new PassengerAccountRepository(database),
+    undefined,
+    new PassengerPushDevicesService(
+      new PassengerPushDevicesRepository(database),
+    ),
   );
   const controller = new PassengerBookingController(booking, multi);
   const effects = () => ({
