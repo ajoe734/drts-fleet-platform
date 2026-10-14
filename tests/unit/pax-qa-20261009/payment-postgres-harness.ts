@@ -76,7 +76,8 @@ const jwt = require("jsonwebtoken") as typeof import("jsonwebtoken");
 const nativeFetch = globalThis.fetch;
 // Never open a DB or socket on the worker VM, even with an inherited DB URL.
 export const hostedPaymentEnabled = process.env.GITHUB_ACTIONS === "true";
-const databaseUrl = process.env.DATABASE_URL;
+const databaseUrl =
+  process.env.PASSENGER_APP_TEST_DATABASE_URL || process.env.DATABASE_URL;
 const runFile = promisify(execFile);
 
 /** Public fixture keys, used only by guarded tests; never deployment config. */
@@ -101,6 +102,9 @@ export function accountSigningFixture() {
  * Production deliberately sanitizes persistence errors; code/position/hash
  * identify an SQL defect without logging a token, credential or raw message. */
 export class DiagnosedDatabaseService extends DatabaseService {
+  // Case-local observation after the actual native query, on its leased client.
+  // Used to hold an existing acquired row lock; never substitutes SQL/results.
+  leaseObserver?: (sql: string, client: PoolClient) => Promise<void>;
   probe:
     | {
         begin: () => Promise<void>;
@@ -215,6 +219,7 @@ export class DiagnosedDatabaseService extends DatabaseService {
           throw error;
         });
         releaseAcquisition();
+        await this.leaseObserver?.(sql, client);
         if (probe && pid !== undefined) {
           probe.statements.push({
             pid,
@@ -405,7 +410,7 @@ export class PaymentPostgresHarness {
       throw new Error("Payment DB/HTTP is GitHub-hosted only.");
     if (!databaseUrl)
       throw new Error(
-        "Hosted Payment QA requires DATABASE_URL; missing configuration is a failure.",
+        "Hosted Payment QA requires PASSENGER_APP_TEST_DATABASE_URL or DATABASE_URL; missing configuration is a failure.",
       );
     this.admin = new Pool({
       connectionString: databaseUrl,
@@ -917,6 +922,53 @@ export class PaymentPostgresHarness {
       certificates,
       passengerComplaints: new PassengerComplaintService(booking, complaints),
     };
+  }
+
+  /** Separate native booking factory: no changes to historical receipt fixtures.
+   * Approved authority is synthetic configuration persisted/hydrated by the real
+   * repository. Audit/events are harmless sinks, not live provider delivery. */
+  async bookingServices(database: DatabaseService = this.database) {
+    const taxi = new MultiTaxiRepository(database);
+    if (!(await taxi.loadState()).authorizations.length) {
+      const now = new Date().toISOString();
+      await taxi.persistAuthorization({
+        authorizationId: randomUUID(),
+        operatorId: "qa-synthetic-operator",
+        authorityCode: "QA-SYNTHETIC",
+        businessPlanVersion: "qa-native-booking",
+        status: "approved",
+        serviceAreaCodes: ["TPE"],
+        activeFareVersionId: "taipei-20230401",
+        effectiveFrom: "2023-04-01T00:00:00.000Z",
+        effectiveUntil: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    const audit = new AuditNotificationService();
+    const published = vi.fn();
+    const owned = new OwnedMobilityService(
+      {} as never,
+      audit,
+      {
+        registerRecordingAttachmentListener() {},
+        registerRecordingStateChangeListener() {},
+      } as never,
+      {} as never,
+      { publishOrderCreated: published, publishOrderUpdated() {} } as never,
+      new OwnedMobilityRepository(database, taxi),
+    );
+    await owned.onModuleInit();
+    const multi = new MultiTaxiService(owned, taxi, undefined, audit);
+    await multi.onModuleInit();
+    const repository = new PassengerBookingRepository(database);
+    const booking = new PassengerBookingService(
+      repository,
+      multi,
+      new PassengerFareRepository(database),
+      new PassengerAccountRepository(database),
+    );
+    return { booking, repository, multi, owned, taxi, published };
   }
 
   /** Harmless grant fixture persisted by the actual token repository. Its
