@@ -8,8 +8,6 @@ import type {
   PassengerTripRatingRecord,
 } from "@drts/contracts";
 
-import type { PoolClient } from "pg";
-
 import { DatabaseService } from "../../common/db";
 import { ApiRequestError } from "../../common/api-envelope";
 import type { PassengerComplaintIntake } from "./passenger-complaint-intake";
