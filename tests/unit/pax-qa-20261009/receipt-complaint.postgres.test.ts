@@ -48,6 +48,9 @@ describe("PAX QA instrumentation callback contract (server-free, no DB acceptanc
       leased.query("SELECT 1", [], callback);
       expect(callback).toHaveBeenCalledOnce();
       expect(nativeQuery.mock.calls[0]).toEqual(["SELECT 1", [], callback]);
+      // The normal promise path also works without an active concurrency probe.
+      await leased.query("SELECT 1");
+      expect(nativeQuery.mock.calls[1]).toEqual(["SELECT 1", undefined]);
       leased.release();
       expect(client.query).toBe(nativeQuery);
       expect(nativeRelease).toHaveBeenCalledOnce();
