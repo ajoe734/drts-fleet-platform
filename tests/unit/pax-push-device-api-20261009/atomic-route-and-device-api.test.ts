@@ -1,4 +1,4 @@
-import "reflect-metadata";
+import "../../../apps/api/node_modules/reflect-metadata";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PoolClient } from "pg";
 import {
@@ -12,6 +12,8 @@ import { PassengerAccountService } from "../../../apps/api/src/modules/passenger
 import { PassengerBookingService } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.service";
 import { PassengerBookingRepository } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.repository";
 import { FirstPartyNotificationTransport } from "../../../apps/api/src/modules/multi-taxi/first-party-notification.transport";
+import { AUTH_ALLOWED_REALMS_KEY } from "../../../apps/api/src/common/auth/auth.constants";
+import { resolveRouteAuthPolicy } from "../../../apps/api/src/common/auth/auth.policy";
 afterEach(() => vi.unstubAllEnvs());
 const owner = "drts_passenger_fixture",
   orderId = "00000000-0000-4000-8000-000000000001",
@@ -179,18 +181,16 @@ function booking(input: Parameters<typeof database>[0] = {}, eligible = true) {
   const writer = new PassengerPushDevicesService(
     new PassengerPushDevicesRepository(f.db as never),
   );
-  const resolve = vi
-    .spyOn(writer, "resolveActiveDevices")
-    .mockResolvedValue(
-      eligible
-        ? [
-            {
-              appId: route.appId,
-              notificationConsentVersion: route.consentVersion,
-            } as never,
-          ]
-        : [],
-    );
+  const resolve = vi.spyOn(writer, "resolveActiveDevices").mockResolvedValue(
+    eligible
+      ? [
+          {
+            appId: route.appId,
+            notificationConsentVersion: route.consentVersion,
+          } as never,
+        ]
+      : [],
+  );
   const write = vi.spyOn(writer, "writeFirstPartyRoute");
   const command = {
     scheduledAt: new Date(Date.now() + 3600000).toISOString(),
@@ -399,6 +399,49 @@ function deviceApi() {
   };
 }
 describe("Existing account/session and owned push device API facade", () => {
+  it("keeps both HTTP methods under the existing passenger realm policy", () => {
+    expect(
+      Reflect.getMetadata(AUTH_ALLOWED_REALMS_KEY, PassengerPushController),
+    ).toEqual(["passenger"]);
+    for (const [method, path] of [
+      ["POST", "/api/passenger-app/push-devices"],
+      ["DELETE", `/api/passenger-app/push-devices/${deviceId}`],
+    ]) {
+      expect(resolveRouteAuthPolicy(method!, path!)).toMatchObject({
+        allowedRealms: ["passenger"],
+        requiredScopes: [],
+      });
+    }
+  });
+  it("rejects absent and non-passenger sessions on both mutations", async () => {
+    const f = deviceApi();
+    for (const identity of [
+      null,
+      Object.assign({}, f.identity, { realm: "partner" }) as never,
+    ]) {
+      await expect(
+        f.controller.register(identity, f.body),
+      ).rejects.toMatchObject({ status: 401 });
+      await expect(
+        f.controller.unregister(identity, deviceId),
+      ).rejects.toMatchObject({ status: 401 });
+    }
+    expect(f.register).not.toHaveBeenCalled();
+    expect(f.revoke).not.toHaveBeenCalled();
+  });
+  it("rejects forged owners, ambiguous aliases and unsupported provider input before registration", async () => {
+    const f = deviceApi();
+    for (const extra of [
+      { drtsPassengerId: "foreign" },
+      { appId: "ambiguous" },
+      { provider: "unsupported" },
+    ]) {
+      await expect(
+        f.service.register(f.identity, { ...f.body, ...extra }),
+      ).rejects.toMatchObject({ status: 400 });
+    }
+    expect(f.register).not.toHaveBeenCalled();
+  });
   it("registers and touches with the real account owner, normalizes wire fields, and returns only deviceId", async () => {
     const f = deviceApi();
     const response = await f.controller.register(f.identity, f.body);
