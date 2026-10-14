@@ -30,6 +30,10 @@ import { PassengerBookingService } from "./booking/passenger-booking.service";
 import { PassengerBookingRepository } from "./booking/passenger-booking.repository";
 import { PassengerBookingSettingsController } from "./booking/passenger-booking-settings.controller";
 import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
+import { ComplaintModule } from "../complaint/complaint.module";
+import { PassengerComplaintController } from "./complaint/passenger-complaint.controller";
+import { PassengerComplaintService } from "./complaint/passenger-complaint.service";
+import { PassengerReceiptController } from "./receipt/passenger-receipt.controller";
 import { PaymentMethodController } from "./payment/payment-method.controller";
 import { PaymentMethodRepository } from "./payment/payment-method.repository";
 import {
@@ -55,7 +59,13 @@ import {
 
 @Global()
 @Module({
-  imports: [DatabaseModule, GeoModule, ServiceAreaModule, MultiTaxiModule],
+  imports: [
+    DatabaseModule,
+    GeoModule,
+    ServiceAreaModule,
+    MultiTaxiModule,
+    ComplaintModule,
+  ],
   controllers: [
     PassengerAccountController,
     PassengerOtpController,
@@ -64,6 +74,8 @@ import {
     FacebookDataDeletionController,
     PassengerBookingController,
     PassengerBookingSettingsController,
+    PassengerComplaintController,
+    PassengerReceiptController,
     PaymentMethodController,
     PaymentRefundController,
   ],
@@ -80,6 +92,7 @@ import {
     PassengerOtpService,
     PassengerBookingRepository,
     PassengerBookingService,
+    PassengerComplaintService,
     PaymentMethodRepository,
     PaymentMethodService,
     PaymentChargeRepository,

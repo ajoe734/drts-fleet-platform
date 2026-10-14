@@ -115,16 +115,77 @@ function renderPdf(certificate: CertificateSupportView) {
 function certificateRows(
   certificate: CertificateSupportView,
 ): Array<[string, string]> {
+  const fareBreakdown =
+    certificate.actualFareBreakdown ?? certificate.e04Snapshot?.fareBreakdown;
   return [
     ["訂單 / 行程", `${certificate.orderId} / ${value(certificate.tripId)}`],
     ["車牌", value(certificate.plateNo)],
+    ...(certificate.e04Snapshot
+      ? ([
+          ["車隊／派遣業者", certificate.e04Snapshot.fleetOperatorName],
+          [
+            "駕駛（姓氏＋執登證號遮碼）",
+            `${certificate.e04Snapshot.driverSurname} ${certificate.e04Snapshot.driverRegistrationMasked}`,
+          ],
+        ] as Array<[string, string]>)
+      : []),
+    ...(certificate.driverSurname
+      ? ([
+          ["駕駛自填姓氏（非身分核驗）", certificate.driverSurname],
+          ["姓氏來源", value(certificate.driverSurnameSource ?? null)],
+          [
+            "駕駛資料更新時間",
+            value(certificate.driverSurnameProfileUpdatedAt ?? null),
+          ],
+        ] as Array<[string, string]>)
+      : []),
     ["上車時間", value(certificate.pickupAt)],
     ["下車時間", value(certificate.dropoffAt)],
     ["行駛時間（秒）", value(certificate.travelDurationSeconds)],
     ["路線", value(certificate.routeSummary)],
     ["里程（公尺）", value(certificate.distanceMeters)],
-    ["車資", money(certificate.fareMinor, certificate.currency)],
-    ["通行費", money(certificate.tollMinor, certificate.currency)],
+    [
+      "車資",
+      money(
+        certificate.fareMinor,
+        certificate.currency,
+        Boolean(certificate.e04Snapshot),
+      ),
+    ],
+    ...(fareBreakdown
+      ? ([
+          ["起程", money(fareBreakdown.startMinor, certificate.currency, true)],
+          [
+            "續程",
+            money(fareBreakdown.distanceMinor, certificate.currency, true),
+          ],
+          [
+            "延滯計時",
+            money(fareBreakdown.delayMinor, certificate.currency, true),
+          ],
+          [
+            "夜間加成",
+            money(fareBreakdown.nightMinor, certificate.currency, true),
+          ],
+        ] as Array<[string, string]>)
+      : []),
+    ...(certificate.e04Snapshot
+      ? ([
+          [
+            "車資合計",
+            money(certificate.fareMinor, certificate.currency, true),
+          ],
+          ["支付方式", certificate.e04Snapshot.paymentMethodDisplay],
+        ] as Array<[string, string]>)
+      : []),
+    [
+      "通行費",
+      money(
+        certificate.tollMinor,
+        certificate.currency,
+        Boolean(certificate.e04Snapshot),
+      ),
+    ],
     ["客服電話", value(certificate.consumerServicePhone)],
     ["主管機關申訴電話", value(certificate.authorityComplaintPhone)],
     ["簽發時間", certificate.issuedAt],
@@ -135,8 +196,10 @@ function value(input: string | number | null) {
   return input === null || input === "" ? "未取得" : String(input);
 }
 
-function money(input: number | null, currency: string) {
-  return input === null ? "未取得" : `${currency} ${(input / 100).toFixed(0)}`;
+function money(input: number | null, currency: string, exact = false) {
+  return input === null
+    ? "未取得"
+    : `${currency} ${(input / 100).toFixed(exact ? 2 : 0)}`;
 }
 
 function utf16Hex(value: string) {

@@ -1341,7 +1341,8 @@ export interface AuditLogRecord {
     | "ops_observer"
     | "partner_api_key"
     | "partner_user"
-    | "referral_passenger";
+    | "referral_passenger"
+    | "first_party_passenger";
   tenantId: string | null;
   moduleName: string;
   actionName: string;
