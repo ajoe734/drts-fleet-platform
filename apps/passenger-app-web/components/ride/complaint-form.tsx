@@ -1,0 +1,253 @@
+import { t } from "./translations";
+import { useState } from "react";
+import { passengerChrome } from "../../lib/passenger-presentation";
+import { requestPassengerRideAction } from "../../lib/ride/passenger-live";
+
+const shellInset = 14;
+
+export function ComplaintForm({
+  token,
+  authMode,
+}: {
+  token: string;
+  authMode?: "id" | "token" | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  const [category, setCategory] = useState<
+    "service" | "fare" | "lost_item" | "other"
+  >("service");
+  const [content, setContent] = useState("");
+  const [lostItemDescription, setLostItemDescription] = useState("");
+  const [contactConsent, setContactConsent] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+
+  if (authMode === "token") return null;
+
+  if (!open) {
+    return (
+      <div style={{ margin: `0 ${shellInset}px 12px`, textAlign: "center" }}>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          style={{
+            background: "none",
+            border: "none",
+            color: passengerChrome.shell,
+            fontSize: 14,
+            fontWeight: 600,
+            textDecoration: "underline",
+            cursor: "pointer",
+          }}
+        >
+          {t.ComplaintAndLostFound}
+        </button>
+      </div>
+    );
+  }
+
+  if (submitted) {
+    return (
+      <div
+        style={{
+          margin: `0 ${shellInset}px 12px`,
+          padding: 16,
+          background: passengerChrome.card,
+          border: `1px solid ${passengerChrome.border}`,
+          borderRadius: 12,
+        }}
+      >
+        <div
+          style={{
+            fontWeight: 600,
+            marginBottom: 8,
+            color: passengerChrome.text,
+          }}
+        >
+          {t.ComplaintAndLostFound}
+        </div>
+        <div
+          style={{
+            color: passengerChrome.success.fg,
+            textAlign: "center",
+            padding: "12px 0",
+          }}
+        >
+          {t.FormSubmitted}
+        </div>
+      </div>
+    );
+  }
+
+  const submit = async () => {
+    if (!content.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      await requestPassengerRideAction(
+        token,
+        "complaints",
+        {
+          rideId: token,
+          category,
+          content,
+          contactConsent,
+          ...(category === "lost_item" ? { lostItemDescription } : {}),
+        },
+        false,
+      );
+      setSubmitted(true);
+    } catch (e: unknown) {
+      window.alert(e instanceof Error ? e.message : "Failed to submit");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        margin: `0 ${shellInset}px 12px`,
+        border: `1px solid ${passengerChrome.border}`,
+        borderRadius: 12,
+        padding: 16,
+        background: passengerChrome.card,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 12,
+        }}
+      >
+        <h3
+          style={{
+            fontSize: 16,
+            fontWeight: 600,
+            margin: 0,
+            color: passengerChrome.text,
+          }}
+        >
+          {t.ComplaintAndLostFound}
+        </h3>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          style={{
+            background: "none",
+            border: "none",
+            color: passengerChrome.muted,
+            cursor: "pointer",
+            fontSize: 14,
+          }}
+        >
+          {t.Cancel}
+        </button>
+      </div>
+
+      <div style={{ marginBottom: 12 }}>
+        <select
+          value={category}
+          onChange={(e) =>
+            setCategory(
+              e.target.value as "service" | "fare" | "lost_item" | "other",
+            )
+          }
+          style={{
+            width: "100%",
+            padding: 8,
+            borderRadius: 6,
+            border: `1px solid ${passengerChrome.border}`,
+            background: passengerChrome.card,
+            color: passengerChrome.text,
+            fontSize: 14,
+          }}
+        >
+          <option value="service">{t.ComplaintServiceIssue}</option>
+          <option value="fare">{t.ComplaintFareIssue}</option>
+          <option value="lost_item">{t.ComplaintLostItem}</option>
+          <option value="other">{t.ComplaintOther}</option>
+        </select>
+      </div>
+
+      {category === "lost_item" && (
+        <div style={{ marginBottom: 12 }}>
+          <input
+            type="text"
+            placeholder={t.LostItemPlaceholder}
+            value={lostItemDescription}
+            onChange={(e) => setLostItemDescription(e.target.value)}
+            style={{
+              width: "100%",
+              padding: 8,
+              borderRadius: 6,
+              border: `1px solid ${passengerChrome.border}`,
+              background: passengerChrome.card,
+              color: passengerChrome.text,
+              fontSize: 14,
+            }}
+          />
+        </div>
+      )}
+
+      <div style={{ marginBottom: 12 }}>
+        <textarea
+          placeholder={t.ComplaintPlaceholder}
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          rows={3}
+          style={{
+            width: "100%",
+            padding: 8,
+            borderRadius: 6,
+            border: `1px solid ${passengerChrome.border}`,
+            background: passengerChrome.card,
+            color: passengerChrome.text,
+            fontSize: 14,
+            resize: "vertical",
+          }}
+        />
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 14,
+            color: passengerChrome.text,
+            cursor: "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={contactConsent}
+            onChange={(e) => setContactConsent(e.target.checked)}
+          />
+          {t.AgreeToContact}
+        </label>
+      </div>
+
+      <button
+        type="button"
+        onClick={submit}
+        disabled={submitting || !content.trim()}
+        style={{
+          width: "100%",
+          padding: "10px 16px",
+          borderRadius: 8,
+          background: passengerChrome.shell,
+          color: "#fff",
+          border: "none",
+          fontWeight: 600,
+          cursor: submitting || !content.trim() ? "not-allowed" : "pointer",
+          opacity: submitting || !content.trim() ? 0.6 : 1,
+        }}
+      >
+        {submitting ? "送出中..." : "確認送出"}
+      </button>
+    </div>
+  );
+}

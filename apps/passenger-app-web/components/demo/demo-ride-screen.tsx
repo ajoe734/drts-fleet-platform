@@ -4,6 +4,7 @@ import { RIDE_T as T } from "./translations";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { PassengerRidePage } from "../ride/passenger-ride-page";
 import {
   AuthScreen,
   AuthAlert,
@@ -812,117 +813,20 @@ export function liveRideStatus(status: string) {
   return labels[status] ?? status;
 }
 function LiveRideScreen({ rideId }: { rideId: string }) {
-  const [ride, setRide] = useState<LiveRideSummary | null>(null);
-  const [error, setError] = useState("");
-  const [refresh, setRefresh] = useState(0);
-  const [busy, setBusy] = useState(false);
-  const [cancelPrompt, setCancelPrompt] = useState(false);
-  useEffect(() => {
-    if (!rideId) return;
-    let active = true;
-    setError("");
-    setRide(null);
-    void readLiveRideData(`rides/${encodeURIComponent(rideId)}`)
-      .then((data) => {
-        if (active) setRide(liveRideSummary(data.ride));
-      })
-      .catch((reason: unknown) => {
-        if (active)
-          setError(reason instanceof Error ? reason.message : T.message102);
-      });
-    return () => {
-      active = false;
-    };
-  }, [rideId, refresh]);
-  return (
-    <AuthScreen title={T.message015} account>
-      {!rideId ? (
+  if (!rideId) {
+    return (
+      <AuthScreen title={T.message015} account>
         <AuthAlert kind="info">{T.message103}</AuthAlert>
-      ) : error ? (
-        <>
-          <AuthAlert>{error}</AuthAlert>
-          <Link href="/login">{T.message021}</Link>
-          <P5Btn onClick={() => setRefresh((value) => value + 1)}>
-            {T.message104}
-          </P5Btn>
-        </>
-      ) : !ride ? (
-        <p role="status">{T.message105}</p>
-      ) : (
-        <>
-          <P5Eta main={liveRideStatus(ride.status)} sub={ride.orderNo} />
-          <P5Card title={T.message028}>
-            <p>
-              {T.message106}
-              {ride.pickup}
-            </p>
-            <p>
-              {T.message107}
-              {ride.dropoff}
-            </p>
-            <p>
-              {T.message108}
-              {rideTime(ride.scheduledAt)}
-            </p>
-            <P5Btn onClick={() => setRefresh((value) => value + 1)}>
-              {T.message109}
-            </P5Btn>
-          </P5Card>
-          {ride.canCancel && (
-            <P5Card title={T.message038}>
-              {cancelPrompt ? (
-                <>
-                  <p>{T.message110}</p>
-                  <P5Btn
-                    disabled={busy}
-                    danger
-                    onClick={() => {
-                      setBusy(true);
-                      void readLiveRideData(
-                        `rides/${encodeURIComponent(ride.id)}/cancel`,
-                        {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            rideId: ride.id,
-                            reason: "passenger_requested",
-                          }),
-                        },
-                      )
-                        .then(() => {
-                          setCancelPrompt(false);
-                          setRefresh((value) => value + 1);
-                        })
-                        .catch((reason: unknown) =>
-                          setError(
-                            reason instanceof Error
-                              ? reason.message
-                              : T.message111,
-                          ),
-                        )
-                        .finally(() => setBusy(false));
-                    }}
-                  >
-                    {T.message041}
-                  </P5Btn>
-                  <P5Btn
-                    disabled={busy}
-                    kind="ghost"
-                    onClick={() => setCancelPrompt(false)}
-                  >
-                    {T.message042}
-                  </P5Btn>
-                </>
-              ) : (
-                <P5Btn danger onClick={() => setCancelPrompt(true)}>
-                  {T.message043}
-                </P5Btn>
-              )}
-            </P5Card>
-          )}
-        </>
-      )}
-      <RideNavigation />
-    </AuthScreen>
+        <RideNavigation />
+      </AuthScreen>
+    );
+  }
+  return (
+    <PassengerRidePage
+      token={rideId}
+      authMode="id"
+      kind="ride"
+      searchParams={{ mode: "live" }}
+    />
   );
 }
