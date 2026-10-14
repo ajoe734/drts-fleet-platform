@@ -1,4 +1,4 @@
-import { Injectable, HttpStatus, Optional } from "@nestjs/common";
+import { Inject, Injectable, HttpStatus, Optional } from "@nestjs/common";
 import { PassengerBookingRepository } from "./passenger-booking.repository";
 import { MultiTaxiService } from "../../multi-taxi/multi-taxi.service";
 import { PassengerFareRepository } from "../fare/passenger-fare.repository";
@@ -9,6 +9,7 @@ import type {
   RatePassengerRideCommand,
 } from "@drts/contracts";
 import { ComplaintService } from "../../complaint/complaint.service";
+import { PassengerPushDevicesService } from "../../passenger-push-devices/passenger-push-devices.service";
 import { bookingPaymentMethodId } from "../payment/booking-payment.guard";
 import {
   CreatePassengerRideCommand,
@@ -23,7 +24,9 @@ export class PassengerBookingService {
     private readonly multiTaxiService: MultiTaxiService,
     private readonly fareRepository: PassengerFareRepository,
     private readonly accountRepository: PassengerAccountRepository,
-    @Optional() private readonly complaintService?: ComplaintService,
+    @Optional() private readonly complaintService: ComplaintService | undefined,
+    @Inject(PassengerPushDevicesService)
+    private readonly pushDevices: PassengerPushDevicesService,
   ) {}
 
   getBookingSettings(): PassengerBookingSettingsResponse {
@@ -163,15 +166,53 @@ export class PassengerBookingService {
       command,
       passengerId,
       requestId,
-      (orderId, persistRide) =>
-        this.repository.commitBooking(
+      async (orderId, persistRide) => {
+        if (!this.pushDevices)
+          throw new ApiRequestError(
+            503,
+            "unavailable",
+            "Push route storage is unavailable.",
+          );
+        // Resolve before commitBooking leases its transaction client: the
+        // existing resolver uses the same pool and must not borrow a nested
+        // connection. Its ordering still selects the latest eligible device;
+        // no device means Web bookings skip the optional notification route.
+        const [device] =
+          await this.pushDevices.resolveActiveDevices(passengerId);
+        await this.repository.commitBooking(
           passengerId,
           orderId,
           req.fareSnapshotId,
           new Date(req.passengerConfirmedAt).toISOString(),
           paymentMethodId,
-          persistRide,
-        ),
+          async (client) => {
+            await persistRide(client);
+            if (!device) return;
+            const route = await this.pushDevices.writeFirstPartyRoute(
+              {
+                orderId,
+                tenantId: null,
+                drtsPassengerId: passengerId,
+                passengerSubjectRef: passengerId,
+                appId: device.appId,
+                consentVersion: device.notificationConsentVersion,
+                rideRef: orderId,
+              },
+              client,
+            );
+            if (
+              route.outcome === "rejected_partner_route_exists" ||
+              route.outcome === "rejected_content_mismatch"
+            )
+              throw new ApiRequestError(
+                409,
+                "FIRST_PARTY_NOTIFICATION_ROUTE_CONFLICT",
+                "Booking notification route could not be stored.",
+                { outcome: route.outcome },
+              );
+          },
+        );
+      },
     );
 
     const view = await this.multiTaxiService.getPassengerRideById(

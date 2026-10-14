@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import type { PoolClient } from "pg";
 
 import type {
   FirstPartyPassengerPushDeviceResolver,
@@ -20,9 +21,7 @@ import {
  * `FIRST_PARTY_PUSH_DEVICE_RESOLVER` — nothing injects it yet this wave.
  */
 @Injectable()
-export class PassengerPushDevicesService
-  implements FirstPartyPassengerPushDeviceResolver
-{
+export class PassengerPushDevicesService implements FirstPartyPassengerPushDeviceResolver {
   constructor(private readonly repository: PassengerPushDevicesRepository) {}
 
   registerDevice(
@@ -47,7 +46,11 @@ export class PassengerPushDevicesService
     reason: string,
     expectedTokenSha256?: string,
   ): Promise<PassengerPushDeviceRecord | null> {
-    return this.repository.invalidateDevice(deviceId, reason, expectedTokenSha256);
+    return this.repository.invalidateDevice(
+      deviceId,
+      reason,
+      expectedTokenSha256,
+    );
   }
 
   resolveActiveDevices(
@@ -58,7 +61,8 @@ export class PassengerPushDevicesService
 
   writeFirstPartyRoute(
     command: WriteFirstPartyRouteCommand,
+    callerClient?: PoolClient,
   ): Promise<WriteFirstPartyRouteResult> {
-    return this.repository.writeFirstPartyRoute(command);
+    return this.repository.writeFirstPartyRoute(command, callerClient);
   }
 }

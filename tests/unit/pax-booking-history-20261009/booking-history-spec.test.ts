@@ -1,3 +1,4 @@
+import { PassengerPushDevicesService } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.service";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassengerBookingService } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.service";
 import { randomUUID } from "crypto";
@@ -40,6 +41,10 @@ describe("Passenger Booking History API - Spec requirements", () => {
       multiTaxiMock,
       fareMock,
       accountMock,
+      undefined,
+      {
+        resolveActiveDevices: async () => [],
+      } as unknown as PassengerPushDevicesService,
     );
   });
 

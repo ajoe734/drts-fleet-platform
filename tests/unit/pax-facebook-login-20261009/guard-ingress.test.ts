@@ -96,8 +96,8 @@ describe.each(["staging", "production", "development"])(
         ["GET", `${PATH}/status/${"a".repeat(111)}`],
         ["GET", `${PATH}/status/${"g".repeat(112)}`],
         ["POST", PATH.replace("/api/", "/")],
-        ["POST", "/api/passenger-app/auth/oauth/facebook/start"],
-        ["POST", "/api/passenger-app/auth/oauth/facebook/callback"],
+        ["GET", "/api/passenger-app/auth/oauth/facebook/start"],
+        ["GET", "/api/passenger-app/auth/oauth/facebook/callback"],
         ["POST", "/api/passenger-app/auth/otp/start"],
         ["GET", "/api/passenger-app/me"],
       ]) {
