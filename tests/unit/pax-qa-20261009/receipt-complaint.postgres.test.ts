@@ -374,6 +374,9 @@ describe.skipIf(!hostedPaymentEnabled)(
       );
       expect(html.buffer.toString()).toContain("歐陽");
       expect(html.buffer.toString()).toContain("••••0042");
+      expect(html.buffer.toString()).toContain("TWD 190.37");
+      expect(html.buffer.toString()).toContain("TWD 85.01");
+      expect(html.buffer.toString()).toContain("TWD 13.03");
       const pdf = await f.multi.getTrustedPassengerReceiptArtifact(
         f.event.orderId,
         f.owner,
