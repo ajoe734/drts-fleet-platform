@@ -224,8 +224,8 @@ describe.skipIf(!hostedPaymentEnabled)(
               completeRide(driver, assignment.taskId),
             ).rejects.toMatchObject({ code: "MIN_PHOTO_COUNT_NOT_MET" });
           const before = await snapshot(h, f.orderId); // AFTER actual driver commit.
-          expect(before.phase1_owned_orders[0].status).toBe(status);
-          expect(before.phase1_driver_tasks[0].status).toBe(status);
+          expect(before.phase1_owned_orders[0]!.status).toBe(status);
+          expect(before.phase1_driver_tasks[0]!.status).toBe(status);
           expect(
             before.dispatch_resource_reservations.every(
               (r) => r.status === "occupied",
@@ -334,8 +334,8 @@ describe.skipIf(!hostedPaymentEnabled)(
           "cancellation acquired real driver lock",
         );
         const before = await snapshot(h, f.orderId);
-        expect(before.phase1_owned_orders[0].status).toBe("proof_pending");
-        expect(before.phase1_driver_tasks[0].status).toBe("proof_pending");
+        expect(before.phase1_owned_orders[0]!.status).toBe("proof_pending");
+        expect(before.phase1_driver_tasks[0]!.status).toBe("proof_pending");
         const effects = [driver.effects(), cancellation.effects()];
         const memory = structuredClone(cancellation.owned.listOrders());
         releaseCancel.release();
@@ -391,7 +391,7 @@ describe.skipIf(!hostedPaymentEnabled)(
           );
         }
         expect(
-          (await snapshot(h, f.orderId)).phase1_owned_orders[0].status,
+          (await snapshot(h, f.orderId)).phase1_owned_orders[0]!.status,
         ).toBe(status);
         const statements = await refuse(f, stale, `stale terminal ${status}`);
         expect(statements.some((s) => s.verb === "ROLLBACK")).toBe(true);

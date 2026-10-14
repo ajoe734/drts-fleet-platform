@@ -252,9 +252,8 @@ export async function requireProof(actor: BookingActor, orderId: string) {
 }
 
 export async function snapshot(h: PaymentPostgresHarness, orderId: string) {
-  const state: Record<string, Record<string, unknown>[]> = {};
   // Case-owned native rows, including generated versions and every trace/outbox.
-  for (const table of [
+  const tables = [
     "phase1_owned_orders",
     "phase1_driver_tasks",
     "phase1_dispatch_assignments",
@@ -264,7 +263,12 @@ export async function snapshot(h: PaymentPostgresHarness, orderId: string) {
     "phase1_dispatch_trace_logs",
     "consumer_notification_outbox",
     "driver_completion_outbox",
-  ]) {
+  ] as const;
+  const state = {} as Record<
+    (typeof tables)[number],
+    Record<string, unknown>[]
+  >;
+  for (const table of tables) {
     state[table] = (
       await h.pool!.query(
         `SELECT * FROM ops.${table} WHERE order_id=$1 ORDER BY to_jsonb(${table})::text`,
