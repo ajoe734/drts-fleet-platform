@@ -551,6 +551,7 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
         } as unknown as MultiTaxiService,
         { findOwnedSnapshot } as unknown as PassengerFareRepository,
         { transaction } as unknown as PassengerAccountRepository,
+        undefined,
         {
           resolveActiveDevices: async () => [],
         } as unknown as PassengerPushDevicesService,

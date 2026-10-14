@@ -166,8 +166,20 @@ export class PassengerBookingService {
       command,
       passengerId,
       requestId,
-      (orderId, persistRide) =>
-        this.repository.commitBooking(
+      async (orderId, persistRide) => {
+        if (!this.pushDevices)
+          throw new ApiRequestError(
+            503,
+            "unavailable",
+            "Push route storage is unavailable.",
+          );
+        // Resolve before commitBooking leases its transaction client: the
+        // existing resolver uses the same pool and must not borrow a nested
+        // connection. Its ordering still selects the latest eligible device;
+        // no device means Web bookings skip the optional notification route.
+        const [device] =
+          await this.pushDevices.resolveActiveDevices(passengerId);
+        await this.repository.commitBooking(
           passengerId,
           orderId,
           req.fareSnapshotId,
@@ -175,17 +187,6 @@ export class PassengerBookingService {
           paymentMethodId,
           async (client) => {
             await persistRide(client);
-            if (!this.pushDevices)
-              throw new ApiRequestError(
-                503,
-                "unavailable",
-                "Push route storage is unavailable.",
-              );
-            // Existing resolver ordering chooses the most recently seen real
-            // eligible device. No device means optional notification is skipped;
-            // existing Web bookings do not require native registration.
-            const [device] =
-              await this.pushDevices.resolveActiveDevices(passengerId);
             if (!device) return;
             const route = await this.pushDevices.writeFirstPartyRoute(
               {
@@ -210,7 +211,8 @@ export class PassengerBookingService {
                 { outcome: route.outcome },
               );
           },
-        ),
+        );
+      },
     );
 
     const view = await this.multiTaxiService.getPassengerRideById(

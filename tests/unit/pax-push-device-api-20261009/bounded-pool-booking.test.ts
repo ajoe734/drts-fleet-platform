@@ -45,7 +45,9 @@ describe("Production booking and resolver with a real bounded pg Pool", () => {
           let rows: unknown[] = [];
           if (sql.includes("SELECT status FROM passenger.accounts"))
             rows = [{ status: "active" }];
-          if (sql.includes("SELECT payment_method_id FROM passenger.psp_tokens"))
+          if (
+            sql.includes("SELECT payment_method_id FROM passenger.psp_tokens")
+          )
             rows = [{ payment_method_id: methodId }];
           const result = { rows, rowCount: rows.length };
           if (callback) {
@@ -101,8 +103,9 @@ describe("Production booking and resolver with a real bounded pg Pool", () => {
         },
         async getPassengerRideById(orderId: string) {
           published += 1;
-          expect(statements.filter(({ sql }) => sql === "COMMIT").length)
-            .toBeGreaterThanOrEqual(published);
+          expect(
+            statements.filter(({ sql }) => sql === "COMMIT").length,
+          ).toBeGreaterThanOrEqual(published);
           return { order: { orderId } };
         },
       };
@@ -152,23 +155,39 @@ describe("Production booking and resolver with a real bounded pg Pool", () => {
         expect(pool.totalCount).toBeLessThanOrEqual(capacity);
         expect(pool.idleCount).toBe(pool.totalCount);
         const sql = statements.map((entry) => entry.sql);
-        expect(sql.filter((s) => s.includes("FROM iam.phase1_passenger_push_devices")))
-          .toHaveLength(capacity);
+        expect(
+          sql.filter((s) =>
+            s.includes("FROM iam.phase1_passenger_push_devices"),
+          ),
+        ).toHaveLength(capacity);
         expect(sql.filter((s) => s === "BEGIN")).toHaveLength(capacity);
         expect(sql.filter((s) => s === "COMMIT")).toHaveLength(capacity);
-        expect(sql.filter((s) => s.includes("INSERT INTO passenger.booking_histories")))
-          .toHaveLength(capacity);
-        expect(sql.some((s) => s.includes("phase1_order_first_party_notification_routes")))
-          .toBe(false);
+        expect(
+          sql.filter((s) =>
+            s.includes("INSERT INTO passenger.booking_histories"),
+          ),
+        ).toHaveLength(capacity);
+        expect(
+          sql.some((s) =>
+            s.includes("phase1_order_first_party_notification_routes"),
+          ),
+        ).toBe(false);
         expect(sql).not.toContain("ROLLBACK");
         // Both durable writes belong to their outer booking transaction.
         for (const client of new Set(statements.map((entry) => entry.client))) {
-          const ownSql = statements.filter((entry) => entry.client === client)
+          const ownSql = statements
+            .filter((entry) => entry.client === client)
             .map((entry) => entry.sql);
-          expect(ownSql.filter((s) => s.includes("INSERT INTO ops.phase1_owned_orders")))
-            .toHaveLength(ownSql.filter((s) => s === "COMMIT").length);
-          expect(ownSql.filter((s) => s.includes("INSERT INTO passenger.booking_histories")))
-            .toHaveLength(ownSql.filter((s) => s === "COMMIT").length);
+          expect(
+            ownSql.filter((s) =>
+              s.includes("INSERT INTO ops.phase1_owned_orders"),
+            ),
+          ).toHaveLength(ownSql.filter((s) => s === "COMMIT").length);
+          expect(
+            ownSql.filter((s) =>
+              s.includes("INSERT INTO passenger.booking_histories"),
+            ),
+          ).toHaveLength(ownSql.filter((s) => s === "COMMIT").length);
         }
       } finally {
         clearTimeout(timer);
