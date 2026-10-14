@@ -383,6 +383,30 @@ describe("actual Native P5 rendered terminal and active screens", () => {
     expect(text(renderer)).not.toContain("位置更新於 ");
   });
 
+  it("discloses captured masked registration, validity, vehicle facts and actual driver rating", async () => {
+    const renderer = await mount(project());
+    for (const value of [
+      "TEST***01",
+      "2027-01-01T00:00:00Z",
+      "Captured color",
+      "2025",
+      "4 門",
+      "4.8",
+      "17 則評價",
+    ])
+      expect(text(renderer)).toContain(value);
+    const next = authority();
+    next.assignment!.rating = {
+      displayState: "new_driver",
+      averageRating: null,
+      ratingCount: 0,
+      aggregateVersion: 4,
+    };
+    await update(renderer, project(next), ports());
+    expect(text(renderer)).toContain("新司機，尚無評價");
+    expect(text(renderer)).not.toContain("4.8");
+  });
+
   it("A04 invokes the existing authority retry callback and applies a parent-provided real terminal projection", async () => {
     const view = authority();
     const actions = ports();

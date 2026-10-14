@@ -395,6 +395,17 @@ function NativeP5ScreenBody({
           </Text>
         </View>
       ) : null}
+      {fixture.screenId === "P5-04" && (
+        <Text style={styles.text}>
+          正在重新安排車輛，請以最新指派資料為準。
+        </Text>
+      )}
+      {fixture.screenId === "P5-05" && (
+        <Text style={styles.text}>車輛與司機已更新，請確認最新車牌。</Text>
+      )}
+      {!!fixture.contactSafetyNote && (
+        <Text style={styles.text}>{fixture.contactSafetyNote}</Text>
+      )}
       {showTrip ? (
         <View testID="native-active-trip" style={styles.card}>
           <View testID="native-trip-map">
@@ -426,6 +437,32 @@ function NativeP5ScreenBody({
           {fixture.driver.plateNo ? (
             <Text style={styles.text}>{fixture.driver.plateNo}</Text>
           ) : null}
+          {!!fixture.driver.color && (
+            <Text style={styles.text}>{fixture.driver.color}</Text>
+          )}
+          {fixture.assignment?.vehicle && (
+            <Text style={styles.text}>
+              {fixture.assignment.vehicle.modelYear} 年出廠 ·{" "}
+              {fixture.assignment.vehicle.doorCount} 門
+            </Text>
+          )}
+          {!!fixture.driver.registrationMaskedDisplay && (
+            <Text style={styles.text}>
+              執登證號：{fixture.driver.registrationMaskedDisplay}
+            </Text>
+          )}
+          {!!fixture.driver.registrationEffectiveUntil && (
+            <Text style={styles.text}>
+              有效期限：{fixture.driver.registrationEffectiveUntil}
+            </Text>
+          )}
+          {fixture.assignment?.rating && (
+            <Text testID="native-driver-rating" style={styles.text}>
+              {fixture.assignment.rating.displayState === "new_driver"
+                ? "新司機，尚無評價"
+                : `${fixture.assignment.rating.averageRating == null ? "評價資料未提供" : fixture.assignment.rating.averageRating.toFixed(1)} · ${fixture.assignment.rating.ratingCount} 則評價`}
+            </Text>
+          )}
           {fixture.seatbeltNotice ? (
             <Text style={styles.text}>乘車請繫妥安全帶。</Text>
           ) : null}
