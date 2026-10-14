@@ -87,4 +87,6 @@ export const t = {
   WellDone: "做得好",
   NeedsImprovement: "待改善",
   DesignPending: "(畫面設計待補)",
+  RideCancelledThisTrip: "此行程已取消",
+  RideCancelledNote: "行程已取消，未產生後續扣款。",
 };

@@ -1612,7 +1612,7 @@ function ContactUnavailableCard({
         <a
           href="tel:02-2944-0985"
           role="button"
-          aria-label="聯絡客服"
+          aria-label={t.ContactSupport}
           style={{
             ...buttonStyle("primary"),
             display: "block",
@@ -2169,10 +2169,10 @@ function RideContent({
             }}
           >
             <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
-              此行程已取消
+              {t.RideCancelledThisTrip}
             </div>
             <div style={{ fontSize: 13, color: passengerChrome.muted }}>
-              {fixture.cancelNote || "行程已取消，未產生後續扣款。"}
+              {fixture.cancelNote || t.RideCancelledNote}
             </div>
           </div>
         </Card>
