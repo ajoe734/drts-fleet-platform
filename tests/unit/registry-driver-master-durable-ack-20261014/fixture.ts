@@ -77,8 +77,7 @@ export function fixture() {
   const repository = new RegulatoryRegistryRepository({
     isEnabled: () => enabled,
     query,
-    withTransaction: async (operation: (client: unknown) => Promise<unknown>) =>
-      operation({ query }),
+    connect: async () => ({ query, release: () => {} }),
   } as never);
   const report = vi
     .spyOn(repository, "reportPersistenceFailure")
@@ -120,10 +119,8 @@ export function fixture() {
       freshProfile,
       repository,
     );
-    // Avoid onModuleInit's unrelated expiry scheduler; this is the production
-    // repository loadState plus the same public read/decoration path.
-    const state = await repository.loadState();
-    Object.assign(fresh, { drivers: state.drivers });
+    await fresh.onModuleInit();
+    await fresh.onModuleDestroy();
     return fresh;
   };
   return {
