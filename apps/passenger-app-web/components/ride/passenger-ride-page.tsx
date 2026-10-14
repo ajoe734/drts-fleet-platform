@@ -45,6 +45,7 @@ function Shell({ children }: { children: ReactNode }) {
         justifyContent: "center",
         padding: "24px 12px",
         background: `linear-gradient(180deg, ${passengerChrome.background} 0%, ${passengerChrome.info.bg} 100%)`,
+        fontFamily: passengerChrome.fontFamily,
       }}
     >
       <div style={{ width: "100%", maxWidth: 430 }}>
@@ -55,12 +56,14 @@ function Shell({ children }: { children: ReactNode }) {
             margin: "0 auto",
             background: passengerChrome.background,
             borderRadius: 38,
-            border: `10px solid ${passengerChrome.text}`,
+            border: "10px solid #10161d",
             overflow: "hidden",
             display: "flex",
             flexDirection: "column",
             minHeight: 844,
             boxShadow: passengerChrome.shadow,
+            fontFamily: passengerChrome.fontFamily,
+            color: passengerChrome.text,
           }}
         >
           {children}
@@ -1280,14 +1283,29 @@ function RatingCard({
               selectedScore <= 2 ? Boolean(contactRequested) : false,
           };
 
-    requestPassengerRideAction<{ score: number }>(
+    const ratingPromise = requestPassengerRideAction<{ score: number }>(
       token,
       "ratings",
       payload,
       authMode === "token",
-    )
-      .then((res) => {
-        const rating = res || { score: selectedScore };
+    );
+    const complaintsPromise =
+      selectedScore <= 2 && contactRequested
+        ? requestPassengerRideAction(
+            token,
+            "complaints",
+            {
+              category: "service",
+              content: comment || "低分評價請求客服聯繫",
+              contactConsent: true,
+            },
+            authMode === "token",
+          ).catch(() => ({}))
+        : Promise.resolve();
+
+    Promise.all([ratingPromise, complaintsPromise])
+      .then(([res]) => {
+        const rating = (res as { score?: number }) || { score: selectedScore };
         setSubmittedScore(rating.score || selectedScore);
         setSubmitting(false);
       })
@@ -1858,9 +1876,9 @@ function Actions({
     const cert = fixture.certificate;
     return (
       <ActionGroup>
-        {cert?.state === "available" ? (
+        {cert?.state === "available" && cert.pdfUrl ? (
           <a
-            href={cert.pdfUrl || cert.htmlUrl}
+            href={cert.pdfUrl}
             target="_blank"
             rel="noreferrer"
             style={buttonStyle("primary")}
@@ -1935,7 +1953,10 @@ function Actions({
           <button
             type="button"
             style={buttonStyle("primary")}
-            onClick={() => window.location.reload()}
+            onClick={() => {
+              void fetchPassengerRideAuthority(token, authMode === "token");
+            }}
+            aria-label="重新取得報價"
           >
             {t.Requote}
           </button>

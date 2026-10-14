@@ -29,9 +29,16 @@ export default function RidesListPage() {
       const activeIds = new Set(activeRides.map((r) => r.order.orderId));
 
       setActive(activeRides);
-      setHistory(
-        (historyRes.rides || []).filter((r) => !activeIds.has(r.order.orderId)),
-      );
+      const seen = new Set(activeIds);
+      const uniqueHistory: PassengerRideAuthorityView[] = [];
+      for (const r of historyRes.rides || []) {
+        const id = r?.order?.orderId;
+        if (id && !seen.has(id)) {
+          seen.add(id);
+          uniqueHistory.push(r);
+        }
+      }
+      setHistory(uniqueHistory);
       setNextCursor(historyRes.nextCursor || null);
     } catch (err) {
       console.error(err);
@@ -57,11 +64,21 @@ export default function RidesListPage() {
         limit: 20,
         cursor: nextCursor,
       });
-      const activeIds = new Set(active.map((r) => r.order.orderId));
-      setHistory((prev) => [
-        ...prev,
-        ...(res.rides || []).filter((r) => !activeIds.has(r.order.orderId)),
-      ]);
+      setHistory((prev) => {
+        const existingIds = new Set([
+          ...active.map((r) => r.order.orderId),
+          ...prev.map((r) => r.order.orderId),
+        ]);
+        const next: PassengerRideAuthorityView[] = [];
+        for (const ride of res.rides || []) {
+          const id = ride?.order?.orderId;
+          if (id && !existingIds.has(id)) {
+            existingIds.add(id);
+            next.push(ride);
+          }
+        }
+        return [...prev, ...next];
+      });
       setNextCursor(res.nextCursor || null);
     } catch (err) {
       console.error("載入更多失敗", err);
@@ -94,7 +111,15 @@ export default function RidesListPage() {
   }
 
   return (
-    <main style={{ padding: "16px", color: passengerChrome.text }}>
+    <main
+      style={{
+        padding: "16px",
+        color: passengerChrome.text,
+        background: passengerChrome.background,
+        fontFamily: passengerChrome.fontFamily,
+        minHeight: "100dvh",
+      }}
+    >
       <h1 style={{ fontSize: 24, fontWeight: "bold", marginBottom: 16 }}>
         {t.MyRides}
       </h1>

@@ -477,6 +477,15 @@ export function mapPassengerCertificate(
     }
     return { state: "pending" };
   }
+  const e04 = (record as any).e04Snapshot;
+  if (!e04 || !e04.fleetOperatorName || !e04.paymentMethodDisplay) {
+    return {
+      state: "error",
+      receiptNo: receipt.receiptNo,
+      errorCode: "PASSENGER_RECEIPT_LEGAL_FIELDS_MISSING",
+    };
+  }
+
   const plateNo = readText(record, "plateNo");
   const pickupAt = readDate(record, "pickupAt");
   const dropoffAt = readDate(record, "dropoffAt");
@@ -493,15 +502,22 @@ export function mapPassengerCertificate(
   const htmlUrl = readText(record, "htmlUrl");
   const pdfUrl = readText(record, "pdfUrl");
 
-  const driverRegistrationNo = readText(record, "driverRegistrationNo");
-  const paymentMethod = readText(record, "paymentMethod");
-  const fleetName = readText(record, "fleetName");
-  const driverName = readText(record, "driverName");
+  const fleetName = e04.fleetOperatorName || readText(record, "fleetName");
+  const driverName = e04.driverSurname || readText(record, "driverName");
+  const driverRegistrationNo =
+    e04.driverRegistrationMasked || readText(record, "driverRegistrationNo");
+  const paymentMethod =
+    e04.paymentMethodDisplay || readText(record, "paymentMethod");
 
-  const fareBaseMinor = readNonNegativeNumber(record, "fareBaseMinor");
-  const fareDistanceMinor = readNonNegativeNumber(record, "fareDistanceMinor");
-  const fareTimeMinor = readNonNegativeNumber(record, "fareTimeMinor");
-  const fareNightMinor = readNonNegativeNumber(record, "fareNightMinor");
+  const fareBaseMinor =
+    e04.fareBreakdown?.startMinor ?? readNonNegativeNumber(record, "fareBaseMinor");
+  const fareDistanceMinor =
+    e04.fareBreakdown?.distanceMinor ??
+    readNonNegativeNumber(record, "fareDistanceMinor");
+  const fareTimeMinor =
+    e04.fareBreakdown?.delayMinor ?? readNonNegativeNumber(record, "fareTimeMinor");
+  const fareNightMinor =
+    e04.fareBreakdown?.nightMinor ?? readNonNegativeNumber(record, "fareNightMinor");
 
   if (
     !plateNo ||
@@ -558,20 +574,20 @@ export function mapPassengerCertificate(
     ...(paymentMethod ? [{ label: "支付方式", value: paymentMethod }] : []),
   ];
 
-  if (fareBaseMinor !== null) {
+  if (fareBaseMinor !== null && fareBaseMinor !== undefined) {
     rows.push({ label: "起程", value: formatMoney(fareBaseMinor), mono: true });
   }
-  if (fareDistanceMinor !== null) {
+  if (fareDistanceMinor !== null && fareDistanceMinor !== undefined) {
     rows.push({
       label: "續程",
       value: formatMoney(fareDistanceMinor),
       mono: true,
     });
   }
-  if (fareTimeMinor !== null) {
+  if (fareTimeMinor !== null && fareTimeMinor !== undefined) {
     rows.push({ label: "延滯", value: formatMoney(fareTimeMinor), mono: true });
   }
-  if (fareNightMinor !== null) {
+  if (fareNightMinor !== null && fareNightMinor !== undefined) {
     rows.push({
       label: "夜間加成",
       value: formatMoney(fareNightMinor),
@@ -600,7 +616,26 @@ function resolveScreenId(
     // STOP: Cannot use P5-12 as it implies an active assignment. Cannot use A04 as it implies a quote.
     return "CANCELLED_TODO" as any;
   }
-  if (view.order.status === "exception_hold") return "A04";
+  const hasValidQuote =
+    (view.assignment?.routeFare?.payableFareMinor !== undefined &&
+      view.assignment?.routeFare?.payableFareMinor !== null) ||
+    (view.assignment?.routeFare?.estimatedFareMinor !== undefined &&
+      view.assignment?.routeFare?.estimatedFareMinor !== null) ||
+    ((view.order as any).estimatedFareMinor !== undefined &&
+      (view.order as any).estimatedFareMinor !== null);
+
+  const hasQuoteAnomaly =
+    Boolean((view.order as any).fareQuoteAnomaly) ||
+    (view.order as any).fareQuoteStatus === "anomaly" ||
+    (view.order as any).quoteAnomaly ||
+    (view as any).fareQuoteAnomaly;
+
+  if (
+    hasQuoteAnomaly ||
+    (view.order.status === "exception_hold" && !hasValidQuote)
+  ) {
+    return "A04";
+  }
   if (view.order.status === "completed") return view.rating ? "P5-09" : "P5-08";
   if (view.receipt) return "P5-10";
   if (view.order.status === "on_trip") return "P5-07";
@@ -656,6 +691,7 @@ function statusLabel(status: PassengerRideAuthorityView["order"]["status"]) {
     completed: "行程已完成",
     cancelled: "行程已取消",
     redispatch_required: "正在為您改派",
+    exception_hold: "行程保留處理中",
   };
   return labels[status] ?? "行程狀態更新中";
 }

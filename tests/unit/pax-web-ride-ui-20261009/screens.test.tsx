@@ -278,6 +278,18 @@ describe("P5 and A04 Screens validation", () => {
             certificateVersion: "1",
             certificateState: "available",
             generatedFrom: "owned_mobility_completion",
+            e04Snapshot: {
+              fleetOperatorName: "智行車隊",
+              driverSurname: "蔡",
+              driverRegistrationMasked: "••••4280",
+              paymentMethodDisplay: "信用卡 ••••1234",
+              fareBreakdown: {
+                startMinor: 70,
+                distanceMinor: 20,
+                delayMinor: 10,
+                nightMinor: 0,
+              },
+            },
           },
         },
       },
@@ -362,11 +374,16 @@ describe("P5 and A04 Screens validation", () => {
     expect(fetchCalls[0].body.lostItemDescription).toBe("my wallet");
   });
 
-  it("A04 Exception Hold", async () => {
+  it("A04 Quote Anomaly", async () => {
     fetchResponse = {
       ride: {
         ...baseView,
-        order: { ...baseView.order, status: "exception_hold" },
+        order: {
+          ...baseView.order,
+          status: "exception_hold",
+          fareQuoteAnomaly: "quote_provider_unavailable",
+        },
+        assignment: null,
       },
     };
     render(
@@ -383,6 +400,26 @@ describe("P5 and A04 Screens validation", () => {
     expect(screen.getByText("目前無法取得正式報價")).toBeTruthy();
     expect(screen.getByText("正式報價完成前不會為您確認訂單")).toBeTruthy();
     expect(screen.getByText("重新取得報價")).toBeTruthy();
+  });
+
+  it("Operational Hold with valid quote preserves assignment rather than quote outage", async () => {
+    fetchResponse = {
+      ride: {
+        ...baseView,
+        order: { ...baseView.order, status: "exception_hold" },
+      },
+    };
+    render(
+      <PassengerRidePage
+        token="uuid"
+        searchParams={{ mode: "live" }}
+        kind="ride"
+        authMode="id"
+      />,
+    );
+    await waitFor(() => expect(screen.getByText("行程保留處理中")).toBeTruthy());
+    expect(screen.getByText("Test Driver")).toBeTruthy();
+    expect(screen.queryByText("目前無法取得正式報價")).toBeNull();
   });
 
   it("P5-12 Driver Contact Not Provisioned", async () => {

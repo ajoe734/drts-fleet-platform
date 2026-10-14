@@ -176,4 +176,48 @@ describe("RidesListPage", () => {
     });
     expect(screen.queryByText("載入更多")).not.toBeTruthy();
   });
+
+  it("should deduplicate overlapping history items across multiple pages", async () => {
+    const h1 = {
+      order: {
+        orderId: "h1",
+        orderNo: "H1",
+        requestedPickupAt: new Date().toISOString(),
+        status: "completed",
+        pickup: { address: "History-A" },
+      },
+    } as any;
+    const h2 = {
+      order: {
+        orderId: "h2",
+        orderNo: "H2",
+        requestedPickupAt: new Date().toISOString(),
+        status: "completed",
+        pickup: { address: "History-B" },
+      },
+    } as any;
+
+    (passengerClient.getActiveRides as any).mockResolvedValue({ rides: [] });
+    (passengerClient.getRides as any)
+      .mockResolvedValueOnce({
+        rides: [h1],
+        nextCursor: "cursor-2",
+      })
+      .mockResolvedValueOnce({
+        rides: [h1, h2],
+        nextCursor: null,
+      });
+
+    render(<RidesListPage />);
+    await waitFor(() => {
+      expect(screen.getByText("History-A")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText("載入更多"));
+    await waitFor(() => {
+      expect(screen.getByText("History-B")).toBeTruthy();
+    });
+
+    expect(screen.queryAllByText("History-A").length).toBe(1);
+  });
 });

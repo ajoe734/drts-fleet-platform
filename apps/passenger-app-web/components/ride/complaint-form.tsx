@@ -1,5 +1,6 @@
 import { t } from "./translations";
 import { useState } from "react";
+import { CORE_FOREGROUNDS } from "@drts/ui-tokens";
 import { passengerChrome } from "../../lib/passenger-presentation";
 import { requestPassengerRideAction } from "../../lib/ride/passenger-live";
 
@@ -239,7 +240,7 @@ export function ComplaintForm({
           padding: "10px 16px",
           borderRadius: 8,
           background: passengerChrome.shell,
-          color: "#fff",
+          color: CORE_FOREGROUNDS.foregroundInvert,
           border: "none",
           fontWeight: 600,
           cursor: submitting || !content.trim() ? "not-allowed" : "pointer",

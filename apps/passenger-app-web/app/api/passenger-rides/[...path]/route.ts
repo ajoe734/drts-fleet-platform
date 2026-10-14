@@ -74,8 +74,25 @@ function isAllowedPath(method: string, path: string[]) {
     return true; // POST :token/ratings
   if (method === "POST" && path.length === 2 && path[1] === "contact")
     return true; // POST :token/contact
+  if (method === "POST" && path.length === 2 && path[1] === "complaints")
+    return true; // POST :token/complaints
   if (method === "GET" && path.length === 2 && path[1] === "receipt")
     return true; // GET :token/receipt
+  if (
+    method === "GET" &&
+    path.length === 3 &&
+    path[1] === "receipt" &&
+    path[2] === "downloads"
+  )
+    return true;
+  if (
+    method === "GET" &&
+    path.length === 4 &&
+    path[1] === "receipt" &&
+    path[2] === "artifacts" &&
+    ["html", "pdf"].includes(path[3] ?? "")
+  )
+    return true;
 
   return false;
 }

@@ -1,5 +1,10 @@
-import { REALM_COLORS, STATUS_TONES, type ToneRamp } from "@drts/ui-tokens";
-import { buildCanvasTheme } from "@drts/ui-web";
+import {
+  REALM_COLORS,
+  STATUS_TONES,
+  CORE_SURFACES,
+  CORE_FOREGROUNDS,
+  type ToneRamp,
+} from "@drts/ui-tokens";
 import {
   resolvePassengerScreenId,
   type PassengerBadgeTone,
@@ -9,30 +14,41 @@ export { resolvePassengerScreenId };
 
 export type PassengerDataMode = "fixture" | "live";
 
-export const passengerTheme = buildCanvasTheme({
-  surface: "tenant",
-  density: "compact",
-});
-
 export const passengerChrome = {
   shell: REALM_COLORS.passenger.light.fg,
-  shellDark: REALM_COLORS.passenger.light.fg, // fallback
-  background: REALM_COLORS.passenger.light.bg,
+  shellDark: REALM_COLORS.passenger.light.headerBg,
+  background: "#F3F5F8",
+  brandBg: REALM_COLORS.passenger.light.bg,
   headerBg: REALM_COLORS.passenger.light.headerBg,
-  card: passengerTheme.surface,
-  border: passengerTheme.border,
-  borderStrong: passengerTheme.borderStrong,
-  text: passengerTheme.text,
-  muted: passengerTheme.textMuted,
-  dim: passengerTheme.textDim,
+  card: CORE_SURFACES.surface,
+  border: "#E3E8EE",
+  borderSoft: "#EDF1F5",
+  text: "#16212C",
+  muted: "#5A6A7B",
+  dim: "#93A0AE",
   success: STATUS_TONES.success.light,
   warning: STATUS_TONES.warning.light,
   danger: STATUS_TONES.danger.light,
   info: STATUS_TONES.info.light,
   neutral: STATUS_TONES.neutral.light,
   driverRealm: REALM_COLORS.driver.light,
-  invert: passengerTheme.invert,
-  shadow: passengerTheme.shadow,
+  invert: CORE_FOREGROUNDS.foregroundInvert,
+  fontFamily: '"Inter", "Noto Sans TC", system-ui, sans-serif',
+  monoFont: '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace',
+  shadow: "0 1px 2px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.06)",
+};
+
+export const passengerTheme = {
+  surface: passengerChrome.card,
+  border: passengerChrome.border,
+  borderStrong: passengerChrome.border,
+  text: passengerChrome.text,
+  textMuted: passengerChrome.muted,
+  textDim: passengerChrome.dim,
+  invert: passengerChrome.invert,
+  shadow: passengerChrome.shadow,
+  fontFamily: passengerChrome.fontFamily,
+  monoFamily: passengerChrome.monoFont,
 };
 
 export function getPassengerFixtureSourceLabel(
