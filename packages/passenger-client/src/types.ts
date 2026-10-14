@@ -71,4 +71,3 @@ export type {
   CreatePassengerComplaintCommand,
   CreatePassengerComplaintResponse,
 } from "@drts/contracts";
-

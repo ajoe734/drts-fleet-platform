@@ -67,7 +67,11 @@ describe("P5 and A04 Screens validation", () => {
       vehicle: { plateNo: "ABC-1234", model: "Toyota", color: "White" },
       location: { lat: 0, lng: 0, bearing: 0 },
       etaSeconds: 300,
-      eta: { minutes: 5, calculatedAt: "2026-10-11T12:00:00Z", locationFreshness: "fresh" },
+      eta: {
+        minutes: 5,
+        calculatedAt: "2026-10-11T12:00:00Z",
+        locationFreshness: "fresh",
+      },
       assignmentVersion: 1,
       rating: { displayState: "rated" },
       routeFare: {
@@ -417,7 +421,9 @@ describe("P5 and A04 Screens validation", () => {
         authMode="id"
       />,
     );
-    await waitFor(() => expect(screen.getByText("行程保留處理中")).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText("行程保留處理中")).toBeTruthy(),
+    );
     expect(screen.getByText("Test Driver")).toBeTruthy();
     expect(screen.queryByText("目前無法取得正式報價")).toBeNull();
   });

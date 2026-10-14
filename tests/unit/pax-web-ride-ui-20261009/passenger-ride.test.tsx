@@ -299,12 +299,10 @@ describe("Passenger Ride UI Acceptance", () => {
   });
 
   it("A04 retry uses supported authority GET only for both account and token", async () => {
-    const { Actions } = await import(
-      "../../../apps/passenger-app-web/components/ride/passenger-ride-page"
-    );
-    const { createFareQuoteAnomalyFixture } = await import(
-      "../../../apps/passenger-app-web/lib/ride/passenger-live"
-    );
+    const { Actions } =
+      await import("../../../apps/passenger-app-web/components/ride/passenger-ride-page");
+    const { createFareQuoteAnomalyFixture } =
+      await import("../../../apps/passenger-app-web/lib/ride/passenger-live");
 
     const holdView = {
       order: {
@@ -429,11 +427,7 @@ describe("Passenger Ride UI Acceptance", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     render(
-      <PassengerRidePage
-        token="ride-recovered"
-        authMode="id"
-        kind="ride"
-      />,
+      <PassengerRidePage token="ride-recovered" authMode="id" kind="ride" />,
     );
 
     await waitFor(() => {
@@ -465,11 +459,7 @@ describe("Passenger Ride UI Acceptance", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     render(
-      <PassengerRidePage
-        token="ride-conflict"
-        authMode="id"
-        kind="ride"
-      />,
+      <PassengerRidePage token="ride-conflict" authMode="id" kind="ride" />,
     );
 
     await waitFor(() => {
@@ -568,12 +558,10 @@ describe("Passenger Ride UI Acceptance", () => {
   });
 
   it("R9/R12 - A04 quote retry error retains actual known authority facts", async () => {
-    const { Actions } = await import(
-      "../../../apps/passenger-app-web/components/ride/passenger-ride-page"
-    );
-    const { mapPassengerRideAuthorityToFixture } = await import(
-      "../../../apps/passenger-app-web/lib/ride/passenger-live"
-    );
+    const { Actions } =
+      await import("../../../apps/passenger-app-web/components/ride/passenger-ride-page");
+    const { mapPassengerRideAuthorityToFixture } =
+      await import("../../../apps/passenger-app-web/lib/ride/passenger-live");
 
     const holdAuthority = {
       order: {
@@ -633,12 +621,10 @@ describe("Passenger Ride UI Acceptance", () => {
   });
 
   it("R9/R12 - Supported retry applies authoritative completed terminal state over quote anomaly", async () => {
-    const { Actions } = await import(
-      "../../../apps/passenger-app-web/components/ride/passenger-ride-page"
-    );
-    const { mapPassengerRideAuthorityToFixture } = await import(
-      "../../../apps/passenger-app-web/lib/ride/passenger-live"
-    );
+    const { Actions } =
+      await import("../../../apps/passenger-app-web/components/ride/passenger-ride-page");
+    const { mapPassengerRideAuthorityToFixture } =
+      await import("../../../apps/passenger-app-web/lib/ride/passenger-live");
 
     const holdAuthority = {
       order: {

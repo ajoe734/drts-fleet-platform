@@ -375,4 +375,3 @@ export class PassengerClient implements PassengerViewModel {
     );
   }
 }
-

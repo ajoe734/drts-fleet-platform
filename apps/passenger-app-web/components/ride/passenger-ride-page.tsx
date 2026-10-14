@@ -37,7 +37,6 @@ const ConnectionContext = React.createContext<{
   lastEventTime: number;
 }>({ connectionState: "connected", lastEventTime: 0 });
 
-
 const monoFont = '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace';
 const shellInset = 14;
 const starTone = passengerChrome.driverRealm.fg;
@@ -1764,7 +1763,9 @@ function CancelledCard({ fixture }: { fixture: PassengerRideFixture }) {
               borderTop: `1px solid ${passengerChrome.borderSoft}`,
             }}
           >
-            <span style={{ color: passengerChrome.muted }}>{t.OrderNumber}</span>
+            <span style={{ color: passengerChrome.muted }}>
+              {t.OrderNumber}
+            </span>
             <span style={{ fontFamily: monoFont, fontWeight: 600 }}>
               {fixture.orderNo}
             </span>
@@ -1778,7 +1779,9 @@ function CancelledCard({ fixture }: { fixture: PassengerRideFixture }) {
               alignItems: "center",
             }}
           >
-            <span style={{ color: passengerChrome.muted }}>{t.CancellationTime}</span>
+            <span style={{ color: passengerChrome.muted }}>
+              {t.CancellationTime}
+            </span>
             <span>{fixture.cancelledAtText}</span>
           </div>
         ) : null}
@@ -1790,7 +1793,9 @@ function CancelledCard({ fixture }: { fixture: PassengerRideFixture }) {
               alignItems: "center",
             }}
           >
-            <span style={{ color: passengerChrome.muted }}>{t.PickupLocation}</span>
+            <span style={{ color: passengerChrome.muted }}>
+              {t.PickupLocation}
+            </span>
             <span
               style={{
                 fontWeight: 600,
@@ -1810,7 +1815,9 @@ function CancelledCard({ fixture }: { fixture: PassengerRideFixture }) {
               alignItems: "center",
             }}
           >
-            <span style={{ color: passengerChrome.muted }}>{t.DropoffLocation}</span>
+            <span style={{ color: passengerChrome.muted }}>
+              {t.DropoffLocation}
+            </span>
             <span
               style={{
                 fontWeight: 600,
@@ -1882,12 +1889,7 @@ function Actions({
 }) {
   const [actionPending, setActionPending] = useState(false);
   if (fixture.status === "行程已取消") {
-    return (
-      <CancelledActions
-        token={token}
-        authMode={authMode}
-      />
-    );
+    return <CancelledActions token={token} authMode={authMode} />;
   }
 
   const runLiveAction = (
@@ -1939,7 +1941,8 @@ function Actions({
         );
         const anomalyCode =
           !isTerminal && !hasValidQuote && fixture.screenId === "A04"
-            ? (fixture as any).quoteAnomalyCode || "P5_QUOTE_PROVIDER_UNAVAILABLE"
+            ? (fixture as any).quoteAnomalyCode ||
+              "P5_QUOTE_PROVIDER_UNAVAILABLE"
             : undefined;
         const next = mapPassengerRideAuthorityToFixture(
           view,
@@ -2250,7 +2253,12 @@ function RideContent({
           title={t.DispatchIncomplete}
           detail="系統正在重新確認車輛與駕駛資料，尚未完成指派。完成後會立即通知您。"
         />
-        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
+        <Actions
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onFixtureUpdate={onFixtureUpdate}
+        />
       </>
     );
   }
@@ -2275,7 +2283,12 @@ function RideContent({
             if (open) onOpenComplaint?.();
           }}
         />
-        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
+        <Actions
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onFixtureUpdate={onFixtureUpdate}
+        />
       </>
     );
   }
@@ -2299,7 +2312,12 @@ function RideContent({
             if (open) onOpenComplaint?.();
           }}
         />
-        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
+        <Actions
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onFixtureUpdate={onFixtureUpdate}
+        />
       </>
     );
   }
@@ -2336,7 +2354,12 @@ function RideContent({
           }
         />
         <FareCard fixture={fixture} />
-        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
+        <Actions
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onFixtureUpdate={onFixtureUpdate}
+        />
       </>
     );
   }
@@ -2368,7 +2391,12 @@ function RideContent({
             </span>
           }
         />
-        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
+        <Actions
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onFixtureUpdate={onFixtureUpdate}
+        />
       </>
     );
   }
@@ -2378,11 +2406,15 @@ function RideContent({
       <>
         <MapCard fixture={fixture} />
         <FareCard fixture={fixture} />
-        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
+        <Actions
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onFixtureUpdate={onFixtureUpdate}
+        />
       </>
     );
   }
-
 
   if (fixture.screenId === "P5-08") {
     return (
@@ -2425,7 +2457,12 @@ function RideContent({
         <EtaBlock fixture={fixture} />
         <VehicleCard fixture={fixture} plateChanged />
         <PaymentCard fixture={fixture} />
-        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
+        <Actions
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onFixtureUpdate={onFixtureUpdate}
+        />
       </>
     );
   }
@@ -2438,7 +2475,12 @@ function RideContent({
         <VehicleCard fixture={fixture} />
         <SeatbeltNotice />
         <PaymentCard fixture={fixture} />
-        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
+        <Actions
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onFixtureUpdate={onFixtureUpdate}
+        />
       </>
     );
   }
@@ -2463,7 +2505,12 @@ function RideContent({
         <EtaBlock fixture={fixture} />
         <VehicleCard fixture={fixture} />
         <ContactUnavailableCard fixture={fixture} />
-        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
+        <Actions
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onFixtureUpdate={onFixtureUpdate}
+        />
       </>
     );
   }
@@ -2476,7 +2523,12 @@ function RideContent({
       <VehicleCard fixture={fixture} />
       <FareCard fixture={fixture} />
       <PaymentCard fixture={fixture} />
-      <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
+      <Actions
+        fixture={fixture}
+        token={token}
+        authMode={authMode}
+        onFixtureUpdate={onFixtureUpdate}
+      />
     </>
   );
 }

@@ -412,8 +412,7 @@ export function mapPassengerRideAuthorityToFixture(
       : {}),
     canCancel:
       view.order.status === "cancelled" ? false : view.actions.canCancel,
-    canRate:
-      view.order.status === "cancelled" ? false : view.actions.canRate,
+    canRate: view.order.status === "cancelled" ? false : view.actions.canRate,
     canContact:
       view.order.status === "cancelled" ? false : view.actions.canContact,
     canReadReceipt:
@@ -476,7 +475,11 @@ function mapPassengerPayment(
   if (!payment) return undefined;
   const presentations: Record<
     string,
-    { label: string; detail: string; tone: "info" | "success" | "warning" | "danger" }
+    {
+      label: string;
+      detail: string;
+      tone: "info" | "success" | "warning" | "danger";
+    }
   > = {
     not_selected: {
       label: "尚未選擇付款方式",
@@ -542,7 +545,8 @@ export function mapPassengerCertificate(
     return {
       state: "pending",
       ...(receipt.receiptNo ? { receiptNo: receipt.receiptNo } : {}),
-      ...("receiptUrl" in receipt && typeof (receipt as any).receiptUrl === "string"
+      ...("receiptUrl" in receipt &&
+      typeof (receipt as any).receiptUrl === "string"
         ? { htmlUrl: (receipt as any).receiptUrl }
         : {}),
       ...("htmlUrl" in receipt && typeof (receipt as any).htmlUrl === "string"
@@ -597,14 +601,17 @@ export function mapPassengerCertificate(
     e04.paymentMethodDisplay || readText(record, "paymentMethod");
 
   const fareBaseMinor =
-    e04.fareBreakdown?.startMinor ?? readNonNegativeNumber(record, "fareBaseMinor");
+    e04.fareBreakdown?.startMinor ??
+    readNonNegativeNumber(record, "fareBaseMinor");
   const fareDistanceMinor =
     e04.fareBreakdown?.distanceMinor ??
     readNonNegativeNumber(record, "fareDistanceMinor");
   const fareTimeMinor =
-    e04.fareBreakdown?.delayMinor ?? readNonNegativeNumber(record, "fareTimeMinor");
+    e04.fareBreakdown?.delayMinor ??
+    readNonNegativeNumber(record, "fareTimeMinor");
   const fareNightMinor =
-    e04.fareBreakdown?.nightMinor ?? readNonNegativeNumber(record, "fareNightMinor");
+    e04.fareBreakdown?.nightMinor ??
+    readNonNegativeNumber(record, "fareNightMinor");
 
   if (
     !plateNo ||
@@ -765,7 +772,7 @@ export function screenTitle(screenId: PassengerScreenId) {
     "P5-10": "Electronic Ride Certificate",
     "P5-11": "Disclosure Unavailable",
     "P5-12": "Driver Contact Not Provisioned",
-    "A04": "Fare Quote Anomaly",
+    A04: "Fare Quote Anomaly",
   };
   return titles[screenId] ?? "Passenger Ride";
 }

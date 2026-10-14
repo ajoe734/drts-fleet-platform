@@ -9,9 +9,7 @@
   "source_path": "infra/migrations/V0119__passenger_ride_rating_contact.sql",
   "domain": "existing_token_rating_contact_choice_and_canonical_CRM",
   "target_schema": "ops",
-  "primary_tables": [
-    "ops.passenger_ride_rating_consents"
-  ],
+  "primary_tables": ["ops.passenger_ride_rating_consents"],
   "referenced_existing_authorities": [
     "ops.passenger_trip_ratings",
     "ops.phase1_owned_orders",

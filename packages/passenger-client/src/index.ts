@@ -8,4 +8,3 @@ export * from "./payment/fields.js";
 export * from "./payment/state.js";
 export * from "./payment/booking.js";
 export * from "./ride/view-model.js";
-

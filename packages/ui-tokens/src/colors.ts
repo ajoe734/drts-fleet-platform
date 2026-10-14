@@ -251,4 +251,3 @@ export const PASSENGER_P5_STATUS_TONES = {
     border: PASSENGER_P5_COLORS.line,
   },
 } as const;
-
