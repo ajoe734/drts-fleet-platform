@@ -194,6 +194,8 @@ function receipt(): MultiTaxiElectronicReceipt {
 }
 
 interface TestNode {
+  children: Array<string | TestNode>;
+  findAllByType(type: string): TestNode[];
   props: Record<string, any>;
   findByProps(props: Record<string, unknown>): TestNode;
   findAllByProps(props: Record<string, unknown>): TestNode[];
@@ -385,6 +387,11 @@ describe("actual Native P5 rendered terminal and active screens", () => {
 
   it("discloses captured masked registration, validity, vehicle facts and actual driver rating", async () => {
     const renderer = await mount(project());
+    const visibleText = () =>
+      renderer.root
+        .findAllByType("Text")
+        .map((node: any) => node.children.join(""))
+        .join("\n");
     for (const value of [
       "TEST***01",
       "2027-01-01T00:00:00Z",
@@ -394,7 +401,7 @@ describe("actual Native P5 rendered terminal and active screens", () => {
       "4.8",
       "17 則評價",
     ])
-      expect(text(renderer)).toContain(value);
+      expect(visibleText()).toContain(value);
     const next = authority();
     next.assignment!.rating = {
       displayState: "new_driver",
@@ -403,8 +410,8 @@ describe("actual Native P5 rendered terminal and active screens", () => {
       aggregateVersion: 4,
     };
     await update(renderer, project(next), ports());
-    expect(text(renderer)).toContain("新司機，尚無評價");
-    expect(text(renderer)).not.toContain("4.8");
+    expect(visibleText()).toContain("新司機，尚無評價");
+    expect(visibleText()).not.toContain("4.8");
   });
 
   it("A04 invokes the existing authority retry callback and applies a parent-provided real terminal projection", async () => {
