@@ -4,7 +4,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { Redirect } from "expo-router";
 import {
   PLATFORM_CODE_REGISTRY,
-  type DriverPayoutStatus,
   type DriverStatementRecord,
   type MoneyAmount,
   type PlatformEarningsByPlatformResponse,
@@ -21,6 +20,7 @@ import {
   Shell,
   driverCanvasTheme,
 } from "@/components/canvas-primitives";
+import { DriverStatementRow } from "@/components/earnings/driver-statement-row";
 import {
   isOwnedPlatformCode,
   isShadowOnlyPlatformCode,
@@ -33,13 +33,12 @@ import {
 } from "@/lib/api-client";
 import {
   formatAmountNumber,
-  formatMoney,
   formatSignedAmountNumber,
   getCurrencyLabel,
   sumMoneyAmounts,
 } from "@/lib/money";
-import { formatDriverPayoutStatusLabel } from "@/lib/operational-labels";
 import { driverEarningsPeriodOptions, driverStrings } from "@/lib/strings";
+import { listDriverEarningsStatements } from "@/lib/driver-statement-actions";
 
 type PeriodKey = "today" | "week" | "month";
 
@@ -168,10 +167,6 @@ function isEmptyBreakdown(item: PlatformEarningsItem) {
     item.subsidy.amountMinor === 0 &&
     item.netAmount.amountMinor === 0
   );
-}
-
-function getStatementTone(status: DriverPayoutStatus) {
-  return status === "paid" ? ("success" as const) : ("warn" as const);
 }
 
 function BreakdownRow({
@@ -353,66 +348,13 @@ function BreakdownRow({
   );
 }
 
-function StatementRow({
-  statement,
-  last,
-}: {
-  statement: DriverStatementRecord;
-  last: boolean;
-}) {
-  return (
-    <View
-      style={[
-        styles.statementRow,
-        {
-          borderBottomColor: THEME.border,
-        },
-        last ? styles.statementRowLast : null,
-      ]}
-    >
-      <View style={styles.statementCopy}>
-        <Text
-          style={[
-            styles.statementTitle,
-            { color: THEME.text, fontFamily: THEME.fontFamily },
-          ]}
-        >
-          {statement.periodMonth} 月結
-        </Text>
-        <Text
-          style={[
-            styles.statementSubtitle,
-            { color: THEME.textMuted, fontFamily: THEME.fontFamily },
-          ]}
-        >
-          {statement.lines.length} 趟 ·{" "}
-          {formatDriverPayoutStatusLabel(statement.payoutStatus)}
-        </Text>
-      </View>
-
-      <View style={styles.statementValueWrap}>
-        <Pill theme={THEME} tone={getStatementTone(statement.payoutStatus)}>
-          {formatDriverPayoutStatusLabel(statement.payoutStatus)}
-        </Pill>
-        <Text
-          style={[
-            styles.statementAmount,
-            { color: THEME.text, fontFamily: THEME.monoFamily },
-          ]}
-        >
-          {formatMoney(statement.netAmount)}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
 export default function EarningsScreen() {
   const [summary, setSummary] = useState<PlatformEarningsSummary | null>(null);
   const [platformItems, setPlatformItems] = useState<
     PlatformEarningsByPlatformResponse["items"]
   >([]);
   const [statements, setStatements] = useState<DriverStatementRecord[]>([]);
+  const [statementError, setStatementError] = useState<string | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodKey>("today");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -426,6 +368,7 @@ export default function EarningsScreen() {
       setSummary(null);
       setPlatformItems([]);
       setStatements([]);
+      setStatementError(null);
     });
     return () => unregister();
   }, []);
@@ -435,6 +378,7 @@ export default function EarningsScreen() {
       setSummary(null);
       setPlatformItems([]);
       setStatements([]);
+      setStatementError(null);
       return;
     }
 
@@ -444,33 +388,40 @@ export default function EarningsScreen() {
       const requests: [
         Promise<PlatformEarningsSummary>,
         Promise<PlatformEarningsByPlatformResponse>,
-        Promise<DriverStatementRecord[]>,
+        Promise<{ rows: DriverStatementRecord[]; error: string | null }>,
       ] = [
         client.getPlatformEarningsSummary(),
         client.getPlatformEarningsByPlatform(period),
-        // Driver statements come from a back-office route that is not exposed to
-        // the driver realm. Treat them as best-effort so a realm/permission
-        // rejection cannot blank the whole earnings dashboard - the
-        // platform-earnings summary and by-platform breakdown still render.
-        client
-          .listDriverStatements()
-          .catch(() => [] as DriverStatementRecord[]),
+        // A statement read failure has its own retry state and does not hide
+        // the independently available platform earnings.
+        listDriverEarningsStatements(client).then(
+          (rows) => ({ rows, error: null }),
+          (readError: unknown) => ({
+            rows: [] as DriverStatementRecord[],
+            error: formatDriverError(
+              readError,
+              driverStrings.earnings.statement.listError,
+            ),
+          }),
+        ),
       ];
-      const [summaryResponse, byPlatformResponse, statementRows] =
+      const [summaryResponse, byPlatformResponse, statementResult] =
         await Promise.all(requests);
 
       setSummary(summaryResponse);
       setPlatformItems(byPlatformResponse.items);
       setStatements(
-        [...statementRows].sort((left, right) =>
+        [...statementResult.rows].sort((left, right) =>
           right.updatedAt.localeCompare(left.updatedAt),
         ),
       );
+      setStatementError(statementResult.error);
       setError(null);
     } catch (nextError) {
       setSummary(null);
       setPlatformItems([]);
       setStatements([]);
+      setStatementError(null);
       setError(toErrorMessage(nextError));
     }
   };
@@ -882,12 +833,35 @@ export default function EarningsScreen() {
         {statements.length > 0 ? (
           <View>
             {statements.map((statement, index) => (
-              <StatementRow
+              <DriverStatementRow
                 key={statement.statementId}
                 statement={statement}
                 last={index === statements.length - 1}
+                onLoaded={(record) =>
+                  setStatements((rows) =>
+                    rows.map((row) =>
+                      row.statementId === record.statementId ? record : row,
+                    ),
+                  )
+                }
               />
             ))}
+          </View>
+        ) : statementError ? (
+          <View style={styles.statementEmpty}>
+            <Banner
+              theme={THEME}
+              tone="warn"
+              title={driverStrings.earnings.statement.errorTitle}
+              body={statementError}
+            />
+            <Btn
+              theme={THEME}
+              disabled={refreshing}
+              onPress={() => void onRefresh()}
+            >
+              {driverStrings.earnings.statement.listRetry}
+            </Btn>
           </View>
         ) : (
           <View style={styles.statementEmpty}>
@@ -1113,41 +1087,6 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     lineHeight: 15,
     fontWeight: "700",
-  },
-  statementRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-  },
-  statementRowLast: {
-    borderBottomWidth: 0,
-  },
-  statementCopy: {
-    flex: 1,
-    gap: 4,
-  },
-  statementTitle: {
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "700",
-  },
-  statementSubtitle: {
-    fontSize: 11.5,
-    lineHeight: 16,
-  },
-  statementValueWrap: {
-    alignItems: "flex-end",
-    gap: 6,
-  },
-  statementAmount: {
-    fontSize: 15.5,
-    lineHeight: 18,
-    fontWeight: "700",
-    letterSpacing: -0.2,
   },
   statementEmpty: {
     paddingHorizontal: 14,

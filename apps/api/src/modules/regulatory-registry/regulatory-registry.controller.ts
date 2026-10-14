@@ -189,12 +189,12 @@ export class RegulatoryRegistryController {
   }
 
   @Post("drivers")
-  createDriver(
+  async createDriver(
     @Body() command: CreateDriverMasterCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.createDriver(command, requestId),
+      await this.regulatoryRegistryService.createDriver(command, requestId),
       requestId,
     );
   }

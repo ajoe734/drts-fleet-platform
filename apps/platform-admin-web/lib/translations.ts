@@ -1526,6 +1526,92 @@ const cmpZh: Record<keyof typeof cmpEn, string> = {
 };
 
 const en = {
+  "fareManage.inputError":
+    "Complete the required fields with valid whole TWD amounts, increments and times.",
+  "fareManage.revisionError":
+    "This version changed while you were editing. Your input is retained. Refresh to review the latest version, then cancel and reopen the editor before applying your changes.",
+  "fareManage.lifecycleError":
+    "This version is no longer available for that action. Refresh to review its current state.",
+  "fareManage.timeError":
+    "This time conflicts with the published fare schedule. Refresh and choose a valid future time.",
+  "fareManage.replacement":
+    "A current or scheduled fare remains published until a filed replacement takes over. Create and schedule a replacement to change this interval.",
+  "fareManage.existsError": "This version ID already exists. Choose a new ID.",
+  "fareManage.saveError":
+    "The action could not be completed. Your input is retained; you can retry.",
+  "fareManage.saved": "Saved to the official fare records.",
+  "fareManage.demoSaved":
+    "Simulation updated. Official fare records were not changed.",
+  "fareManage.enterDemo": "Try isolated simulation",
+  "fareManage.exitDemo": "Return to official records",
+  "fareManage.demoNotice":
+    "Simulation only: this copy and clock are isolated. Filing can be skipped for demonstration; no official filing or fare changes are submitted.",
+  "fareManage.loading": "Loading official fare versions…",
+  "fareManage.loadError":
+    "Official fare versions could not be read. Retry to load current data; changes are unavailable until the read succeeds.",
+  "fareManage.savedReadError":
+    "The change was saved, but the latest list could not be read. The saved version is shown; other rows may be out of date. Retry the read before making further changes.",
+  "fareManage.retry": "Retry read",
+  "fareManage.resetDemo": "Reset simulation",
+  "fareManage.advanceDemo": "Advance simulation to scheduled time",
+  "fareManage.refresh": "Refresh",
+  "fareManage.evaluatedAt":
+    "State evaluated at {time} · Taiwan time (UTC+08:00)",
+  "fareManage.empty":
+    "No official fare versions are available. Create a draft with explicit fare parameters.",
+  "fareManage.edit": "Edit draft",
+  "fareManage.choose": "Choose a rule",
+  "fareManage.feeName": "Additional fee name",
+  "fareManage.feeAmount": "Additional fee (whole TWD)",
+  "fareManage.removeFee": "Remove fee",
+  "fareManage.addFee": "Add fee",
+  "fareManage.saving": "Saving…",
+  "fareManage.saveDraft": "Save draft",
+  "fareManage.cancel": "Cancel",
+  "fareManage.effectiveUntil": "Effective until · Taiwan time (UTC+08:00)",
+  "fareManage.evidence": "Filing evidence reference",
+  "fareManage.filedAt": "Filing recorded at · Taiwan time (UTC+08:00)",
+  "fareManage.filedBy": "Filing recorded by",
+  "fareManage.scheduled":
+    "Scheduled for {time} · Taiwan time (UTC+08:00); not active yet.",
+  "fareManage.filingUnavailable":
+    "The external filing service is unavailable in this simulation. Retry the demonstration or skip filing to continue. No official approval was received.",
+  "fareManage.tryDemoFiling": "Try / retry simulated filing",
+  "fareManage.skipFiling": "Skip external filing in simulation",
+  "fareManage.manualFiling":
+    "Record the actual filing reference and supporting evidence you received. This action records metadata; it does not submit to or verify with the authority.",
+  "fareManage.recordFiling": "Record actual filing",
+  "fareManage.activateNow": "Activate now",
+  "fareManage.retireReason": "Retirement reason",
+  "fareManage.retire": "Retire version",
+  "fareManage.selectVersion":
+    "Select a version to preview its full fare parameters.",
+  "fareManage.field.fareVersionId": "New version ID",
+  "fareManage.field.displayName": "Version name",
+  "fareManage.field.publicSummary": "Public summary",
+  "fareManage.field.sourceReference": "Fare source reference",
+  "fareManage.field.effectiveLocal": "Effective time · Taiwan time (UTC+08:00)",
+  "fareManage.field.baseFare": "Base fare (whole TWD)",
+  "fareManage.field.baseDistanceMeters": "Base distance (m)",
+  "fareManage.field.distanceRate": "Distance fare (whole TWD)",
+  "fareManage.field.distanceIncrementMeters": "Distance increment (m)",
+  "fareManage.field.delayRate": "Waiting fare (whole TWD)",
+  "fareManage.field.delayIncrementSeconds": "Waiting increment (seconds)",
+  "fareManage.field.nightSurchargeAmount":
+    "Night surcharge (whole TWD per trip)",
+  "fareManage.field.totalIncrement": "Total rounding increment (whole TWD)",
+  "fareManage.field.nightSurchargeWindowStart":
+    "Night period starts (Taiwan time)",
+  "fareManage.field.nightSurchargeWindowEnd": "Night period ends (Taiwan time)",
+  "fareManage.field.distanceRounding": "Distance rounding",
+  "fareManage.field.delayRounding": "Waiting rounding",
+  "fareManage.field.totalRounding": "Total rounding",
+  "fareManage.field.nightApplication": "Night surcharge application",
+  "fareManage.rule.ceil": "Round up",
+  "fareManage.rule.floor": "Round down",
+  "fareManage.rule.nearest": "Round to nearest",
+  "fareManage.rule.pickup": "Based on pickup time",
+  "fareManage.rule.any_overlap": "Any overlap with night period",
   "partnerNotification.permissionDenied": "Permission Denied",
   "partnerNotification.saveFailed": "Save Failed",
   "partnerNotification.reload": "Reload",
@@ -4701,6 +4787,85 @@ const en = {
 };
 
 const zh: typeof en = {
+  "fareManage.inputError":
+    "請填妥必要欄位，並使用有效的整數新臺幣金額、計價單位及時間。",
+  "fareManage.revisionError":
+    "編輯期間此版本已被更新，已保留您的輸入。請重新整理比對最新版本，再取消並重新開啟編輯後套用變更。",
+  "fareManage.lifecycleError":
+    "此版本目前無法執行這項操作，請重新整理確認最新狀態。",
+  "fareManage.timeError":
+    "此時間與已發布費率排程衝突，請重新整理並選擇有效的未來時間。",
+  "fareManage.replacement":
+    "現行或已排程費率須由已備查的替代版本接續。若要變更此區間，請建立替代版本並排程生效。",
+  "fareManage.existsError": "此版本 ID 已存在，請使用新的 ID。",
+  "fareManage.saveError": "操作未能完成，已保留輸入，可再次重試。",
+  "fareManage.saved": "已儲存至正式費率資料。",
+  "fareManage.demoSaved": "示範已更新，正式費率資料未變更。",
+  "fareManage.enterDemo": "進入獨立示範",
+  "fareManage.exitDemo": "返回正式資料",
+  "fareManage.demoNotice":
+    "僅供示範：此份資料與時間獨立運作。可跳過外部備查以繼續示範，不會提交正式備查或變更正式費率。",
+  "fareManage.loading": "正在載入正式費率版本…",
+  "fareManage.loadError":
+    "無法讀取正式費率版本，請重試取得最新資料；讀取成功前暫時無法變更。",
+  "fareManage.savedReadError":
+    "變更已儲存，但無法讀取最新列表。目前顯示已儲存的版本，其他列可能尚未更新；請重試讀取後再進行其他變更。",
+  "fareManage.retry": "重試讀取",
+  "fareManage.resetDemo": "重設示範",
+  "fareManage.advanceDemo": "將示範時間推進至排程生效時間",
+  "fareManage.refresh": "重新整理",
+  "fareManage.evaluatedAt": "狀態判定時間：{time} · 台灣時間（UTC+08:00）",
+  "fareManage.empty": "目前沒有正式費率版本，可明確填寫費率參數建立草稿。",
+  "fareManage.edit": "編輯草稿",
+  "fareManage.choose": "選擇規則",
+  "fareManage.feeName": "附加費名稱",
+  "fareManage.feeAmount": "附加費（整數新臺幣）",
+  "fareManage.removeFee": "移除附加費",
+  "fareManage.addFee": "新增附加費",
+  "fareManage.saving": "儲存中…",
+  "fareManage.saveDraft": "儲存草稿",
+  "fareManage.cancel": "取消",
+  "fareManage.effectiveUntil": "生效截止 · 台灣時間（UTC+08:00）",
+  "fareManage.evidence": "備查證據識別",
+  "fareManage.filedAt": "備查記錄時間 · 台灣時間（UTC+08:00）",
+  "fareManage.filedBy": "備查記錄者",
+  "fareManage.scheduled":
+    "已排程於 {time} · 台灣時間（UTC+08:00）生效，目前尚未啟用。",
+  "fareManage.filingUnavailable":
+    "此示範無法使用外部備查服務。可再次示範或跳過備查繼續操作；並未取得正式核准。",
+  "fareManage.tryDemoFiling": "示範／重試外部備查",
+  "fareManage.skipFiling": "示範中跳過外部備查",
+  "fareManage.manualFiling":
+    "請填寫實際取得的備查文號與證據識別。此操作記錄備查資料，不會向主管機關提交或驗證。",
+  "fareManage.recordFiling": "記錄實際備查",
+  "fareManage.activateNow": "立即生效",
+  "fareManage.retireReason": "停用理由",
+  "fareManage.retire": "停用版本",
+  "fareManage.selectVersion": "請選擇版本，預覽完整費率參數。",
+  "fareManage.field.fareVersionId": "新版本 ID",
+  "fareManage.field.displayName": "版本名稱",
+  "fareManage.field.publicSummary": "公開摘要",
+  "fareManage.field.sourceReference": "費率來源依據",
+  "fareManage.field.effectiveLocal": "生效時間 · 台灣時間（UTC+08:00）",
+  "fareManage.field.baseFare": "起跳金額（整數新臺幣）",
+  "fareManage.field.baseDistanceMeters": "起跳里程（公尺）",
+  "fareManage.field.distanceRate": "里程單位金額（整數新臺幣）",
+  "fareManage.field.distanceIncrementMeters": "里程計價單位（公尺）",
+  "fareManage.field.delayRate": "延滯單位金額（整數新臺幣）",
+  "fareManage.field.delayIncrementSeconds": "延滯計價單位（秒）",
+  "fareManage.field.nightSurchargeAmount": "夜間加收（每趟整數新臺幣）",
+  "fareManage.field.totalIncrement": "總額取整單位（整數新臺幣）",
+  "fareManage.field.nightSurchargeWindowStart": "夜間時段起點（台灣時間）",
+  "fareManage.field.nightSurchargeWindowEnd": "夜間時段終點（台灣時間）",
+  "fareManage.field.distanceRounding": "里程取整",
+  "fareManage.field.delayRounding": "延滯取整",
+  "fareManage.field.totalRounding": "總額取整",
+  "fareManage.field.nightApplication": "夜間加收適用方式",
+  "fareManage.rule.ceil": "無條件進位",
+  "fareManage.rule.floor": "無條件捨去",
+  "fareManage.rule.nearest": "四捨五入",
+  "fareManage.rule.pickup": "依上車時間",
+  "fareManage.rule.any_overlap": "行程經過夜間時段即適用",
   "partnerNotification.lifecycleCtrl": "生命週期控制",
   "partnerNotification.testRejected": "綁定測試遭拒",
   "partnerNotification.enableFailed": "啟用失敗",

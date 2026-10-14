@@ -21,6 +21,7 @@ import type {
   CreateVehicleContractCommand,
   DispatchExclusivityLifecycleStatus,
   DispatchExclusivityRecord,
+  DriverDeclaredSurnameSnapshot,
   DriverEligibilityBlockReason,
   DriverEtaResponse,
   DriverLocationHeartbeatAck,
@@ -554,6 +555,9 @@ export class RegulatoryRegistryService
 
   private drivers = DRIVER_SEED.map((driver) => ({ ...driver }));
 
+  // Preserve duplicate-create rejection while the linked profile save awaits.
+  private readonly pendingDriverCreations = new Set<string>();
+
   private latestDriverLocations = new Map<string, DriverLocationSnapshot>();
 
   private latestDriverHeartbeatUploads = new Map<
@@ -1068,10 +1072,13 @@ export class RegulatoryRegistryService
     );
   }
 
-  createDriver(command: CreateDriverMasterCommand, requestId?: string) {
+  async createDriver(command: CreateDriverMasterCommand, requestId?: string) {
     const driverId = command.driverId?.trim() || `drv_${randomUUID()}`;
     this.assertNonBlank(driverId, "driverId");
-    if (this.drivers.some((candidate) => candidate.driverId === driverId)) {
+    if (
+      this.pendingDriverCreations.has(driverId) ||
+      this.drivers.some((candidate) => candidate.driverId === driverId)
+    ) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "DRIVER_ALREADY_EXISTS",
@@ -1120,36 +1127,41 @@ export class RegulatoryRegistryService
         ? {}
         : { bankAccount: command.bankAccount }),
     };
-    const profile = this.driverProfileService.upsertAdminProfile(
-      driverId,
-      profileCommand,
-      requestId,
-    );
-    created.profileUpdatedAt = profile.updatedAt;
-    created.deviceBindings = profile.deviceBindings.map((binding) => ({
-      ...binding,
-    }));
+    this.pendingDriverCreations.add(driverId);
+    try {
+      const profile = await this.driverProfileService.upsertAdminProfile(
+        driverId,
+        profileCommand,
+        requestId,
+      );
+      created.profileUpdatedAt = profile.updatedAt;
+      created.deviceBindings = profile.deviceBindings.map((binding) => ({
+        ...binding,
+      }));
 
-    this.drivers = [this.cloneDriver(created), ...this.drivers];
-    this.persistChanges(
-      { drivers: [this.cloneDriver(created)] },
-      "create_driver",
-    );
-    this.recordAudit(
-      {
-        actorId: "platform-admin",
-        actorType: "platform_admin",
-        tenantId: null,
-        moduleName: "regulatory-registry",
-        actionName: "create_driver_master",
-        resourceType: "driver_master",
-        resourceId: driverId,
-        newValuesSummary: this.buildDriverAuditSummary(created, null),
-      },
-      requestId,
-    );
+      this.drivers = [this.cloneDriver(created), ...this.drivers];
+      this.persistChanges(
+        { drivers: [this.cloneDriver(created)] },
+        "create_driver",
+      );
+      this.recordAudit(
+        {
+          actorId: "platform-admin",
+          actorType: "platform_admin",
+          tenantId: null,
+          moduleName: "regulatory-registry",
+          actionName: "create_driver_master",
+          resourceType: "driver_master",
+          resourceId: driverId,
+          newValuesSummary: this.buildDriverAuditSummary(created, null),
+        },
+        requestId,
+      );
 
-    return this.cloneDriver(created);
+      return this.cloneDriver(created);
+    } finally {
+      this.pendingDriverCreations.delete(driverId);
+    }
   }
 
   /**
@@ -3707,6 +3719,30 @@ export class RegulatoryRegistryService
       (p) => p.vehicleId === vehicleId,
     );
     return profile ? { ...profile } : null;
+  }
+
+  getDriverDeclaredSurnameSnapshot(
+    driverId: string,
+  ): DriverDeclaredSurnameSnapshot | null {
+    // This is a declared profile-view snapshot, never an inferred surname or
+    // proof of legal identity/current cross-replica database revision.
+    const profile = this.driverProfileService.findProfileForDriver(driverId);
+    if (
+      !profile ||
+      !Object.prototype.hasOwnProperty.call(profile, "driverSurname") ||
+      typeof profile.driverSurname !== "string" ||
+      !profile.driverSurname.trim() ||
+      typeof profile.updatedAt !== "string" ||
+      !profile.updatedAt.trim() ||
+      !Number.isFinite(Date.parse(profile.updatedAt))
+    ) {
+      return null;
+    }
+    return {
+      driverSurname: profile.driverSurname,
+      driverSurnameSource: "driver_profile_declared",
+      driverSurnameProfileUpdatedAt: profile.updatedAt,
+    };
   }
 
   getDriverPublicRegistrationCredential(

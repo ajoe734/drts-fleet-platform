@@ -308,7 +308,7 @@ export default function SettingsScreen() {
 
   const settingsErrors = validateSettingsValues(settingsValues);
   const profileErrors = profileLoaded
-    ? validateProfileValues(profileValues)
+    ? validateProfileValues(profileValues, initialProfile)
     : {};
 
   const settingsDirty =
@@ -385,7 +385,9 @@ export default function SettingsScreen() {
     if (profileDirty) {
       tasks.push(
         client
-          .updateDriverProfile(buildProfileCommand(profileValues))
+          .updateDriverProfile(
+            buildProfileCommand(profileValues, initialProfile),
+          )
           .then(() => ({ section: "個人資料" })),
       );
     }
@@ -568,6 +570,23 @@ export default function SettingsScreen() {
               onChangeText={(value) => updateProfile({ profileName: value })}
               placeholder="司機姓名"
               error={profileErrors.profileName}
+              editable={profileLoaded && !saving}
+            />
+            <FormField
+              label={driverStrings.settings.surname.label}
+              accessibilityLabel={driverStrings.settings.surname.label}
+              accessibilityHint={driverStrings.settings.surname.help}
+              value={profileValues.profileSurname ?? ""}
+              onChangeText={(value) => updateProfile({ profileSurname: value })}
+              placeholder={driverStrings.settings.surname.placeholder}
+              helpText={driverStrings.settings.surname.help}
+              error={
+                profileErrors.profileSurname
+                  ? driverStrings.settings.surname.errors[
+                      profileErrors.profileSurname
+                    ]
+                  : undefined
+              }
               editable={profileLoaded && !saving}
             />
             <FormField

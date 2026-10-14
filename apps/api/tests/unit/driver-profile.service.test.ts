@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { DriverProfileRepository } from "../../src/modules/driver-profile/driver-profile.repository";
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
 
 describe("DriverProfileService sensitive-data governance", () => {
-  it("redacts phone, email, emergency contact, and account holder details in audit logs", () => {
+  it("redacts phone, email, emergency contact, and account holder details in audit logs", async () => {
     const auditNotificationService = new AuditNotificationService();
-    const service = new DriverProfileService(auditNotificationService);
+    const service = new DriverProfileService(
+      auditNotificationService,
+      new DriverProfileRepository({
+        isEnabled: () => true,
+        query: async () => ({ rows: [] }),
+      } as never),
+    );
 
-    service.updateProfile(
+    await service.updateProfile(
       "drv-demo-001",
       {
         phone: "+886-912-333-444",
