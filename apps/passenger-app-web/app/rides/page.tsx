@@ -7,6 +7,34 @@ import { passengerChrome } from "../../lib/passenger-presentation";
 import type { PassengerRideAuthorityView } from "@drts/contracts";
 import { HistoryScreen } from "../../components/demo/demo-history-screen";
 import { isDemoMode } from "../../lib/demo/store";
+import {
+  P5Phone,
+  P5Header,
+  P5Card,
+  P5Btn,
+  P5Icon,
+} from "../../components/p5-ui";
+
+function formatFare(ride: PassengerRideAuthorityView): string {
+  const fareMinor =
+    ride.assignment?.routeFare?.payableFareMinor ??
+    ride.assignment?.routeFare?.estimatedFareMinor ??
+    ride.receipt?.amountMinor ??
+    (ride.order as any)?.estimatedFareMinor;
+  if (fareMinor !== undefined && fareMinor !== null) {
+    return `車資 NT$ ${Math.round(fareMinor / 100)}`;
+  }
+  return "車資 --";
+}
+
+function formatTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  } catch {
+    return iso;
+  }
+}
 
 export default function RidesListPage() {
   const [isDemo, setIsDemo] = useState(false);
@@ -110,148 +138,229 @@ export default function RidesListPage() {
     );
   }
 
+  if (active.length === 0 && history.length === 0) {
+    return (
+      <main
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          minHeight: "100dvh",
+          background: passengerChrome.background,
+          padding: "20px 12px",
+          fontFamily: passengerChrome.fontFamily,
+        }}
+      >
+        <P5Phone url="ride.smarttransport.tw/rides">
+          <P5Header status="行程紀錄" order="" />
+          <div
+            style={{
+              padding: "32px 14px",
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <P5Icon
+              name="car"
+              size={48}
+              style={{ color: passengerChrome.border }}
+            />
+            <div style={{ color: passengerChrome.muted, fontSize: 15 }}>
+              {t.NoActiveRides}
+            </div>
+            <div style={{ marginTop: 16, width: "100%", maxWidth: 200 }}>
+              <Link href="/" style={{ textDecoration: "none" }}>
+                <P5Btn kind="primary">{t.BookRide}</P5Btn>
+              </Link>
+            </div>
+          </div>
+        </P5Phone>
+      </main>
+    );
+  }
+
   return (
     <main
       style={{
-        padding: "16px",
-        color: passengerChrome.text,
-        background: passengerChrome.background,
-        fontFamily: passengerChrome.fontFamily,
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
         minHeight: "100dvh",
+        background: passengerChrome.background,
+        padding: "20px 12px",
+        fontFamily: passengerChrome.fontFamily,
       }}
     >
-      <h1 style={{ fontSize: 24, fontWeight: "bold", marginBottom: 16 }}>
-        {t.MyRides}
-      </h1>
-
-      {active.length > 0 && (
-        <section style={{ marginBottom: 24 }}>
-          <h2
-            style={{
-              fontSize: 18,
-              fontWeight: "bold",
-              marginBottom: 8,
-              color: passengerChrome.shell,
-            }}
-          >
-            {t.InProgress}
-          </h2>
+      <P5Phone url="ride.smarttransport.tw/rides">
+        <P5Header status={t.RideHistory} order="" />
+        <div style={{ padding: "16px 0", flex: 1, overflowY: "auto" }}>
           {active.map((ride) => (
-            <Link
-              href={`/rides/${ride.order.orderId}`}
+            <P5Card
               key={ride.order.orderId}
-              style={{
-                display: "block",
-                textDecoration: "none",
-                color: "inherit",
-                padding: 12,
-                border: `1px solid ${passengerChrome.border}`,
-                borderRadius: 8,
-                marginBottom: 8,
-              }}
+              title={t.ActiveRideTitle}
+              tag={
+                <span
+                  style={{
+                    background: passengerChrome.shell,
+                    color: passengerChrome.card,
+                    padding: "2px 6px",
+                    borderRadius: 4,
+                    fontSize: 10,
+                    marginLeft: 8,
+                  }}
+                >
+                  {t.InProgress}
+                </span>
+              }
             >
-              <div style={{ fontWeight: "bold" }}>
-                {new Date(ride.order.requestedPickupAt).toLocaleString()}
-              </div>
-              <div style={{ fontSize: 14, color: passengerChrome.muted }}>
-                {ride.order.pickup.address}
-              </div>
-            </Link>
-          ))}
-        </section>
-      )}
-
-      <section>
-        <h2 style={{ fontSize: 18, fontWeight: "bold", marginBottom: 8 }}>
-          {t.History}
-        </h2>
-        {history.length === 0 ? (
-          <div style={{ color: passengerChrome.muted }}>{t.NoRideHistory}</div>
-        ) : (
-          history.map((ride) => {
-            const needsRating = ride.actions?.canRate;
-            return (
-              <Link
-                href={`/rides/${ride.order.orderId}`}
-                key={ride.order.orderId}
+              <div
                 style={{
-                  display: "block",
-                  textDecoration: "none",
-                  color: "inherit",
-                  padding: 12,
-                  border: `1px solid ${passengerChrome.border}`,
-                  borderRadius: 8,
-                  marginBottom: 8,
+                  fontSize: 12,
+                  color: passengerChrome.muted,
+                  marginBottom: 4,
                 }}
               >
-                <div
+                {formatTime(ride.order.requestedPickupAt)}
+              </div>
+              <div style={{ fontSize: 14 }}>{ride.order.pickup.address}</div>
+              <div style={{ marginTop: 8 }}>
+                <Link
+                  href={`/rides/${ride.order.orderId}`}
+                  style={{ textDecoration: "none" }}
+                >
+                  <P5Btn kind="secondary">{t.ViewRide}</P5Btn>
+                </Link>
+              </div>
+            </P5Card>
+          ))}
+
+          {history.length > 0 && (
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 700,
+                color: passengerChrome.muted,
+                padding: "8px 14px 4px",
+              }}
+            >
+              {t.History}
+            </div>
+          )}
+
+          {history.map((ride) => {
+            const isCompleted = ride.order.status === "completed";
+            const isCancelled = ride.order.status === "cancelled";
+            const needsRating = ride.actions?.canRate;
+
+            return (
+              <P5Card
+                key={ride.order.orderId}
+                title={isCompleted ? "已完成" : isCancelled ? "已取消" : "行程"}
+                dimmed={isCancelled}
+              >
+                <Link
+                  href={`/rides/${ride.order.orderId}`}
                   style={{
-                    fontWeight: "bold",
-                    display: "flex",
-                    justifyContent: "space-between",
+                    textDecoration: "none",
+                    color: "inherit",
+                    display: "block",
                   }}
                 >
-                  <span>
-                    {new Date(ride.order.requestedPickupAt).toLocaleString()}
-                  </span>
-                  <span
-                    style={{
-                      color:
-                        ride.order.status === "completed"
-                          ? passengerChrome.success.fg
-                          : passengerChrome.muted,
-                    }}
-                  >
-                    {ride.order.status === "completed"
-                      ? "完成"
-                      : ride.order.status === "cancelled"
-                        ? "已取消"
-                        : t.InProgress}
-                  </span>
-                </div>
-                <div
-                  style={{
-                    fontSize: 14,
-                    color: passengerChrome.muted,
-                    marginTop: 4,
-                  }}
-                >
-                  {ride.order.pickup.address}
-                </div>
-                {needsRating && (
                   <div
                     style={{
-                      marginTop: 8,
-                      color: passengerChrome.shell,
-                      fontSize: 13,
-                      fontWeight: "bold",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
                     }}
                   >
-                    {t.WriteReview}
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: passengerChrome.muted,
+                          marginBottom: 4,
+                        }}
+                      >
+                        {formatTime(ride.order.requestedPickupAt)}
+                      </div>
+                      <div style={{ fontSize: 14, fontWeight: 600 }}>
+                        {isCompleted
+                          ? formatFare(ride)
+                          : isCancelled
+                            ? "乘客取消"
+                            : ride.order.pickup.address}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: passengerChrome.muted,
+                          marginTop: 2,
+                        }}
+                      >
+                        {ride.order.pickup.address}
+                      </div>
+                    </div>
+                    {needsRating ? (
+                      <div
+                        style={{
+                          alignSelf: "center",
+                          marginLeft: 12,
+                          flexShrink: 0,
+                        }}
+                      >
+                        <span
+                          style={{
+                            display: "inline-block",
+                            padding: "6px 12px",
+                            borderRadius: 8,
+                            background: passengerChrome.shell,
+                            color: passengerChrome.card,
+                            fontSize: 12,
+                            fontWeight: 700,
+                          }}
+                        >
+                          {t.WriteReview}
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
-                )}
-              </Link>
+                </Link>
+              </P5Card>
             );
-          })
-        )}
-        {nextCursor && (
-          <button
-            onClick={loadMore}
-            disabled={loadingMore}
-            style={{
-              marginTop: 12,
-              padding: "8px 16px",
-              borderRadius: 4,
-              background: passengerChrome.background,
-              border: `1px solid ${passengerChrome.border}`,
-              color: passengerChrome.text,
-              cursor: "pointer",
-            }}
-          >
-            {loadingMore ? "載入中..." : "載入更多"}
-          </button>
-        )}
-      </section>
+          })}
+
+          {nextCursor ? (
+            <div style={{ padding: "0 14px 16px" }}>
+              <button
+                type="button"
+                onClick={loadingMore ? undefined : loadMore}
+                disabled={loadingMore}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: "100%",
+                  minHeight: 46,
+                  borderRadius: 12,
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: loadingMore ? "not-allowed" : "pointer",
+                  fontFamily: "inherit",
+                  border: `1px solid ${passengerChrome.border}`,
+                  background: passengerChrome.card,
+                  color: passengerChrome.text,
+                }}
+              >
+                {loadingMore ? "載入中..." : "載入更多"}
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </P5Phone>
     </main>
   );
 }

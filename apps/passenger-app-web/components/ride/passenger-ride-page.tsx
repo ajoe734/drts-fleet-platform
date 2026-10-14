@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { getToneRamp, passengerChrome } from "../../lib/passenger-presentation";
+import { STATUS_TONES } from "@drts/ui-tokens";
 import type {
   PassengerRideFixture,
   PassengerCertificatePresentation,
@@ -56,7 +57,7 @@ function Shell({ children }: { children: ReactNode }) {
             margin: "0 auto",
             background: passengerChrome.background,
             borderRadius: 38,
-            border: "10px solid #10161d",
+            border: `10px solid ${STATUS_TONES.neutral.dark.bg}`,
             overflow: "hidden",
             display: "flex",
             flexDirection: "column",
@@ -1108,20 +1109,7 @@ function CertificateCard({
 
   return (
     <Card title={t.EReceipt}>
-      {certificate.htmlUrl ? (
-        <iframe
-          src={certificate.htmlUrl}
-          style={{
-            width: "100%",
-            height: "400px",
-            border: "none",
-            marginBottom: hasRows ? 16 : 0,
-          }}
-          title={t.EReceiptIframeTitle}
-        />
-      ) : null}
-
-      {!certificate.htmlUrl && !hasRows ? (
+      {!hasRows ? (
         <div
           style={{
             textAlign: "center",
@@ -1283,28 +1271,13 @@ function RatingCard({
               selectedScore <= 2 ? Boolean(contactRequested) : false,
           };
 
-    const ratingPromise = requestPassengerRideAction<{ score: number }>(
+    requestPassengerRideAction<{ score?: number }>(
       token,
       "ratings",
       payload,
       authMode === "token",
-    );
-    const complaintsPromise =
-      selectedScore <= 2 && contactRequested
-        ? requestPassengerRideAction(
-            token,
-            "complaints",
-            {
-              category: "service",
-              content: comment || "低分評價請求客服聯繫",
-              contactConsent: true,
-            },
-            authMode === "token",
-          ).catch(() => ({}))
-        : Promise.resolve();
-
-    Promise.all([ratingPromise, complaintsPromise])
-      .then(([res]) => {
+    )
+      .then((res) => {
         const rating = (res as { score?: number }) || { score: selectedScore };
         setSubmittedScore(rating.score || selectedScore);
         setSubmitting(false);
@@ -1758,12 +1731,14 @@ function Actions({
   authMode,
   onCancel,
   onContact,
+  onFixtureUpdate,
 }: {
   fixture: PassengerRideFixture;
   token: string;
   authMode?: "id" | "token" | undefined;
   onCancel?: () => void;
   onContact?: () => void;
+  onFixtureUpdate?: ((fixture: PassengerRideFixture) => void) | undefined;
 }) {
   const [actionPending, setActionPending] = useState(false);
   const runLiveAction = (
@@ -1801,10 +1776,40 @@ function Actions({
   };
   const cancel = () => runLiveAction("cancel", onCancel);
   const contact = () => runLiveAction("contact", onContact);
+  const requote = () => {
+    if (actionPending) return;
+    setActionPending(true);
+    void fetchPassengerRideAuthority(token, authMode === "token")
+      .then((view) => {
+        const next = mapPassengerRideAuthorityToFixture(
+          view,
+          token,
+          fixture.screenId === "A03" ? "fares" : fixture.screenId === "P5-10" ? "receipt" : "ride",
+        );
+        onFixtureUpdate?.(next);
+        setActionPending(false);
+      })
+      .catch((err: unknown) => {
+        console.error("Requote error", err);
+        setActionPending(false);
+      });
+  };
 
   if (fixture.screenId === "P5-01") {
     return (
       <ActionGroup>
+        {fixture.status === "exception_hold" ||
+        fixture.status === "行程保留處理中" ? (
+          <button
+            type="button"
+            style={buttonStyle("primary")}
+            onClick={requote}
+            disabled={actionPending}
+            aria-label={t.Requote}
+          >
+            {actionPending ? "取得中..." : t.Requote}
+          </button>
+        ) : null}
         <button
           type="button"
           style={buttonStyle("secondary", true)}
@@ -1953,12 +1958,11 @@ function Actions({
           <button
             type="button"
             style={buttonStyle("primary")}
-            onClick={() => {
-              void fetchPassengerRideAuthority(token, authMode === "token");
-            }}
+            onClick={requote}
+            disabled={actionPending}
             aria-label={t.Requote}
           >
-            {t.Requote}
+            {actionPending ? "取得中..." : t.Requote}
           </button>
           <a
             href="tel:02-2944-0985"
@@ -2031,6 +2035,7 @@ function RideContent({
   token,
   authMode,
   onCertificateUpdate,
+  onFixtureUpdate,
 }: {
   fixture: PassengerRideFixture;
   token: string;
@@ -2038,6 +2043,7 @@ function RideContent({
   onCertificateUpdate?:
     | ((cert: PassengerCertificatePresentation) => void)
     | undefined;
+  onFixtureUpdate?: ((fixture: PassengerRideFixture) => void) | undefined;
 }) {
   if (fixture.screenId === "P5-11") {
     return (
@@ -2047,7 +2053,7 @@ function RideContent({
           title={t.DispatchIncomplete}
           detail="系統正在重新確認車輛與駕駛資料，尚未完成指派。完成後會立即通知您。"
         />
-        <Actions fixture={fixture} token={token} authMode={authMode} />
+        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
       </>
     );
   }
@@ -2064,7 +2070,7 @@ function RideContent({
           onCertificateUpdate={onCertificateUpdate}
         />
         <ComplaintForm token={token} authMode={authMode} />
-        <Actions fixture={fixture} token={token} authMode={authMode} />
+        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
       </>
     );
   }
@@ -2080,7 +2086,7 @@ function RideContent({
           onCertificateUpdate={onCertificateUpdate}
         />
         <ComplaintForm token={token} authMode={authMode} />
-        <Actions fixture={fixture} token={token} authMode={authMode} />
+        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
       </>
     );
   }
@@ -2117,7 +2123,7 @@ function RideContent({
           }
         />
         <FareCard fixture={fixture} />
-        <Actions fixture={fixture} token={token} authMode={authMode} />
+        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
       </>
     );
   }
@@ -2149,7 +2155,7 @@ function RideContent({
             </span>
           }
         />
-        <Actions fixture={fixture} token={token} authMode={authMode} />
+        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
       </>
     );
   }
@@ -2159,7 +2165,7 @@ function RideContent({
       <>
         <MapCard fixture={fixture} />
         <FareCard fixture={fixture} />
-        <Actions fixture={fixture} token={token} authMode={authMode} />
+        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
       </>
     );
   }
@@ -2231,7 +2237,7 @@ function RideContent({
         <EtaBlock fixture={fixture} />
         <VehicleCard fixture={fixture} plateChanged />
         <PaymentCard fixture={fixture} />
-        <Actions fixture={fixture} token={token} authMode={authMode} />
+        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
       </>
     );
   }
@@ -2244,7 +2250,7 @@ function RideContent({
         <VehicleCard fixture={fixture} />
         <SeatbeltNotice />
         <PaymentCard fixture={fixture} />
-        <Actions fixture={fixture} token={token} authMode={authMode} />
+        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
       </>
     );
   }
@@ -2269,7 +2275,7 @@ function RideContent({
         <EtaBlock fixture={fixture} />
         <VehicleCard fixture={fixture} />
         <ContactUnavailableCard fixture={fixture} />
-        <Actions fixture={fixture} token={token} authMode={authMode} />
+        <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
       </>
     );
   }
@@ -2282,7 +2288,7 @@ function RideContent({
       <VehicleCard fixture={fixture} />
       <FareCard fixture={fixture} />
       <PaymentCard fixture={fixture} />
-      <Actions fixture={fixture} token={token} authMode={authMode} />
+      <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
     </>
   );
 }
@@ -2292,6 +2298,7 @@ function PassengerScreen({
   token,
   authMode,
   onCertificateUpdate,
+  onFixtureUpdate,
 }: {
   fixture: PassengerRideFixture;
   token: string;
@@ -2299,6 +2306,7 @@ function PassengerScreen({
   onCertificateUpdate?:
     | ((cert: PassengerCertificatePresentation) => void)
     | undefined;
+  onFixtureUpdate?: ((fixture: PassengerRideFixture) => void) | undefined;
 }) {
   return (
     <>
@@ -2326,6 +2334,7 @@ function PassengerScreen({
           token={token}
           authMode={authMode}
           onCertificateUpdate={onCertificateUpdate}
+          onFixtureUpdate={onFixtureUpdate}
         />
         <FooterNotice />
       </div>
@@ -2445,6 +2454,7 @@ export function PassengerRidePage({
           token={token}
           authMode={authMode}
           onCertificateUpdate={handleCertificateUpdate}
+          onFixtureUpdate={setLiveFixture}
         />
       </ConnectionContext.Provider>
     </Shell>

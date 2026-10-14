@@ -520,6 +520,20 @@ async function forward(
       if (fullPath === "auth/logout" && method === "POST") {
         headers.set("Content-Type", "application/json");
       }
+      if (
+        path[0] === "rides" &&
+        path[2] === "complaints" &&
+        method === "POST" &&
+        !headers.has("idempotency-key")
+      ) {
+        headers.set(
+          "idempotency-key",
+          typeof crypto !== "undefined" &&
+            typeof crypto.randomUUID === "function"
+            ? `bff-complaint-${crypto.randomUUID()}`
+            : `bff-complaint-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        );
+      }
       await applyUpstreamAuth(headers, targetUrl, currentToken);
       const init: RequestInit = {
         method,

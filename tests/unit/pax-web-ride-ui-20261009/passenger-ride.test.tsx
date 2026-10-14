@@ -197,10 +197,13 @@ describe("Passenger Ride UI Acceptance", () => {
     expect(fetchCalls[0].body.contactConsent).toBe(false);
   });
 
-  it("CertificateCard renders HTML iframe and PDF download links correctly", async () => {
+  it("CertificateCard renders HTML and PDF download links correctly without embedding iframe", async () => {
     const view = {
       order: { orderId: "order-uuid", status: "completed" },
-      receipt: { receiptUrl: "https://example.com/authorized.html" },
+      receipt: {
+        receiptUrl: "https://example.com/authorized.html",
+        pdfUrl: "https://example.com/authorized.pdf",
+      },
       actions: { canReadReceipt: true },
     };
     fetchResponse = { ride: view };
@@ -215,9 +218,9 @@ describe("Passenger Ride UI Acceptance", () => {
     );
 
     await waitFor(() => {
-      const iframe = document.querySelector("iframe");
-      expect(iframe).toBeTruthy();
-      expect(iframe?.src).toBe("https://example.com/authorized.html");
+      expect(screen.getByText("下載 HTML")).toBeTruthy();
+      expect(screen.getByText("下載 PDF")).toBeTruthy();
+      expect(document.querySelector("iframe")).toBeNull();
     });
   });
 

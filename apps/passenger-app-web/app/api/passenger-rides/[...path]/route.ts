@@ -74,8 +74,6 @@ function isAllowedPath(method: string, path: string[]) {
     return true; // POST :token/ratings
   if (method === "POST" && path.length === 2 && path[1] === "contact")
     return true; // POST :token/contact
-  if (method === "POST" && path.length === 2 && path[1] === "complaints")
-    return true; // POST :token/complaints
   if (method === "GET" && path.length === 2 && path[1] === "receipt")
     return true; // GET :token/receipt
   if (

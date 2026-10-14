@@ -351,11 +351,21 @@ export class PassengerClient implements PassengerViewModel {
   async createComplaint(
     id: string,
     command: import("./types.js").CreatePassengerComplaintCommand,
+    idempotencyKey?: string,
   ): Promise<import("./types.js").CreatePassengerComplaintResponse> {
+    const key =
+      idempotencyKey ||
+      (command as any).idempotencyKey ||
+      (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? `complaint-${crypto.randomUUID()}`
+        : `complaint-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
     return this.request<import("./types.js").CreatePassengerComplaintResponse>(
       `/api/passenger-app/rides/${encodeURIComponent(id)}/complaints`,
       {
         method: "POST",
+        headers: {
+          "idempotency-key": key,
+        },
         body: JSON.stringify(command),
       },
     );
