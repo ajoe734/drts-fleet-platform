@@ -1,10 +1,10 @@
+import { legacyExpiryRegistryStorage } from "../../registry-driver-master-durable-ack-20261014/storage-fixture";
 import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 
 import { OpsDispatchEventsService } from "../../../../apps/api/src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { DriverProfileService } from "../../../../apps/api/src/modules/driver-profile/driver-profile.service";
-import { RegulatoryRegistryRepository } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
 import { RegulatoryRegistryService } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 import { NotificationDeliveryService } from "../../../../apps/api/src/modules/notification-delivery/notification-delivery.service";
 import { MemoryMailOutbox } from "./test-helpers";
@@ -17,7 +17,7 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: Credential Expiry Reconciliation & Rene
     const opsEvents = new OpsDispatchEventsService(new EventEmitter() as any);
     const auditNotification = new AuditNotificationService();
     const driverProfile = new DriverProfileService(auditNotification);
-    const repository = new RegulatoryRegistryRepository();
+    const { repository, withMasterStorage } = legacyExpiryRegistryStorage();
 
     const outbox = options?.withOutbox ? new MemoryMailOutbox() : null;
     const notificationDelivery = outbox
@@ -33,17 +33,19 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: Credential Expiry Reconciliation & Rene
       options?.mockAcademyService,
     );
 
-    return { service, repository, outbox };
+    return { service, repository, outbox, withMasterStorage };
   };
 
   describe("Driver Credential Expiry Scanning & Event Invariants", () => {
     it("scans expired driver licenses (<= asOf) and creates expiry events with delivery intents", async () => {
-      const { service } = createService();
+      const { service, withMasterStorage } = createService();
 
       // Seed driver with expired license
-      service.updateDriverLicenses("drv-demo-001", {
-        licenseExpiry: "2026-05-01T00:00:00.000Z",
-      });
+      await withMasterStorage(() =>
+        service.updateDriverLicenses("drv-demo-001", {
+          licenseExpiry: "2026-05-01T00:00:00.000Z",
+        }),
+      );
 
       const asOf = "2026-05-15T00:00:00.000Z";
       const result = await service.reconcileExpiredCredentials({
@@ -58,7 +60,9 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: Credential Expiry Reconciliation & Rene
       // Verify the event was persisted in backlog
       const backlog = await service.getExpiryBacklog({ entityType: "driver" });
       const driverEvent = backlog.find(
-        (e) => e.entity_id === "drv-demo-001" && e.credential_type === "driver_license",
+        (e) =>
+          e.entity_id === "drv-demo-001" &&
+          e.credential_type === "driver_license",
       );
       expect(driverEvent).toBeDefined();
       expect(driverEvent!.status).toBe("pending");
@@ -72,13 +76,15 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: Credential Expiry Reconciliation & Rene
     });
 
     it("does not flag future credentials (> asOf) as expired", async () => {
-      const { service } = createService();
+      const { service, withMasterStorage } = createService();
 
-      service.updateDriverLicenses("drv-demo-002", {
-        licenseExpiry: "2027-01-01T00:00:00.000Z",
-        professionalDriverLicenseExpiry: "2027-01-01T00:00:00.000Z",
-        taxiDriverRegistrationExpiry: "2027-01-01T00:00:00.000Z",
-      });
+      await withMasterStorage(() =>
+        service.updateDriverLicenses("drv-demo-002", {
+          licenseExpiry: "2027-01-01T00:00:00.000Z",
+          professionalDriverLicenseExpiry: "2027-01-01T00:00:00.000Z",
+          taxiDriverRegistrationExpiry: "2027-01-01T00:00:00.000Z",
+        }),
+      );
 
       const asOf = "2026-06-01T00:00:00.000Z";
       await service.reconcileExpiredCredentials({ asOf });
@@ -91,12 +97,14 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: Credential Expiry Reconciliation & Rene
     });
 
     it("does not permanently overwrite licensesValid on the driver record", async () => {
-      const { service } = createService();
+      const { service, withMasterStorage } = createService();
 
-      const initialDriver = service.updateDriverLicenses("drv-demo-001", {
-        licenseExpiry: "2028-01-01T00:00:00.000Z",
-        licensesValid: true,
-      });
+      const initialDriver = await withMasterStorage(() =>
+        service.updateDriverLicenses("drv-demo-001", {
+          licenseExpiry: "2028-01-01T00:00:00.000Z",
+          licensesValid: true,
+        }),
+      );
       expect(initialDriver.licensesValid).toBe(true);
 
       await service.reconcileExpiredCredentials({
@@ -168,19 +176,25 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: Credential Expiry Reconciliation & Rene
         }),
       };
 
-      const { service } = createService({ mockAcademyService });
+      const { service, withMasterStorage } = createService({
+        mockAcademyService,
+      });
 
       // Seed driver
-      service.updateDriverLicenses("drv-demo-004", {
-        licenseExpiry: "2027-01-01T00:00:00.000Z", // License valid
-      });
+      await withMasterStorage(() =>
+        service.updateDriverLicenses("drv-demo-004", {
+          licenseExpiry: "2027-01-01T00:00:00.000Z", // License valid
+        }),
+      );
 
       const asOf = "2026-06-01T00:00:00.000Z";
       await service.reconcileExpiredCredentials({ asOf });
 
       const backlog = await service.getExpiryBacklog({ entityType: "driver" });
       const academyEvent = backlog.find(
-        (e) => e.entity_id === "drv-demo-004" && e.credential_type === "academy_qualification",
+        (e) =>
+          e.entity_id === "drv-demo-004" &&
+          e.credential_type === "academy_qualification",
       );
       expect(academyEvent).toBeDefined();
       expect(academyEvent!.source_expiry_at).toBe("2026-01-01T00:00:00.000Z");
@@ -189,25 +203,33 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: Credential Expiry Reconciliation & Rene
 
   describe("Renewal & Superseded Invariant (§B4)", () => {
     it("marks older active event superseded upon driver credential renewal", async () => {
-      const { service } = createService();
+      const { service, withMasterStorage } = createService();
 
       // Expired license
-      service.updateDriverLicenses("drv-demo-001", {
-        licenseExpiry: "2026-01-01T00:00:00.000Z",
+      await withMasterStorage(() =>
+        service.updateDriverLicenses("drv-demo-001", {
+          licenseExpiry: "2026-01-01T00:00:00.000Z",
+        }),
+      );
+
+      await service.reconcileExpiredCredentials({
+        asOf: "2026-06-01T00:00:00.000Z",
       });
 
-      await service.reconcileExpiredCredentials({ asOf: "2026-06-01T00:00:00.000Z" });
-
-      const beforeRenewal = await service.getExpiryBacklog({ entityType: "driver" });
+      const beforeRenewal = await service.getExpiryBacklog({
+        entityType: "driver",
+      });
       const initialEvent = beforeRenewal.find(
         (e) => e.entity_id === "drv-demo-001" && e.status === "pending",
       );
       expect(initialEvent).toBeDefined();
 
       // Driver renews license!
-      service.updateDriverLicenses("drv-demo-001", {
-        licenseExpiry: "2028-01-01T00:00:00.000Z",
-      });
+      await withMasterStorage(() =>
+        service.updateDriverLicenses("drv-demo-001", {
+          licenseExpiry: "2028-01-01T00:00:00.000Z",
+        }),
+      );
 
       // Older event should now be marked superseded
       const eventAfter = await service.getExpiryEvent(initialEvent!.event_id);
@@ -236,7 +258,11 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: Credential Expiry Reconciliation & Rene
       expect(event.status).toBe("pending");
 
       // Activate policy
-      await repository.supersedeActiveExpiryEventsForEntity("policy", "pol-test-1", "insurance_policy");
+      await repository.supersedeActiveExpiryEventsForEntity(
+        "policy",
+        "pol-test-1",
+        "insurance_policy",
+      );
 
       const refreshed = await repository.getExpiryEventById(event.event_id);
       expect(refreshed!.status).toBe("superseded");
@@ -245,11 +271,15 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: Credential Expiry Reconciliation & Rene
 
   describe("Durable Delivery Intent & Outbox Hand-off (§B5)", () => {
     it("enqueues delivery intent to NotificationDeliveryService and marks intent enqueued & event completed", async () => {
-      const { service, outbox } = createService({ withOutbox: true });
-
-      service.updateDriverLicenses("drv-demo-001", {
-        licenseExpiry: "2026-01-01T00:00:00.000Z",
+      const { service, outbox, withMasterStorage } = createService({
+        withOutbox: true,
       });
+
+      await withMasterStorage(() =>
+        service.updateDriverLicenses("drv-demo-001", {
+          licenseExpiry: "2026-01-01T00:00:00.000Z",
+        }),
+      );
 
       const result = await service.reconcileExpiredCredentials({
         asOf: "2026-06-01T00:00:00.000Z",
@@ -260,7 +290,9 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: Credential Expiry Reconciliation & Rene
       // Verify intent is enqueued with outbox_delivery_id
       const receipts = await service.getExpiryReceipts();
       expect(receipts.length).toBeGreaterThanOrEqual(1);
-      expect(receipts.every((r) => r.delivery_status === "enqueued")).toBe(true);
+      expect(receipts.every((r) => r.delivery_status === "enqueued")).toBe(
+        true,
+      );
       expect(receipts[0]!.outbox_delivery_id).toBeDefined();
 
       // Verify event is marked completed
@@ -270,15 +302,21 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: Credential Expiry Reconciliation & Rene
       // Verify outbox received the message
       const queuedDeliveries = Object.values(outbox!.state.deliveries);
       expect(queuedDeliveries.length).toBeGreaterThanOrEqual(1);
-      expect(queuedDeliveries[0]!.message.idempotencyKey).toBe(receipts[0]!.idempotency_key);
+      expect(queuedDeliveries[0]!.message.idempotencyKey).toBe(
+        receipts[0]!.idempotency_key,
+      );
     });
 
     it("leaves intent pending and event pending when no delivery service is configured", async () => {
-      const { service } = createService({ withOutbox: false });
-
-      service.updateDriverLicenses("drv-demo-001", {
-        licenseExpiry: "2026-01-01T00:00:00.000Z",
+      const { service, withMasterStorage } = createService({
+        withOutbox: false,
       });
+
+      await withMasterStorage(() =>
+        service.updateDriverLicenses("drv-demo-001", {
+          licenseExpiry: "2026-01-01T00:00:00.000Z",
+        }),
+      );
 
       const result = await service.reconcileExpiredCredentials({
         asOf: "2026-06-01T00:00:00.000Z",

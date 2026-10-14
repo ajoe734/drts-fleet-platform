@@ -1,11 +1,15 @@
-import { Injectable, HttpStatus } from "@nestjs/common";
+import { Injectable, HttpStatus, Optional } from "@nestjs/common";
 import { PassengerBookingRepository } from "./passenger-booking.repository";
 import { MultiTaxiService } from "../../multi-taxi/multi-taxi.service";
 import { PassengerFareRepository } from "../fare/passenger-fare.repository";
 import { PassengerAccountRepository } from "../account/passenger-account.repository";
 import { ApiRequestError } from "../../../common/api-envelope";
+import type {
+  CreateMultiTaxiRideCommand,
+  RatePassengerRideCommand,
+} from "@drts/contracts";
+import { ComplaintService } from "../../complaint/complaint.service";
 import { bookingPaymentMethodId } from "../payment/booking-payment.guard";
-import type { CreateMultiTaxiRideCommand } from "@drts/contracts";
 import {
   CreatePassengerRideCommand,
   PassengerBookingSettingsResponse,
@@ -19,6 +23,7 @@ export class PassengerBookingService {
     private readonly multiTaxiService: MultiTaxiService,
     private readonly fareRepository: PassengerFareRepository,
     private readonly accountRepository: PassengerAccountRepository,
+    @Optional() private readonly complaintService?: ComplaintService,
   ) {}
 
   getBookingSettings(): PassengerBookingSettingsResponse {
@@ -333,6 +338,74 @@ export class PassengerBookingService {
       }
     }
     return { rides };
+  }
+
+  async rateRide(
+    passengerId: string,
+    orderId: string,
+    body: RatePassengerRideCommand,
+  ) {
+    await this.getRide(passengerId, orderId);
+    const score = body?.rating;
+    if (
+      score !== 1 &&
+      score !== 2 &&
+      score !== 3 &&
+      score !== 4 &&
+      score !== 5
+    ) {
+      throw new ApiRequestError(
+        400,
+        "PASSENGER_RATING_SCORE_INVALID",
+        "Rating must be between 1 and 5.",
+      );
+    }
+    if (
+      body.contactRequested !== undefined &&
+      typeof body.contactRequested !== "boolean"
+    ) {
+      throw new ApiRequestError(
+        400,
+        "PASSENGER_RATING_CONSENT_INVALID",
+        "Contact requested must be a boolean.",
+      );
+    }
+    if (
+      body.comments !== undefined &&
+      (typeof body.comments !== "string" ||
+        Array.from(body.comments).length > 200)
+    ) {
+      throw new ApiRequestError(
+        400,
+        "PASSENGER_RATING_COMMENT_INVALID",
+        "Comments must be at most 200 characters.",
+      );
+    }
+    if (!this.complaintService)
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Rating consent storage is unavailable.",
+      );
+    const command = {
+      score,
+      tags: body.tags ?? [],
+      comment: body.comments?.trim() || null,
+    };
+    const hook = this.complaintService.preparePassengerRatingHook(
+      passengerId,
+      orderId,
+      body.contactRequested === true,
+      command,
+    );
+    await this.multiTaxiService.submitTrustedPassengerRating(
+      orderId,
+      command,
+      passengerId,
+      hook,
+    );
+    await hook.afterCommit();
+    return { success: true };
   }
 
   async getRide(passengerId: string, orderId: string) {

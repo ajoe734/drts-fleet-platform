@@ -1,3 +1,4 @@
+import { enabledRegistryRepository } from "../../registry-driver-master-durable-ack-20261014/storage-fixture";
 // SR-DRIVER-GAPS-20260911 -- Driver-side four product gaps remediation unit tests
 // Covers:
 // 1. C051: Shift attendance clockIn checks driver lifecycle suspension & certification validity
@@ -26,7 +27,7 @@ function createRegistryContext() {
     } as never,
     auditService,
     profileService,
-    undefined,
+    enabledRegistryRepository(),
   );
   return { auditService, registry };
 }
@@ -59,7 +60,7 @@ describe("SR-DRIVER-GAPS-20260911: Remediation Suite", () => {
         registry,
       );
 
-      registry.updateDriverLifecycle("drv-demo-001", {
+      await registry.updateDriverLifecycle("drv-demo-001", {
         lifecycleStatus: "suspended",
         reason: "Disciplinary suspension",
       });
@@ -86,7 +87,7 @@ describe("SR-DRIVER-GAPS-20260911: Remediation Suite", () => {
       );
 
       const pastDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      registry.updateDriverLicenses("drv-demo-001", {
+      await registry.updateDriverLicenses("drv-demo-001", {
         professionalDriverLicenseExpiry: pastDate,
       });
 
@@ -295,7 +296,7 @@ describe("SR-DRIVER-GAPS-20260911: Remediation Suite", () => {
       const yesterday = new Date(
         Date.now() - 24 * 60 * 60 * 1000,
       ).toISOString();
-      const updated = registry.updateDriverLicenses("drv-demo-001", {
+      const updated = await registry.updateDriverLicenses("drv-demo-001", {
         professionalDriverLicenseExpiry: yesterday,
       });
 
@@ -328,10 +329,10 @@ describe("SR-DRIVER-GAPS-20260911: Remediation Suite", () => {
       const in15Days = new Date(now + 15 * 24 * 60 * 60 * 1000).toISOString();
       const in60Days = new Date(now + 60 * 24 * 60 * 60 * 1000).toISOString();
 
-      registry.updateDriverLicenses("drv-demo-001", {
+      await registry.updateDriverLicenses("drv-demo-001", {
         professionalDriverLicenseExpiry: in15Days,
       });
-      registry.updateDriverLicenses("drv-demo-002", {
+      await registry.updateDriverLicenses("drv-demo-002", {
         professionalDriverLicenseExpiry: in60Days,
       });
 

@@ -293,17 +293,17 @@ export function deriveStatementDates(
   const effectiveIssuedAt =
     rawIssuedAt ??
     (typeof periodOrRecord === "object"
-      ? periodOrRecord.issuedAt ?? periodOrRecord.issued_at
+      ? (periodOrRecord.issuedAt ?? periodOrRecord.issued_at)
       : undefined);
   const effectiveDueAt =
     rawDueAt ??
     (typeof periodOrRecord === "object"
-      ? periodOrRecord.dueAt ?? periodOrRecord.due_at
+      ? (periodOrRecord.dueAt ?? periodOrRecord.due_at)
       : undefined);
   const effectiveGeneratedAt =
     rawGeneratedAt ??
     (typeof periodOrRecord === "object"
-      ? periodOrRecord.generatedAt ?? periodOrRecord.generated_at
+      ? (periodOrRecord.generatedAt ?? periodOrRecord.generated_at)
       : undefined);
 
   // Check if there is an exact seed statement record for this period
@@ -611,7 +611,8 @@ async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
   if (usageResult.status === "rejected") failures.push("program-usage");
   if (ordersResult.status === "rejected") failures.push("orders");
   if (contractsResult.status === "rejected") failures.push("contracts");
-  if (statementsResult.status === "rejected") failures.push("settlement-statements");
+  if (statementsResult.status === "rejected")
+    failures.push("settlement-statements");
   if (usersResult.status === "rejected") failures.push("users");
   if (auditResult.status === "rejected") failures.push("audit");
 
@@ -623,11 +624,11 @@ async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
     contractsResult.status === "fulfilled" ? contractsResult.value : [];
   const statements =
     statementsResult.status === "fulfilled" ? statementsResult.value : [];
-  const rawUsers =
-    usersResult.status === "fulfilled" ? usersResult.value : [];
+  const rawUsers = usersResult.status === "fulfilled" ? usersResult.value : [];
   const users = Array.isArray(rawUsers)
     ? rawUsers
-    : rawUsers && Array.isArray((rawUsers as { items?: TenantUserRoleRecord[] }).items)
+    : rawUsers &&
+        Array.isArray((rawUsers as { items?: TenantUserRoleRecord[] }).items)
       ? (rawUsers as { items: TenantUserRoleRecord[] }).items
       : [];
   const audit = auditResult.status === "fulfilled" ? auditResult.value : [];
@@ -674,7 +675,7 @@ export function mapStatementsFromApi(
     const paidTotal = totals?.paid_total ?? totals?.paidTotal;
     const issuerPayable = totals?.issuer_payable ?? totals?.issuerPayable;
     const tripCount =
-      totals?.trip_count ?? totals?.tripCount ?? (statement.lines?.length ?? 0);
+      totals?.trip_count ?? totals?.tripCount ?? statement.lines?.length ?? 0;
 
     const artifactRef = statement.artifact_ref ?? statement.artifactRef;
     const artifactId =

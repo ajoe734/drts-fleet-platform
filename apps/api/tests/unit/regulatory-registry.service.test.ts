@@ -1,3 +1,4 @@
+import { enabledRegistryRepository } from "../../../../tests/unit/registry-driver-master-durable-ack-20261014/storage-fixture";
 import { HttpStatus } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 
@@ -20,6 +21,7 @@ function createService(
     listLatestDriverLocations: ReturnType<typeof vi.fn>;
     loadState: ReturnType<typeof vi.fn>;
   }> = {},
+  masterStorage = false,
 ) {
   const opsDispatchEventsService = {
     publishDriverLocationUpdated: vi.fn(),
@@ -58,7 +60,9 @@ function createService(
     opsDispatchEventsService as never,
     auditNotificationService,
     driverProfileService,
-    regulatoryRegistryRepository as never,
+    masterStorage
+      ? enabledRegistryRepository()
+      : (regulatoryRegistryRepository as never),
   );
 
   return {
@@ -363,7 +367,7 @@ describe("RegulatoryRegistryService", () => {
   });
 
   it("creates a driver master with linked profile and lifecycle audit metadata", async () => {
-    const { service, auditNotificationService } = createService();
+    const { service, auditNotificationService } = createService({}, true);
 
     const created = await service.createDriver(
       {
@@ -391,14 +395,14 @@ describe("RegulatoryRegistryService", () => {
     expect(auditLog?.resourceId).toBe(created.driverId);
   });
 
-  it("removes suspended and retired drivers from dispatch eligibility", () => {
-    const { service } = createService();
+  it("removes suspended and retired drivers from dispatch eligibility", async () => {
+    const { service } = createService({}, true);
 
     expect(service.getDriverAvailability("drv-demo-001", "standard_taxi")).toBe(
       true,
     );
 
-    const suspended = service.updateDriverLifecycle("drv-demo-001", {
+    const suspended = await service.updateDriverLifecycle("drv-demo-001", {
       lifecycleStatus: "suspended",
       reason: "manual compliance hold",
     });
@@ -410,12 +414,12 @@ describe("RegulatoryRegistryService", () => {
       false,
     );
 
-    const reactivated = service.updateDriverLifecycle("drv-demo-001", {
+    const reactivated = await service.updateDriverLifecycle("drv-demo-001", {
       lifecycleStatus: "active",
     });
     expect(reactivated.dispatchEligible).toBe(true);
 
-    const retired = service.updateDriverLifecycle("drv-demo-001", {
+    const retired = await service.updateDriverLifecycle("drv-demo-001", {
       lifecycleStatus: "retired",
       reason: "driver retired",
     });

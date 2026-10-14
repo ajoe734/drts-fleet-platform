@@ -1,3 +1,4 @@
+import { legacyExpiryRegistryStorage } from "../../../unit/registry-driver-master-durable-ack-20261014/storage-fixture";
 import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 
@@ -5,7 +6,6 @@ import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../../../apps/api/src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { DriverProfileService } from "../../../../apps/api/src/modules/driver-profile/driver-profile.service";
-import { RegulatoryRegistryRepository } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
 import { RegulatoryRegistryService } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 import { RegulatoryRegistryController } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.controller";
 import { NotificationDeliveryService } from "../../../../apps/api/src/modules/notification-delivery/notification-delivery.service";
@@ -16,7 +16,7 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: RegulatoryRegistry Controller & Lifecyc
     const opsEvents = new OpsDispatchEventsService(new EventEmitter() as any);
     const auditNotification = new AuditNotificationService();
     const driverProfile = new DriverProfileService(auditNotification);
-    const repository = new RegulatoryRegistryRepository();
+    const { repository, withMasterStorage } = legacyExpiryRegistryStorage();
     const outbox = new MemoryMailOutbox();
     const notificationDelivery = new NotificationDeliveryService(outbox);
 
@@ -30,16 +30,18 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: RegulatoryRegistry Controller & Lifecyc
 
     const controller = new RegulatoryRegistryController(service);
 
-    return { controller, service, repository, outbox };
+    return { controller, service, repository, outbox, withMasterStorage };
   };
 
   it("executes full lifecycle: reconcile endpoint -> backlog -> receipts -> event detail -> renewal", async () => {
-    const { controller, service } = createController();
+    const { controller, service, withMasterStorage } = createController();
 
     // 1. Seed expired driver license
-    service.updateDriverLicenses("drv-demo-001", {
-      licenseExpiry: "2026-04-01T00:00:00.000Z",
-    });
+    await withMasterStorage(() =>
+      service.updateDriverLicenses("drv-demo-001", {
+        licenseExpiry: "2026-04-01T00:00:00.000Z",
+      }),
+    );
 
     // 2. Call reconcile-expiry endpoint
     const reconcileResponse = await controller.reconcileExpiry({
@@ -50,11 +52,18 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: RegulatoryRegistry Controller & Lifecyc
 
     expect(reconcileResponse.data).toBeDefined();
     expect(reconcileResponse.data.scannedDrivers).toBeGreaterThanOrEqual(1);
-    expect(reconcileResponse.data.expiredEventsCreated).toBeGreaterThanOrEqual(1);
-    expect(reconcileResponse.data.deliveryIntentsEnqueued).toBeGreaterThanOrEqual(1);
+    expect(reconcileResponse.data.expiredEventsCreated).toBeGreaterThanOrEqual(
+      1,
+    );
+    expect(
+      reconcileResponse.data.deliveryIntentsEnqueued,
+    ).toBeGreaterThanOrEqual(1);
 
     // 3. Query backlog endpoint
-    const backlogResponse = await controller.getExpiryBacklog("default", "driver");
+    const backlogResponse = await controller.getExpiryBacklog(
+      "default",
+      "driver",
+    );
     expect(backlogResponse.data).toBeDefined();
     const events = backlogResponse.data;
     expect(events.length).toBeGreaterThanOrEqual(1);
@@ -71,17 +80,23 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: RegulatoryRegistry Controller & Lifecyc
     expect(receipts.length).toBeGreaterThanOrEqual(1);
 
     // 5. Query event by ID endpoint
-    const eventDetailResponse = await controller.getExpiryEvent(targetEvent.event_id);
+    const eventDetailResponse = await controller.getExpiryEvent(
+      targetEvent.event_id,
+    );
     expect(eventDetailResponse.data).toBeDefined();
     expect(eventDetailResponse.data.event_id).toBe(targetEvent.event_id);
     expect(eventDetailResponse.data.intent).toBeDefined();
 
     // 6. Renewal superseding
-    service.updateDriverLicenses("drv-demo-001", {
-      licenseExpiry: "2028-01-01T00:00:00.000Z",
-    });
+    await withMasterStorage(() =>
+      service.updateDriverLicenses("drv-demo-001", {
+        licenseExpiry: "2028-01-01T00:00:00.000Z",
+      }),
+    );
 
-    const refreshedEvent = await controller.getExpiryEvent(targetEvent.event_id);
+    const refreshedEvent = await controller.getExpiryEvent(
+      targetEvent.event_id,
+    );
     expect(refreshedEvent.data.status).toBe("superseded");
     expect(refreshedEvent.data.superseded_at).toBeDefined();
 

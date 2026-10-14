@@ -17,8 +17,10 @@ import { PLATFORM_CURRENCY } from "./index";
 //     and a new safety.* schema for S-3.
 
 import type {
+  ActualTripFareBreakdown,
   AddressPayload,
   ControlledDownloadRecord,
+  DriverDeclaredSurnameSnapshot,
   MoneyAmount,
   OwnedOrderStatus,
   PassengerProfile,
@@ -555,6 +557,8 @@ export interface SubmitPassengerTripRatingCommand {
   score: 1 | 2 | 3 | 4 | 5;
   tags?: string[];
   comment?: string | null;
+  /** Omitted by legacy callers; new ratings capture false in that case. */
+  contactRequested?: boolean;
 }
 
 export const PASSENGER_CONTACT_UNAVAILABLE_REASONS = [
@@ -684,7 +688,11 @@ export interface MultiTaxiElectronicReceipt {
   record: Partial<MultiTaxiElectronicReceiptRecord> & Record<string, unknown>;
 }
 
-export interface MultiTaxiElectronicReceiptRecord {
+export interface MultiTaxiElectronicReceiptRecord extends Partial<DriverDeclaredSurnameSnapshot> {
+  /** Captured actual components; no aggregate/toll convention or full E-04 inferred. */
+  actualFareBreakdown?: ActualTripFareBreakdown;
+  /** Actual captured completion facts; legacy records may be incomplete. */
+  e04Snapshot?: MultiTaxiReceiptE04Snapshot;
   tripId: string;
   plateNo: string;
   pickupAt: string;
@@ -701,6 +709,19 @@ export interface MultiTaxiElectronicReceiptRecord {
   pdfUrl: string;
   supersededByCertificateId?: string;
   generatedFrom: "owned_mobility_completion" | "certificate_regeneration";
+}
+
+export interface MultiTaxiReceiptE04Snapshot {
+  fleetOperatorName: string;
+  driverSurname: string;
+  driverRegistrationMasked: string;
+  fareBreakdown: {
+    startMinor: number;
+    distanceMinor: number;
+    delayMinor: number;
+    nightMinor: number;
+  };
+  paymentMethodDisplay: string;
 }
 
 export interface RegenerateMultiTaxiElectronicReceiptCommand {

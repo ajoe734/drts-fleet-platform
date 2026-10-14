@@ -11,6 +11,9 @@ import {
 } from "./partner-notification.types";
 import { notificationExpiresAt } from "./partner-notification.transport";
 import { PLATFORM_CURRENCY } from "@drts/contracts";
+import type { PassengerReceiptResponse } from "@drts/contracts";
+import { CertificateSupportService } from "../certificate-support/certificate-support.service";
+import { ComplaintService } from "../complaint/complaint.service";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { DatabaseService } from "../../common/db/database.service";
 import type { OwnedMobilityQueryExecutor } from "../owned-mobility/owned-mobility.repository";
@@ -90,6 +93,7 @@ import {
   type PassengerNotificationChannelMetadata,
   type PassengerRatingReviewRepositoryDetail,
   type PassengerRatingReviewRepositoryQuery,
+  type PassengerAccountRatingHook,
 } from "./multi-taxi.repository";
 import { resolveNonPartnerChannelOutcome } from "./passenger-notification-channel-router";
 import {
@@ -192,6 +196,10 @@ export class MultiTaxiService implements OnModuleInit {
     private readonly tenantPartnerService?: TenantPartnerService,
     @Optional()
     private readonly firstPartyTransport?: FirstPartyNotificationTransport,
+    @Optional()
+    private readonly certificateSupportService?: CertificateSupportService,
+    @Optional()
+    private readonly complaintService?: ComplaintService,
   ) {}
 
   async onModuleInit() {
@@ -654,8 +662,24 @@ export class MultiTaxiService implements OnModuleInit {
     orderId: string,
     command: SubmitPassengerTripRatingCommand,
     passengerSubjectRef: string,
+    accountHook?: PassengerAccountRatingHook,
   ) {
     const order = this.requireMultiTaxiOrder(orderId);
+    if (
+      accountHook &&
+      this.resolvePassengerSubjectRef(order) !== passengerSubjectRef
+    )
+      throw new ApiRequestError(
+        404,
+        "PASSENGER_RIDE_NOT_FOUND",
+        "Ride not found.",
+      );
+    if (accountHook && !this.repository?.isEnabled())
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_RATING_STORAGE_UNAVAILABLE",
+        "Rating storage is unavailable.",
+      );
     if (order.status !== "completed") {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -685,7 +709,7 @@ export class MultiTaxiService implements OnModuleInit {
     );
     if (existing) {
       this.assertIdempotentRating(existing, score, tags, comment);
-      return existing;
+      if (!accountHook) return existing;
     }
 
     const now = new Date().toISOString();
@@ -704,6 +728,7 @@ export class MultiTaxiService implements OnModuleInit {
     };
     const persisted = (await this.repository?.persistPassengerRating(
       rating,
+      accountHook,
     )) ?? { rating, summary: null };
     this.assertIdempotentRating(persisted.rating, score, tags, comment);
     this.ratingsByPassengerOrder.set(
@@ -729,8 +754,14 @@ export class MultiTaxiService implements OnModuleInit {
     orderId: string,
     passengerSubjectRef: string,
   ) {
-    void passengerSubjectRef;
     const order = this.requireMultiTaxiOrder(orderId);
+    if (this.resolvePassengerSubjectRef(order) !== passengerSubjectRef) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PASSENGER_RIDE_NOT_FOUND",
+        "Ride not found.",
+      );
+    }
     const receipt =
       (await this.repository?.findElectronicReceipt(order.orderId)) ?? null;
     if (!receipt) {
@@ -741,7 +772,64 @@ export class MultiTaxiService implements OnModuleInit {
         { orderId: order.orderId },
       );
     }
-    return receipt;
+    return {
+      ...receipt,
+      record: {
+        ...receipt.record,
+        htmlUrl: `/api/passenger-app/rides/${encodeURIComponent(orderId)}/receipt/artifacts/html`,
+        pdfUrl: `/api/passenger-app/rides/${encodeURIComponent(orderId)}/receipt/artifacts/pdf`,
+      },
+    };
+  }
+
+  async getTrustedPassengerReceiptDownloads(
+    orderId: string,
+    passengerSubjectRef: string,
+  ): Promise<PassengerReceiptResponse> {
+    const receipt = await this.getTrustedPassengerReceipt(
+      orderId,
+      passengerSubjectRef,
+    );
+    await this.requireCertificateSupport().getPassengerView(
+      receipt.receiptId,
+      orderId,
+    );
+    const htmlUrl = `/api/passenger-app/rides/${encodeURIComponent(orderId)}/receipt/artifacts/html`;
+    const pdfUrl = `/api/passenger-app/rides/${encodeURIComponent(orderId)}/receipt/artifacts/pdf`;
+    return {
+      receiptUrl: htmlUrl,
+      htmlUrl,
+      pdfUrl,
+      certificateId: receipt.receiptId,
+      orderId,
+    };
+  }
+
+  async getTrustedPassengerReceiptArtifact(
+    orderId: string,
+    passengerSubjectRef: string,
+    format: "html" | "pdf",
+  ) {
+    const receipt = await this.getTrustedPassengerReceipt(
+      orderId,
+      passengerSubjectRef,
+    );
+    return this.requireCertificateSupport().getPassengerArtifact(
+      receipt.receiptId,
+      orderId,
+      format,
+    );
+  }
+
+  private requireCertificateSupport(): CertificateSupportService {
+    if (!this.certificateSupportService) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "CERTIFICATE_WRITER_UNAVAILABLE",
+        "The certificate authority is unavailable.",
+      );
+    }
+    return this.certificateSupportService;
   }
 
   streamTrustedPassengerEvents(
@@ -857,6 +945,8 @@ export class MultiTaxiService implements OnModuleInit {
   ) {
     const token = await this.requireAccessToken(accessToken, "ride:rate");
     const order = this.requireMultiTaxiOrder(token.orderId);
+    if (this.resolvePassengerSubjectRef(order) !== token.passengerSubjectRef)
+      throw this.invalidPassengerToken();
     if (order.status !== "completed") {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -881,14 +971,47 @@ export class MultiTaxiService implements OnModuleInit {
     const score = this.requireRatingScore(command.score);
     const tags = this.normalizeRatingTags(command.tags);
     const comment = command.comment?.trim() || null;
-    const existing = await this.findPassengerRating(
-      order.orderId,
-      token.passengerSubjectRef,
-    );
-    if (existing) {
-      this.assertIdempotentRating(existing, score, tags, comment);
-      return existing;
+    if (
+      command.contactRequested !== undefined &&
+      typeof command.contactRequested !== "boolean"
+    )
+      throw new ApiRequestError(
+        400,
+        "PASSENGER_RATING_CONTACT_INVALID",
+        "contactRequested must be a boolean when provided.",
+      );
+    const durable = this.repository?.isEnabled?.() ?? false;
+    if (!durable && command.contactRequested !== undefined)
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_RATING_STORAGE_UNAVAILABLE",
+        "Rating contact choices require durable storage.",
+      );
+    if (durable && !this.complaintService)
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Rating consent storage is unavailable.",
+      );
+    // Durable retries always enter the transaction and read the original choice.
+    // Keep the existing server-free legacy behavior for omitted-contact callers.
+    if (!durable) {
+      const existing = await this.findPassengerRating(
+        order.orderId,
+        token.passengerSubjectRef,
+      );
+      if (existing) {
+        this.assertIdempotentRating(existing, score, tags, comment);
+        return existing;
+      }
     }
+    const consent = durable
+      ? this.complaintService!.preparePassengerRideRatingHook(
+          token,
+          command.contactRequested,
+          { score, tags, comment },
+        )
+      : undefined;
 
     const now = new Date().toISOString();
     const rating: PassengerTripRatingRecord = {
@@ -906,11 +1029,20 @@ export class MultiTaxiService implements OnModuleInit {
     };
     const persisted = (await this.repository?.persistPassengerRating(
       rating,
+      undefined,
+      consent
+        ? {
+            token,
+            tokenDigest: this.digestAccessToken(accessToken.trim()),
+            execute: consent.execute,
+          }
+        : undefined,
     )) ?? {
       rating,
       summary: null,
     };
     this.assertIdempotentRating(persisted.rating, score, tags, comment);
+    await consent?.afterCommit();
     this.ratingsByPassengerOrder.set(
       this.ratingKey(order.orderId, token.passengerSubjectRef),
       persisted.rating,
@@ -1815,7 +1947,73 @@ export class MultiTaxiService implements OnModuleInit {
         { orderId: order.orderId },
       );
     }
-    return receipt;
+    const base = `/api/passenger-rides/${encodeURIComponent(accessToken.trim())}/receipt/artifacts`;
+    return {
+      ...receipt,
+      record: {
+        ...receipt.record,
+        htmlUrl: `${base}/html`,
+        pdfUrl: `${base}/pdf`,
+      },
+    };
+  }
+
+  private async resolveLivePassengerReceipt(accessToken: string) {
+    // A receipt download must observe a durable revocation after a previous read.
+    if (this.repository?.isEnabled()) {
+      this.accessTokensByDigest.delete(
+        this.digestAccessToken(accessToken?.trim() ?? ""),
+      );
+    }
+    const token = await this.requireAccessToken(accessToken, "receipt:read");
+    const order = this.requireMultiTaxiOrder(token.orderId);
+    if (
+      this.resolvePassengerSubjectRef(order) !== token.passengerSubjectRef ||
+      !Number.isFinite(Date.parse(token.expiresAt))
+    ) {
+      throw this.invalidPassengerToken();
+    }
+    const receipt = await this.repository?.findElectronicReceipt(order.orderId);
+    if (!receipt) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PASSENGER_RECEIPT_NOT_READY",
+        "The electronic receipt is not ready.",
+      );
+    }
+    return { order, receipt };
+  }
+
+  async getPassengerReceiptDownloads(
+    accessToken: string,
+  ): Promise<PassengerReceiptResponse> {
+    const { order, receipt } =
+      await this.resolveLivePassengerReceipt(accessToken);
+    await this.requireCertificateSupport().getPassengerView(
+      receipt.receiptId,
+      order.orderId,
+    );
+    const base = `/api/passenger-rides/${encodeURIComponent(accessToken.trim())}/receipt/artifacts`;
+    return {
+      receiptUrl: `${base}/html`,
+      htmlUrl: `${base}/html`,
+      pdfUrl: `${base}/pdf`,
+      certificateId: receipt.receiptId,
+      orderId: order.orderId,
+    };
+  }
+
+  async getPassengerReceiptArtifact(
+    accessToken: string,
+    format: "html" | "pdf",
+  ) {
+    const { order, receipt } =
+      await this.resolveLivePassengerReceipt(accessToken);
+    return this.requireCertificateSupport().getPassengerArtifact(
+      receipt.receiptId,
+      order.orderId,
+      format,
+    );
   }
 
   /**
