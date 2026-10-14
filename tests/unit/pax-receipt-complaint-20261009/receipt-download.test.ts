@@ -100,6 +100,25 @@ async function fixture(complete = true, fromProducer = false) {
       if (
         sql.includes("INSERT INTO reporting.multi_taxi_electronic_receipts")
       ) {
+        if (sql.includes("supersedes_receipt_id")) {
+          transport.row = {
+            receipt_id: values[0],
+            order_id: values[1],
+            receipt_no: values[2],
+            receipt_version: values[3],
+            is_current: true,
+            supersedes_receipt_id: values[4],
+            regeneration_idempotency_key: values[5],
+            regenerated_by_actor_id: values[6],
+            regeneration_reason: values[7],
+            regeneration_audit_id: null,
+            amount_minor: values[8],
+            currency: values[9],
+            issued_at: values[10],
+            record: JSON.parse(values[11] as string),
+          };
+          return { rows: [structuredClone(transport.row)] } as never;
+        }
         transport.row = {
           receipt_id: values[0],
           order_id: values[1],
@@ -118,7 +137,29 @@ async function fixture(complete = true, fromProducer = false) {
         };
         return { rows: [] } as never;
       }
+      if (
+        sql.includes("UPDATE reporting.multi_taxi_electronic_receipts") &&
+        transport.row
+      ) {
+        const previous = structuredClone(transport.row);
+        previous.is_current = false;
+        previous.record = {
+          ...(previous.record as Record<string, unknown>),
+          certificateState: "superseded",
+          supersededByCertificateId: values[1],
+        };
+        transport.historicalRows.push(previous);
+        return { rows: [] } as never;
+      }
       if (sql.includes("FROM reporting.multi_taxi_electronic_receipts")) {
+        if (sql.includes("WHERE regeneration_idempotency_key")) {
+          return {
+            rows:
+              transport.row?.regeneration_idempotency_key === values[0]
+                ? [structuredClone(transport.row)]
+                : [],
+          } as never;
+        }
         // SQL transport fixtures, not a PostgreSQL/versioning simulator.
         // An unqualified order lookup may return the historical row first.
         const rows = [
@@ -135,6 +176,16 @@ async function fixture(complete = true, fromProducer = false) {
       }
       return originalQuery(sql, values);
     },
+  );
+  // A receipt SQL transport boundary only. Production repository code still
+  // performs its BEGIN/read/version-copy/UPDATE/INSERT/COMMIT sequence.
+  vi.spyOn(booking.database, "connect").mockImplementation(
+    async () =>
+      ({
+        query: (sql: string, values?: readonly unknown[]) =>
+          booking.database.query(sql, values),
+        release() {},
+      }) as never,
   );
   const certificates = new CertificateSupportService(
     new CertificateSupportRepository(booking.database),
@@ -257,6 +308,73 @@ async function fixture(complete = true, fromProducer = false) {
 }
 
 describe("captured E04 downstream mapping and authorized downloads (SQL fixtures, not acceptance)", () => {
+  it("retains completion snapshots through the real regeneration repository and current read", async () => {
+    const f = await fixture(false, true);
+    const before = structuredClone(f.row().record);
+    const regenerated = await new CertificateSupportRepository(
+      f.booking.database,
+    ).regenerate({
+      certificateId: f.row().receipt_id as string,
+      actorId: "unit-platform-actor",
+      reason: "unit-regeneration",
+      idempotencyKey: "unit-regeneration-key",
+      issuedAt: new Date(NOW + 60000).toISOString(),
+    });
+    for (const field of [
+      "actualFareBreakdown",
+      "driverSurname",
+      "driverSurnameSource",
+      "driverSurnameProfileUpdatedAt",
+    ]) {
+      expect(regenerated.row.record[field]).toEqual(
+        (before as Record<string, unknown>)[field],
+      );
+    }
+    expect(regenerated.row.record).not.toHaveProperty("e04Snapshot");
+    const current = await f.multi.getTrustedPassengerReceipt(f.orderId, OWNER);
+    expect(current.receiptId).toBe(regenerated.row.receiptId);
+    expect(current.record.driverSurnameProfileUpdatedAt).toBe(
+      "2026-10-09T01:02:03.000Z",
+    );
+    expect(
+      (await f.certificates.get(current.receiptId)).actualFareBreakdown,
+    ).toEqual(f.event.actualFareBreakdown);
+    await expect(
+      f.multi.getPassengerReceiptDownloads(f.tokenValue),
+    ).rejects.toMatchObject({ code: "PASSENGER_E04_NOT_READY" });
+  });
+
+  it("keeps legacy completion facts absent rather than reconstructing them from full E04", async () => {
+    const f = await fixture();
+    const view = await f.certificates.get(f.row().receipt_id as string);
+    for (const field of [
+      "actualFareBreakdown",
+      "driverSurname",
+      "driverSurnameSource",
+      "driverSurnameProfileUpdatedAt",
+    ]) {
+      expect(f.row().record).not.toHaveProperty(field);
+      expect(view).not.toHaveProperty(field);
+    }
+  });
+
+  it("preserves explicit zero components and exact declaration text without full E04", async () => {
+    const f = await fixture(false, true);
+    f.event.actualFareBreakdown = {
+      startMinor: 0,
+      distanceMinor: 0,
+      delayMinor: 0,
+      nightMinor: 0,
+    };
+    f.event.driverSurname = " 歐陽 ";
+    f.transport.row = undefined;
+    const row = await f.certificates.writeCompletedTrip(f.event);
+    const view = await f.certificates.get(row.receiptId);
+    expect(view.actualFareBreakdown).toEqual(f.event.actualFareBreakdown);
+    expect(view.driverSurname).toBe(" 歐陽 ");
+    expect(view).not.toHaveProperty("e04Snapshot");
+  });
+
   it("preserves actual producer facts in JSONB and detached views without inventing E04", async () => {
     const f = await fixture(false, true);
     expect(f.event).not.toHaveProperty("e04Snapshot");

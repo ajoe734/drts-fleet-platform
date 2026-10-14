@@ -50,6 +50,8 @@ afterEach(() => {
 /** SQL response/failure boundary only; no PG schema/concurrency claim. */
 async function fixture(fault?: Fault) {
   const booking = createProductionBookingFixture();
+  booking.account.drtsPassengerId = PASSENGER;
+  booking.snapshot.drtsPassengerId = PASSENGER;
   const ride = await booking.service.createRide(PASSENGER, booking.command);
   const orderId = ride.ride.order.orderId;
   let stored: Stored | undefined;

@@ -62,6 +62,8 @@ afterEach(() => {
 /** Real booking/rating/CRM/controller logic; SQL results and completed assignment are external fixtures, never a PG/concurrency acceptance simulator. */
 async function fixture() {
   const booked = createProductionBookingFixture();
+  booked.account.drtsPassengerId = PASSENGER;
+  booked.snapshot.drtsPassengerId = PASSENGER;
   const created = await booked.service.createRide(PASSENGER, booked.command);
   const orderId = created.ride.order.orderId;
   booked.state.order!.status = "completed";

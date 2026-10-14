@@ -9,15 +9,13 @@ const { PLATFORM_CURRENCY } = contracts;
 async function main() {
   delete process.env.MULTI_TAXI_CERTIFICATE_SERVICE_PHONE;
   delete process.env.MULTI_TAXI_AUTHORITY_COMPLAINT_PHONE;
+  const producer = Object.create(OwnedMobilityService.prototype);
+  producer.regulatoryRegistryService = {
+    listVehicles: () => [{ vehicleId: "unit-vehicle", plateNo: "UNIT-01" }],
+  };
   const event =
     OwnedMobilityService.prototype.buildMultiTaxiCertificateEvent.call(
-      {
-        regulatoryRegistryService: {
-          listVehicles: () => [
-            { vehicleId: "unit-vehicle", plateNo: "UNIT-01" },
-          ],
-        },
-      },
+      producer,
       {
         orderId: "11111111-1111-4111-8111-111111111111",
         fixedPrice: false,
@@ -34,8 +32,19 @@ async function main() {
         actualDistanceKm: 2,
         actualDurationSec: 600,
         fare: { currency: PLATFORM_CURRENCY, amountMinor: 10000 },
+        actualFareBreakdown: {
+          startMinor: 8500,
+          distanceMinor: 1000,
+          delayMinor: 500,
+          nightMinor: 0,
+        },
       },
       { photos: [], expenseItems: [], signatureId: null },
+      {
+        driverSurname: "歐陽",
+        driverSurnameSource: "driver_profile_declared",
+        driverSurnameProfileUpdatedAt: "2026-10-09T01:02:03.000Z",
+      },
     );
   let row;
   const repository = {
@@ -60,7 +69,7 @@ async function main() {
     .join("\n");
   const labels = [
     "車隊／派遣業者",
-    "駕駛",
+    "駕駛（姓氏＋執登證號遮碼）",
     "起程",
     "續程",
     "延滯計時",
@@ -89,8 +98,15 @@ async function main() {
         source:
           "OwnedMobilityService.buildMultiTaxiCertificateEvent -> CertificateSupportService.writeCompletedTrip/getArtifact",
         mockBoundary:
-          "registry lookup and receipt SQL only; configuration unset in this probe process",
+          "registry lookup, supplied completed fare/profile snapshot and receipt SQL fixtures; configuration unset; no issuer/credential/payment/total authority supplied",
         producerFields: Object.keys(event),
+        persistedCapturedFacts: {
+          actualFareBreakdown: row.record.actualFareBreakdown,
+          driverSurname: row.record.driverSurname,
+          driverSurnameSource: row.record.driverSurnameSource,
+          driverSurnameProfileUpdatedAt:
+            row.record.driverSurnameProfileUpdatedAt,
+        },
         defaultServicePhone: event.consumerServicePhone,
         htmlUrl: view.htmlUrl,
         pdfUrl: view.pdfUrl,
