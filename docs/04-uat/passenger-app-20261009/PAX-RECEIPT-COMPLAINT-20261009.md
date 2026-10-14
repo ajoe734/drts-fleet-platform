@@ -778,3 +778,37 @@ Final canonical consistency、repo classification、六筆 own trailers、ESLint
 格式檢查 PASS0。R3 明文要求「Copy the exact allocated record bytes」，因此保留
 `3c922809...` 原始 bytes，不用 formatter 改寫簽定 allocation、不加 ignore/config。
 此格式 FAIL 原樣記入 final evidence；不宣稱整個 formatter command 通過。
+
+### Final compatibility audit：F-HISTORICAL-TOKEN-TAG-REPLAY
+
+`689dd035c1f389b4341107ccb92277d811fd8d36` 的兩個正常 same-head hosted runs
+38517057695／38517057688 已 **completed/success**，所有必須 jobs 結束並讀取
+JSON、raw logs；unit/token46、integration、build、typecheck、IAM、cross-surface／39-route
+E2E、smoke 均通過，applicable skips 明列。兩份 raw／plain log 留在上述 evidence 目錄。
+這些綠燈只屬689。owner 尚未 handoff，最後 source audit 又定位下一項相容性 finding，
+因此689不交審、不借用它的 CI 給後續 SHA；待兩個 runs 完成後才改下一個 source unit。
+
+觸發是 V0056 允許的 historical rating：stored tags `["b","a"]`、原 consent 缺失，
+合法 token 對同 order/subject 以 omitted-contact、normalized tags `["a","b"]` exact retry。
+原 `MultiTaxiService.assertIdempotentRating` 對 stored tags 排序後比較，會保留原 rating。
+新 token transaction 借用 account guard 的 raw JSON ordering 比較，誤回409。
+實際 current `Controller→Service→Repository` probe 在689 **FAIL1**；不是 fixture/import
+失敗。修正僅在 token context 排序 comparison copy，原 record 不修改、account comparator
+不修改，choice/hash/CRM/window/ownership 拒絕均保留。
+
+| Finding／驗收項                                                           | Actual source／修改                                                                                                           | 舊版 → 修正版                                                                                                                                  | 命令／結果／evidence                                                                                                                                                                                                                                                                                                                                                                                      | 限制                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F-HISTORICAL-TOKEN-TAG-REPLAY／R2 legacy score/tags/comment compatibility | 原 token `assertIdempotentRating`；新 `MultiTaxiRepository.persistPassengerRating` comparator；原 own token regression 增一例 | 原 a689 production Service PASS0/1 → 689 production path FAIL1/1 → 666658aec same path PASS0/1，original raw tags/ratingId/absent consent 保留 | probe 位於 `.local/.../historical-tag-probe/tests/unit/`；`pnpm exec vitest run --root <probe root> --config "$PWD/vitest.config.ts" tests/unit/historical-tags.test.ts -t 'historical unordered tags exact retry' --maxWorkers=1 --no-file-parallelism`：`historical-tags-before.log` FAIL1／`historical-tags-after.log` PASS0；legacy variant `historical-tags-legacy-final.log` PASS0/1+46 SKIP，6.20s | 外部 SQL/order/assignment fixture；原 service 從 a689 git object 載入，只重定位 import resolution，business methods 不變；未 reset/switch 活躍 WT 或改 shared dependency links。不是 PG/HTTP evidence |
+| 原 F-TOKEN-LOW-RATING-CONTACT＋所有受影響 source 回歸                     | 上述 comparator 小修、其餘 R3/R4 source bytes 保留                                                                            | 新 token47／account78／receipt29／root343／API114 全 PASS                                                                                      | root 原 argv：`affected-root-historical-final.log` exit0/343/14，28.87s；API原10檔 argv：`affected-api-historical-final.log` exit0/114/10，20.55s；`api-build-historical-final.log` exit0，`lint-historical-final.log` exit0                                                                                                                                                                              | 全部 checks 已結束並讀結果；DB/concurrency/peer runtime 尚未驗；两原 keys UNRECORDED                                                                                                                  |
+| 正式 root typecheck                                                       | 未改 compiler/config/links                                                                                                    | 仍環境 FAIL2，無 own diagnostics                                                                                                               | `typecheck-historical-final.log` exit2；同 absent passenger-client／foreign QA api-client linkage                                                                                                                                                                                                                                                                                                         | 不借689 hosted typecheck PASS 給新 SHA；新 full CI 重新跑                                                                                                                                             |
+
+保留 legacy probe 前兩次 setup FAIL1/0 tests：`historical-tags-legacy.log` 缺
+`@nestjs/common`、`historical-tags-legacy-resolved.log` 缺 `rxjs`。最後 adapter 僅透過
+原 API package resolution 重定位 probe 的 bare imports；active source/config/dependencies
+完全未改。這兩次是環境/import failure，不作舊相容行為的 PASS/FAIL 證據。
+正式新版 own token47 是原 root suite 執行，不需要 probe adapter。
+
+新 source evidence 使用 `source-evidence-historical-final.json`，新 publication identity
+使用 `publication-historical-final.json`；前面的 `source-evidence.json/publication.json`
+與689 CI receipts 為保留的歷史紀錄。Normal 新 SHA/gen 独立 review／same-head CI／protected
+merge 與原 PAX-QA formal token PG/HTTP/concurrency、所有原 E04/CRM/legal acceptance 要求不變。
