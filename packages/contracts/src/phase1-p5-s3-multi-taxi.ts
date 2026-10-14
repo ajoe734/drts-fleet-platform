@@ -627,7 +627,8 @@ export interface ConsumerNotificationOutboxRecord {
     | "eta_changed"
     | "driver_arrived"
     | "receipt_ready"
-    | "trip_cancelled";
+    | "trip_cancelled"
+    | "payment_recovery_required";
   assignmentVersion: number | null;
   payload: Record<string, unknown>;
   status: "pending" | "sending" | "delivered" | "failed";
@@ -869,6 +870,109 @@ export interface MultiTaxiPublicFareVersion {
   effectiveUntil: string | null;
   publicSummary: string;
   authorityFilingRef: string | null;
+}
+
+/** Amounts are whole TWD, matching the passenger tariff authority. */
+export interface MultiTaxiFareTariffParameters {
+  baseFare: number;
+  baseDistanceMeters: number;
+  distanceRate: number;
+  distanceIncrementMeters: number;
+  delayRate: number;
+  delayIncrementSeconds: number;
+  nightSurchargeAmount: number;
+  nightSurchargeWindowStart: string;
+  nightSurchargeWindowEnd: string;
+  additionalFees: Record<string, number>;
+  distanceRounding: "ceil" | "floor";
+  delayRounding: "ceil" | "floor";
+  totalRounding: "ceil" | "floor" | "nearest";
+  totalIncrement: number;
+  nightApplication: "pickup" | "any_overlap";
+}
+
+export interface MultiTaxiManagedFareVersion extends MultiTaxiPublicFareVersion {
+  revision: number;
+  sourceReference: string;
+  tariff: MultiTaxiFareTariffParameters;
+  currency: "TWD";
+  nightSurchargeUnit: "TWD_per_trip";
+  publicationScheduled: boolean;
+  scheduledFor: string | null;
+  filingEvidenceReference: string | null;
+  filedAt: string | null;
+  filedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  availableActions: {
+    edit: boolean;
+    file: boolean;
+    schedule: boolean;
+    retire: boolean;
+  };
+  retirementBlockedReason: "replacement_required" | null;
+}
+
+export interface MultiTaxiFareManagementList {
+  items: MultiTaxiManagedFareVersion[];
+  evaluatedAt: string;
+  activeFareVersionId: string | null;
+}
+
+/**
+ * Management responses carry opaque fee identifiers as values so the global
+ * snake_case response serializer cannot rename or merge operator-defined keys.
+ * The SDK restores the domain additionalFees map after decoding the DTO fields.
+ */
+export interface MultiTaxiManagedFareWireVersion extends Omit<
+  MultiTaxiManagedFareVersion,
+  "tariff"
+> {
+  tariff: Omit<MultiTaxiFareTariffParameters, "additionalFees"> & {
+    additionalFeeEntries: Array<{ key: string; amount: number }>;
+  };
+}
+
+export interface MultiTaxiFareManagementWireList extends Omit<
+  MultiTaxiFareManagementList,
+  "items"
+> {
+  items: MultiTaxiManagedFareWireVersion[];
+}
+
+export interface CreatePlatformFareVersionCommand {
+  fareVersionId: string;
+  displayName: string;
+  publicSummary: string;
+  sourceReference: string;
+  effectiveFrom: string;
+  tariff: MultiTaxiFareTariffParameters;
+}
+
+export interface UpdatePlatformFareVersionCommand {
+  expectedRevision: number;
+  displayName: string;
+  publicSummary: string;
+  sourceReference: string;
+  effectiveFrom: string;
+  tariff: MultiTaxiFareTariffParameters;
+}
+
+export interface RecordPlatformFareVersionFilingCommand {
+  expectedRevision: number;
+  authorityFilingRef: string;
+  filingEvidenceReference: string;
+}
+
+export interface SchedulePlatformFareVersionCommand {
+  expectedRevision: number;
+  /** null activates at the database clock after the timeline lock is held. */
+  effectiveFrom: string | null;
+}
+
+export interface RetirePlatformFareVersionCommand {
+  expectedRevision: number;
+  reason: string;
 }
 
 // ===========================================================================

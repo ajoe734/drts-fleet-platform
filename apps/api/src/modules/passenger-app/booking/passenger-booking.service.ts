@@ -9,6 +9,7 @@ import type {
   RatePassengerRideCommand,
 } from "@drts/contracts";
 import { ComplaintService } from "../../complaint/complaint.service";
+import { bookingPaymentMethodId } from "../payment/booking-payment.guard";
 import {
   CreatePassengerRideCommand,
   PassengerBookingSettingsResponse,
@@ -136,6 +137,7 @@ export class PassengerBookingService {
       );
     }
 
+    const paymentMethodId = bookingPaymentMethodId(req.paymentMethodId);
     const command: CreateMultiTaxiRideCommand = {
       pickup: {
         lat: req.origin.lat,
@@ -154,7 +156,7 @@ export class PassengerBookingService {
       },
       requestedPickupAt: snapshot.scheduledAt,
       timingMode: "scheduled",
-      paymentMethodTokenRef: req.paymentMethodId || null,
+      paymentMethodTokenRef: paymentMethodId,
     };
 
     const result = await this.multiTaxiService.createTrustedPassengerRide(
@@ -167,6 +169,7 @@ export class PassengerBookingService {
           orderId,
           req.fareSnapshotId,
           new Date(req.passengerConfirmedAt).toISOString(),
+          paymentMethodId,
           persistRide,
         ),
     );

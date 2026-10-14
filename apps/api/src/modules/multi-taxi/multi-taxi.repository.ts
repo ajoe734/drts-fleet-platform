@@ -711,9 +711,10 @@ export class MultiTaxiRepository {
    */
   async resolvePassengerNotificationChannel(
     orderId: string,
+    executor: Pick<DatabaseService, "query"> = this.databaseService!,
   ): Promise<PassengerNotificationRouteResolution> {
     if (!this.isEnabled()) return { channel: "none" };
-    const result = await this.databaseService!.query<{
+    const result = await executor.query<{
       partner_route: OrderPartnerNotificationRouteRow | null;
       first_party_route: FirstPartyNotificationRouteRow | null;
     }>(
@@ -739,6 +740,120 @@ export class MultiTaxiRepository {
         route: mapFirstPartyNotificationRoute(firstPartyRow),
       };
     return { channel: "none" };
+  }
+
+  async isPaymentRecoveryNoticeRelevant(
+    orderId: string,
+    subjectRef: string,
+    executor: Pick<DatabaseService, "query"> = this.databaseService!,
+  ): Promise<boolean> {
+    if (!this.isEnabled()) return false;
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        orderId,
+      ) ||
+      !subjectRef ||
+      subjectRef.length > 255
+    )
+      return false;
+    const result = await executor.query(
+      `SELECT c.order_id FROM passenger.payment_charge_records c
+       JOIN passenger.booking_histories h ON h.order_id=c.order_id AND h.drts_passenger_id=c.drts_passenger_id
+       JOIN passenger.accounts a ON a.drts_passenger_id=c.drts_passenger_id AND a.status='active'
+       JOIN billing.multi_taxi_passenger_payments p ON p.payment_id=c.payment_id AND p.order_id=c.order_id::text
+       JOIN ops.phase1_owned_orders o ON o.order_id=c.order_id::text
+       JOIN mobility.phase1_order_first_party_notification_routes r
+         ON r.order_id=c.order_id::text AND r.drts_passenger_id=c.drts_passenger_id
+       WHERE c.order_id=$1 AND r.passenger_subject_ref=$2 AND o.status='completed'
+         AND o.record->'passenger'->>'passengerId'=c.drts_passenger_id
+         AND c.status='manual_recovery' AND p.status='manual_recovery'
+         AND c.recovery_notice_requested_at IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM mobility.phase1_order_partner_notification_routes pr WHERE pr.order_id=r.order_id)`,
+      [orderId, subjectRef],
+    );
+    return result.rows.length === 1;
+  }
+
+  /** Called inside the payment account-first transaction on its SAME client.
+   * No route is manufactured and no receipt/delivery status is written here.
+   */
+  async enqueuePaymentRecoveryNotice(
+    executor: Pick<DatabaseService, "query">,
+    orderId: string,
+    expiresAt: string,
+  ): Promise<string | null> {
+    if (
+      !this.isEnabled() ||
+      !Number.isFinite(Date.parse(expiresAt)) ||
+      Date.parse(expiresAt) <= Date.now()
+    )
+      return null;
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        orderId,
+      )
+    )
+      return null;
+    const resolution = await this.resolvePassengerNotificationChannel(
+      orderId,
+      executor,
+    );
+    if (resolution.channel !== "first_party_app") return null;
+    const route = resolution.route;
+    if (
+      !(await this.isPaymentRecoveryNoticeRelevant(
+        orderId,
+        route.passengerSubjectRef,
+        executor,
+      ))
+    )
+      return null;
+    const outboxId = `pax:payment-recovery:${orderId}`;
+    const prior = await executor.query(
+      `SELECT * FROM ops.consumer_notification_outbox WHERE outbox_id=$1 FOR UPDATE`,
+      [outboxId],
+    );
+    if (prior.rows[0]) {
+      const row = prior.rows[0];
+      if (
+        row.order_id !== orderId ||
+        row.passenger_subject_ref !== route.passengerSubjectRef ||
+        row.event_type !== "payment_recovery_required" ||
+        !Number.isSafeInteger(row.payload?.eventSequence) ||
+        row.payload.eventSequence < 1 ||
+        typeof row.payload?.expiresAt !== "string" ||
+        !Number.isFinite(Date.parse(row.payload.expiresAt)) ||
+        Date.parse(row.payload.expiresAt) <= new Date(row.created_at).getTime()
+      )
+        throw new Error("payment_recovery_notice_state_conflict");
+      return outboxId; // Original expiry/sequence/claim/receipt are immutable.
+    }
+    const inserted = await executor.query(
+      `INSERT INTO ops.consumer_notification_outbox (outbox_id,order_id,passenger_subject_ref,event_type,assignment_version,payload,status,attempt_count,next_attempt_at,created_at,delivered_at)
+       VALUES ($1,$2,$3,'payment_recovery_required',NULL,$4::jsonb,'pending',0,now(),now(),NULL)
+       ON CONFLICT (outbox_id) DO NOTHING RETURNING outbox_id`,
+      [
+        outboxId,
+        orderId,
+        route.passengerSubjectRef,
+        JSON.stringify({ expiresAt: new Date(expiresAt).toISOString() }),
+      ],
+    );
+    if (inserted.rowCount !== 1)
+      throw new Error("payment_recovery_notice_state_conflict");
+    const sequence = await this.allocateNotificationEventSequence(
+      orderId,
+      executor,
+    );
+    if (sequence === null || !Number.isSafeInteger(sequence) || sequence < 1)
+      throw new Error("payment_recovery_notice_sequence_unavailable");
+    const updated = await executor.query(
+      `UPDATE ops.consumer_notification_outbox SET payload=jsonb_set(payload,'{eventSequence}',to_jsonb($2::bigint)) WHERE outbox_id=$1 AND order_id=$3 AND event_type='payment_recovery_required' AND passenger_subject_ref=$4`,
+      [outboxId, sequence, orderId, route.passengerSubjectRef],
+    );
+    if (updated.rowCount !== 1)
+      throw new Error("payment_recovery_notice_state_conflict");
+    return outboxId;
   }
 
   /**

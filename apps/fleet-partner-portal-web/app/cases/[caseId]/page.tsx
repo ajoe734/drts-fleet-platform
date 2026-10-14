@@ -10,7 +10,6 @@ import {
   CanvasEmptyState,
   CanvasBtn,
 } from "@drts/ui-web";
-import { FleetActionButton } from "@/components/fleet-action-button";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 import {
   loadCaseDetail,
@@ -19,6 +18,10 @@ import {
 } from "@/lib/fleet-portal-data.server";
 import { DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { CaseReplyComposer } from "./case-reply-composer";
+import { CaseResponseAction } from "../case-response-action";
+import { CaseExportAction } from "../case-export-action";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -62,18 +65,18 @@ function TimelineList({
           e.tone === "success"
             ? theme.success
             : e.tone === "danger"
-            ? theme.danger
-            : e.tone === "warn"
-            ? theme.warn
-            : theme.accent;
+              ? theme.danger
+              : e.tone === "warn"
+                ? theme.warn
+                : theme.accent;
         const toneBg =
           e.tone === "success"
             ? theme.successBg
             : e.tone === "danger"
-            ? theme.dangerBg
-            : e.tone === "warn"
-            ? theme.warnBg
-            : theme.accentBg;
+              ? theme.dangerBg
+              : e.tone === "warn"
+                ? theme.warnBg
+                : theme.accentBg;
 
         return (
           <li
@@ -157,8 +160,8 @@ function TimelineList({
                         e.actorRealm === "tenant"
                           ? "accent"
                           : e.actorRealm === "ops"
-                          ? "info"
-                          : "neutral"
+                            ? "info"
+                            : "neutral"
                       }
                     >
                       {e.actorRealm}
@@ -235,6 +238,7 @@ export default async function FleetCaseDetailPage({
   params,
 }: CaseDetailPageProps) {
   const { caseId } = await params;
+  const locale = await getServerLocale();
   const theme = buildFleetTheme();
 
   let detailResult;
@@ -272,6 +276,19 @@ export default async function FleetCaseDetailPage({
 
   if (!c) {
     notFound();
+  }
+  if (source !== "live" || error || c.id !== caseId) {
+    return (
+      <div style={{ padding: 24 }}>
+        <CanvasEmptyState
+          theme={theme}
+          tone="warn"
+          title={t("cases.detailUnavailable", locale)}
+          body={t("cases.detailUnavailableBody", locale)}
+          action={<Link href="/cases">{t("cases.backToList", locale)}</Link>}
+        />
+      </div>
+    );
   }
 
   const isClosed = c.status === "closed";
@@ -328,10 +345,7 @@ export default async function FleetCaseDetailPage({
             <CanvasPill theme={theme} tone="danger">
               {c.severity}
             </CanvasPill>
-            <CanvasPill
-              theme={theme}
-              tone={isPlatform ? "neutral" : "danger"}
-            >
+            <CanvasPill theme={theme} tone={isPlatform ? "neutral" : "danger"}>
               {"責任歸屬 · "} {c.responsibility}
             </CanvasPill>
           </span>
@@ -339,30 +353,17 @@ export default async function FleetCaseDetailPage({
         subtitle={`${c.cat} · ${c.desc}`}
         actions={
           <div style={{ display: "flex", gap: 8 }}>
-            <FleetActionButton
-              descriptor={{
-                action: "export",
-                enabled: true,
-                riskLevel: "low",
-              }}
-              icon="reports"
-              label="匯出案件"
-              en="export"
+            <CaseExportAction
+              caseDetail={c}
+              timeline={timeline}
+              attachments={attachments}
             />
-            <FleetActionButton
-              descriptor={{
-                action: "respond",
-                enabled: !isPlatform && !isClosed,
-                ...(isPlatform
-                  ? { disabledReasonCode: "platform_owned" }
-                  : isClosed
-                  ? { disabledReasonCode: "case_closed" }
-                  : {}),
-                riskLevel: "medium",
-              }}
-              icon="check"
-              label="送出回覆"
-              en="respond"
+            <CaseResponseAction
+              caseId={c.id}
+              responsibility={c.responsibility}
+              status={c.status}
+              availability={c.actionDescriptor}
+              currentPage
             />
           </div>
         }

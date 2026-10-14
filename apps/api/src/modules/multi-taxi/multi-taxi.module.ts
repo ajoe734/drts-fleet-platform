@@ -25,6 +25,9 @@ import {
   UnavailableMaskedCallPort,
 } from "./masked-call.port";
 import { MultiTaxiController } from "./multi-taxi.controller";
+import { FareVersionController } from "./fare-versions/fare-version.controller";
+import { FareVersionRepository } from "./fare-versions/fare-version.repository";
+import { FareVersionService } from "./fare-versions/fare-version.service";
 import { MultiTaxiRepository } from "./multi-taxi.repository";
 import { MultiTaxiService } from "./multi-taxi.service";
 import { PASSENGER_PUSH_PORT } from "./passenger-push.port";
@@ -47,8 +50,10 @@ import { PartnerNotificationWorker } from "./partner-notification.worker";
     TenantPartnerModule,
     CertificateSupportModule,
   ],
-  controllers: [MultiTaxiController],
+  controllers: [MultiTaxiController, FareVersionController],
   providers: [
+    FareVersionRepository,
+    FareVersionService,
     MultiTaxiRepository,
     MultiTaxiService,
     PartnerNotificationWorker,

@@ -40,25 +40,38 @@ describe("fleet partner repository", () => {
 
     expect(databaseService.connect).toHaveBeenCalledTimes(1);
     expect(client.query).toHaveBeenNthCalledWith(1, "BEGIN");
-    expect(client.query).toHaveBeenNthCalledWith(
-      2,
-      expect.stringContaining(
-        "DELETE FROM billing.phase1_fleet_partner_statements",
-      ),
-      ["2026-03", "fleet-demo-001"],
+    const calls = client.query.mock.calls as unknown as [
+      string,
+      unknown[] | undefined,
+    ][];
+    const deleteIndex = calls.findIndex(([sql]) =>
+      sql.includes("DELETE FROM billing.phase1_fleet_partner_statements"),
     );
-    expect(client.query).toHaveBeenNthCalledWith(
-      3,
-      expect.stringContaining(
-        "INSERT INTO billing.phase1_fleet_partner_statements",
-      ),
+    const insertIndex = calls.findIndex(([sql]) =>
+      sql.includes("INSERT INTO billing.phase1_fleet_partner_statements"),
+    );
+    const lockIndex = calls.findIndex(([sql]) =>
+      sql.includes("pg_advisory_xact_lock"),
+    );
+    const payoutReadIndex = calls.findIndex(
+      ([sql]) => sql.includes("payout_status") && sql.includes("FOR UPDATE"),
+    );
+    expect(lockIndex).toBeGreaterThan(0);
+    expect(calls[lockIndex]![1]).toEqual([
+      "fleet-statement-decision:fleet-statement-fleet-demo-001-2026-03",
+    ]);
+    expect(payoutReadIndex).toBeGreaterThan(lockIndex);
+    expect(deleteIndex).toBeGreaterThan(payoutReadIndex);
+    expect(calls[deleteIndex]![1]).toEqual(["2026-03", "fleet-demo-001"]);
+    expect(insertIndex).toBeGreaterThan(deleteIndex);
+    expect(calls[insertIndex]![1]).toEqual(
       expect.arrayContaining([
         "fleet-statement-fleet-demo-001-2026-03",
         "fleet-demo-001",
         "2026-03",
       ]),
     );
-    expect(client.query).toHaveBeenNthCalledWith(4, "COMMIT");
+    expect(calls.at(-1)).toEqual(["COMMIT"]);
     expect(client.release).toHaveBeenCalledTimes(1);
   });
 });

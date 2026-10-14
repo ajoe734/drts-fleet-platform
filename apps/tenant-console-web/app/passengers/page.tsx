@@ -20,9 +20,15 @@ import {
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import { getTenantClient } from "@/lib/api-client";
-import { getServerLocale } from "@/lib/server-locale";
-import { t, type Locale } from "@/lib/translations";
+import { getTenantClient } from "../../lib/api-client";
+import { getServerLocale } from "../../lib/server-locale";
+import { t, type Locale } from "../../lib/translations";
+import {
+  getPageActions,
+  getPassengerActions,
+  isPassengerAction,
+} from "./passenger-actions";
+import { PassengerActionControl } from "./passenger-action-control";
 
 export const dynamic = "force-dynamic";
 
@@ -306,7 +312,9 @@ const EMPTY_STATE_VIEWS: Record<PassengerEmptyReason, EmptyStateView> = {
 };
 
 function toErrorMessage(error: unknown, locale: Locale) {
-  return error instanceof Error ? error.message : t("passengers.error.unknown", locale);
+  return error instanceof Error
+    ? error.message
+    : t("passengers.error.unknown", locale);
 }
 
 function parseDate(value: string | null | undefined) {
@@ -509,105 +517,6 @@ function isCrossAppResourceLink(value: unknown): value is CrossAppResourceLink {
   );
 }
 
-function inferDefaultPassengerActions(
-  passenger: TenantPassengerRecord,
-): ResourceActionDescriptor[] {
-  return [
-    {
-      action: "edit",
-      enabled: false,
-      disabledReasonCode: "not_wired_yet",
-      riskLevel: "medium",
-    },
-    passenger.activeFlag
-      ? {
-          action: "deactivate",
-          enabled: false,
-          disabledReasonCode: "not_wired_yet",
-          requiresReason: true,
-          riskLevel: "high",
-        }
-      : {
-          action: "reactivate",
-          enabled: false,
-          disabledReasonCode: "not_wired_yet",
-          riskLevel: "medium",
-        },
-  ];
-}
-
-function isActionDescriptor(value: unknown): value is ResourceActionDescriptor {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate.action === "string" &&
-    typeof candidate.enabled === "boolean" &&
-    typeof candidate.riskLevel === "string"
-  );
-}
-
-function getPassengerActions(
-  passenger: RuntimePassengerRecord,
-): ResourceActionDescriptor[] {
-  const inlineActions = passenger.availableActions;
-  if (Array.isArray(inlineActions) && inlineActions.every(isActionDescriptor)) {
-    return inlineActions;
-  }
-
-  const metadataActions = passenger.metadata?.availableActions;
-  if (
-    Array.isArray(metadataActions) &&
-    metadataActions.every(isActionDescriptor)
-  ) {
-    return metadataActions;
-  }
-
-  return inferDefaultPassengerActions(passenger);
-}
-
-function getPageActions(passengers: RuntimePassengerRecord[]) {
-  const pageActionSource = passengers
-    .map((passenger) => passenger.metadata?.availableActions)
-    .find(
-      (actions): actions is ResourceActionDescriptor[] =>
-        Array.isArray(actions) && actions.every(isActionDescriptor),
-    );
-
-  if (pageActionSource) {
-    const createActions = pageActionSource.filter(
-      (action) => action.action === "create",
-    );
-    if (createActions.length > 0) {
-      return createActions;
-    }
-  }
-
-  const source = passengers[0];
-  if (!source) {
-    return [
-      {
-        action: "create",
-        enabled: false,
-        disabledReasonCode: "not_wired_yet",
-        riskLevel: "medium",
-      },
-    ] satisfies ResourceActionDescriptor[];
-  }
-
-  const sourceActions = getPassengerActions(source);
-  return [
-    sourceActions.find((action) => action.action === "create") ?? {
-      action: "create",
-      enabled: false,
-      disabledReasonCode: "not_wired_yet",
-      riskLevel: "medium",
-    },
-  ];
-}
-
 function buildTabNodes(
   selectedTab: PassengerTabKey,
   filters: PassengerFilters,
@@ -800,12 +709,26 @@ function renderActionDescriptor(
   descriptor: ResourceActionDescriptor,
   label: string,
   locale: Locale,
+  passenger?: TenantPassengerRecord,
 ) {
   const helper = descriptor.requiresReason
     ? t("passengers.action.requiresReason", locale, { label })
     : descriptor.riskLevel === "high"
       ? t("passengers.action.highRisk", locale, { label })
       : label;
+
+  if (descriptor.enabled && isPassengerAction(descriptor.action)) {
+    return (
+      <PassengerActionControl
+        key={descriptor.action}
+        descriptor={descriptor}
+        label={label}
+        helper={helper}
+        locale={locale}
+        {...(passenger ? { passenger } : {})}
+      />
+    );
+  }
 
   if (descriptor.enabled) {
     return (
@@ -989,7 +912,10 @@ function getRefreshBannerCopy(
         title: t("passengers.refresh.banner.stale.title", locale),
         body: t("passengers.refresh.banner.stale.body", locale, {
           time: formatUpdated(refreshMetadata.generatedAt),
-          source: t(`passengers.refresh.source.${refreshMetadata.source}`, locale),
+          source: t(
+            `passengers.refresh.source.${refreshMetadata.source}`,
+            locale,
+          ),
         }),
       };
     case "degraded":
@@ -997,7 +923,10 @@ function getRefreshBannerCopy(
         tone: "danger" as const,
         title: t("passengers.refresh.banner.degraded.title", locale),
         body: t("passengers.refresh.banner.degraded.body", locale, {
-          source: t(`passengers.refresh.source.${refreshMetadata.source}`, locale),
+          source: t(
+            `passengers.refresh.source.${refreshMetadata.source}`,
+            locale,
+          ),
         }),
       };
     case "unknown":
@@ -1143,7 +1072,12 @@ export default async function PassengersPage({
       matchesTab(passenger, "disabled"),
     ).length,
   } satisfies Record<PassengerTabKey, number>;
-  const { tabs, activeTab } = buildTabNodes(selectedTab, filters, counts, locale);
+  const { tabs, activeTab } = buildTabNodes(
+    selectedTab,
+    filters,
+    counts,
+    locale,
+  );
   const activeCount = passengers.filter(
     (passenger) => passenger.activeFlag,
   ).length;
@@ -1216,7 +1150,8 @@ export default async function PassengersPage({
     {
       h: t("passengers.column.email", locale),
       mono: true,
-      r: (row: PassengerRow) => row.email ?? t("passengers.value.empty", locale),
+      r: (row: PassengerRow) =>
+        row.email ?? t("passengers.value.empty", locale),
     },
     {
       h: t("passengers.column.state", locale),
@@ -1251,6 +1186,7 @@ export default async function PassengersPage({
               action,
               getActionLabel(action.action, locale),
               locale,
+              row,
             ),
           )}
         </div>
@@ -1428,7 +1364,9 @@ export default async function PassengersPage({
                 name="state"
                 style={fieldStyle}
               >
-                <option value="all">{t("passengers.filters.stateAll", locale)}</option>
+                <option value="all">
+                  {t("passengers.filters.stateAll", locale)}
+                </option>
                 <option value="active">
                   {t("passengers.filters.stateActive", locale)}
                 </option>
@@ -1477,7 +1415,10 @@ export default async function PassengersPage({
             title={t("passengers.list.title", locale)}
             subtitle={t("passengers.list.subtitle", locale, {
               count: rows.length,
-              state: t(`passengers.filters.stateValue.${filters.activeState}`, locale),
+              state: t(
+                `passengers.filters.stateValue.${filters.activeState}`,
+                locale,
+              ),
             })}
           >
             {emptyReason ? (
@@ -1545,18 +1486,27 @@ export default async function PassengersPage({
                     },
                     {
                       k: t("passengers.detail.employeeNo", locale),
-                      v: selectedPassenger.employeeNo ?? t("passengers.value.empty", locale),
+                      v:
+                        selectedPassenger.employeeNo ??
+                        t("passengers.value.empty", locale),
                       mono: true,
                     },
-                    { k: t("passengers.detail.department", locale), v: selectedDepartment },
+                    {
+                      k: t("passengers.detail.department", locale),
+                      v: selectedDepartment,
+                    },
                     {
                       k: t("passengers.detail.mobile", locale),
-                      v: selectedPassenger.mobile ?? t("passengers.value.empty", locale),
+                      v:
+                        selectedPassenger.mobile ??
+                        t("passengers.value.empty", locale),
                       mono: true,
                     },
                     {
                       k: t("passengers.detail.email", locale),
-                      v: selectedPassenger.email ?? t("passengers.value.empty", locale),
+                      v:
+                        selectedPassenger.email ??
+                        t("passengers.value.empty", locale),
                       mono: true,
                     },
                     {
@@ -1566,11 +1516,15 @@ export default async function PassengersPage({
                     },
                     {
                       k: t("passengers.detail.consentVersion", locale),
-                      v: selectedConsentVersion ?? t("passengers.value.empty", locale),
+                      v:
+                        selectedConsentVersion ??
+                        t("passengers.value.empty", locale),
                     },
                     {
                       k: t("passengers.detail.readOnlyReason", locale),
-                      v: selectedReadOnlyReason ?? t("passengers.value.empty", locale),
+                      v:
+                        selectedReadOnlyReason ??
+                        t("passengers.value.empty", locale),
                     },
                     {
                       k: t("passengers.detail.updatedAt", locale),
@@ -1590,6 +1544,7 @@ export default async function PassengersPage({
                         action,
                         getActionLabel(action.action, locale),
                         locale,
+                        selectedPassenger,
                       ),
                     )}
                   </div>

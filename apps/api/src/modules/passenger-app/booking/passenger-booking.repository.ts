@@ -3,6 +3,7 @@ import { DatabaseService } from "../../../common/db/database.service";
 import type { PoolClient } from "pg";
 import { ApiRequestError } from "../../../common/api-envelope";
 import type { OwnedMobilityQueryExecutor } from "../../owned-mobility/owned-mobility.repository";
+import { assertPassengerCanBook } from "../payment/booking-payment.guard";
 
 @Injectable()
 export class PassengerBookingRepository {
@@ -32,6 +33,7 @@ export class PassengerBookingRepository {
     orderId: string,
     fareSnapshotId: string,
     passengerConfirmedAt: string,
+    paymentMethodId: string,
     persistRide: (executor: PoolClient) => Promise<void>,
   ): Promise<void> {
     const client = await this.db.connect();
@@ -40,6 +42,7 @@ export class PassengerBookingRepository {
       await client.query("BEGIN");
       await client.query("SET LOCAL lock_timeout = '3s'");
       await client.query("SET LOCAL statement_timeout = '8s'");
+      await assertPassengerCanBook(client, passengerId, paymentMethodId);
       await persistRide(client);
       try {
         await this.createBookingHistory(

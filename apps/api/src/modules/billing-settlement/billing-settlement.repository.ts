@@ -494,6 +494,7 @@ export class BillingSettlementRepository {
     action: PaymentRecoveryAction;
     state: "accepted" | "completed";
     receipt: ActionReceipt;
+    passengerLedgerManaged?: true;
   }) {
     if (!this.isEnabled()) {
       throw new Error("Payment recovery persistence is unavailable.");
@@ -502,6 +503,51 @@ export class BillingSettlementRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
+      const passengerCharge = await client.query(
+        "SELECT drts_passenger_id FROM passenger.payment_charge_records WHERE payment_id=$1",
+        [input.paymentId],
+      );
+      const owner = passengerCharge.rows[0]?.drts_passenger_id;
+      if (owner) {
+        if (!input.passengerLedgerManaged)
+          throw new Error("Passenger payment requires its core writer.");
+        await client.query(
+          "SELECT status FROM passenger.accounts WHERE drts_passenger_id=$1 FOR UPDATE",
+          [owner],
+        );
+        const authority = await client.query(
+          `SELECT c.status AS charge_status,p.status AS billing_status,
+                  c.attempt_count AS charge_attempts,p.attempt_count AS billing_attempts,
+                  c.amount_minor AS charge_amount,p.amount_minor AS billing_amount,
+                  c.currency AS charge_currency,p.currency AS billing_currency,
+                  c.provider_capture_ref,p.provider_payment_ref
+           FROM passenger.payment_charge_records c
+           JOIN billing.multi_taxi_passenger_payments p ON p.payment_id=c.payment_id AND p.order_id=c.order_id::text
+           WHERE c.payment_id=$1 FOR UPDATE OF c,p`,
+          [input.paymentId],
+        );
+        const row = authority.rows[0];
+        if (
+          !row ||
+          row.charge_status !== row.billing_status ||
+          row.charge_attempts !== row.billing_attempts ||
+          String(row.charge_amount) !== String(row.billing_amount) ||
+          row.charge_currency !== row.billing_currency ||
+          row.charge_currency !== "TWD" ||
+          (row.provider_capture_ref ?? null) !==
+            (row.provider_payment_ref ?? null) ||
+          (input.action === "begin_manual_recovery" &&
+            row.charge_status !== "manual_recovery") ||
+          (input.action === "retry_capture" &&
+            input.state === "completed" &&
+            !["captured", "refunded"].includes(row.charge_status))
+        ) {
+          throw new Error(
+            "Passenger payment receipt does not match its authority.",
+          );
+        }
+      } else if (input.passengerLedgerManaged)
+        throw new Error("Passenger payment authority is missing.");
       const commandUpdate = await client.query(
         `
           UPDATE billing.multi_taxi_payment_recovery_commands
@@ -518,8 +564,9 @@ export class BillingSettlementRepository {
         throw new Error("Payment recovery command is no longer processing.");
       }
 
-      await client.query(
-        `
+      if (!owner)
+        await client.query(
+          `
           UPDATE billing.multi_taxi_passenger_payments
           SET
             status = CASE
@@ -534,8 +581,8 @@ export class BillingSettlementRepository {
             updated_at = now()
           WHERE payment_id = $1
         `,
-        [input.paymentId, input.action, input.state],
-      );
+          [input.paymentId, input.action, input.state],
+        );
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");

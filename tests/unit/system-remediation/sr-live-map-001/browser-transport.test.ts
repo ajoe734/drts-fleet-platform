@@ -56,7 +56,7 @@ function transport() {
     on: vi.fn(),
     detach: vi.fn().mockResolvedValue(undefined),
   };
-  const page = { on: vi.fn() };
+  const page = { on: vi.fn(), goto: vi.fn() };
   const context = {
     newCDPSession: vi.fn().mockResolvedValue(cdp),
     routeWebSocket: vi.fn(),
@@ -73,12 +73,13 @@ function transport() {
       url: string,
       headers: Record<string, string> = {},
       requestId = "request-1",
+      resourceType: unknown = "Document",
     ) {
       const handler = cdp.on.mock.calls.find(
         ([event]) => event === "Fetch.requestPaused",
       )?.[1];
       expect(handler).toBeTypeOf("function");
-      await handler({ requestId, request: { url, headers } });
+      await handler({ requestId, resourceType, request: { url, headers } });
     },
     run: () =>
       registered.body!({
@@ -99,6 +100,398 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("private ops map browser transport", () => {
+  it.each(["continue", "block", "detach"])(
+    "writes failed evidence by a deadline when %s never settles",
+    async (operation) => {
+      vi.useFakeTimers();
+      const mock = transport();
+      let release: (() => void) | undefined;
+      const stalled = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let paused: Promise<void> | undefined;
+      mock.cdp.send.mockImplementation(async (method) => {
+        if (operation === "continue" && method === "Fetch.continueRequest")
+          return stalled;
+        if (operation === "block" && method === "Fetch.failRequest")
+          return stalled;
+        return {};
+      });
+      if (operation === "detach") mock.cdp.detach.mockReturnValue(stalled);
+      mock.request.get.mockImplementation(async () => {
+        if (operation !== "detach")
+          paused = mock.pause(
+            operation === "block"
+              ? "https://forbidden.example.test/"
+              : "https://ops.example.test/dispatch",
+          );
+        return { ok: () => false, status: () => 403 };
+      });
+      const verdict = expect(mock.run()).rejects.toThrow(
+        "Hosted map rendering failed",
+      );
+      try {
+        await vi.advanceTimersByTimeAsync(6_000);
+        expect(save).toHaveBeenCalledOnce();
+        expect(save.mock.calls[0]?.[1]).toMatchObject({
+          status: "failed",
+          pending_interceptions: operation === "detach" ? 0 : 1,
+          transport_failures: expect.arrayContaining([
+            {
+              category:
+                operation === "detach"
+                  ? "interception-cleanup-timeout"
+                  : "interception-drain-timeout",
+              resource_type: "Unknown",
+              block_result: "not-attempted",
+            },
+          ]),
+        });
+        if (operation === "block")
+          expect(save.mock.calls[0]?.[1].transport_failures).toContainEqual(
+            expect.objectContaining({
+              category: "target-policy-rejected",
+              block_result: "pending",
+            }),
+          );
+        expect(mock.cdp.detach).toHaveBeenCalledOnce();
+        expect(JSON.stringify(save.mock.calls)).not.toContain(token);
+      } finally {
+        release!();
+        await verdict;
+        await paused;
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("bounds the whole drain even while new callbacks keep arriving", async () => {
+    vi.useFakeTimers();
+    const mock = transport();
+    const paused: Array<Promise<void>> = [];
+    mock.cdp.send.mockImplementation(async (method) => {
+      if (method === "Fetch.continueRequest")
+        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+      return {};
+    });
+    let arrivals: ReturnType<typeof setInterval> | undefined;
+    mock.request.get.mockImplementation(async () => {
+      paused.push(mock.pause("https://ops.example.test/dispatch"));
+      arrivals = setInterval(() => {
+        paused.push(mock.pause("https://ops.example.test/dispatch"));
+      }, 25);
+      return { ok: () => false, status: () => 403 };
+    });
+    const verdict = expect(mock.run()).rejects.toThrow(
+      "Hosted map rendering failed",
+    );
+    try {
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(save).toHaveBeenCalledOnce();
+      expect(save.mock.calls[0]?.[1]).toMatchObject({
+        status: "failed",
+        transport_failures: [
+          {
+            category: "interception-drain-timeout",
+            resource_type: "Unknown",
+            block_result: "not-attempted",
+          },
+        ],
+      });
+      expect(save.mock.calls[0]?.[1].pending_interceptions).toBeGreaterThan(0);
+    } finally {
+      clearInterval(arrivals);
+      await vi.advanceTimersByTimeAsync(101);
+      await verdict;
+      await Promise.all(paused);
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    [`data:image/png;base64,${token}`, "data"],
+    [`blob:https://ops.example.test/${token}`, "blob"],
+    [`http://ops.example.test/?key=${token}`, "insecure-http"],
+    [`https://user:${token}@ops.example.test/`, "credential-bearing"],
+    [`https://unapproved.example.test/?key=${token}`, "unapproved-https"],
+    [`javascript:${token}`, "other-scheme"],
+    [`file:///${token}`, "other-scheme"],
+    ["about:blank", "other-scheme"],
+    [token, "invalid-url"],
+  ])(
+    "reports only fixed target classes and still rejects %s",
+    async (url, targetKind) => {
+      const mock = transport();
+      mock.request.get.mockImplementation(async () => {
+        await mock.pause(url!, { Authorization: `Bearer ${token}` });
+        return { ok: () => false, status: () => 403 };
+      });
+      await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+      expect(save.mock.calls[0]?.[1].transport_failures).toEqual([
+        {
+          category: "target-policy-rejected",
+          target_kind: targetKind,
+          resource_type: "Document",
+          block_result: "blocked",
+        },
+      ]);
+      expect(
+        mock.cdp.send.mock.calls.some(
+          ([method]) => method === "Fetch.continueRequest",
+        ),
+      ).toBe(false);
+      expect(JSON.stringify(save.mock.calls)).not.toContain(token);
+      expect(JSON.stringify(save.mock.calls)).not.toContain(url!);
+    },
+  );
+
+  it("does not classify successful allowed continuations as failures", async () => {
+    const mock = transport();
+    mock.request.get.mockImplementation(async () => {
+      await mock.pause(
+        "https://ops.example.test/dispatch",
+        {},
+        "ops",
+        "Document",
+      );
+      await mock.pause(
+        "https://maps.gstatic.com/asset.png",
+        { Authorization: token },
+        "image",
+        "Image",
+      );
+      return { ok: () => false, status: () => 403 };
+    });
+    await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+    expect(save.mock.calls[0]?.[1].transport_failures).toEqual([]);
+    expect(
+      mock.cdp.send.mock.calls.filter(
+        ([method]) => method === "Fetch.continueRequest",
+      ),
+    ).toHaveLength(2);
+  });
+
+  it.each(["session", "enable", "websocket", "detach"])(
+    "sanitizes %s lifecycle failure and keeps the final gate failed",
+    async (operation) => {
+      const mock = transport();
+      const error = new Error(`CDP lifecycle secret=${token}`);
+      if (operation === "session")
+        mock.context.newCDPSession.mockRejectedValue(error);
+      if (operation === "enable") mock.cdp.send.mockRejectedValue(error);
+      if (operation === "websocket")
+        mock.context.routeWebSocket.mockRejectedValue(error);
+      if (operation === "detach") mock.cdp.detach.mockRejectedValue(error);
+      await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+      expect(save.mock.calls[0]?.[1]).toMatchObject({
+        status: "failed",
+        transport_failures: [
+          {
+            category:
+              operation === "detach"
+                ? "interception-cleanup-failed"
+                : "interception-setup-failed",
+            resource_type: "Unknown",
+            block_result: "not-attempted",
+          },
+        ],
+      });
+      expect(JSON.stringify(save.mock.calls)).not.toContain(token);
+    },
+  );
+
+  it("settles outstanding interception recovery before writing final evidence", async () => {
+    const mock = transport();
+    let rejectContinue: ((reason: Error) => void) | undefined;
+    let finishBlock: (() => void) | undefined;
+    const continuation = new Promise<void>((_resolve, reject) => {
+      rejectContinue = reject;
+    });
+    const blocking = new Promise<void>((resolve) => {
+      finishBlock = resolve;
+    });
+    mock.cdp.send.mockImplementation(async (method) => {
+      if (method === "Fetch.continueRequest") return continuation;
+      if (method === "Fetch.failRequest") return blocking;
+      return {};
+    });
+    let paused: Promise<void> | undefined;
+    mock.request.get.mockImplementation(async () => {
+      // EventEmitter does not wait for an async requestPaused callback.
+      paused = mock.pause("https://ops.example.test/dispatch");
+      return { ok: () => false, status: () => 403 };
+    });
+    const run = expect(mock.run()).rejects.toThrow(
+      "Hosted map rendering failed",
+    );
+    try {
+      await vi.waitFor(() => expect(mock.cdp.detach).toHaveBeenCalledOnce());
+      expect(save).not.toHaveBeenCalled();
+      rejectContinue!(new Error(`late protocol failure ${token}`));
+      await vi.waitFor(() =>
+        expect(mock.cdp.send).toHaveBeenCalledWith(
+          "Fetch.failRequest",
+          expect.anything(),
+        ),
+      );
+      expect(save).not.toHaveBeenCalled();
+    } finally {
+      rejectContinue!(new Error(`late protocol failure ${token}`));
+      finishBlock!();
+      await run;
+      await paused;
+    }
+    expect(save.mock.calls[0]?.[1].transport_failures).toEqual([
+      {
+        category: "continue-request-failed",
+        target_kind: "ops-https",
+        resource_type: "Document",
+        block_result: "blocked",
+      },
+    ]);
+    expect(JSON.stringify(save.mock.calls)).not.toContain(token);
+  });
+
+  it.each([
+    [
+      "target-policy-rejected",
+      "https://unapproved.example.test/",
+      "Image",
+      "unapproved-https",
+    ],
+    [
+      "continue-request-failed",
+      "https://ops.example.test/dispatch",
+      "Document",
+      "ops-https",
+    ],
+    [
+      "continue-request-failed",
+      "https://maps.googleapis.com/?key=unit-key",
+      "Image",
+      "allowed-https",
+    ],
+  ])(
+    "diagnoses %s without retaining source strings",
+    async (category, url, resourceType, targetKind) => {
+      const mock = transport();
+      mock.cdp.send.mockImplementation(async (method) => {
+        if (method === "Fetch.continueRequest")
+          throw new Error(`Protocol/navigation secret=${token} ${url}`);
+        return {};
+      });
+      mock.request.get.mockImplementation(async () => {
+        await mock.pause(
+          url!,
+          { Authorization: `Bearer ${token}` },
+          "secret-request-id",
+          resourceType,
+        );
+        return { ok: () => false, status: () => 403 };
+      });
+      await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+      expect(save.mock.calls[0]?.[1].transport_failures).toEqual([
+        {
+          category,
+          target_kind: targetKind,
+          resource_type: resourceType,
+          block_result: "blocked",
+        },
+      ]);
+      const retained = JSON.stringify(save.mock.calls);
+      for (const secret of [
+        token,
+        url!,
+        "secret-request-id",
+        "Protocol/navigation",
+      ])
+        expect(retained).not.toContain(secret);
+    },
+  );
+
+  it.each([token, `Image?key=${token}`, null, {}, "image"])(
+    "replaces untrusted resource metadata with a fixed enum (%s)",
+    async (resourceType) => {
+      const mock = transport();
+      mock.request.get.mockImplementation(async () => {
+        await mock.pause(
+          `data:text/plain,${token}`,
+          {},
+          "request-1",
+          resourceType,
+        );
+        return { ok: () => false, status: () => 403 };
+      });
+      await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+      expect(save.mock.calls[0]?.[1].transport_failures).toEqual([
+        {
+          category: "target-policy-rejected",
+          target_kind: "data",
+          resource_type: "Unknown",
+          block_result: "blocked",
+        },
+      ]);
+      expect(JSON.stringify(save.mock.calls)).not.toContain(token);
+    },
+  );
+
+  it("retains each of five failures and failed failRequest recovery truthfully", async () => {
+    const mock = transport();
+    mock.cdp.send.mockImplementation(async (method) => {
+      if (method === "Fetch.failRequest") throw new Error(`closed ${token}`);
+      return {};
+    });
+    mock.request.get.mockImplementation(async () => {
+      for (let index = 0; index < 5; index++)
+        await mock.pause(
+          `https://forbidden.example.test/?key=${token}`,
+          {},
+          `request-${index}`,
+          "Image",
+        );
+      return { ok: () => false, status: () => 403 };
+    });
+    await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+    expect(save.mock.calls[0]?.[1].transport_failures).toEqual(
+      Array.from({ length: 5 }, () => ({
+        category: "target-policy-rejected",
+        target_kind: "unapproved-https",
+        resource_type: "Image",
+        block_result: "block-failed",
+      })),
+    );
+    expect(save.mock.calls[0]?.[1].failures).toHaveLength(6);
+    expect(JSON.stringify(save.mock.calls)).not.toContain(token);
+    expect(mock.cdp.detach).toHaveBeenCalledOnce();
+  });
+
+  it("distinguishes navigation rejection from target and continue errors", async () => {
+    const mock = transport();
+    mock.request.get.mockResolvedValue({
+      ok: () => true,
+      status: () => 200,
+      headers: () => ({ "x-drts-candidate-sha": env.DRTS_CANDIDATE_SHA }),
+      json: async () => ({
+        provider: "google",
+        enabled: true,
+        reasonCode: null,
+      }),
+    });
+    mock.page.goto.mockRejectedValue(new Error(`Navigation failed ${token}`));
+    await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
+    expect(save.mock.calls[0]?.[1]).toMatchObject({
+      stage: "page:/dispatch:http",
+      transport_failures: [
+        {
+          category: "navigation-failed",
+          resource_type: "Document",
+          block_result: "not-attempted",
+        },
+      ],
+    });
+    expect(JSON.stringify(save.mock.calls)).not.toContain(token);
+  });
+
   it("authenticates the actual spec's config request without following redirects", async () => {
     const mock = transport();
     await expect(mock.run()).rejects.toThrow("Hosted map rendering failed");
@@ -213,6 +606,15 @@ describe("private ops map browser transport", () => {
     "https://user:password@ops.example.test/",
     "http://ops.example.test/",
     `data:text/plain,${token}`,
+    `data:image/png;base64,${token}`,
+    `blob:https://ops.example.test/${token}`,
+    `javascript:${token}`,
+    `file:///${token}`,
+    "about:blank",
+    "not a URL",
+    "https://maps.googleapis.com.evil.test/",
+    "https://maps.googleapis.com:444/",
+    "https://user:password@maps.gstatic.com/",
     `https://unapproved.example.test/?secret=${token}`,
   ])(
     "blocks a disallowed target without emitting credentials: %s",

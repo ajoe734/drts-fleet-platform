@@ -1128,6 +1128,9 @@ export class BillingSettlementService implements OnModuleInit {
           action,
           state: providerResult.status,
           receipt,
+          ...(providerResult.passengerLedgerManaged
+            ? { passengerLedgerManaged: true }
+            : {}),
         },
       );
     } catch {

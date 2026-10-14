@@ -510,7 +510,7 @@ export class MultiTaxiController {
       command.scope ?? {},
     );
     return toApiSuccessEnvelope(
-      this.requireReportingFilingService().createMultiTaxiTripExportJob(
+      await this.requireReportingFilingService().createMultiTaxiTripExportJobDurably(
         command,
         payload.rows,
         identity,

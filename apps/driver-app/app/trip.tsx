@@ -83,6 +83,12 @@ import {
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import { formatMoney } from "@/lib/money";
 import {
+  actualFareFields,
+  emptyActualFareDraft,
+  readActualFareInput,
+  type ActualFareDraft,
+} from "@/lib/actual-fare-input";
+import {
   formatDriverServiceProductLabel,
   formatDriverTaskStatusLabel,
   readDriverServiceProductCode,
@@ -775,6 +781,10 @@ function getTripAuthorityBannerProps(
 export default function TripScreen() {
   const [taskDetail, setTaskDetail] = useState<DriverTaskRecord | null>(null);
   const [orderDetail, setOrderDetail] = useState<OwnedOrderRecord | null>(null);
+  const [actualFareState, setActualFareState] = useState<{
+    taskId: string | null;
+    draft: ActualFareDraft;
+  }>({ taskId: null, draft: emptyActualFareDraft() });
   const [proofPhotos, setProofPhotos] = useState<ProofPhoto[]>([]);
   const [signoffReference, setSignoffReference] = useState("");
   const [expenseType, setExpenseType] = useState("");
@@ -814,9 +824,23 @@ export default function TripScreen() {
   );
   const router = useRouter();
 
-  const proofRequirements = getCompletionProofRequirements(orderDetail);
+  const completionOrder =
+    orderDetail?.orderId === taskDetail?.orderId ? orderDetail : null;
+  const actualFareDraft =
+    actualFareState.taskId === taskDetail?.taskId
+      ? actualFareState.draft
+      : emptyActualFareDraft();
+  const actualFareInput = readActualFareInput(
+    actualFareDraft,
+    Boolean(completionOrder?.fixedPrice),
+    completionOrder?.quotedFare,
+  );
+  const actualFareError = actualFareInput.issue
+    ? driverStrings.trip.actualFare.errors[actualFareInput.issue]
+    : null;
+  const proofRequirements = getCompletionProofRequirements(completionOrder);
   const proofRequirementsUnavailable = Boolean(
-    taskDetail?.orderId && !orderDetail,
+    taskDetail?.orderId && !completionOrder,
   );
   const remainingSlots = MAX_COMPLETION_PROOF_PHOTOS - proofPhotos.length;
   const missingRequiredPhotos = Math.max(
@@ -984,7 +1008,8 @@ export default function TripScreen() {
     dispatchSemantics: orderDetail?.dispatchSemantics ?? null,
   });
   const footerNotice =
-    completionSubmitBlocker === "proof_requirements_unavailable"
+    actualFareError ??
+    (completionSubmitBlocker === "proof_requirements_unavailable"
       ? "完單前需先載入訂單佐證需求，請重新整理後再送出。"
       : completionSubmitBlocker === "expense_amount_invalid"
         ? "費用金額格式無效，請輸入有效的正數後再完成行程。"
@@ -1008,10 +1033,11 @@ export default function TripScreen() {
                         ? tripAuthorityBanner.description
                         : primaryTripAction
                           ? primaryTripAction.helperText
-                          : tripStatusPresentation.detail;
+                          : tripStatusPresentation.detail);
   const completeActionDisabled =
     primaryTripAction?.action === "complete"
-      ? shouldDisableCompleteTripAction({
+      ? Boolean(actualFareError) ||
+        shouldDisableCompleteTripAction({
           submittingAction,
           proofRequirementsUnavailable,
           missingRequiredPhotos,
@@ -1087,7 +1113,8 @@ export default function TripScreen() {
     },
     {
       label: "送出狀態",
-      value: completionSubmitBlocker ? "仍有缺口" : "可完成行程",
+      value:
+        completionSubmitBlocker || actualFareError ? "仍有缺口" : "可完成行程",
     },
   ];
 
@@ -1107,7 +1134,20 @@ export default function TripScreen() {
     );
   }
 
+  function updateActualFareDraft(field: keyof ActualFareDraft, value: string) {
+    setActualFareState((current) => ({
+      taskId: taskDetail?.taskId ?? null,
+      draft: {
+        ...(current.taskId === taskDetail?.taskId
+          ? current.draft
+          : emptyActualFareDraft()),
+        [field]: value,
+      },
+    }));
+  }
+
   function resetCompletionDraft() {
+    setActualFareState({ taskId: null, draft: emptyActualFareDraft() });
     setProofPhotos([]);
     setSignoffReference("");
     setExpenseType("");
@@ -1519,7 +1559,16 @@ export default function TripScreen() {
             return;
           }
 
+          if (actualFareInput.issue) {
+            Alert.alert(
+              driverStrings.trip.actualFare.invalidTitle,
+              actualFareError ?? "",
+            );
+            return;
+          }
+
           await submitDriverTaskCompletion(taskDetail.taskId, {
+            ...actualFareInput.command,
             completedAt: now,
             actualDistanceKm: roundTripDistanceKm(liveDistanceKm),
             actualDurationSec: calculateTripDurationSec(
@@ -1969,6 +2018,74 @@ export default function TripScreen() {
                 </View>
               }
             />
+          ) : null}
+
+          {!isForwardedTrip && showCompletionProofCard ? (
+            <Card
+              theme={driverCanvasTheme}
+              title={driverStrings.trip.actualFare.title}
+              subtitle={driverStrings.trip.actualFare.hint}
+            >
+              <View style={styles.fieldStack}>
+                {actualFareFields.map((field) => (
+                  <Field
+                    key={field}
+                    theme={driverCanvasTheme}
+                    label={driverStrings.trip.actualFare.fields[field]}
+                  >
+                    <Input
+                      theme={driverCanvasTheme}
+                      value={actualFareDraft[field]}
+                      onChangeText={(value) =>
+                        updateActualFareDraft(field, value)
+                      }
+                      editable={
+                        submittingAction === null &&
+                        !proofRequirementsUnavailable &&
+                        !queuedCompletionForActiveTask
+                      }
+                      ph={driverStrings.trip.actualFare.placeholder}
+                      mono
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                  </Field>
+                ))}
+                {completionOrder?.fixedPrice ? (
+                  <Text style={styles.fieldFeedbackText}>
+                    {driverStrings.trip.actualFare.fixedPriceHint}
+                  </Text>
+                ) : (
+                  <Field
+                    theme={driverCanvasTheme}
+                    label={driverStrings.trip.actualFare.fields.aggregate}
+                    hint={driverStrings.trip.actualFare.aggregateHint}
+                  >
+                    <Input
+                      theme={driverCanvasTheme}
+                      value={actualFareDraft.aggregate}
+                      onChangeText={(value) =>
+                        updateActualFareDraft("aggregate", value)
+                      }
+                      editable={
+                        submittingAction === null &&
+                        !proofRequirementsUnavailable &&
+                        !queuedCompletionForActiveTask
+                      }
+                      ph={driverStrings.trip.actualFare.placeholder}
+                      mono
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                  </Field>
+                )}
+                {actualFareError ? (
+                  <Text style={styles.fieldFeedbackText}>
+                    {actualFareError}
+                  </Text>
+                ) : null}
+              </View>
+            </Card>
           ) : null}
 
           {!isForwardedTrip && showCompletionProofCard ? (

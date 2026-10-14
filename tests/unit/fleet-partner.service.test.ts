@@ -114,9 +114,23 @@ describe("FleetPartnerService", () => {
   });
 
   it("replaces persisted statement slices so stale rows are removed on rebuild", async () => {
+    let persistedStatements: Parameters<
+      FleetPartnerRepository["replaceStatementsForPeriodMonth"]
+    >[1] = [];
     const repository = {
+      isEnabled: () => true,
+      loadStatements: vi.fn(async () => [...persistedStatements]),
       persistChanges: vi.fn(async () => undefined),
-      replaceStatementsForPeriodMonth: vi.fn(async () => undefined),
+      replaceStatementsForPeriodMonth: vi.fn(
+        async (
+          _periodMonth: string,
+          statements: Parameters<
+            FleetPartnerRepository["replaceStatementsForPeriodMonth"]
+          >[1],
+        ) => {
+          persistedStatements = statements;
+        },
+      ),
       deleteRevenueShareRule: vi.fn(async () => undefined),
       reportPersistenceFailure: vi.fn(),
     } satisfies Partial<FleetPartnerRepository>;

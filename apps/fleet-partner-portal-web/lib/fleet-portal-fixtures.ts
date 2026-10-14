@@ -9,6 +9,7 @@
 // fleet-partner-scoped api-client (x-fleet-partner-id header), keeping the
 // same return shapes so the pages do not change.
 
+import type { FleetPartnerStatementRecord } from "@drts/contracts";
 import type { CanvasTone } from "@drts/ui-web";
 
 export type ServiceKey =
@@ -307,7 +308,19 @@ export const FX_FLEET_STATEMENT: {
   ],
 };
 
-export type FleetStatement = {
+export type FleetStatementDecision = Pick<
+  FleetPartnerStatementRecord,
+  | "decisionStatus"
+  | "confirmedAt"
+  | "confirmedBy"
+  | "confirmNote"
+  | "disputedAt"
+  | "disputedBy"
+  | "disputeReason"
+  | "disputeCaseId"
+>;
+
+export type FleetStatement = FleetStatementDecision & {
   id: string;
   period: string;
   trips: number;

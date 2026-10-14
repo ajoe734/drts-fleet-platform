@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PassengerBookingService } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.service";
 import { randomUUID } from "crypto";
-import { NOW, QUOTE_ID } from "./production-booking-fixture";
+import { NOW, QUOTE_ID, PAYMENT_METHOD_ID } from "./production-booking-fixture";
 
 describe("Passenger Booking History API - Spec requirements", () => {
   let service: PassengerBookingService;
@@ -83,7 +83,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
       scheduledAt: scheduledAtStr,
       origin: { lat: 25.04, lng: 121.51, address: "Origin Address" },
       destination: { lat: 25.06, lng: 121.55, address: "Dest Address" },
-      paymentMethodId: "pm-1",
+      paymentMethodId: PAYMENT_METHOD_ID,
       fareSnapshotId: QUOTE_ID,
       passengerConfirmedAt: new Date().toISOString(),
       // Forged body data
@@ -148,7 +148,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
       scheduledAt: scheduledAtStr,
       origin: { lat: 25.04, lng: 121.51, address: "Origin Address" },
       destination: { lat: 25.06, lng: 121.55, address: "Dest Address" },
-      paymentMethodId: "pm-1",
+      paymentMethodId: PAYMENT_METHOD_ID,
       fareSnapshotId: QUOTE_ID,
       passengerConfirmedAt: new Date().toISOString(),
     };
@@ -188,7 +188,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
       scheduledAt: scheduledAtStr,
       origin: { lat: 25.04, lng: 121.51, address: "Origin Address" },
       destination: { lat: 25.06, lng: 121.55, address: "Dest Address" },
-      paymentMethodId: "pm-1",
+      paymentMethodId: PAYMENT_METHOD_ID,
       fareSnapshotId: QUOTE_ID,
       passengerConfirmedAt: new Date().toISOString(),
     };
@@ -259,7 +259,9 @@ describe("Passenger Booking History API - Spec requirements", () => {
     expect(res2.rides[0]?.order.orderId).toBe(id3);
 
     // Check getActiveRides traversing multiple pages, with real UUID shapes.
-    const completedIds: string[] = Array.from({ length: 50 }, () => randomUUID());
+    const completedIds: string[] = Array.from({ length: 50 }, () =>
+      randomUUID(),
+    );
     const activeId = randomUUID();
     repoMock.listBookingHistories.mockImplementation(
       async (_paxId: any, limit: any, cursorCreatedAt: any) => {

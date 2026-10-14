@@ -88,6 +88,7 @@ export class IncidentService implements OnModuleInit {
   private timelines = new Map<string, IncidentTimelineEntry[]>();
   private recoveryActions = new Map<string, ServiceRecoveryActionRecord[]>();
   private suppressions = new Map<string, DriverMatchingSuppression>();
+  private complaintLinkOperations = new Map<string, Promise<void>>();
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
@@ -124,6 +125,19 @@ export class IncidentService implements OnModuleInit {
   createIncident(
     inputCommand: CreateIncidentCommand,
     requestId?: string,
+    identity: BootstrapRequestIdentity | null = null,
+  ) {
+    return this.publishPreparedIncident(
+      this.prepareIncident(inputCommand, identity),
+      requestId,
+      identity,
+    );
+  }
+
+  /** Reserve the record without publishing events or writing incident state.
+   * Complaint escalation publishes it only after its CRM association commits. */
+  prepareIncident(
+    inputCommand: CreateIncidentCommand,
     identity: BootstrapRequestIdentity | null = null,
   ) {
     // A driver may only file incidents (incl. SOS) for themselves; never trust a
@@ -169,6 +183,17 @@ export class IncidentService implements OnModuleInit {
       updatedAt: now,
     };
 
+    return { incident, command };
+  }
+
+  publishPreparedIncident(
+    prepared: ReturnType<IncidentService["prepareIncident"]>,
+    requestId?: string,
+    identity: BootstrapRequestIdentity | null = null,
+  ) {
+    const { incident, command } = prepared;
+    const incidentId = incident.incidentId;
+    const now = incident.createdAt;
     const timelineEntries = [
       this.createTimelineEntry(
         incidentId,
@@ -423,6 +448,29 @@ export class IncidentService implements OnModuleInit {
     this.opsDispatchEventsService?.publishIncidentUpdated(decorated, requestId);
 
     return this.cloneIncident(decorated);
+  }
+
+  /** Both controller entrances must validate, commit the complaint side and
+   * publish the incident side as one ordered operation for this incident. */
+  async withComplaintLink<T>(
+    incidentId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.complaintLinkOperations.get(incidentId);
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.complaintLinkOperations.set(incidentId, current);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.complaintLinkOperations.get(incidentId) === current) {
+        this.complaintLinkOperations.delete(incidentId);
+      }
+    }
   }
 
   linkComplaint(

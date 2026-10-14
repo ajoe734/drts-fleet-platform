@@ -25,7 +25,8 @@ export default async function FleetCasesPage({ searchParams }: CasesPageProps) {
   const fleetCount = rows.filter((r) => r.responsibility === "fleet").length;
   const sharedCount = rows.filter((r) => r.responsibility === "shared").length;
   const closedCount = rows.filter(
-    (r) => (r.status as string) === "closed" || (r.status as string) === "resolved",
+    (r) =>
+      (r.status as string) === "closed" || (r.status as string) === "resolved",
   ).length;
 
   const caseTabs = [
@@ -82,7 +83,9 @@ export default async function FleetCasesPage({ searchParams }: CasesPageProps) {
     filteredRows = rows.filter((r) => r.responsibility === "shared");
   } else if (activeTabKey === "closed") {
     filteredRows = rows.filter(
-      (r) => (r.status as string) === "closed" || (r.status as string) === "resolved",
+      (r) =>
+        (r.status as string) === "closed" ||
+        (r.status as string) === "resolved",
     );
   }
 
@@ -102,7 +105,7 @@ export default async function FleetCasesPage({ searchParams }: CasesPageProps) {
           gap: 12,
         }}
       >
-        {/* Navigation & Quick Links */}
+        {/* Case navigation lives on the actual loaded rows below. */}
         <div
           style={{
             display: "flex",
@@ -112,66 +115,6 @@ export default async function FleetCasesPage({ searchParams }: CasesPageProps) {
             gap: 12,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: theme.textMuted }}>
-              {"案件詳情快捷入口："}
-            </span>
-            <Link
-              href="/cases/cmp_0908"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                padding: "3px 8px",
-                borderRadius: 5,
-                background: theme.surfaceLo,
-                border: `1px solid ${theme.border}`,
-                color: theme.accent,
-                fontSize: 12,
-                textDecoration: "none",
-              }}
-            >
-              <CanvasIcon name="complaints" size={12} />
-              {"cmp_0908 (車行責任·待回覆)"}
-            </Link>
-            <Link
-              href="/cases/cmp_0912"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                padding: "3px 8px",
-                borderRadius: 5,
-                background: theme.surfaceLo,
-                border: `1px solid ${theme.border}`,
-                color: theme.textMuted,
-                fontSize: 12,
-                textDecoration: "none",
-              }}
-            >
-              <CanvasIcon name="complaints" size={12} />
-              {"cmp_0912 (平台責任·唯讀)"}
-            </Link>
-            <Link
-              href="/cases/cmp_closed_001"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                padding: "3px 8px",
-                borderRadius: 5,
-                background: theme.surfaceLo,
-                border: `1px solid ${theme.border}`,
-                color: theme.textDim,
-                fontSize: 12,
-                textDecoration: "none",
-              }}
-            >
-              <CanvasIcon name="complaints" size={12} />
-              {"cmp_closed_001 (已結案)"}
-            </Link>
-          </div>
-
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <Link
               href="/cases/errors"
@@ -185,7 +128,7 @@ export default async function FleetCasesPage({ searchParams }: CasesPageProps) {
               }}
             >
               <CanvasIcon name="warn" size={12} />
-              {"案件錯誤指引"}
+              {t("cases.errorGuide", locale)}
             </Link>
             <span style={{ color: theme.textDim }}>|</span>
             <Link
@@ -200,7 +143,7 @@ export default async function FleetCasesPage({ searchParams }: CasesPageProps) {
               }}
             >
               <CanvasIcon name="audit" size={12} />
-              {"附件/歷程讀取狀態"}
+              {t("cases.accessStates", locale)}
             </Link>
           </div>
         </div>

@@ -18,6 +18,22 @@ export function resolveAuthoritativeFleetShellEnv(
 type Dict = Record<string, string>;
 
 const en: Dict = {
+  "cases.action.export": "Export case (JSON)",
+  "cases.exportFailed":
+    "The case file could not be downloaded. Please try again.",
+  "cases.errorGuide": "Case error guide",
+  "cases.accessStates": "Attachment and history access status",
+  "cases.detailUnavailable": "Unable to load this case",
+  "cases.detailUnavailableBody":
+    "The case service did not return this case. Return to the list and try again.",
+  "cases.backToList": "Back to cases",
+  "cases.replyContent": "Reply content",
+  "actions.reason.caseClosed": "case closed",
+  "actions.reason.caseUnavailable": "Replies are currently unavailable",
+  "case.status.closed": "Closed",
+  "case.status.resolved": "Resolved",
+  "case.status.reopened": "Reopened",
+  "case.status.under_investigation": "Under investigation",
   "app.name": "Fleet Partner Portal",
   "app.sub": "Fleet Partner Workspace",
   "app.brandMark": "FLP",
@@ -288,11 +304,15 @@ const en: Dict = {
   "statements.request.disputed": "Dispute requested",
   "statements.request.persistedNote": "{action} · {at}",
   "statements.request.confirmPrompt":
-    "Enter a confirmation reason for the statement request.",
+    "Add a confirmation note (optional). Submit an empty note to confirm without one.",
   "statements.request.disputePrompt":
-    "Enter an optional dispute note for the statement request.",
-  "statements.request.confirmReasonRequired":
-    "A confirmation reason is required before the request can be generated.",
+    "Enter the reason for disputing this statement (required).",
+  "statements.request.disputeReasonRequired": "A dispute reason is required.",
+  "statements.request.openCase": "View dispute case {id}",
+  "statements.request.failed":
+    "The decision could not be saved: {detail}. Please retry.",
+  "statements.request.retry": "Please try again.",
+  "statements.request.unavailable": "Live statement unavailable",
   "revenue.currentPeriod": "Current share · {period}",
   "revenue.breakdownSubtitle": "Composition breakdown · backend-calculated",
   "revenue.rule.perTripSplit": "Per-trip split",
@@ -548,6 +568,8 @@ const en: Dict = {
   "trip.status.cancelled": "Cancelled",
   "statement.status.pending_confirm": "Pending confirm",
   "statement.status.paid": "Paid",
+  "statement.status.confirmed": "Confirmed",
+  "statement.status.disputed": "Disputed",
   "document.status.expires_30d": "Expires in 30d",
   "document.status.expires_60d": "Expires in 60d",
   "document.status.missing": "Missing",
@@ -577,6 +599,20 @@ const en: Dict = {
 };
 
 const zh: Dict = {
+  "cases.action.export": "匯出案件（JSON）",
+  "cases.exportFailed": "無法下載案件檔案，請再試一次。",
+  "cases.errorGuide": "案件錯誤指引",
+  "cases.accessStates": "附件/歷程讀取狀態",
+  "cases.detailUnavailable": "無法載入此案件",
+  "cases.detailUnavailableBody": "案件服務尚未回傳此案件，請返回列表後再試。",
+  "cases.backToList": "返回案件列表",
+  "cases.replyContent": "回覆內容",
+  "actions.reason.caseClosed": "案件已結案",
+  "actions.reason.caseUnavailable": "目前無法回覆此案件",
+  "case.status.closed": "已結案",
+  "case.status.resolved": "已解決",
+  "case.status.reopened": "重新開啟",
+  "case.status.under_investigation": "調查中",
   "app.name": "車行夥伴入口",
   "app.sub": "車行夥伴工作台",
   "app.brandMark": "FLP",
@@ -834,10 +870,14 @@ const zh: Dict = {
   "statements.request.confirmed": "已確認",
   "statements.request.disputed": "已提出異議",
   "statements.request.persistedNote": "{action} · {at}",
-  "statements.request.confirmPrompt": "請輸入此次確認對帳單請求的原因。",
-  "statements.request.disputePrompt":
-    "請輸入此次提出異議請求的補充說明（可留空）。",
-  "statements.request.confirmReasonRequired": "確認對帳單前必須填寫原因。",
+  "statements.request.confirmPrompt":
+    "請輸入確認備註（選填）；留空送出即可確認。",
+  "statements.request.disputePrompt": "請輸入對帳單異議原因（必填）。",
+  "statements.request.disputeReasonRequired": "提出異議時必須填寫原因。",
+  "statements.request.openCase": "查看異議案件 {id}",
+  "statements.request.failed": "對帳單決定未能儲存：{detail}。請重試。",
+  "statements.request.retry": "請再試一次。",
+  "statements.request.unavailable": "目前無法讀取正式對帳單",
   "revenue.currentPeriod": "當期分潤 · {period}",
   "revenue.breakdownSubtitle": "組成明細 · 以後端計算為準",
   "revenue.rule.perTripSplit": "逐趟分潤比例",
@@ -1061,6 +1101,8 @@ const zh: Dict = {
   "trip.status.cancelled": "已取消",
   "statement.status.pending_confirm": "待確認",
   "statement.status.paid": "已付款",
+  "statement.status.confirmed": "已確認",
+  "statement.status.disputed": "已提出異議",
   "document.status.expires_30d": "30 天內到期",
   "document.status.expires_60d": "60 天內到期",
   "document.status.missing": "缺件",

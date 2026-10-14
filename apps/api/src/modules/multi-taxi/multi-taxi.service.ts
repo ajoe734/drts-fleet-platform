@@ -1382,7 +1382,10 @@ export class MultiTaxiService implements OnModuleInit {
     record: ConsumerNotificationOutboxRecord,
     requestId?: string,
   ): Promise<PassengerPushDeliveryOutcome> {
-    if (this.passengerPushPort?.transportMode === "partner_webhook") {
+    if (
+      record.eventType === "payment_recovery_required" ||
+      this.passengerPushPort?.transportMode === "partner_webhook"
+    ) {
       return this.deliverRoutedPassengerNotification(record, requestId);
     }
     const attemptCount = record.attemptCount + 1;
@@ -1786,6 +1789,8 @@ export class MultiTaxiService implements OnModuleInit {
         record.orderId,
       );
     if (resolution.channel === "partner_webhook") {
+      if (record.eventType === "payment_recovery_required")
+        return this.deliverNonPartnerChannelOutcome(record.outboxId, "none");
       return this.deliverPartnerNotification(record.outboxId, requestId);
     }
     if (resolution.channel === "first_party_app") {

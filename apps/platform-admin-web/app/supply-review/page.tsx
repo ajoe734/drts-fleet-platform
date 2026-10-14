@@ -77,6 +77,7 @@ export default function SupplyReviewQueuePage() {
   const [submissions, setSubmissions] = useState<SupplyQueueRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [startingId, setStartingId] = useState<string | null>(null);
+  const [filtersExpanded, setFiltersExpanded] = useState(true);
 
   // 7 required filters
   const [fleetFilter, setFleetFilter] = useState("all");
@@ -452,8 +453,16 @@ export default function SupplyReviewQueuePage() {
         tabs={tabNodes}
         activeTab={activeTabNode}
         actions={
-          <CanvasBtn icon="filter" variant="secondary">
-            {t("supplyReview.queue.moreFilters")}
+          <CanvasBtn
+            icon="filter"
+            variant="secondary"
+            onClick={() => setFiltersExpanded((expanded) => !expanded)}
+          >
+            {t(
+              filtersExpanded
+                ? "supplyReview.queue.hideFilters"
+                : "supplyReview.queue.moreFilters",
+            )}
           </CanvasBtn>
         }
       />
@@ -475,6 +484,9 @@ export default function SupplyReviewQueuePage() {
 
         <CanvasCard padding={0}>
           <div
+            hidden={!filtersExpanded}
+            role="group"
+            aria-label={t("supplyReview.queue.moreFilters")}
             style={{
               padding: "12px 16px",
               borderBottom: `1px solid ${theme.border}`,
@@ -484,6 +496,7 @@ export default function SupplyReviewQueuePage() {
             <div style={metaRowStyle}>
               {/* Filter 1: Fleet */}
               <select
+                aria-label={t("supplyReview.filter.fleetAll")}
                 style={selectStyle}
                 value={fleetFilter}
                 onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
@@ -504,6 +517,7 @@ export default function SupplyReviewQueuePage() {
 
               {/* Filter 2: Type */}
               <select
+                aria-label={t("supplyReview.filter.typeAll")}
                 style={selectStyle}
                 value={typeFilter}
                 onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
@@ -524,6 +538,7 @@ export default function SupplyReviewQueuePage() {
 
               {/* Filter 3: Service product */}
               <select
+                aria-label={t("supplyReview.filter.serviceAll")}
                 style={selectStyle}
                 value={serviceFilter}
                 onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
@@ -546,6 +561,7 @@ export default function SupplyReviewQueuePage() {
 
               {/* Filter 4: Business Area */}
               <select
+                aria-label={t("supplyReview.filter.areaAll")}
                 style={selectStyle}
                 value={areaFilter}
                 onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
@@ -566,6 +582,7 @@ export default function SupplyReviewQueuePage() {
 
               {/* Filter 5: Status */}
               <select
+                aria-label={t("supplyReview.filter.statusAll")}
                 style={selectStyle}
                 value={statusFilter}
                 onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
@@ -594,6 +611,7 @@ export default function SupplyReviewQueuePage() {
 
               {/* Filter 6: Missing items */}
               <select
+                aria-label={t("supplyReview.filter.missingAll")}
                 style={selectStyle}
                 value={missingFilter}
                 onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
@@ -613,6 +631,7 @@ export default function SupplyReviewQueuePage() {
 
               {/* Filter 7: Date */}
               <select
+                aria-label={t("supplyReview.filter.dateAll")}
                 style={selectStyle}
                 value={dateFilter}
                 onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>

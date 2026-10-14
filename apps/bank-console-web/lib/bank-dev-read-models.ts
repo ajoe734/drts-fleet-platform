@@ -293,17 +293,17 @@ export function deriveStatementDates(
   const effectiveIssuedAt =
     rawIssuedAt ??
     (typeof periodOrRecord === "object"
-      ? periodOrRecord.issuedAt ?? periodOrRecord.issued_at
+      ? (periodOrRecord.issuedAt ?? periodOrRecord.issued_at)
       : undefined);
   const effectiveDueAt =
     rawDueAt ??
     (typeof periodOrRecord === "object"
-      ? periodOrRecord.dueAt ?? periodOrRecord.due_at
+      ? (periodOrRecord.dueAt ?? periodOrRecord.due_at)
       : undefined);
   const effectiveGeneratedAt =
     rawGeneratedAt ??
     (typeof periodOrRecord === "object"
-      ? periodOrRecord.generatedAt ?? periodOrRecord.generated_at
+      ? (periodOrRecord.generatedAt ?? periodOrRecord.generated_at)
       : undefined);
 
   // Check if there is an exact seed statement record for this period
@@ -611,7 +611,8 @@ async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
   if (usageResult.status === "rejected") failures.push("program-usage");
   if (ordersResult.status === "rejected") failures.push("orders");
   if (contractsResult.status === "rejected") failures.push("contracts");
-  if (statementsResult.status === "rejected") failures.push("settlement-statements");
+  if (statementsResult.status === "rejected")
+    failures.push("settlement-statements");
   if (usersResult.status === "rejected") failures.push("users");
   if (auditResult.status === "rejected") failures.push("audit");
 
@@ -623,11 +624,11 @@ async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
     contractsResult.status === "fulfilled" ? contractsResult.value : [];
   const statements =
     statementsResult.status === "fulfilled" ? statementsResult.value : [];
-  const rawUsers =
-    usersResult.status === "fulfilled" ? usersResult.value : [];
+  const rawUsers = usersResult.status === "fulfilled" ? usersResult.value : [];
   const users = Array.isArray(rawUsers)
     ? rawUsers
-    : rawUsers && Array.isArray((rawUsers as { items?: TenantUserRoleRecord[] }).items)
+    : rawUsers &&
+        Array.isArray((rawUsers as { items?: TenantUserRoleRecord[] }).items)
       ? (rawUsers as { items: TenantUserRoleRecord[] }).items
       : [];
   const audit = auditResult.status === "fulfilled" ? auditResult.value : [];
@@ -674,7 +675,7 @@ export function mapStatementsFromApi(
     const paidTotal = totals?.paid_total ?? totals?.paidTotal;
     const issuerPayable = totals?.issuer_payable ?? totals?.issuerPayable;
     const tripCount =
-      totals?.trip_count ?? totals?.tripCount ?? (statement.lines?.length ?? 0);
+      totals?.trip_count ?? totals?.tripCount ?? statement.lines?.length ?? 0;
 
     const artifactRef = statement.artifact_ref ?? statement.artifactRef;
     const artifactId =
@@ -842,59 +843,100 @@ export async function loadBankStatementsData(
   }
 }
 
+export type BankProgram = {
+  id: string;
+  name: string;
+  definition: TenantServiceProgramRecord | null;
+  usage: TenantProgramUsageRecord[];
+};
+
+export type BankProgramsData = BankLoadState<{
+  programs: BankProgram[];
+  programsAvailable: boolean;
+  usageAvailable: boolean;
+}>;
+
+// These two API records are flat. The HTTP interceptor returns snake_case;
+// in-process adapters can still return the TypeScript camelCase contract.
+function normalizeBankProgramRecord<T>(record: Record<string, unknown>): T {
+  const normalized = Object.fromEntries(
+    Object.entries(record).map(([key, value]) => [
+      key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()),
+      value,
+    ]),
+  );
+  if (typeof normalized.programId !== "string" || !normalized.programId) {
+    throw new Error("Program response is missing programId.");
+  }
+  return normalized as T;
+}
+
 export async function loadBankProgramsData(
   tenantId: string,
   role: BankConsoleRole,
-): Promise<
-  BankLoadState<{
-    programs: Array<{
-      id: string;
-      name: string;
-      code: string;
-      period: string;
-      served: number;
-      used: number;
-      total: number;
-      remaining: number;
-      exceptionCount: number;
-    }>;
-  }>
-> {
-  try {
-    const core = await loadCoreBankData(tenantId, role);
-    const exceptionCount = core.contracts.reduce(
-      (sum, contract) =>
-        sum +
-        (contract.exceptions ?? []).filter((item) => item.status === "open")
-          .length,
-      0,
-    );
-    const byId = new Map(
-      core.programs.map((program) => [program.programId, program]),
-    );
-    return {
-      data: {
-        programs: core.usage.map((record) => ({
-          id: record.programId,
-          name: byId.get(record.programId)?.displayName ?? record.programCode,
-          code: record.programCode,
-          period: record.period,
-          served: record.cardholdersServed,
-          used: record.tripsConsumed,
-          total: record.quotaTotal ?? 0,
-          remaining: record.quotaRemaining ?? 0,
-          exceptionCount,
-        })),
-      },
-      degradedMessage: core.degradedMessage,
-    };
-  } catch (error) {
-    return {
-      data: { programs: [] },
-      degradedMessage:
-        error instanceof Error ? error.message : "Failed to load programs.",
-    };
+): Promise<BankProgramsData> {
+  const actorId = `bank-console:${tenantId}:${role}`;
+  const [definitions, usage] = await Promise.allSettled([
+    bankApiGetList<Record<string, unknown>>(
+      "api/tenant/service-programs",
+      tenantId,
+      actorId,
+    ).then((records) =>
+      records.map(normalizeBankProgramRecord<TenantServiceProgramRecord>),
+    ),
+    bankApiGetList<Record<string, unknown>>(
+      "api/tenant/program-usage",
+      tenantId,
+      actorId,
+    ).then((records) =>
+      records.map(normalizeBankProgramRecord<TenantProgramUsageRecord>),
+    ),
+  ]);
+  const byId = new Map<string, BankProgram>();
+  if (definitions.status === "fulfilled") {
+    for (const definition of definitions.value) {
+      // The tenant catalog also includes enterprise dispatch and other partner
+      // products. This issuer surface only covers airport card benefits.
+      if (
+        definition.programType !== "credit_card_airport_transfer" &&
+        definition.programType !== "card_benefit_airport"
+      ) {
+        continue;
+      }
+      byId.set(definition.programId, {
+        id: definition.programId,
+        name: definition.displayName,
+        definition,
+        usage: [],
+      });
+    }
   }
+  if (usage.status === "fulfilled") {
+    for (const record of usage.value) {
+      const program = byId.get(record.programId) ?? {
+        id: record.programId,
+        name: record.programCode,
+        definition: null,
+        usage: [],
+      };
+      program.usage.push(record);
+      byId.set(record.programId, program);
+    }
+  }
+  const unavailable = [
+    definitions.status === "rejected" ? "service-programs" : null,
+    usage.status === "rejected" ? "program-usage" : null,
+  ].filter(Boolean);
+  return {
+    data: {
+      programs: [...byId.values()],
+      programsAvailable: definitions.status === "fulfilled",
+      usageAvailable: usage.status === "fulfilled",
+    },
+    degradedMessage: unavailable.length
+      ? `Program data unavailable: ${unavailable.join(", ")}.`
+      : null,
+  };
 }
 
 export async function loadBankUsersData(

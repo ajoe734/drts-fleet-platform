@@ -8,6 +8,8 @@ import type {
   PassengerTripRatingRecord,
 } from "@drts/contracts";
 
+import type { PoolClient } from "pg";
+
 import { DatabaseService } from "../../common/db";
 import { ApiRequestError } from "../../common/api-envelope";
 import type { PassengerComplaintIntake } from "./passenger-complaint-intake";
@@ -83,16 +85,42 @@ export class ComplaintRepository {
     };
   }
 
-  async persistChanges(changes: PersistComplaintChanges) {
-    if (!this.isEnabled()) {
+  async persistChanges(
+    changes: PersistComplaintChanges,
+    transaction?: PoolClient,
+  ) {
+    if (!this.isEnabled() && !transaction) {
       return;
     }
 
+    if (
+      !transaction &&
+      changes.complaintCases?.some(
+        (item) => item.category === "settlement_dispute",
+      )
+    ) {
+      const client = await this.databaseService!.connect();
+      try {
+        await client.query("BEGIN");
+        await this.persistChanges(changes, client);
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+      return;
+    }
+
+    const queryable: {
+      query(text: string, values: unknown[]): Promise<unknown>;
+    } = transaction ?? this.databaseService!;
     const writes: Promise<unknown>[] = [];
 
     for (const complaintCase of changes.complaintCases ?? []) {
       writes.push(
-        this.databaseService!.query(
+        queryable.query(
           `
             INSERT INTO crm.phase1_complaint_cases (
               case_no,
@@ -125,7 +153,7 @@ export class ComplaintRepository {
 
     for (const timelineEntry of changes.complaintTimelines ?? []) {
       writes.push(
-        this.databaseService!.query(
+        queryable.query(
           `
             INSERT INTO crm.phase1_complaint_timelines (
               entry_id,
@@ -439,6 +467,48 @@ export class ComplaintRepository {
         "crm.phase1_complaint_timelines",
       ),
     );
+  }
+
+  async loadSettlementState(): Promise<ComplaintState> {
+    if (!this.isEnabled())
+      return { complaintCases: [], complaintTimelines: [] };
+    // One PostgreSQL statement gives the cases and their timelines the same
+    // snapshot even when another API replica commits during this read.
+    const snapshot = await this.databaseService!.query<
+      JsonRecordRow & { kind: "case" | "timeline" }
+    >(
+      `WITH settlement_cases AS (
+         SELECT case_no, record, created_at
+         FROM crm.phase1_complaint_cases
+         WHERE record->>'category' = 'settlement_dispute'
+       )
+       SELECT kind, record FROM (
+         SELECT 'case' AS kind, record, created_at FROM settlement_cases
+         UNION ALL
+         SELECT 'timeline' AS kind, timeline.record, timeline.created_at
+         FROM crm.phase1_complaint_timelines timeline
+         JOIN settlement_cases c ON c.case_no = timeline.case_no
+       ) snapshot
+       ORDER BY kind, created_at`,
+    );
+    return {
+      complaintCases: snapshot.rows
+        .filter((row) => row.kind === "case")
+        .map((row) =>
+          this.parseRecord<ComplaintCaseRecord>(
+            row.record,
+            "settlement complaint",
+          ),
+        ),
+      complaintTimelines: snapshot.rows
+        .filter((row) => row.kind === "timeline")
+        .map((row) =>
+          this.parseRecord<ComplaintTimelineEntry>(
+            row.record,
+            "settlement timeline",
+          ),
+        ),
+    };
   }
 
   reportPersistenceFailure(error: unknown, context: string) {

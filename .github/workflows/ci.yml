@@ -279,6 +279,7 @@ jobs:
       PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       PARTNER_NOTIFY_UI_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       PASSENGER_PUSH_CHANNEL_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      UV_RECORDER_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
     steps:
       - uses: actions/checkout@v4
@@ -302,7 +303,7 @@ jobs:
         run: |
           pnpm --filter @drts/passenger-client run build
           test -f packages/passenger-client/dist/index.d.ts
-          
+
           # Static portability check for DOM/Node/Next
           echo "Checking passenger-client portability..."
           if grep -qR -E "from ['\"](next|react|fs|path|os|events|crypto|child_process)" packages/passenger-client/src; then
@@ -353,6 +354,52 @@ jobs:
         run: |
           python3 -m unittest tools/ci/test_partner_notification_postgres_gate.py
           python3 tools/ci/verify_passenger_push_channel_postgres_gate.py unit-test-results.json
+      - name: Verify voice checkpoint PostgreSQL gate (four cases, zero skips)
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          path = "tests/integration/uv-exec-010-checkpoint.integration.test.ts"
+          group = "UV-EXEC-010 PostgreSQL checkpoint journal"
+          expected = {
+              group + " " + title for title in (
+                  "concurrent retries converge on one immutable row across connections",
+                  "conflicting evidence/policy cannot overwrite the established version",
+                  "rollback leaves no checkpoint and allows a fresh verified append",
+                  "database triggers reject update, delete and truncate",
+              )
+          }
+          try:
+              report = json.loads(Path("unit-test-results.json").read_text())
+          except (OSError, ValueError) as error:
+              sys.exit(f"Voice checkpoint gate: cannot read report: {error}")
+          if not isinstance(report, dict) or not isinstance(report.get("testResults"), list):
+              sys.exit("Voice checkpoint gate: missing testResults array")
+          matches = [
+              suite for suite in report["testResults"]
+              if isinstance(suite, dict) and isinstance(suite.get("name"), str)
+              and (suite["name"].replace("\\", "/") == path
+                   or suite["name"].replace("\\", "/").endswith("/" + path))
+          ]
+          if len(matches) != 1:
+              sys.exit(f"Voice checkpoint gate: expected one exact suite, got {len(matches)}")
+          suite = matches[0]
+          if suite.get("status") != "passed" or suite.get("message") or suite.get("failureMessage"):
+              sys.exit("Voice checkpoint gate: suite/hook did not pass")
+          cases = suite.get("assertionResults")
+          if not isinstance(cases, list) or len(cases) != 4:
+              sys.exit("Voice checkpoint gate: expected exactly four cases")
+          if any(not isinstance(case, dict) or case.get("status") != "passed"
+                 or case.get("failureMessages") for case in cases):
+              sys.exit("Voice checkpoint gate: failed, pending, skipped, todo or missing case status")
+          names = [case.get("fullName") for case in cases]
+          if any(not isinstance(name, str) for name in names) or set(names) != expected:
+              sys.exit("Voice checkpoint gate: missing, duplicate or unexpected case identity")
+          print("Voice checkpoint PostgreSQL gate: four passed, zero skipped/pending/failed/todo.")
+          PY
       - name: Upload test results
         uses: actions/upload-artifact@v4
         if: always()

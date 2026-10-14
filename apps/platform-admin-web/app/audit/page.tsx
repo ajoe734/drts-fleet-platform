@@ -28,6 +28,7 @@ import {
   usePlatformAdminClient,
 } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import { downloadAuditCsv } from "./download-audit-csv";
 import {
   formatPlatformCodeLabel,
   getPlatformLabel,
@@ -171,6 +172,10 @@ function AuditPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AuditTabId>("log");
   const [filterModule, setFilterModule] = useState<string>("");
+  const [exportNotice, setExportNotice] = useState<{
+    tone: "success" | "danger";
+    count?: number;
+  } | null>(null);
 
   const contextEvaluation = useMemo(
     () => parseAuditResourceContext(searchParams),
@@ -181,6 +186,22 @@ function AuditPageContent() {
     () => filterAuditRecordsByContext(records, contextEvaluation, filterModule),
     [records, contextEvaluation, filterModule],
   );
+
+  const canExport =
+    activeTab === "log" &&
+    !loading &&
+    !error &&
+    !contextResult.isInvalid &&
+    contextResult.rows.length > 0;
+  const handleExport = () => {
+    if (!canExport) return;
+    try {
+      downloadAuditCsv(contextResult.rows);
+      setExportNotice({ tone: "success", count: contextResult.rows.length });
+    } catch {
+      setExportNotice({ tone: "danger" });
+    }
+  };
 
   const handleClearFilter = useCallback(() => {
     setFilterModule("");
@@ -470,7 +491,13 @@ function AuditPageContent() {
         activeTab={activeTabNode}
         actions={
           <>
-            <CanvasBtn theme={theme} variant="secondary" icon="filter">
+            <CanvasBtn
+              theme={theme}
+              variant="secondary"
+              icon="filter"
+              onClick={handleExport}
+              disabled={!canExport}
+            >
               {t("audit.page.exportCsv")}
             </CanvasBtn>
             <CanvasBtn
@@ -488,6 +515,21 @@ function AuditPageContent() {
       />
 
       <div style={bodyStyle}>
+        {exportNotice ? (
+          <div role={exportNotice.tone === "danger" ? "alert" : "status"}>
+            <CanvasBanner
+              theme={theme}
+              tone={exportNotice.tone}
+              title={
+                exportNotice.tone === "danger"
+                  ? t("audit.page.exportFailed")
+                  : t("audit.page.exportStarted", {
+                      count: exportNotice.count ?? 0,
+                    })
+              }
+            />
+          </div>
+        ) : null}
         {error ? (
           <CanvasBanner
             theme={theme}
@@ -550,7 +592,9 @@ function AuditPageContent() {
                     border: `1px solid ${theme.border}`,
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: 8 }}
+                  >
                     <CanvasPill theme={theme} tone="accent">
                       {MSG_ACTIVE_CONTEXT}
                     </CanvasPill>
@@ -612,7 +656,9 @@ function AuditPageContent() {
                       border: `1px solid ${theme.border}`,
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 8 }}
+                    >
                       <CanvasPill theme={theme} tone="accent">
                         {MSG_ACTIVE_CONTEXT}
                       </CanvasPill>
@@ -648,7 +694,8 @@ function AuditPageContent() {
                       tone={filterModule ? "neutral" : "accent"}
                       dot
                     >
-                      {t("audit.page.all")} {contextCandidates.length.toLocaleString()}
+                      {t("audit.page.all")}{" "}
+                      {contextCandidates.length.toLocaleString()}
                     </CanvasPill>
                   </button>
                   {moduleCounts.map(([moduleName, count]) => (
@@ -664,7 +711,9 @@ function AuditPageContent() {
                     >
                       <CanvasPill
                         theme={theme}
-                        tone={filterModule === moduleName ? "accent" : "neutral"}
+                        tone={
+                          filterModule === moduleName ? "accent" : "neutral"
+                        }
                         dot
                       >
                         {formatPlatformCodeLabel(locale, moduleName)} {count}
