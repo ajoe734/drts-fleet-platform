@@ -353,6 +353,209 @@ describe.skipIf(!hostedPaymentEnabled)(
       },
     );
 
+    it("native rating invalidation retains remaining-active summary, audit and unchanged consent/CRM through peer replay", async () => {
+      const f = await fixture();
+      await f.booking.rateRide(f.owner, f.event.orderId, {
+        rideId: f.event.orderId,
+        rating: 2,
+        contactRequested: true,
+      });
+      const otherOwner = await h.account();
+      const otherTrip = await h.receiptTrip(otherOwner);
+      const other = await h.receiptServices();
+      await other.booking.rateRide(otherOwner, otherTrip.orderId, {
+        rideId: otherTrip.orderId,
+        rating: 5,
+        contactRequested: false,
+      });
+      const before = await h.receiptState(f.event.orderId);
+      const ratingId = before.ratings[0]!.rating_id as string;
+      expect(before.summaries[0]).toMatchObject({
+        rating_count: 2,
+        average_rating: "3.50",
+      });
+      const command = {
+        reason: "QA native moderation",
+        idempotencyKey: "qa-native-invalidation",
+        confirmation: { action: "invalidate_rating" as const, ratingId },
+      };
+      const result = await f.multi.invalidatePassengerRating(
+        ratingId,
+        command,
+        "platform-admin-001",
+        "qa-invalidation-request",
+      );
+      expect(result.replayed).toBe(false);
+      expect(result.rating).toMatchObject({
+        ratingId,
+        status: "invalidated",
+        score: 2,
+      });
+      expect(result.driverRatingSummary).toMatchObject({
+        driverId: "qa-driver",
+        displayState: "rated",
+        ratingCount: 1,
+        averageRating: 5,
+        aggregateVersion: before.summaries[0]!.aggregate_version + 1,
+      });
+      expect(result.audit).toMatchObject({
+        ratingId,
+        action: "invalidate",
+        reason: command.reason,
+        actorId: "platform-admin-001",
+        idempotencyKey: command.idempotencyKey,
+        previousStatus: "active",
+        resultingStatus: "invalidated",
+        aggregateVersion: result.driverRatingSummary.aggregateVersion,
+        requestId: "qa-invalidation-request",
+      });
+      const after = await h.receiptState(f.event.orderId);
+      expect(after.ratings[0]!.status).toBe("invalidated");
+      expect(after.summaries[0]).toMatchObject({
+        rating_count: 1,
+        average_rating: "5.00",
+        display_state: "rated",
+        aggregate_version: result.driverRatingSummary.aggregateVersion,
+      });
+      for (const name of [
+        "consents",
+        "rideConsents",
+        "intakes",
+        "cases",
+        "timelines",
+      ] as const)
+        expect(after[name]).toEqual(before[name]);
+      expect((await h.receiptState(otherTrip.orderId)).ratings[0]!.status).toBe(
+        "active",
+      );
+      const audits = (
+        await h.pool!.query(
+          "SELECT * FROM ops.passenger_rating_moderation_audits WHERE rating_id=$1 ORDER BY audit_id",
+          [ratingId],
+        )
+      ).rows;
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        audit_id: result.audit.auditId,
+        idempotency_key: command.idempotencyKey,
+        aggregate_version: result.driverRatingSummary.aggregateVersion,
+      });
+      const peer = await h.receiptServices();
+      const replay = await peer.multi.invalidatePassengerRating(
+        ratingId,
+        command,
+        "platform-admin-001",
+        "different-replay-request",
+      );
+      expect({ ...replay, replayed: false }).toEqual(result);
+      await expect(
+        peer.multi.invalidatePassengerRating(
+          ratingId,
+          { ...command, reason: "changed reason" },
+          "platform-admin-001",
+        ),
+      ).rejects.toMatchObject({
+        code: "RATING_INVALIDATION_IDEMPOTENCY_CONFLICT",
+      });
+      expect(await h.receiptState(f.event.orderId)).toEqual(after);
+      expect(
+        (
+          await h.pool!.query(
+            "SELECT * FROM ops.passenger_rating_moderation_audits WHERE rating_id=$1 ORDER BY audit_id",
+            [ratingId],
+          )
+        ).rows,
+      ).toEqual(audits);
+    });
+
+    it("native moderation audit failure rolls back prior rating/summary writes and recovery creates one audit", async () => {
+      const f = await fixture();
+      await f.booking.rateRide(f.owner, f.event.orderId, {
+        rideId: f.event.orderId,
+        rating: 1,
+        contactRequested: true,
+      });
+      const before = await h.receiptState(f.event.orderId);
+      const ratingId = before.ratings[0]!.rating_id as string;
+      const command = {
+        reason: "QA native rollback",
+        idempotencyKey: "qa-moderation-rollback",
+        confirmation: { action: "invalidate_rating" as const, ratingId },
+      };
+      await h.pool!.query(
+        "ALTER TABLE ops.passenger_rating_moderation_audits ADD CONSTRAINT qa_moderation_audit_failure CHECK(false) NOT VALID",
+      );
+      await expect(
+        f.multi.invalidatePassengerRating(
+          ratingId,
+          command,
+          "platform-admin-001",
+          "qa-rollback-request",
+        ),
+      ).rejects.toMatchObject({
+        code: "23514",
+        constraint: "qa_moderation_audit_failure",
+      });
+      expect(await h.receiptState(f.event.orderId)).toEqual(before);
+      expect(
+        (
+          await h.pool!.query(
+            "SELECT * FROM ops.passenger_rating_moderation_audits WHERE rating_id=$1",
+            [ratingId],
+          )
+        ).rows,
+      ).toHaveLength(0);
+      await h.pool!.query(
+        "ALTER TABLE ops.passenger_rating_moderation_audits DROP CONSTRAINT qa_moderation_audit_failure",
+      );
+      const result = await (
+        await h.receiptServices()
+      ).multi.invalidatePassengerRating(
+        ratingId,
+        command,
+        "platform-admin-001",
+        "qa-rollback-request",
+      );
+      expect(result.replayed).toBe(false);
+      expect(result.rating.status).toBe("invalidated");
+      expect(result.driverRatingSummary).toMatchObject({
+        displayState: "new_driver",
+        ratingCount: 0,
+        averageRating: null,
+        lastRatedAt: null,
+        aggregateVersion: before.summaries[0]!.aggregate_version + 1,
+      });
+      const after = await h.receiptState(f.event.orderId);
+      expect(after.summaries[0]).toMatchObject({
+        display_state: "new_driver",
+        rating_count: 0,
+        average_rating: null,
+        aggregate_version: result.driverRatingSummary.aggregateVersion,
+      });
+      for (const name of [
+        "consents",
+        "rideConsents",
+        "intakes",
+        "cases",
+        "timelines",
+      ] as const)
+        expect(after[name]).toEqual(before[name]);
+      const audits = (
+        await h.pool!.query(
+          "SELECT * FROM ops.passenger_rating_moderation_audits WHERE rating_id=$1",
+          [ratingId],
+        )
+      ).rows;
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        audit_id: result.audit.auditId,
+        idempotency_key: command.idempotencyKey,
+        previous_status: "active",
+        resulting_status: "invalidated",
+        aggregate_version: result.driverRatingSummary.aggregateVersion,
+      });
+    });
+
     it("legacy ride token opt-in persists canonical CRM without inventing an account and survives peer Ops/retry", async () => {
       const owner = await h.account();
       const event = await h.receiptTrip(owner);
