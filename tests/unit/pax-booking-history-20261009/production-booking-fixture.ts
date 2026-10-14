@@ -1,3 +1,4 @@
+import { PassengerPushDevicesService } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.service";
 import { MultiTaxiService } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
 import { MultiTaxiRepository } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
 import { OwnedMobilityService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
@@ -243,6 +244,10 @@ export function createProductionBookingFixture(
     multi,
     fare as never,
     accountRepository as never,
+    undefined,
+    {
+      resolveActiveDevices: async () => [],
+    } as unknown as PassengerPushDevicesService,
   );
   return {
     state,

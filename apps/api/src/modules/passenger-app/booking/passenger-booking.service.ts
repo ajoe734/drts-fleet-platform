@@ -1,4 +1,4 @@
-import { Injectable, HttpStatus, Optional } from "@nestjs/common";
+import { Inject, Injectable, HttpStatus, Optional } from "@nestjs/common";
 import { PassengerBookingRepository } from "./passenger-booking.repository";
 import { MultiTaxiService } from "../../multi-taxi/multi-taxi.service";
 import { PassengerFareRepository } from "../fare/passenger-fare.repository";
@@ -9,6 +9,7 @@ import type {
   RatePassengerRideCommand,
 } from "@drts/contracts";
 import { ComplaintService } from "../../complaint/complaint.service";
+import { PassengerPushDevicesService } from "../../passenger-push-devices/passenger-push-devices.service";
 import { bookingPaymentMethodId } from "../payment/booking-payment.guard";
 import {
   CreatePassengerRideCommand,
@@ -24,6 +25,8 @@ export class PassengerBookingService {
     private readonly fareRepository: PassengerFareRepository,
     private readonly accountRepository: PassengerAccountRepository,
     @Optional() private readonly complaintService?: ComplaintService,
+    @Inject(PassengerPushDevicesService)
+    private readonly pushDevices?: PassengerPushDevicesService,
   ) {}
 
   getBookingSettings(): PassengerBookingSettingsResponse {
@@ -170,7 +173,43 @@ export class PassengerBookingService {
           req.fareSnapshotId,
           new Date(req.passengerConfirmedAt).toISOString(),
           paymentMethodId,
-          persistRide,
+          async (client) => {
+            await persistRide(client);
+            if (!this.pushDevices)
+              throw new ApiRequestError(
+                503,
+                "unavailable",
+                "Push route storage is unavailable.",
+              );
+            // Existing resolver ordering chooses the most recently seen real
+            // eligible device. No device means optional notification is skipped;
+            // existing Web bookings do not require native registration.
+            const [device] =
+              await this.pushDevices.resolveActiveDevices(passengerId);
+            if (!device) return;
+            const route = await this.pushDevices.writeFirstPartyRoute(
+              {
+                orderId,
+                tenantId: null,
+                drtsPassengerId: passengerId,
+                passengerSubjectRef: passengerId,
+                appId: device.appId,
+                consentVersion: device.notificationConsentVersion,
+                rideRef: orderId,
+              },
+              client,
+            );
+            if (
+              route.outcome === "rejected_partner_route_exists" ||
+              route.outcome === "rejected_content_mismatch"
+            )
+              throw new ApiRequestError(
+                409,
+                "FIRST_PARTY_NOTIFICATION_ROUTE_CONFLICT",
+                "Booking notification route could not be stored.",
+                { outcome: route.outcome },
+              );
+          },
         ),
     );
 

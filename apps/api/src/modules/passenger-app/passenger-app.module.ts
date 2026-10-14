@@ -1,4 +1,6 @@
 import { Global, Module } from "@nestjs/common";
+import { PassengerPushService } from "./push/passenger-push.service";
+import { PassengerPushController } from "./push/passenger-push.controller";
 import { DatabaseModule } from "../../common/db/database.module";
 import { PassengerJwtService } from "../../common/auth/passenger-jwt.service";
 import { PassengerAccountController } from "./account/passenger-account.controller";
@@ -69,6 +71,7 @@ import {
   ],
   controllers: [
     PassengerAccountController,
+    PassengerPushController,
     PassengerOtpController,
     PassengerFareController,
     PassengerOAuthController,
@@ -82,6 +85,7 @@ import {
   ],
   providers: [
     PassengerJwtService,
+    PassengerPushService,
     PassengerAccountRepository,
     PassengerAccountService,
     PassengerFareRepository,

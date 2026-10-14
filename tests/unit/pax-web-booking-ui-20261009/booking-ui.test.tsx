@@ -1,3 +1,4 @@
+import { PassengerPushDevicesService } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.service";
 // @vitest-environment jsdom
 import {
   render as renderComponent,
@@ -550,6 +551,9 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
         } as unknown as MultiTaxiService,
         { findOwnedSnapshot } as unknown as PassengerFareRepository,
         { transaction } as unknown as PassengerAccountRepository,
+        {
+          resolveActiveDevices: async () => [],
+        } as unknown as PassengerPushDevicesService,
       );
       const producerErrors: { status: number; response: unknown }[] = [];
       f.createResponder = async () => {

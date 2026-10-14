@@ -1,3 +1,5 @@
+import { PassengerPushDevicesService } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.service";
+import { PassengerPushDevicesRepository } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.repository";
 import { execFile } from "node:child_process";
 import {
   createHash,
@@ -911,6 +913,9 @@ export class PaymentPostgresHarness {
       new PassengerFareRepository(this.database),
       this.accountStore,
       complaints,
+      new PassengerPushDevicesService(
+        new PassengerPushDevicesRepository(this.database),
+      ),
     );
     return {
       audit,
@@ -967,6 +972,10 @@ export class PaymentPostgresHarness {
       multi,
       new PassengerFareRepository(database),
       new PassengerAccountRepository(database),
+      undefined,
+      new PassengerPushDevicesService(
+        new PassengerPushDevicesRepository(database),
+      ),
     );
     return { booking, repository, multi, owned, taxi, published };
   }

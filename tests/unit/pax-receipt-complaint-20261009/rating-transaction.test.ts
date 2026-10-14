@@ -1,3 +1,4 @@
+import { PassengerPushDevicesService } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.service";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ComplaintCaseRecord,
@@ -262,6 +263,9 @@ async function fixture() {
     {} as never,
     {} as never,
     complaint,
+    {
+      resolveActiveDevices: async () => [],
+    } as unknown as PassengerPushDevicesService,
   );
   const controller = new PassengerBookingController(booking, multi);
   const ops = new ComplaintController(complaint, {} as never, {} as never);
@@ -510,6 +514,9 @@ describe("actual account rating and explicit contact choice share the CRM transa
       {} as never,
       {} as never,
       peer,
+      {
+        resolveActiveDevices: async () => [],
+      } as unknown as PassengerPushDevicesService,
     );
     f.access.fault = undefined;
     f.access.now = NOW + 48 * 3600000;
