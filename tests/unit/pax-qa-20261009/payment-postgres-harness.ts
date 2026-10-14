@@ -1,5 +1,10 @@
 import { execFile } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  generateKeyPairSync,
+  randomUUID,
+} from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";
@@ -44,12 +49,30 @@ import { PassengerComplaintService } from "../../../apps/api/src/modules/passeng
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { CertificateSupportRepository } from "../../../apps/api/src/modules/certificate-support/certificate-support.repository";
 import { CertificateSupportService } from "../../../apps/api/src/modules/certificate-support/certificate-support.service";
+import { PassengerFareService } from "../../../apps/api/src/modules/passenger-app/fare/passenger-fare.service";
+import { ServiceAreaRepository } from "../../../apps/api/src/modules/service-area/service-area.repository";
+import { ServiceAreaService } from "../../../apps/api/src/modules/service-area/service-area.service";
+import type { GeoService } from "../../../apps/api/src/modules/geo/geo.service";
+import { PassengerOtpRepository } from "../../../apps/api/src/modules/passenger-app/otp/passenger-otp.repository";
+import { PassengerOtpService } from "../../../apps/api/src/modules/passenger-app/otp/passenger-otp.service";
+import { PassengerOAuthTransactionRepository } from "../../../apps/api/src/modules/passenger-app/oauth/oauth-transaction.repository";
+import { PassengerOAuthService } from "../../../apps/api/src/modules/passenger-app/oauth/passenger-oauth.service";
+import { FacebookDataDeletionService } from "../../../apps/api/src/modules/passenger-app/oauth/facebook-data-deletion.service";
+import type { NotificationDeliveryService } from "../../../apps/api/src/modules/notification-delivery/notification-delivery.service";
+import type { OAuthStartResponse } from "@drts/contracts";
+import {
+  GOOGLE_OIDC_ENDPOINTS,
+  LINE_OIDC_ENDPOINTS,
+} from "../../../apps/api/src/modules/auth/oidc-id-token-verifier";
+import { FACEBOOK_GRAPH_ORIGIN } from "../../../apps/api/src/modules/passenger-app/oauth/facebook-oauth";
 
 const require = createRequire(
   new URL("../../../apps/api/package.json", import.meta.url),
 );
 require("reflect-metadata");
 const { Pool } = require("pg") as typeof import("pg");
+const jwt = require("jsonwebtoken") as typeof import("jsonwebtoken");
+const nativeFetch = globalThis.fetch;
 // Never open a DB or socket on the worker VM, even with an inherited DB URL.
 export const hostedPaymentEnabled = process.env.GITHUB_ACTIONS === "true";
 const databaseUrl = process.env.DATABASE_URL;
@@ -863,6 +886,294 @@ export class PaymentPostgresHarness {
       complaintRepository,
       certificates,
       passengerComplaints: new PassengerComplaintService(booking, complaints),
+    };
+  }
+
+  async fareServices() {
+    const areaRepository = new ServiceAreaRepository(this.database);
+    const seedView = new ServiceAreaService(areaRepository);
+    await seedView.onModuleInit();
+    // Persist the actual existing catalog/policies, then rehydrate via the
+    // production repository. Empty storage alone does not remove defaults.
+    for (const area of seedView.listServiceAreas())
+      await areaRepository.persistServiceArea(area);
+    for (const policy of seedView.listStopPolicies())
+      await areaRepository.persistStopPolicy(policy);
+    const areas = new ServiceAreaService(areaRepository);
+    await areas.onModuleInit();
+    const geo = {
+      route: vi.fn(async () => ({
+        provider: "qa-captured-geo",
+        distanceMeters: 1251,
+        durationSeconds: 60,
+        encodedPolyline: "qa-captured-polyline",
+        generatedAt: new Date().toISOString(),
+      })),
+    };
+    const repository = new PassengerFareRepository(this.database);
+    const fares = new PassengerFareService(
+      repository,
+      this.accounts,
+      geo as unknown as GeoService,
+      areas,
+    );
+    return { fares, repository, areas, areaRepository, geo };
+  }
+
+  authServices() {
+    const pepper = "public-qa-otp-pepper-no-real-provider-or-deployment";
+    const lineSecret = "public-qa-line-secret-not-a-real-provider-credential";
+    const facebookSecret =
+      "public-qa-facebook-secret-not-a-real-provider-credential";
+    for (const [name, value] of Object.entries({
+      GOOGLE_OAUTH_CLIENT_ID: "qa-google-client",
+      GOOGLE_OAUTH_CLIENT_SECRET: "public-qa-google-secret",
+      LINE_CHANNEL_ID: "qa-line-client",
+      LINE_CHANNEL_SECRET: lineSecret,
+      FACEBOOK_APP_ID: "qa-facebook-app",
+      FACEBOOK_APP_SECRET: facebookSecret,
+      FACEBOOK_DATA_DELETION_STATUS_ORIGIN: "https://qa-api.example.invalid",
+      OAUTH_REDIRECT_ALLOWLIST: ["google", "line", "facebook"]
+        .map((p) => `https://ride.smarttransport.tw/auth/callback/${p}`)
+        .join(","),
+    }))
+      vi.stubEnv(name, value);
+    const deliveries: {
+      provider: "phone" | "email";
+      target: string;
+      code: string;
+    }[] = [];
+    const sms = {
+      availability: () => "available" as const,
+      sendOtp: vi.fn(async (target: string, code: string) => {
+        deliveries.push({ provider: "phone", target, code });
+        return { status: "sent" as const };
+      }),
+    };
+    const mail = {
+      platformAvailability: () => "available" as const,
+      sendPlatformMail: vi.fn(
+        async (input: { recipientEmail: string; body: string }) => {
+          const code = input.body.match(/[0-9]{6}/)?.[0];
+          if (!code)
+            throw new Error("OTP mail fixture did not capture a code.");
+          deliveries.push({
+            provider: "email",
+            target: input.recipientEmail,
+            code,
+          });
+          return { status: "sent" as const };
+        },
+      ),
+    };
+    const otpOptions = {
+      pepper,
+      fromEmail: "qa@example.invalid",
+      ipHourlyLimit: 20,
+      trustedProxyHops: 0,
+    };
+    const otpRepository = new PassengerOtpRepository(this.database);
+    const otp = new PassengerOtpService(
+      otpRepository,
+      this.accounts,
+      mail as unknown as NotificationDeliveryService,
+      sms,
+      otpOptions,
+    );
+    const oauthRepository = new PassengerOAuthTransactionRepository(
+      this.database,
+    );
+    const oauth = new PassengerOAuthService(oauthRepository, this.accounts);
+    const google = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const grants = new Map<
+      string,
+      {
+        provider: "google" | "line" | "facebook";
+        nonce: string;
+        challenge: string;
+        subject: string;
+        wrongNonce?: boolean;
+        reject?: boolean;
+      }
+    >();
+    const providerFetch = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        // Mounted HTTP remains a genuine hosted socket. Every external URL is
+        // handled here or rejected, never forwarded to a real provider.
+        if (url.startsWith("http://127.0.0.1:"))
+          return nativeFetch(input, init);
+        if (url === GOOGLE_OIDC_ENDPOINTS.jwks)
+          return new Response(
+            JSON.stringify({
+              keys: [
+                {
+                  ...google.publicKey.export({ format: "jwk" }),
+                  kid: "qa-google-signature",
+                  alg: "RS256",
+                  use: "sig",
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        const params = new URLSearchParams(init?.body as string);
+        if (
+          [
+            GOOGLE_OIDC_ENDPOINTS.token,
+            LINE_OIDC_ENDPOINTS.token,
+            `${FACEBOOK_GRAPH_ORIGIN}/oauth/access_token`,
+          ].includes(url)
+        ) {
+          const grant = grants.get(params.get("code") ?? "");
+          if (
+            !grant ||
+            grant.reject ||
+            createHash("sha256")
+              .update(params.get("code_verifier") ?? "")
+              .digest("base64url") !== grant.challenge
+          )
+            return new Response("qa-invalid-grant", { status: 400 });
+          if (grant.provider === "facebook")
+            return new Response(
+              JSON.stringify({ access_token: `qa-facebook-${grant.subject}` }),
+              { status: 200 },
+            );
+          const now = Math.floor(Date.now() / 1000);
+          const payload = {
+            iss:
+              grant.provider === "google"
+                ? "https://accounts.google.com"
+                : "https://access.line.me",
+            aud:
+              grant.provider === "google"
+                ? "qa-google-client"
+                : "qa-line-client",
+            sub: grant.subject,
+            nonce: grant.wrongNonce ? "qa-wrong-nonce" : grant.nonce,
+            iat: now,
+            exp: now + 300,
+            name: "QA signed provider",
+            email: "qa-provider@example.invalid",
+            email_verified: true,
+          };
+          const id_token =
+            grant.provider === "google"
+              ? jwt.sign(payload, google.privateKey, {
+                  algorithm: "RS256",
+                  keyid: "qa-google-signature",
+                })
+              : jwt.sign(payload, lineSecret, { algorithm: "HS256" });
+          return new Response(JSON.stringify({ id_token }), { status: 200 });
+        }
+        if (url.startsWith(`${FACEBOOK_GRAPH_ORIGIN}/debug_token`)) {
+          const parsed = new URL(url);
+          const subject =
+            parsed.searchParams
+              .get("input_token")
+              ?.replace("qa-facebook-", "") ?? "";
+          return new Response(
+            JSON.stringify({
+              data: {
+                is_valid: true,
+                app_id: "qa-facebook-app",
+                user_id: subject,
+                expires_at: Math.floor(Date.now() / 1000) + 300,
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.startsWith(`${FACEBOOK_GRAPH_ORIGIN}/me`)) {
+          const parsed = new URL(url);
+          const access =
+            new Headers(init?.headers)
+              .get("authorization")
+              ?.replace(/^Bearer /, "") ?? "";
+          const expected = createHmac("sha256", facebookSecret)
+            .update(access)
+            .digest("hex");
+          if (parsed.searchParams.get("appsecret_proof") !== expected)
+            return new Response("qa-invalid-proof", { status: 400 });
+          return new Response(
+            JSON.stringify({
+              id: access.replace("qa-facebook-", ""),
+              name: "QA Facebook",
+              email: "qa-unverified@example.invalid",
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error("An unexpected external provider URL was requested.");
+      },
+    );
+    vi.stubGlobal("fetch", providerFetch);
+    const registerGrant = async (
+      start: OAuthStartResponse,
+      provider: "google" | "line" | "facebook",
+      options: {
+        subject?: string;
+        wrongNonce?: boolean;
+        reject?: boolean;
+      } = {},
+    ) => {
+      const row = (
+        await this.pool!.query(
+          "SELECT * FROM passenger.oauth_transactions WHERE transaction_id=$1",
+          [start.transactionId],
+        )
+      ).rows[0];
+      if (!row) throw new Error("Actual OAuth transaction was not persisted.");
+      const code = `qa-code-${start.transactionId}`;
+      grants.set(code, {
+        provider,
+        nonce: row.nonce,
+        challenge: row.code_challenge,
+        subject:
+          options.subject ??
+          (provider === "facebook" ? "42420001" : `qa-${provider}-subject`),
+        ...options,
+      });
+      return {
+        provider,
+        code,
+        state: start.state,
+        transactionId: start.transactionId,
+      };
+    };
+    const lastCode = () => {
+      const item = deliveries.at(-1);
+      if (!item) throw new Error("No harmless OTP delivery was captured.");
+      return item.code;
+    };
+    const facebookDeletion = new FacebookDataDeletionService(this.accountStore);
+    const signedFacebookDeletion = (subject: string) => {
+      const payload = Buffer.from(
+        JSON.stringify({ algorithm: "HMAC-SHA256", user_id: subject }),
+      ).toString("base64url");
+      return {
+        signed_request: `${createHmac("sha256", facebookSecret).update(payload).digest("base64url")}.${payload}`,
+      };
+    };
+    return {
+      otp,
+      otpOptions,
+      otpRepository,
+      oauth,
+      oauthRepository,
+      providerFetch,
+      sms,
+      mail,
+      deliveries,
+      lastCode,
+      registerGrant,
+      facebookDeletion,
+      signedFacebookDeletion,
     };
   }
 
