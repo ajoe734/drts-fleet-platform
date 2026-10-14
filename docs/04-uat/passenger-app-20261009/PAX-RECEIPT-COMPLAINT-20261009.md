@@ -771,3 +771,10 @@ handoff 給原獨立 Codex。Hosted CI、review、merge 是新 candidate 的後�
 pending 不冒稱 PASS；原 ddbc 綠燈不借用。本 VM 沒有 product/API/PG/browser/preview/Docker
 server、workflow dispatch/rerun、provider/external service call 或部署；沒有 approve、
 record-acceptance 或 done。
+
+Final canonical consistency、repo classification、六筆 own trailers、ESLint 均 PASS0。
+包含 immutable Supervisor allocation leaf 的 Prettier check 為 **FAIL1**，只指出
+`schema-allocation-20261014-token-rating-contact.json` 的單元素 array 格式；其餘九檔
+格式檢查 PASS0。R3 明文要求「Copy the exact allocated record bytes」，因此保留
+`3c922809...` 原始 bytes，不用 formatter 改寫簽定 allocation、不加 ignore/config。
+此格式 FAIL 原樣記入 final evidence；不宣稱整個 formatter command 通過。
