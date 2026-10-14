@@ -39,6 +39,7 @@
 | **R10 (Clean Trailers Lineage)** | Git commit history | 舊版重現：包含無效 trailers。<br>修正版：繼承自乾淨 dev baseline，包含合規 trailers。 | `python3 tools/ci/git/check_commit_trailers.py --base db212a3d --head HEAD`<br>Exit 0 (5 commits OK) | 待 hosted CI 驗證。 |
 | **R13 (Vitest Subpath Aliasing)** | `vitest.config.ts` | 舊版重現：別名順序錯誤導致生產測試失敗。<br>修正版：精確排序 `@drts/ui-web/canvas-tokens` 先於 `@drts/ui-web`。 | `pnpm vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx tests/unit/platform-admin-assistant-tools.test.ts tests/unit/platform-admin-assistant-context-packet.test.ts tests/unit/platform-admin-assistant-route-context.test.ts`<br>Exit 0, 42/42 passed | 無。 |
 | **R14 (Identity State Transition Isolation)** | `apps/passenger-app-web/components/ride/passenger-ride-page.tsx` | 舊版重現：換 rideId 時殘留舊資料。<br>修正版：變更 token/rideId 立即清除舊 fixture 並展示錯誤處理。 | Probe: `R14 id change hides previous trip and shows error` (PASS)<br>Vitest: `passenger-ride.test.tsx` (Exit 0, 4/4) | 無。 |
+| **CI i18n Guard Remediation** | `apps/passenger-app-web/components/ride/passenger-ride-page.tsx:1959` | 候選 71f81b5 於 CI 觸發 i18n-guard 違規（Inline aria-label text "重新取得報價"）。<br>修正版：改用 `{t.Requote}`。 | `pnpm run i18n:guard`<br>Exit 0 (637 files scanned, OK) | 無。 |
 | **`pax-web-ride_p5_live_page`** | 行程頁面主視覺、狀態切換與 BFF 代理 | P5-01～P5-12 元件、SSE 監聽、A04 報價異常重試與 BFF 轉發全部通過測試。 | Vitest 4 files, 60 tests passed (Exit 0)<br>Readonly Probe 18/18 passed (Exit 0) | **SCOPED PASS (Unit/Probe)**。真實雲端環境部署與 E2E 驗收受限於 VM 限制，留待 hosted CI。 |
 | **`pax-web-ride_rating_receipt_history_complaint`** | 評價、乘車證明、歷史紀錄與客訴 | E-18 評價客訴連動、E-04 乘車證明 snapshot 欄位消費與下載路徑、歷史紀錄去重與客訴表單均完整實作且驗證通過。 | Vitest 4 files, 60 tests passed (Exit 0)<br>Readonly Probe 18/18 passed (Exit 0) | **SCOPED PASS (Unit/Probe)**。後端 13 E04 產出與端對端金流整合留待跨模組驗收。 |
 
@@ -98,5 +99,10 @@ Exit 0 (0 warnings, 0 errors)
 
 # 4. Commit Trailers 規範檢查
 $ python3 tools/ci/git/check_commit_trailers.py --base db212a3d6e6a0eced76fe2cebb0c05a46b8511c1 --head HEAD
-check_commit_trailers: 5 commit(s) OK.
+check_commit_trailers: 7 commit(s) OK.
+
+# 5. i18n Guard 規範檢查
+$ pnpm run i18n:guard
+i18n-guard: OK (637 files scanned across 11 apps, 81 exemption(s) from i18n-guard-baseline.json)
+Exit 0 (0 errors)
 ```

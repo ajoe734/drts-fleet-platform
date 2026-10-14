@@ -1956,7 +1956,7 @@ function Actions({
             onClick={() => {
               void fetchPassengerRideAuthority(token, authMode === "token");
             }}
-            aria-label="重新取得報價"
+            aria-label={t.Requote}
           >
             {t.Requote}
           </button>
