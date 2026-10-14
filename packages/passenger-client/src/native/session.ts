@@ -85,8 +85,16 @@ export class NativePassengerSession {
       return true;
     });
   }
-  async adopt(tokens: NativePassengerTokenPair): Promise<void> {
+  async adopt(
+    tokens: NativePassengerTokenPair,
+    expectedGeneration?: number,
+  ): Promise<void> {
     await this.hydrate();
+    if (
+      expectedGeneration !== undefined &&
+      expectedGeneration !== this.generation
+    )
+      throw new NativePassengerSessionChangedError();
     if (!(await this.commit(tokens, ++this.generation))) {
       throw new NativePassengerSessionChangedError();
     }
@@ -97,7 +105,9 @@ export class NativePassengerSession {
       throw new NativePassengerSessionChangedError();
     }
   }
-  private async activeAccessToken(): Promise<string> {
+  private async authenticated<T>(
+    request: (accessToken: string) => Promise<T>,
+  ): Promise<T> {
     const current = await this.snapshot();
     if (!current) {
       throw new PassengerApiError(
@@ -106,52 +116,73 @@ export class NativePassengerSession {
         "An active passenger session is required.",
       );
     }
-    return current.tokens.accessToken;
+    let result: T;
+    try {
+      result = await request(current.tokens.accessToken);
+    } catch (error) {
+      if (!(error instanceof PassengerApiError) || error.status !== 401)
+        throw error;
+      const tokens = await this.refresh(current);
+      result = await request(tokens.accessToken);
+    }
+    if ((await this.snapshot())?.generation !== current.generation)
+      throw new NativePassengerSessionChangedError();
+    return result;
   }
 
   requestOtp(command: RequestOtpCommand) {
     return command.purpose === "login"
       ? this.auth.requestOtp(command)
-      : this.activeAccessToken().then((token) =>
-          this.auth.requestOtp(command, token),
-        );
+      : this.authenticated((token) => this.auth.requestOtp(command, token));
   }
   async verifyOtp(
     command: VerifyOtpCommand,
     mode: "login" | "authenticated" = "login",
   ): Promise<VerifyOtpResponse> {
-    const result = await this.auth.verifyOtp(
-      command,
-      mode === "authenticated" ? await this.activeAccessToken() : undefined,
-    );
+    await this.hydrate();
+    const generation = this.generation;
+    const result =
+      mode === "authenticated"
+        ? await this.authenticated((token) =>
+            this.auth.verifyOtp(command, token),
+          )
+        : await this.auth.verifyOtp(command);
     if (result.result === "logged_in") {
-      await this.adopt({
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-      });
+      await this.adopt(
+        {
+          accessToken: result.accessToken,
+          refreshToken: result.refreshToken,
+        },
+        generation,
+      );
     }
     return result;
   }
   oauthStart(command: OAuthStartCommand) {
     return command.purpose === "login"
       ? this.auth.oauthStart(command)
-      : this.activeAccessToken().then((token) =>
-          this.auth.oauthStart(command, token),
-        );
+      : this.authenticated((token) => this.auth.oauthStart(command, token));
   }
   async oauthCallback(
     command: OAuthCallbackCommand,
     purpose: "login" | "link" = "login",
   ): Promise<OAuthCallbackResponse> {
-    const result = await this.auth.oauthCallback(
-      command,
-      purpose === "link" ? await this.activeAccessToken() : undefined,
-    );
+    await this.hydrate();
+    const generation = this.generation;
+    const result =
+      purpose === "link"
+        ? await this.authenticated((token) =>
+            this.auth.oauthCallback(command, token),
+          )
+        : await this.auth.oauthCallback(command);
     if (result.result === "logged_in") {
-      await this.adopt({
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-      });
+      await this.adopt(
+        {
+          accessToken: result.accessToken,
+          refreshToken: result.refreshToken,
+        },
+        generation,
+      );
     }
     return result;
   }

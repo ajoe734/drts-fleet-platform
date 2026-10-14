@@ -399,6 +399,170 @@ async function press(r: any, id: string) {
     await flush();
   });
 }
+
+function notificationPorts(enabled = true) {
+  let registration:
+    | import("@drts/passenger-client").NativePassengerPushRegistration
+    | null = null;
+  let permission: "granted" | "undetermined" = "undetermined";
+  let click: ((data: unknown) => void) | undefined;
+  const unsub = vi.fn();
+  const token = vi.fn(async () => ({
+    provider: "fcm_v1" as const,
+    token: "fixture-native-fcm",
+  }));
+  const request = vi.fn(async () => {
+    permission = "granted";
+    return permission;
+  });
+  const ports = {
+    status: "ready" as const,
+    enabled,
+    platform: "android" as const,
+    appId: "com.cctechsupport.drts.passenger",
+    appVersion: "0.1.0",
+    notificationConsentVersion: "fixture-v1",
+    fcm: {
+      status: "available" as const,
+      getToken: token,
+      onTokenChanged: vi.fn(() => unsub),
+    },
+    permission: {
+      getStatus: async () => permission,
+      request,
+      subscribe: vi.fn(() => unsub),
+    },
+    clicks: {
+      subscribe: vi.fn((listener: (data: unknown) => void) => {
+        click = listener;
+        return unsub;
+      }),
+    },
+    store: {
+      read: async () => registration,
+      write: async (next: typeof registration) => {
+        registration = next;
+      },
+      clear: async () => {
+        registration = null;
+      },
+    },
+  };
+  return {
+    ports,
+    token,
+    request,
+    unsub,
+    click: (data: unknown) => click?.(data),
+    registration: () => registration,
+  };
+}
+
+describe("mounted Native push integration", () => {
+  it("failed push cleanup does not block local logout or claim a confirmed device removal", async () => {
+    const push = notificationPorts();
+    const f = fixture(async (url, options) => {
+      if (url.endsWith("/push-devices") && options?.method === "POST")
+        return success({ deviceId: "fixture-device" });
+      if (
+        url.endsWith("/push-devices/fixture-device") &&
+        options?.method === "DELETE"
+      )
+        return fault(503, "unavailable");
+      return undefined;
+    });
+    const { r } = await mount(f, { notifications: push.ports });
+    await press(r, "app-enable-notifications");
+    push.ports.store.read = async () => {
+      throw new Error("injected device-store outage");
+    };
+    await press(r, "app-nav-account");
+    await press(r, "account-logout");
+    expect(f.stored()).toBeNull();
+    expect(present(r, "app-login")).toBe(true);
+    expect(text(r, "app-session-message")).toContain("推播裝置註銷尚未確認");
+    expect(push.unsub).toHaveBeenCalledTimes(3);
+  });
+  it("uses explicit permission opt-in, acknowledged raw API device ID and current bearer", async () => {
+    const push = notificationPorts();
+    const f = fixture(async (url, options) =>
+      url.endsWith("/push-devices") && options?.method === "POST"
+        ? success({ deviceId: "fixture-device" })
+        : undefined,
+    );
+    const { r } = await mount(f, { notifications: push.ports });
+    expect(push.request).not.toHaveBeenCalled();
+    expect(push.token).not.toHaveBeenCalled();
+    await press(r, "app-enable-notifications");
+    expect(push.request).toHaveBeenCalledTimes(1);
+    expect(push.token).toHaveBeenCalledTimes(1);
+    const call = f.calls.find((c) => c.url.endsWith("/push-devices"));
+    expect(call?.options?.headers?.Authorization).toBe(
+      `Bearer ${PAIR.accessToken}`,
+    );
+    expect(JSON.parse(call?.options?.body ?? "{}")).toMatchObject({
+      provider: "fcm_v1",
+      token: "fixture-native-fcm",
+    });
+    expect(push.registration()?.deviceId).toBe("fixture-device");
+    expect(text(r, "app-push-status")).toContain("已登錄");
+  });
+  it("disabled flag makes zero platform subscriptions, permission prompts or API registrations", async () => {
+    const push = notificationPorts(false);
+    const f = fixture();
+    const { r } = await mount(f, { notifications: push.ports });
+    expect(present(r, "app-enable-notifications")).toBe(false);
+    expect(push.token).not.toHaveBeenCalled();
+    expect(push.ports.clicks.subscribe).not.toHaveBeenCalled();
+    expect(f.calls.some((c) => c.url.includes("push-devices"))).toBe(false);
+  });
+  it("unregisters own acknowledged device before logout clears its session and detaches clicks", async () => {
+    const push = notificationPorts();
+    const f = fixture(async (url, options) => {
+      if (url.endsWith("/push-devices") && options?.method === "POST")
+        return success({ deviceId: "fixture-device" });
+      if (
+        url.endsWith("/push-devices/fixture-device") &&
+        options?.method === "DELETE"
+      )
+        return success({ success: true });
+      return undefined;
+    });
+    const { r } = await mount(f, { notifications: push.ports });
+    await press(r, "app-enable-notifications");
+    await press(r, "app-nav-account");
+    await press(r, "account-logout");
+    const removal = f.calls.findIndex(
+      (c) =>
+        c.options?.method === "DELETE" &&
+        c.url.endsWith("/push-devices/fixture-device"),
+    );
+    const logout = f.calls.findIndex((c) => c.url.endsWith("/auth/logout"));
+    expect(removal).toBeGreaterThan(-1);
+    expect(removal).toBeLessThan(logout);
+    expect(push.registration()).toBeNull();
+    expect(push.unsub).toHaveBeenCalledTimes(3);
+    expect(f.stored()).toBeNull();
+  });
+  it("clicks re-read the owned ride and unmount stops native subscriptions", async () => {
+    const push = notificationPorts();
+    const f = fixture(async (url, options) =>
+      url.endsWith("/push-devices") && options?.method === "POST"
+        ? success({ deviceId: "fixture-device" })
+        : undefined,
+    );
+    const { r } = await mount(f, { notifications: push.ports });
+    await press(r, "app-enable-notifications");
+    await act(async () => {
+      push.click({ ride_ref: "one" });
+      await flush();
+    });
+    expect(present(r, "app-ride")).toBe(true);
+    expect(f.calls.some((c) => c.url.endsWith("/rides/one"))).toBe(true);
+    await act(() => r.unmount());
+    expect(push.unsub).toHaveBeenCalledTimes(3);
+  });
+});
 async function enter(r: any, id: string, value: string) {
   await act(() => {
     r.root.findByProps({ testID: id }).props.onChangeText(value);

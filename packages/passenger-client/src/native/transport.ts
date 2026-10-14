@@ -1,5 +1,8 @@
 import type { FetchFn, FetchOptions } from "../client.js";
-import { NativePassengerSession } from "./session.js";
+import {
+  NativePassengerSession,
+  NativePassengerSessionChangedError,
+} from "./session.js";
 
 const GEO_ROUTES: Readonly<Record<string, string>> = {
   "GET /api/passenger-app/geo/search": "/api/geo/search",
@@ -76,12 +79,18 @@ export function createNativePassengerFetch(options: {
         ? withBearer(requestOptions, current.tokens.accessToken)
         : requestOptions,
     );
+    const after = await options.session.snapshot();
+    if (after?.generation !== current?.generation)
+      throw new NativePassengerSessionChangedError();
     if (response.status !== 401 || !current) return response;
     const tokens = await options.session.refresh(current);
     // One retry after the rotated pair has actually been persisted, never on 403.
-    return options.fetchFn(
+    const retry = await options.fetchFn(
       target,
       withBearer(requestOptions, tokens.accessToken),
     );
+    if ((await options.session.snapshot())?.generation !== current.generation)
+      throw new NativePassengerSessionChangedError();
+    return retry;
   };
 }

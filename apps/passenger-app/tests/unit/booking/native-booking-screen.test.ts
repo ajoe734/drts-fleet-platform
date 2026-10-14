@@ -213,7 +213,9 @@ function fixture(handler?: Handler) {
     fetchFn,
   });
   const onCreated = vi.fn(
-    async (_ride: Parameters<NativeBookingScreenProps["onCreated"]>[0]) => {},
+    async (ride: Parameters<NativeBookingScreenProps["onCreated"]>[0]) => {
+      void ride;
+    },
   );
   const onAccount = vi.fn(async () => {});
   const onPaymentMethods = vi.fn(async () => {});

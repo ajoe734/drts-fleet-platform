@@ -17,7 +17,7 @@ import {
   type NativePassengerSession,
 } from "@drts/passenger-client";
 
-/** The future App adapter opens the API authUrl in the system browser. */
+/** The App adapter opens the API authUrl in the system browser. */
 export interface PassengerOAuthBrowserPort {
   openAuthSession(
     authUrl: string,
@@ -65,7 +65,9 @@ function failureMessage(error: unknown): string {
   return "登入流程暫時無法完成，請重試。";
 }
 /** Only callback query fields; transactionId remains the API start response. */
-function callbackFields(url: string): { code: string; state: string } | null {
+export function callbackFields(
+  url: string,
+): { code: string; state: string } | null {
   const query = url.split("?")[1]?.split("#")[0] ?? "";
   const fields: Record<string, string> = {};
   try {

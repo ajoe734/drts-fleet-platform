@@ -63,12 +63,12 @@ function googleFixture() {
       },
     ]),
   );
-  const network = vi.fn(
-    async (_url: string) =>
-      new Response(JSON.stringify({ keys: [{ ...jwk, kid }] }), {
-        status: 200,
-      }),
-  );
+  const network = vi.fn(async (url: string) => {
+    void url;
+    return new Response(JSON.stringify({ keys: [{ ...jwk, kid }] }), {
+      status: 200,
+    });
+  });
   vi.stubGlobal("fetch", network);
   const now = Math.floor(Date.now() / 1000);
   const token = jwt.sign(

@@ -1,5 +1,5 @@
 /**
- * Native preparation: portable P5 projection from accepted Web source52.
+ * Portable Native P5 projection of the accepted Web authority presentation.
  * No transport, browser, React, Next, fixture data, API route or platform runtime.
  * The App owns rendering, header-bearing events, binary downloads and lifecycle.
  */

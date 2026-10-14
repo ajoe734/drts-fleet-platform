@@ -257,11 +257,22 @@ function ApplicationBody() {
           模擬示意：外部服務與資料使用測試介面，未執行真實預約、付款或訊息送達。
         </Text>
       )}
-      <Text testID="app-push-skipped">
-        {options.notifications?.status === "disabled"
-          ? "推播尚未啟用，已略過此步驟。"
-          : "推播送達服務尚未提供，已略過此外部步驟。"}
-      </Text>
+      <Text testID="app-push-status">{state.pushMessage}</Text>
+      {options.notifications?.status === "ready" &&
+        options.notifications.enabled && (
+          <Action
+            id="app-enable-notifications"
+            label="開啟或重試行程通知"
+            onPress={() => runtime.requestNotifications()}
+          />
+        )}
+      {options.notifications?.status !== "ready" && (
+        <Text testID="app-push-skipped">
+          {options.notifications?.status === "disabled"
+            ? "推播尚未啟用，已略過此步驟。"
+            : "推播送達服務尚未提供，已略過此外部步驟。"}
+        </Text>
+      )}
       <Text testID="app-account-label">
         {state.account?.displayName ?? "乘客"}
       </Text>
@@ -325,6 +336,16 @@ function ApplicationBody() {
           <PassengerAccountScreen
             passenger={runtime.passenger}
             session={runtime.session}
+            beforeSessionEnd={() => runtime.beforeSessionEnd()}
+            onSessionEndFailed={() => runtime.sessionEndFailed()}
+            {...(options.browser.status === "ready"
+              ? {
+                  oauth: {
+                    browser: options.browser.port,
+                    callbackUri: options.callbackUri,
+                  },
+                }
+              : {})}
             mode={options.mode}
             {...(options.policy ? { policy: options.policy } : {})}
             {...(options.demoOtpHint

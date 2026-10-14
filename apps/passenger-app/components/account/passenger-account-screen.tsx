@@ -15,7 +15,12 @@ import {
   type NativePassengerSession,
   type PassengerAccount,
   type PassengerClient,
+  type PassengerLoginIdentity,
 } from "@drts/passenger-client";
+import {
+  callbackFields,
+  type PassengerOAuthBrowserPort,
+} from "../auth/passenger-login-screen";
 
 export interface PassengerAccountScreenProps {
   passenger: PassengerClient;
@@ -33,6 +38,9 @@ export interface PassengerAccountScreenProps {
     onOpen(kind: "terms" | "privacy"): void;
   };
   demoOtpHint?: string;
+  beforeSessionEnd?(): Promise<string>;
+  onSessionEndFailed?(): Promise<void>;
+  oauth?: { browser: PassengerOAuthBrowserPort; callbackUri: string };
 }
 type Proof = { provider: "phone" | "email"; target: string; challenge: string };
 function message(error: unknown) {
@@ -57,6 +65,9 @@ export function PassengerAccountScreen({
   onAccountChanged,
   policy,
   demoOtpHint,
+  beforeSessionEnd,
+  onSessionEndFailed,
+  oauth,
 }: PassengerAccountScreenProps) {
   const [account, setAccount] = useState<PassengerAccount | null>(null);
   const [name, setName] = useState("");
@@ -66,6 +77,8 @@ export function PassengerAccountScreen({
   const [policyAgreed, setPolicyAgreed] = useState(false);
   const [providers, setProviders] = useState<string[]>([]);
   const [providerError, setProviderError] = useState("");
+  const [identities, setIdentities] = useState<PassengerLoginIdentity[]>([]);
+  const [identityError, setIdentityError] = useState("");
   const [proof, setProof] = useState<Proof | null>(null);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -76,6 +89,7 @@ export function PassengerAccountScreen({
   const [cleanupPending, setCleanupPending] = useState(false);
   const active = useRef(true);
   const running = useRef(false);
+  const sessionEndNotice = useRef("");
 
   function accept(next: PassengerAccount) {
     if (!active.current) return;
@@ -118,6 +132,63 @@ export function PassengerAccountScreen({
     await run(async () => {
       accept(await passenger.getAccount());
       await loadProviders();
+      await loadIdentities();
+    });
+  }
+  async function loadIdentities(): Promise<boolean> {
+    try {
+      const result = await passenger.getIdentities();
+      if (active.current) {
+        setIdentities(result.identities);
+        setIdentityError("");
+      }
+      return true;
+    } catch {
+      if (active.current) setIdentityError("登入身分尚未讀取，請重試。");
+      return false;
+    }
+  }
+  async function linkOAuth(provider: "google" | "facebook" | "line") {
+    if (!oauth) return;
+    await run(async () => {
+      const start = await session.oauthStart({
+        provider,
+        purpose: "link",
+        redirectUri: oauth.callbackUri,
+      });
+      const returned = await oauth.browser.openAuthSession(
+        start.authUrl,
+        oauth.callbackUri,
+      );
+      if (!active.current) return;
+      if (returned.type !== "success") {
+        setNotice("已取消第三方綁定。");
+        return;
+      }
+      const fields = callbackFields(returned.url);
+      if (!fields) throw new Error("第三方綁定未完成，請重試。");
+      const result = await session.oauthCallback(
+        { provider, ...fields, transactionId: start.transactionId },
+        "link",
+      );
+      if (result.result !== "linked")
+        throw new Error("尚未確認身分綁定結果，請重新讀取帳號。");
+      const read = await loadIdentities();
+      setNotice(
+        read ? "登入方式已綁定。" : "綁定已完成；登入身分尚未讀取，請重試。",
+      );
+    });
+  }
+  async function unlink(identityId: string) {
+    await run(async () => {
+      const result = await passenger.unlinkIdentity({ identityId });
+      if (!result.success) throw new Error("服務尚未確認解除綁定，請重試。");
+      const read = await loadIdentities();
+      setNotice(
+        read
+          ? "登入方式已解除綁定。"
+          : "解除綁定已完成；登入身分尚未讀取，請重試。",
+      );
     });
   }
   useEffect(() => {
@@ -203,13 +274,20 @@ export function PassengerAccountScreen({
     await session.clear();
     if (!active.current) return;
     setCleanupPending(false);
-    const text = "帳號已刪除，本機登入資料已清除。";
+    const text = "帳號已刪除，本機登入資料已清除。" + sessionEndNotice.current;
     setNotice(text);
     await onSignedOut({ reason: "deleted", message: text });
   }
   async function removeAccount() {
     await run(async () => {
-      const result = await passenger.deleteAccount();
+      sessionEndNotice.current = (await beforeSessionEnd?.()) ?? "";
+      let result;
+      try {
+        result = await passenger.deleteAccount();
+      } catch (error) {
+        await onSessionEndFailed?.();
+        throw error;
+      }
       if (!result.success) throw new Error("服務尚未確認帳號刪除，請重試。");
       setTerminal("deleted");
       setAccount(null);
@@ -225,13 +303,14 @@ export function PassengerAccountScreen({
   }
   async function logout() {
     await run(async () => {
+      const pushMessage = await beforeSessionEnd?.();
       const result = await session.logout();
       if (!result.localCleared)
         throw new Error("本機登入資料尚未清除，請重試登出。");
       const text =
-        result.remoteRevocation === "unconfirmed"
+        (result.remoteRevocation === "unconfirmed"
           ? "已清除本機登入；服務端撤銷尚未確認。"
-          : "已登出，本機登入資料已清除。";
+          : "已登出，本機登入資料已清除。") + (pushMessage ?? "");
       setTerminal("logout");
       setAccount(null);
       setProof(null);
@@ -426,6 +505,45 @@ export function PassengerAccountScreen({
                   )}
                 </View>
               )}
+              <View testID="account-identities">
+                <Text>登入身分</Text>
+                {!!identityError && (
+                  <Text accessibilityRole="alert">{identityError}</Text>
+                )}
+                {action("account-reload-identities", "重新讀取登入身分", () =>
+                  run(async () => {
+                    await loadIdentities();
+                  }),
+                )}
+                {identities.map((identity) => (
+                  <View key={identity.identityId}>
+                    <Text>{identity.provider}</Text>
+                    {action(
+                      `account-unlink-${identity.identityId}`,
+                      `解除 ${identity.provider} 綁定`,
+                      () => unlink(identity.identityId),
+                      busy || identities.length <= 1 || !!identityError,
+                    )}
+                  </View>
+                ))}
+                {(["google", "facebook", "line"] as const)
+                  .filter((provider) => providers.includes(provider))
+                  .map((provider) =>
+                    oauth ? (
+                      <View key={provider}>
+                        {action(
+                          `account-link-${provider}`,
+                          `${mode === "demo" ? "模擬" : ""}綁定 ${provider}`,
+                          () => linkOAuth(provider),
+                        )}
+                      </View>
+                    ) : (
+                      <Text key={provider}>
+                        系統瀏覽器尚未提供，已略過 {provider} 綁定。
+                      </Text>
+                    ),
+                  )}
+              </View>
               {action("account-logout", "登出", logout)}
               {action("account-open-delete", "刪除帳號", () =>
                 setConfirmDelete(true),

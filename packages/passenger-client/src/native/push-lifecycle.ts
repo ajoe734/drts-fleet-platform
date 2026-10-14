@@ -17,7 +17,7 @@ function record(value: unknown): Record<string, unknown> | null {
     ? (value as Record<string, unknown>)
     : null;
 }
-/** Planned original Push API transport. Its backend dependency is not implemented by this helper. */
+/** Raw transport for the existing passenger-owned Push API. */
 export class NativePassengerPushClient {
   constructor(
     private readonly options: { baseUrl: string; fetchFn: FetchFn },

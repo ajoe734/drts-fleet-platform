@@ -426,9 +426,7 @@ describe("actual Native P5 rendered terminal and active screens", () => {
   });
 
   it("preserves the supplied port method receiver when dispatching an authority retry", async () => {
-    let receiver: unknown = null;
     const retryAuthority = vi.fn(function (this: NativeP5ScreenActions) {
-      receiver = this;
       return Promise.resolve();
     });
     const actions = ports({ retryAuthority });
@@ -440,7 +438,7 @@ describe("actual Native P5 rendered terminal and active screens", () => {
     );
     await press(renderer, "native-retry-authority");
     expect(retryAuthority).toHaveBeenCalledOnce();
-    expect(receiver).toBe(actions);
+    expect(retryAuthority.mock.contexts[0]).toBe(actions);
   });
 
   it("pending cancellation dispatches one existing request and disables another press", async () => {

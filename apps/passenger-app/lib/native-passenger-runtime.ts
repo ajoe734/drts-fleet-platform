@@ -8,6 +8,8 @@ import {
   PassengerBookingClient,
   PassengerPaymentClient,
   PassengerApiError,
+  NativePassengerPushLifecycle,
+  NativePassengerPushClient,
   createNativePassengerFetch,
   createNativePassengerBinaryTransport,
   mapNativePassengerRidePresentation,
@@ -20,6 +22,11 @@ import {
   type NativePassengerStreamState,
   type NativePassengerRidePresentation,
   type PassengerPaymentFieldsAvailability,
+  type NativePassengerFcmPort,
+  type NativePassengerNotificationPermissionPort,
+  type NativePassengerNotificationClickPort,
+  type NativePassengerPushRegistrationStore,
+  type NativePassengerPushResult,
 } from "@drts/passenger-client";
 import type {
   PassengerAccount,
@@ -51,7 +58,23 @@ export interface NativePassengerApplicationState {
   message: string;
   receiptMessage: string;
   cancelConfirmation: boolean;
+  pushMessage: string;
 }
+export type NativePassengerNotifications =
+  | { status: "disabled" | "unavailable" }
+  | {
+      status: "ready";
+      enabled: boolean;
+      platform: "ios" | "android";
+      appId: string;
+      appVersion: string;
+      notificationConsentVersion: string;
+      fcm: NativePassengerFcmPort;
+      permission: NativePassengerNotificationPermissionPort;
+      clicks: NativePassengerNotificationClickPort;
+      store: NativePassengerPushRegistrationStore;
+      resolveRideRef?(reference: string): Promise<string | null>;
+    };
 export interface NativePassengerRuntimeOptions {
   baseUrl: string;
   mode: "configured" | "demo";
@@ -78,8 +101,7 @@ export interface NativePassengerRuntimeOptions {
     files: NativePassengerReceiptFilePort;
   };
   telephone?: { open(uri: string): void | Promise<void> };
-  /** Push binding is a separate prepared unit; absent/disabled external delivery is explicit. */
-  notifications?: { status: "disabled" | "unavailable" };
+  notifications?: NativePassengerNotifications;
 }
 type SignedOut = Parameters<PassengerAccountScreenProps["onSignedOut"]>[0];
 
@@ -97,6 +119,7 @@ export class NativePassengerRuntime {
   private listeners = new Set<() => void>();
   private fetch!: FetchFn;
   private stream: NativePassengerRideStream | null = null;
+  private push: NativePassengerPushLifecycle | null = null;
   private downloads: NativePassengerReceiptDownloads | null = null;
   private receiptMetadata: PassengerReceiptResponse | null = null;
   private rideRevision = 0;
@@ -112,6 +135,7 @@ export class NativePassengerRuntime {
     message: "",
     receiptMessage: "",
     cancelConfirmation: false,
+    pushMessage: "",
   };
   constructor(readonly options: NativePassengerRuntimeOptions) {
     this.now = options.now ?? Date.now;
@@ -198,6 +222,9 @@ export class NativePassengerRuntime {
     if (!(await this.session.snapshot()))
       throw new PassengerApiError(401, "unauthorized", "登入狀態尚未保存。");
     if (this.disposed || expectedVersion !== this.state.identityVersion) return;
+    const pushMessage = await this.beforeSessionEnd();
+    if (this.disposed || expectedVersion !== this.state.identityVersion) return;
+    this.push = null;
     this.closeRide();
     ++this.epoch;
     this.replaceClients();
@@ -206,8 +233,93 @@ export class NativePassengerRuntime {
       account,
       identityVersion: this.state.identityVersion + 1,
       route: { kind: "home" },
-      message: "",
+      message: pushMessage,
     });
+    await this.startPush();
+  }
+  private async startPush() {
+    const ports = this.options.notifications;
+    if (
+      !ports ||
+      ports.status !== "ready" ||
+      this.disposed ||
+      this.state.phase !== "active"
+    )
+      return;
+    if (!this.push) {
+      const epoch = this.epoch;
+      this.push = new NativePassengerPushLifecycle({
+        ...ports,
+        session: this.session,
+        accountClient: new PassengerClient({
+          baseUrl: this.options.baseUrl,
+          fetchFn: createNativePassengerFetch({
+            baseUrl: this.options.baseUrl,
+            fetchFn: this.options.fetchFn,
+            session: this.session,
+          }),
+        }),
+        client: new NativePassengerPushClient({
+          baseUrl: this.options.baseUrl,
+          fetchFn: this.options.fetchFn,
+        }),
+        onOwnedRide: (ride) => {
+          if (epoch === this.epoch)
+            void this.openRide(ride).catch(() =>
+              this.publish({
+                pushMessage: "通知行程尚未讀取，請至乘車紀錄重試。",
+              }),
+            );
+        },
+        onResult: (result) => {
+          if (epoch === this.epoch)
+            this.publish({ pushMessage: this.pushResultMessage(result) });
+        },
+        onError: () => {
+          if (epoch === this.epoch)
+            this.publish({ pushMessage: "推播裝置設定尚未完成，請重試。" });
+        },
+      });
+    }
+    try {
+      await this.push.start();
+    } catch {
+      this.publish({ pushMessage: "推播裝置設定尚未完成，請重試。" });
+    }
+  }
+  private pushResultMessage(result: NativePassengerPushResult): string {
+    return {
+      disabled: "推播尚未啟用，已略過此步驟。",
+      provider_unavailable: "原生 FCM 服務尚未設定，已略過此外部步驟。",
+      permission_required: "可選擇開啟行程通知。",
+      session_required: "請登入後再設定通知。",
+      stopped: "推播連線已停止。",
+      registered: "推播裝置已登錄；實際送達仍依服務設定。",
+      unregistered: "推播裝置已註銷。",
+      unregister_unconfirmed: "推播裝置註銷尚未確認。",
+      click_unresolved: "通知行程尚未確認，請至乘車紀錄查看。",
+      opened: "已讀取通知所屬行程。",
+    }[result.status];
+  }
+  async requestNotifications() {
+    try {
+      await this.push?.requestNotifications();
+    } catch {
+      this.publish({ pushMessage: "推播裝置設定尚未完成，請重試。" });
+    }
+  }
+  async beforeSessionEnd(): Promise<string> {
+    try {
+      const result = await this.push?.beforeLogout();
+      return result?.status === "unregister_unconfirmed"
+        ? "推播裝置註銷尚未確認。"
+        : "";
+    } catch {
+      return "推播裝置註銷尚未確認。";
+    }
+  }
+  async sessionEndFailed() {
+    await this.startPush();
   }
   updateAccount(account: PassengerAccount, expectedVersion: number) {
     if (
@@ -224,9 +336,12 @@ export class NativePassengerRuntime {
       this.state.phase === "signed_out"
     )
       return;
+    const pushMessage = await this.beforeSessionEnd();
+    if (this.disposed || expectedEpoch !== this.epoch) return;
+    this.push = null;
     this.closeRide();
     ++this.epoch;
-    let message = "登入已失效，請重新登入。";
+    let message = `登入已失效，請重新登入。${pushMessage}`;
     try {
       if (await this.session.snapshot()) await this.session.clear();
     } catch {
@@ -243,6 +358,8 @@ export class NativePassengerRuntime {
   }
   signedOut(result: SignedOut, expectedVersion: number) {
     if (expectedVersion !== this.state.identityVersion || this.disposed) return;
+    this.push?.stop();
+    this.push = null;
     this.closeRide();
     ++this.epoch;
     this.replaceClients();
@@ -510,6 +627,7 @@ export class NativePassengerRuntime {
     };
   }
   dispose() {
+    this.push?.stop();
     this.closeRide();
     this.disposed = true;
     ++this.epoch;

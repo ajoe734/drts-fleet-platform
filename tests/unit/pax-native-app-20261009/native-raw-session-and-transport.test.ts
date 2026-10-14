@@ -36,6 +36,77 @@ const otp = {
   provider: "email" as const,
   challenge: "fixture-challenge",
 };
+
+describe("pending raw Native operations across session changes", () => {
+  it("renews an expired own access token for authenticated contact OTP using the existing refresh protocol", async () => {
+    const f = fixture(async (url, options) => {
+      if (url.endsWith("/auth/refresh")) {
+        expect(JSON.parse(options?.body ?? "{}")).toEqual({
+          refreshToken: pair.refreshToken,
+        });
+        return response(200, { data: rotated });
+      }
+      if (options?.headers?.Authorization === `Bearer ${pair.accessToken}`)
+        return response(401, { error: { code: "unauthorized" } });
+      expect(options?.headers?.Authorization).toBe(
+        `Bearer ${rotated.accessToken}`,
+      );
+      return response(200, {
+        data: { success: true, challenge: "renewed-challenge" },
+      });
+    }, pair);
+    await expect(
+      f.session.requestOtp({
+        provider: "phone",
+        target: "+886900000000",
+        purpose: "verify_contact_phone",
+      }),
+    ).resolves.toMatchObject({ challenge: "renewed-challenge" });
+    expect((await f.session.snapshot())?.tokens).toEqual(rotated);
+    expect(f.calls.filter((c) => c.url.endsWith("/auth/refresh"))).toHaveLength(
+      1,
+    );
+  });
+  it("does not restore a login response that arrives after logout", async () => {
+    const gate = deferred<void>();
+    const started = deferred<void>();
+    const f = fixture(async (url) => {
+      if (url.endsWith("/auth/otp/verify")) {
+        started.resolve();
+        await gate.promise;
+        return response(200, { data: { result: "logged_in", ...pair } });
+      }
+      return response(200, { data: { success: true } });
+    });
+    const pending = f.session.verifyOtp(otp);
+    const rejection = expect(pending).rejects.toBeInstanceOf(
+      NativePassengerSessionChangedError,
+    );
+    await started.promise;
+    await f.session.logout();
+    gate.resolve();
+    await rejection;
+    expect(await f.session.snapshot()).toBeNull();
+  });
+  it("does not deliver a successful previous-account read after adopting a new session", async () => {
+    const gate = deferred<void>();
+    const started = deferred<void>();
+    const f = fixture(async () => {
+      started.resolve();
+      await gate.promise;
+      return response(200, { data: { account } });
+    }, pair);
+    const pending = f.client.getAccount();
+    const rejection = expect(pending).rejects.toBeInstanceOf(
+      NativePassengerSessionChangedError,
+    );
+    await started.promise;
+    await f.session.adopt(rotated);
+    gate.resolve();
+    await rejection;
+    expect((await f.session.snapshot())?.tokens).toEqual(rotated);
+  });
+});
 function response(status: number, payload: unknown): FetchResponse {
   return {
     ok: status >= 200 && status < 300,

@@ -278,6 +278,7 @@ export function createNativePassengerPlatformPorts(input: {
   shareWebOrigin?: string;
   fileSystem?: NativePassengerExpoFileSystem;
   openSavedFile?: (uri: string, contentType: string) => Promise<void>;
+  notifications?: NativePassengerRuntimeOptions["notifications"];
 }): NativePassengerPlatformPorts {
   const modules = input.modules ?? {
     secureStore: SecureStore,
@@ -342,6 +343,6 @@ export function createNativePassengerPlatformPorts(input: {
     paymentFields: { status: "unavailable" },
     paymentBrowser: { status: "unavailable" },
     bookingMap: { status: "unavailable" },
-    notifications: { status: "disabled" },
+    notifications: input.notifications ?? { status: "disabled" },
   };
 }

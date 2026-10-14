@@ -514,38 +514,49 @@ function receiptSetup() {
   let missingPdf = false;
   const binaryRequests: BinaryRequest[] = [];
   let configure: (xhr: BinaryRequest) => void = () => undefined;
-  const fetchFn = vi.fn(async (url: string, _options?: FetchOptions) => ({
-    ok: status === 200,
-    status,
-    json: async () => {
-      if (badJson) throw new Error("not json");
-      return url.endsWith("/downloads")
-        ? {
-            data: {
-              receipt_url: `/api/passenger-app/rides/${id}/receipt/artifacts/html`,
-              html_url: `/api/passenger-app/rides/${id}/receipt/artifacts/html`,
-              ...(!missingPdf
-                ? {
-                    pdf_url: `/api/passenger-app/rides/${id}/receipt/artifacts/pdf`,
-                  }
-                : {}),
-              order_id: id,
-              certificate_id: "receipt-demo-901",
-            },
-          }
-        : { data: { ride: snake(view) } };
-    },
-  }));
+  const fetchFn = vi.fn(async (url: string, options?: FetchOptions) => {
+    void options;
+    return {
+      ok: status === 200,
+      status,
+      json: async () => {
+        if (badJson) throw new Error("not json");
+        return url.endsWith("/downloads")
+          ? {
+              data: {
+                receipt_url: `/api/passenger-app/rides/${id}/receipt/artifacts/html`,
+                html_url: `/api/passenger-app/rides/${id}/receipt/artifacts/html`,
+                ...(!missingPdf
+                  ? {
+                      pdf_url: `/api/passenger-app/rides/${id}/receipt/artifacts/pdf`,
+                    }
+                  : {}),
+                order_id: id,
+                certificate_id: "receipt-demo-901",
+              },
+            }
+          : { data: { ride: snake(view) } };
+      },
+    };
+  });
   const files = {
     write: vi.fn(
       async (_input: {
         fileName: string;
         contentType: string;
         bytes: Uint8Array;
-      }) => "file:///synthetic-boundary/ride-demo.pdf",
+      }) => {
+        void _input;
+        return "file:///synthetic-boundary/ride-demo.pdf";
+      },
     ),
-    remove: vi.fn(async (_uri: string) => undefined),
-    open: vi.fn(async (_uri: string, _type: string) => undefined),
+    remove: vi.fn(async (uri: string) => {
+      void uri;
+    }),
+    open: vi.fn(async (uri: string, type: string) => {
+      void uri;
+      void type;
+    }),
   };
   const downloads = new NativePassengerReceiptDownloads({
     baseUrl: "https://api.example.invalid",

@@ -152,6 +152,135 @@ async function mountAccount(
   renderers.push(r);
   return r;
 }
+
+describe("Native account provider and identity parity", () => {
+  it.each(["google", "facebook", "line"] as const)(
+    "links %s using current session and API-owned transaction without replacing tokens",
+    async (provider) => {
+      const f = fixture(
+        async (url) => {
+          if (url.endsWith("/me/identities"))
+            return reply(200, {
+              data: {
+                identities: [
+                  {
+                    identityId: "id-email",
+                    provider: "email",
+                    subject: "fixture",
+                    drtsPassengerId: account.drtsPassengerId,
+                  },
+                ],
+              },
+            });
+          if (url.endsWith(`/auth/oauth/${provider}/start`))
+            return reply(200, {
+              data: {
+                authUrl: "https://provider.invalid/authorize",
+                transactionId: "fixture-transaction",
+                state: "fixture-state",
+                expiresAt: "2099-01-01T00:00:00Z",
+              },
+            });
+          if (url.endsWith(`/auth/oauth/${provider}/callback`))
+            return reply(200, { data: { result: "linked" } });
+          return undefined;
+        },
+        [provider, "email"],
+      );
+      const browser = {
+        openAuthSession: vi.fn(async () => ({
+          type: "success" as const,
+          url: "drtspassenger://auth/callback?code=fixture-code&state=fixture-state",
+        })),
+      };
+      const r = await mountAccount(f, {
+        oauth: { browser, callbackUri: "drtspassenger://auth/callback" },
+      } as Partial<PassengerAccountScreenProps>);
+      await press(r, `account-link-${provider}`);
+      const start = f.calls.find((c) =>
+        c.url.endsWith(`/oauth/${provider}/start`),
+      );
+      const callback = f.calls.find((c) =>
+        c.url.endsWith(`/oauth/${provider}/callback`),
+      );
+      expect(JSON.parse(start?.options?.body ?? "{}")).toMatchObject({
+        purpose: "link",
+        provider,
+        redirectUri: "drtspassenger://auth/callback",
+      });
+      expect(start?.options?.headers?.Authorization).toBe(
+        `Bearer ${tokens.accessToken}`,
+      );
+      expect(JSON.parse(callback?.options?.body ?? "{}")).toEqual({
+        provider,
+        code: "fixture-code",
+        state: "fixture-state",
+        transactionId: "fixture-transaction",
+      });
+      expect(callback?.options?.headers?.Authorization).toBe(
+        `Bearer ${tokens.accessToken}`,
+      );
+      expect(f.stored()).toEqual(tokens);
+      expect(f.store.write).not.toHaveBeenCalled();
+    },
+  );
+  it("reads actual identities and unlinks the selected identity through the existing own API", async () => {
+    let identities = ["one", "two"].map((identityId) => ({
+      identityId,
+      provider: "email",
+      subject: "fixture",
+      drtsPassengerId: account.drtsPassengerId,
+    }));
+    const f = fixture(async (url, options) => {
+      if (url.endsWith("/me/identities"))
+        return reply(200, { data: { identities } });
+      if (url.endsWith("/me/identities/two") && options?.method === "DELETE") {
+        identities = identities.filter((i) => i.identityId !== "two");
+        return reply(200, { data: { success: true } });
+      }
+      return undefined;
+    });
+    const r = await mountAccount(f);
+    await press(r, "account-unlink-two");
+    expect(
+      f.calls.some(
+        (c) =>
+          c.url.endsWith("/me/identities/two") &&
+          c.options?.headers?.Authorization === `Bearer ${tokens.accessToken}`,
+      ),
+    ).toBe(true);
+    expect(
+      r.root.findByProps({ testID: "account-unlink-one" }).props.disabled,
+    ).toBe(true);
+    expect(
+      r.root.findAllByProps({ testID: "account-unlink-two" }),
+    ).toHaveLength(0);
+  });
+  it("browser cancellation preserves the signed-in account and sends no callback", async () => {
+    const f = fixture(
+      async (url) =>
+        url.endsWith("/oauth/google/start")
+          ? reply(200, {
+              data: {
+                authUrl: "https://provider.invalid/authorize",
+                transactionId: "fixture-transaction",
+                state: "state",
+              },
+            })
+          : undefined,
+      ["google"],
+    );
+    const r = await mountAccount(f, {
+      oauth: {
+        browser: { openAuthSession: async () => ({ type: "cancel" }) },
+        callbackUri: "drtspassenger://auth/callback",
+      },
+    } as Partial<PassengerAccountScreenProps>);
+    await press(r, "account-link-google");
+    expect(f.calls.some((c) => c.url.endsWith("/callback"))).toBe(false);
+    expect(f.stored()).toEqual(tokens);
+  });
+});
 async function mountHistory(
   f: ReturnType<typeof fixture>,
   onOpenRide = vi.fn(),
