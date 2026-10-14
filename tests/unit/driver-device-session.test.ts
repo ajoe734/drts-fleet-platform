@@ -1,10 +1,10 @@
+import { enabledRegistryRepository } from "./registry-driver-master-durable-ack-20261014/storage-fixture";
 import { describe, expect, it } from "vitest";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/driver-profile.service";
-import { RegulatoryRegistryRepository } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 import { SecurityEventsRepository } from "../../apps/api/src/modules/security-events/security-events.repository";
 import { SecurityEventsService } from "../../apps/api/src/modules/security-events/security-events.service";
@@ -26,7 +26,7 @@ function setupServices() {
   const securityEventsService = new SecurityEventsService(
     securityEventsRepository,
   );
-  const regulatoryRepository = new RegulatoryRegistryRepository();
+  const regulatoryRepository = enabledRegistryRepository();
   const regulatoryService = new RegulatoryRegistryService(
     opsDispatchEventsService,
     auditService,
@@ -275,7 +275,7 @@ describe("DriverDeviceSessionService (IAM-DRV-001)", () => {
     ).rejects.toThrowError(ApiRequestError);
 
     // 3. Suspend driver in RegulatoryRegistryService
-    regulatoryService.updateDriverLifecycle("drv-demo-001", {
+    await regulatoryService.updateDriverLifecycle("drv-demo-001", {
       lifecycleStatus: "suspended",
     });
 

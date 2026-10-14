@@ -1,3 +1,4 @@
+import { enabledRegistryRepository } from "./registry-driver-master-durable-ack-20261014/storage-fixture";
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 
@@ -843,14 +844,16 @@ describe("driver service buckets after registration", () => {
     return service.listDrivers()[0]!.driverId;
   }
 
-  it("lets the platform change which dispatch types a driver may take", () => {
+  it("lets the platform change which dispatch types a driver may take", async () => {
     // SD-DP-20260817-010 (PRD 11.4) makes this the platform's decision, and it
     // could only be made at registration -- the one moment the platform knows
     // least about the driver.
-    const service = createRegulatoryRegistryService();
+    const service = createRegulatoryRegistryService(
+      enabledRegistryRepository(),
+    );
     const driverId = firstDriverId(service);
 
-    const updated = service.updateDriverServiceBuckets(driverId, {
+    const updated = await service.updateDriverServiceBuckets(driverId, {
       supportedServiceBuckets: ["business_dispatch"],
       reason: "moved to the corporate fleet",
     });
@@ -862,19 +865,20 @@ describe("driver service buckets after registration", () => {
     ).toEqual(["business_dispatch"]);
   });
 
-  it("records what the buckets were before, not only what they became", () => {
+  it("records what the buckets were before, not only what they became", async () => {
     const auditService = new AuditNotificationService();
     const service = new RegulatoryRegistryService(
       new OpsDispatchEventsService(new EventEmitter() as never),
       auditService,
       new DriverProfileService(auditService),
+      enabledRegistryRepository(),
     );
     const driverId = firstDriverId(service);
     const before = service
       .listDrivers()
       .find((d) => d.driverId === driverId)!.supportedServiceBuckets;
 
-    service.updateDriverServiceBuckets(driverId, {
+    await service.updateDriverServiceBuckets(driverId, {
       supportedServiceBuckets: ["standard_taxi"],
     });
 
@@ -889,13 +893,15 @@ describe("driver service buckets after registration", () => {
     });
   });
 
-  it("refuses to leave a driver with no bucket at all", () => {
-    const service = createRegulatoryRegistryService();
+  it("refuses to leave a driver with no bucket at all", async () => {
+    const service = createRegulatoryRegistryService(
+      enabledRegistryRepository(),
+    );
 
     // A driver with no bucket can never be dispatched, which is a suspension
     // by accident rather than a dispatch setting.
     try {
-      service.updateDriverServiceBuckets(firstDriverId(service), {
+      await service.updateDriverServiceBuckets(firstDriverId(service), {
         supportedServiceBuckets: [],
       });
       throw new Error("expected the call to throw");
@@ -904,11 +910,13 @@ describe("driver service buckets after registration", () => {
     }
   });
 
-  it("refuses a bucket Phase 1 does not have", () => {
-    const service = createRegulatoryRegistryService();
+  it("refuses a bucket Phase 1 does not have", async () => {
+    const service = createRegulatoryRegistryService(
+      enabledRegistryRepository(),
+    );
 
     try {
-      service.updateDriverServiceBuckets(firstDriverId(service), {
+      await service.updateDriverServiceBuckets(firstDriverId(service), {
         supportedServiceBuckets: ["av_pilot"] as never,
       });
       throw new Error("expected the call to throw");
@@ -917,12 +925,17 @@ describe("driver service buckets after registration", () => {
     }
   });
 
-  it("does not let a duplicate silently double a bucket", () => {
-    const service = createRegulatoryRegistryService();
+  it("does not let a duplicate silently double a bucket", async () => {
+    const service = createRegulatoryRegistryService(
+      enabledRegistryRepository(),
+    );
 
-    const updated = service.updateDriverServiceBuckets(firstDriverId(service), {
-      supportedServiceBuckets: ["standard_taxi", "standard_taxi"],
-    });
+    const updated = await service.updateDriverServiceBuckets(
+      firstDriverId(service),
+      {
+        supportedServiceBuckets: ["standard_taxi", "standard_taxi"],
+      },
+    );
 
     expect(updated.supportedServiceBuckets).toEqual(["standard_taxi"]);
   });

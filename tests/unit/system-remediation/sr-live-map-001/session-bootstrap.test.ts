@@ -1,3 +1,4 @@
+import { enabledRegistryRepository } from "../../registry-driver-master-durable-ack-20261014/storage-fixture";
 import { expect, it, vi } from "vitest";
 import { deepToSnakeCase } from "../../../../apps/api/src/common/snake-case.interceptor";
 import { OpsDispatchEventsService } from "../../../../apps/api/src/common/ops-dispatch-events.service";
@@ -478,10 +479,13 @@ it("keeps a real lifecycle reactivation isolated until the existing work-state c
     new OpsDispatchEventsService({ emit } as never),
     audit,
     new DriverProfileService(audit),
+    enabledRegistryRepository(),
   );
   const controller = new RegulatoryRegistryController(registry);
   const driverId = env.DRTS_LIVE_MAP_TEST_DRIVER_ID;
-  controller.updateDriverLifecycle(driverId, { lifecycleStatus: "active" });
+  await controller.updateDriverLifecycle(driverId, {
+    lifecycleStatus: "active",
+  });
   const deps = harness({ snake: true, registry: controller.listDrivers() });
   await expect(bootstrapMapSessions(env, deps)).rejects.toThrow(
     "workState=available",
