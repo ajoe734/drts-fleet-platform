@@ -5,7 +5,10 @@ import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { vi } from "vitest";
 import type { PoolClient } from "pg";
-import type { DriverTaskRecord, PassengerDispatchDisclosureSnapshot } from "@drts/contracts";
+import type {
+  DriverTaskRecord,
+  PassengerDispatchDisclosureSnapshot,
+} from "@drts/contracts";
 import { DatabaseService } from "../../../apps/api/src/common/db/database.service";
 import { PassengerJwtService } from "../../../apps/api/src/common/auth/passenger-jwt.service";
 import type { RequestIdentity } from "../../../apps/api/src/common/auth/auth.types";
@@ -57,10 +60,12 @@ const runFile = promisify(execFile);
  * identify an SQL defect without logging a token, credential or raw message. */
 class DiagnosedDatabaseService extends DatabaseService {
   private readonly observed = new WeakSet<PoolClient>();
-  probe?: {
-    begin: () => Promise<void>;
-    mutations: { pid: number; sqlSha256: string }[];
-  };
+  probe:
+    | {
+        begin: () => Promise<void>;
+        mutations: { pid: number; sqlSha256: string }[];
+      }
+    | undefined;
   override async connect(): Promise<PoolClient> {
     const client = await super.connect();
     if (!this.observed.has(client)) {
@@ -69,8 +74,12 @@ class DiagnosedDatabaseService extends DatabaseService {
       client.query = (async (sql: string, values?: unknown[]) => {
         const probe = this.probe;
         let pid: number | undefined;
-        if (probe && (sql.trim() === "BEGIN" || /^\s*(INSERT|UPDATE)/i.test(sql))) {
-          pid = (await query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
+        if (
+          probe &&
+          (sql.trim() === "BEGIN" || /^\s*(INSERT|UPDATE)/i.test(sql))
+        ) {
+          pid = (await query("SELECT pg_backend_pid() AS pid")).rows[0]
+            .pid as number;
         }
         const result = await query(sql, values).catch((error: unknown) => {
           const fields =
@@ -97,7 +106,10 @@ class DiagnosedDatabaseService extends DatabaseService {
         });
         if (probe && sql.trim() === "BEGIN") await probe.begin();
         if (probe && pid !== undefined && /^\s*(INSERT|UPDATE)/i.test(sql)) {
-          probe.mutations.push({ pid, sqlSha256: createHash("sha256").update(sql).digest("hex") });
+          probe.mutations.push({
+            pid,
+            sqlSha256: createHash("sha256").update(sql).digest("hex"),
+          });
         }
         return result;
       }) as typeof client.query;
@@ -109,6 +121,20 @@ export const syntheticPolicy: PaymentCapturePolicy = {
   retryDelaysMs: [0],
   retryDefinitiveDeclines: false,
   unknownReadbackDelaysMs: [0, 0],
+};
+
+/** Explicitly simulated issuer/credential/payment facts, never legal E04 evidence. */
+export const simulatedE04 = {
+  fleetOperatorName: "QA simulated operator <escaped>",
+  driverSurname: "歐陽",
+  driverRegistrationMasked: "••••0042",
+  fareBreakdown: {
+    startMinor: 8501,
+    distanceMinor: 1303,
+    delayMinor: 0,
+    nightMinor: 0,
+  },
+  paymentMethodDisplay: "QA simulated captured card ••••0042",
 };
 
 /** Harmless, scripted PSP boundary. No adapter, network, device or real policy. */
@@ -469,39 +495,106 @@ export class PaymentPostgresHarness {
    * No Payment bind prerequisite is required for independent Receipt/CRM QA. */
   async receiptTrip(owner: string, paid = true) {
     const event = await this.ride(owner, randomUUID());
-    event.pickupAt = new Date(Date.parse(event.completedAt) - 600000).toISOString();
+    event.pickupAt = new Date(
+      Date.parse(event.completedAt) - 600000,
+    ).toISOString();
     event.fareMinor = 19037;
     event.tollMinor = 271;
     event.driverSurname = "歐陽";
     event.driverSurnameSource = "driver_profile_declared";
     event.driverSurnameProfileUpdatedAt = event.completedAt;
-    event.actualFareBreakdown = { startMinor: 8501, distanceMinor: 1303, delayMinor: 0, nightMinor: 0 };
+    event.actualFareBreakdown = {
+      startMinor: 8501,
+      distanceMinor: 1303,
+      delayMinor: 0,
+      nightMinor: 0,
+    };
     const state = await this.owned.loadState();
     const task = state.driverTasks.find((row) => row.taskId === event.tripId)!;
     task.startedAt = event.pickupAt;
     task.fare = { amountMinor: event.fareMinor, currency: event.currency };
     const snapshot: PassengerDispatchDisclosureSnapshot = {
-      snapshotId: randomUUID(), runtimeProfileCode: "multi_taxi_direct",
-      orderId: event.orderId, bookingId: null, dispatchJobId: task.dispatchJobId,
-      assignmentId: task.assignmentId, assignmentVersion: 1,
-      vehicle: { vehicleId: task.vehicleId, make: "QA", model: "synthetic", plateNo: event.plateNo, modelYear: 2099, doorCount: 4, color: null, profileVersion: 1 },
-      driver: { driverId: task.driverId, displayName: "Synthetic driver", registrationMaskedDisplay: "••••0042", registrationStatus: "verified_active", registrationEffectiveUntil: "2099-01-01T00:00:00Z", credentialVersion: 1 },
-      rating: { displayState: "new_driver", averageRating: null, ratingCount: 0, aggregateVersion: 1 },
+      snapshotId: randomUUID(),
+      runtimeProfileCode: "multi_taxi_direct",
+      orderId: event.orderId,
+      bookingId: null,
+      dispatchJobId: task.dispatchJobId,
+      assignmentId: task.assignmentId,
+      assignmentVersion: 1,
+      vehicle: {
+        vehicleId: task.vehicleId,
+        make: "QA",
+        model: "synthetic",
+        plateNo: event.plateNo,
+        modelYear: 2099,
+        doorCount: 4,
+        color: null,
+        profileVersion: 1,
+      },
+      driver: {
+        driverId: task.driverId,
+        displayName: "Synthetic driver",
+        registrationMaskedDisplay: "••••0042",
+        registrationStatus: "verified_active",
+        registrationEffectiveUntil: "2099-01-01T00:00:00Z",
+        credentialVersion: 1,
+      },
+      rating: {
+        displayState: "new_driver",
+        averageRating: null,
+        ratingCount: 0,
+        aggregateVersion: 1,
+      },
       eta: { minutes: null, calculatedAt: null, locationFreshness: "missing" },
-      routeFare: { routeSnapshotId: randomUUID(), quoteSnapshotId: randomUUID(), orderId: event.orderId,
-        pickup: { address: "Synthetic origin", lat: 25, lng: 121 }, dropoff: { address: "Synthetic destination", lat: 25.1, lng: 121.1 },
-        estimatedDistanceMeters: 2000, estimatedDurationSeconds: 600, encodedPolyline: null,
-        chargingMode: "meter_estimate", estimatedFareMinor: 125, payableFareMinor: null, currency: "TWD",
-        farePolicyId: "qa-fixture", farePolicyVersion: "qa-fixture", fareChangeRuleId: "qa-fixture", fareChangeRuleVersion: "qa-fixture", fareChangeRuleDisplayText: "Synthetic dependency", passengerConfirmedAt: event.pickupAt, generatedAt: event.pickupAt },
-      createdAt: event.pickupAt, supersededAt: null,
+      routeFare: {
+        routeSnapshotId: randomUUID(),
+        quoteSnapshotId: randomUUID(),
+        orderId: event.orderId,
+        pickup: {
+          address: "Synthetic origin",
+          lat: 25,
+          lng: 121,
+          coordinateSource: "manual_pin",
+          geocodeConfidence: "manual",
+          resolvedAt: event.pickupAt,
+        },
+        dropoff: {
+          address: "Synthetic destination",
+          lat: 25.1,
+          lng: 121.1,
+          coordinateSource: "manual_pin",
+          geocodeConfidence: "manual",
+          resolvedAt: event.pickupAt,
+        },
+        estimatedDistanceMeters: 2000,
+        estimatedDurationSeconds: 600,
+        encodedPolyline: null,
+        chargingMode: "meter_estimate",
+        estimatedFareMinor: 125,
+        payableFareMinor: null,
+        currency: "TWD",
+        farePolicyId: "qa-fixture",
+        farePolicyVersion: "qa-fixture",
+        fareChangeRuleId: "qa-fixture",
+        fareChangeRuleVersion: "qa-fixture",
+        fareChangeRuleDisplayText: "Synthetic dependency",
+        passengerConfirmedAt: event.pickupAt,
+        generatedAt: event.pickupAt,
+      },
+      createdAt: event.pickupAt,
+      supersededAt: null,
     };
-    await this.owned.persistChanges({ driverTasks: [task], passengerDisclosureSnapshots: [snapshot] });
-    if (paid) await this.pool!.query(
-      `INSERT INTO billing.multi_taxi_passenger_payments
+    await this.owned.persistChanges({
+      driverTasks: [task],
+      passengerDisclosureSnapshots: [snapshot],
+    });
+    if (paid)
+      await this.pool!.query(
+        `INSERT INTO billing.multi_taxi_passenger_payments
        (payment_id,order_id,provider_payment_ref,status,amount_minor,currency)
        VALUES ($1,$2,'qa-simulated-capture','captured',$3,$4)`,
-      [randomUUID(), event.orderId, event.fareMinor, event.currency],
-    );
+        [randomUUID(), event.orderId, event.fareMinor, event.currency],
+      );
     return event;
   }
 
@@ -510,20 +603,52 @@ export class PaymentPostgresHarness {
     const audit = new AuditNotificationService();
     const complaintRepository = new ComplaintRepository(this.database);
     const complaints = new ComplaintService(audit, complaintRepository);
-    const certificates = new CertificateSupportService(new CertificateSupportRepository(this.database));
+    const certificates = new CertificateSupportService(
+      new CertificateSupportRepository(this.database),
+    );
     const owned = new OwnedMobilityService(
-      {} as never, audit,
-      { registerRecordingAttachmentListener() {}, registerRecordingStateChangeListener() {} } as never,
-      {} as never, undefined, this.owned,
+      {} as never,
+      audit,
+      {
+        registerRecordingAttachmentListener() {},
+        registerRecordingStateChangeListener() {},
+      } as never,
+      {} as never,
+      undefined,
+      this.owned,
     );
     // Only hydration; do not register this service for scheduler bootstrap.
     await owned.onModuleInit();
-    const multi = new MultiTaxiService(owned, this.taxi, undefined, audit,
-      undefined, undefined, undefined, undefined, undefined, undefined, certificates);
-    const booking = new PassengerBookingService(new PassengerBookingRepository(this.database), multi,
-      new PassengerFareRepository(this.database), this.accountStore, complaints);
-    return { audit, owned, multi, booking, complaints, complaintRepository, certificates,
-      passengerComplaints: new PassengerComplaintService(booking, complaints) };
+    const multi = new MultiTaxiService(
+      owned,
+      this.taxi,
+      undefined,
+      audit,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      certificates,
+    );
+    const booking = new PassengerBookingService(
+      new PassengerBookingRepository(this.database),
+      multi,
+      new PassengerFareRepository(this.database),
+      this.accountStore,
+      complaints,
+    );
+    return {
+      audit,
+      owned,
+      multi,
+      booking,
+      complaints,
+      complaintRepository,
+      certificates,
+      passengerComplaints: new PassengerComplaintService(booking, complaints),
+    };
   }
 
   /** Barrier on BEGIN of the actual clients subsequently executing production
@@ -533,16 +658,27 @@ export class PaymentPostgresHarness {
     let arrivals = 0;
     let release!: () => void;
     let fail!: (error: Error) => void;
-    const barrier = new Promise<void>((resolve, reject) => { release = resolve; fail = reject; });
-    const timer = setTimeout(() => fail(new Error("Two production transactions did not reach BEGIN.")), 5000);
+    const barrier = new Promise<void>((resolve, reject) => {
+      release = resolve;
+      fail = reject;
+    });
+    const timer = setTimeout(
+      () => fail(new Error("Two production transactions did not reach BEGIN.")),
+      5000,
+    );
     database.probe = {
       mutations: [],
-      begin: async () => { if (++arrivals === 2) release(); await barrier; },
+      begin: async () => {
+        if (++arrivals === 2) release();
+        await barrier;
+      },
     };
     try {
       const result = await work();
       const mutations = database.probe.mutations;
-      process.stdout.write(`Receipt CRM QA production session provenance ${JSON.stringify({ mutations })}\n`);
+      process.stdout.write(
+        `Receipt CRM QA production session provenance ${JSON.stringify({ mutations })}\n`,
+      );
       return { result, mutations };
     } finally {
       clearTimeout(timer);
@@ -552,15 +688,39 @@ export class PaymentPostgresHarness {
 
   async receiptState(orderId: string) {
     const queries = {
-      ratings: ["SELECT * FROM ops.passenger_trip_ratings WHERE order_id=$1", [orderId]],
-      consents: ["SELECT * FROM passenger.rating_consents WHERE order_id=$1", [orderId]],
-      intakes: ["SELECT * FROM passenger.complaints WHERE order_id=$1 ORDER BY case_no", [orderId]],
-      cases: ["SELECT * FROM crm.phase1_complaint_cases WHERE record->>'relatedOrderId'=$1 ORDER BY case_no", [orderId]],
-      timelines: ["SELECT t.* FROM crm.phase1_complaint_timelines t JOIN crm.phase1_complaint_cases c USING(case_no) WHERE c.record->>'relatedOrderId'=$1 ORDER BY entry_id", [orderId]],
-      summaries: ["SELECT * FROM ops.driver_rating_summaries WHERE driver_id='qa-driver'", []],
+      ratings: [
+        "SELECT * FROM ops.passenger_trip_ratings WHERE order_id=$1",
+        [orderId],
+      ],
+      consents: [
+        "SELECT * FROM passenger.rating_consents WHERE order_id=$1",
+        [orderId],
+      ],
+      intakes: [
+        "SELECT * FROM passenger.complaints WHERE order_id=$1 ORDER BY case_no",
+        [orderId],
+      ],
+      cases: [
+        "SELECT * FROM crm.phase1_complaint_cases WHERE record->>'relatedOrderId'=$1 ORDER BY case_no",
+        [orderId],
+      ],
+      timelines: [
+        "SELECT t.* FROM crm.phase1_complaint_timelines t JOIN crm.phase1_complaint_cases c USING(case_no) WHERE c.record->>'relatedOrderId'=$1 ORDER BY entry_id",
+        [orderId],
+      ],
+      summaries: [
+        "SELECT * FROM ops.driver_rating_summaries WHERE driver_id='qa-driver'",
+        [],
+      ],
     } as const;
-    return Object.fromEntries(await Promise.all(Object.entries(queries).map(async ([name, [sql, params]]) =>
-      [name, (await this.pool!.query(sql, [...params])).rows]))) as Record<keyof typeof queries, Record<string, any>[]>;
+    return Object.fromEntries(
+      await Promise.all(
+        Object.entries(queries).map(async ([name, [sql, params]]) => [
+          name,
+          (await this.pool!.query(sql, [...params])).rows,
+        ]),
+      ),
+    ) as Record<keyof typeof queries, Record<string, any>[]>;
   }
 
   async state(orderId: string) {
