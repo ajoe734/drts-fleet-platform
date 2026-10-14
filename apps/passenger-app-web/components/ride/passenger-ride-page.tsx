@@ -17,10 +17,12 @@ import type {
   PassengerCertificatePresentation,
 } from "@drts/passenger-client";
 import {
+  createFareQuoteAnomalyFixture,
   fetchPassengerRideAuthority,
   fetchPassengerReceipt,
   mapPassengerRideAuthorityToFixture,
   mapPassengerCertificate,
+  P5_QUOTE_ANOMALY_ERROR_CODES,
   PassengerAuthorityError,
   requestPassengerRideAction,
   subscribePassengerRideAuthority,
@@ -1780,14 +1782,25 @@ function Actions({
     if (actionPending) return;
     setActionPending(true);
     if (fixture.screenId === "A04") {
-      const quoteUrl =
-        authMode === "token"
-          ? `/api/passenger-rides/${encodeURIComponent(token)}/quotes`
-          : "/api/passenger-app/quotes";
-      void fetch(quoteUrl, {
+      if (authMode === "token") {
+        window.alert("此行程不支援重新計算報價，請聯絡客服。");
+        setActionPending(false);
+        return;
+      }
+      const scheduledAt =
+        (fixture as any)?.scheduledAt ||
+        new Date(Date.now() + 86400000).toISOString();
+      const quotePayload = {
+        originLat: (fixture as any)?.originLat ?? 25.033,
+        originLng: (fixture as any)?.originLng ?? 121.565,
+        destinationLat: (fixture as any)?.destinationLat ?? 25.04,
+        destinationLng: (fixture as any)?.destinationLng ?? 121.56,
+        scheduledAt,
+      };
+      void fetch("/api/passenger-app/quotes", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ rideId: token }),
+        body: JSON.stringify(quotePayload),
       })
         .then(async (res) => {
           if (!res.ok) {
@@ -1796,7 +1809,11 @@ function Actions({
               errData?.error?.message || "QUOTE_RECALCULATION_FAILED",
             );
           }
-          return fetchPassengerRideAuthority(token, authMode === "token");
+          const data = await res.json().catch(() => ({}));
+          if (data?.data?.ride) {
+            return data.data.ride;
+          }
+          return fetchPassengerRideAuthority(token, false);
         })
         .then((view) => {
           const next = mapPassengerRideAuthorityToFixture(
@@ -1826,13 +1843,20 @@ function Actions({
         const next = mapPassengerRideAuthorityToFixture(
           view,
           token,
-          fixture.screenId === "A03" ? "fares" : fixture.screenId === "P5-10" ? "receipt" : "ride",
+          fixture.screenId === "A03"
+            ? "fares"
+            : fixture.screenId === "P5-10"
+              ? "receipt"
+              : "ride",
         );
         onFixtureUpdate?.(next);
         setActionPending(false);
       })
       .catch((err: unknown) => {
         console.error("Requote error", err);
+        window.alert(
+          err instanceof Error ? err.message : "AUTHORITY_REFRESH_FAILED",
+        );
         setActionPending(false);
       });
   };
@@ -1847,9 +1871,9 @@ function Actions({
             style={buttonStyle("primary")}
             onClick={requote}
             disabled={actionPending}
-            aria-label={t.Requote}
+            aria-label={t.Refresh}
           >
-            {actionPending ? "取得中..." : t.Requote}
+            {actionPending ? "取得中..." : t.Refresh}
           </button>
         ) : null}
         <button
@@ -2078,6 +2102,7 @@ function RideContent({
   authMode,
   onCertificateUpdate,
   onFixtureUpdate,
+  onOpenComplaint,
 }: {
   fixture: PassengerRideFixture;
   token: string;
@@ -2086,7 +2111,23 @@ function RideContent({
     | ((cert: PassengerCertificatePresentation) => void)
     | undefined;
   onFixtureUpdate?: ((fixture: PassengerRideFixture) => void) | undefined;
+  onOpenComplaint?: (() => void) | undefined;
 }) {
+  if (fixture.status === "行程已取消") {
+    return (
+      <>
+        <MapCard fixture={fixture} />
+        <FareCard fixture={fixture} />
+        <Actions
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onFixtureUpdate={onFixtureUpdate}
+        />
+      </>
+    );
+  }
+
   if (fixture.screenId === "P5-11") {
     return (
       <>
@@ -2115,6 +2156,10 @@ function RideContent({
           token={token}
           authMode={authMode}
           orderNo={fixture.orderNo}
+          isOpen={false}
+          onOpenChange={(open) => {
+            if (open) onOpenComplaint?.();
+          }}
         />
         <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
       </>
@@ -2135,6 +2180,10 @@ function RideContent({
           token={token}
           authMode={authMode}
           orderNo={fixture.orderNo}
+          isOpen={false}
+          onOpenChange={(open) => {
+            if (open) onOpenComplaint?.();
+          }}
         />
         <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
       </>
@@ -2333,6 +2382,32 @@ function PassengerScreen({
     | undefined;
   onFixtureUpdate?: ((fixture: PassengerRideFixture) => void) | undefined;
 }) {
+  const [complaintOpen, setComplaintOpen] = useState(false);
+
+  if (complaintOpen && authMode !== "token") {
+    return (
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          background: passengerChrome.card,
+        }}
+      >
+        <ComplaintForm
+          token={token}
+          authMode={authMode}
+          orderNo={fixture.orderNo}
+          isOpen={true}
+          onOpenChange={setComplaintOpen}
+        />
+        <FooterNotice />
+      </div>
+    );
+  }
+
   return (
     <>
       <TopChrome
@@ -2360,6 +2435,7 @@ function PassengerScreen({
           authMode={authMode}
           onCertificateUpdate={onCertificateUpdate}
           onFixtureUpdate={onFixtureUpdate}
+          onOpenComplaint={() => setComplaintOpen(true)}
         />
         <FooterNotice />
       </div>
@@ -2432,11 +2508,22 @@ export function PassengerRidePage({
       })
       .catch((error: unknown) => {
         if (!active) return;
-        setAuthorityError(
-          error instanceof Error
+        const errCode =
+          (error as any)?.code ||
+          (error instanceof Error
             ? error.message
-            : "PASSENGER_AUTHORITY_UNAVAILABLE",
-        );
+            : "PASSENGER_AUTHORITY_UNAVAILABLE");
+        if (
+          P5_QUOTE_ANOMALY_ERROR_CODES.includes(errCode as any) ||
+          (error as any)?.status === 409
+        ) {
+          startTransition(() => {
+            setLiveFixture(createFareQuoteAnomalyFixture(token, errCode));
+            setAuthorityError(null);
+          });
+          return;
+        }
+        setAuthorityError(errCode);
         setConnectionState("disconnected");
       });
     return () => {

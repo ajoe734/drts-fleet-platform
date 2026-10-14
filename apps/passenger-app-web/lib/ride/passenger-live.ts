@@ -66,10 +66,11 @@ export async function fetchPassengerRideAuthority(
       const res = await passengerClient.getRide(idOrToken);
       return res.ride;
     } catch (e: unknown) {
-      throw new PassengerAuthorityError(
-        500,
-        e instanceof Error ? e.message : "PASSENGER_AUTHORITY_REQUEST_FAILED",
-      );
+      const errCode =
+        (e as any)?.code ||
+        (e instanceof Error ? e.message : "PASSENGER_AUTHORITY_REQUEST_FAILED");
+      const errStatus = (e as any)?.status || 500;
+      throw new PassengerAuthorityError(errStatus, errCode);
     }
   }
 }
@@ -224,21 +225,66 @@ export async function fetchPassengerReceipt(
       if (!rawData || typeof rawData !== "object") {
         return rawData;
       }
-      const receiptUrl = rawData.receiptUrl || rawData.htmlUrl || "";
-      const pdfUrl = rawData.pdfUrl || rawData.record?.pdfUrl || undefined;
+      let receiptUrl = rawData.receiptUrl || rawData.htmlUrl || "";
+      let pdfUrl = rawData.pdfUrl || rawData.record?.pdfUrl || undefined;
+      let record = rawData.record;
+      let receiptId = rawData.receiptId;
+      let receiptNo = rawData.receiptNo;
+      let issuedAt = rawData.issuedAt;
+      let amountMinor = rawData.amountMinor;
+      let currency = rawData.currency;
+
+      if (!record || !pdfUrl) {
+        try {
+          const [rideRes, dlRes] = await Promise.allSettled([
+            passengerClient.getRide(idOrToken),
+            fetch(
+              `/api/passenger-app/rides/${encodeURIComponent(idOrToken)}/receipt/downloads`,
+              { cache: "no-store" },
+            ),
+          ]);
+
+          if (rideRes.status === "fulfilled" && rideRes.value?.ride?.receipt) {
+            const official = rideRes.value.ride.receipt;
+            if (official.receiptId) receiptId = official.receiptId;
+            if (official.receiptNo) receiptNo = official.receiptNo;
+            if (official.issuedAt) issuedAt = official.issuedAt;
+            if (typeof official.amountMinor === "number")
+              amountMinor = official.amountMinor;
+            if (official.currency) currency = official.currency;
+            if (official.record) {
+              record = official.record;
+              if (official.record.htmlUrl && !receiptUrl)
+                receiptUrl = official.record.htmlUrl;
+              if (official.record.pdfUrl && !pdfUrl)
+                pdfUrl = official.record.pdfUrl;
+            }
+          }
+
+          if (dlRes.status === "fulfilled" && dlRes.value.ok) {
+            const dlJson = await dlRes.value.json().catch(() => ({}));
+            const dlData = dlJson?.data || dlJson;
+            if (dlData.htmlUrl && !receiptUrl) receiptUrl = dlData.htmlUrl;
+            if (dlData.pdfUrl) pdfUrl = dlData.pdfUrl;
+            if (record && pdfUrl && !record.pdfUrl) {
+              record = { ...record, pdfUrl };
+            }
+          }
+        } catch {
+          // fall through without fabricating
+        }
+      }
 
       return {
-        ...(rawData.receiptId ? { receiptId: rawData.receiptId } : {}),
-        ...(rawData.receiptNo ? { receiptNo: rawData.receiptNo } : {}),
-        ...(rawData.issuedAt ? { issuedAt: rawData.issuedAt } : {}),
-        ...(typeof rawData.amountMinor === "number"
-          ? { amountMinor: rawData.amountMinor }
-          : {}),
-        ...(rawData.currency ? { currency: rawData.currency } : {}),
+        ...(receiptId ? { receiptId } : {}),
+        ...(receiptNo ? { receiptNo } : {}),
+        ...(issuedAt ? { issuedAt } : {}),
+        ...(typeof amountMinor === "number" ? { amountMinor } : {}),
+        ...(currency ? { currency } : {}),
         receiptUrl,
         htmlUrl: rawData.htmlUrl || receiptUrl || undefined,
         ...(pdfUrl ? { pdfUrl } : {}),
-        ...(rawData.record ? { record: rawData.record } : {}),
+        ...(record ? { record } : {}),
       };
     } catch (e: unknown) {
       throw new PassengerAuthorityError(
@@ -285,13 +331,14 @@ export function mapPassengerRideAuthorityToFixture(
           requestedPickupText: `預約時間 ${formatDateTime(view.order.requestedPickupAt)}`,
         }
       : {}),
-    ...(assignment?.eta.minutes === null ||
+    ...(view.order.status === "cancelled" ||
+    assignment?.eta.minutes === null ||
     assignment?.eta.minutes === undefined
       ? {}
       : { etaMain: `預計 ${assignment.eta.minutes} 分鐘抵達` }),
-    ...(assignment?.eta.calculatedAt
-      ? { etaSub: `更新於 ${formatDateTime(assignment.eta.calculatedAt)}` }
-      : {}),
+    ...(view.order.status === "cancelled" || !assignment?.eta.calculatedAt
+      ? {}
+      : { etaSub: `更新於 ${formatDateTime(assignment.eta.calculatedAt)}` }),
     ...(distanceMeters === null
       ? {}
       : { routeDistanceKm: `約 ${(distanceMeters / 1000).toFixed(1)} 公里` }),
@@ -752,4 +799,40 @@ function readNonNegativeNumber(record: Record<string, unknown>, key: string) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
     ? value
     : null;
+}
+
+export function createFareQuoteAnomalyFixture(
+  token: string,
+  errorCode: string = "P5_QUOTE_PROVIDER_UNAVAILABLE",
+): PassengerRideFixture {
+  const dummyView: PassengerRideAuthorityView = {
+    order: {
+      orderId: token,
+      orderNo: token,
+      status: "created",
+      timingMode: "scheduled",
+      requestedPickupAt: new Date().toISOString(),
+      pickup: { address: "" },
+      dropoff: { address: "" },
+      cancelableUntil: null,
+      cancelledAt: null,
+      completedAt: null,
+    },
+    assignment: null,
+    rating: null,
+    payment: null,
+    receipt: null,
+    actions: {
+      canCancel: false,
+      canRate: false,
+      canContact: true,
+      canReadReceipt: false,
+    },
+  };
+  return mapPassengerRideAuthorityToFixture(
+    dummyView,
+    token,
+    "ride",
+    errorCode,
+  );
 }

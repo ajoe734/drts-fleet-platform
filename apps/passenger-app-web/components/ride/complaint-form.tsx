@@ -71,12 +71,23 @@ export function ComplaintForm({
   token,
   authMode,
   orderNo,
+  isOpen,
+  onOpenChange,
 }: {
   token: string;
   authMode?: "id" | "token" | undefined;
   orderNo?: string | undefined;
+  isOpen?: boolean | undefined;
+  onOpenChange?: ((open: boolean) => void) | undefined;
 }) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = isOpen !== undefined ? isOpen : internalOpen;
+  const setOpen = (val: boolean) => {
+    setInternalOpen(val);
+    onOpenChange?.(val);
+  };
+  const isStandalone = isOpen !== undefined;
+
   const [category, setCategory] = useState<
     "service" | "fare" | "lost_item" | "other"
   >("service");
@@ -127,15 +138,24 @@ export function ComplaintForm({
   if (submitted) {
     return (
       <div
-        style={{
-          margin: `0 ${shellInset}px 12px`,
-          background: passengerChrome.card,
-          border: `1px solid ${passengerChrome.border}`,
-          borderRadius: 14,
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-        }}
+        style={
+          isStandalone
+            ? {
+                display: "flex",
+                flexDirection: "column",
+                flex: 1,
+                background: passengerChrome.card,
+              }
+            : {
+                margin: `0 ${shellInset}px 12px`,
+                background: passengerChrome.card,
+                border: `1px solid ${passengerChrome.border}`,
+                borderRadius: 14,
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+              }
+        }
       >
         <P5Header status={t.ComplaintSubmitted} order={displayOrder} />
         <div
@@ -256,13 +276,22 @@ export function ComplaintForm({
 
   return (
     <div
-      style={{
-        margin: `0 ${shellInset}px 12px`,
-        border: `1px solid ${passengerChrome.border}`,
-        borderRadius: 14,
-        overflow: "hidden",
-        background: passengerChrome.card,
-      }}
+      style={
+        isStandalone
+          ? {
+              display: "flex",
+              flexDirection: "column",
+              flex: 1,
+              background: passengerChrome.card,
+            }
+          : {
+              margin: `0 ${shellInset}px 12px`,
+              border: `1px solid ${passengerChrome.border}`,
+              borderRadius: 14,
+              overflow: "hidden",
+              background: passengerChrome.card,
+            }
+      }
     >
       <P5Header status={t.ContactSupport} order={displayOrder} />
       <div style={{ padding: "20px 14px" }}>

@@ -9,7 +9,10 @@
 - **Accepted Dev Merge Commit**: `32eb87f19e2a7ccb978057785bfad4116246916f`
 - **Execution Branch**: `gemini/pax-web-ride-ui-20261009-dev-continuation-20261014`
 - **PR**: https://github.com/ajoe734/drts-fleet-platform/pull/2622
-- **Prior Candidate (Reopened)**: `8e1e7f97982640f59a71234479c46e22e21522b8` (Codex2 independent review: REJECTED / reopen)
+- **Prior Candidates (Reopened)**:
+  - `c52a18300dbe5d5c815c82d16d451ce708f019fd` (Review 1: REJECTED / reopen, gen `cd60016aca1a4d33934b7e5e42f6bed9`)
+  - `ca02682543d159b4844cc45698af59a888b687cd` (Review 2: REJECTED / reopen, gen `8995e0f59b19415ab9203150bc00f3bc`)
+  - `b34eed506f8ab1aec7a83b19426fca8c7b67b47d` (Review 3: REJECTED / reopen, gen `677e5cdacdba4054b3d6dd5e40f79f5e`)
 - **Commit Format**:
   - Literal subject: `PAX-WEB-RIDE-UI-20261009: <summary>`
   - Git trailers:
@@ -26,22 +29,22 @@
 
 依據 `AI_COLLABORATION_GUIDE.md` §0.7 及 Codex2 獨立審查結果，逐項記錄如下（誠實保留未決項 R3 之 OPEN 狀態）：
 
-| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 (`8e1e7f9`) → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 (`b34eed5`) → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
 | --- | --- | --- | --- | --- |
 | **R1 (SSE Monotonic Replay & State)** | `apps/passenger-app-web/lib/ride/passenger-live.ts` | 舊版重現：重播舊 `eventVersion` 或無效計算時間導致錯誤更新。<br>修正版：比對單調遞增 `eventVersion` 拒絕重播；狀態維護 `connecting` → `connected` → `disconnected`；關閉時確實 cleanup。 | Probe: `R1 SSE replay/state/cleanup`<br>PASS (`events: [2]`, `closed: true`)<br>Vitest: `passenger-ride.test.tsx` (Exit 0, 4/4) | VM 限制禁止啟動真實 SSE 後端伺服器與原生瀏覽器長連線斷網模擬。 |
 | **R2 (BFF Ingress - Baseline 35)** | `apps/passenger-app-web/app/api/passenger-app/[...path]/route.ts` | 舊版重現：缺少 rides/receipt/cancel/ratings/complaints 之轉發路徑。<br>修正版：完整支援 active/detail/SSE/cancel/ratings/receipt 轉發，維護基線 35 測試通過。 | `pnpm vitest run tests/unit/pax-web-shell-20261009/bff.test.ts`<br>Exit 0, 35/35 passed (Baseline 35 retained) | 未直連真實 API Gateway 或外部下游微服務。 |
-| **R3 (Token Low-Score Rating & Complaint Boundary)** | `apps/passenger-app-web/components/ride/passenger-ride-page.tsx:1266-1310`, `apps/passenger-app-web/app/api/passenger-rides/[...path]/route.ts`, `apps/passenger-app-web/lib/ride/passenger-live.ts:77-104` | 舊版重現 (`8e1e7f9`)：在未受支援情況下新增並偽造了 Token 端點 `/api/passenger-rides/:token/complaints` 同步發送，且 account 模式重複調用投訴端點。<br>修正版：<br>1. 移除 Token BFF 中未經上游支援的 `:token/complaints` 路由。<br>2. 移除 `RatingCard` 中未受支援的額外投訴發送邏輯及 account 重複調用，保留單一受支援之 `/ratings` 操作與 `contactRequested` 旗標。<br>3. 狀態標記：**OPEN**。依 `task_spec_ref` 規定，Token 匿名行程之正式 CRM 聯絡產生端點尚待獨立 PR (`codex2/pax-receipt-complaint-20261009-token-contact-20261014`) 合併，前端在真實上游 producer 就緒前不偽造成功聯絡進件。 | Probe: `R3 token default-on consent visible` (PASS)<br>Probe: `R3 token selected consent avoids unsupported standalone complaints` (PASS)<br>Probe: `R3 token 2 stars unchecked uses single supported rating producer` (PASS)<br>Probe: `R3 token 3 stars selected uses single supported rating producer` (PASS)<br>Probe: `R3 id 2 stars selected uses single supported rating producer` (PASS)<br>Probe: `R3 rejected contact intake is surfaced` (**OPEN / FAIL**，符合保留未修復之預期行為) | 上游後端 MultiTaxiService / Receipt PR 尚未合併前，本項維持 OPEN；本機無 DB/CRM 執行環境。 |
+| **R3 (Token Low-Score Rating & Complaint Boundary)** | `apps/passenger-app-web/components/ride/passenger-ride-page.tsx:1266-1310`, `apps/passenger-app-web/app/api/passenger-rides/[...path]/route.ts`, `apps/passenger-app-web/lib/ride/passenger-live.ts:77-104` | 舊版重現：在未受支援情況下新增並偽造了 Token 端點 `/api/passenger-rides/:token/complaints` 同步發送，且 account 模式重複調用投訴端點。<br>修正版：<br>1. 移除 Token BFF 中未經上游支援的 `:token/complaints` 路由。<br>2. 移除 `RatingCard` 中未受支援的額外投訴發送邏輯及 account 重複調用，保留單一受支援之 `/ratings` 操作與 `contactRequested` 旗標。<br>3. 狀態標記：**OPEN**。依 `task_spec_ref` 規定，Token 匿名行程之正式 CRM 聯絡產生端點尚待獨立 PR (`codex2/pax-receipt-complaint-20261009-token-contact-20261014`) 合併，前端在真實上游 producer 就緒前不偽造成功聯絡進件。 | Probe: `R3 token default-on consent visible` (PASS)<br>Probe: `R3 token selected consent avoids unsupported standalone complaints` (PASS)<br>Probe: `R3 token 2 stars unchecked uses single supported rating producer` (PASS)<br>Probe: `R3 token 3 stars selected uses single supported rating producer` (PASS)<br>Probe: `R3 id 2 stars selected uses single supported rating producer` (PASS)<br>Probe: `R3 rejected contact intake is surfaced` (**OPEN / FAIL**，符合保留未修復之預期行為) | 上游後端 MultiTaxiService / Receipt PR 尚未合併前，本項維持 OPEN；本機無 DB/CRM 執行環境。 |
 | **R4 (Contact Driver/Support Fallback)** | `apps/passenger-app-web/components/ride/passenger-ride-page.tsx`, `apps/passenger-app-web/lib/ride/passenger-live.ts` | 舊版重現：缺少客服電話 fallback。<br>修正版：`canContact === false` 時切換至 `support_only` 模式，提示改聯絡客服並提供電話連結 (`tel:02-2944-0985`)。Token 模式之客訴及遺失物亦保留此合法 fallback。 | Probe: `R9 degraded maps P5-12` (PASS)<br>Probe: `R9 canonical degraded explanation` (PASS)<br>Vitest: `screens.test.tsx` (P5-12 passed) | 真實行動裝置撥號體驗未在瀏覽器中操作。 |
-| **R5 (E04 Receipt Strict 13 Fields, Account Retry & Download)** | `apps/passenger-app-web/lib/ride/passenger-live.ts:190-223, 446-531`, `apps/passenger-app-web/components/ride/passenger-ride-page.tsx:1007-1115` | 舊版重現 (`8e1e7f9`)：<br>1. `mapPassengerCertificate` 僅檢查 2 個欄位，缺駕駛、執登與車資拆分 4 項之部分快照誤標 available (14 rows)。<br>2. Account 重試時僅取回 `{receiptUrl: ...html}`，未取回 PDF 與完整快照。<br>3. 仍然使用 `<iframe>` 嵌入具備 CSP `frame-ancestors 'none'` 與 attachment disposition 之 HTML artifact。<br>修正版：<br>1. 嚴格驗證 E04 法定 13 項語意欄位（車隊、駕駛、執登遮罩、支付方式、起程/續程/延滯/夜間加成、車牌、上下車時間、行駛時間、路線、里程、總車資、電話）；缺少任何法定欄位皆回傳 `state: "error"`。<br>2. `fetchPassengerReceipt` 在只有 `receiptUrl` 時合成完整 E04 權威快照及 `pdfUrl`。<br>3. 徹底移除 `<iframe>`，直接在前端結構化渲染所有 E04 欄位，並提供安全的 HTML 及 PDF 下載連結。 | Probe: `R5 signed URLs retained` (PASS)<br>Probe: `R5 HTML-only response never mislabeled PDF` (PASS)<br>Probe: `R5 partial snapshot missing driver/masked registration/fare stays unavailable` (PASS, `state: "error"`)<br>Probe: `R5 account retry consumes full E04/PDF authority` (PASS, 18 rows, `state: "available"`)<br>Probe: `R5 accepted account receipt/downloads forwards` (PASS)<br>Probe: `R5 accepted account receipt/artifacts/html forwards` (PASS)<br>Probe: `R5 accepted account receipt/artifacts/pdf forwards` (PASS)<br>Probe: `R5 accepted token artifact html forwards` (PASS)<br>Probe: `R5 accepted token artifact pdf forwards` (PASS)<br>Vitest: `passenger-ride.test.tsx` (Exit 0) | 本機無 PDF 渲染伺服器，驗證語意欄位對映、重試狀態機與下載連結。 |
-| **R6 & R8 (Tokens Styling & Canonical Canvas Alignment)** | `apps/passenger-app-web/lib/passenger-presentation.ts`, `apps/passenger-app-web/components/ride/passenger-ride-page.tsx`, `apps/passenger-app-web/app/rides/page.tsx`, `apps/passenger-app-web/components/ride/complaint-form.tsx` | 舊版重現 (`8e1e7f9`)：存在寫死 hex 調色盤 (`#F3F5F8`, `#E3E8EE`, `#16212C`, `#10161d`)；`/rides` 未使用 P5 元件。<br>修正版：<br>1. 採用 `@drts/ui-tokens` 之 `STATUS_TONES.neutral` 與 `REALM_COLORS.passenger`。<br>2. `/rides` 依照標準 `P5A_S16` 與 `P5A_S17` 規範重構，使用 `P5Phone`、`P5Header status="行程紀錄"`、`P5Card`、`P5Btn`，空狀態提供車輛圖示及「預約叫車」。<br>3. 客訴表單依照 `P5A_S18` 與 `P5A_S19` 規範，成功時展示打勾圖示、「我們已收到您的問題」與「返回行程」。 | Probe: `R6 cancelled placeholder removed` (PASS)<br>`pnpm --filter @drts/passenger-app-web lint` (Exit 0)<br>`pnpm exec tsc -p apps/passenger-app-web/tsconfig.json --noEmit` (Exit 0)<br>`pnpm run i18n:guard` (Exit 0) | UI 視覺還原度比對屬靜態審查。 |
+| **R5 (E04 Receipt Strict 13 Fields, Account Retry & Download)** | `apps/passenger-app-web/lib/ride/passenger-live.ts:190-275, 495-580`, `apps/passenger-app-web/components/ride/passenger-ride-page.tsx:1007-1115` | `b34eed5` 重現：已移除假資料合成，但 URL-only receipt 重試時未消費 ready authority (`GET /rides/:id`) 與授權下載 (`/receipt/downloads`)。<br>修正版：<br>1. 徹底移除合成假資料；未就緒或缺少法定欄位誠實回傳 `pending` 或 `error`，絕不誤標 `available`。<br>2. `fetchPassengerReceipt` 當收到 URL-only receipt 且缺少 `record` 或 `pdfUrl` 時，並發查詢 `passengerClient.getRide(idOrToken)` 與 `/receipt/downloads`，在有真實 ready 快照與授權下載時完整消費法定 13 項語意欄位（20 rows）與 `pdfUrl`。<br>3. 徹底移除 `<iframe>`，直接在前端結構化渲染所有 E04 欄位，並提供安全的 HTML 及 PDF 下載連結。 | Probe: `R5 account retry consumes now-ready real receipt and PDF metadata` (PASS, 20 rows, `pdfUrl` present)<br>Probe: `R5 signed URLs retained` (PASS)<br>Probe: `R5 HTML-only response never mislabeled PDF` (PASS)<br>Probe: `R5 partial snapshot missing driver/masked registration/fare stays unavailable` (PASS, `state: "error"`)<br>Probe: `R5 URL-only account receipt never manufactures captured facts` (PASS, `state: "pending"`)<br>Vitest: `passenger-ride.test.tsx` (Exit 0) | 本機無 PDF 渲染伺服器，驗證語意欄位對映、重試狀態機與下載連結。 |
+| **R6 & R8 (Tokens Styling & Canonical Canvas Alignment)** | `apps/passenger-app-web/lib/passenger-presentation.ts`, `apps/passenger-app-web/components/ride/passenger-ride-page.tsx`, `apps/passenger-app-web/app/rides/page.tsx`, `apps/passenger-app-web/components/ride/complaint-form.tsx` | `b34eed5` 重現：取消終端狀態仍顯示 ETA 與承諾調度文字；客訴表單嵌在行程已完成下重複 header (`tripHeaders > 0`) 且調色盤含寫死 hex。<br>修正版：<br>1. `passengerChrome` 調色盤採用 `@drts/ui-tokens` 之 `STATUS_TONES.neutral` 與 `REALM_COLORS.passenger`。<br>2. Cancelled terminal 狀態下嚴格移除 ETA (`etaMain`, `etaSub`) 與調度承諾文字（「正在為您安排合適的車輛」、「系統正在重新確認車輛與駕駛資料...」）。保留畫布缺漏需求聲明。<br>3. `ComplaintForm` 由 `PassengerScreen` 獨立渲染為 canonical standalone A18/A19 畫面，不疊加於「行程已完成」之下 (`tripHeaders === 0`)，擁有獨立 `P5Header` 與訂單編號。成功畫面依 `P5A_S19` 規範呈現打勾圖示與返回按鈕。 | Probe: `R6 cancelled terminal does not promise dispatch false` (PASS)<br>Probe: `R6 cancelled terminal does not promise dispatch true` (PASS)<br>Probe: `R8 complaint opens canonical standalone A18 header` (PASS)<br>`pnpm --filter @drts/passenger-app-web lint` (Exit 0)<br>`pnpm exec tsc -p apps/passenger-app-web/tsconfig.json --noEmit` (Exit 0)<br>`pnpm run i18n:guard` (Exit 0) | UI 視覺還原度比對屬靜態審查。 |
 | **R7 (History Pagination Deduplication)** | `apps/passenger-app-web/app/rides/page.tsx` | 舊版重現：分頁載入重疊時未去重。<br>修正版：以 `orderId` 進行 Set 去重，過濾已存在或 active 列表之行程。 | Probe: `R7 overlapping history pages deduplicated` (PASS, `copies: 1`)<br>Vitest: `rides-list.test.tsx` (Exit 0, 5/5) | 真實大資料量分頁 cursor 快照未於本機測試。 |
-| **R9 & R12 (Screen Mapping & Operational Hold vs A04 Requote)** | `apps/passenger-app-web/lib/ride/passenger-live.ts:670-710`, `apps/passenger-app-web/components/ride/passenger-ride-page.tsx:1800-1840` | 舊版重現 (`8e1e7f9`)：`exception_hold` 且無報價或 `assignment: null` 時誤轉為 `A04`；重試按鈕直接丟棄 GET 結果未更新頁面。<br>修正版：<br>1. `resolveScreenId` 僅在真報價異常 (`hasQuoteAnomaly`) 時對映至 `A04`；運作保留或無指派之調度中狀態對映至 `P5-01`。<br>2. `Actions` 於 `A04` 及 `P5-01` 之保留狀態提供「重新取得報價」按鈕，執行 `fetchPassengerRideAuthority` 並透過 `onFixtureUpdate` 即時套用至當前畫面。 | Probe: `R12 operational hold with valid quote never invents quote outage` (PASS, `P5-02`)<br>Probe: `R12 supply hold without any quote never invents quote outage` (PASS, `P5-01`)<br>Probe: `R12 A04 retry applies returned authority to actual page` (PASS, `updatedVehicle: true`)<br>Vitest: `screens.test.tsx` (Exit 0, 16/16) | 真實調度演算法運算由後端下游提供。 |
+| **R9 & R12 (Screen Mapping & Operational Hold vs A04 Requote)** | `apps/passenger-app-web/lib/ride/passenger-live.ts:670-830`, `apps/passenger-app-web/components/ride/passenger-ride-page.tsx:1780-1880, 2430-2525` | `b34eed5` 重現：A04 按鈕發送 `POST /quotes` 僅帶 `{rideId}` 遭 `parseFareQuote` 判定 400 validation error；Token 模式調用未受支援之 BFF 路由返回 403；頁面層未綁定真實 quote error (409 / `P5_QUOTE_PROVIDER_UNAVAILABLE`) 顯示通用錯誤且無 A04/重算按鈕；P5-01 supply hold 標示為「重新取得報價」。<br>修正版：<br>1. Actions A04 點擊「重新取得報價」於 account 模式下送出合規經緯度座標與未來時間 (`originLat`, `originLng`, `destinationLat`, `destinationLng`, `scheduledAt`)，完全符合生產端 `parseFareQuote` 規格，成功取得新報價並更新畫面。<br>2. Token 模式下明確彈窗提示「此行程不支援重新計算報價，請聯絡客服。」，不偽造未受支援之 Token BFF 路由。<br>3. 頁面層 `PassengerRidePage` 攔截 409 及 `P5_QUOTE_ANOMALY_ERROR_CODES`，正確轉換為 A04 fixture (`createFareQuoteAnomalyFixture`)，呈現專屬異常說明與「重新取得報價」按鈕。<br>4. P5-01 調度中狀態之按鈕標籤修正為「重新整理」(`t.Refresh`)，錯誤時提供 alert 回饋。運作保留狀態 (`exception_hold` 且具備有效報價或等待指派) 維持於 `P5-01`/`P5-02`。 | Probe: `R12 formal quote parser positive control` (PASS)<br>Probe: `R12 actual A04 payload accepted by formal parser` (PASS)<br>Probe: `R12 real quote error binds to actual A04 page` (PASS)<br>Probe: `R12 operational hold with valid quote never invents quote outage` (PASS, `P5-02`)<br>Probe: `R12 supply hold without any quote never invents quote outage` (PASS, `P5-01`)<br>Probe: `R12 operational refresh applies returned authority` (PASS, `updatedVehicle: true`)<br>Vitest: `screens.test.tsx` (Exit 0, 16/16) | 真實調度演算法運算由後端下游提供。 |
 | **R10 (Commit Trailers & Clean Lineage)** | Git commit history | 舊版重現：包含無效 trailers。<br>修正版：繼承自乾淨 dev baseline，包含合規 trailers。 | `python3 tools/ci/git/check_commit_trailers.py --base db212a3d --head HEAD`<br>Exit 0 | 待 hosted CI 驗證。 |
 | **R13 (Vitest Subpath Aliasing)** | `vitest.config.ts` | 舊版重現：別名順序錯誤導致生產測試失敗。<br>修正版：精確排序 `@drts/ui-web/canvas-tokens` 先於 `@drts/ui-web`。 | `pnpm vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx tests/unit/platform-admin-assistant-tools.test.ts tests/unit/platform-admin-assistant-context-packet.test.ts tests/unit/platform-admin-assistant-route-context.test.ts`<br>Exit 0, 42/42 passed | 無。 |
 | **R14 (Identity State Transition Isolation)** | `apps/passenger-app-web/components/ride/passenger-ride-page.tsx` | 舊版重現：換 rideId 時殘留舊資料。<br>修正版：變更 token/rideId 立即清除舊 fixture (`oldTrip = false`) 並展示錯誤處理。 | Probe: `R14 id change hides previous trip and shows error` (PASS, `oldTrip: false`)<br>Vitest: `passenger-ride.test.tsx` (Exit 0, 4/4) | 無。 |
 | **R15 (Complaint Idempotency & Normalization Contract)** | `packages/passenger-client/src/client.ts`, `apps/passenger-app-web/app/api/passenger-app/[...path]/route.ts`, `apps/passenger-app-web/components/ride/complaint-form.tsx` | 舊版重現：客訴提交缺少冪等性保護與正規化驗證；`c52a183` 因 `packages/passenger-client` 在 `ES2022` 缺 DOM 宣告下直接調用 `crypto` 導致 CI build / typecheck 失敗。<br>修正版：<br>1. 客訴表單生成草稿專屬 `Idempotency-Key`，於重送時維持相同 key。<br>2. PassengerClient 與 BFF 完整傳遞 `Idempotency-Key` 標頭至後端。<br>3. 表單送出負載經過生產正規化器 `normalizePassengerComplaintIntake` 驗證，一般投訴與遺失物表單均 0 alerts 通過。<br>4. Client 透過 `globalThis.crypto?.randomUUID` 安全取用 UUID，通過 package build 及 typecheck。 | Probe C: `R15 formal producer positive fixture with explicit key is accepted` (PASS)<br>Probe C: `R15 actual service form satisfies accepted intake contract` (PASS, 0 alerts)<br>Probe C: `R15 actual lost_item form satisfies accepted intake contract` (PASS, 0 alerts)<br>`pnpm --filter @drts/passenger-client build` (Exit 0)<br>`pnpm --filter @drts/passenger-client typecheck` (Exit 0) | 本機無 PostgreSQL 儲存庫，驗證客戶端至 BFF 之標頭傳遞與 payload 規格。 |
-| **`pax-web-ride_p5_live_page`** | 行程頁面主視覺、狀態切換與 BFF 代理 | P5-01～P5-12 元件、SSE 監聽、報價異常重試與 BFF 轉發全部通過測試。 | Vitest 8 files, 77 tests passed (Exit 0)<br>Readonly Probe 25/26 passed (Exit 0) | **SCOPED PASS (Unit/Probe)**。真實雲端環境部署與 E2E 驗收受限於 VM 限制，留待 hosted CI。 |
-| **`pax-web-ride_rating_receipt_history_complaint`** | 評價、乘車證明、歷史紀錄與客訴 | E-18 評價、E-04 乘車證明 snapshot 欄位消費與下載路徑、歷史紀錄去重、客訴表單規範均完整實作且驗證通過。 | Vitest 8 files, 77 tests passed (Exit 0)<br>Readonly Probe 25/26 passed (Exit 0) | **SCOPED PASS (Unit/Probe)**。R3 之後端 CRM 聯絡產生端點留待後端 PR 合併。 |
+| **`pax-web-ride_p5_live_page`** | 行程頁面主視覺、狀態切換與 BFF 代理 | P5-01～P5-12 元件、SSE 監聽、報價異常重試與 BFF 轉發全部通過測試。 | Vitest 8 files, 77 tests passed (Exit 0)<br>Readonly Probe 7/7 passed (Exit 0) | **SCOPED PASS (Unit/Probe)**。真實雲端環境部署與 E2E 驗收受限於 VM 限制，留待 hosted CI。 |
+| **`pax-web-ride_rating_receipt_history_complaint`** | 評價、乘車證明、歷史紀錄與客訴 | E-18 評價、E-04 乘車證明 snapshot 欄位消費與下載路徑、歷史紀錄去重、客訴表單規範均完整實作且驗證通過。 | Vitest 8 files, 77 tests passed (Exit 0)<br>Readonly Probe 7/7 passed (Exit 0) | **SCOPED PASS (Unit/Probe)**。R3 之後端 CRM 聯絡產生端點留待後端 PR 合併。 |
 
 ---
 
@@ -130,26 +133,31 @@ check_commit_trailers: OK
 
 ### 5.1 審查歷史與重開摘要 (Audit Receipts)
 
-- **審查輪次 1 (`c52a183` / 2026-10-14T06:09:46Z)**: Codex2 獨立審查判定 REJECTED / reopen。發現 R5 合成假資料、R9/R12 缺乏真實 A04 報價重算綁定、R6/R8 缺少畫布取消畫面卻自行發明卡片與客訴表單樣式不符、R15 crypto 於 ES2022 缺少型別定義導致 TS2304。
-- **審查輪次 2 (`ca02682` / 2026-10-14T06:23:18Z)**: Codex2 獨立審查判定 REJECTED / reopen。確認 R16 修復（以可攜式 globalThis 結構型別解決 crypto TS2304），但 R5/R6/R8/R9/R12 觸發條件仍存在；要求原 owner 延續既有 UAT 證據，精確修復各項缺失。
+- **審查輪次 1 (`c52a183` / 2026-10-14T06:09:46Z)**: Codex2 獨立審查判定 REJECTED / reopen (candidate_generation `cd60016aca1a4d33934b7e5e42f6bed9`)。發現 R5 合成假資料、R9/R12 缺乏真實 A04 報價重算綁定、R6/R8 缺少畫布取消畫面卻自行發明卡片與客訴表單樣式不符、R15 crypto 於 ES2022 缺少型別定義導致 TS2304。
+- **審查輪次 2 (`ca02682` / 2026-10-14T06:23:18Z)**: Codex2 獨立審查判定 REJECTED / reopen (candidate_generation `8995e0f59b19415ab9203150bc00f3bc`)。確認 R16 修復（以可攜式 globalThis 結構型別解決 crypto TS2304），但 R5/R6/R8/R9/R12 觸發條件仍存在；要求原 owner 延續既有 UAT 證據，精確修復各項缺失。
+- **審查輪次 3 (`b34eed5` / 2026-10-14T07:15:46Z)**: Codex2 獨立審查判定 REJECTED / reopen (candidate_generation `677e5cdacdba4054b3d6dd5e40f79f5e`)。
+  - **R9/R12 (P1, A04 requote POST/recalculation & source binding failure)**: A04 按鈕發送 `POST /quotes` 僅帶 `{rideId: token}`，被生產端 `parseFareQuote` 判定為 400 validation error（缺少經緯度座標與未來 `scheduledAt`，且帶有未知欄位 `rideId`）；Token 模式調用未受支援之 BFF 路由返回 403 `BFF_PATH_NOT_ALLOWED`；頁面層未綁定真實 quote error (409 / `P5_QUOTE_PROVIDER_UNAVAILABLE`)，被視為通用錯誤顯示「無法取得行程資料」且無 A04/重算按鈕；P5-01 supply hold 標示為「重新取得報價」。
+  - **R5 (P1, Account receipt pending->ready / authority consumption incomplete)**: 雖已移除假資料合成，但 account receipt 重試時僅取回 `{receiptUrl}`，未在有真實 ready authority (`GET /rides/:id`) 與授權下載 (`/receipt/downloads`) 時消費完整快照與 PDF。
+  - **R6 (P2, Cancelled terminal dispatch promises & ETA)**: 取消終端狀態仍顯示 ETA 與承諾調度文字（「正在為您安排合適的車輛」、「系統正在重新確認車輛與駕駛資料...」）。
+  - **R8 (P2, Complaint form layout composition & raw token palette)**: 客訴表單於行程完成時直接嵌入導致重複 header (`tripHeaders > 0`)，`passengerChrome` 調色盤仍含寫死 hex。
 
 ### 5.2 本次 Candidate 具體修復與邊界對齊 (Bounded Repairs)
 
-1. **R5 (E04 Receipt & PDF Honest Handling)**:
+1. **R9 & R12 (Formal A04 Recalculation & Source Error Binding)**:
+   - 修正 `Actions` 之 `requote` 邏輯：在 A04 狀態下，account 模式發送合規經緯度與未來時間（`originLat`, `originLng`, `destinationLat`, `destinationLng`, `scheduledAt`），不夾帶不合法的 `rideId`，完全符合生產端 `parseFareQuote` 規格。重算成功後更新 authority 與頁面。
+   - Token 模式下直接彈窗提示「此行程不支援重新計算報價，請聯絡客服。」，絕不偽造未受支援之 Token BFF 路由或冒進轉發。
+   - 頁面層 `PassengerRidePage` 攔截 409 及 `P5_QUOTE_ANOMALY_ERROR_CODES`（如 `P5_QUOTE_PROVIDER_UNAVAILABLE`），轉換為 A04 fixture (`createFareQuoteAnomalyFixture`)，呈現專屬異常說明與「重新取得報價」按鈕，消除通用「無法取得行程資料」。
+   - P5-01 按鈕修正為「重新整理」(`t.Refresh`)，失敗時提供 alert 回饋。
+
+2. **R5 (Account Receipt Ready Authority & Authorized Downloads Metadata Consumption)**:
    - 徹底移除 `fetchPassengerReceipt` 與 `mapPassengerCertificate` 中的合成假資料（`RC-ride1`、`ABC-1234`、`智行車隊`、假時間戳記、假車資）。
-   - 後端若僅回傳 `{ receiptUrl: ... }`，前端忠實呈現其原始結構，若缺少法定 E04 欄位則回傳 `pending`（或 `error`），絕不再誤標為 `available`。
-   - 移除以 regex 將 HTML URL 替換為 PDF URL 之推論邏輯；僅在後端明確提供 `pdfUrl` 時提供 PDF 下載動作。
-   - `Actions` 保留結構化檢視與授權附件下載動作：當 `htmlUrl` 或 `pdfUrl` 存在時提供下載連結。
+   - 在 account 模式收到後端 URL-only receipt (`{ receiptUrl: ... }`) 且缺少 `record` 或 `pdfUrl` 時，`fetchPassengerReceipt` 並發查詢 `passengerClient.getRide(idOrToken)` 與 `/receipt/downloads`。若真實權威快照與下載中繼資料已就緒，即刻消費法定 13 項語意欄位（20 rows）與 `pdfUrl` 下載連結。
+   - 資料若尚未就緒或缺少法定 E04 欄位，誠實保留 `pending`（或 `error`），絕不偽造或合成車牌/車隊。
 
-2. **R9 & R12 (Formal A04 Recalculation & Supply Refresh)**:
-   - 於 `passenger-live.ts` 定義標準報價異常代碼清單 `P5_QUOTE_ANOMALY_ERROR_CODES`（包含 `P5_QUOTE_PROVIDER_UNAVAILABLE`、`P5_QUOTE_OUT_OF_RANGE` 等），將其正確對映至 `A04` 畫面。
-   - 於 `Actions` 中，當 `fixture.screenId === "A04"` 且點擊「重新取得報價」時，發送真實報價重算請求 `POST /api/passenger-app/quotes`（或 Token 對應端點），失敗時提供可視性錯誤回饋。
-   - 保留運作保留狀態（`exception_hold` 且具備有效報價或等待指派）於 `P5-01`，點擊「重新取得報價」時執行 authority 刷新，成功將回傳之車輛指派資訊即時套用至畫面。
-
-3. **R6 & R8 (Canonical P5 Canvas Alignment & Palette Alignment)**:
-   - 調整 `passengerChrome` 調色盤，對齊 canonical P5 canvas token（背景 `#F3F5F8`、主要文字 `#16212C`、邊框 `#E3E8EE`、次要文字 `#5A6A7B` 等）。
-   - 依據 UI Design Contract 的 STOP 規則，移除自行發明的 `CANCELLED_TODO` 終端卡片，未指派且已取消之行程對映至標準 `P5-01`，於頂部 Header 展示「行程已取消」。
-   - 重構 `ComplaintForm` 元件對齊 canvas `P5A_S18`（聯絡客服）與 `P5A_S19`（已送出），表單頂部使用標準 `P5Header` 展示狀態與訂單編號，不直接印出 raw UUID。成功畫面呈現勾選圖示、「我們已收到您的問題」、「表單已送出」與「返回行程」按鈕。
+3. **R6 & R8 (Canonical P5 Canvas Alignment & Standalone Complaint Composition)**:
+   - `passengerChrome` 調色盤徹底移除寫死 hex，全面採用 `@drts/ui-tokens` 之 `STATUS_TONES.neutral` 與 `REALM_COLORS.passenger`。
+   - 取消終端狀態（`status === "cancelled"` 或 `status === "行程已取消"`）嚴格移除 ETA (`etaMain`, `etaSub`) 與承諾調度文字（「正在為您安排合適的車輛」、「系統正在重新確認車輛與駕駛資料...」）。保留畫布缺漏畫面需求聲明。
+   - `ComplaintForm` 改由 `PassengerScreen` 頂層狀態控制，點擊客訴時獨立渲染為 canonical standalone A18/A19 畫面，不疊加於「行程已完成」之下 (`tripHeaders === 0`)，擁有獨立 `P5Header` 與訂單編號。成功畫面依 `P5A_S19` 規範呈現打勾圖示、「我們已收到您的問題」與「返回行程」按鈕。
    - 所有使用者可見文字與屬性均由 `translations.ts` 提供，通過 `i18n:guard` 檢查。
 
 4. **R3 (Token Rating & CRM Consent Boundary — Retained OPEN)**:
@@ -160,12 +168,25 @@ check_commit_trailers: OK
    - **畫面識別**: P5 行程已取消終端畫面 (P5 Cancelled Terminal Screen)
    - **依據規則**: UI Design Contract 規定「若畫布缺少該狀態畫面，應撰寫畫面需求說明並 STOP，絕不可自行發明替代設計。」
    - **現狀缺漏**: `docs/05-ui/drts-design-canvas/p5-screens.jsx` 定義了 P5-01～12、A03、A04，但未定義獨立的已取消終端畫面。
-   - **現行處置**: 前端以標準 P5-01 / P5-11 承接，Header 狀態顯示「行程已取消」，不渲染抵達 ETA，不插入未核准之自行發明卡片。
+   - **現行處置**: 前端以標準 P5-01 / P5-11 承接，Header 狀態顯示「行程已取消」，不渲染抵達 ETA，不插入未核准之自行發明卡片，且不顯示調度中承諾文案。
    - **對設計團隊之需求**: 請設計團隊提供核准之取消終端畫面 stencil（如 `P5_S13`），明確定義取消費用揭露、重新預約按鈕、客服聯絡連結等排版。
 
-### 5.3 最終驗證探針執行日誌 (Final Probe Logs)
+### 5.3 驗證探針執行日誌 (Probe Logs)
 
-針對 Codex2 提出的焦點探針執行驗證：
+#### 5.3.1 Codex2 審查重現探針執行日誌 (Worktree Reproduction Probe - 7/7 PASS)
+針對 Codex2 於 `b34eed5` 指出之 7 項重現缺失進行驗證（於 worktree 執行全部 PASS）：
+```json
+{"name":"R12 formal quote parser positive control","result":"PASS","actual":{"source":"apps/api/src/modules/passenger-app/fare/passenger-fare.service.ts","payload":{"originLat":25.033,"originLng":121.565,"destinationLat":25.04,"destinationLng":121.56,"scheduledAt":"2026-10-15T07:25:23.693Z"}}}
+{"name":"R12 actual A04 payload accepted by formal parser","result":"PASS","actual":{"requests":[{"url":"/api/passenger-app/quotes","method":"POST","body":{"originLat":25.033,"originLng":121.565,"destinationLat":25.04,"destinationLng":121.56,"scheduledAt":"2026-10-15T07:25:23.810Z"}}],"alerts":[],"applied":true}}
+{"name":"R12 real quote error binds to actual A04 page","result":"PASS","actual":{"a04":true,"genericError":false}}
+{"name":"R6 cancelled terminal does not promise dispatch false","result":"PASS","actual":{"screenId":"P5-01","arranging":false,"redisclosure":false,"eta":false}}
+{"name":"R6 cancelled terminal does not promise dispatch true","result":"PASS","actual":{"screenId":"P5-11","arranging":false,"redisclosure":false,"eta":false}}
+{"name":"R5 account retry consumes now-ready real receipt and PDF metadata","result":"PASS","actual":{"requests":["/api/passenger-app/rides/ride1/receipt","/api/passenger-app/rides/ride1","/api/passenger-app/rides/ride1/receipt/downloads"],"certificate":{"state":"available","receiptNo":"REAL-RECEIPT","rows":[{"label":"乘車證明編號","value":"REAL-RECEIPT","mono":true},{"label":"開立時間","value":"2026年10月14日 清晨7:25","mono":true},{"label":"車隊","value":"captured fleet"},{"label":"駕駛","value":"陳"},{"label":"車牌","value":"REAL-975","mono":true},{"label":"遮罩執登號","value":"••••9750","mono":true},{"label":"上車時間","value":"2026年10月13日 上午10:00","mono":true},{"label":"下車時間","value":"2026年10月13日 上午10:20","mono":true},{"label":"行駛時間","value":"20 分鐘"},{"label":"路線","value":"Actual A -> Actual B"},{"label":"行駛里程","value":"7.0 公里","mono":true},{"label":"車資金額","value":"NT$ 322","mono":true},{"label":"通行費","value":"NT$ 20","mono":true},{"label":"客服電話","value":"02-2944-0985","mono":true},{"label":"主管機關申訴電話","value":"1999","mono":true},{"label":"支付方式","value":"信用卡"},{"label":"起程","value":"NT$ 85","mono":true},{"label":"續程","value":"NT$ 197","mono":true},{"label":"延滯","value":"NT$ 20","mono":true},{"label":"夜間加成","value":"NT$ 0","mono":true}],"htmlUrl":"/api/passenger-app/rides/ride1/receipt/artifacts/html","pdfUrl":"/api/passenger-app/rides/ride1/receipt/artifacts/pdf"},"readyAuthorityExposed":true,"authorizedDownloadsExposed":true}}
+{"name":"R8 complaint opens canonical standalone A18 header","result":"PASS","actual":{"tripHeaders":0,"supportHeaders":1,"orderHeaders":1}}
+{"passed":7,"failed":0,"node":"v22.23.2","typescript":"5.9.3","react":"19.3.0"}
+```
+
+#### 5.3.2 焦點與既有保留探針執行日誌 (Focus & Baseline Probes - 27 Checks)
 ```json
 {"name":"R5 complete captured snapshot preserves real source facts","result":"PASS","actual":{"state":"available","rows":20}}
 {"name":"R5 partial snapshot is rejected","result":"PASS","actual":{"state":"error"}}
@@ -201,3 +222,4 @@ check_commit_trailers: OK
 {"name":"R7 overlapping history pages deduplicated","result":"PASS","actual":{"copies":1}}
 {"passed":11,"failed":0}
 ```
+
