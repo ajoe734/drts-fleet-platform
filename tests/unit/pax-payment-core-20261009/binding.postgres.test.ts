@@ -207,7 +207,7 @@ describe.skipIf(process.env.GITHUB_ACTIONS !== "true")(
         }),
       ).toEqual(replay.method);
       expect(await repository.list(owner)).toEqual([
-        second.method,
+        { ...second.method, isDefault: true },
         replay.method,
       ]);
       const stored = await pool!.query(
