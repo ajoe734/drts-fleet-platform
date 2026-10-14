@@ -678,3 +678,96 @@ red regression／UAT 仍完整。新的可追溯紀錄位於
 
 後續 source repair、新版正負與 failure/replay 回歸、同 SHA 獨立 review／CI／merge 仍待完成；
 原兩項 acceptance key 與 PG／mounted HTTP／peer Ops／legal facts 全部保留未驗。
+
+### R3／R4 修復結果與正式呼叫路徑
+
+保留相鄰候選 `ddbc97426b8dc881ac1a5ec95202149ed31cc829`、原 generation818、
+原 Codex 的 source reopening／Ride f59 review 與18a red checkpoint。新 source
+在 `6d58eacd4` 完成；`b86e70482` 補 production regression，`7ba8a7112` 完成
+R4 ledger append 與 Ops negative assertion 修正。全部 ordinary push，沒有歷史改寫。
+最終 candidate identity 以本 task CLI handoff 與下面的 publication manifest 為準，
+不得沿用舊 source approval／CI／merge32。
+
+實際修復位置與 caller：
+
+- 既有 `SubmitPassengerTripRatingCommand` 增 optional boolean `contactRequested`；
+  既有 `MultiTaxiController.submitPassengerRating` 保持同一路由／envelope。
+  `MultiTaxiService.submitPassengerRating` 核對 token 與 order subject、驗證 boolean，
+  durable 路徑每次都進 transaction，不能由 rating cache 提早回成功。
+  既有 account caller 的 constructor 位置與 `submitTrustedPassengerRating` 不變；
+  `MultiTaxiModule` 附加既有 `ComplaintModule`，注入同一 canonical service。
+- `MultiTaxiRepository.persistPassengerRating` 的原 client／execute seam 接收 token
+  context；同一 transaction 依 token ID/digest/order/subject 重讀並 share-lock 有效
+  scope/expiry/revocation、正式 order/subject/completion，沿既有 rating advisory lock／
+  unique upsert 與 completion task/payment/window 檢查，再保存 consent／CRM／summary。
+  Account hook 的 account/booking locks 與拒絕語意保留；token 不走 account hook。
+- `ComplaintService.preparePassengerRideRatingHook` 沿現有 case／timeline builder；
+  低分且 true 才有 draft，`ComplaintRepository.persistRideTokenRatingConsent` 用原
+  `persistChanges(..., client)` 寫 canonical CRM，保存不可變 consent/intake 後才 COMMIT。
+  exact replay 讀原 choice/hash/case/timeline；changed score/tags/comment/contact 為409，
+  不覆寫資料或重建 case。commit／audit 回覆遺失可沿原 durable record 重試。
+- 新 omitted contact 按 false 保存；high score true 保留 true 而沒有 case。
+  pre-V0119 historical rating 沒有 choice 時，omitted exact retry 相容、不 backfill；
+  explicit true 或 false 都回 `PASSENGER_RATING_CONSENT_UNAVAILABLE`，不猜歷史同意。
+  explicit choice 缺 durable storage／CRM service 時回503，不顯示成功。
+- 原 `listPassengerCases/getPassengerCase/getPassengerTimeline` 的正式 SQL source 範圍
+  附加 token consent 所連 canonical case；既有 Ops controller/service 可跨新 instance
+  讀取。commit 後才 publish/audit；token audit 為 `system`／null actor、
+  `source=passenger_ride_token` 與真實 subject，沒有冒稱 first-party account。
+
+V0119 正式 SQL 與 production repository 逐欄核對：
+
+| 正式欄位／constraint                     | Production binding／依據                                                      |
+| ---------------------------------------- | ----------------------------------------------------------------------------- |
+| order_id／passenger_subject_ref，複合 PK | rating.orderId／rating.passengerSubjectRef，現有 varchar(255)；正式 order FK  |
+| rating_id，UNIQUE                        | storedRating.ratingId；與 order/subject/score 的複合 FK 同時對照 V0056 rating |
+| original_token_id                        | verified token.tokenId；與 order/subject 的複合 FK 同時對照 V0056 token       |
+| rating_score                             | storedRating.score，smallint 1–5；複合 FK 防不同 rating score                 |
+| source                                   | DB default/check `passenger_ride_token`，不是 account source                  |
+| contact_requested／request_hash          | 原始 normalized boolean／score+sorted tags+trimmed comment+choice SHA256      |
+| complaint_case_no，UNIQUE／CRM FK        | 同 client 的 canonical case；CHECK 要求且僅允許 selected score≤2 有 case      |
+| created_at                               | original storedRating.submittedAt；retry 不修改 consent                       |
+
+Applied V0114 bytes 與 a689 完全相同，SHA256
+`14a5d8a13ab5be4bf7b1e1b978c0c0dde115460df4fefbcb9f6a0691b86df4ed`。
+Account/booking、E04 writer/renderer/download、OwnedMobility、auth、workflows 與 QA harness
+沒有 source diff。上述 DDL/SQL 核對不是 PostgreSQL 執行或 concurrency 驗收。
+
+R4 frozen spec SHA256 `8f9df5d16512a83fbe8a5e50721d305eedee87a61015b709ff4a9af88d51b605`
+正式授權 OWN WT ledger 的唯一 V0119 append；entry source hash
+`beaaaf6d4a1c3b76f5a4fa7370a4cc437015b15325e0f250372168607def0a9b`。
+移除新最後一列後，JSON 所有舊 semantic values 與 accepted a689 完全一致，
+無其他 allocation/amendment 改動、無 dirty canonical root 寫入或匯入。
+兩個既有 guard tests 與全部 assertions 原封保留。
+
+### 本輪完整驗證表與仍未滿足的 acceptance
+
+Evidence 位於 assigned WT
+`.local/pax-receipt-complaint-20261009/token-contact-resume-20261014/`。
+`source-evidence.json` 保存命令、exit code、版本、執行來源、log 與 source hashes；
+`publication.json` 保存最終完整 candidate SHA/branch/PR/local-remote identity。
+外部 SQL 回應、completed order/assignment、transaction acknowledgement、audit failure
+是 fixtures；正式 controller/service/repository/hash/mappers/SQL/case builders 都未 mock。
+Fixture commit/rollback 只是回應邊界，不能證明 PostgreSQL 原子性、锁或 FK 行為。
+
+| Finding／驗收項                                                     | Source／修改                                                                                           | 舊版 → 修正版                                                                                                                                                                                                                                                          | 命令／結果／evidence                                                                                                                                            | 未驗與限制                                                                                                                                 |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| F-TOKEN-LOW-RATING-CONTACT：score2/selected 與 changed-choice retry | 同正式 token controller→service→rating repo→Complaint service/repo                                     | 18a 2 FAIL/9 PASS → same 11 assertions PASS；擴充46皆 PASS                                                                                                                                                                                                             | 原 token vitest 命令：`token-red.log` exit1；`token-green-initial.log` exit0/11；`affected-root.log` exit0 含 token46                                           | SQL fixture；未宣告 PG、mounted HTTP、concurrency、peer Ops 真實驗收                                                                       |
+| Token normal/replay/failure/authority 正負回歸                      | V0119 consent；同 client CRM/timeline/summary；Ops durable reads                                       | score1/2 true、false/omitted/high true；exact/changed payload；historical choice；restart/Ops；7種 failure rollback、lost commit、failed rollback/audit、cached expiry/revocation/scope、foreign subject/completion/assignment/payment/window、invalid contact 全 PASS | `affected-root.log` exit0，342/14 files，39.52s；新 token46、原 account40/intake38、receipt29/regeneration 與 affected booking/CRM 全保留                       | 尚需原 PAX-QA 使用正式 migrations+production repositories 量測 concurrent same/different choice、所有 rollback/restart／真正 HTTP/Ops 路徑 |
+| F-V0119-ALLOCATION-CONSUMER                                         | 既有 global ledger passenger_app_allocations 只 append Supervisor exact entry                          | 原 unchanged tests 2 FAIL/56 PASS（119≤118）→ 58/58 PASS                                                                                                                                                                                                               | 同兩個 vitest files：`allocation-consumers.log` exit1；`allocation-consumers-final.log` exit0，2.10s；PAX-SD 既有3 PASS0，`pax-sd-ledger.log`                   | 不改 test、assertions、gate 或 schema 配號；不是 DB 行為                                                                                   |
+| 原 account/E04/CRM/API 整體回歸                                     | Account hook、原 capture/download/regeneration、Ops lifecycle/incident/audit、rating reads/export/repo | 原 78/36 baselines PASS；affected root342、API114 PASS                                                                                                                                                                                                                 | root 同上；API10 exact files：`affected-api-final.log` exit0/114/10，16.14s；初始 API argv7實際只匹配5 files/73，未冒稱7檔全跑                                  | unit PASS 不取代真实 completion/PSP/PG/HTTP/browser/native/legal evidence                                                                  |
+| Source type/build/lint                                              | 正式 contracts/auth/API compiler 與 scoped ESLint                                                      | `pnpm --dir apps/api build` PASS0；ESLint PASS0；root typecheck仍環境 FAIL2                                                                                                                                                                                            | `api-build.log` exit0，含 prebuild；`scoped-lint.log` exit0；`typecheck-final.log` exit2，缺 passenger-client + foreign QA api-client links；無 own diagnostics | 未修改 compiler/config/shared dependency links，沒有隱藏 workaround；root command 不標 PASS                                                |
+| pax-complaint_intake_and_low_rating                                 | 本輪 token producer 已修；原 account/intake/Ops 行為保留                                               | Source positives/negatives 通過；required key **UNRECORDED**                                                                                                                                                                                                           | 上述 production-path source evidence；新 SHA/gen 必須獨立 review、同 head full CI/protected merge                                                               | 正式 PG transaction/unique/concurrency、mounted HTTP/peer Ops/acceptance 仍由原 QA；不能借 account fixture 綠燈                            |
+| pax-receipt_e04_fields_and_passenger_download                       | 本輪未改 E04 source，原全部 finding 保留                                                               | 原 receipt29/regeneration source PASS 保留；完整 E04 原 FAIL2/NOT_READY 未豁免                                                                                                                                                                                         | affected root receipt source回歸 PASS0；不重跑與本 seam 無關的缺外部facts probe                                                                                 | Key **UNRECORDED**；issuer/operator/masked credential/payment display/total/toll、真實 download/PG/HTTP/legal facts pending                |
+
+保留初始 FAIL：`token-green-expanded.log` 45 PASS/1 FAIL（新 fixture test 期待了不存在的
+Ops error `COMPLAINT_CASE_NOT_FOUND`，正式回傳是 `NOT_FOUND`），修正 own assertion 後
+root342 PASS；不是 product Ops 故障，也不算舊 token 缺陷重現。
+第一個 ledger Prettier check FAIL1 只因新 array 的格式，僅格式化新增列後通過；
+未削弱 assertions 或重寫其他設計。所有已啟動本機 checks 均已結束並讀結果。
+
+最終 source candidate 走 normal substantive commit/ordinary push/原 PR2627/newSHA-gen
+handoff 給原獨立 Codex。Hosted CI、review、merge 是新 candidate 的後續 lifecycle evidence，
+pending 不冒稱 PASS；原 ddbc 綠燈不借用。本 VM 沒有 product/API/PG/browser/preview/Docker
+server、workflow dispatch/rerun、provider/external service call 或部署；沒有 approve、
+record-acceptance 或 done。
