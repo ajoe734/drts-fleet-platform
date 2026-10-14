@@ -3342,7 +3342,8 @@ const en = {
   "billing.form.saved": "Billing profile saved.",
   "billing.form.failed":
     "Unable to save the billing profile. Your entries have been kept; please try again.",
-  "billing.form.unavailable": "Billing profile editing is currently unavailable.",
+  "billing.form.unavailable":
+    "Billing profile editing is currently unavailable.",
   "billing.form.open": "Open billing profile",
   "billing.action.editProfile": "Edit billing profile",
   "billing.action.openInvoices": "Open invoices",

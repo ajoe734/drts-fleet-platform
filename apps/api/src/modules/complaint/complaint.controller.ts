@@ -68,7 +68,7 @@ export class ComplaintController {
     await this.complaintService.refreshSettlementCases();
     return toApiSuccessEnvelope(
       {
-        items: this.complaintService.listComplaintCases(),
+        items: await this.complaintService.listComplaintCasesForOps(),
       },
       requestId,
     );
@@ -106,7 +106,7 @@ export class ComplaintController {
   ) {
     await this.complaintService.refreshSettlementCases();
     return toApiSuccessEnvelope(
-      this.complaintService.getComplaintCase(caseNo),
+      await this.complaintService.getComplaintCaseForOps(caseNo),
       requestId,
     );
   }
@@ -119,7 +119,7 @@ export class ComplaintController {
     await this.complaintService.refreshSettlementCases();
     return toApiSuccessEnvelope(
       {
-        items: this.complaintService.getComplaintTimeline(caseNo),
+        items: await this.complaintService.getComplaintTimelineForOps(caseNo),
       },
       requestId,
     );

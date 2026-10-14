@@ -792,7 +792,9 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
                 dense
               />
             ) : (
-              <div style={emptyStateStyle}>{t("billing.empty.invoices", locale)}</div>
+              <div style={emptyStateStyle}>
+                {t("billing.empty.invoices", locale)}
+              </div>
             )}
           </CanvasCard>
         </div>
@@ -811,7 +813,9 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
               dense
             />
           ) : (
-            <div style={emptyStateStyle}>{t("billing.empty.statements", locale)}</div>
+            <div style={emptyStateStyle}>
+              {t("billing.empty.statements", locale)}
+            </div>
           )}
         </CanvasCard>
       </div>

@@ -3,7 +3,12 @@ import { firstValueFrom, of } from "../../../apps/api/node_modules/rxjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OwnedOrderRecord } from "@drts/contracts";
 import { PassengerBookingService } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.service";
+import { PassengerBookingController } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.controller";
 import { PassengerBookingSettingsController } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking-settings.controller";
+import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { ComplaintRepository } from "../../../apps/api/src/modules/complaint/complaint.repository";
+import { ComplaintService } from "../../../apps/api/src/modules/complaint/complaint.service";
+import type { PassengerRequestIdentity } from "../../../apps/api/src/common/auth/auth.types";
 import { SnakeCaseInterceptor } from "../../../apps/api/src/common/snake-case.interceptor";
 import {
   createProductionBookingFixture,
@@ -12,11 +17,26 @@ import {
   QUOTE_ID,
 } from "./production-booking-fixture";
 
-const identity = { realm: "passenger", drtsPassengerId: OWNER } as never;
-const otherIdentity = {
+// The controller receives a verified server identity, never a body/header actor.
+const identity: PassengerRequestIdentity = {
+  authMode: "jwt_bearer",
   realm: "passenger",
+  actorType: "first_party_passenger",
+  actorId: OWNER,
+  tenantId: null,
+  drtsPassengerId: OWNER,
+  sessionId: "unit-booking-owner-session",
+  roleFamilies: [],
+  roles: [],
+  scopes: [],
+  requestId: null,
+};
+const otherIdentity: PassengerRequestIdentity = {
+  ...identity,
+  actorId: "pax-other",
   drtsPassengerId: "pax-other",
-} as never;
+  sessionId: "unit-booking-other-session",
+};
 type Fixture = ReturnType<typeof createProductionBookingFixture>;
 
 beforeEach(() => {
@@ -351,10 +371,23 @@ describe("pax-booking_history_and_ride_actions: production ownership", () => {
     const f = createProductionBookingFixture();
     const created = await f.service.createRide(OWNER, f.command);
     const id = created.ride.order.orderId;
+    const complaint = new ComplaintService(
+      new AuditNotificationService(),
+      new ComplaintRepository(f.database),
+    );
+    const service = new PassengerBookingService(
+      f.bookingRepository,
+      f.multi,
+      f.fareRepository,
+      f.accountRepository as never,
+      complaint,
+    );
+    const controller = new PassengerBookingController(service, f.multi);
+    const prepareHook = vi.spyOn(complaint, "preparePassengerRatingHook");
     const rate = vi
       .spyOn(f.multi, "submitTrustedPassengerRating")
       .mockResolvedValue({} as never);
-    const response = await f.controller.rateRide(identity, id, {
+    const response = await controller.rateRide(identity, id, {
       rideId: "body-id-is-ignored",
       rating: 4,
       tags: ["clean"],
@@ -365,7 +398,13 @@ describe("pax-booking_history_and_ride_actions: production ownership", () => {
       id,
       { score: 4, tags: ["clean"], comment: "Good" },
       OWNER,
+      prepareHook.mock.results[0]!.value,
     );
+    expect(prepareHook).toHaveBeenCalledWith(OWNER, id, false, {
+      score: 4,
+      tags: ["clean"],
+      comment: "Good",
+    });
     await expect(f.controller.getReceipt(identity, id)).rejects.toMatchObject({
       code: "PASSENGER_RECEIPT_NOT_READY",
     });
@@ -378,7 +417,7 @@ describe("pax-booking_history_and_ride_actions: production ownership", () => {
     });
     rate.mockClear();
     await expect(
-      f.controller.rateRide(identity, id, { rideId: id, rating: 0 as never }),
+      controller.rateRide(identity, id, { rideId: id, rating: 0 as never }),
     ).rejects.toMatchObject({ code: "PASSENGER_RATING_SCORE_INVALID" });
     expect(rate).not.toHaveBeenCalled();
   });

@@ -19,6 +19,7 @@ import { ServiceProductModule } from "../service-product/service-product.module"
 // one-way edge (TenantPartnerModule does not import MultiTaxiModule), so
 // this does not introduce a module cycle.
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
+import { CertificateSupportModule } from "../certificate-support/certificate-support.module";
 import {
   MASKED_CALL_PORT,
   UnavailableMaskedCallPort,
@@ -47,6 +48,7 @@ import { PartnerNotificationWorker } from "./partner-notification.worker";
     ReportingFilingModule,
     ServiceProductModule,
     TenantPartnerModule,
+    CertificateSupportModule,
   ],
   controllers: [MultiTaxiController, FareVersionController],
   providers: [

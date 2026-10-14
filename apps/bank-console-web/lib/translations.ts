@@ -602,12 +602,14 @@ const en = {
   "programs.period": "Period",
   "programs.empty": "No programs have been returned for this issuer.",
   "programs.noUsage": "No usage records are available for these programs yet.",
-  "programs.usageUnavailable": "Usage could not be loaded. Reload the page to try again; downloads are unavailable until usage is restored.",
+  "programs.usageUnavailable":
+    "Usage could not be loaded. Reload the page to try again; downloads are unavailable until usage is restored.",
   "programs.notProvided": "Not provided",
   "programs.status.active": "Active",
   "programs.status.inactive": "Inactive",
   "programs.source.live": "Data source: connected API",
-  "programs.source.partial": "Some API data is unavailable. Only retrieved records are shown; reload to try again.",
+  "programs.source.partial":
+    "Some API data is unavailable. Only retrieved records are shown; reload to try again.",
   "programs.source.definitions": "Program settings",
   "programs.source.usage": "Usage",
   "programs.source.connected": "Connected API",
@@ -1206,8 +1208,7 @@ const zh: Record<keyof typeof en, string> = {
 
   "programs.title": "方案與配額",
   "programs.eyebrow": "方案用量",
-  "programs.lead":
-    "檢視發卡方案與各期別的服務卡友數、已用趟次及剩餘配額。",
+  "programs.lead": "檢視發卡方案與各期別的服務卡友數、已用趟次及剩餘配額。",
   "programs.purpose":
     "各方案／期別的權益消耗：服務卡友數、趟次消耗 vs 配額（禮遇趟次剩餘）。",
   "programs.banner.label": "發卡行識別",
@@ -1311,12 +1312,14 @@ const zh: Record<keyof typeof en, string> = {
   "programs.period": "期別",
   "programs.empty": "此發卡行尚無回傳的方案。",
   "programs.noUsage": "這些方案尚無使用量紀錄。",
-  "programs.usageUnavailable": "使用量載入失敗，請重新整理後再試；資料恢復前暫時無法下載。",
+  "programs.usageUnavailable":
+    "使用量載入失敗，請重新整理後再試；資料恢復前暫時無法下載。",
   "programs.notProvided": "未提供",
   "programs.status.active": "啟用",
   "programs.status.inactive": "停用",
   "programs.source.live": "資料來源：已連線 API",
-  "programs.source.partial": "部分 API 資料無法取得，僅顯示已回讀的紀錄；請重新整理後再試。",
+  "programs.source.partial":
+    "部分 API 資料無法取得，僅顯示已回讀的紀錄；請重新整理後再試。",
   "programs.source.definitions": "方案設定",
   "programs.source.usage": "使用量",
   "programs.source.connected": "已連線 API",
