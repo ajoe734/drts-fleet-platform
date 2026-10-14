@@ -1,12 +1,62 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import type { PoolClient } from "pg";
+import { DatabaseService } from "../../../apps/api/src/common/db/database.service";
 import type { CreatePassengerComplaintCommand } from "@drts/contracts";
 import { CertificateSupportRepository } from "../../../apps/api/src/modules/certificate-support/certificate-support.repository";
 import {
   hostedPaymentEnabled,
   PaymentPostgresHarness,
+  DiagnosedDatabaseService,
   simulatedE04,
 } from "./payment-postgres-harness";
+
+describe("PAX QA instrumentation callback contract (server-free, no DB acceptance)", () => {
+  it("preserves the native callback overload and restores query before returning a lease", async () => {
+    // Only a PoolClient transport seam, without fabricated SQL rows or any
+    // production business call. This reproduces the wrapper's pool callback fault.
+    vi.stubEnv("DATABASE_URL", "");
+    const callback = vi.fn();
+    const nativeQuery = vi.fn((...args: unknown[]) => {
+      const done = args.at(-1);
+      if (typeof done === "function") {
+        done();
+        return;
+      }
+      return Promise.resolve();
+    });
+    const client = {
+      query: nativeQuery,
+      release: vi.fn(() => {
+        expect(client.query).toBe(nativeQuery);
+      }),
+    };
+    const nativeRelease = client.release;
+    vi.spyOn(DatabaseService.prototype, "connect").mockResolvedValue(
+      client as unknown as PoolClient,
+    );
+    try {
+      const leased = await new DiagnosedDatabaseService().connect();
+      leased.query("SELECT 1", [], callback);
+      expect(callback).toHaveBeenCalledOnce();
+      expect(nativeQuery.mock.calls[0]).toEqual(["SELECT 1", [], callback]);
+      leased.release();
+      expect(client.query).toBe(nativeQuery);
+      expect(nativeRelease).toHaveBeenCalledOnce();
+    } finally {
+      vi.restoreAllMocks();
+      vi.unstubAllEnvs();
+    }
+  });
+});
 
 describe.skipIf(!hostedPaymentEnabled)(
   "PAX QA Receipt CRM production PostgreSQL",

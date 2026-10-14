@@ -58,8 +58,7 @@ const runFile = promisify(execFile);
 /** Observe real PG errors without changing rows, SQL, parameters or rejection.
  * Production deliberately sanitizes persistence errors; code/position/hash
  * identify an SQL defect without logging a token, credential or raw message. */
-class DiagnosedDatabaseService extends DatabaseService {
-  private readonly observed = new WeakSet<PoolClient>();
+export class DiagnosedDatabaseService extends DatabaseService {
   probe:
     | {
         begin: () => Promise<void>;
@@ -68,10 +67,14 @@ class DiagnosedDatabaseService extends DatabaseService {
     | undefined;
   override async connect(): Promise<PoolClient> {
     const client = await super.connect();
-    if (!this.observed.has(client)) {
-      this.observed.add(client);
+    {
+      // Instrument only the leased production executor. Pool.query uses the
+      // callback overload on returned clients; preserve that API and restore
+      // the exact native method before releasing this lease back to the pool.
+      const nativeQuery = client.query;
       const query = client.query.bind(client);
-      client.query = (async (sql: string, values?: unknown[]) => {
+      const release = client.release.bind(client);
+      const observe = async (sql: string, values?: unknown[]) => {
         const probe = this.probe;
         let pid: number | undefined;
         if (
@@ -112,7 +115,17 @@ class DiagnosedDatabaseService extends DatabaseService {
           });
         }
         return result;
+      };
+      client.query = ((...args: unknown[]) => {
+        if (typeof args[0] !== "string" || typeof args.at(-1) === "function") {
+          return Reflect.apply(nativeQuery, client, args);
+        }
+        return observe(args[0], args[1] as unknown[] | undefined);
       }) as typeof client.query;
+      client.release = (...args) => {
+        client.query = nativeQuery;
+        return release(...args);
+      };
     }
     return client;
   }
@@ -312,11 +325,14 @@ export class PaymentPostgresHarness {
   }
 
   private async closeCase(): Promise<void> {
-    await this.database?.onModuleDestroy();
-    await this.pool?.end();
-    this.pool = undefined;
-    // Ensure subsequent cleanup cannot close an already closed service.
+    const database = this.database;
+    const pool = this.pool;
+    // Detach before awaiting cleanup so a timed-out hook cannot end the same
+    // pool twice and obscure the original failure on subsequent cases.
     this.database = undefined as unknown as DatabaseService;
+    this.pool = undefined;
+    await database?.onModuleDestroy();
+    await pool?.end();
     if (this.activeName) {
       await this.admin!.query(`DROP DATABASE "${this.activeName}"`);
       this.created.delete(this.activeName);
