@@ -6,6 +6,7 @@ import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { PoolClient, QueryResultRow } from "pg";
 import { ApiRequestError } from "../../common/api-envelope";
+import { resolvePassengerSubjectRef } from "../../common/sensitive-data-policy";
 
 export interface PassengerAccountRatingHook {
   execute(
@@ -13,6 +14,11 @@ export interface PassengerAccountRatingHook {
     rating: PassengerTripRatingRecord,
     isNew: boolean,
   ): Promise<void>;
+}
+
+export interface PassengerRideRatingContext extends PassengerAccountRatingHook {
+  token: PassengerRideAccessToken;
+  tokenDigest: string;
 }
 
 import type {
@@ -30,6 +36,7 @@ import type {
   PassengerRatingReviewListItem,
   PassengerPushDeliveryOutcome,
   PassengerRideAccessToken,
+  OwnedOrderRecord,
   PassengerTripRatingRecord,
   PushProviderAckState,
 } from "@drts/contracts";
@@ -1656,9 +1663,10 @@ export class MultiTaxiRepository {
   async persistPassengerRating(
     rating: PassengerTripRatingRecord,
     accountHook?: PassengerAccountRatingHook,
+    rideContext?: PassengerRideRatingContext,
   ) {
     if (!this.isEnabled()) {
-      if (accountHook)
+      if (accountHook || rideContext)
         throw new ApiRequestError(
           503,
           "PASSENGER_RATING_STORAGE_UNAVAILABLE",
@@ -1674,9 +1682,79 @@ export class MultiTaxiRepository {
     let committed = false;
     try {
       await client.query("BEGIN");
-      if (accountHook) {
+      if (accountHook || rideContext) {
         await client.query("SET LOCAL lock_timeout = '3s'");
         await client.query("SET LOCAL statement_timeout = '8s'");
+      }
+      if (rideContext) {
+        const verified = await client.query<{
+          scopes: string[];
+          expires_at: Date | string;
+          revoked_at: Date | string | null;
+          database_now: Date | string;
+        }>(
+          `SELECT scopes, expires_at, revoked_at, clock_timestamp() AS database_now
+           FROM ops.passenger_ride_access_tokens
+           WHERE token_id = $1 AND token_digest = $2 AND order_id = $3
+             AND passenger_subject_ref = $4 FOR SHARE`,
+          [
+            rideContext.token.tokenId,
+            rideContext.tokenDigest,
+            rating.orderId,
+            rating.passengerSubjectRef,
+          ],
+        );
+        const token = verified.rows[0];
+        if (
+          !token ||
+          token.revoked_at !== null ||
+          !Number.isFinite(new Date(token.expires_at).getTime()) ||
+          new Date(token.expires_at).getTime() <=
+            new Date(token.database_now).getTime()
+        )
+          throw new ApiRequestError(
+            404,
+            "PASSENGER_RIDE_TOKEN_INVALID",
+            "The passenger ride link is invalid or expired.",
+          );
+        if (!Array.isArray(token.scopes) || !token.scopes.includes("ride:rate"))
+          throw new ApiRequestError(
+            403,
+            "PASSENGER_RIDE_SCOPE_FORBIDDEN",
+            "The passenger ride token does not grant this action.",
+          );
+        const owned = await client.query<{
+          status: string;
+          record: OwnedOrderRecord;
+        }>(
+          `SELECT o.status, o.record FROM ops.phase1_owned_orders o
+           WHERE o.order_id = $1 FOR SHARE`,
+          [rating.orderId],
+        );
+        const order = owned.rows[0];
+        if (
+          !order ||
+          order.record.runtimeProfileCode !== "multi_taxi_direct" ||
+          resolvePassengerSubjectRef(order.record.passenger) !==
+            rating.passengerSubjectRef
+        )
+          throw new ApiRequestError(
+            404,
+            "PASSENGER_RIDE_NOT_FOUND",
+            "Ride not found.",
+          );
+        if (order.status !== "completed")
+          throw new ApiRequestError(
+            409,
+            "PASSENGER_RATING_TRIP_NOT_COMPLETED",
+            "The trip must be completed.",
+          );
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+          [`passenger-rating:${rating.orderId}:${rating.passengerSubjectRef}`],
+        );
+      }
+      if (accountHook) {
         const owner = await client.query<{
           status: string;
           record: { passenger?: { passengerId?: string } };
@@ -1743,7 +1821,7 @@ export class MultiTaxiRepository {
         ],
       );
       const storedRating = this.mapPassengerRating(ratingResult.rows[0]!);
-      if (accountHook) {
+      if (accountHook || rideContext) {
         if (
           storedRating.score !== rating.score ||
           JSON.stringify(storedRating.tags) !== JSON.stringify(rating.tags) ||
@@ -1756,6 +1834,16 @@ export class MultiTaxiRepository {
           );
         }
         const isNew = storedRating.ratingId === rating.ratingId;
+        if (
+          rideContext &&
+          (storedRating.tripId !== rating.tripId ||
+            storedRating.driverId !== rating.driverId)
+        )
+          throw new ApiRequestError(
+            409,
+            "PASSENGER_RATING_ASSIGNMENT_MISSING",
+            "The original rating assignment cannot be changed.",
+          );
         if (isNew) {
           const task = await client.query<{
             completed_at: string | null;
@@ -1794,7 +1882,11 @@ export class MultiTaxiRepository {
               "The completed trip must be paid.",
             );
         }
-        await accountHook.execute(client, storedRating, isNew);
+        await (accountHook ?? rideContext)!.execute(
+          client,
+          storedRating,
+          isNew,
+        );
       }
       const calculatedAt = new Date().toISOString();
       const summaryResult = await client.query<DriverRatingSummaryRow>(
