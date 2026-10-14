@@ -1779,6 +1779,48 @@ function Actions({
   const requote = () => {
     if (actionPending) return;
     setActionPending(true);
+    if (fixture.screenId === "A04") {
+      const quoteUrl =
+        authMode === "token"
+          ? `/api/passenger-rides/${encodeURIComponent(token)}/quotes`
+          : "/api/passenger-app/quotes";
+      void fetch(quoteUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rideId: token }),
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(
+              errData?.error?.message || "QUOTE_RECALCULATION_FAILED",
+            );
+          }
+          return fetchPassengerRideAuthority(token, authMode === "token");
+        })
+        .then((view) => {
+          const next = mapPassengerRideAuthorityToFixture(
+            view,
+            token,
+            fixture.screenId === "A03"
+              ? "fares"
+              : fixture.screenId === "P5-10"
+                ? "receipt"
+                : "ride",
+          );
+          onFixtureUpdate?.(next);
+          setActionPending(false);
+        })
+        .catch((err: unknown) => {
+          console.error("Requote error", err);
+          window.alert(
+            err instanceof Error ? err.message : "QUOTE_RECALCULATION_FAILED",
+          );
+          setActionPending(false);
+        });
+      return;
+    }
+
     void fetchPassengerRideAuthority(token, authMode === "token")
       .then((view) => {
         const next = mapPassengerRideAuthorityToFixture(
@@ -1881,7 +1923,7 @@ function Actions({
     const cert = fixture.certificate;
     return (
       <ActionGroup>
-        {cert?.state === "available" && cert.pdfUrl ? (
+        {cert?.pdfUrl ? (
           <a
             href={cert.pdfUrl}
             target="_blank"
@@ -1891,7 +1933,7 @@ function Actions({
             {t.DownloadPdf}
           </a>
         ) : null}
-        {cert?.state === "available" && cert.htmlUrl ? (
+        {cert?.htmlUrl ? (
           <a
             href={cert.htmlUrl}
             target="_blank"
@@ -2069,7 +2111,11 @@ function RideContent({
           authMode={authMode}
           onCertificateUpdate={onCertificateUpdate}
         />
-        <ComplaintForm token={token} authMode={authMode} />
+        <ComplaintForm
+          token={token}
+          authMode={authMode}
+          orderNo={fixture.orderNo}
+        />
         <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
       </>
     );
@@ -2085,7 +2131,11 @@ function RideContent({
           authMode={authMode}
           onCertificateUpdate={onCertificateUpdate}
         />
-        <ComplaintForm token={token} authMode={authMode} />
+        <ComplaintForm
+          token={token}
+          authMode={authMode}
+          orderNo={fixture.orderNo}
+        />
         <Actions fixture={fixture} token={token} authMode={authMode} onFixtureUpdate={onFixtureUpdate} />
       </>
     );
@@ -2170,31 +2220,6 @@ function RideContent({
     );
   }
 
-  if (fixture.screenId === ("CANCELLED_TODO" as any)) {
-    return (
-      <>
-        <MapCard fixture={fixture} />
-        {fixture.assignment && <VehicleCard fixture={fixture} />}
-        {fixture.routeFareText && <FareCard fixture={fixture} />}
-        <Card>
-          <div
-            style={{
-              padding: 16,
-              textAlign: "center",
-              color: passengerChrome.text,
-            }}
-          >
-            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
-              {t.RideCancelledThisTrip}
-            </div>
-            <div style={{ fontSize: 13, color: passengerChrome.muted }}>
-              {fixture.cancelNote || t.RideCancelledNote}
-            </div>
-          </div>
-        </Card>
-      </>
-    );
-  }
 
   if (fixture.screenId === "P5-08") {
     return (

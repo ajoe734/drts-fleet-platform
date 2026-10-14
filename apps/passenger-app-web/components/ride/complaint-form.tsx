@@ -6,12 +6,75 @@ import { requestPassengerRideAction } from "../../lib/ride/passenger-live";
 
 const shellInset = 14;
 
+function P5Header({
+  status,
+  order,
+}: {
+  status: string;
+  order?: string | undefined;
+}) {
+  return (
+    <div
+      style={{
+        background: passengerChrome.headerBg,
+        color: passengerChrome.invert,
+        padding: "10px 18px 14px",
+        flexShrink: 0,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span
+          aria-hidden="true"
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: 6,
+            background: "rgba(255,255,255,.16)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 13,
+            fontWeight: 700,
+          }}
+        >
+          {t.Vehicle}
+        </span>
+        <span style={{ fontSize: 13, fontWeight: 700 }}>{t.AppTitle}</span>
+        <span style={{ flex: 1 }} />
+        {order ? (
+          <span
+            style={{
+              fontFamily: passengerChrome.monoFont,
+              fontSize: 10.5,
+              opacity: 0.78,
+            }}
+          >
+            {order}
+          </span>
+        ) : null}
+      </div>
+      <div
+        style={{
+          fontSize: 19,
+          fontWeight: 800,
+          marginTop: 8,
+          letterSpacing: 0.2,
+        }}
+      >
+        {status}
+      </div>
+    </div>
+  );
+}
+
 export function ComplaintForm({
   token,
   authMode,
+  orderNo,
 }: {
   token: string;
   authMode?: "id" | "token" | undefined;
+  orderNo?: string | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const [category, setCategory] = useState<
@@ -32,6 +95,12 @@ export function ComplaintForm({
   }
 
   if (authMode === "token") return null;
+
+  const displayOrder =
+    orderNo ||
+    (token.startsWith("ZX-") || (token.includes("-") && token.length <= 16)
+      ? token
+      : "");
 
   if (!open) {
     return (
@@ -60,88 +129,101 @@ export function ComplaintForm({
       <div
         style={{
           margin: `0 ${shellInset}px 12px`,
-          padding: "32px 14px",
           background: passengerChrome.card,
           border: `1px solid ${passengerChrome.border}`,
           borderRadius: 14,
+          overflow: "hidden",
           display: "flex",
           flexDirection: "column",
-          alignItems: "center",
-          gap: 16,
-          textAlign: "center",
         }}
       >
+        <P5Header status={t.ComplaintSubmitted} order={displayOrder} />
         <div
           style={{
-            width: 64,
-            height: 64,
-            borderRadius: 32,
-            background: passengerChrome.success.bg,
+            padding: "40px 14px",
             display: "flex",
+            flexDirection: "column",
             alignItems: "center",
-            justifyContent: "center",
-            color: passengerChrome.success.fg,
+            gap: 16,
+            textAlign: "center",
           }}
         >
-          <svg
-            width="32"
-            height="32"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+          <div
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: 32,
+              background: passengerChrome.success.bg,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: passengerChrome.success.fg,
+            }}
           >
-            <path d="M5 12l5 5L20 7" />
-          </svg>
-        </div>
-        <div
-          style={{
-            fontSize: 18,
-            fontWeight: 700,
-            color: passengerChrome.text,
-          }}
-        >
-          {t.ComplaintReceived}
-        </div>
-        <div
-          style={{
-            fontSize: 13.5,
-            color: passengerChrome.muted,
-            lineHeight: 1.6,
-          }}
-        >
-          <span style={{ fontWeight: 600, color: passengerChrome.success.fg }}>
-            {t.FormSubmitted}
-          </span>
-          <div style={{ marginTop: 4 }}>
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M5 12l5 5L20 7" />
+            </svg>
+          </div>
+          <div
+            style={{
+              fontSize: 18,
+              fontWeight: 700,
+              color: passengerChrome.text,
+            }}
+          >
+            {t.ComplaintReceived}
+          </div>
+          <div
+            style={{
+              fontSize: 14,
+              color: passengerChrome.muted,
+              lineHeight: 1.6,
+            }}
+          >
+            <div
+              style={{
+                fontWeight: 600,
+                color: passengerChrome.success.fg,
+                marginBottom: 4,
+              }}
+            >
+              {t.FormSubmitted}
+            </div>
             {t.ComplaintProcessingNotice}
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              setSubmitted(false);
+              setOpen(false);
+              setContent("");
+              setLostItemDescription("");
+              idempotencyKeyRef.current = "";
+            }}
+            style={{
+              marginTop: 24,
+              padding: "10px 24px",
+              borderRadius: 12,
+              background: passengerChrome.card,
+              border: `1px solid ${passengerChrome.border}`,
+              color: passengerChrome.text,
+              fontSize: 14,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            {t.BackToRide}
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setSubmitted(false);
-            setOpen(false);
-            setContent("");
-            setLostItemDescription("");
-            idempotencyKeyRef.current = "";
-          }}
-          style={{
-            marginTop: 12,
-            padding: "10px 24px",
-            borderRadius: 12,
-            background: passengerChrome.background,
-            border: `1px solid ${passengerChrome.border}`,
-            color: passengerChrome.text,
-            fontSize: 14,
-            fontWeight: 700,
-            cursor: "pointer",
-          }}
-        >
-          {t.BackToRide}
-        </button>
       </div>
     );
   }
@@ -178,206 +260,187 @@ export function ComplaintForm({
         margin: `0 ${shellInset}px 12px`,
         border: `1px solid ${passengerChrome.border}`,
         borderRadius: 14,
-        padding: 16,
+        overflow: "hidden",
         background: passengerChrome.card,
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 14,
-        }}
-      >
-        <div>
-          <h3
-            style={{
-              fontSize: 16,
-              fontWeight: 700,
-              margin: 0,
-              color: passengerChrome.text,
-            }}
-          >
-            {t.ComplaintAndLostFound}
-          </h3>
-          <div
-            style={{
-              fontSize: 11.5,
-              color: passengerChrome.muted,
-              fontFamily: passengerChrome.monoFont,
-              marginTop: 2,
-            }}
-          >
-            {token}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          style={{
-            background: "none",
-            border: "none",
-            color: passengerChrome.muted,
-            cursor: "pointer",
-            fontSize: 14,
-          }}
-        >
-          {t.Cancel}
-        </button>
-      </div>
-
-      <div style={{ marginBottom: 12 }}>
+      <P5Header status={t.ContactSupport} order={displayOrder} />
+      <div style={{ padding: "20px 14px" }}>
         <div
           style={{
-            fontSize: 13,
-            fontWeight: 700,
-            marginBottom: 6,
-            color: passengerChrome.text,
+            display: "flex",
+            justifyContent: "flex-end",
+            marginBottom: 8,
           }}
         >
-          {t.IssueCategory}
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            style={{
+              background: "none",
+              border: "none",
+              color: passengerChrome.muted,
+              cursor: "pointer",
+              fontSize: 13,
+            }}
+          >
+            {t.Cancel}
+          </button>
         </div>
-        <select
-          value={category}
-          onChange={(e) => {
-            const nextCat = e.target.value as
-              | "service"
-              | "fare"
-              | "lost_item"
-              | "other";
-            setCategory(nextCat);
-            idempotencyKeyRef.current = "";
-          }}
-          style={{
-            width: "100%",
-            padding: "10px 12px",
-            borderRadius: 8,
-            border: `1px solid ${passengerChrome.border}`,
-            background: passengerChrome.card,
-            color: passengerChrome.text,
-            fontSize: 14,
-          }}
-        >
-          <option value="service">{t.ComplaintServiceIssue}</option>
-          <option value="fare">{t.ComplaintFareIssue}</option>
-          <option value="lost_item">{t.ComplaintLostItem}</option>
-          <option value="other">{t.ComplaintOther}</option>
-        </select>
-      </div>
 
-      {category === "lost_item" && (
-        <div style={{ marginBottom: 12 }}>
+        <div style={{ marginBottom: 16 }}>
           <div
             style={{
               fontSize: 13,
               fontWeight: 700,
-              marginBottom: 6,
+              marginBottom: 8,
               color: passengerChrome.text,
             }}
           >
-            {t.LostItemDesc}
+            {t.IssueCategory}
           </div>
-          <input
-            type="text"
-            placeholder={t.LostItemPlaceholder}
-            value={lostItemDescription}
+          <select
+            value={category}
             onChange={(e) => {
-              setLostItemDescription(e.target.value);
+              const nextCat = e.target.value as
+                | "service"
+                | "fare"
+                | "lost_item"
+                | "other";
+              setCategory(nextCat);
               idempotencyKeyRef.current = "";
             }}
             style={{
               width: "100%",
-              padding: "10px 12px",
+              padding: "12px",
               borderRadius: 8,
               border: `1px solid ${passengerChrome.border}`,
               background: passengerChrome.card,
               color: passengerChrome.text,
               fontSize: 14,
+            }}
+          >
+            <option value="lost_item">{t.ComplaintLostItem}</option>
+            <option value="service">{t.ComplaintServiceIssue}</option>
+            <option value="fare">{t.ComplaintFareIssue}</option>
+            <option value="other">{t.ComplaintOther}</option>
+          </select>
+        </div>
+
+        {category === "lost_item" && (
+          <div style={{ marginBottom: 16 }}>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 700,
+                marginBottom: 8,
+                color: passengerChrome.text,
+              }}
+            >
+              {t.LostItemDesc}
+            </div>
+            <input
+              type="text"
+              placeholder={t.LostItemPlaceholder}
+              value={lostItemDescription}
+              onChange={(e) => {
+                setLostItemDescription(e.target.value);
+                idempotencyKeyRef.current = "";
+              }}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 8,
+                border: `1px solid ${passengerChrome.border}`,
+                background: passengerChrome.card,
+                color: passengerChrome.text,
+                fontSize: 14,
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
+        )}
+
+        <div style={{ marginBottom: 16 }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              marginBottom: 8,
+              color: passengerChrome.text,
+            }}
+          >
+            {t.DetailDescription}
+          </div>
+          <textarea
+            placeholder={t.ComplaintPlaceholder}
+            value={content}
+            onChange={(e) => {
+              setContent(e.target.value);
+              idempotencyKeyRef.current = "";
+            }}
+            rows={4}
+            style={{
+              width: "100%",
+              height: 120,
+              padding: "12px",
+              borderRadius: 8,
+              border: `1px solid ${passengerChrome.border}`,
+              background: passengerChrome.card,
+              color: passengerChrome.text,
+              fontSize: 14,
+              resize: "vertical",
               boxSizing: "border-box",
             }}
           />
         </div>
-      )}
 
-      <div style={{ marginBottom: 12 }}>
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 700,
-            marginBottom: 6,
-            color: passengerChrome.text,
-          }}
-        >
-          {t.DetailDescription}
+        <div style={{ marginBottom: 16 }}>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 8,
+              fontSize: 13,
+              color: passengerChrome.text,
+              cursor: "pointer",
+              lineHeight: 1.45,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={contactConsent}
+              onChange={(e) => {
+                setContactConsent(e.target.checked);
+                idempotencyKeyRef.current = "";
+              }}
+              style={{ marginTop: 2 }}
+            />
+            {t.AgreeToContact}
+          </label>
         </div>
-        <textarea
-          placeholder={t.ComplaintPlaceholder}
-          value={content}
-          onChange={(e) => {
-            setContent(e.target.value);
-            idempotencyKeyRef.current = "";
-          }}
-          rows={4}
+
+        <button
+          type="button"
+          onClick={submit}
+          disabled={submitting || !content.trim()}
           style={{
             width: "100%",
-            padding: "10px 12px",
-            borderRadius: 8,
-            border: `1px solid ${passengerChrome.border}`,
-            background: passengerChrome.card,
-            color: passengerChrome.text,
+            minHeight: 46,
+            padding: "10px 16px",
+            borderRadius: 12,
+            background: passengerChrome.shell,
+            color: CORE_FOREGROUNDS.foregroundInvert,
+            border: "none",
+            fontWeight: 700,
             fontSize: 14,
-            resize: "vertical",
-            boxSizing: "border-box",
-          }}
-        />
-      </div>
-
-      <div style={{ marginBottom: 16 }}>
-        <label
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 8,
-            fontSize: 13,
-            color: passengerChrome.text,
-            cursor: "pointer",
-            lineHeight: 1.45,
+            cursor: submitting || !content.trim() ? "not-allowed" : "pointer",
+            opacity: submitting || !content.trim() ? 0.6 : 1,
           }}
         >
-          <input
-            type="checkbox"
-            checked={contactConsent}
-            onChange={(e) => {
-              setContactConsent(e.target.checked);
-              idempotencyKeyRef.current = "";
-            }}
-            style={{ marginTop: 2 }}
-          />
-          {t.AgreeToContact}
-        </label>
+          {submitting ? t.Submitting : t.ConfirmSubmit}
+        </button>
       </div>
-
-      <button
-        type="button"
-        onClick={submit}
-        disabled={submitting || !content.trim()}
-        style={{
-          width: "100%",
-          minHeight: 46,
-          padding: "10px 16px",
-          borderRadius: 12,
-          background: passengerChrome.shell,
-          color: CORE_FOREGROUNDS.foregroundInvert,
-          border: "none",
-          fontWeight: 700,
-          fontSize: 14,
-          cursor: submitting || !content.trim() ? "not-allowed" : "pointer",
-          opacity: submitting || !content.trim() ? 0.6 : 1,
-        }}
-      >
-        {submitting ? "送出中..." : "確認送出"}
-      </button>
     </div>
   );
 }

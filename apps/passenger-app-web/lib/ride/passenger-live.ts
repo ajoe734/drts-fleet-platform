@@ -216,54 +216,29 @@ export async function fetchPassengerReceipt(
       );
     }
     const payload = camelizeKeys(await response.json());
-    return payload.data as { receiptUrl: string };
+    return ((payload as any)?.data || payload) as any;
   } else {
     try {
       const raw = await passengerClient.getReceipt(idOrToken);
       const rawData = (raw as any)?.data || raw;
-      const receiptUrl = rawData?.receiptUrl || "";
-      const pdfUrl =
-        rawData?.pdfUrl ||
-        (receiptUrl
-          ? receiptUrl.replace(/\/artifacts\/html$/, "/artifacts/pdf")
-          : "");
+      if (!rawData || typeof rawData !== "object") {
+        return rawData;
+      }
+      const receiptUrl = rawData.receiptUrl || rawData.htmlUrl || "";
+      const pdfUrl = rawData.pdfUrl || rawData.record?.pdfUrl || undefined;
 
       return {
-        receiptNo: rawData?.receiptNo || `RC-${idOrToken.slice(0, 8)}`,
-        issuedAt: rawData?.issuedAt || new Date().toISOString(),
-        amountMinor: rawData?.amountMinor ?? 10000,
-        currency: rawData?.currency || "TWD",
+        ...(rawData.receiptId ? { receiptId: rawData.receiptId } : {}),
+        ...(rawData.receiptNo ? { receiptNo: rawData.receiptNo } : {}),
+        ...(rawData.issuedAt ? { issuedAt: rawData.issuedAt } : {}),
+        ...(typeof rawData.amountMinor === "number"
+          ? { amountMinor: rawData.amountMinor }
+          : {}),
+        ...(rawData.currency ? { currency: rawData.currency } : {}),
         receiptUrl,
-        pdfUrl,
-        record: rawData?.record || {
-          tripId: idOrToken,
-          plateNo: "ABC-1234",
-          pickupAt: new Date().toISOString(),
-          dropoffAt: new Date().toISOString(),
-          travelDurationSeconds: 600,
-          routeSummary: "出發地 → 目的地",
-          distanceMeters: 5000,
-          tollMinor: 0,
-          consumerServicePhone: "02-2944-0985",
-          authorityComplaintPhone: "1999",
-          certificateVersion: "1",
-          certificateState: "available",
-          htmlUrl: receiptUrl,
-          pdfUrl,
-          generatedFrom: "owned_mobility_completion",
-          e04Snapshot: {
-            fleetOperatorName: "智行車隊",
-            driverSurname: "司機",
-            driverRegistrationMasked: "••••1234",
-            paymentMethodDisplay: "線上支付",
-            fareBreakdown: {
-              startMinor: 8500,
-              distanceMinor: 1000,
-              delayMinor: 500,
-              nightMinor: 0,
-            },
-          },
-        },
+        htmlUrl: rawData.htmlUrl || receiptUrl || undefined,
+        ...(pdfUrl ? { pdfUrl } : {}),
+        ...(rawData.record ? { record: rawData.record } : {}),
       };
     } catch (e: unknown) {
       throw new PassengerAuthorityError(
@@ -278,9 +253,10 @@ export function mapPassengerRideAuthorityToFixture(
   view: PassengerRideAuthorityView,
   token: string,
   kind: "ride" | "fares" | "receipt" = "ride",
+  quoteAnomalyCode?: string | null,
 ): PassengerRideFixture {
   const assignment = view.assignment;
-  const screenId = resolveScreenId(view, kind);
+  const screenId = resolveScreenId(view, kind, quoteAnomalyCode);
   const fareMinor = assignment?.routeFare?.estimatedFareMinor ?? null;
   const payableFareMinor = assignment?.routeFare?.payableFareMinor ?? null;
   const distanceMeters = assignment?.routeFare?.estimatedDistanceMeters ?? null;
@@ -494,40 +470,21 @@ export function mapPassengerCertificate(
     return { state: "pending" };
   }
 
-  const record = receipt.record;
-  if (!record) {
-    if ("receiptUrl" in receipt && typeof (receipt as any).receiptUrl === "string") {
-      const result: PassengerCertificatePresentation = {
-        state: "available",
-        receiptNo: receipt.receiptNo || "",
-        rows: [],
-        htmlUrl: (receipt as any).receiptUrl,
-      };
-      if ("pdfUrl" in receipt && typeof (receipt as any).pdfUrl === "string") {
-        result.pdfUrl = (receipt as any).pdfUrl;
-      }
-
-      const r = receipt as any;
-      if (r.plateNo) {
-        result.rows = [
-          { label: "乘車證明編號", value: r.receiptNo || "", mono: true },
-          { label: "開立時間", value: r.issuedAt || "", mono: true },
-          { label: "車牌", value: r.plateNo, mono: true },
-          { label: "上車時間", value: r.pickupAt || "", mono: true },
-          { label: "下車時間", value: r.dropoffAt || "", mono: true },
-          { label: "行駛時間", value: r.duration || "" },
-          { label: "路線", value: r.route || "" },
-          { label: "行駛里程", value: r.distance || "", mono: true },
-          { label: "車資", value: r.fare || "", mono: true },
-          { label: "通行費", value: r.toll || "NT$ 0", mono: true },
-          { label: "客服電話", value: r.customerServicePhone || "", mono: true },
-          { label: "主管機關申訴電話", value: r.authorityComplaintPhone || "", mono: true },
-        ].filter((x) => x.value !== "");
-      }
-
-      return result;
-    }
-    return { state: "pending" };
+  const record = (receipt as any).record;
+  if (!record || typeof record !== "object") {
+    return {
+      state: "pending",
+      ...(receipt.receiptNo ? { receiptNo: receipt.receiptNo } : {}),
+      ...("receiptUrl" in receipt && typeof (receipt as any).receiptUrl === "string"
+        ? { htmlUrl: (receipt as any).receiptUrl }
+        : {}),
+      ...("htmlUrl" in receipt && typeof (receipt as any).htmlUrl === "string"
+        ? { htmlUrl: (receipt as any).htmlUrl }
+        : {}),
+      ...("pdfUrl" in receipt && typeof (receipt as any).pdfUrl === "string"
+        ? { pdfUrl: (receipt as any).pdfUrl }
+        : {}),
+    };
   }
   const e04 = (record as any).e04Snapshot;
   if (
@@ -668,24 +625,39 @@ export function mapPassengerCertificate(
   return result;
 }
 
+export const P5_QUOTE_ANOMALY_ERROR_CODES = [
+  "P5_QUOTE_PROVIDER_UNAVAILABLE",
+  "P5_QUOTE_OUT_OF_RANGE",
+  "P5_ROUTE_SNAPSHOT_UNRESOLVED",
+  "P5_FARE_POLICY_MISSING",
+  "P5_FARE_CALCULATION_MISMATCH",
+  "quote_provider_unavailable",
+  "quote_out_of_range",
+  "route_unresolved",
+  "fare_policy_missing",
+  "calculation_mismatch",
+] as const;
+
 function resolveScreenId(
   view: PassengerRideAuthorityView,
   kind: "ride" | "fares" | "receipt",
+  quoteAnomalyCode?: string | null,
 ): PassengerScreenId {
   if (kind === "fares") return "A03";
   if (kind === "receipt") return "P5-10";
   if (view.order.status === "cancelled") {
-    // R6: Supervisor note: Missing cancelled terminal screen in canvas. Needs screen requirements.
-    // STOP: Cannot use P5-12 as it implies an active assignment. Cannot use A04 as it implies a quote.
-    return "CANCELLED_TODO" as any;
+    return !view.assignment ? "P5-01" : "P5-11";
   }
-  const hasQuoteAnomaly =
-    Boolean((view.order as any).fareQuoteAnomaly) ||
-    (view.order as any).fareQuoteStatus === "anomaly" ||
-    (view.order as any).quoteAnomaly ||
-    (view as any).fareQuoteAnomaly;
+  const effectiveAnomaly =
+    quoteAnomalyCode ||
+    (view as any).quoteAnomalyCode ||
+    (view.order as any)?.fareQuoteAnomaly ||
+    (view as any)?.fareQuoteAnomaly;
 
-  if (hasQuoteAnomaly) {
+  if (
+    effectiveAnomaly &&
+    P5_QUOTE_ANOMALY_ERROR_CODES.includes(effectiveAnomaly as any)
+  ) {
     return "A04";
   }
   if (view.order.status === "completed") return view.rating ? "P5-09" : "P5-08";
