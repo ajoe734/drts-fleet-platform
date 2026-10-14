@@ -268,11 +268,12 @@ describe.skipIf(!hostedPaymentEnabled)(
         f.owner,
       ))!;
       const expiredId = randomUUID();
+      const capturedNow = Date.now();
       await f.repository.insertSnapshot({
         ...captured,
         fareSnapshotId: expiredId,
-        createdAt: new Date(Date.now() - 960000).toISOString(),
-        expiresAt: new Date(Date.now() - 60000).toISOString(),
+        createdAt: new Date(capturedNow - 960000).toISOString(),
+        expiresAt: new Date(capturedNow - 60000).toISOString(),
       });
       await h.accounts.updateMe(f.identity, { contactPhone: "0900000000" });
       const services = await h.receiptServices();
