@@ -419,3 +419,111 @@ change product source. All checks below completed and their results were read.
 | Original Booking access prerequisite                                 | 本輪授權 `booking-access.test.ts` 的 server-derived first_party_passenger identity 與 real rating-hook dependency/delegation fixture；其餘 source 與 tests 不改。                                                                     | pristine cec585 48 cases：44 PASS、4 FAIL，三個 ownership rating negatives 因 fixture identity 缺 actor 被 401 擋住；mapping positive 同樣缺 actor，修後仍須提供 actual consent hook prerequisite。 | `pnpm exec vitest run tests/unit/pax-booking-history-20261009/booking-access.test.ts` FAIL1 (`cec585-booking-access.log`)。                                                                                                                                                                                                     | fixture correction，不能描述成產品 ownership 缺陷；原 R1–R9/session/payment/terminal/score/200char/contact controls 保留。 |
 | `pax-receipt_e04_fields_and_passenger_download` / F-E04              | 原 E04 downstream source 與十三欄定稿保留。                                                                                                                                                                                           | 仍無 lawful upstream issuer/surname/masked credentials/actual four fare components/captured payment method/total convention；不製造 default facts。                                                 | 原 actual producer FAIL2 evidence 保留；最終會重跑 actual probe。                                                                                                                                                                                                                                                               | 不完整，不 handoff；PG／HTTP／browser／issuer witness pending。                                                            |
 | `pax-complaint_intake_and_low_rating` / F-LOW-RATING / F-OPS-REPLICA | 前輪 actual transaction/intake/Ops read 與完整 negatives 保留。                                                                                                                                                                       | 本輪補 Booking fixture，不取代 actual rating transaction／intake tests。                                                                                                                            | 最終 affected regression 待跑並讀結果。                                                                                                                                                                                                                                                                                         | PG concurrency／cross-replica HTTP/Ops acceptance pending；未記 acceptance。                                               |
+
+## 2026-10-14 原 owner 續作：immutable completion facts → receipt consumer
+
+本節更新當前 source disposition；上文所有歷史 finding、失敗／skip、十個 immutable
+原 own commit 及原兩項 acceptance 都保留。實際 Supervisor 凍結續作規格：
+`/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261014T0238-root/receipt-continuation/PAX-RECEIPT-COMPLAINT-PRODUCER-CONSUMER-CONTINUATION-20261014.md`，
+SHA256 `8544169b25911104cefa2763000afbaf8dd90f7e6c5d4ac158f576619e780b54`。
+六個 Driver dependency 已 DONE；本輪沿原 Codex2/Codex、原 branch／PR #2556
+續作，不以舊 helper 作 resume authority。
+
+### Source 與 publication provenance
+
+- 原 published `a81b1842a09fabdb6caffc160cf4edcc564604a2`、accepted dev
+  `db212a3d6e6a0eced76fe2cebb0c05a46b8511c1` 正常 merge 成
+  `324c9ac2e930d4b24ab58ef50280bb4bb3e90117`，兩個 parent 與原十個 own commits 全保留。
+  五個衝突均在 scoped complaint／event／Booking／passenger module；保留 accepted
+  Payment 接線、Settlement Ops refresh，以及原 Receipt rating/intake/download 接線。
+- 原正常 Husky/lint-staged 在 merge 時格式化八個 imported accepted 檔。
+  Supervisor 已逐檔核對 formatter canonical equality，並透過凍結 R1 精確授權保留
+  db212→324c9ac 的既有差異，未授權再改功能／workflow／policy：
+  `/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261014T0238-root/receipt-continuation/PAX-RECEIPT-CONTINUATION-R1-INHERITED-FORMATTING-20261014.md`，
+  SHA256 `b121b3f293521476e6ba5cd0ba6fe5c7a0b1c5e4c2fe69438bff6aa77d4443be`。
+  `merge-formatting/formatter-equivalence.json` 是格式等價證據，非 functional acceptance。
+  八個 blob 在後續 own checkpoints 完全未改；未修改 hook/checker 或設定 bypass。
+- Merge 的 ComplaintRepository 自動合併留下重複 PoolClient import，pristine
+  324c9ac 新回歸因此 parse FAIL1/0 tests；`e2364ca3650d04a93962801e7a19a55cf57c4426`
+  只消除該重複 import。這不是成功的 producer defect reproduction。
+- Product consumer 修復版本：`98fac49f55183ef76b98fa4ea5ec136fefd25af8`。
+  Test/probe 更新版本：`eb4ca1195618a6dc478fe0c87bfa062072a2549c`。
+  後續 closeout 只記本頁證據，candidate 以正常 handoff 的完整 SHA／PR head 為準。
+
+### Actual production mapping 與界線
+
+`OwnedMobilityService.buildMultiTaxiCertificateEvent` 已輸出 flat
+`actualFareBreakdown`、`driverSurname`、`driverSurnameSource`、
+`driverSurnameProfileUpdatedAt`；`driverSurnameSnapshot` 是 producer local variable，
+不是 event property。本輪不改已接受 Driver command／完成驗證／profile／outbox
+或 Payment amount policy。Event type 正常 composition 同時保留既有完整 optional E04
+與 accepted flat capture fields。
+
+`CertificateSupportService.writeCompletedTrip` 與 `toView` 現在複製並投影已捕捉的四個
+actual components 及完整 self-declaration provenance。它們獨立於完整 `e04Snapshot`：
+缺外部資料的正常完成事件仍可保存；未傳入 partial E04 去觸發
+`CERTIFICATE_E04_SNAPSHOT_INVALID`。新舊 view 不共用可變 breakdown object，零值保留，
+不轉換估價、猜姓氏、讀 current profile、發明日期／issuer／credential／付款，
+也不以 component sum 推定 aggregate/toll convention。Declaration 原字串及 whole-profile
+revision 原字串保留；這不是 legal identity verification。
+
+真實儲存表為 `reporting.multi_taxi_electronic_receipts`，不是 billing schema。
+已逐欄核對 V0056 的 record JSONB 與 V0062 的 current/version/unique constraints。
+既有 `CertificateSupportRepository.persistInitial` 將完整 record 序列化至 `$7::jsonb`；
+`regenerate` 複製 sourceRecord 到 `$12::jsonb` 並只更新 version/artifact/regeneration
+metadata。因此無需 SQL column／migration 或 repository source 修改。
+測試直接呼叫這兩個正式 repository，SQL 回應 fixtures 不代表 PG 實測。
+
+既有 renderer 在有 flat capture 時顯示四個 actual fare components 與
+「駕駛自填姓氏（非身分核驗）」、來源、whole-profile revision。完整 E04 的 issuer／mask／
+payment 路徑保留。Legacy 沒有 flat facts 時保持缺失，不從 E04 回填 provenance。
+原 aggregate/toll 顯示及合計慣例不改。正式 account/token artifact adapters 仍共用
+`getPassengerView/getPassengerArtifact`，缺完整 E04 時拒絕；平台舊 artifacts 保持相容。
+
+### 本輪 finding／原 acceptance 對照
+
+機器 evidence 在 assigned WT 的
+`.local/pax-receipt-complaint-20261009/continuation-20261014/`；所有命令在 assigned cwd，
+Node v22.23.2、pnpm 10.33.0、TypeScript 5.9.3、Vitest 4.1.4。
+外部 clock、registry、完成／profile／full-E04 capture 及 SQL 回應為 unit fixtures；
+producer projection/fare validator、writer、正式 repository、view、HTML/PDF、account/token
+controller/ownership/rating/intake/Ops business logic 均使用正式實作。
+未寫入真實 PG／外部 issuer／PSP，也未發佈任何 simulated artifact 為真實證明。
+
+| Finding／驗收項                                      | 原始碼與修復位置                                                                                                            | 舊版 → 修正版結果                                                                                                                                        | 完成命令／退出碼／evidence                                                                                                                                                                                                                   | 未驗與限制                                                                                                                                                                             |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F-E04 captured facts consumer                        | 正式 producer → CertificateSupportService writer/toView → JSONB/current MultiTaxi read → renderer/account-token artifact    | e2364ca 舊 consumer 3 FAIL /23 PASS；修復後同三項通過，26/26 PASS。後加 legacy/zero/real-regeneration regression 最終29/29 PASS。                        | `pnpm exec vitest run tests/unit/pax-receipt-complaint-20261009/receipt-download.test.ts`：old `producer-consumer-old-functional.log` FAIL1；new `producer-consumer-new.log` PASS0。Final receipt suite 在 `affected-root-final.log` PASS0。 | Registry/SQL/immutable input 邊界為 fixtures；不是 completion HTTP/PG/legal issuer acceptance。                                                                                        |
+| `pax-receipt_e04_fields_and_passenger_download`      | 真實 producer/writer/renderer probe 保存 actual four components、自填姓氏及來源／revision；原完整 passenger readiness guard | 四個 actual components 已保存／顯示，service phone 正確；真實完整 E04 仍 `PASSENGER_E04_NOT_READY`，probe **FAIL2 E04_REQUIREMENTS_UNMET**。             | `node tests/unit/pax-receipt-complaint-20261009/e04-source-probe.mjs` → `e04-source-gap-current.log` FAIL2。Probe 的 prototype receiver 改為保留真實 helper；缺少 full issuer/mask/payment/total labels 逐項保留。                           | Lawful issuer/operator mapping、masked credential capture、settled PSP/payment display／total convention 仍缺。此 key **UNRECORDED**；PG/HTTP/browser/provider/legal/manual 尚未接受。 |
+| F-LOW-RATING / `pax-complaint_intake_and_low_rating` | 原 Booking→MultiTaxi rating PoolClient→CRM/intake/consent 與 Ops production 路徑保留                                        | 原客訴／rating unit 78/78 PASS；完成現行 Payment guard 所需同一帳號 fixture，未 mock 掉 guard 或修改 Payment source。                                    | `complaint-rating-composed.log` PASS0/78；完整 `affected-root-final.log` PASS0/296/13 files。原 opt-in/off/highscore/immutable payload/foreign/window/payment/failure/retry/lost ack cases 保留。                                            | SQL fixtures 不是 PG atomicity/concurrency 或 cross-replica Ops HTTP；此 key **UNRECORDED**。                                                                                          |
+| F-CURRENT-RECEIPT                                    | 原 findElectronicReceipt current/version selection；正式 regenerate sourceRecord preservation                               | Current/unavailable/no-current/history 正負案例均保留；新增 actual regenerate→current read 保存 immutable facts／revision，仍不可發乘客 incomplete E04。 | 同 final receipt/root regression PASS0；repository 的 storage/transaction 結果是 fixtures。                                                                                                                                                  | 真實 PG constraint/lock/restart 與 hosted artifact HTTP pending。                                                                                                                      |
+| F-AUDIT-ACTOR / F-OPS-REPLICA                        | 原 truthful actor mapper、durable passenger-source Ops read，加上 accepted settlement refresh                               | 原 audit projection 與 intake/rating/Ops 回歸 PASS；沒有 identity 偽造或 source cache-only shadow module。                                               | Root13 files PASS0；API9 files PASS0/112（`affected-api-regression.log`）。                                                                                                                                                                  | PG/replica/browser/regulator witness 不以 unit PASS 取代。                                                                                                                             |
+| 原 upstream 與 publication provenance                | 原十個 own commits、新 merge 與新 own exact trailers；官方 checker 無修改                                                   | Actual `origin/dev..HEAD` trailer PASS0；完整 raw62→HEAD **FAIL1**，兩個 upstream `[ReviewBus]` subjects 原封保留。                                      | `current-ci-range-trailers.log` PASS0；`raw62-range-trailers.log` FAIL1：1fba7476925b、942a702c6e49。`history-scope.json` 驗十個 ancestor、全部 own literal roles、41 scoped netdiff paths、八個 inherited blobs 未變。                      | Raw FAIL 不改稱 PASS，不 attributed to Codex2、不 bypass/history rewrite。Final source 還需 exact Codex review／same-SHA hosted full CI／protected merge。                             |
+
+### 完成 checks 與保留 failures
+
+- API build（含 contracts/control-plane-auth prebuild）：`api-build-initial.log` PASS0。
+  新 product source 在98fac49完成，後续eb4ca只更新 test/probe。
+- Final `pnpm typecheck:root`：`root-typecheck-final.log` PASS0。
+  前次 `root-typecheck.log` FAIL2 來自正在修正的新增 regeneration fixture assertion
+  將 unknown record 傳入 toMatchObject；已改成只比較四個 immutable fact values，未 cast
+  或修改 production identity/PG logic。
+- Final root affected argv：`pnpm exec vitest run tests/unit/pax-receipt-complaint-20261009 tests/unit/pax-booking-history-20261009 tests/unit/complaint.test.ts tests/unit/system-remediation/sr-qa-call-001/c045-complaint-lifecycle-sla.test.ts tests/unit/system-remediation/sr-qa-reports-001/c098-electronic-ride-certificate.test.ts`；PASS0，296 cases /13 files。API argv 沿原九項 affected suites，PASS0/112/9 files。
+- 初始 root296前版 (`affected-root-initial.log`) FAIL1：78個 fixture 在 booking 新 Payment
+  account lock lookup 未提供同一 drtsPassengerId，215 PASS；修正 own Receipt fixture 的
+  account/snapshot ID，未改既有 Payment-owned fixture 文件或 source／政策。
+- `producer-consumer-old.log` parse FAIL1/0 tests、`producer-consumer-old-reproduction.log`
+  booking prerequisite FAIL1/26 cases，均不作舊 consumer 缺陷重現。有效 old-fail 是修正前提後
+  的 `producer-consumer-old-functional.log`，3 FAIL/23 PASS。
+- `producer-consumer-regeneration.log` 初次 FAIL1/1 failed+28 passed，原因是 fixture 錯把
+  正常新 version/generatedAt/URLs metadata 當不可變；修正比對範圍後 final PASS。這不是
+  repository regeneration 故障；首次 log 保留。
+- Scoped ESLint `--max-warnings=0` (`scoped-lint.log`)、canonical consistency
+  (`canonical-consistency.log`)、repo classification (`classification.log`) PASS0。
+  Whitespace、final own message/scope/remote/PR identity checks 於 final publication receipt 記錄。
+- 無 VM product server、PG、browser、Docker、deploy/cloud/secret/cleanup；未呼叫 done、
+  self approve 或 record-acceptance。此前 checkpoint CI cancelled/skip/FAIL/PASS 按原 SHA
+  留存，draft skips 不是 final candidate full CI。
+
+本輪可以正常固定 source candidate 交獨立 Codex；缺真實外部 facts 不阻止已授權
+source 實作交審。Source/review/CI/merge 與真實 E04、CRM/PG/HTTP/browser/PSP/native/manual、
+full-system DONE 仍分開；原兩項 key 在 genuine evidence 前維持 **UNRECORDED**。
