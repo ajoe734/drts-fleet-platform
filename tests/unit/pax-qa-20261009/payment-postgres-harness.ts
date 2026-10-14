@@ -13,6 +13,7 @@ import type { PoolClient } from "pg";
 import type {
   DriverTaskRecord,
   PassengerDispatchDisclosureSnapshot,
+  PassengerRideAccessToken,
 } from "@drts/contracts";
 import { DatabaseService } from "../../../apps/api/src/common/db/database.service";
 import { PassengerJwtService } from "../../../apps/api/src/common/auth/passenger-jwt.service";
@@ -869,6 +870,7 @@ export class PaymentPostgresHarness {
       undefined,
       undefined,
       certificates,
+      complaints,
     );
     const booking = new PassengerBookingService(
       new PassengerBookingRepository(this.database),
@@ -887,6 +889,40 @@ export class PaymentPostgresHarness {
       certificates,
       passengerComplaints: new PassengerComplaintService(booking, complaints),
     };
+  }
+
+  /** Harmless grant fixture persisted by the actual token repository. Its
+   * digest, scope, expiry, subject and transaction checks remain production. */
+  async receiptToken(orderId: string, legacySubject?: string) {
+    const order = (await this.owned.loadState()).orders.find(
+      (row) => row.orderId === orderId,
+    );
+    if (!order) throw new Error("Token fixture requires an owned order.");
+    if (legacySubject) {
+      order.passenger.passengerId = legacySubject;
+      await this.owned.persistChanges({ orders: [order] });
+    }
+    const subject = order.passenger.passengerId;
+    if (!subject)
+      throw new Error("Token fixture requires a passenger subject.");
+    const raw = `qa-ride-token-${randomUUID()}`;
+    const record: PassengerRideAccessToken = {
+      tokenId: randomUUID(),
+      orderId,
+      passengerSubjectRef: subject,
+      scopes: ["ride:read", "ride:rate", "receipt:read"],
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+      revokedAt: null,
+    };
+    await this.taxi.persistRideAccessToken(
+      record,
+      createHash("sha256")
+        .update(
+          `${process.env.PASSENGER_RIDE_TOKEN_PEPPER?.trim() ?? ""}\0${raw}`,
+        )
+        .digest("hex"),
+    );
+    return { raw, record };
   }
 
   async fareServices() {
@@ -1232,6 +1268,10 @@ export class PaymentPostgresHarness {
       ],
       consents: [
         "SELECT * FROM passenger.rating_consents WHERE order_id=$1",
+        [orderId],
+      ],
+      rideConsents: [
+        "SELECT * FROM ops.passenger_ride_rating_consents WHERE order_id=$1",
         [orderId],
       ],
       intakes: [

@@ -350,6 +350,242 @@ describe.skipIf(!hostedPaymentEnabled)(
       },
     );
 
+    it("legacy ride token opt-in persists canonical CRM without inventing an account and survives peer Ops/retry", async () => {
+      const owner = await h.account();
+      const event = await h.receiptTrip(owner);
+      const grant = await h.receiptToken(
+        event.orderId,
+        "qa-legacy-token-subject",
+      );
+      const services = await h.receiptServices();
+      const peer = await h.receiptServices();
+      const body = {
+        score: 2 as const,
+        contactRequested: true,
+        tags: ["comfort"],
+        comment: "QA token contact",
+      };
+      const rating = await services.multi.submitPassengerRating(
+        grant.raw,
+        body,
+      );
+      const before = await h.receiptState(event.orderId);
+      expect(before.ratings).toHaveLength(1);
+      expect(before.rideConsents).toHaveLength(1);
+      expect(before.rideConsents[0]).toMatchObject({
+        original_token_id: grant.record.tokenId,
+        passenger_subject_ref: "qa-legacy-token-subject",
+        rating_id: rating.ratingId,
+        rating_score: 2,
+        contact_requested: true,
+        source: "passenger_ride_token",
+      });
+      expect(before.rideConsents[0]!.request_hash).toMatch(/^[a-f0-9]{64}$/);
+      expect(before.consents).toHaveLength(0);
+      expect(before.intakes).toHaveLength(0);
+      expect(before.cases).toHaveLength(1);
+      expect(before.timelines).toHaveLength(1);
+      expect(
+        (
+          await h.pool!.query(
+            "SELECT drts_passenger_id FROM passenger.accounts",
+          )
+        ).rows,
+      ).toEqual([{ drts_passenger_id: owner }]);
+      expect(await peer.multi.submitPassengerRating(grant.raw, body)).toEqual(
+        rating,
+      );
+      await expect(
+        peer.multi.submitPassengerRating(grant.raw, {
+          ...body,
+          contactRequested: false,
+        }),
+      ).rejects.toMatchObject({ code: "PASSENGER_RATING_ALREADY_SUBMITTED" });
+      const after = await h.receiptState(event.orderId);
+      for (const name of [
+        "ratings",
+        "rideConsents",
+        "cases",
+        "timelines",
+      ] as const)
+        expect(after[name]).toEqual(before[name]);
+      const caseNo = before.rideConsents[0]!.complaint_case_no;
+      for (const ops of [
+        peer.complaints,
+        (await h.receiptServices()).complaints,
+      ]) {
+        expect(await ops.getComplaintCaseForOps(caseNo)).toEqual(
+          before.cases[0]!.record,
+        );
+        expect(await ops.getComplaintTimelineForOps(caseNo)).toHaveLength(1);
+      }
+    });
+
+    it.each([
+      { score: 2 as const, contactRequested: false },
+      { score: 5 as const, contactRequested: true },
+      { score: 2 as const },
+    ])(
+      "token choice %j is durable without a canonical complaint",
+      async (body) => {
+        const f = await fixture();
+        const grant = await h.receiptToken(f.event.orderId);
+        const rating = await f.multi.submitPassengerRating(grant.raw, body);
+        expect(
+          await (
+            await h.receiptServices()
+          ).multi.submitPassengerRating(grant.raw, body),
+        ).toEqual(rating);
+        const state = await h.receiptState(f.event.orderId);
+        expect(state.rideConsents).toHaveLength(1);
+        expect(state.rideConsents[0]).toMatchObject({
+          contact_requested: body.contactRequested ?? false,
+          complaint_case_no: null,
+        });
+        expect(state.ratings).toHaveLength(1);
+        expect(state.summaries[0]!.rating_count).toBe(1);
+        for (const name of [
+          "consents",
+          "intakes",
+          "cases",
+          "timelines",
+        ] as const)
+          expect(state[name]).toHaveLength(0);
+      },
+    );
+
+    it.each([
+      "ops.passenger_trip_ratings",
+      "crm.phase1_complaint_cases",
+      "crm.phase1_complaint_timelines",
+      "ops.passenger_ride_rating_consents",
+      "ops.driver_rating_summaries",
+    ])(
+      "token native failure on %s rolls back rating, choice, CRM and summary together",
+      async (table) => {
+        const f = await fixture();
+        const grant = await h.receiptToken(f.event.orderId);
+        await h.pool!.query(
+          `ALTER TABLE ${table} ADD CONSTRAINT qa_token_write_failure CHECK(false) NOT VALID`,
+        );
+        const body = { score: 1 as const, contactRequested: true };
+        await expect(
+          f.multi.submitPassengerRating(grant.raw, body),
+        ).rejects.toMatchObject({
+          code: "23514",
+          constraint: "qa_token_write_failure",
+        });
+        for (const rows of Object.values(await h.receiptState(f.event.orderId)))
+          expect(rows).toHaveLength(0);
+        await h.pool!.query(
+          `ALTER TABLE ${table} DROP CONSTRAINT qa_token_write_failure`,
+        );
+        await f.multi.submitPassengerRating(grant.raw, body);
+        const state = await h.receiptState(f.event.orderId);
+        for (const name of [
+          "ratings",
+          "rideConsents",
+          "cases",
+          "timelines",
+          "summaries",
+        ] as const)
+          expect(state[name]).toHaveLength(1);
+      },
+    );
+
+    it("two real token mutation clients contend on the same lock and retain one immutable choice/case", async () => {
+      const f = await fixture();
+      const grant = await h.receiptToken(f.event.orderId);
+      const peer = await h.receiptServices();
+      const { result, sessions, contention, mutations } =
+        await h.concurrentMutations(
+          () =>
+            Promise.all(
+              [f.multi, peer.multi].map((service) =>
+                service.submitPassengerRating(grant.raw, {
+                  score: 2,
+                  contactRequested: true,
+                }),
+              ),
+            ),
+          true,
+        );
+      expect(result[0]).toEqual(result[1]);
+      expect(new Set(sessions).size).toBe(2);
+      expect(contention).toHaveLength(1);
+      expect(new Set(mutations.map((row) => row.pid)).size).toBe(2);
+      expect(mutations.every((row) => sessions.includes(row.pid))).toBe(true);
+      const state = await h.receiptState(f.event.orderId);
+      for (const name of [
+        "ratings",
+        "rideConsents",
+        "cases",
+        "timelines",
+        "summaries",
+      ] as const)
+        expect(state[name]).toHaveLength(1);
+      expect(state.summaries[0]!.rating_count).toBe(1);
+    });
+
+    it.each([
+      "revoked",
+      "expired",
+      "scope",
+      "subject",
+      "unpaid",
+      "window",
+    ] as const)(
+      "token %s authority cannot leave partial rating or consent",
+      async (reason) => {
+        const f = await fixture(reason !== "unpaid");
+        const grant = await h.receiptToken(f.event.orderId);
+        if (reason === "revoked")
+          await h.pool!.query(
+            "UPDATE ops.passenger_ride_access_tokens SET revoked_at=now() WHERE token_id=$1",
+            [grant.record.tokenId],
+          );
+        if (reason === "expired")
+          await h.pool!.query(
+            "UPDATE ops.passenger_ride_access_tokens SET expires_at=now()-interval '1 minute' WHERE token_id=$1",
+            [grant.record.tokenId],
+          );
+        if (reason === "scope")
+          await h.pool!.query(
+            "UPDATE ops.passenger_ride_access_tokens SET scopes='[\"ride:read\"]'::jsonb WHERE token_id=$1",
+            [grant.record.tokenId],
+          );
+        if (reason === "subject")
+          await h.pool!.query(
+            "UPDATE ops.phase1_owned_orders SET record=jsonb_set(record,'{passenger,passengerId}','\"other-subject\"'::jsonb) WHERE order_id=$1",
+            [f.event.orderId],
+          );
+        if (reason === "window")
+          await h.pool!.query(
+            "UPDATE ops.phase1_driver_tasks SET record=jsonb_set(record,'{completedAt}',to_jsonb((now()-interval '49 hours')::text)) WHERE record->>'orderId'=$1",
+            [f.event.orderId],
+          );
+        await expect(
+          f.multi.submitPassengerRating(grant.raw, {
+            score: 1,
+            contactRequested: true,
+          }),
+        ).rejects.toMatchObject({
+          code:
+            reason === "scope"
+              ? "PASSENGER_RIDE_SCOPE_FORBIDDEN"
+              : reason === "subject"
+                ? "PASSENGER_RIDE_NOT_FOUND"
+                : reason === "unpaid"
+                  ? "PASSENGER_RATING_PAYMENT_REQUIRED"
+                  : reason === "window"
+                    ? "PASSENGER_RATING_WINDOW_CLOSED"
+                    : "PASSENGER_RIDE_TOKEN_INVALID",
+        });
+        for (const rows of Object.values(await h.receiptState(f.event.orderId)))
+          expect(rows).toHaveLength(0);
+      },
+    );
+
     it("unpaid and expired completion reject ratings without storing any partial data", async () => {
       const f = await fixture(false);
       const before = await h.receiptState(f.event.orderId);
