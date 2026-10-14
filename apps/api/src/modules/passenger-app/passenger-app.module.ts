@@ -28,6 +28,7 @@ import { FacebookDataDeletionService } from "./oauth/facebook-data-deletion.serv
 import { PassengerBookingController } from "./booking/passenger-booking.controller";
 import { PassengerBookingService } from "./booking/passenger-booking.service";
 import { PassengerBookingRepository } from "./booking/passenger-booking.repository";
+import { PassengerRideEventsGuard } from "./booking/passenger-ride-events.guard";
 import { PassengerBookingSettingsController } from "./booking/passenger-booking-settings.controller";
 import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
 import { ComplaintModule } from "../complaint/complaint.module";
@@ -92,6 +93,7 @@ import {
     PassengerOtpService,
     PassengerBookingRepository,
     PassengerBookingService,
+    PassengerRideEventsGuard,
     PassengerComplaintService,
     PaymentMethodRepository,
     PaymentMethodService,

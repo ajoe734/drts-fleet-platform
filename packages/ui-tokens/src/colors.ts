@@ -201,3 +201,53 @@ export const STATUS_TONE_NAMES = [
   "danger",
   "neutral",
 ] as const satisfies readonly StatusToneName[];
+
+/**
+ * Exact P-5 passenger mobile web palette primitives derived verbatim from
+ * canonical design primary (docs/05-ui/drts-design-canvas/p5-ui.jsx).
+ */
+export const PASSENGER_P5_COLORS = {
+  bg: "#F3F5F8",
+  surface: "#FFFFFF",
+  ink: "#16212C",
+  mut: "#5A6A7B",
+  dim: "#93A0AE",
+  line: "#E3E8EE",
+  lineSoft: "#EDF1F5",
+  brand: "#0B5CAB",
+  brandDark: "#07437E",
+  brandBg: "#EAF2FB",
+  ok: "#1B7F4D",
+  okBg: "#E9F5EF",
+  okBd: "#BFE3D0",
+  warn: "#A86407",
+  warnBg: "#FBF2DF",
+  warnBd: "#EAD3A4",
+  danger: "#C03A2E",
+  dangerBg: "#FBECEA",
+  dangerBd: "#EFC8C2",
+  mono: '"JetBrains Mono",ui-monospace,monospace',
+} as const;
+
+export const PASSENGER_P5_STATUS_TONES = {
+  success: {
+    fg: PASSENGER_P5_COLORS.ok,
+    bg: PASSENGER_P5_COLORS.okBg,
+    border: PASSENGER_P5_COLORS.okBd,
+  },
+  warning: {
+    fg: PASSENGER_P5_COLORS.warn,
+    bg: PASSENGER_P5_COLORS.warnBg,
+    border: PASSENGER_P5_COLORS.warnBd,
+  },
+  danger: {
+    fg: PASSENGER_P5_COLORS.danger,
+    bg: PASSENGER_P5_COLORS.dangerBg,
+    border: PASSENGER_P5_COLORS.dangerBd,
+  },
+  neutral: {
+    fg: PASSENGER_P5_COLORS.mut,
+    bg: PASSENGER_P5_COLORS.bg,
+    border: PASSENGER_P5_COLORS.line,
+  },
+} as const;
