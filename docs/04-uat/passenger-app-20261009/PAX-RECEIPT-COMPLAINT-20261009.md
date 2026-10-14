@@ -867,3 +867,57 @@ private-property 型別交集衝突；沒有本輪修改檔的 diagnostic。沒�
 本機 checks 完成並讀結果後才 handoff。原角色 Codex2 owner／Codex reviewer 不變，
 新 substantive SHA/gen 須獨立 review、automatic same-head CI 與 protected merge。
 未啟動 VM product/PG/API/browser/preview/Docker、未部署、未呼叫 acceptance/done。
+
+### R6：F-R6-INVALIDATION-SUMMARY-PARAMETER（2026-10-14）
+
+原 Codex 的 R6 唯讀退修針對已交付的
+`d0cf16b50120f3ddf87ba9ec943963b1b6dccf0b`／generation
+`80b18ecb29b848c2ad4e0a54b0140913`，先前 merge
+`0a03db0250551d1732d82ff3a57abb2efb0691ce` 的 review／CI／修復紀錄保留。
+本輪讀完整最新退修、註冊的
+`PAX-RECEIPT-R6-EXISTING-RATING-INVALIDATION-QUERY-20261014.md`
+（SHA256 `cdba22cc8394ae3e7e445360ac8acbab8a711f2fd869d5caa42b4238c3fb1a54`）
+及 source followup（SHA256
+`e2cbb676574c5b400114dfdf82f7abee27951f0b86fbbb31f1db232a6b6d9bbd`），
+繼續同一原 task／owner／reviewer／branch，不改既有 findings 或兩個驗收 keys。
+
+正式入口是 `MultiTaxiController` 的
+`POST platform-admin/multi-taxi-ratings/:ratingId/invalidate` →
+`MultiTaxiService.invalidatePassengerRating` →
+`MultiTaxiRepository.invalidatePassengerRating`。controller 的 platform realm、
+`multi_taxi_ratings:moderate`、verified actor 與 request ID，service 的 reason／
+resource-bound confirmation／idempotency conflict 保留。正式 V0056 第65／78行
+兩個 driver_id 均為 `varchar(255)`；repository 使用原
+`client.query(text, [ratingRow.driver_id, input.invalidatedAt])`。
+
+產品修改**只有第二段 summary SQL 的 SELECT 與 WHERE 兩處 `$1::varchar`**，
+無 typmod／截短。逐 byte 核對其餘 repository 完全相同，包括 R5 第一段修復、
+aggregates／active filter／version／time、transaction／rollback、moderation audit、
+replay、consent／CRM。沒有 migration／schema／契約／auth／workflow／provider 變更。
+source anchor `63b85caf665038d4b2c09620b25c3742cca3a4aa` 已普通 non-force push；
+final candidate 只再增加本節證據，publication receipt 綁定 final SHA／remote／PR。
+
+本輪 machine evidence 保存在 canonical root 的
+`.local/pax-receipt-complaint-20261009/r6-20261014T075651-owner/`，
+不依賴 worker worktree 生命週期。`sql-source-binding.json` 與
+`invalidation-summary-before.sql/after.sql` 核對舊 SQL SHA256
+`81be2b94292fe4d2b92fd8e1d4c074fa22cf5ba98cedb03bcd9074a3c9152a47` → 新
+`22f3303f11555fa637adb9cd80ea41d0f5072aa78b3ec84d859d244c98a41340`；
+移除兩處 casts 即回到舊 query，R5 第一段 query bytes 保留。
+
+| Finding／驗收項                                                                 | 原始碼依據與修改位置                                                                                      | 舊版重現 → 修正版結果                                                                                                                                                                                                   | 命令、退出碼、版本與證據位置                                                                                                                                                                                                 | 未驗項與具體限制                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F-R6-INVALIDATION-SUMMARY-PARAMETER                                             | 上述正式 Controller → Service → Repository；V0056 型別；第二段 summary 兩處 casts                         | 舊 invalidation source query 與真正曾失敗的舊 persist query byte-identical；新版靜態型別一致、其餘 bytes 不變。**未新執行 invalidation 舊／新 PG，不記 runtime FAIL／PASS**                                             | `source_binding.py` exit0／`sql-source-binding.json`；`gh run view 38515068055 --job 115692063945 --log` exit0，`old-native-qa-log-read.json/.log`／`old-native-error-binding.json` 重新確認同 hash 的14次42P08、position283 | VM 禁止 PG/API/product runtime；原 PAX-QA hosted Receipt suite 仍須真實正式 schema＋production method/service 的 old/fixed invalidation probe                                                                                                                                                              |
+| 原 invalidation／moderation confirmation／context／replay／rollback 回歸        | 原 repository、service、controller 三份 unit tests；不新增鏡像 SQL assertion                              | 新 source 43 PASS／3 files，exit0，無 skip；包含 active invalidation、new_driver summary mapping、audit、exact replay／no rebuild、reason／confirmation／changed-key／changed-payload 拒絕與 aggregate failure rollback | `api-invalidation-regression.json/.log` 保存完整 `pnpm --dir apps/api exec vitest run ... --maxWorkers=1 --no-file-parallelism` argv；Vitest4.1.4，8.09s                                                                     | query responses 為 fixtures；service invalidation positive 是原 in-memory authority。不能據此宣稱 PG inference、durable rated/new_driver／version／audit 或 HTTP 通過                                                                                                                                      |
+| 前輪 token/contact/account/CRM/intake/Booking/receipt findings 的受影響整體回歸 | 原 own root suites及另外六份 API authority/read/export/complaint/certificate suites；R5 首 query fix 保留 | root325 PASS／11 files；另外API69 PASS／6 files，合計不重複112 PASS／9 files，全部exit0／0skip；ESLint PASS0                                                                                                            | `root-regression.json/.log`：原 root兩目錄 argv、29.79s；`api-remaining-regression.json/.log`：完整六檔 argv、16.92s；`source-lint.json/.log`；Node22.23.2／pnpm10.33.0／Vitest4.1.4／TS5.9.3                                | SQL/account/completion/assignment responses 為 unit fixtures。既有 rollback warnings 是預期 fault injection；不把它們或歷史 hosted140 credit 移給新 invalidation                                                                                                                                           |
+| Source compiler／交付 checks                                                    | 正式 API prebuild＋build；原 root compiler/config／links                                                  | API build PASS0；root compiler 環境 FAIL2，無本輪 source diagnostic；repo classification PASS0                                                                                                                          | `api-build.json/.log`：`pnpm --dir apps/api build` exit0；`root-typecheck.json/.log`；`classification.json/.log`。兩檔 formatter、diff、trailers、publication 結果保存在本目錄                                               | root compiler 保留 R5 已記錄的 absent @drts/passenger-client／foreign QA ApiClient private-property 型別衝突。未改 shared dependency links／compiler/config；本 worktree 缺 ignored `.husky/_`，closeout 前僅複製原 canonical Husky runtime shims，source anchor trailers 另以正式 checker 核對；無 bypass |
+| pax-complaint_intake_and_low_rating                                             | 原 R3/R4/V0119、historical-token-tag／account／CRM findings 與本輪第二 query 修复                         | Source回歸 PASS；required key **UNRECORDED**                                                                                                                                                                            | 上述 completed source checks；新 immutable candidate／generation 與 same-head CI／review／merge 由原 lifecycle 綁定                                                                                                          | 原 hosted invalidation 須斷言 durable rating＋remaining-active rated/new_driver summary＋version＋moderation audit；exact replay 不再 mutation/version/audit，原 conflict／confirmation／rollback negatives 與 account/token consent/CRM 回歸保留；token concurrency／peer Ops及整體 acceptance pending    |
+| pax-receipt_e04_fields_and_passenger_download                                   | 本輪 E04 source 不變，保留所有原 finding／NOT_READY 行為                                                  | 原 receipt29 source回歸包含在root325 PASS；required key **UNRECORDED**                                                                                                                                                  | 同 `root-regression.json/.log`，沒有重跑無關外部 facts probe                                                                                                                                                                 | lawful issuer/operator／masked credential／payment display-total-toll／legal／provider／deployed download／native／manual 原 criteria 全保留；模擬 E04／PSP／OAuth／transport fixtures 不授予外部 acceptance                                                                                               |
+
+原 QA153b 的140 business PG/HTTP PASS＋1 separate callback adapter PASS 是歷史事實，
+Receipt33PG＋17HTTP 沒有呼叫 `invalidatePassengerRating`，不能算本輪操作驗證。
+所有本輪已啟動本機 checks 均結束並讀結果才發布 final source candidate；
+新候選 independent Codex review、same-head mandatory CI、protected merge 與原 QA
+native invalidation pending，不能借 d0 或 QA153b 綠燈。未啟動本 VM
+PG/API/product/browser/preview/Docker、未 workflow dispatch/rerun、未部署或呼叫
+approve／record-acceptance／done。
