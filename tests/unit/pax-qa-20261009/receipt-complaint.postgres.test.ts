@@ -297,30 +297,37 @@ describe.skipIf(!hostedPaymentEnabled)(
     });
 
     it.each(["complaint", "rating"] as const)(
-      "concurrent %s submissions use two actual production mutation sessions and converge",
+      "concurrent %s submissions use two actual production executor sessions and converge",
       async (operation) => {
         const f = await fixture();
         const peer = await h.receiptServices();
-        const { result, mutations } = await h.concurrentMutations(() =>
-          Promise.all(
-            [f, peer].map((service) =>
-              operation === "complaint"
-                ? service.passengerComplaints.create(
-                    f.owner,
-                    f.event.orderId,
-                    f.command,
-                    "qa-concurrent",
-                  )
-                : service.booking.rateRide(f.owner, f.event.orderId, {
-                    rideId: f.event.orderId,
-                    rating: 2,
-                    contactRequested: true,
-                  }),
+        const { result, sessions, mutations } = await h.concurrentMutations(
+          () =>
+            Promise.all(
+              [f, peer].map((service) =>
+                operation === "complaint"
+                  ? service.passengerComplaints.create(
+                      f.owner,
+                      f.event.orderId,
+                      f.command,
+                      "qa-concurrent",
+                    )
+                  : service.booking.rateRide(f.owner, f.event.orderId, {
+                      rideId: f.event.orderId,
+                      rating: 2,
+                      contactRequested: true,
+                    }),
+              ),
             ),
-          ),
         );
         expect(result[0]).toEqual(result[1]);
-        expect(new Set(mutations.map((row) => row.pid)).size).toBe(2);
+        expect(new Set(sessions).size).toBe(2);
+        expect(mutations.every((row) => sessions.includes(row.pid))).toBe(true);
+        // A complaint replay reads the original committed case without writing
+        // again. Ratings use a real ON CONFLICT update on both executor leases.
+        expect(new Set(mutations.map((row) => row.pid)).size).toBe(
+          operation === "rating" ? 2 : 1,
+        );
         const state = await h.receiptState(f.event.orderId);
         for (const name of ["cases", "timelines", "intakes"] as const)
           expect(state[name]).toHaveLength(1);

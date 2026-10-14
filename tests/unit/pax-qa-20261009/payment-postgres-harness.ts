@@ -62,6 +62,7 @@ export class DiagnosedDatabaseService extends DatabaseService {
   probe:
     | {
         begin: () => Promise<void>;
+        sessions: Set<number>;
         mutations: { pid: number; sqlSha256: string }[];
       }
     | undefined;
@@ -107,7 +108,10 @@ export class DiagnosedDatabaseService extends DatabaseService {
           );
           throw error;
         });
-        if (probe && sql.trim() === "BEGIN") await probe.begin();
+        if (probe && sql.trim() === "BEGIN") {
+          probe.sessions.add(pid!);
+          await probe.begin();
+        }
         if (probe && pid !== undefined && /^\s*(INSERT|UPDATE)/i.test(sql)) {
           probe.mutations.push({
             pid,
@@ -667,8 +671,8 @@ export class PaymentPostgresHarness {
     };
   }
 
-  /** Barrier on BEGIN of the actual clients subsequently executing production
-   * mutation SQL. PID observations never use extra unrelated pool clients. */
+  /** Barrier on BEGIN of the actual production submission executors. Mutation
+   * logs distinguish writes from replay; PIDs never use unrelated pool clients. */
   async concurrentMutations<T>(work: () => Promise<T>) {
     const database = this.database as DiagnosedDatabaseService;
     let arrivals = 0;
@@ -683,6 +687,7 @@ export class PaymentPostgresHarness {
       5000,
     );
     database.probe = {
+      sessions: new Set(),
       mutations: [],
       begin: async () => {
         if (++arrivals === 2) release();
@@ -692,10 +697,11 @@ export class PaymentPostgresHarness {
     try {
       const result = await work();
       const mutations = database.probe.mutations;
+      const sessions = [...database.probe.sessions];
       process.stdout.write(
-        `Receipt CRM QA production session provenance ${JSON.stringify({ mutations })}\n`,
+        `Receipt CRM QA production session provenance ${JSON.stringify({ sessions, mutations })}\n`,
       );
-      return { result, mutations };
+      return { result, sessions, mutations };
     } finally {
       clearTimeout(timer);
       database.probe = undefined;
