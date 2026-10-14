@@ -39,7 +39,7 @@
 | **R10 (Commit Trailers & Clean Lineage)** | Git commit history | 舊版重現：包含無效 trailers。<br>修正版：繼承自乾淨 dev baseline，包含合規 trailers。 | `python3 tools/ci/git/check_commit_trailers.py --base db212a3d --head HEAD`<br>Exit 0 | 待 hosted CI 驗證。 |
 | **R13 (Vitest Subpath Aliasing)** | `vitest.config.ts` | 舊版重現：別名順序錯誤導致生產測試失敗。<br>修正版：精確排序 `@drts/ui-web/canvas-tokens` 先於 `@drts/ui-web`。 | `pnpm vitest run tests/unit/system-remediation/sr-partner-notify-ui-20260917/notification-ui-component.test.tsx tests/unit/platform-admin-assistant-tools.test.ts tests/unit/platform-admin-assistant-context-packet.test.ts tests/unit/platform-admin-assistant-route-context.test.ts`<br>Exit 0, 42/42 passed | 無。 |
 | **R14 (Identity State Transition Isolation)** | `apps/passenger-app-web/components/ride/passenger-ride-page.tsx` | 舊版重現：換 rideId 時殘留舊資料。<br>修正版：變更 token/rideId 立即清除舊 fixture (`oldTrip = false`) 並展示錯誤處理。 | Probe: `R14 id change hides previous trip and shows error` (PASS, `oldTrip: false`)<br>Vitest: `passenger-ride.test.tsx` (Exit 0, 4/4) | 無。 |
-| **R15 (Complaint Idempotency & Normalization Contract)** | `packages/passenger-client/src/client.ts`, `apps/passenger-app-web/app/api/passenger-app/[...path]/route.ts`, `apps/passenger-app-web/components/ride/complaint-form.tsx` | 舊版重現：客訴提交缺少冪等性保護與正規化驗證。<br>修正版：<br>1. 客訴表單生成草稿專屬 `Idempotency-Key`，於重送時維持相同 key。<br>2. PassengerClient 與 BFF 完整傳遞 `Idempotency-Key` 標頭至後端。<br>3. 表單送出負載經過生產正規化器 `normalizePassengerComplaintIntake` 驗證，一般投訴與遺失物表單均 0 alerts 通過。 | Probe C: `R15 formal producer positive fixture with explicit key is accepted` (PASS)<br>Probe C: `R15 actual service form satisfies accepted intake contract` (PASS, 0 alerts)<br>Probe C: `R15 actual lost_item form satisfies accepted intake contract` (PASS, 0 alerts) | 本機無 PostgreSQL 儲存庫，驗證客戶端至 BFF 之標頭傳遞與 payload 規格。 |
+| **R15 (Complaint Idempotency & Normalization Contract)** | `packages/passenger-client/src/client.ts`, `apps/passenger-app-web/app/api/passenger-app/[...path]/route.ts`, `apps/passenger-app-web/components/ride/complaint-form.tsx` | 舊版重現：客訴提交缺少冪等性保護與正規化驗證；`c52a183` 因 `packages/passenger-client` 在 `ES2022` 缺 DOM 宣告下直接調用 `crypto` 導致 CI build / typecheck 失敗。<br>修正版：<br>1. 客訴表單生成草稿專屬 `Idempotency-Key`，於重送時維持相同 key。<br>2. PassengerClient 與 BFF 完整傳遞 `Idempotency-Key` 標頭至後端。<br>3. 表單送出負載經過生產正規化器 `normalizePassengerComplaintIntake` 驗證，一般投訴與遺失物表單均 0 alerts 通過。<br>4. Client 透過 `globalThis.crypto?.randomUUID` 安全取用 UUID，通過 package build 及 typecheck。 | Probe C: `R15 formal producer positive fixture with explicit key is accepted` (PASS)<br>Probe C: `R15 actual service form satisfies accepted intake contract` (PASS, 0 alerts)<br>Probe C: `R15 actual lost_item form satisfies accepted intake contract` (PASS, 0 alerts)<br>`pnpm --filter @drts/passenger-client build` (Exit 0)<br>`pnpm --filter @drts/passenger-client typecheck` (Exit 0) | 本機無 PostgreSQL 儲存庫，驗證客戶端至 BFF 之標頭傳遞與 payload 規格。 |
 | **`pax-web-ride_p5_live_page`** | 行程頁面主視覺、狀態切換與 BFF 代理 | P5-01～P5-12 元件、SSE 監聽、報價異常重試與 BFF 轉發全部通過測試。 | Vitest 8 files, 77 tests passed (Exit 0)<br>Readonly Probe 25/26 passed (Exit 0) | **SCOPED PASS (Unit/Probe)**。真實雲端環境部署與 E2E 驗收受限於 VM 限制，留待 hosted CI。 |
 | **`pax-web-ride_rating_receipt_history_complaint`** | 評價、乘車證明、歷史紀錄與客訴 | E-18 評價、E-04 乘車證明 snapshot 欄位消費與下載路徑、歷史紀錄去重、客訴表單規範均完整實作且驗證通過。 | Vitest 8 files, 77 tests passed (Exit 0)<br>Readonly Probe 25/26 passed (Exit 0) | **SCOPED PASS (Unit/Probe)**。R3 之後端 CRM 聯絡產生端點留待後端 PR 合併。 |
 
@@ -99,6 +99,12 @@ Tests       77 passed (77)
 
 # 2. TypeScript 型別檢查
 $ pnpm --filter @drts/passenger-app-web exec tsc --noEmit
+Exit 0 (0 errors)
+
+$ pnpm --filter @drts/passenger-client build
+Exit 0 (0 errors)
+
+$ pnpm --filter @drts/passenger-client typecheck
 Exit 0 (0 errors)
 
 # 3. ESLint 代碼風格檢查

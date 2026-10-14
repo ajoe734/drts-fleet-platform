@@ -353,11 +353,15 @@ export class PassengerClient implements PassengerViewModel {
     command: import("./types.js").CreatePassengerComplaintCommand,
     idempotencyKey?: string,
   ): Promise<import("./types.js").CreatePassengerComplaintResponse> {
+    const cryptoObj =
+      typeof globalThis !== "undefined"
+        ? (globalThis as { crypto?: { randomUUID?: () => string } }).crypto
+        : undefined;
     const key =
       idempotencyKey ||
       (command as any).idempotencyKey ||
-      (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-        ? `complaint-${crypto.randomUUID()}`
+      (typeof cryptoObj?.randomUUID === "function"
+        ? `complaint-${cryptoObj.randomUUID()}`
         : `complaint-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
     return this.request<import("./types.js").CreatePassengerComplaintResponse>(
       `/api/passenger-app/rides/${encodeURIComponent(id)}/complaints`,
