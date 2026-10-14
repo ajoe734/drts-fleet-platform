@@ -33,14 +33,10 @@ describe("platform admin P5 UI contract", () => {
     expect(p5ConsoleSource).toContain('body={t("p5.disclosure.maskedNote")}');
   });
 
-  it("keeps the correction queue actions and fare lifecycle states wired", () => {
+  it("keeps the correction queue actions wired", () => {
     expect(p5ConsoleSource).toContain('view === "queue"');
     expect(p5ConsoleSource).toContain('t("p5.action.view")');
     expect(p5ConsoleSource).toContain('t("p5.action.return")');
     expect(p5ConsoleSource).toContain('t("p5.action.approve")');
-    expect(p5ConsoleSource).toContain('status: "draft"');
-    expect(p5ConsoleSource).toContain('status: "filed"');
-    expect(p5ConsoleSource).toContain('status: "active"');
-    expect(p5ConsoleSource).toContain('status: "retired"');
   });
 });

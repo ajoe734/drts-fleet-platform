@@ -103,6 +103,10 @@ export class DriverProfileService implements OnModuleInit {
 
   private readonly profiles = new Map<string, DriverProfileRecord>();
 
+  // Whole-record writes share one local order per driver, including inherited
+  // device writers. Rejected saves must not poison later attempts.
+  private readonly profileWrites = new Map<string, Promise<void>>();
+
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional() private readonly repository?: DriverProfileRepository,
@@ -152,145 +156,152 @@ export class DriverProfileService implements OnModuleInit {
     return this.profileExists(driverId) ? driverId : null;
   }
 
-  createProfile(
+  async createProfile(
     actorId: string | null | undefined,
     command: CreateDriverProfileCommand,
     requestId?: string,
   ) {
     const driverId = this.resolveDriverId(actorId);
-    if (this.profileExists(driverId)) {
-      throw new ApiRequestError(
-        409,
-        "DRIVER_PROFILE_EXISTS",
-        "Driver profile already exists for this driver.",
-        { driverId },
+    return this.enqueueProfileWrite(driverId, async () => {
+      if (this.profileExists(driverId)) {
+        throw new ApiRequestError(
+          409,
+          "DRIVER_PROFILE_EXISTS",
+          "Driver profile already exists for this driver.",
+          { driverId },
+        );
+      }
+
+      const base = this.resolveBaseProfile(driverId);
+      const created: DriverProfileRecord = {
+        ...base,
+        name: this.normalizeRequiredText("name", command.name),
+        ...this.normalizeExplicitSurname(command),
+        phone: this.normalizeOptionalText(command.phone) ?? null,
+        email: this.normalizeOptionalText(command.email) ?? null,
+        photoUrl: this.normalizeOptionalText(command.photoUrl) ?? null,
+        emergencyContact:
+          this.normalizeEmergencyContact(command.emergencyContact) ?? null,
+        bankAccount: this.normalizeBankAccount(command.bankAccount) ?? null,
+        updatedAt: new Date().toISOString(),
+      };
+
+      const saved = await this.saveProfile(created, "create_profile");
+      this.recordAudit(
+        {
+          actorId: driverId,
+          actorType: "system",
+          tenantId: null,
+          moduleName: "driver-profile",
+          actionName: "create_driver_profile",
+          resourceType: "driver_profile",
+          resourceId: driverId,
+          newValuesSummary: this.buildAuditSummary(saved),
+        },
+        requestId,
       );
-    }
 
-    const base = this.resolveBaseProfile(driverId);
-    const created: DriverProfileRecord = {
-      ...base,
-      name: this.normalizeRequiredText("name", command.name),
-      phone: this.normalizeOptionalText(command.phone) ?? null,
-      email: this.normalizeOptionalText(command.email) ?? null,
-      photoUrl: this.normalizeOptionalText(command.photoUrl) ?? null,
-      emergencyContact:
-        this.normalizeEmergencyContact(command.emergencyContact) ?? null,
-      bankAccount: this.normalizeBankAccount(command.bankAccount) ?? null,
-      updatedAt: new Date().toISOString(),
-    };
-
-    this.profiles.set(driverId, this.clone(created));
-    this.persist(created, "create_profile");
-    this.recordAudit(
-      {
-        actorId: driverId,
-        actorType: "system",
-        tenantId: null,
-        moduleName: "driver-profile",
-        actionName: "create_driver_profile",
-        resourceType: "driver_profile",
-        resourceId: driverId,
-        newValuesSummary: this.buildAuditSummary(created),
-      },
-      requestId,
-    );
-
-    return this.clone(created);
+      return this.clone(saved);
+    });
   }
 
-  updateProfile(
+  async updateProfile(
     actorId: string | null | undefined,
     command: UpdateDriverProfileCommand,
     requestId?: string,
   ) {
     const driverId = this.resolveDriverId(actorId);
-    const current = this.resolveBaseProfile(driverId);
-    const updated: DriverProfileRecord = {
-      ...current,
-      ...(command.name !== undefined && {
-        name: this.normalizeRequiredText("name", command.name),
-      }),
-      ...(command.phone !== undefined && {
-        phone: this.normalizeOptionalText(command.phone) ?? null,
-      }),
-      ...(command.email !== undefined && {
-        email: this.normalizeOptionalText(command.email) ?? null,
-      }),
-      ...(command.photoUrl !== undefined && {
-        photoUrl: this.normalizeOptionalText(command.photoUrl) ?? null,
-      }),
-      ...(command.emergencyContact !== undefined && {
-        emergencyContact:
-          this.normalizeEmergencyContact(command.emergencyContact) ?? null,
-      }),
-      ...(command.bankAccount !== undefined && {
-        bankAccount: this.normalizeBankAccount(command.bankAccount) ?? null,
-      }),
-      updatedAt: new Date().toISOString(),
-    };
+    return this.enqueueProfileWrite(driverId, async () => {
+      const current = this.resolveBaseProfile(driverId);
+      const updated: DriverProfileRecord = {
+        ...current,
+        ...this.normalizeExplicitSurname(command),
+        ...(command.name !== undefined && {
+          name: this.normalizeRequiredText("name", command.name),
+        }),
+        ...(command.phone !== undefined && {
+          phone: this.normalizeOptionalText(command.phone) ?? null,
+        }),
+        ...(command.email !== undefined && {
+          email: this.normalizeOptionalText(command.email) ?? null,
+        }),
+        ...(command.photoUrl !== undefined && {
+          photoUrl: this.normalizeOptionalText(command.photoUrl) ?? null,
+        }),
+        ...(command.emergencyContact !== undefined && {
+          emergencyContact:
+            this.normalizeEmergencyContact(command.emergencyContact) ?? null,
+        }),
+        ...(command.bankAccount !== undefined && {
+          bankAccount: this.normalizeBankAccount(command.bankAccount) ?? null,
+        }),
+        updatedAt: new Date().toISOString(),
+      };
 
-    this.profiles.set(driverId, this.clone(updated));
-    this.persist(updated, "update_profile");
-    this.recordAudit(
-      {
-        actorId: driverId,
-        actorType: "system",
-        tenantId: null,
-        moduleName: "driver-profile",
-        actionName: "update_driver_profile",
-        resourceType: "driver_profile",
-        resourceId: driverId,
-        oldValuesSummary: this.buildAuditSummary(current),
-        newValuesSummary: this.buildAuditSummary(updated),
-      },
-      requestId,
-    );
+      const saved = await this.saveProfile(updated, "update_profile");
+      this.recordAudit(
+        {
+          actorId: driverId,
+          actorType: "system",
+          tenantId: null,
+          moduleName: "driver-profile",
+          actionName: "update_driver_profile",
+          resourceType: "driver_profile",
+          resourceId: driverId,
+          oldValuesSummary: this.buildAuditSummary(current),
+          newValuesSummary: this.buildAuditSummary(saved),
+        },
+        requestId,
+      );
 
-    return this.clone(updated);
+      return this.clone(saved);
+    });
   }
 
-  upsertAdminProfile(
+  async upsertAdminProfile(
     driverId: string,
     command: CreateDriverProfileCommand,
     requestId?: string,
   ) {
     const normalizedDriverId = driverId.trim();
     this.assertDriverId(normalizedDriverId);
-    const hadExistingProfile = this.profileExists(normalizedDriverId);
-    const current = this.resolveBaseProfile(normalizedDriverId);
-    const updated: DriverProfileRecord = {
-      ...current,
-      name: this.normalizeRequiredText("name", command.name),
-      phone: this.normalizeOptionalText(command.phone) ?? null,
-      email: this.normalizeOptionalText(command.email) ?? null,
-      photoUrl: this.normalizeOptionalText(command.photoUrl) ?? null,
-      emergencyContact:
-        this.normalizeEmergencyContact(command.emergencyContact) ?? null,
-      bankAccount: this.normalizeBankAccount(command.bankAccount) ?? null,
-      updatedAt: new Date().toISOString(),
-    };
+    const storageDriverId = this.resolveDriverId(normalizedDriverId);
+    return this.enqueueProfileWrite(storageDriverId, async () => {
+      const hadExistingProfile = this.profileExists(normalizedDriverId);
+      const current = this.resolveBaseProfile(normalizedDriverId);
+      const updated: DriverProfileRecord = {
+        ...current,
+        name: this.normalizeRequiredText("name", command.name),
+        ...this.normalizeExplicitSurname(command),
+        phone: this.normalizeOptionalText(command.phone) ?? null,
+        email: this.normalizeOptionalText(command.email) ?? null,
+        photoUrl: this.normalizeOptionalText(command.photoUrl) ?? null,
+        emergencyContact:
+          this.normalizeEmergencyContact(command.emergencyContact) ?? null,
+        bankAccount: this.normalizeBankAccount(command.bankAccount) ?? null,
+        updatedAt: new Date().toISOString(),
+      };
 
-    this.profiles.set(normalizedDriverId, this.clone(updated));
-    this.persist(updated, "upsert_admin_profile");
-    this.recordAudit(
-      {
-        actorId: "platform-admin",
-        actorType: "platform_admin",
-        tenantId: null,
-        moduleName: "driver-profile",
-        actionName: hadExistingProfile
-          ? "update_driver_profile_admin"
-          : "create_driver_profile_admin",
-        resourceType: "driver_profile",
-        resourceId: normalizedDriverId,
-        oldValuesSummary: this.buildAuditSummary(current),
-        newValuesSummary: this.buildAuditSummary(updated),
-      },
-      requestId,
-    );
+      const saved = await this.saveProfile(updated, "upsert_admin_profile");
+      this.recordAudit(
+        {
+          actorId: "platform-admin",
+          actorType: "platform_admin",
+          tenantId: null,
+          moduleName: "driver-profile",
+          actionName: hadExistingProfile
+            ? "update_driver_profile_admin"
+            : "create_driver_profile_admin",
+          resourceType: "driver_profile",
+          resourceId: normalizedDriverId,
+          oldValuesSummary: this.buildAuditSummary(current),
+          newValuesSummary: this.buildAuditSummary(saved),
+        },
+        requestId,
+      );
 
-    return this.clone(updated);
+      return this.clone(saved);
+    });
   }
 
   recordDeviceBinding(
@@ -475,6 +486,30 @@ export class DriverProfileService implements OnModuleInit {
     return normalized;
   }
 
+  private normalizeExplicitSurname(
+    command: CreateDriverProfileCommand | UpdateDriverProfileCommand,
+  ): Pick<DriverProfileRecord, "driverSurname"> {
+    if (!Object.prototype.hasOwnProperty.call(command, "driverSurname")) {
+      return {};
+    }
+
+    if (typeof command.driverSurname !== "string") {
+      throw new ApiRequestError(
+        400,
+        "INVALID_DRIVER_PROFILE",
+        "driverSurname must be nonempty text for driver profile.",
+        { field: "driverSurname" },
+      );
+    }
+
+    return {
+      driverSurname: this.normalizeRequiredText(
+        "driverSurname",
+        command.driverSurname,
+      ),
+    };
+  }
+
   private normalizeOptionalText(value: string | null | undefined) {
     if (value === undefined) {
       return undefined;
@@ -546,6 +581,9 @@ export class DriverProfileService implements OnModuleInit {
     return {
       driverId: profile.driverId,
       name: maskName(profile.name),
+      ...(profile.driverSurname !== undefined && {
+        driverSurnameConfigured: true,
+      }),
       phone: maskPhone(profile.phone),
       email: maskEmail(profile.email),
       photoConfigured: profile.photoUrl !== null,
@@ -576,10 +614,72 @@ export class DriverProfileService implements OnModuleInit {
     };
   }
 
+  private enqueueProfileWrite<T>(
+    driverId: string,
+    write: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.profileWrites.get(driverId) ?? Promise.resolve();
+    const result = previous.then(write);
+    const settled = result.then(
+      () => {},
+      () => {},
+    );
+    this.profileWrites.set(driverId, settled);
+    void settled.then(() => {
+      if (this.profileWrites.get(driverId) === settled) {
+        this.profileWrites.delete(driverId);
+      }
+    });
+    return result;
+  }
+
+  private async saveProfile(profile: DriverProfileRecord, context: string) {
+    if (!this.repository?.isEnabled()) {
+      throw new ApiRequestError(
+        503,
+        "DRIVER_PROFILE_STORAGE_UNAVAILABLE",
+        "Driver profile storage is unavailable.",
+      );
+    }
+
+    const beforeWrite = this.profiles.get(profile.driverId);
+    try {
+      await this.repository.upsert(profile);
+    } catch (error) {
+      this.repository.reportPersistenceFailure(error, context);
+      throw error;
+    }
+
+    // Device writers keep their existing synchronous local behavior. Preserve
+    // bindings changed while this save awaited storage; their queued full-record
+    // writes will use the newly committed profile fields, never the old snapshot.
+    const current = this.profiles.get(profile.driverId);
+    const saved =
+      current && current !== beforeWrite
+        ? {
+            ...profile,
+            deviceBindings: cloneDeviceBindings(current.deviceBindings),
+            updatedAt: current.updatedAt,
+          }
+        : profile;
+    this.profiles.set(profile.driverId, this.clone(saved));
+    return saved;
+  }
+
   private persist(profile: DriverProfileRecord, context: string) {
     if (!this.repository) return;
 
-    void this.repository.upsert(profile).catch((error: unknown) => {
+    const snapshot = this.clone(profile);
+    void this.enqueueProfileWrite(profile.driverId, async () => {
+      // Only device fields belong to this inherited writer. A snapshot captured
+      // before an awaited profile save must not revert its acknowledged fields.
+      const current = this.resolveBaseProfile(profile.driverId);
+      await this.repository!.upsert({
+        ...current,
+        deviceBindings: snapshot.deviceBindings,
+        updatedAt: current.updatedAt,
+      });
+    }).catch((error: unknown) => {
       this.repository!.reportPersistenceFailure(error, context);
     });
   }

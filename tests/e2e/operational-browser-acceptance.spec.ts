@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { createOperationalEvidenceJournal } from "./operational-evidence-journal";
 import {
   runSetup,
   requiredOrigin,
@@ -95,9 +96,12 @@ const candidateSha = process.env.DRTS_CANDIDATE_SHA?.trim();
 const evidenceDir =
   process.env.DRTS_OPERATIONAL_EVIDENCE_DIR ??
   path.join(process.cwd(), "test-results/operational-browser");
-const evidence: Array<Record<string, unknown>> = [];
+const evidenceJournal = createOperationalEvidenceJournal(
+  evidenceDir,
+  candidateSha,
+  manifestPath,
+);
 const interactionTimeoutMs = 10_000;
-
 
 function requiredEnvironmentValue(envName: string) {
   const value = process.env[envName]?.trim();
@@ -109,13 +113,9 @@ function requiredEnvironmentValue(envName: string) {
   return value;
 }
 
-
 function record(entry: Record<string, unknown>) {
-  evidence.push({
-    candidateSha,
-    recordedAt: new Date().toISOString(),
-    ...entry,
-  });
+  const { workerIndex, testId, retry } = test.info();
+  evidenceJournal.record({ ...entry, workerIndex, testId, retry });
 }
 
 function expectCandidateRevision(
@@ -128,10 +128,6 @@ function expectCandidateRevision(
   ).toBe(candidateSha);
 }
 
-
-
-
-
 function interpolatePath(
   template: string,
   resultId: unknown,
@@ -143,9 +139,9 @@ function interpolatePath(
     resultId,
     `${materialized} requires a prior operation result ID`,
   ).toBeTruthy();
-  return materialized.split("{resultId}").join(
-    encodeURIComponent(String(resultId)),
-  );
+  return materialized
+    .split("{resultId}")
+    .join(encodeURIComponent(String(resultId)));
 }
 
 async function navigate(page: Page, origin: string, route: string) {
@@ -288,15 +284,7 @@ function installEnvironmentVariables(
 }
 
 test.afterAll(() => {
-  mkdirSync(evidenceDir, { recursive: true });
-  writeFileSync(
-    path.join(evidenceDir, "operational-browser-evidence.json"),
-    `${JSON.stringify(
-      { candidateSha, manifest: path.basename(manifestPath), evidence },
-      null,
-      2,
-    )}\n`,
-  );
+  evidenceJournal.flush();
 });
 
 test("requires a single immutable candidate SHA and complete formal journey manifest", () => {
@@ -392,7 +380,11 @@ for (const journey of manifest.journeys) {
       });
     }
     await installBrowserSession(page, journey, origin, variables);
-    await runSetup({ request: page.context().request, record }, journey, variables);
+    await runSetup(
+      { request: page.context().request, record },
+      journey,
+      variables,
+    );
     await navigate(
       page,
       origin,
@@ -638,7 +630,11 @@ for (const journey of manifest.journeys) {
       });
     }
     await installBrowserSession(page, journey, origin, variables);
-    await runSetup({ request: page.context().request, record }, journey, variables);
+    await runSetup(
+      { request: page.context().request, record },
+      journey,
+      variables,
+    );
     const response = await page.goto(
       new URL(
         interpolatePath(journey.route, null, variables),
