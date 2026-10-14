@@ -646,3 +646,35 @@ server、實際外部服務呼叫、workflow dispatch 或部署。
   `requestEnvelope` 身分不一致與相依 implicit-any diagnostics；無新增 own test diagnostics。
   未安裝套件、改共享 node_modules／compiler config 或以此環境失敗充作產品重現。
   此命令不是 PASS；所有已啟動檢查均已等候結束並讀結果。
+
+## 2026-10-14 R3：Supervisor 正式配號與原 owner 續修
+
+本次 dispatch 保留 `18a48f77f2445699faafa8bad8a67d5302d6e6fb` red checkpoint，
+local／remote／draft PR2627 head 一致。於 05:03:24Z，實際 Supervisor 已核對
+全域保留並在同一 task 的 `migration_allocations` 正式配給
+`infra/migrations/V0119__passenger_ride_rating_contact.sql`，更新 frozen R3 spec。
+先前配號卡點已解除；owner 的 05:03:33Z note 在讀到新狀態前送出，不能用該舊 note
+否定正式 allocation。已用 current-release CLI progress 記錄續修。
+
+正式 allocation 原始 bytes 已複製到
+`docs/04-uat/passenger-app-20261009/schema-allocation-20261014-token-rating-contact.json`，
+SHA256 `3c922809269f43b83d32b5a68a974ccbba9ab7c7ed468f3f84b5f13e9d9ad1db`。
+不修改 dirty canonical root 全域 ledger，不重寫 V0114、不捏造 account。
+V0119 以現有 varchar token/order/subject/rating 與 canonical CRM FK 保存原始 choice；
+複合 FK 同時核對 rating score、order、subject 與原 token，唯一鍵避免重複 consent/case。
+舊 rating 不補猜 contact choice。此 schema checkpoint 尚不是修復候選或 PG 驗收。
+
+本次 assigned WT 原 `.local/.../token-contact-20261014/` 目錄不在；既有 tracked
+red regression／UAT 仍完整。新的可追溯紀錄位於
+`.local/pax-receipt-complaint-20261009/token-contact-resume-20261014/`，不冒稱恢復舊 log。
+在未改 product source 的 `18a48f77f2445699faafa8bad8a67d5302d6e6fb`：
+
+- 相同正式 token regression 命令：`token-red.log` exit1，2 FAIL／9 PASS，5.36s；
+  原缺 CRM 與反向 contact replay 被接受皆重現。
+- 相同 account rating／intake 命令：`account-intake.log` exit0，78/78，6.83s；
+  fault-injection rollback warnings 已讀。
+- 相同 API legacy token service／controller 命令：`legacy-token.log` exit0，36/36，7.07s。
+- Node22.23.2、pnpm10.33.0、Vitest4.1.4、TypeScript5.9.3。以上 checks 均完成並讀取。
+
+後續 source repair、新版正負與 failure/replay 回歸、同 SHA 獨立 review／CI／merge 仍待完成；
+原兩項 acceptance key 與 PG／mounted HTTP／peer Ops／legal facts 全部保留未驗。
