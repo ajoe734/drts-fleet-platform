@@ -23,6 +23,10 @@ const require = createRequire(
 );
 const { Pool } = require("pg") as typeof import("pg");
 const runFile = promisify(execFile);
+function credentialValue() {
+  // The existing fake provider intentionally accepts alphabetic suffixes only.
+  return `synthetic_credential_${randomUUID().replace(/[0-9]/g, (digit) => String.fromCharCode(97 + Number(digit)))}`;
+}
 // Do not connect even to an inherited URL on the worker VM. Existing hosted CI
 // supplies DATABASE_URL; missing hosted configuration must fail, never skip.
 describe.skipIf(process.env.GITHUB_ACTIONS !== "true")(
@@ -133,10 +137,7 @@ describe.skipIf(process.env.GITHUB_ACTIONS !== "true")(
       service = new PaymentMethodService(repository, { provider, cipher });
     });
 
-    async function bind(
-      credential = `synthetic_credential_${randomUUID()}`,
-      passengerId = owner,
-    ) {
+    async function bind(credential = credentialValue(), passengerId = owner) {
       const result = await service.bind(passengerId, {
         providerToken: credential,
       });
@@ -270,7 +271,7 @@ describe.skipIf(process.env.GITHUB_ACTIONS !== "true")(
       const claim = await repository.claimBinding(
         owner,
         provider.name,
-        `synthetic_credential_${randomUUID()}`,
+        credentialValue(),
       );
       const value = {
         paymentMethodId: claim.methodId,
