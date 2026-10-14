@@ -561,7 +561,7 @@ describe.skipIf(!hostedPaymentEnabled)(
           );
         if (reason === "window")
           await h.pool!.query(
-            "UPDATE ops.phase1_driver_tasks SET record=jsonb_set(record,'{completedAt}',to_jsonb((now()-interval '49 hours')::text)) WHERE record->>'orderId'=$1",
+            "UPDATE ops.phase1_driver_tasks SET record=jsonb_set(record,'{completedAt}',to_jsonb((now()-interval '49 hours')::text)) WHERE order_id=$1",
             [f.event.orderId],
           );
         await expect(

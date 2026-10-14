@@ -22,6 +22,7 @@ import { PassengerComplaintController } from "../../../apps/api/src/modules/pass
 import { PassengerComplaintService } from "../../../apps/api/src/modules/passenger-app/complaint/passenger-complaint.service";
 import { PassengerReceiptController } from "../../../apps/api/src/modules/passenger-app/receipt/passenger-receipt.controller";
 import { MultiTaxiService } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
+import { MultiTaxiController } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.controller";
 import { ComplaintController } from "../../../apps/api/src/modules/complaint/complaint.controller";
 import { ComplaintService } from "../../../apps/api/src/modules/complaint/complaint.service";
 import { IncidentService } from "../../../apps/api/src/modules/incident/incident.service";
@@ -98,6 +99,7 @@ describe.skipIf(!hostedPaymentEnabled)(
       // Separate Ops instance is mounted before passenger writes; it must refresh real SQL.
       const peer = await h.receiptServices();
       const constructors = [
+        [MultiTaxiController, [MultiTaxiService]],
         [
           PassengerBookingController,
           [PassengerBookingService, MultiTaxiService],
@@ -116,6 +118,7 @@ describe.skipIf(!hostedPaymentEnabled)(
         Reflect.defineMetadata("design:paramtypes", types, controller);
       @Module({
         controllers: [
+          MultiTaxiController,
           PassengerBookingController,
           PassengerComplaintController,
           PassengerReceiptController,
@@ -287,6 +290,189 @@ describe.skipIf(!hostedPaymentEnabled)(
       const state = await h.receiptState(event.orderId);
       expect(state.intakes[0]!.contact_consent).toBe(false);
       expect(state.cases).toHaveLength(1);
+    });
+
+    it("mounted ride token opt-in returns canonical rating and peer Ops sees its single case", async () => {
+      const grant = await h.receiptToken(event.orderId);
+      const path = `passenger-rides/${grant.raw}/ratings`;
+      const body = {
+        score: 2,
+        contactRequested: true,
+        comment: "QA HTTP token contact",
+      };
+      const response = await request("POST", path, undefined, body);
+      expect(response.status).toBe(201);
+      expect(response.json.data).toMatchObject({
+        order_id: event.orderId,
+        passenger_subject_ref: owner,
+        score: 2,
+      });
+      expect((await request("POST", path, undefined, body)).json.data).toEqual(
+        response.json.data,
+      );
+      expect(
+        (
+          await request("POST", path, undefined, {
+            ...body,
+            contactRequested: false,
+          })
+        ).status,
+      ).toBe(409);
+      const state = await h.receiptState(event.orderId);
+      for (const name of [
+        "ratings",
+        "rideConsents",
+        "cases",
+        "timelines",
+      ] as const)
+        expect(state[name]).toHaveLength(1);
+      expect(state.consents).toHaveLength(0);
+      expect(state.intakes).toHaveLength(0);
+      const id = state.rideConsents[0]!.complaint_case_no;
+      const ops = await request(
+        "GET",
+        `complaints/${id}`,
+        undefined,
+        undefined,
+        opsHeaders,
+      );
+      expect(ops.status).toBe(200);
+      expect(ops.json.data).toMatchObject({
+        case_no: id,
+        related_order_id: event.orderId,
+        category: "driver_service",
+      });
+      expect(
+        (
+          await request(
+            "GET",
+            `complaints/${id}/timeline`,
+            undefined,
+            undefined,
+            opsHeaders,
+          )
+        ).json.data.items,
+      ).toHaveLength(1);
+      expect(response.text).not.toContain(grant.raw);
+    });
+
+    it.each([
+      { score: 2, contactRequested: false },
+      { score: 5, contactRequested: true },
+      { score: 2 },
+    ])("mounted token %j retains choice without a complaint", async (body) => {
+      const grant = await h.receiptToken(event.orderId);
+      expect(
+        (
+          await request(
+            "POST",
+            `passenger-rides/${grant.raw}/ratings`,
+            undefined,
+            body,
+          )
+        ).status,
+      ).toBe(201);
+      const state = await h.receiptState(event.orderId);
+      expect(state.rideConsents).toHaveLength(1);
+      expect(state.rideConsents[0]).toMatchObject({
+        contact_requested: body.contactRequested ?? false,
+        complaint_case_no: null,
+      });
+      expect(state.ratings).toHaveLength(1);
+      expect(state.cases).toHaveLength(0);
+      expect(state.timelines).toHaveLength(0);
+    });
+
+    it("mounted invalid token, persisted revocation/scope and malformed choice return lawful denials", async () => {
+      expect(
+        (
+          await request(
+            "POST",
+            "passenger-rides/qa-missing/ratings",
+            undefined,
+            { score: 2, contactRequested: true },
+          )
+        ).status,
+      ).toBe(404);
+      for (const reason of ["revoked", "scope", "choice"] as const) {
+        const grant = await h.receiptToken(event.orderId);
+        if (reason === "revoked")
+          await h.pool!.query(
+            "UPDATE ops.passenger_ride_access_tokens SET revoked_at=now() WHERE token_id=$1",
+            [grant.record.tokenId],
+          );
+        if (reason === "scope")
+          await h.pool!.query(
+            "UPDATE ops.passenger_ride_access_tokens SET scopes='[\"ride:read\"]'::jsonb WHERE token_id=$1",
+            [grant.record.tokenId],
+          );
+        const response = await request(
+          "POST",
+          `passenger-rides/${grant.raw}/ratings`,
+          undefined,
+          { score: 2, contactRequested: reason === "choice" ? "yes" : true },
+        );
+        expect(response.status).toBe(
+          reason === "revoked" ? 404 : reason === "scope" ? 403 : 400,
+        );
+        expect(response.text).not.toContain(grant.raw);
+      }
+      for (const rows of Object.values(await h.receiptState(event.orderId)))
+        expect(rows).toHaveLength(0);
+    });
+
+    it("mounted token native consent failure returns error without partial records and recovery creates one case", async () => {
+      const grant = await h.receiptToken(event.orderId);
+      await h.pool!.query(
+        "ALTER TABLE ops.passenger_ride_rating_consents ADD CONSTRAINT qa_token_http_failure CHECK(false) NOT VALID",
+      );
+      const path = `passenger-rides/${grant.raw}/ratings`;
+      const body = { score: 1, contactRequested: true };
+      const failed = await request("POST", path, undefined, body);
+      expect(failed.status).toBe(500);
+      expect(failed.text).not.toContain(grant.raw);
+      expect(failed.text).not.toContain("qa_token_http_failure");
+      for (const rows of Object.values(await h.receiptState(event.orderId)))
+        expect(rows).toHaveLength(0);
+      await h.pool!.query(
+        "ALTER TABLE ops.passenger_ride_rating_consents DROP CONSTRAINT qa_token_http_failure",
+      );
+      expect((await request("POST", path, undefined, body)).status).toBe(201);
+      expect((await h.receiptState(event.orderId)).cases).toHaveLength(1);
+    });
+
+    it("mounted original token receipt downloads use persisted simulated E04 and refuse a revoked grant", async () => {
+      const grant = await h.receiptToken(event.orderId);
+      const row = await services.multi.persistPassengerReceiptForCompletedTrip({
+        ...event,
+        e04Snapshot: structuredClone(simulatedE04),
+      });
+      const path = `passenger-rides/${grant.raw}/receipt`;
+      const metadata = await request("GET", `${path}/downloads`);
+      expect(metadata.status).toBe(200);
+      expect(metadata.json.data).toMatchObject({
+        certificate_id: row.receiptId,
+        order_id: event.orderId,
+        html_url: `/api/${path}/artifacts/html`,
+        pdf_url: `/api/${path}/artifacts/pdf`,
+      });
+      for (const format of ["html", "pdf"] as const) {
+        const response = await request("GET", `${path}/artifacts/${format}`);
+        expect(response.status).toBe(200);
+        expect(response.headers.get("cache-control")).toBe("private, no-store");
+        if (format === "html")
+          expect(response.text).toContain(
+            "QA simulated operator &lt;escaped&gt;",
+          );
+        else expect(response.bytes.subarray(0, 8).toString()).toBe("%PDF-1.7");
+        expect(response.text).not.toContain(grant.raw);
+      }
+      await h.pool!.query(
+        "UPDATE ops.passenger_ride_access_tokens SET revoked_at=now() WHERE token_id=$1",
+        [grant.record.tokenId],
+      );
+      expect((await request("GET", `${path}/downloads`)).status).toBe(404);
+      expect((await request("GET", `${path}/artifacts/html`)).status).toBe(404);
     });
 
     it("mounted low rating opt-in creates one canonical case and refuses changed retry", async () => {
