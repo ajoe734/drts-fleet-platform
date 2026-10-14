@@ -447,7 +447,7 @@ describe.skipIf(!hostedPaymentEnabled)(
         "platform-admin-001",
         "different-replay-request",
       );
-      expect({ ...replay, replayed: false }).toEqual(result);
+      expect(replay).toEqual({ ...result, replayed: true });
       await expect(
         peer.multi.invalidatePassengerRating(
           ratingId,
