@@ -452,44 +452,6 @@ describe.skipIf(!hostedPaymentEnabled)(
           wrongNonce,
         });
 
-        it("wrong provider and a mismatched persisted PKCE verifier follow burned-proof semantics", async () => {
-          const wrongProvider = await auth.oauth.start(
-            "google",
-            {
-              provider: "google",
-              purpose: "login",
-              redirectUri: redirect("google"),
-            },
-            null,
-          );
-          const command = await auth.registerGrant(wrongProvider, "google");
-          await expect(
-            auth.oauth.callback("line", { ...command, provider: "line" }, null),
-          ).rejects.toMatchObject({ code: "invalid_grant" });
-          const pkce = await auth.oauth.start(
-            "google",
-            {
-              provider: "google",
-              purpose: "login",
-              redirectUri: redirect("google"),
-            },
-            null,
-          );
-          const pkceCommand = await auth.registerGrant(pkce, "google");
-          await h.pool!.query(
-            "UPDATE passenger.oauth_transactions SET code_verifier=$2 WHERE transaction_id=$1",
-            [pkce.transactionId, "x".repeat(43)],
-          );
-          await expect(
-            auth.oauth.callback("google", pkceCommand, null),
-          ).rejects.toMatchObject({ code: "invalid_grant" });
-          expect((await oauthRows()).every((row) => row.consumed_at)).toBe(
-            true,
-          );
-          expect(
-            (await h.pool!.query("SELECT * FROM passenger.logins")).rows,
-          ).toHaveLength(0);
-        });
         await expect(
           auth.oauth.callback(
             "google",
@@ -507,6 +469,43 @@ describe.skipIf(!hostedPaymentEnabled)(
       ).toHaveLength(0);
       expect(
         (await h.pool!.query("SELECT * FROM passenger.sessions")).rows,
+      ).toHaveLength(0);
+    });
+
+    it("wrong provider and a mismatched persisted PKCE verifier follow burned-proof semantics", async () => {
+      const wrongProvider = await auth.oauth.start(
+        "google",
+        {
+          provider: "google",
+          purpose: "login",
+          redirectUri: redirect("google"),
+        },
+        null,
+      );
+      const command = await auth.registerGrant(wrongProvider, "google");
+      await expect(
+        auth.oauth.callback("line", { ...command, provider: "line" }, null),
+      ).rejects.toMatchObject({ code: "invalid_grant" });
+      const pkce = await auth.oauth.start(
+        "google",
+        {
+          provider: "google",
+          purpose: "login",
+          redirectUri: redirect("google"),
+        },
+        null,
+      );
+      const pkceCommand = await auth.registerGrant(pkce, "google");
+      await h.pool!.query(
+        "UPDATE passenger.oauth_transactions SET code_verifier=$2 WHERE transaction_id=$1",
+        [pkce.transactionId, "x".repeat(43)],
+      );
+      await expect(
+        auth.oauth.callback("google", pkceCommand, null),
+      ).rejects.toMatchObject({ code: "invalid_grant" });
+      expect((await oauthRows()).every((row) => row.consumed_at)).toBe(true);
+      expect(
+        (await h.pool!.query("SELECT * FROM passenger.logins")).rows,
       ).toHaveLength(0);
     });
 
