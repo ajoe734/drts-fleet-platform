@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { vi } from "vitest";
+import type {
+  DriverPublicRegistrationCredential,
+  VehiclePassengerDisclosureProfile,
+} from "@drts/contracts";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { MultiTaxiRepository } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
 import { MultiTaxiService } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
@@ -81,11 +85,43 @@ export async function bookingActor(
     getEligibleCandidates: () => [candidate],
     getVehicleDispatchability: () => true,
     getDriverAvailability: () => true,
-    getVehicleLicenseType: () => null,
-    getVehiclePassengerDisclosureProfile: () => null,
-    getDriverPublicRegistrationCredential: () => null,
+    getVehicleLicenseType: () => "multi_purpose_taxi",
+    getVehiclePassengerDisclosureProfile:
+      (): VehiclePassengerDisclosureProfile => ({
+        vehicleId: candidate.vehicleId,
+        make: "QA synthetic make",
+        model: "QA synthetic model",
+        modelYear: 2025,
+        doorCount: 4,
+        color: "white",
+        status: "complete",
+        missingFieldCodes: [],
+        verifiedByActorId: "qa-synthetic-verifier",
+        verifiedAt: "2025-01-01T00:00:00.000Z",
+        sourceSubmissionId: null,
+        version: 1,
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      }),
+    getDriverPublicRegistrationCredential:
+      (): DriverPublicRegistrationCredential => ({
+        driverId: candidate.driverId,
+        registrationNo: "QA-SYNTHETIC",
+        registrationArea: "QA",
+        effectiveFrom: "2025-01-01T00:00:00.000Z",
+        effectiveUntil: "2099-01-01T00:00:00.000Z",
+        status: "verified_active",
+        maskedDisplay: "QA-SYNTHETIC",
+        verifiedByActorId: "qa-synthetic-verifier",
+        verifiedAt: "2025-01-01T00:00:00.000Z",
+        sourceSubmissionId: null,
+        version: 1,
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      }),
     listVehicles: () => [
       { vehicleId: candidate.vehicleId, plateNo: "QA-0000" },
+    ],
+    listDrivers: () => [
+      { driverId: candidate.driverId, name: "QA synthetic driver" },
     ],
   };
   const audit = new AuditNotificationService();
