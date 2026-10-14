@@ -120,7 +120,18 @@ function isAllowedPassengerPath(path: string[], method: string) {
       (path.length === 3 &&
         ((method === "GET" && ["events", "receipt"].includes(path[2] ?? "")) ||
           (method === "POST" &&
-            ["cancel", "ratings"].includes(path[2] ?? "")))))
+            ["cancel", "ratings", "contact", "complaints"].includes(
+              path[2] ?? "",
+            )))) ||
+      (method === "GET" &&
+        path.length === 4 &&
+        path[2] === "receipt" &&
+        path[3] === "downloads") ||
+      (method === "GET" &&
+        path.length === 5 &&
+        path[2] === "receipt" &&
+        path[3] === "artifacts" &&
+        ["html", "pdf"].includes(path[4] ?? "")))
   )
     return true;
   if (["GET", "POST"].includes(method) && fullPath === "payment-methods")
@@ -508,6 +519,20 @@ async function forward(
       const headers = copyHeaders(request.headers);
       if (fullPath === "auth/logout" && method === "POST") {
         headers.set("Content-Type", "application/json");
+      }
+      if (
+        path[0] === "rides" &&
+        path[2] === "complaints" &&
+        method === "POST" &&
+        !headers.has("idempotency-key")
+      ) {
+        headers.set(
+          "idempotency-key",
+          typeof crypto !== "undefined" &&
+            typeof crypto.randomUUID === "function"
+            ? `bff-complaint-${crypto.randomUUID()}`
+            : `bff-complaint-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        );
       }
       await applyUpstreamAuth(headers, targetUrl, currentToken);
       const init: RequestInit = {
