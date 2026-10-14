@@ -921,3 +921,40 @@ Receipt33PG＋17HTTP 沒有呼叫 `invalidatePassengerRating`，不能算本輪�
 native invalidation pending，不能借 d0 或 QA153b 綠燈。未啟動本 VM
 PG/API/product/browser/preview/Docker、未 workflow dispatch/rerun、未部署或呼叫
 approve／record-acceptance／done。
+
+#### R6：正式 dev 同步與最後 source identity
+
+Pre-sync `35e146ebb0a661719b19cf2810abbab9485230df` 已正常推送，PR2628
+為 `CONFLICTING/DIRTY`，查詢沒有該 SHA 的 CI runs；尚未 handoff／鎖候選。
+因此普通 merge accepted `origin/dev=0a03db0250551d1732d82ff3a57abb2efb0691ce`，
+保留全部 published history。Merge anchor
+`d89b08b7591b5736e79bc9ea1363f04c659f89c7` 的兩個 parents 是35e與0a03。
+唯一 conflict 在本 artifact；dev 與 d0 的原 artifact bytes 相同，完整保留它們及
+own R6 append。Accepted registry source／fixture 更新由 dev 原樣帶入。
+
+既有 Husky merge hook 另外格式化
+`apps/api/tests/unit/auth-bootstrap.test.ts`（在原 `apps/api/tests/unit/` scope），
+故最終對 dev 的 diff 是 repository 兩处 casts、原 artifact append，以及這一份
+unit-test formatting。`merge-hook-formatting-equivalence.json`／
+`merge-formatting-equivalence.json/.log`：正式 TS5.9.3 parser 的完整 structural AST
+（含所有 leaf tokens）與全部 comments 均相同，AST SHA256
+`00a31bacf7e68bc021f77aea1174f93d1e543050371d6587414b1c5bae5c9bcf`，exit0。
+沒有 auth 行為或 assertion 修改，沒有 hook bypass／config／security policy 變更。
+最初 ad-hoc AST tool 的 Node exec options 型別錯誤是 setup FAIL，並未進入比較；
+修正自己的 evidence tool 後才取得上述結果，不算產品重現。
+
+同步後重新完成並讀取 root325 PASS／11 files（24.23s）、API112 PASS／9 files
+（17.40s），皆 exit0／0skip：`root-regression-post-sync.json/.log` 與
+`api-regression-post-sync.json/.log` 保存完整 argv、merge SHA 及相同 production
+repository SHA256 `90018772268691525650bc094c5ff89af8f816b8f2519bffea94d4e2bd0fdc56`。
+正式 API prebuild/build 重跑 PASS0，exit0；`api-build-post-sync.json/.log` 保存正式 prebuild/build 命令與結果。
+本節上方 root typecheck FAIL2 是 source anchor63的實際環境結果，沒有改 links 或
+config，也沒有把它重標成新 candidate PASS；最終 clean hosted CI 仍須獨立 typecheck。
+
+Pre-sync publication 保留於 `publication-pre-sync-35e146ebb.json`。
+Final `publication.json` 重新核對 local／normal-pushed remote／PR2628 head 相同、
+tracked tree clean、accepted dev ancestor、三個實際 diff paths 與 source／artifact hashes；
+final closeout 僅補本文證據，不改 production 或 unit bytes。Merge anchor 的 automatic
+CI38533761520／38533761539 與 final SHA 的新 CI 分開記錄；取消／pending／PASS 分列，
+不借 anchor 或 R5 綠燈。原 reviewer Codex 接收新 immutable SHA／generation；本輪 source
+修復完成不等於 native invalidation／兩個 original required acceptance keys 通過。
