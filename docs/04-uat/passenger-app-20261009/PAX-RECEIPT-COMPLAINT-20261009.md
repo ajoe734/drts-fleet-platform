@@ -812,3 +812,58 @@ E2E、smoke 均通過，applicable skips 明列。兩份 raw／plain log 留在�
 使用 `publication-historical-final.json`；前面的 `source-evidence.json/publication.json`
 與689 CI receipts 為保留的歷史紀錄。Normal 新 SHA/gen 独立 review／same-head CI／protected
 merge 與原 PAX-QA formal token PG/HTTP/concurrency、所有原 E04/CRM/legal acceptance 要求不變。
+
+### R5：F-R5-PG-RATING-SUMMARY-PARAMETER（2026-10-14）
+
+沿用原 task、全部既有 findings 與 acceptance。原 Codex 於 06:39:44Z 退回
+`3c15254b34fe2a3213263ca8cc94a2a4a6b20131`／generation
+`f7aee625b7384ee7aaa8a5a20c6d7870`；本輪先讀完整退修、註冊的
+`PAX-RECEIPT-R5-ACTUAL-PG-RATING-SUMMARY-PARAMETER-REPAIR-20261014.md` 與
+`actual-R5-before-source-and-native-QA-binding.json`，再修同一最小單元。
+
+正式呼叫路徑為 account `PassengerBookingController.rateRide` →
+`PassengerBookingService.rateRide` → `MultiTaxiService.submitTrustedPassengerRating`，
+或 token `MultiTaxiController.submitPassengerRating` →
+`MultiTaxiService.submitPassengerRating`；兩者都進
+`MultiTaxiRepository.persistPassengerRating`。正式 V0056 的
+`ops.passenger_trip_ratings.driver_id` 與 `ops.driver_rating_summaries.driver_id`
+均為 `varchar(255)`。本輪產品 diff 僅把該方法摘要 INSERT SELECT 與 WHERE 的
+兩個 `$1` 都指定為 `$1::varchar`，**沒有 typmod／截短**；既有 aggregates、active
+filter、version/time、locks、account/token consent/CRM participant、COMMIT/ROLLBACK、
+immutable replay 與 return mapping 全部保留，沒有 migration／auth／QA harness／workflow 變更。
+
+舊失敗是真實 hosted QA，不是新 mock 推導：source
+`0bafaa1db9a5a7389cc99961c1fe5ba76dec9ac4`，run `38515068055`／job
+`115692063945`，artifact `11872023288`，既有 artifact SHA256
+`6be5515879fe917a0a1352f4b642b8009431fd385d249a80e25e51e67e297ced`。
+本輪重新讀取該 job log：PG `42P08` position `283`、`text versus character varying`，
+mounted low-rating HTTP 收到500而預期201。既有正式 Receipt17PG 為7 PASS/10 FAIL、
+HTTP10 為6 PASS/4 FAIL；其中 rating 受影響為13 cases、14次 SQL errors。
+另一個 complaint-concurrency fixture 的 mutation PID 斷言由原 QA 處理，
+不藉此改 production coalescing/idempotency；Payment27 PASS 不給 Receipt 驗收 credit。
+
+證據目錄（本 worker cwd 下）：
+`.local/pax-receipt-complaint-20261009/r5-20261014/`。
+`sql-source-binding.json`、`summary-before.sql`、`summary-after.sql` 記錄真正 production
+方法所含 SQL bytes；舊候選 SQL 與原 native QA 失敗 SQL 完全相同，SHA256
+`81be2b94292fe4d2b92fd8e1d4c074fa22cf5ba98cedb03bcd9074a3c9152a47`；
+新版 SQL SHA256
+`22f3303f11555fa637adb9cd80ea41d0f5072aa78b3ec84d859d244c98a41340`。
+移除這兩個 casts 即逐 byte 回到舊 SQL。這是靜態修復邊界核對，**不是新版 PG PASS**。
+
+| Finding／驗收項                                                           | 原始碼依據與修改位置                                                                                      | 舊版重現 → 修正版結果                                                                                  | 命令、退出碼、版本與證據                                                                                                                                                                                                                                                          | 未驗項與具體限制                                                                                                                        |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| F-R5-PG-RATING-SUMMARY-PARAMETER                                          | `MultiTaxiRepository.persistPassengerRating` summary 的兩處 `$1::varchar`；正式 V0056 欄位                | 真實舊 hosted PG42P08／HTTP500 → 新 source 兩處型別一致、其餘 SQL bytes 不變；新版 PG/HTTP **NOT RUN** | `old-native-qa.json/.log`：`gh run view 38515068055 --job 115692063945 --log` exit0；`sql-source-binding.json` 保留舊候選 SHA/gen、前後 SQL hashes、原 QA source/run/job/artifact                                                                                                 | VM 禁止 PG/API/server；原 QA 在 protected repair 後重跑原17PG+10HTTP，不能以 SQL mock 或其他標準 PG jobs 代替                           |
+| 原 token/contact/account/CRM/intake/Booking/receipt findings 的受影響回歸 | 原 production controller/service/repository；既有47 token、40 account rating、38 intake、29 receipt cases | 新 source root325 PASS/11 files；API112 PASS/9 files，無新增 skip                                      | `root-regression.json/.log`：`pnpm exec vitest run tests/unit/pax-receipt-complaint-20261009 tests/unit/pax-booking-history-20261009 --maxWorkers=1 --no-file-parallelism` exit0；`api-regression.json/.log` 保留完整9檔 argv，exit0；Node22.23.2/pnpm10.33.0/Vitest4.1.4/TS5.9.3 | 外部 SQL responses／completed order/assignment 為 fixtures；未模擬 PostgreSQL type inference；rollback warning 是既有 failure injection |
+| Source compiler／lint                                                     | 正式 contracts/control-plane-auth/API build 與 scoped ESLint                                              | API build PASS0；ESLint PASS0                                                                          | `api-build.json/.log`：`pnpm --dir apps/api build` exit0，含兩項 prebuild；`source-lint.json/.log`：`pnpm exec eslint apps/api/src/modules/multi-taxi/multi-taxi.repository.ts --max-warnings=0` exit0                                                                            | root compiler 結果另列；沒有更動 compiler/config/shared dependency links                                                                |
+| pax-complaint_intake_and_low_rating                                       | 原 R3/R4/V0119、historical-tag 修復保留；本輪修 summary type boundary                                     | Source 回歸 PASS；required key **UNRECORDED**                                                          | 本節 source evidence；新候選 SHA／branch／PR identity 由 `publication.json` 與 canonical handoff 綁定                                                                                                                                                                             | 原 QA formal PG/HTTP/token concurrency/peer Ops、同候選 review/CI/protected merge 待驗                                                  |
+| pax-receipt_e04_fields_and_passenger_download                             | 未變更 E04 source；保留原逐項 finding 與 NOT_READY 行為                                                   | Receipt29 source 回歸 PASS；完整 E04 原 FAIL2/NOT_READY 保留；required key **UNRECORDED**              | 同 root source suite；未重跑與本次兩處 SQL cast 無關的外部 facts probe                                                                                                                                                                                                            | issuer/operator/masked credential/payment display/total/toll、真實 download/PG/HTTP/legal evidence 待驗                                 |
+
+正式 `pnpm typecheck:root` **FAIL2**（`root-typecheck.json/.log`）：缺
+`@drts/passenger-client`，並有原 foreign QA worktree／本 worktree 的 `ApiClient`
+private-property 型別交集衝突；沒有本輪修改檔的 diagnostic。沒有更動共享 links／config
+以隱藏此環境失敗。Formatter 與最終 publication receipt 記在同目錄。
+不借用舊 `3c15254` 的 CI38520170454／38520170330 綠燈。所有本輪已啟動的必要
+本機 checks 完成並讀結果後才 handoff。原角色 Codex2 owner／Codex reviewer 不變，
+新 substantive SHA/gen 須獨立 review、automatic same-head CI 與 protected merge。
+未啟動 VM product/PG/API/browser/preview/Docker、未部署、未呼叫 acceptance/done。

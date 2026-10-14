@@ -1903,7 +1903,7 @@ export class MultiTaxiRepository {
             calculated_at
           )
           SELECT
-            $1,
+            $1::varchar,
             CASE WHEN count(*) = 0 THEN 'new_driver' ELSE 'rated' END,
             CASE
               WHEN count(*) = 0 THEN NULL
@@ -1914,7 +1914,7 @@ export class MultiTaxiRepository {
             1,
             $2
           FROM ops.passenger_trip_ratings
-          WHERE driver_id = $1
+          WHERE driver_id = $1::varchar
             AND status = 'active'
           ON CONFLICT (driver_id) DO UPDATE SET
             display_state = EXCLUDED.display_state,
