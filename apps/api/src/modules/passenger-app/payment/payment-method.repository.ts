@@ -178,11 +178,13 @@ export class PaymentMethodRepository {
       // Concurrent PSP replay can finish first. Return its committed metadata,
       // without making a second method or overwriting another default.
       if (claim.rows[0].outcome !== "completed") {
+        // Both uses must infer varchar; leave the 100-character limit to the
+        // column constraint instead of a length-qualified cast that truncates.
         await client.query(
           `INSERT INTO passenger.psp_tokens
            (payment_method_id,drts_passenger_id,provider,token_envelope,last4,card_type,expiry_month,expiry_year,is_default)
-           VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,
-             NOT EXISTS(SELECT 1 FROM passenger.psp_tokens WHERE drts_passenger_id=$2 AND status='active' AND is_default))`,
+           VALUES ($1,$2::varchar,$3,$4::jsonb,$5,$6,$7,$8,
+             NOT EXISTS(SELECT 1 FROM passenger.psp_tokens WHERE drts_passenger_id=$2::varchar AND status='active' AND is_default))`,
           [
             value.paymentMethodId,
             passengerId,
