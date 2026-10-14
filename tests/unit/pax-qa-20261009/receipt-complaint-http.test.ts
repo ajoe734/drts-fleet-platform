@@ -443,7 +443,7 @@ describe.skipIf(!hostedPaymentEnabled)(
 
     it("mounted original token receipt downloads use persisted simulated E04 and refuse a revoked grant", async () => {
       const grant = await h.receiptToken(event.orderId);
-      const row = await services.multi.persistPassengerReceiptForCompletedTrip({
+      const row = await services.certificates.writeCompletedTrip({
         ...event,
         e04Snapshot: structuredClone(simulatedE04),
       });
