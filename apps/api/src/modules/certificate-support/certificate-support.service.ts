@@ -24,6 +24,7 @@ import {
   type CertificateSupportState,
   type CertificateSupportView,
   type CertificateE04Snapshot,
+  type CertificateCapturedCompletionFacts,
 } from "./certificate-support.types";
 
 /**
@@ -270,6 +271,7 @@ export class CertificateSupportService {
       pdfUrl: this.artifactUrl(receiptId, "pdf"),
       generatedFrom: "owned_mobility_completion",
       generatedAt: event.completedAt,
+      ...this.resolveCapturedCompletionFacts(event),
       ...(capturedE04.snapshot ? { e04Snapshot: capturedE04.snapshot } : {}),
     };
     try {
@@ -367,6 +369,7 @@ export class CertificateSupportService {
         : null,
       supersededByCertificateId,
       artifactBlockers,
+      ...this.resolveCapturedCompletionFacts(record),
       ...(e04Snapshot ? { e04Snapshot } : {}),
       regeneration: {
         enabled: regenerationEnabled,
@@ -662,6 +665,57 @@ export class CertificateSupportService {
     }
 
     return blockers;
+  }
+
+  private resolveCapturedCompletionFacts(
+    value: unknown,
+  ): CertificateCapturedCompletionFacts {
+    const record =
+      value && typeof value === "object"
+        ? (value as Record<string, unknown>)
+        : {};
+    const facts: CertificateCapturedCompletionFacts = {};
+    const raw = record.actualFareBreakdown;
+    if (raw && typeof raw === "object") {
+      const parts = raw as Record<string, unknown>;
+      const { startMinor, distanceMinor, delayMinor, nightMinor } = parts;
+      if (
+        typeof startMinor === "number" &&
+        Number.isSafeInteger(startMinor) &&
+        startMinor >= 0 &&
+        typeof distanceMinor === "number" &&
+        Number.isSafeInteger(distanceMinor) &&
+        distanceMinor >= 0 &&
+        typeof delayMinor === "number" &&
+        Number.isSafeInteger(delayMinor) &&
+        delayMinor >= 0 &&
+        typeof nightMinor === "number" &&
+        Number.isSafeInteger(nightMinor) &&
+        nightMinor >= 0
+      ) {
+        facts.actualFareBreakdown = {
+          startMinor,
+          distanceMinor,
+          delayMinor,
+          nightMinor,
+        };
+      }
+    }
+    // Keep the exact declaration and existing profile revision together. Never
+    // parse a display name, reread a current profile, or invent provenance.
+    if (
+      typeof record.driverSurname === "string" &&
+      record.driverSurname.trim() &&
+      record.driverSurnameSource === "driver_profile_declared" &&
+      typeof record.driverSurnameProfileUpdatedAt === "string" &&
+      Number.isFinite(Date.parse(record.driverSurnameProfileUpdatedAt))
+    ) {
+      facts.driverSurname = record.driverSurname;
+      facts.driverSurnameSource = record.driverSurnameSource;
+      facts.driverSurnameProfileUpdatedAt =
+        record.driverSurnameProfileUpdatedAt;
+    }
+    return facts;
   }
 
   private resolveE04Snapshot(value: unknown): {

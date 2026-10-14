@@ -7,6 +7,7 @@ import { CertificateSupportController } from "../../../apps/api/src/modules/cert
 import { MultiTaxiRepository } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
 import { MultiTaxiService } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
 import { MultiTaxiController } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.controller";
+import { OwnedMobilityService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import { PassengerReceiptController } from "../../../apps/api/src/modules/passenger-app/receipt/passenger-receipt.controller";
 import type { RequestIdentity } from "../../../apps/api/src/common/auth/auth.types";
 import type { CertificateE04Snapshot } from "../../../apps/api/src/modules/certificate-support/certificate-support.types";
@@ -58,8 +59,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function fixture(complete = true) {
+async function fixture(complete = true, fromProducer = false) {
   const booking = createProductionBookingFixture();
+  booking.account.drtsPassengerId = OWNER;
+  booking.snapshot.drtsPassengerId = OWNER;
   const created = await booking.service.createRide(OWNER, booking.command);
   const orderId = created.ride.order.orderId;
   const tokenValue = "unit-receipt-token";
@@ -138,7 +141,7 @@ async function fixture(complete = true) {
   );
   // External immutable capture is a unit fixture. The actual production emitter
   // cannot yet supply it; e04-source-probe.mjs separately proves that blocker.
-  const event: OwnedMobilityMultiTaxiTripCompletedEvent = {
+  let event: OwnedMobilityMultiTaxiTripCompletedEvent = {
     runtimeProfileCode: "multi_taxi_direct",
     orderId,
     tripId: "unit-trip",
@@ -156,6 +159,63 @@ async function fixture(complete = true) {
     completedAt: new Date(NOW).toISOString(),
     ...(complete ? { e04Snapshot: structuredClone(capture) } : {}),
   };
+  if (fromProducer) {
+    // Invoke the real completion projection and fare validator. Only registry
+    // lookup and already-captured completion/profile inputs are unit fixtures.
+    const producer = Object.create(OwnedMobilityService.prototype) as {
+      regulatoryRegistryService: { listVehicles: () => unknown[] };
+      buildMultiTaxiCertificateEvent: (
+        order: unknown,
+        task: unknown,
+        command: unknown,
+        proof: unknown,
+        surname: unknown,
+      ) => OwnedMobilityMultiTaxiTripCompletedEvent;
+    };
+    producer.regulatoryRegistryService = {
+      listVehicles: () => [{ vehicleId: "unit-vehicle", plateNo: "UNIT-01" }],
+    };
+    event = producer.buildMultiTaxiCertificateEvent(
+      { ...booking.state.order!, fixedPrice: false },
+      {
+        taskId: "unit-trip",
+        vehicleId: "unit-vehicle",
+        startedAt: new Date(NOW - 600000).toISOString(),
+      },
+      {
+        completedAt: new Date(NOW).toISOString(),
+        actualDistanceKm: 2,
+        actualDurationSec: 600,
+        fare: { currency: "TWD", amountMinor: 19037 },
+        // Deliberately not the aggregate: no sum/toll convention is asserted.
+        actualFareBreakdown: {
+          startMinor: 8501,
+          distanceMinor: 1303,
+          delayMinor: 0,
+          nightMinor: 0,
+        },
+      },
+      {
+        photos: [],
+        expenseItems: [{ type: "toll", amountMinor: 271 }],
+        signatureId: null,
+      },
+      {
+        driverSurname: "歐陽",
+        driverSurnameSource: "driver_profile_declared",
+        driverSurnameProfileUpdatedAt: "2026-10-09T01:02:03.000Z",
+      },
+    );
+    if (complete) {
+      // Missing issuer/credential/payment authority is explicitly simulated
+      // only in this isolated unit fixture, never by the production producer.
+      event.e04Snapshot = {
+        ...structuredClone(capture),
+        driverSurname: event.driverSurname!,
+        fareBreakdown: { ...event.actualFareBreakdown! },
+      };
+    }
+  }
   await certificates.writeCompletedTrip(event);
   const multi = new MultiTaxiService(
     booking.owned,
@@ -197,6 +257,86 @@ async function fixture(complete = true) {
 }
 
 describe("captured E04 downstream mapping and authorized downloads (SQL fixtures, not acceptance)", () => {
+  it("preserves actual producer facts in JSONB and detached views without inventing E04", async () => {
+    const f = await fixture(false, true);
+    expect(f.event).not.toHaveProperty("e04Snapshot");
+    const expected = {
+      actualFareBreakdown: { ...f.event.actualFareBreakdown! },
+      driverSurname: "歐陽",
+      driverSurnameSource: "driver_profile_declared",
+      driverSurnameProfileUpdatedAt: "2026-10-09T01:02:03.000Z",
+    };
+    expect(f.row().record).toMatchObject(expected);
+    const view = await f.certificates.get(f.row().receipt_id as string);
+    expect(view).toMatchObject(expected);
+    expect(view).not.toHaveProperty("e04Snapshot");
+    f.event.actualFareBreakdown!.startMinor = 99999;
+    const returned = view as unknown as typeof expected;
+    returned.actualFareBreakdown.distanceMinor = 99999;
+    expect(await f.certificates.get(view.certificateId)).toMatchObject(
+      expected,
+    );
+    expect(
+      (await f.multi.getTrustedPassengerReceipt(f.orderId, OWNER)).record,
+    ).toMatchObject(expected);
+    for (const format of ["html", "pdf"] as const) {
+      const artifact = await f.certificates.getArtifact(
+        view.certificateId,
+        format,
+      );
+      const bytes = artifact.buffer.toString("utf8");
+      const text =
+        format === "html"
+          ? bytes
+          : [...bytes.matchAll(/<([A-F0-9]+)> Tj/g)]
+              .map((m) =>
+                Buffer.from(m[1]!, "hex").swap16().toString("utf16le"),
+              )
+              .join("\n");
+      expect(text).toContain("駕駛自填姓氏");
+      expect(text).toContain("歐陽");
+      expect(text).toContain("driver_profile_declared");
+      expect(text).toContain(expected.driverSurnameProfileUpdatedAt);
+      expect(text).toContain("TWD 85.01");
+      expect(text).toContain("TWD 13.03");
+      expect(text).toContain("TWD 0.00");
+      expect(text).not.toContain("支付方式");
+      await expect(
+        f.account[format](identity, f.orderId, f.response),
+      ).rejects.toMatchObject({ code: "PASSENGER_E04_NOT_READY" });
+      await expect(
+        f.multi.getPassengerReceiptArtifact(f.tokenValue, format),
+      ).rejects.toMatchObject({ code: "PASSENGER_E04_NOT_READY" });
+    }
+  });
+
+  it.each(["html", "pdf"] as const)(
+    "uses captured facts on actual account/token %s with disclosed external E04 fixture",
+    async (format) => {
+      const f = await fixture(true, true);
+      const content = await readBytes(
+        await f.account[format](identity, f.orderId, f.response),
+      );
+      expect(content).toEqual(
+        (await f.multi.getPassengerReceiptArtifact(f.tokenValue, format))
+          .buffer,
+      );
+      const bytes = content.toString("utf8");
+      const text =
+        format === "html"
+          ? bytes
+          : [...bytes.matchAll(/<([A-F0-9]+)> Tj/g)]
+              .map((m) =>
+                Buffer.from(m[1]!, "hex").swap16().toString("utf16le"),
+              )
+              .join("\n");
+      expect(text).toContain("driver_profile_declared");
+      expect(text).toContain("TWD 85.01");
+      expect(text).toContain("TWD 190.37");
+      expect(text).toContain("TWD 2.71");
+    },
+  );
+
   it.each(["html", "pdf"] as const)(
     "serves own account and token %s bytes through the actual writer/repositories/renderer",
     async (format) => {

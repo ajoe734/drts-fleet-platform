@@ -1,3 +1,8 @@
+import type {
+  ActualTripFareBreakdown,
+  DriverDeclaredSurnameSnapshot,
+} from "@drts/contracts";
+
 export const CERTIFICATE_SUPPORT_STATES = [
   "available",
   "generating",
@@ -27,7 +32,12 @@ export interface CertificateSupportRow {
   record: Record<string, unknown>;
 }
 
-export interface CertificateSupportView {
+/** Captured completion data does not establish lawful E-04 issuance readiness. */
+export interface CertificateCapturedCompletionFacts extends Partial<DriverDeclaredSurnameSnapshot> {
+  actualFareBreakdown?: ActualTripFareBreakdown;
+}
+
+export interface CertificateSupportView extends CertificateCapturedCompletionFacts {
   certificateId: string;
   certificateNo: string;
   orderId: string;

@@ -115,6 +115,8 @@ function renderPdf(certificate: CertificateSupportView) {
 function certificateRows(
   certificate: CertificateSupportView,
 ): Array<[string, string]> {
+  const fareBreakdown =
+    certificate.actualFareBreakdown ?? certificate.e04Snapshot?.fareBreakdown;
   return [
     ["訂單 / 行程", `${certificate.orderId} / ${value(certificate.tripId)}`],
     ["車牌", value(certificate.plateNo)],
@@ -124,6 +126,16 @@ function certificateRows(
           [
             "駕駛（姓氏＋執登證號遮碼）",
             `${certificate.e04Snapshot.driverSurname} ${certificate.e04Snapshot.driverRegistrationMasked}`,
+          ],
+        ] as Array<[string, string]>)
+      : []),
+    ...(certificate.driverSurname
+      ? ([
+          ["駕駛自填姓氏（非身分核驗）", certificate.driverSurname],
+          ["姓氏來源", value(certificate.driverSurnameSource ?? null)],
+          [
+            "駕駛資料更新時間",
+            value(certificate.driverSurnameProfileUpdatedAt ?? null),
           ],
         ] as Array<[string, string]>)
       : []),
@@ -140,40 +152,25 @@ function certificateRows(
         Boolean(certificate.e04Snapshot),
       ),
     ],
-    ...(certificate.e04Snapshot
+    ...(fareBreakdown
       ? ([
-          [
-            "起程",
-            money(
-              certificate.e04Snapshot.fareBreakdown.startMinor,
-              certificate.currency,
-              true,
-            ),
-          ],
+          ["起程", money(fareBreakdown.startMinor, certificate.currency, true)],
           [
             "續程",
-            money(
-              certificate.e04Snapshot.fareBreakdown.distanceMinor,
-              certificate.currency,
-              true,
-            ),
+            money(fareBreakdown.distanceMinor, certificate.currency, true),
           ],
           [
             "延滯計時",
-            money(
-              certificate.e04Snapshot.fareBreakdown.delayMinor,
-              certificate.currency,
-              true,
-            ),
+            money(fareBreakdown.delayMinor, certificate.currency, true),
           ],
           [
             "夜間加成",
-            money(
-              certificate.e04Snapshot.fareBreakdown.nightMinor,
-              certificate.currency,
-              true,
-            ),
+            money(fareBreakdown.nightMinor, certificate.currency, true),
           ],
+        ] as Array<[string, string]>)
+      : []),
+    ...(certificate.e04Snapshot
+      ? ([
           [
             "車資合計",
             money(certificate.fareMinor, certificate.currency, true),
