@@ -11,14 +11,6 @@ import {
   type ReactNode,
 } from "react";
 import { getToneRamp, passengerChrome } from "../../lib/passenger-presentation";
-import {
-  isProductionEnvironment,
-  loadPassengerRideFixture,
-} from "../../lib/passenger-fixture-loader";
-function resolvePassengerDataMode(queryMode: string | null | undefined): "fixture" | "live" {
-  if (isProductionEnvironment()) return "live";
-  return queryMode === "live" ? "live" : "fixture";
-}
 import type {
   PassengerRideFixture,
   PassengerCertificatePresentation,
@@ -39,9 +31,6 @@ const ConnectionContext = React.createContext<{
   lastEventTime: number;
 }>({ connectionState: "connected", lastEventTime: Date.now() });
 
-function readQueryValue(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
 
 const monoFont = '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace';
 const shellInset = 14;
@@ -2326,53 +2315,23 @@ function PassengerScreen({
 export function PassengerRidePage({
   authMode = "id",
   token,
-  searchParams,
   kind,
 }: {
   token: string;
   authMode?: "id" | "token" | undefined;
-  searchParams: Record<string, string | string[] | undefined>;
+  searchParams?: Record<string, string | string[] | undefined>;
   kind: "ride" | "fares" | "receipt";
 }) {
-  const sourceMode = resolvePassengerDataMode(
-    readQueryValue(searchParams.mode),
-  );
   const [liveFixture, setLiveFixture] = useState<PassengerRideFixture | null>(
     null,
   );
-  const [previewFixture, setPreviewFixture] =
-    useState<PassengerRideFixture | null>(null);
   const [authorityError, setAuthorityError] = useState<string | null>(null);
-
-  // Fixture payloads load through a production-gated dynamic import, so they
-  // arrive asynchronously and are absent from a production bundle entirely.
-  useEffect(() => {
-    if (sourceMode !== "fixture") {
-      setPreviewFixture(null);
-      return;
-    }
-    let active = true;
-    void loadPassengerRideFixture(token, kind, searchParams.screen).then(
-      (fixture) => {
-        if (active) {
-          setPreviewFixture(fixture);
-        }
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [kind, searchParams.screen, sourceMode, token]);
-
   const [connectionState, setConnectionState] = useState<
     "connecting" | "connected" | "disconnected"
   >("connecting");
   const [lastEventTime, setLastEventTime] = useState<number>(Date.now());
 
   useEffect(() => {
-    if (sourceMode !== "live") {
-      return;
-    }
     let active = true;
     setLiveFixture(null);
     setAuthorityError(null);
@@ -2429,9 +2388,9 @@ export function PassengerRidePage({
       active = false;
       unsubscribe();
     };
-  }, [kind, sourceMode, token, authMode]);
+  }, [kind, token, authMode]);
 
-  const fixture = sourceMode === "fixture" ? previewFixture : liveFixture;
+  const fixture = liveFixture;
 
   if (!fixture) {
     return (
@@ -2454,13 +2413,7 @@ export function PassengerRidePage({
   }
 
   const handleCertificateUpdate = (cert: PassengerCertificatePresentation) => {
-    if (sourceMode === "fixture") {
-      setPreviewFixture((prev) =>
-        prev ? { ...prev, certificate: cert } : null,
-      );
-    } else {
-      setLiveFixture((prev) => (prev ? { ...prev, certificate: cert } : null));
-    }
+    setLiveFixture((prev) => (prev ? { ...prev, certificate: cert } : null));
   };
 
   return (

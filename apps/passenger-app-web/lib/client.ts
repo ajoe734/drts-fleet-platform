@@ -1,6 +1,7 @@
 import { PassengerClient } from "@drts/passenger-client";
+import { passengerFetch } from "./runtime-fetch";
 
 export const passengerClient = new PassengerClient({
   baseUrl: "",
-  fetchFn: (...args: Parameters<typeof fetch>) => fetch(...args),
+  fetchFn: passengerFetch,
 });
