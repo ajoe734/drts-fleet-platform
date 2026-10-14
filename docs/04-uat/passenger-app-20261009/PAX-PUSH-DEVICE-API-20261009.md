@@ -26,9 +26,9 @@ review, candidate CI, merge and acceptance remain separate lifecycle gates.
   `passenger-app:self`; no auth-policy change is needed. `PassengerAppModule`
   appends the facade/controller. The registry module remains controller-free;
   its global production dependency was already imported by `AppModule`.
-- `PassengerBookingService.createRide` wraps the existing sixth `commitBooking`
-  callback: persist ride/token, resolve active devices with unchanged ordering,
-  then write the route using **the same PoolClient**. Most recently seen eligible
+- `PassengerBookingService.createRide` resolves active devices with unchanged
+  ordering before `commitBooking` leases its transaction client. Its existing
+  sixth callback persists ride/token, then writes the route using **the same PoolClient**. Most recently seen eligible
   device supplies actual appId and notificationConsentVersion. Without a device,
   optional notification routing is skipped and durable Web booking succeeds.
   Passenger/order IDs are trusted server values; tenant is null and rideRef is
@@ -160,3 +160,41 @@ waiting-for argument and did not change machine status; source remained
 in_progress and followed the new Supervisor coordination. The new publication
 will supersede the documentation-only checkpoint with a reviewed candidate;
 no stale-SHA approval/CI or acceptance credit is adopted.
+
+## Codex2 review of 02f3a949: F1/F2 repairs
+
+Independent review reopened candidate `02f3a949f5d4198724d194577b5ceab1d1c84c12`
+(generation `e794982232e44a07b2ad468ffab1caf1`). Full review and runnable probes:
+`/home/lupin/workspace/drts-fleet-platform/.local/pax-push-device-api-20261014/codex2-review-02f3a949/review-findings.json`,
+SHA256 `526bac646981bbf1dbb6cc2990ec17aa48621faca1243291abb4362e2cf4a384`.
+Both findings and their evidence remain here; this is their first independent
+review, not a repeated-two-round defect. Previous same-SHA
+[CI 38609093223](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38609093223)
+and [integration CI 38609093172](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38609093172)
+completed successfully and were read: root 9318 pass / 0 fail / 47 skip,
+API 1734/0/0; native PG 5, old push PG 30, dormant 3, inventory 5 all passed
+without skips. Those green runs did not cover the findings below and are
+historical evidence, not approval of the replacement candidate.
+
+| Finding / acceptance                                                                               | Production source and repair boundary                                                                                                                                                                                                                                                        | Old reproduction → repaired result                                                                                                                                                                                                                                                                                | Commands / version / evidence                                                                                                                                                                                                                                                                                                                                                      | Remaining limits                                                                                                                                                                         |
+| -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1 `PAX-PUSH-REVIEW-F1`: all available booking leases wait for nested resolver leases              | `PassengerBookingService.createRide` callback now resolves metadata before `PassengerBookingRepository.commitBooking` connects. Resolver policy/SQL, pool size and workflow are unchanged; persistRide and route write still use the outer client, followed by history and outer settlement. | Original 02f source at regression anchor `0a71bf34abe2f697ed2040bdf6388d5b26cb39a7`: max1 and max6 time out, waiting=1/6, idle=0, publication=0. The checked-in two-case regression fails (exit1). Repair source `4bff46b28` completes both (exit0), no queued leases, all histories/COMMIT/publications present. | `pnpm exec vitest run tests/unit/pax-push-device-api-20261009/bounded-pool-booking.test.ts`; old-bounded-tests.json/log and f1-tests.json/log. `node .local/pax-push-device-api-20261014-r2/bounded-pool-probe.cjs candidate 1` and `candidate 6`: old-pool1/6.json exit1; new-pool1/6.json exit0. Narrow regression plus original atomic/device suite: 29 pass / 0 fail / 0 skip. | Real installed pg Pool; only socket/query results and external account/fare/trusted-order boundary are synthetic. Proves reservation and production call flow, not native SQL/locks.     |
+| P2 `PAX-PUSH-REVIEW-F2`: five-argument Web constructor passes push fixture as complaint dependency | Exact granted `booking-ui.test.tsx` adapter inserts `undefined` at fifth position and keeps the push fixture at sixth. All cases/assertions retained; no tsconfig/workflow change.                                                                                                           | Original 02f source: actual compiler reports TS2554 Expected 6 arguments, got 5 (exit1). Repair source `4bff46b28`: targeted semantic check must eliminate TS2554; existing 50 Web cases and 92 booking/history/receipt cases all pass.                                                                           | Reviewer script copied unchanged: `node .local/pax-push-device-api-20261014-r2/web-fixture-typecheck.cjs candidate`; old-web-types.log, new-web-types.log. Combined regression.json/log records all original consumer cases.                                                                                                                                                       | Pre-existing TS2741 missing bfcacheId is unchanged and outside the finding; targeted exit status covers constructor TS2554, not a clean semantic check of this previously excluded .tsx. |
+| `pax-push-device_api_and_first_party_route`: preserve original behavior and gates                  | Original session/ownership API, nullable tenant V0116, same-client route writer, no-device booking and default-off transport; earlier inventory/native replay repair retained.                                                                                                               | Combined local regression: 320 pass / 0 fail / 35 skip (exit0); actual API registry: 28/0/0 (exit0). Local native SQL cases are skipped, not passed.                                                                                                                                                              | `.local/pax-push-device-api-20261014-r2/regression.json/log`, api-registry.log. Hosted final candidate must rerun native5, oldPG30, dormant3, inventory5, original push gate and full CI before handoff.                                                                                                                                                                           | Independent exact-SHA review, merge and original acceptance remain outstanding; no provider/native-device delivery claim.                                                                |
+
+Repair evidence directory (absolute):
+`/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-pax-push-device-api-20261009/.local/pax-push-device-api-20261014-r2/`.
+The dependency-loading failure on initial probe execution is not a behavioral
+reproduction. Worktree dependencies were repaired with
+`CI=true pnpm install --offline --frozen-lockfile --ignore-scripts` (exit0), then
+the old-source probes and regression were rerun and their actual failures read.
+Initial API typecheck also lacked built `@drts/control-plane-auth`; build the
+existing contracts/auth packages and rerun it, retaining both results.
+
+The final publication receipt `final-ci-evidence.json` in that directory records
+the full immutable candidate SHA, matching local/remote/PR heads, same-SHA CI
+run/job conclusions and raw downloaded `test-results` counts/hashes. At document
+publication hosted checks are pending; the owner reads every started required
+check and supplies the completed receipt in the original task handoff, without
+another source push or adopting the previous candidate's green CI. No product
+runtime, local PG/browser server or Docker is started on this VM.
