@@ -1,0 +1,20 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"],
+      "@drts/passenger-client": [
+        "../../packages/passenger-client/src/index.ts"
+      ],
+      "@drts/contracts": ["../../packages/contracts/src/index.ts"],
+      "@drts/ui-tokens": ["../../packages/ui-tokens/src/index.ts"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx", "../driver-app/react-test-renderer.d.ts"],
+  "exclude": ["node_modules", "android", "ios"]
+}
