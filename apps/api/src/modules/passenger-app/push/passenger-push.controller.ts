@@ -11,8 +11,9 @@ import { PassengerPushService } from "./passenger-push.service";
 @RequireRealms("passenger")
 export class PassengerPushController {
   constructor(private readonly push: PassengerPushService) {}
+  // Registration upserts the existing actor/app/token device through the registry.
   @Post()
-  async register(
+  async upsert(
     @CurrentIdentity() identity: RequestIdentity | null,
     @Body() body: unknown,
   ) {

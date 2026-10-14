@@ -419,9 +419,9 @@ describe("Existing account/session and owned push device API facade", () => {
       null,
       Object.assign({}, f.identity, { realm: "partner" }) as never,
     ]) {
-      await expect(
-        f.controller.register(identity, f.body),
-      ).rejects.toMatchObject({ status: 401 });
+      await expect(f.controller.upsert(identity, f.body)).rejects.toMatchObject(
+        { status: 401 },
+      );
       await expect(
         f.controller.unregister(identity, deviceId),
       ).rejects.toMatchObject({ status: 401 });
@@ -444,7 +444,7 @@ describe("Existing account/session and owned push device API facade", () => {
   });
   it("registers and touches with the real account owner, normalizes wire fields, and returns only deviceId", async () => {
     const f = deviceApi();
-    const response = await f.controller.register(f.identity, f.body);
+    const response = await f.controller.upsert(f.identity, f.body);
     expect(response.data).toEqual({ deviceId });
     expect(JSON.stringify(response)).not.toContain("token");
     expect(JSON.stringify(response)).not.toContain("hash");

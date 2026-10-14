@@ -102,12 +102,23 @@ describe.skipIf(!hostedPaymentEnabled)(
       const a = await h.authenticatedAccount();
       const other = await h.authenticatedAccount();
       const p = push();
-      await expect(p.controller.register(null, body())).rejects.toMatchObject({
+      await expect(p.controller.upsert(null, body())).rejects.toMatchObject({
         status: 401,
       });
-      const response = await p.controller.register(a.identity, body());
+      const registration = body();
+      const response = await p.controller.upsert(a.identity, registration);
       expect(Object.keys(response.data!)).toEqual(["deviceId"]);
       const id = response.data!.deviceId;
+      const repeated = await p.controller.upsert(a.identity, registration);
+      expect(repeated.data).toEqual({ deviceId: id });
+      expect(
+        (
+          await h.pool!.query(
+            "SELECT device_id FROM iam.phase1_passenger_push_devices WHERE drts_passenger_id=$1",
+            [a.owner],
+          )
+        ).rows,
+      ).toEqual([{ device_id: id }]);
       expect(await p.devices.resolveActiveDevices(a.owner)).toEqual([
         expect.objectContaining({
           deviceId: id,
@@ -124,7 +135,7 @@ describe.skipIf(!hostedPaymentEnabled)(
       expect(await p.devices.resolveActiveDevices(a.owner)).toEqual([]);
       await h.accounts.logout(a.session.refreshToken);
       await expect(
-        p.controller.register(a.identity, body()),
+        p.controller.upsert(a.identity, body()),
       ).rejects.toMatchObject({ status: 401 });
     });
 

@@ -127,3 +127,36 @@ records the failure and scope request; its auto-triggered CI is not source
 acceptance evidence. No failing candidate was handed off, no done was called,
 and no independent review/merge/acceptance completion is claimed. Original
 owner/reviewer, dependencies and acceptance key remain unchanged.
+
+## Same-task repair after Normal Supervisor coordination
+
+After recording the above failure, the task's canonical `next` received Normal
+Supervisor's working320 hosted observation and exact source guidance (read
+2026-10-14): the existing registry reuses the same actor/app/token row, and its
+configuration operation can be named `upsert` to match actual behavior. This
+resolved the scope/spec interpretation without editing the security test or
+adding a new mechanism. The original roles, scopes, dependencies and key remain.
+Observation artifact:
+`/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261014T0948-root/original-Push-source-hosted-observation-20261014/qualified-working320-real-Push-native5-success-and-existing-register-classification-failure.json`,
+SHA256 `4a588ee04e33819a5abe5036e2a8cd554f1a3b36bcb896aac39e308f9010acf5`.
+
+The controller handler is now `PassengerPushController.upsert`; HTTP POST path,
+wire fields, persistent session/ownership and facade `register` call are unchanged.
+This names the existing production registerDevice upsert behavior; no new
+idempotency header/service/cache/policy, scanner exception or allowlist is added.
+The original scanner's existing upsert entity-CRUD classification applies;
+its 49 expected unprotected rows and novel-command negative controls are intact.
+The original native registration case now repeats the identical actor/app/token
+payload and asserts the same device ID plus exactly one stored device row.
+Own controller callers are updated; no foreign fixtures need further change.
+
+| Finding                                         | Adjacent source evidence and repair                                                                                                                              | Verification                                                                                                                                                                                                                                                                                                                                                         | Pending                                                                                                                                                                                                 |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| New registration classified as a create command | Source320 failed the real scanner at line497; controller now accurately exposes the existing native upsert operation. Production registry mutation is unchanged. | Original `tests/security/idempotency-regression-guard.test.ts` **5 pass / 0 fail / 0 skip**, new socket-free unit **27/0/0**, dormant **3/0/0** using the actual checked-in files; combined command exits0, `.local/pax-push-device-api-20261014/upsert-repair.json` and `.log`. Root typecheck and scoped ESLint exit0 (`typecheck-upsert.log`, `lint-upsert.log`). | Five native cases, including strengthened repeat-device assertions, must pass on the new published source SHA in hosted CI. Prior source320 PG evidence is historical, not a substitute for this rerun. |
+
+The earlier unresolved-boundary entry is retained as candidate history, not the
+current disposition. The attempted blocker command lacked its required
+waiting-for argument and did not change machine status; source remained
+in_progress and followed the new Supervisor coordination. The new publication
+will supersede the documentation-only checkpoint with a reviewed candidate;
+no stale-SHA approval/CI or acceptance credit is adopted.
