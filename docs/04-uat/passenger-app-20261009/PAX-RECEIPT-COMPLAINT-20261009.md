@@ -527,3 +527,343 @@ controller/ownership/rating/intake/Ops business logic 均使用正式實作。
 本輪可以正常固定 source candidate 交獨立 Codex；缺真實外部 facts 不阻止已授權
 source 實作交審。Source/review/CI/merge 與真實 E04、CRM/PG/HTTP/browser/PSP/native/manual、
 full-system DONE 仍分開；原兩項 key 在 genuine evidence 前維持 **UNRECORDED**。
+
+## 2026-10-14 R2：supported token low-rating contact 最小重現與修正邊界
+
+本節是原 Codex2 owner 對新 source finding `F-TOKEN-LOW-RATING-CONTACT` 的定位
+checkpoint，**不是修復候選或交審**。保留上文所有 finding、原 review、CI、merge 與
+未解 acceptance，不以此前 account-path 的 PASS78 覆蓋 token-path 的產品失敗。
+
+### 本輪來源與執行身分
+
+- 原獨立 Codex receipt：`REVIEWED_SHA=ddbc97426b8dc881ac1a5ec95202149ed31cc829`，
+  generation `818b341aacee41c1a171db40861cf927`，acceptance-review request
+  `85d5fef97038444bb31589158fbc2270`，此前正常 merge
+  `32eb87f19e2a7ccb978057785bfad4116246916f`。Source reopening 已由原 reviewer 完成；
+  不沿用原 approval，兩個原 key 仍 UNRECORDED。
+- 凍結 R2：canonical root 的
+  `.local/goal-continuation-20261014T0238-root/receipt-continuation/token-low-rating-source-followup/PAX-RECEIPT-R2-SUPPORTED-TOKEN-LOW-RATING-CONTACT-20261014.md`。
+  已讀原 task/common A9/A12、SA/SD、定稿 E18/E18b、實際 caller/contract/service/repository/V0056/V0114。
+  Ride 原獨立 receipt SHA256 仍為
+  `4059c81796baf2344522066b6a9467c73be906369a7e384d7a331d852fdae6b2`。
+- 留在 Supervisor assigned isolated worktree，以新 branch
+  `codex2/pax-receipt-complaint-20261009-token-contact-20261014` 續作。
+  `git fetch origin` 後，從32eb87正常 fast-forward 至執行 source
+  `a6890213c907017e3c1be8761d5cd94ba601e3c0`；該新 branch 當時無 remote ref 或 PR。
+  未改寫任何 published history，未切 canonical root。
+- 核對 source SHA256 與原 reviewer 一致：MultiTaxiService
+  `3d7656a9aa672fdaef861616b5afaed97ec2c1b4cf9446d67e67a82ea163de75`、MultiTaxiRepository
+  `23163e1efc2c00e00cc3c2f5125fb78c096e46fa63323ae1fc20c63af46ca2db`、rating contract
+  `6f73eb4471dff5e29d5fbe3dad1a24ef08f0b20bcea329d082df3f3f58faf55e`。
+  本 checkpoint 沒有 product、migration、auth、workflow、QA harness 或外部環境修改。
+
+### 最小重現、實際差異與邊界
+
+已加入可重跑的
+`tests/unit/pax-receipt-complaint-20261009/token-rating-contact.test.ts`，直接執行
+`MultiTaxiController.submitPassengerRating` → `MultiTaxiService.submitPassengerRating`
+→ `MultiTaxiRepository.persistPassengerRating`。只 fixture SQL 回應與 completed
+order/assignment；實際 digest、scope/expiry/revocation、score/tags、交易 SQL、mapper
+與 replay logic 全用正式實作。未知 SQL 直接拋錯；沒有複製 business SQL、建鏡像表或啟動 server。
+
+觸發為 valid unexpired `ride:rate` token、已完成有 assignment 的 multi_taxi_direct
+order、`{score:2,contactRequested:true}`。預期成功前原子保存原始 contact choice、
+一個 canonical CRM case 及初始 timeline；同 payload 重試保留 rating/case，改 contact
+則衝突。實際 rating 成功並 COMMIT，case 寫入為0；同 payload 同 ratingId，反向 contact
+仍成功。這兩項是 **FAIL1 的產品失敗**，不是 import/setup 失敗。False、omitted、high
+score 及 missing/expired/revoked/wrong-scope/incomplete/unassigned 六種拒絕控制共9例 PASS。
+
+原因逐一核對：
+
+- `SubmitPassengerTripRatingCommand` 只有 score/tags/comment；controller 原樣傳入。
+- `MultiTaxiService.submitPassengerRating` 不讀 contact，cached replay 只經
+  `assertIdempotentRating` 比對 score/tags/comment，persist 沒有 hook。
+- `MultiTaxiRepository.persistPassengerRating` 的 accountHook 才執行 account/booking
+  ownership、completion/payment/window 與 consent/CRM；token caller 沒有此 hook。
+- `ComplaintService.preparePassengerRatingHook`、
+  `ComplaintRepository.persistPassengerRatingConsent/persistPassengerIntakeWithClient`
+  及 V0114 明確要求 active `passenger.accounts`、`booking_histories` FK。
+  Legacy token subject 不能偽裝 drtsPassengerId；不能假造帳號或改已套用 V0114。
+
+### 已送 Supervisor 的具體配號與 QA 協調請求
+
+透過本 task 的 current-release CLI `progress` 於 `2026-10-14T04:51:49Z` 記錄。
+現有 schema-allocation 僅配本 task 的 V0114；V0116 屬 Push，V0117/118 另有 owner。
+提出 **尚未配給、不得視為授權的**
+`V0119__passenger_ride_rating_contact.sql`（須 Supervisor 核對全域保留並決定實際檔號）。
+本輪不自行改 schema-allocation，也不建立未配號 migration。
+
+待配號的最小 durable seam 建議為 `ops.passenger_ride_rating_consents`，使用
+V0056 的 varchar token/order/subject/rating authority；不使用 account/booking FK。
+一筆 immutable consent 同時作 token-source intake，保存原始 boolean、normalized
+payload hash、原 token id、rating id 及 optional canonical CRM case FK。
+對 (order, subject)／rating 唯一、case 唯一；所連 token/rating 的 order 與 subject
+必須一致。False／omitted 新請求按相容行為記 false，高分 true 保存原選擇而不建案。
+既有未捕捉 consent 的歷史 rating 不得補猜同意或追建案；確切 legacy replay 行為須在
+實修時按現有 account semantics 與 omitted compatibility 逐例核對，不捏造歷史 consent。
+
+下一個不可分割 source 單元：既有 token contract 增 optional boolean；用已驗證 token
+的真實 authority，沿現有 repository transaction seam 加 token 專用 hook（不走
+account hook）；交易內重讀/鎖定有效 token 與 order/assignment/completion/payment/window，
+以既有唯一鍵/lock 將 rating、consent/intake、CRM case/timeline、driver summary 同交易提交，
+commit 後才更新 cache/回成功。既有 canonical ComplaintService/Repository 建案與 Ops
+durable source read 擴充此 token intake；不另造 token complaint endpoint、假帳號或 auth。
+正常／lost-ack replay 必須讀原始 durable 記錄；改 payload/contact 必須409；不以 cached
+rating 跳過 consent 比對。原 account40、intake38、E04 全部保留。
+
+Supervisor 尚須讓原 `PAX-QA-20261009` 依正式新 migration 擴充 supported-token cases：
+selected/unselected/omitted/high-score、same/changed payload、concurrent same/different
+choice、rating/CRM/timeline/intake/consent/summary failure rollback、commit lost reply、
+restart/peer Ops、expired/revoked/wrong-scope/foreign order/subject/assignment、payment/window。
+本 owner 不接管 QA harness；mock SQL 不能替代正式 PG constraints/concurrency、mounted
+HTTP/peer Ops 或真實 runtime acceptance。
+
+### 本輪 finding／acceptance 證據表
+
+證據位置是 assigned WT `.local/pax-receipt-complaint-20261009/token-contact-20261014/`。
+Node v22.23.2、pnpm10.33.0、TypeScript5.9.3、Vitest4.1.4。
+
+| Finding／驗收項                               | 原始碼與修改位置                                                                         | 舊版 → 修正版結果                                | 命令、退出碼與 evidence                                                                                                                                                                                                                                                                              | 未驗與具體限制                                                                                                                     |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| F-TOKEN-LOW-RATING-CONTACT                    | controller → token service → rating repository；新增 own regression，product source 未改 | a689021 原缺陷2 FAIL／9 PASS；修正版尚未實作     | `pnpm exec vitest run tests/unit/pax-receipt-complaint-20261009/token-rating-contact.test.ts --maxWorkers=1 --no-file-parallelism`：`old-production-regression.log` exit1，11例；formatted 同案例結果及其他 checks 見下方                                                                            | 先完成 Supervisor 正式 forward migration 配號；不可套 account FK 或自行分配檔號。紅色 regression 是 checkpoint，不 handoff。       |
+| pax-complaint_intake_and_low_rating           | 原 account rating/consent/CRM、intake 與 Ops source 保留                                 | account40+intake38 PASS；supported token 仍 FAIL | `pnpm exec vitest run tests/unit/pax-receipt-complaint-20261009/rating-transaction.test.ts tests/unit/pax-receipt-complaint-20261009/complaint-intake.test.ts --maxWorkers=1 --no-file-parallelism`：`account-intake-regression.log` exit0，78/78，6.40s；已讀預期 fault-injection rollback warnings | Key UNRECORDED；token source repair、formal PG/HTTP/concurrency/peer Ops pending。                                                 |
+| pax-receipt_e04_fields_and_passenger_download | 本輪未改 E04 producer/consumer/renderer/download；原未解行保留                           | 無新 acceptance credit                           | 本輪不重跑無關 E04 probe；原 FAIL2 E04_REQUIREMENTS_UNMET 及原 scoped PASS 皆保留                                                                                                                                                                                                                    | Key UNRECORDED；lawful issuer/operator、masked credential、captured payment/total convention 及 runtime/legal witness 仍 pending。 |
+
+此 checkpoint 只能普通 commit/push 留存 red reproduction 與修正邊界，不是可接受候選。
+尚未 handoff、approve、record-acceptance 或 done；沒有 product/API/PG/browser/preview/Docker
+server、實際外部服務呼叫、workflow dispatch 或部署。
+
+完成並讀過本輪其餘檢查結果：
+
+- 格式化後相同 production regression：`old-production-regression-formatted.log` exit1，
+  仍2 FAIL／9 PASS，6.52s。缺 case 與 changed contact 被接受，都是同一正式 source 缺陷。
+- `pnpm --dir apps/api exec vitest run tests/unit/multi-taxi.service.test.ts tests/unit/multi-taxi.controller.test.ts --maxWorkers=1 --no-file-parallelism`：
+  `legacy-token-baseline.log` exit0，36/36，7.90s。舊測試未涵蓋 contact，不能抵銷新紅例。
+- `pnpm exec eslint tests/unit/pax-receipt-complaint-20261009/token-rating-contact.test.ts --max-warnings=0`：
+  `scoped-lint.log` exit0。兩個 own 檔經 Prettier 格式化，`git diff --check` exit0。
+- `pnpm typecheck:root`：`root-typecheck.log` **exit2**。共享依賴無法 resolve
+  `@drts/passenger-client`，以及 `@drts/api-client` 指向另一個 QA worktree，導致 private
+  `requestEnvelope` 身分不一致與相依 implicit-any diagnostics；無新增 own test diagnostics。
+  未安裝套件、改共享 node_modules／compiler config 或以此環境失敗充作產品重現。
+  此命令不是 PASS；所有已啟動檢查均已等候結束並讀結果。
+
+## 2026-10-14 R3：Supervisor 正式配號與原 owner 續修
+
+本次 dispatch 保留 `18a48f77f2445699faafa8bad8a67d5302d6e6fb` red checkpoint，
+local／remote／draft PR2627 head 一致。於 05:03:24Z，實際 Supervisor 已核對
+全域保留並在同一 task 的 `migration_allocations` 正式配給
+`infra/migrations/V0119__passenger_ride_rating_contact.sql`，更新 frozen R3 spec。
+先前配號卡點已解除；owner 的 05:03:33Z note 在讀到新狀態前送出，不能用該舊 note
+否定正式 allocation。已用 current-release CLI progress 記錄續修。
+
+正式 allocation 原始 bytes 已複製到
+`docs/04-uat/passenger-app-20261009/schema-allocation-20261014-token-rating-contact.json`，
+SHA256 `3c922809269f43b83d32b5a68a974ccbba9ab7c7ed468f3f84b5f13e9d9ad1db`。
+不修改 dirty canonical root 全域 ledger，不重寫 V0114、不捏造 account。
+V0119 以現有 varchar token/order/subject/rating 與 canonical CRM FK 保存原始 choice；
+複合 FK 同時核對 rating score、order、subject 與原 token，唯一鍵避免重複 consent/case。
+舊 rating 不補猜 contact choice。此 schema checkpoint 尚不是修復候選或 PG 驗收。
+
+本次 assigned WT 原 `.local/.../token-contact-20261014/` 目錄不在；既有 tracked
+red regression／UAT 仍完整。新的可追溯紀錄位於
+`.local/pax-receipt-complaint-20261009/token-contact-resume-20261014/`，不冒稱恢復舊 log。
+在未改 product source 的 `18a48f77f2445699faafa8bad8a67d5302d6e6fb`：
+
+- 相同正式 token regression 命令：`token-red.log` exit1，2 FAIL／9 PASS，5.36s；
+  原缺 CRM 與反向 contact replay 被接受皆重現。
+- 相同 account rating／intake 命令：`account-intake.log` exit0，78/78，6.83s；
+  fault-injection rollback warnings 已讀。
+- 相同 API legacy token service／controller 命令：`legacy-token.log` exit0，36/36，7.07s。
+- Node22.23.2、pnpm10.33.0、Vitest4.1.4、TypeScript5.9.3。以上 checks 均完成並讀取。
+
+後續 source repair、新版正負與 failure/replay 回歸、同 SHA 獨立 review／CI／merge 仍待完成；
+原兩項 acceptance key 與 PG／mounted HTTP／peer Ops／legal facts 全部保留未驗。
+
+### R3／R4 修復結果與正式呼叫路徑
+
+保留相鄰候選 `ddbc97426b8dc881ac1a5ec95202149ed31cc829`、原 generation818、
+原 Codex 的 source reopening／Ride f59 review 與18a red checkpoint。新 source
+在 `6d58eacd4` 完成；`b86e70482` 補 production regression，`7ba8a7112` 完成
+R4 ledger append 與 Ops negative assertion 修正。全部 ordinary push，沒有歷史改寫。
+最終 candidate identity 以本 task CLI handoff 與下面的 publication manifest 為準，
+不得沿用舊 source approval／CI／merge32。
+
+實際修復位置與 caller：
+
+- 既有 `SubmitPassengerTripRatingCommand` 增 optional boolean `contactRequested`；
+  既有 `MultiTaxiController.submitPassengerRating` 保持同一路由／envelope。
+  `MultiTaxiService.submitPassengerRating` 核對 token 與 order subject、驗證 boolean，
+  durable 路徑每次都進 transaction，不能由 rating cache 提早回成功。
+  既有 account caller 的 constructor 位置與 `submitTrustedPassengerRating` 不變；
+  `MultiTaxiModule` 附加既有 `ComplaintModule`，注入同一 canonical service。
+- `MultiTaxiRepository.persistPassengerRating` 的原 client／execute seam 接收 token
+  context；同一 transaction 依 token ID/digest/order/subject 重讀並 share-lock 有效
+  scope/expiry/revocation、正式 order/subject/completion，沿既有 rating advisory lock／
+  unique upsert 與 completion task/payment/window 檢查，再保存 consent／CRM／summary。
+  Account hook 的 account/booking locks 與拒絕語意保留；token 不走 account hook。
+- `ComplaintService.preparePassengerRideRatingHook` 沿現有 case／timeline builder；
+  低分且 true 才有 draft，`ComplaintRepository.persistRideTokenRatingConsent` 用原
+  `persistChanges(..., client)` 寫 canonical CRM，保存不可變 consent/intake 後才 COMMIT。
+  exact replay 讀原 choice/hash/case/timeline；changed score/tags/comment/contact 為409，
+  不覆寫資料或重建 case。commit／audit 回覆遺失可沿原 durable record 重試。
+- 新 omitted contact 按 false 保存；high score true 保留 true 而沒有 case。
+  pre-V0119 historical rating 沒有 choice 時，omitted exact retry 相容、不 backfill；
+  explicit true 或 false 都回 `PASSENGER_RATING_CONSENT_UNAVAILABLE`，不猜歷史同意。
+  explicit choice 缺 durable storage／CRM service 時回503，不顯示成功。
+- 原 `listPassengerCases/getPassengerCase/getPassengerTimeline` 的正式 SQL source 範圍
+  附加 token consent 所連 canonical case；既有 Ops controller/service 可跨新 instance
+  讀取。commit 後才 publish/audit；token audit 為 `system`／null actor、
+  `source=passenger_ride_token` 與真實 subject，沒有冒稱 first-party account。
+
+V0119 正式 SQL 與 production repository 逐欄核對：
+
+| 正式欄位／constraint                     | Production binding／依據                                                      |
+| ---------------------------------------- | ----------------------------------------------------------------------------- |
+| order_id／passenger_subject_ref，複合 PK | rating.orderId／rating.passengerSubjectRef，現有 varchar(255)；正式 order FK  |
+| rating_id，UNIQUE                        | storedRating.ratingId；與 order/subject/score 的複合 FK 同時對照 V0056 rating |
+| original_token_id                        | verified token.tokenId；與 order/subject 的複合 FK 同時對照 V0056 token       |
+| rating_score                             | storedRating.score，smallint 1–5；複合 FK 防不同 rating score                 |
+| source                                   | DB default/check `passenger_ride_token`，不是 account source                  |
+| contact_requested／request_hash          | 原始 normalized boolean／score+sorted tags+trimmed comment+choice SHA256      |
+| complaint_case_no，UNIQUE／CRM FK        | 同 client 的 canonical case；CHECK 要求且僅允許 selected score≤2 有 case      |
+| created_at                               | original storedRating.submittedAt；retry 不修改 consent                       |
+
+Applied V0114 bytes 與 a689 完全相同，SHA256
+`14a5d8a13ab5be4bf7b1e1b978c0c0dde115460df4fefbcb9f6a0691b86df4ed`。
+Account/booking、E04 writer/renderer/download、OwnedMobility、auth、workflows 與 QA harness
+沒有 source diff。上述 DDL/SQL 核對不是 PostgreSQL 執行或 concurrency 驗收。
+
+R4 frozen spec SHA256 `8f9df5d16512a83fbe8a5e50721d305eedee87a61015b709ff4a9af88d51b605`
+正式授權 OWN WT ledger 的唯一 V0119 append；entry source hash
+`beaaaf6d4a1c3b76f5a4fa7370a4cc437015b15325e0f250372168607def0a9b`。
+移除新最後一列後，JSON 所有舊 semantic values 與 accepted a689 完全一致，
+無其他 allocation/amendment 改動、無 dirty canonical root 寫入或匯入。
+兩個既有 guard tests 與全部 assertions 原封保留。
+
+### 本輪完整驗證表與仍未滿足的 acceptance
+
+Evidence 位於 assigned WT
+`.local/pax-receipt-complaint-20261009/token-contact-resume-20261014/`。
+`source-evidence.json` 保存命令、exit code、版本、執行來源、log 與 source hashes；
+`publication.json` 保存最終完整 candidate SHA/branch/PR/local-remote identity。
+外部 SQL 回應、completed order/assignment、transaction acknowledgement、audit failure
+是 fixtures；正式 controller/service/repository/hash/mappers/SQL/case builders 都未 mock。
+Fixture commit/rollback 只是回應邊界，不能證明 PostgreSQL 原子性、锁或 FK 行為。
+
+| Finding／驗收項                                                     | Source／修改                                                                                           | 舊版 → 修正版                                                                                                                                                                                                                                                          | 命令／結果／evidence                                                                                                                                            | 未驗與限制                                                                                                                                 |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| F-TOKEN-LOW-RATING-CONTACT：score2/selected 與 changed-choice retry | 同正式 token controller→service→rating repo→Complaint service/repo                                     | 18a 2 FAIL/9 PASS → same 11 assertions PASS；擴充46皆 PASS                                                                                                                                                                                                             | 原 token vitest 命令：`token-red.log` exit1；`token-green-initial.log` exit0/11；`affected-root.log` exit0 含 token46                                           | SQL fixture；未宣告 PG、mounted HTTP、concurrency、peer Ops 真實驗收                                                                       |
+| Token normal/replay/failure/authority 正負回歸                      | V0119 consent；同 client CRM/timeline/summary；Ops durable reads                                       | score1/2 true、false/omitted/high true；exact/changed payload；historical choice；restart/Ops；7種 failure rollback、lost commit、failed rollback/audit、cached expiry/revocation/scope、foreign subject/completion/assignment/payment/window、invalid contact 全 PASS | `affected-root.log` exit0，342/14 files，39.52s；新 token46、原 account40/intake38、receipt29/regeneration 與 affected booking/CRM 全保留                       | 尚需原 PAX-QA 使用正式 migrations+production repositories 量測 concurrent same/different choice、所有 rollback/restart／真正 HTTP/Ops 路徑 |
+| F-V0119-ALLOCATION-CONSUMER                                         | 既有 global ledger passenger_app_allocations 只 append Supervisor exact entry                          | 原 unchanged tests 2 FAIL/56 PASS（119≤118）→ 58/58 PASS                                                                                                                                                                                                               | 同兩個 vitest files：`allocation-consumers.log` exit1；`allocation-consumers-final.log` exit0，2.10s；PAX-SD 既有3 PASS0，`pax-sd-ledger.log`                   | 不改 test、assertions、gate 或 schema 配號；不是 DB 行為                                                                                   |
+| 原 account/E04/CRM/API 整體回歸                                     | Account hook、原 capture/download/regeneration、Ops lifecycle/incident/audit、rating reads/export/repo | 原 78/36 baselines PASS；affected root342、API114 PASS                                                                                                                                                                                                                 | root 同上；API10 exact files：`affected-api-final.log` exit0/114/10，16.14s；初始 API argv7實際只匹配5 files/73，未冒稱7檔全跑                                  | unit PASS 不取代真实 completion/PSP/PG/HTTP/browser/native/legal evidence                                                                  |
+| Source type/build/lint                                              | 正式 contracts/auth/API compiler 與 scoped ESLint                                                      | `pnpm --dir apps/api build` PASS0；ESLint PASS0；root typecheck仍環境 FAIL2                                                                                                                                                                                            | `api-build.log` exit0，含 prebuild；`scoped-lint.log` exit0；`typecheck-final.log` exit2，缺 passenger-client + foreign QA api-client links；無 own diagnostics | 未修改 compiler/config/shared dependency links，沒有隱藏 workaround；root command 不標 PASS                                                |
+| pax-complaint_intake_and_low_rating                                 | 本輪 token producer 已修；原 account/intake/Ops 行為保留                                               | Source positives/negatives 通過；required key **UNRECORDED**                                                                                                                                                                                                           | 上述 production-path source evidence；新 SHA/gen 必須獨立 review、同 head full CI/protected merge                                                               | 正式 PG transaction/unique/concurrency、mounted HTTP/peer Ops/acceptance 仍由原 QA；不能借 account fixture 綠燈                            |
+| pax-receipt_e04_fields_and_passenger_download                       | 本輪未改 E04 source，原全部 finding 保留                                                               | 原 receipt29/regeneration source PASS 保留；完整 E04 原 FAIL2/NOT_READY 未豁免                                                                                                                                                                                         | affected root receipt source回歸 PASS0；不重跑與本 seam 無關的缺外部facts probe                                                                                 | Key **UNRECORDED**；issuer/operator/masked credential/payment display/total/toll、真實 download/PG/HTTP/legal facts pending                |
+
+保留初始 FAIL：`token-green-expanded.log` 45 PASS/1 FAIL（新 fixture test 期待了不存在的
+Ops error `COMPLAINT_CASE_NOT_FOUND`，正式回傳是 `NOT_FOUND`），修正 own assertion 後
+root342 PASS；不是 product Ops 故障，也不算舊 token 缺陷重現。
+第一個 ledger Prettier check FAIL1 只因新 array 的格式，僅格式化新增列後通過；
+未削弱 assertions 或重寫其他設計。所有已啟動本機 checks 均已結束並讀結果。
+
+最終 source candidate 走 normal substantive commit/ordinary push/原 PR2627/newSHA-gen
+handoff 給原獨立 Codex。Hosted CI、review、merge 是新 candidate 的後續 lifecycle evidence，
+pending 不冒稱 PASS；原 ddbc 綠燈不借用。本 VM 沒有 product/API/PG/browser/preview/Docker
+server、workflow dispatch/rerun、provider/external service call 或部署；沒有 approve、
+record-acceptance 或 done。
+
+Final canonical consistency、repo classification、六筆 own trailers、ESLint 均 PASS0。
+包含 immutable Supervisor allocation leaf 的 Prettier check 為 **FAIL1**，只指出
+`schema-allocation-20261014-token-rating-contact.json` 的單元素 array 格式；其餘九檔
+格式檢查 PASS0。R3 明文要求「Copy the exact allocated record bytes」，因此保留
+`3c922809...` 原始 bytes，不用 formatter 改寫簽定 allocation、不加 ignore/config。
+此格式 FAIL 原樣記入 final evidence；不宣稱整個 formatter command 通過。
+
+### Final compatibility audit：F-HISTORICAL-TOKEN-TAG-REPLAY
+
+`689dd035c1f389b4341107ccb92277d811fd8d36` 的兩個正常 same-head hosted runs
+38517057695／38517057688 已 **completed/success**，所有必須 jobs 結束並讀取
+JSON、raw logs；unit/token46、integration、build、typecheck、IAM、cross-surface／39-route
+E2E、smoke 均通過，applicable skips 明列。兩份 raw／plain log 留在上述 evidence 目錄。
+這些綠燈只屬689。owner 尚未 handoff，最後 source audit 又定位下一項相容性 finding，
+因此689不交審、不借用它的 CI 給後續 SHA；待兩個 runs 完成後才改下一個 source unit。
+
+觸發是 V0056 允許的 historical rating：stored tags `["b","a"]`、原 consent 缺失，
+合法 token 對同 order/subject 以 omitted-contact、normalized tags `["a","b"]` exact retry。
+原 `MultiTaxiService.assertIdempotentRating` 對 stored tags 排序後比較，會保留原 rating。
+新 token transaction 借用 account guard 的 raw JSON ordering 比較，誤回409。
+實際 current `Controller→Service→Repository` probe 在689 **FAIL1**；不是 fixture/import
+失敗。修正僅在 token context 排序 comparison copy，原 record 不修改、account comparator
+不修改，choice/hash/CRM/window/ownership 拒絕均保留。
+
+| Finding／驗收項                                                           | Actual source／修改                                                                                                           | 舊版 → 修正版                                                                                                                                  | 命令／結果／evidence                                                                                                                                                                                                                                                                                                                                                                                      | 限制                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F-HISTORICAL-TOKEN-TAG-REPLAY／R2 legacy score/tags/comment compatibility | 原 token `assertIdempotentRating`；新 `MultiTaxiRepository.persistPassengerRating` comparator；原 own token regression 增一例 | 原 a689 production Service PASS0/1 → 689 production path FAIL1/1 → 666658aec same path PASS0/1，original raw tags/ratingId/absent consent 保留 | probe 位於 `.local/.../historical-tag-probe/tests/unit/`；`pnpm exec vitest run --root <probe root> --config "$PWD/vitest.config.ts" tests/unit/historical-tags.test.ts -t 'historical unordered tags exact retry' --maxWorkers=1 --no-file-parallelism`：`historical-tags-before.log` FAIL1／`historical-tags-after.log` PASS0；legacy variant `historical-tags-legacy-final.log` PASS0/1+46 SKIP，6.20s | 外部 SQL/order/assignment fixture；原 service 從 a689 git object 載入，只重定位 import resolution，business methods 不變；未 reset/switch 活躍 WT 或改 shared dependency links。不是 PG/HTTP evidence |
+| 原 F-TOKEN-LOW-RATING-CONTACT＋所有受影響 source 回歸                     | 上述 comparator 小修、其餘 R3/R4 source bytes 保留                                                                            | 新 token47／account78／receipt29／root343／API114 全 PASS                                                                                      | root 原 argv：`affected-root-historical-final.log` exit0/343/14，28.87s；API原10檔 argv：`affected-api-historical-final.log` exit0/114/10，20.55s；`api-build-historical-final.log` exit0，`lint-historical-final.log` exit0                                                                                                                                                                              | 全部 checks 已結束並讀結果；DB/concurrency/peer runtime 尚未驗；两原 keys UNRECORDED                                                                                                                  |
+| 正式 root typecheck                                                       | 未改 compiler/config/links                                                                                                    | 仍環境 FAIL2，無 own diagnostics                                                                                                               | `typecheck-historical-final.log` exit2；同 absent passenger-client／foreign QA api-client linkage                                                                                                                                                                                                                                                                                                         | 不借689 hosted typecheck PASS 給新 SHA；新 full CI 重新跑                                                                                                                                             |
+
+保留 legacy probe 前兩次 setup FAIL1/0 tests：`historical-tags-legacy.log` 缺
+`@nestjs/common`、`historical-tags-legacy-resolved.log` 缺 `rxjs`。最後 adapter 僅透過
+原 API package resolution 重定位 probe 的 bare imports；active source/config/dependencies
+完全未改。這兩次是環境/import failure，不作舊相容行為的 PASS/FAIL 證據。
+正式新版 own token47 是原 root suite 執行，不需要 probe adapter。
+
+新 source evidence 使用 `source-evidence-historical-final.json`，新 publication identity
+使用 `publication-historical-final.json`；前面的 `source-evidence.json/publication.json`
+與689 CI receipts 為保留的歷史紀錄。Normal 新 SHA/gen 独立 review／same-head CI／protected
+merge 與原 PAX-QA formal token PG/HTTP/concurrency、所有原 E04/CRM/legal acceptance 要求不變。
+
+### R5：F-R5-PG-RATING-SUMMARY-PARAMETER（2026-10-14）
+
+沿用原 task、全部既有 findings 與 acceptance。原 Codex 於 06:39:44Z 退回
+`3c15254b34fe2a3213263ca8cc94a2a4a6b20131`／generation
+`f7aee625b7384ee7aaa8a5a20c6d7870`；本輪先讀完整退修、註冊的
+`PAX-RECEIPT-R5-ACTUAL-PG-RATING-SUMMARY-PARAMETER-REPAIR-20261014.md` 與
+`actual-R5-before-source-and-native-QA-binding.json`，再修同一最小單元。
+
+正式呼叫路徑為 account `PassengerBookingController.rateRide` →
+`PassengerBookingService.rateRide` → `MultiTaxiService.submitTrustedPassengerRating`，
+或 token `MultiTaxiController.submitPassengerRating` →
+`MultiTaxiService.submitPassengerRating`；兩者都進
+`MultiTaxiRepository.persistPassengerRating`。正式 V0056 的
+`ops.passenger_trip_ratings.driver_id` 與 `ops.driver_rating_summaries.driver_id`
+均為 `varchar(255)`。本輪產品 diff 僅把該方法摘要 INSERT SELECT 與 WHERE 的
+兩個 `$1` 都指定為 `$1::varchar`，**沒有 typmod／截短**；既有 aggregates、active
+filter、version/time、locks、account/token consent/CRM participant、COMMIT/ROLLBACK、
+immutable replay 與 return mapping 全部保留，沒有 migration／auth／QA harness／workflow 變更。
+
+舊失敗是真實 hosted QA，不是新 mock 推導：source
+`0bafaa1db9a5a7389cc99961c1fe5ba76dec9ac4`，run `38515068055`／job
+`115692063945`，artifact `11872023288`，既有 artifact SHA256
+`6be5515879fe917a0a1352f4b642b8009431fd385d249a80e25e51e67e297ced`。
+本輪重新讀取該 job log：PG `42P08` position `283`、`text versus character varying`，
+mounted low-rating HTTP 收到500而預期201。既有正式 Receipt17PG 為7 PASS/10 FAIL、
+HTTP10 為6 PASS/4 FAIL；其中 rating 受影響為13 cases、14次 SQL errors。
+另一個 complaint-concurrency fixture 的 mutation PID 斷言由原 QA 處理，
+不藉此改 production coalescing/idempotency；Payment27 PASS 不給 Receipt 驗收 credit。
+
+證據目錄（本 worker cwd 下）：
+`.local/pax-receipt-complaint-20261009/r5-20261014/`。
+`sql-source-binding.json`、`summary-before.sql`、`summary-after.sql` 記錄真正 production
+方法所含 SQL bytes；舊候選 SQL 與原 native QA 失敗 SQL 完全相同，SHA256
+`81be2b94292fe4d2b92fd8e1d4c074fa22cf5ba98cedb03bcd9074a3c9152a47`；
+新版 SQL SHA256
+`22f3303f11555fa637adb9cd80ea41d0f5072aa78b3ec84d859d244c98a41340`。
+移除這兩個 casts 即逐 byte 回到舊 SQL。這是靜態修復邊界核對，**不是新版 PG PASS**。
+
+| Finding／驗收項                                                           | 原始碼依據與修改位置                                                                                      | 舊版重現 → 修正版結果                                                                                  | 命令、退出碼、版本與證據                                                                                                                                                                                                                                                          | 未驗項與具體限制                                                                                                                        |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| F-R5-PG-RATING-SUMMARY-PARAMETER                                          | `MultiTaxiRepository.persistPassengerRating` summary 的兩處 `$1::varchar`；正式 V0056 欄位                | 真實舊 hosted PG42P08／HTTP500 → 新 source 兩處型別一致、其餘 SQL bytes 不變；新版 PG/HTTP **NOT RUN** | `old-native-qa.json/.log`：`gh run view 38515068055 --job 115692063945 --log` exit0；`sql-source-binding.json` 保留舊候選 SHA/gen、前後 SQL hashes、原 QA source/run/job/artifact                                                                                                 | VM 禁止 PG/API/server；原 QA 在 protected repair 後重跑原17PG+10HTTP，不能以 SQL mock 或其他標準 PG jobs 代替                           |
+| 原 token/contact/account/CRM/intake/Booking/receipt findings 的受影響回歸 | 原 production controller/service/repository；既有47 token、40 account rating、38 intake、29 receipt cases | 新 source root325 PASS/11 files；API112 PASS/9 files，無新增 skip                                      | `root-regression.json/.log`：`pnpm exec vitest run tests/unit/pax-receipt-complaint-20261009 tests/unit/pax-booking-history-20261009 --maxWorkers=1 --no-file-parallelism` exit0；`api-regression.json/.log` 保留完整9檔 argv，exit0；Node22.23.2/pnpm10.33.0/Vitest4.1.4/TS5.9.3 | 外部 SQL responses／completed order/assignment 為 fixtures；未模擬 PostgreSQL type inference；rollback warning 是既有 failure injection |
+| Source compiler／lint                                                     | 正式 contracts/control-plane-auth/API build 與 scoped ESLint                                              | API build PASS0；ESLint PASS0                                                                          | `api-build.json/.log`：`pnpm --dir apps/api build` exit0，含兩項 prebuild；`source-lint.json/.log`：`pnpm exec eslint apps/api/src/modules/multi-taxi/multi-taxi.repository.ts --max-warnings=0` exit0                                                                            | root compiler 結果另列；沒有更動 compiler/config/shared dependency links                                                                |
+| pax-complaint_intake_and_low_rating                                       | 原 R3/R4/V0119、historical-tag 修復保留；本輪修 summary type boundary                                     | Source 回歸 PASS；required key **UNRECORDED**                                                          | 本節 source evidence；新候選 SHA／branch／PR identity 由 `publication.json` 與 canonical handoff 綁定                                                                                                                                                                             | 原 QA formal PG/HTTP/token concurrency/peer Ops、同候選 review/CI/protected merge 待驗                                                  |
+| pax-receipt_e04_fields_and_passenger_download                             | 未變更 E04 source；保留原逐項 finding 與 NOT_READY 行為                                                   | Receipt29 source 回歸 PASS；完整 E04 原 FAIL2/NOT_READY 保留；required key **UNRECORDED**              | 同 root source suite；未重跑與本次兩處 SQL cast 無關的外部 facts probe                                                                                                                                                                                                            | issuer/operator/masked credential/payment display/total/toll、真實 download/PG/HTTP/legal evidence 待驗                                 |
+
+正式 `pnpm typecheck:root` **FAIL2**（`root-typecheck.json/.log`）：缺
+`@drts/passenger-client`，並有原 foreign QA worktree／本 worktree 的 `ApiClient`
+private-property 型別交集衝突；沒有本輪修改檔的 diagnostic。沒有更動共享 links／config
+以隱藏此環境失敗。Formatter 與最終 publication receipt 記在同目錄。
+不借用舊 `3c15254` 的 CI38520170454／38520170330 綠燈。所有本輪已啟動的必要
+本機 checks 完成並讀結果後才 handoff。原角色 Codex2 owner／Codex reviewer 不變，
+新 substantive SHA/gen 須獨立 review、automatic same-head CI 與 protected merge。
+未啟動 VM product/PG/API/browser/preview/Docker、未部署、未呼叫 acceptance/done。

@@ -1,3 +1,4 @@
+import { enabledRegistryRepository } from "../../registry-driver-master-durable-ack-20261014/storage-fixture";
 // SR-QA-DRIVER-001 -- C050 (換機／遺失裝置司機: bind/unbind/recover).
 //
 // `tests/unit/driver-device-session.test.ts` (IAM-DRV-001) already covers
@@ -34,7 +35,6 @@ import { AuditNotificationService } from "../../../../apps/api/src/modules/audit
 import { DriverDeviceSessionRepository } from "../../../../apps/api/src/modules/auth/driver-device-session.repository";
 import { DriverDeviceSessionService } from "../../../../apps/api/src/modules/auth/driver-device-session.service";
 import { DriverProfileService } from "../../../../apps/api/src/modules/driver-profile/driver-profile.service";
-import { RegulatoryRegistryRepository } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
 import { RegulatoryRegistryService } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 import { SecurityEventsRepository } from "../../../../apps/api/src/modules/security-events/security-events.repository";
 import { SecurityEventsService } from "../../../../apps/api/src/modules/security-events/security-events.service";
@@ -56,7 +56,7 @@ function setupServices() {
     opsDispatchEventsService,
     auditService,
     driverProfileService,
-    new RegulatoryRegistryRepository(),
+    enabledRegistryRepository(),
   );
   const sessionService = new DriverDeviceSessionService(
     jwtAuthService,
@@ -266,7 +266,7 @@ describe("SR-QA-DRIVER-001 C050: device binding lifecycle", () => {
     const { sessionService, regulatoryService } = setupServices();
     await sessionService.onModuleInit();
 
-    regulatoryService.updateDriverLifecycle("drv-demo-002", {
+    await regulatoryService.updateDriverLifecycle("drv-demo-002", {
       lifecycleStatus: "suspended",
     });
 

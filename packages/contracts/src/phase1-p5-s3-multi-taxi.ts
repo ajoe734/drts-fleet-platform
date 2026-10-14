@@ -557,6 +557,8 @@ export interface SubmitPassengerTripRatingCommand {
   score: 1 | 2 | 3 | 4 | 5;
   tags?: string[];
   comment?: string | null;
+  /** Omitted by legacy callers; new ratings capture false in that case. */
+  contactRequested?: boolean;
 }
 
 export const PASSENGER_CONTACT_UNAVAILABLE_REASONS = [

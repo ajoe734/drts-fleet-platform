@@ -26,7 +26,10 @@ import {
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import type { PoolClient } from "pg";
-import type { PassengerTripRatingRecord } from "@drts/contracts";
+import type {
+  PassengerTripRatingRecord,
+  PassengerRideAccessToken,
+} from "@drts/contracts";
 import type { PassengerIntakeResult } from "./complaint.repository";
 import { ComplaintRepository } from "./complaint.repository";
 import {
@@ -299,7 +302,10 @@ export class ComplaintService implements OnModuleInit {
     return { complaintId: stored.complaintCase.caseNo };
   }
 
-  private preparePassengerCase(intake: PassengerComplaintIntake) {
+  private preparePassengerCase(
+    intake: Pick<PassengerComplaintIntake, "orderId" | "command">,
+    sourceLabel = "乘客 App",
+  ) {
     const category: ComplaintCategory = {
       service: "driver_service" as const,
       fare: "fare_dispute" as const,
@@ -310,7 +316,7 @@ export class ComplaintService implements OnModuleInit {
     const createdAt = now.toISOString();
     const caseNo = `PAX-${randomUUID()}`;
     const description = [
-      "來源：乘客 App",
+      `來源：${sourceLabel}`,
       `同意客服聯繫：${intake.command.contactConsent ? "是" : "否"}`,
       intake.command.content,
       ...(intake.command.lostItemDescription
@@ -339,7 +345,7 @@ export class ComplaintService implements OnModuleInit {
     const timeline = this.createTimelineEntry(
       caseNo,
       TIMELINE_ACTIONS.created,
-      `來源：乘客 App；同意客服聯繫：${intake.command.contactConsent ? "是" : "否"}`,
+      `來源：${sourceLabel}；同意客服聯繫：${intake.command.contactConsent ? "是" : "否"}`,
       createdAt,
     );
     return { complaintCase, timeline };
@@ -348,12 +354,14 @@ export class ComplaintService implements OnModuleInit {
   private async publishPassengerCase(
     stored: PassengerIntakeResult,
     passengerId: string,
+    source: "passenger_app" | "passenger_ride_token" = "passenger_app",
   ) {
     // Stable audit identity also recovers when COMMIT succeeded but its reply was lost.
     if (!this.auditedPassengerCases.has(stored.complaintCase.caseNo)) {
       await this.auditNotificationService.recordAuditLogAsync({
-        actorId: passengerId,
-        actorType: "first_party_passenger",
+        actorId: source === "passenger_app" ? passengerId : null,
+        actorType:
+          source === "passenger_app" ? "first_party_passenger" : "system",
         tenantId: null,
         moduleName: "complaint",
         actionName: "create_passenger_complaint_case",
@@ -361,8 +369,10 @@ export class ComplaintService implements OnModuleInit {
         resourceId: stored.complaintCase.caseNo,
         requestId: `passenger-complaint:${stored.complaintCase.caseNo}`,
         newValuesSummary: {
-          source: "passenger_app",
-          drtsPassengerId: passengerId,
+          source,
+          ...(source === "passenger_app"
+            ? { drtsPassengerId: passengerId }
+            : { passengerSubjectRef: passengerId }),
           relatedOrderId: stored.complaintCase.relatedOrderId,
           category: stored.complaintCase.category,
         },
@@ -441,6 +451,73 @@ export class ComplaintService implements OnModuleInit {
       },
       afterCommit: async () => {
         if (stored) await this.publishPassengerCase(stored, passengerId);
+      },
+    };
+  }
+
+  /** The existing transaction seam, with verified token authority instead of account intake. */
+  preparePassengerRideRatingHook(
+    token: PassengerRideAccessToken,
+    contactRequested: boolean | undefined,
+    payload: { score: number; tags: string[]; comment: string | null },
+  ) {
+    if (!this.complaintRepository?.isEnabled())
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Rating consent storage is unavailable.",
+      );
+    const choice = contactRequested ?? false;
+    const draft =
+      choice && payload.score <= 2
+        ? this.preparePassengerCase(
+            {
+              orderId: token.orderId,
+              command: {
+                rideId: token.orderId,
+                category: "service",
+                contactConsent: true,
+                content: `乘客評價 ${payload.score} 星，已勾選需要客服聯繫。${payload.comment ? `\n${payload.comment}` : ""}`,
+              },
+            },
+            "乘客行程連結",
+          )
+        : undefined;
+    let stored: PassengerIntakeResult | null = null;
+    return {
+      execute: async (
+        client: PoolClient,
+        rating: PassengerTripRatingRecord,
+        isNew: boolean,
+      ) => {
+        const requestHash = createHash("sha256")
+          .update(
+            JSON.stringify({
+              score: rating.score,
+              tags: rating.tags,
+              comment: rating.comment,
+              contactRequested: choice,
+            }),
+          )
+          .digest("hex");
+        stored = await this.complaintRepository!.persistRideTokenRatingConsent(
+          client,
+          rating,
+          token,
+          choice,
+          contactRequested !== undefined,
+          requestHash,
+          isNew,
+          draft,
+        );
+      },
+      afterCommit: async () => {
+        if (stored)
+          await this.publishPassengerCase(
+            stored,
+            token.passengerSubjectRef,
+            "passenger_ride_token",
+          );
       },
     };
   }

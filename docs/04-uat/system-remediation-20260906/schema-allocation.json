@@ -548,6 +548,22 @@
       ],
       "description": "裝置登錄與現有裝置表 reuse，並對 mobility.phase1_order_first_party_notification_routes 執行 forward ALTER tenant_id DROP NOT NULL",
       "downstream_tasks": ["PAX-NATIVE-APP-20261009"]
+    },
+    {
+      "task_id": "PAX-RECEIPT-COMPLAINT-20261009",
+      "version": "V0119",
+      "migration_filename": "V0119__passenger_ride_rating_contact.sql",
+      "domain": "existing_token_rating_contact_choice_and_canonical_CRM",
+      "target_schema": "ops",
+      "primary_tables": ["ops.passenger_ride_rating_consents"],
+      "referenced_tables": [
+        "ops.passenger_trip_ratings",
+        "ops.phase1_owned_orders",
+        "crm.phase1_complaint_cases"
+      ],
+      "description": "既有 token 評分的原始聯繫選擇與 canonical CRM 案件關聯保存；不建立虛構第一方帳號，沿用既有評分／CRM 同交易與重送語意。",
+      "downstream_tasks": ["PAX-QA-20261009", "PAX-WEB-RIDE-UI-20261009"],
+      "allocation_decision_ref": "docs/04-uat/passenger-app-20261009/schema-allocation-20261014-token-rating-contact.json"
     }
   ],
   "fleet_statement_decision_allocations": [

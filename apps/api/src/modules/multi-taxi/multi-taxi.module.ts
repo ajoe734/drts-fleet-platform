@@ -20,6 +20,7 @@ import { ServiceProductModule } from "../service-product/service-product.module"
 // this does not introduce a module cycle.
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { CertificateSupportModule } from "../certificate-support/certificate-support.module";
+import { ComplaintModule } from "../complaint/complaint.module";
 import {
   MASKED_CALL_PORT,
   UnavailableMaskedCallPort,
@@ -49,6 +50,7 @@ import { PartnerNotificationWorker } from "./partner-notification.worker";
     ServiceProductModule,
     TenantPartnerModule,
     CertificateSupportModule,
+    ComplaintModule,
   ],
   controllers: [MultiTaxiController, FareVersionController],
   providers: [

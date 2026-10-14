@@ -1,0 +1,30 @@
+{
+  "allocated_at": "2026-10-14T05:03:24.400069+00:00",
+  "allocated_by": "Supervisor",
+  "task_id": "PAX-RECEIPT-COMPLAINT-20261009",
+  "owner": "Codex2",
+  "reviewer": "Codex",
+  "version": "V0119",
+  "migration_filename": "V0119__passenger_ride_rating_contact.sql",
+  "source_path": "infra/migrations/V0119__passenger_ride_rating_contact.sql",
+  "domain": "existing_token_rating_contact_choice_and_canonical_CRM",
+  "target_schema": "ops",
+  "primary_tables": ["ops.passenger_ride_rating_consents"],
+  "referenced_existing_authorities": [
+    "ops.passenger_trip_ratings",
+    "ops.phase1_owned_orders",
+    "crm.phase1_complaint_cases"
+  ],
+  "purpose": "Durably capture original verified legacy token subject rating contact choice and canonical complaint association without fabricating first-party accounts. Reuse existing rating/CRM transaction and replay behavior.",
+  "scope": "FORWARD_ONLY_NEW_MIGRATION; no edit/reapply of V0114 or other applied files; no account/booking FK for non-account token subject; actual source owner selects matching existing key types and requisite unique/FK constraints",
+  "preflight": {
+    "accepted_dev": "a6890213c907017e3c1be8761d5cd94ba601e3c0",
+    "max_actual_migration": "V0118__public_fare_version_management.sql",
+    "root_existing_dirty_ledger_V0119_mentions": 0,
+    "all_registered_other_tasks_version_reservations": [],
+    "all_current_worktree_SQL_collision": false,
+    "all_current_git_history_SQL_collision": false
+  },
+  "tracked_delivery_record": "docs/04-uat/passenger-app-20261009/schema-allocation-20261014-token-rating-contact.json",
+  "boundary": "Functional persistence allocation only. No new security/auth/hook/workflow/gate/IAM/scanner policy; formal PG/HTTP belongs originalQA; no VM runtime/provider/deploy. Existing global/root dirty ledger and all other allocations preserved."
+}
