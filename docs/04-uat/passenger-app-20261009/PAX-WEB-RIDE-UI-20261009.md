@@ -121,8 +121,10 @@ $ pnpm exec tsc -p apps/passenger-app-web/tsconfig.json --noEmit --incremental f
 Exit 0 (0 errors)
 
 # 3. ESLint 代碼風格檢查
-$ pnpm --filter @drts/passenger-app-web lint && pnpm --filter @drts/passenger-client lint
-Exit 0 (0 warnings, 0 errors)
+$ pnpm run lint
+Exit 0 (24 packages/apps successful, 0 errors, 0 warnings)
+$ pnpm lint:root
+Exit 0 (0 errors, 0 warnings)
 
 # 4. i18n Guard 規範檢查
 $ pnpm run i18n:guard
@@ -179,6 +181,11 @@ Exit 0
 5. **R8 (Generic Body Palette Mismatch Alignment Note)**:
    - 前端已修正 A18/A19 獨立標頭與訂單編號。
    - 關於 `passengerChrome` 調色盤與 `p5-ui.jsx` 之靜態色彩差異（如 #F3F5F8 vs #F1F4F8 等），維持 **OPEN**，待 Supervisor 協調共享 passenger ui-tokens / P5-kit 範疇，不自行寫死 raw hex。
+
+6. **CI Lint Reconcile (Candidate 400093e38f1e)**:
+   - **發現來源**: CI Run 38536610592 之 lint 工作回報 `tests/unit/pax-web-ride-ui-20261009/passenger-ride.test.tsx:483:17 error 'label' is assigned a value but never used @typescript-eslint/no-unused-vars`。
+   - **修復內容**: 於測試迴圈解構中 elide 未使用的 `label` 變數 (`for (const [, stamp, expectFresh] of [...]`)。
+   - **驗證依據**: `pnpm lint:root` 通過 (0 errors, 0 warnings)，`pnpm run lint` 24/24 專案全數成功，單元測試 31/31 PASS。
 
 ---
 

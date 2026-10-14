@@ -480,7 +480,7 @@ describe("Passenger Ride UI Acceptance", () => {
   });
 
   it("R1 - A04 recovery freshness distinguishes old, missing, and current timestamps", async () => {
-    for (const [label, stamp, expectFresh] of [
+    for (const [, stamp, expectFresh] of [
       ["old timestamp", new Date(Date.now() - 3600000).toISOString(), false],
       ["missing timestamp", null, false],
       ["current timestamp", new Date().toISOString(), true],
