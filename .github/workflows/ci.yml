@@ -303,7 +303,7 @@ jobs:
         run: |
           pnpm --filter @drts/passenger-client run build
           test -f packages/passenger-client/dist/index.d.ts
-          
+
           # Static portability check for DOM/Node/Next
           echo "Checking passenger-client portability..."
           if grep -qR -E "from ['\"](next|react|fs|path|os|events|crypto|child_process)" packages/passenger-client/src; then

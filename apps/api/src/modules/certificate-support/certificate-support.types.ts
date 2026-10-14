@@ -1,3 +1,8 @@
+import type {
+  ActualTripFareBreakdown,
+  DriverDeclaredSurnameSnapshot,
+} from "@drts/contracts";
+
 export const CERTIFICATE_SUPPORT_STATES = [
   "available",
   "generating",
@@ -27,7 +32,12 @@ export interface CertificateSupportRow {
   record: Record<string, unknown>;
 }
 
-export interface CertificateSupportView {
+/** Captured completion data does not establish lawful E-04 issuance readiness. */
+export interface CertificateCapturedCompletionFacts extends Partial<DriverDeclaredSurnameSnapshot> {
+  actualFareBreakdown?: ActualTripFareBreakdown;
+}
+
+export interface CertificateSupportView extends CertificateCapturedCompletionFacts {
   certificateId: string;
   certificateNo: string;
   orderId: string;
@@ -64,6 +74,21 @@ export interface CertificateSupportView {
     enabled: boolean;
     reasonCode: string | null;
   };
+  /** Captured completion facts, absent for legacy/incomplete certificates. */
+  e04Snapshot?: CertificateE04Snapshot;
+}
+
+export interface CertificateE04Snapshot {
+  fleetOperatorName: string;
+  driverSurname: string;
+  driverRegistrationMasked: string;
+  fareBreakdown: {
+    startMinor: number;
+    distanceMinor: number;
+    delayMinor: number;
+    nightMinor: number;
+  };
+  paymentMethodDisplay: string;
 }
 
 export interface CertificateArtifactBlocker {
