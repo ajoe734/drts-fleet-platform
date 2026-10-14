@@ -297,4 +297,185 @@ describe("Passenger Ride UI Acceptance", () => {
 
     vi.useRealTimers();
   });
+
+  it("A04 retry uses supported authority GET only for both account and token", async () => {
+    const { Actions } = await import(
+      "../../../apps/passenger-app-web/components/ride/passenger-ride-page"
+    );
+    const { createFareQuoteAnomalyFixture } = await import(
+      "../../../apps/passenger-app-web/lib/ride/passenger-live"
+    );
+
+    const holdView = {
+      order: {
+        orderId: "ride-account",
+        orderNo: "ORD-ACC",
+        status: "exception_hold",
+        timingMode: "scheduled",
+        requestedPickupAt: new Date().toISOString(),
+        pickup: { address: "A" },
+        dropoff: { address: "B" },
+      },
+      assignment: null,
+      rating: null,
+      payment: null,
+      receipt: null,
+      actions: { canCancel: true, canContact: true, canRate: false },
+    };
+
+    fetchResponse = { ride: holdView };
+    let updatedFixture: any = null;
+
+    // 1. Account mode
+    const { unmount } = render(
+      <Actions
+        fixture={createFareQuoteAnomalyFixture("ride-account")}
+        token="ride-account"
+        authMode="id"
+        onFixtureUpdate={(f) => {
+          updatedFixture = f;
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("重新取得報價"));
+    await waitFor(() => {
+      expect(updatedFixture).not.toBeNull();
+    });
+
+    expect(fetchCalls.length).toBe(1);
+    expect(fetchCalls[0].method).toBe("GET");
+    expect(fetchCalls[0].url).toBe("/api/passenger-app/rides/ride-account");
+    // Without valid quote, retains A04
+    expect(updatedFixture?.screenId).toBe("A04");
+
+    unmount();
+    fetchCalls = [];
+    updatedFixture = null;
+
+    // 2. Token mode
+    render(
+      <Actions
+        fixture={createFareQuoteAnomalyFixture("ride-token")}
+        token="ride-token"
+        authMode="token"
+        onFixtureUpdate={(f) => {
+          updatedFixture = f;
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("重新取得報價"));
+    await waitFor(() => {
+      expect(fetchCalls.length).toBe(1);
+    });
+
+    expect(fetchCalls[0].method).toBe("GET");
+    expect(fetchCalls[0].url).toBe("/api/passenger-rides/ride-token");
+  });
+
+  it("A04 recovery starts live SSE subscription and renders vehicle", async () => {
+    let callCount = 0;
+    const mockFetch = vi
+      .fn()
+      .mockImplementation(async (url: string, opts: any = {}) => {
+        fetchCalls.push({
+          url,
+          method: opts?.method || "GET",
+          body: opts?.body ? JSON.parse(opts.body) : null,
+        });
+        if (++callCount === 1) {
+          return {
+            ok: false,
+            status: 409,
+            json: async () => ({
+              error: {
+                code: "P5_QUOTE_PROVIDER_UNAVAILABLE",
+                message: "P5_QUOTE_PROVIDER_UNAVAILABLE",
+              },
+            }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              ride: {
+                order: {
+                  orderId: "ride-recovered",
+                  orderNo: "ORD-REC",
+                  status: "enroute_pickup",
+                  timingMode: "scheduled",
+                  requestedPickupAt: new Date().toISOString(),
+                  pickup: { address: "A" },
+                  dropoff: { address: "B" },
+                },
+                assignment: {
+                  driver: { displayName: "Driver A" },
+                  vehicle: { plateNo: "ABC-8888" },
+                  eta: { minutes: 5 },
+                  routeFare: {
+                    payableFareMinor: 20000,
+                    estimatedFareMinor: 20000,
+                  },
+                },
+                actions: { canCancel: true, canContact: true },
+              },
+            },
+          }),
+        };
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    render(
+      <PassengerRidePage
+        token="ride-recovered"
+        authMode="id"
+        kind="ride"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("目前無法取得正式報價")).toBeTruthy();
+    });
+    expect(MockEventSource.instances.length).toBe(0);
+
+    fireEvent.click(screen.getByText("重新取得報價"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/ABC-8888/)).toBeTruthy();
+    });
+    expect(MockEventSource.instances.length).toBe(1);
+  });
+
+  it("Unrelated 409 conflict retains honest authority failure rather than A04", async () => {
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      return {
+        ok: false,
+        status: 409,
+        json: async () => ({
+          error: {
+            code: "conflict",
+            message: "unrelated conflict",
+          },
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    render(
+      <PassengerRidePage
+        token="ride-conflict"
+        authMode="id"
+        kind="ride"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("無法取得行程資料")).toBeTruthy();
+    });
+    expect(screen.queryByText("正在為您安排合適的車輛")).toBeNull();
+    expect(screen.queryByText("目前無法取得正式報價")).toBeNull();
+  });
 });

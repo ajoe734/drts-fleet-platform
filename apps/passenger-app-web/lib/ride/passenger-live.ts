@@ -60,7 +60,8 @@ export async function fetchPassengerRideAuthority(
           : "PASSENGER_AUTHORITY_REQUEST_FAILED",
       );
     }
-    return payload.data;
+    const data = (payload as any).data;
+    return (data?.ride ? data.ride : data) as PassengerRideAuthorityView;
   } else {
     try {
       const res = await passengerClient.getRide(idOrToken);
@@ -296,11 +297,12 @@ export async function fetchPassengerReceipt(
 }
 
 export function mapPassengerRideAuthorityToFixture(
-  view: PassengerRideAuthorityView,
+  rawView: PassengerRideAuthorityView,
   token: string,
   kind: "ride" | "fares" | "receipt" = "ride",
   quoteAnomalyCode?: string | null,
 ): PassengerRideFixture {
+  const view = (rawView as any)?.ride || rawView;
   const assignment = view.assignment;
   const screenId = resolveScreenId(view, kind, quoteAnomalyCode);
   const fareMinor = assignment?.routeFare?.estimatedFareMinor ?? null;
@@ -310,10 +312,10 @@ export function mapPassengerRideAuthorityToFixture(
     assignment?.routeFare?.estimatedDurationSeconds ?? null;
   const payment = mapPassengerPayment(view.payment);
   const certificate =
-    view.order.status === "completed" || view.receipt
+    view.order?.status === "completed" || view.receipt
       ? mapPassengerCertificate(
           view.receipt,
-          view.actions.canReadReceipt || Boolean(view.receipt),
+          view.actions?.canReadReceipt || Boolean(view.receipt),
         )
       : undefined;
 
@@ -687,10 +689,12 @@ export const P5_QUOTE_ANOMALY_ERROR_CODES = [
 ] as const;
 
 function resolveScreenId(
-  view: PassengerRideAuthorityView,
+  rawView: PassengerRideAuthorityView,
   kind: "ride" | "fares" | "receipt",
   quoteAnomalyCode?: string | null,
 ): PassengerScreenId {
+  const view = (rawView as any)?.ride || rawView;
+  if (!view || !view.order) return "P5-01";
   if (kind === "fares") return "A03";
   if (kind === "receipt") return "P5-10";
   if (view.order.status === "cancelled") {
