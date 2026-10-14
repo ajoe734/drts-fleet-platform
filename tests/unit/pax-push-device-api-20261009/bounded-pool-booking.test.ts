@@ -2,7 +2,7 @@ import "../../../apps/api/node_modules/reflect-metadata";
 import { createRequire } from "node:module";
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PoolClient } from "pg";
+import type { PoolClient, PoolConfig } from "pg";
 import { DatabaseService } from "../../../apps/api/src/common/db/database.service";
 import { PassengerBookingService } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.service";
 import { PassengerBookingRepository } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.repository";
@@ -63,8 +63,10 @@ describe("Production booking and resolver with a real bounded pg Pool", () => {
         idleTimeoutMillis: 0,
         // Ensures failed old-source runs settle too; no leaked promises/leases.
         connectionTimeoutMillis: 2000,
-        Client: SocketFreeClient,
-      } as ConstructorParameters<typeof Pool>[0]);
+        Client: SocketFreeClient as unknown as NonNullable<
+          PoolConfig["Client"]
+        >,
+      });
       vi.stubEnv("DATABASE_URL", undefined);
       vi.stubEnv("REQUIRE_SMS_VERIFICATION", "false");
       const db = new DatabaseService();
