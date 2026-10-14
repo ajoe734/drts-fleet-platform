@@ -50,10 +50,10 @@ export class SyntheticPaymentProvider implements PaymentProviderPort {
   readonly name = "qa_synthetic_psp";
   readonly available = true;
   bind = vi.fn(
-    async (credential: string, _key: string): Promise<BindResult> => ({
+    async (credential: string, key: string): Promise<BindResult> => ({
       status: "completed",
       card: {
-        token: `qa.stored.${credential}`,
+        token: `qa.stored.${credential}.${key}`,
         last4: "0042",
         cardType: "SYNTHETIC",
         expiryMonth: "12",
@@ -107,8 +107,8 @@ export class PaymentPostgresHarness {
   private readonly template = `pax_payment_tpl_${randomUUID().replaceAll("-", "")}`;
   private readonly created = new Set<string>();
   private admin?: InstanceType<typeof Pool>;
-  private activeName?: string;
-  pool?: InstanceType<typeof Pool>;
+  private activeName: string | undefined;
+  pool: InstanceType<typeof Pool> | undefined;
   database!: DatabaseService;
   methods!: PaymentMethodRepository;
   methodService!: PaymentMethodService;
