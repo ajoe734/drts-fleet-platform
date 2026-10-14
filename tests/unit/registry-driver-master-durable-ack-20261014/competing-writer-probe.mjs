@@ -1,13 +1,18 @@
 // Diagnostic only: inherited non-master full-row writer is outside task scope.
 // Run from apps/api with node -r ts-node/register/transpile-only <this file>.
 // This intentionally detects the obstruction; exit 0 is NOT acceptance credit.
-const assert = require("node:assert/strict");
-const { EventEmitter } = require("node:events");
-const path = require("node:path");
-const sourceRoot = path.resolve(__dirname, "../../..");
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import Module, { createRequire } from "node:module";
+const load = createRequire(import.meta.url);
+const sourceRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../..",
+);
 const apiSource = path.join(sourceRoot, "apps/api/src");
 // Worker node_modules is shared; resolve this checkout's built contracts.
-const Module = require("node:module");
 const originalLoad = Module._load;
 Module._load = function (request, parent, isMain) {
   return originalLoad.call(
@@ -19,25 +24,25 @@ Module._load = function (request, parent, isMain) {
     isMain,
   );
 };
-const { OpsDispatchEventsService } = require(
+const { OpsDispatchEventsService } = load(
   path.join(apiSource, "common/ops-dispatch-events.service.ts"),
 );
-const { AuditNotificationService } = require(
+const { AuditNotificationService } = load(
   path.join(
     apiSource,
     "modules/audit-notification/audit-notification.service.ts",
   ),
 );
-const { DriverProfileService } = require(
+const { DriverProfileService } = load(
   path.join(apiSource, "modules/driver-profile/driver-profile.service.ts"),
 );
-const { RegulatoryRegistryRepository } = require(
+const { RegulatoryRegistryRepository } = load(
   path.join(
     apiSource,
     "modules/regulatory-registry/regulatory-registry.repository.ts",
   ),
 );
-const { RegulatoryRegistryService } = require(
+const { RegulatoryRegistryService } = load(
   path.join(
     apiSource,
     "modules/regulatory-registry/regulatory-registry.service.ts",

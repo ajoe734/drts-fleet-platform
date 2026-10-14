@@ -52,12 +52,12 @@ describe("precise named-command serialization and publication", () => {
       expect(f.writes).toHaveLength(1);
       expect(read(f, "lifecycle")).toEqual(before);
       for (let i = 0; i < order.length; i++) {
-        expect(calls[i].state.status).toBe("pending");
-        f.writes[i].commit();
-        await calls[i].settled;
+        expect(calls[i]!.state.status).toBe("pending");
+        f.writes[i]!.commit();
+        await calls[i]!.settled;
         await flush();
-        expect(calls[i].state.status).toBe("fulfilled");
-        expect(read(f, "lifecycle")).toEqual(f.writes[i].record);
+        expect(calls[i]!.state.status).toBe("fulfilled");
+        expect(read(f, "lifecycle")).toEqual(f.writes[i]!.record);
         expect(f.writes).toHaveLength(Math.min(i + 2, order.length));
       }
       expect(read(f, "lifecycle")).toMatchObject({
@@ -87,14 +87,14 @@ describe("precise named-command serialization and publication", () => {
     await flush();
     expect(f.writes).toHaveLength(1);
     const failure = new Error("first master fails");
-    f.writes[0].reject(failure);
+    f.writes[0]!.reject(failure);
     await failed.settled;
     await flush();
     expect(failed.state.error).toBe(failure);
     expect(read(f, "lifecycle")).toEqual(before);
     expect(f.writes).toHaveLength(2);
-    expect(f.writes[1].record.lifecycleStatus).toBe(before?.lifecycleStatus);
-    f.writes[1].commit();
+    expect(f.writes[1]!.record.lifecycleStatus).toBe(before?.lifecycleStatus);
+    f.writes[1]!.commit();
     await next.settled;
     expect(next.state.status).toBe("fulfilled");
     expect(f.report).toHaveBeenCalledWith(failure, "update_driver_lifecycle");
@@ -114,12 +114,12 @@ describe("precise named-command serialization and publication", () => {
     });
     expect(read(f, "create")).toBeUndefined();
     expect(f.profiles.has(driverId("create"))).toBe(true);
-    f.writes[0].reject(new Error("master create rejected after profile ACK"));
+    f.writes[0]!.reject(new Error("master create rejected after profile ACK"));
     await first.settled;
     const retry = observe(invoke(f, "create"));
     await flush();
     expect(f.writes).toHaveLength(2);
-    f.writes[1].commit();
+    f.writes[1]!.commit();
     await retry.settled;
     expect(retry.state.status).toBe("fulfilled");
     await expect(invoke(f, "create")).rejects.toMatchObject({
@@ -144,13 +144,13 @@ describe("precise named-command serialization and publication", () => {
     await flush();
     expect(f.writes).toHaveLength(1);
     expect(read(f, "create")).toBeUndefined();
-    f.writes[0].commit();
+    f.writes[0]!.commit();
     await created.settled;
     await flush();
     expect(f.writes).toHaveLength(2);
     expect(patch.state.status).toBe("pending");
-    expect(f.writes[1].record.name).toBe("Master ACK");
-    f.writes[1].commit();
+    expect(f.writes[1]!.record.name).toBe("Master ACK");
+    f.writes[1]!.commit();
     await patch.settled;
     expect(read(f, "create")?.supportedServiceBuckets).toEqual([
       "business_dispatch",
@@ -167,10 +167,10 @@ describe("precise named-command serialization and publication", () => {
     );
     await flush();
     expect(f.writes).toHaveLength(2);
-    f.writes[1].commit();
+    f.writes[1]!.commit();
     await second.settled;
     expect(first.state.status).toBe("pending");
-    f.writes[0].commit();
+    f.writes[0]!.commit();
     await first.settled;
     expect(
       f.service
@@ -187,7 +187,7 @@ describe("precise named-command serialization and publication", () => {
       "request-clone",
     );
     await flush();
-    f.writes[0].commit();
+    f.writes[0]!.commit();
     const envelope = await saved;
     expect(envelope.data.supportedServiceBuckets).toEqual([
       "business_dispatch",
@@ -196,7 +196,7 @@ describe("precise named-command serialization and publication", () => {
     expect(read(f, "buckets")?.supportedServiceBuckets).toEqual([
       "business_dispatch",
     ]);
-    expect(f.writes[0].record.supportedServiceBuckets).toEqual([
+    expect(f.writes[0]!.record.supportedServiceBuckets).toEqual([
       "business_dispatch",
     ]);
     expect(
@@ -223,13 +223,13 @@ describe("inherited validation, lifecycle and profile ACK", () => {
       licenseExpiry: "2000-01-01T00:00:00.000Z",
     });
     await flush();
-    f.writes[0].commit();
+    f.writes[0]!.commit();
     expect((await expired).data.licensesValid).toBe(false);
     const renewed = f.controller.updateDriverLicenses("drv-demo-001", {
       licenseExpiry: "2099-01-01T00:00:00.000Z",
     });
     await flush();
-    f.writes[1].commit();
+    f.writes[1]!.commit();
     expect((await renewed).data.licensesValid).toBe(true);
     expect(read(f, "licenses")?.licensesValid).toBe(true);
   });
@@ -278,7 +278,7 @@ describe("inherited validation, lifecycle and profile ACK", () => {
         professionalDriverLicenseExpiry: "2099-01-01T00:00:00.000Z",
       });
       await flush();
-      f.writes[0].commit();
+      f.writes[0]!.commit();
       const { data } = await saved;
       expect(data.lifecycleStatus).toBe(lifecycleStatus);
       expect(data.professionalDriverLicenseExpiry).toBe(

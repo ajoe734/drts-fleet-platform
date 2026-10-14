@@ -23,7 +23,7 @@ describe.each(operations)("%s actual driver master ACK", (operation) => {
       ([log]) => log.actionName === actionNames[operation],
     );
     expect(f.writes).toHaveLength(1);
-    f.writes[0].commit();
+    f.writes[0]!.commit();
     await call.settled;
     expect(pending.status).toBe("pending");
     expect(memory).toEqual(before);
@@ -38,7 +38,7 @@ describe.each(operations)("%s actual driver master ACK", (operation) => {
     await flush();
     const failure = new Error("controlled driver master query rejection");
     expect(f.writes).toHaveLength(1);
-    f.writes[0].reject(failure);
+    f.writes[0]!.reject(failure);
     await flush();
     await call.settled;
     expect(call.state.status).toBe("rejected");
@@ -64,7 +64,7 @@ describe.each(operations)("%s actual driver master ACK", (operation) => {
     const call = observe(invoke(f, operation));
     await flush();
     expect(f.writes).toHaveLength(1);
-    f.writes[0].commit();
+    f.writes[0]!.commit();
     await call.settled;
     expect(call.state.status).toBe("fulfilled");
     expect(call.state.value?.data).toEqual(read(f, operation));
