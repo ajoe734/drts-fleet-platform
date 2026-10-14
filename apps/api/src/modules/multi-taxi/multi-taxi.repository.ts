@@ -1824,7 +1824,9 @@ export class MultiTaxiRepository {
       if (accountHook || rideContext) {
         if (
           storedRating.score !== rating.score ||
-          JSON.stringify(storedRating.tags) !== JSON.stringify(rating.tags) ||
+          JSON.stringify(
+            rideContext ? [...storedRating.tags].sort() : storedRating.tags,
+          ) !== JSON.stringify(rating.tags) ||
           storedRating.comment !== rating.comment
         ) {
           throw new ApiRequestError(

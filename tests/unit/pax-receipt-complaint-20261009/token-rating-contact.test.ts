@@ -523,6 +523,28 @@ describe("token choice transaction, original replay and durable Ops source", () 
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
+  it("historical unordered tags exact retry preserves the original rating", async () => {
+    const f = fixture();
+    f.state.rating = {
+      rating_id: "historical-rating",
+      order_id: ORDER,
+      trip_id: "unit-assignment",
+      driver_id: "unit-driver",
+      passenger_subject_ref: SUBJECT,
+      score: 2,
+      tags: ["b", "a"],
+      comment: null,
+      status: "active",
+      submitted_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const result = await f.submit({ score: 2, tags: ["a", "b"] });
+    expect(result.data.ratingId).toBe("historical-rating");
+    expect(f.state.rating.tags).toEqual(["b", "a"]);
+    expect(f.state.consent).toBeUndefined();
+    expect(f.state.complaintCase).toBeUndefined();
+  });
+
   it.each([
     "rating",
     "case",
