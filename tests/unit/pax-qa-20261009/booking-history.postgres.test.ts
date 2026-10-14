@@ -50,7 +50,7 @@ describe.skipIf(!hostedPaymentEnabled)(
         destinationLng: 121.57,
         scheduledAt,
       });
-      if (!quote.fareSnapshotId || quote.serviceAreaResult !== "serviceable")
+      if (quote.serviceAreaResult !== "serviceable" || !quote.fareSnapshotId)
         throw new Error(
           "Production fare service did not create an owned serviceable quote.",
         );
@@ -319,7 +319,7 @@ describe.skipIf(!hostedPaymentEnabled)(
         ).toContain(f.method.paymentMethodId);
       } finally {
         release.release();
-        database.leaseObserver = undefined;
+        delete database.leaseObserver;
         await booked;
         await removed;
       }
