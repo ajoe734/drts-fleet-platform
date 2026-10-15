@@ -1,6 +1,6 @@
 # EVIDENCE-RETENTION-LEGAL-HOLD-CANONICAL-FLOW-20261015
 
-Owner: Codex. Assigned independent reviewer: Codex2. Status: implementation verified for candidate handoff; independent review, mandatory CI and protected merge pending.
+Owner: Codex. Assigned independent reviewer: Codex2. Status: scoped Source verification retained; F-CI-01 delivery gate failed on published candidate `ac3d5f69c6a600fcf92b71ec7e08a360fe45ca0f`; replacement branch routing, fresh exact-candidate review, mandatory CI and protected merge pending.
 
 Accepted original source: `2c36cad43376f848bd2a7edc06e27369c060c819`.
 Immutable R1 spec: `/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T1226-remaining-original-audits-root/EVIDENCE-RETENTION-LEGAL-HOLD-CANONICAL-FLOW-20261015-R1.task-spec.json`, SHA256 `83adbcf0f5041a30d896f9d3419929c15c51b34c5ebac5ad1e3af518fed87e79`.
@@ -312,3 +312,62 @@ exits are indexed under this worktree's
 No product/preview/browser/DB server, deployment, cloud operation, live
 archive/delete or restore ran. The original Source-only and lifecycle boundaries
 remain in force.
+
+## F-CI-01: published commit subject blocks required CI (2026-10-15)
+
+Codex2 reopened immutable candidate
+`ac3d5f69c6a600fcf92b71ec7e08a360fe45ca0f` at 13:48:06Z. This is a new
+commit-policy trigger, distinct from the prior tenant and audit UUID findings.
+Production `.github/workflows/ci.yml` invokes
+`tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` over every
+non-merge ancestor in the PR range. `SUBJECT_RE` / `validate_message` reject the
+candidate subject `fix(audit): preserve legal protection across audit UUID spelling`.
+The required Task-ID trailers are present; the lowercase subject scope is the
+failure. No additional functional change was requested by this review.
+
+| Finding / acceptance                                                                            | Production basis                                                                     | Before / current result                                        | Command / evidence / exit                                                                                                                                                 | Remaining boundary                                                                                    |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| F-CI-01: required commit gate                                                                   | CI `Commit trailers`; validator `SUBJECT_RE`, `validate_message`, `commits_in_range` | Published candidate fails; no replacement candidate claimed    | [Hosted completed job](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38745101915/job/116456894007), exit 1; owner downloaded and read the matching full log | A correctly titled descendant still retains the failing ancestor                                      |
+| F-CI-01 minimal reproduction                                                                    | Actual checked-in validator                                                          | Same sole offending SHA `ac3d5f69c6a6`                         | `python3 tools/ci/git/check_commit_trailers.py --base ac3d5f69^ --head ac3d5f69`, exit 1                                                                                  | No CI bypass, workflow edit or subject-rule weakening                                                 |
+| `evidence-retention_four-governance-commands-canonical-ACK-and-rejected-state-readback`         | Previous command/repository repairs and matrices above                               | Codex2 retained scoped Source credit at the failed candidate   | Review reports root 63/63 and API 28/28, exit 0; retained prior before/fixed evidence                                                                                     | New candidate must receive fresh exact-SHA review; no live DB credit                                  |
+| `evidence-retention_authoritative-governance-unknown-empty-noDB-and-original-access-boundaries` | Availability/read-consumer and original boundary regressions above                   | Same retained Source credit                                    | Same completed reviewer checks; no new functional checks run for this documentation-only checkpoint                                                                       | No new full-capability or external acceptance                                                         |
+| `evidence-retention_legal-hold-exception-exact-archive-set-and-honest-SQL-result`               | Actual shell/selection and controlled psql matrices above                            | Same retained Source credit                                    | Reviewer bash syntax / scoped lint / diff checks exit 0; shell cases are included in root 63/63                                                                           | SQLite projection and controlled COPY/transaction remain non-live-PG proof                            |
+| `evidence-retention_actual-production-before-fixed-after-and-original-regressions`              | Prior before/fixed evidence and C099 five / C100 four                                | Same retained Source credit                                    | Prior root 63/63 and API 28/28 checks completed; no substituted mirror tests                                                                                              | No servers, archive/delete, restore or provider work                                                  |
+| `evidence-retention_exact-candidate-review-CI-and-protected-merge`                              | Same-candidate lifecycle and protected branch policy                                 | Unsatisfied: reviewer REOPEN; mandatory Commit trailers failed | Exact candidate and PR #2667 head confirmed before this evidence checkpoint                                                                                               | Replacement immutable candidate, review, mandatory CI, protected merge and own-key acceptance pending |
+
+### Prepared recovery and routing boundary
+
+Owner fetched `origin/dev` at
+`9b343586196bfa963d170d3d5a9683b012398111` and confirmed no change in the 11 task
+paths relative to accepted source `2c36cad43376f848bd2a7edc06e27369c060c819`.
+The complete binary-capable source diff from that accepted source to the failed
+candidate was applied using `git read-tree`, a separate `GIT_INDEX_FILE`, and
+`git apply --cached --3way`. Application exited 0; `git diff --exit-code` between
+the reconstructed tree and failed candidate over all 11 task paths exited 0.
+Reconstructed tree: `5a3837cf6e0a187afb9102b25f0a021fd1bbd770`.
+This establishes a conflict-free recovery input; it is not a commit, candidate,
+new review or CI pass. The active index and working files were not reset.
+
+Local evidence in the assigned worker cwd:
+`.local/evidence-retention-20261015/f-ci-01-recovery/` contains
+`hosted-trailers.log`, `local-trailers.log`, `pr-snapshot.json`,
+`task-source.patch`, `apply-check.log`, and `recovery-index.json`.
+Patch SHA256:
+`367206b12c9fa1a2ec438e279c6eb5156d8061f7ec4d00b39185eeaad556dd70`.
+The patch snapshots the original candidate and predates this documentation
+appendix; recovery must also retain this appendix. Earlier worker-local
+`ci-trailers-20261015T1347Z` diagnostics were absent in this dispatch; the logs
+listed here were freshly captured rather than assumed to exist.
+
+Resolution is pending Supervisor branch/workspace routing: this dispatch fixes
+owner to `codex/evidence-retention-legal-hold-canonical-flow-20261015` and the
+assigned cwd. A new compliant descendant on that branch cannot remove F-CI-01.
+Supervisor must assign a replacement branch while preserving the existing
+published branch/PR history. Owner can then apply the task diff plus this UAT
+appendix on the accepted dev base, commit with subject
+`EVIDENCE-RETENTION-LEGAL-HOLD-CANONICAL-FLOW-20261015: recover compliant candidate`,
+run the complete applicable checks including the full PR-range commit gate,
+push normally, create the replacement PR and hand off its immutable SHA to
+Codex2. No amend, rebase, reset, force-push, prior-ref deletion or CI bypass is
+part of this recovery. This evidence-only checkpoint on the assigned branch is
+not a replacement review candidate and does not satisfy the failed gate.
