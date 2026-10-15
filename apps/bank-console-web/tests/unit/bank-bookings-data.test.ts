@@ -1,4 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { resolve } from "node:path";
+import ts from "typescript";
+import * as contracts from "@drts/contracts";
+import type { PartnerChannelEntryRecord } from "@drts/contracts";
 import { loadBankBookingsData } from "../../lib/bank-bookings-data";
 import {
   bookingList,
@@ -51,6 +57,81 @@ const formal = () => ({
 });
 let rows: unknown[];
 let programs: unknown[];
+
+// Execute the complete production service module without constructing services,
+// opening listeners or loading infrastructure. Only unused service imports are
+// stubbed; the catalog/order methods, seed, envelopes and serializer are real.
+function producer() {
+  const apiRoot = resolve(__dirname, "../../../api");
+  const realRequire = createRequire(resolve(apiRoot, "package.json"));
+  function load(file: string, exposeSeed = false): Record<string, unknown> {
+    const module = { exports: {} };
+    const source = readFileSync(resolve(apiRoot, "src", file), "utf8");
+    const output = ts.transpileModule(
+      source + (exposeSeed ? "\nexport { PARTNER_ENTRY_SEED };" : ""),
+      {
+        compilerOptions: {
+          module: ts.ModuleKind.CommonJS,
+          target: ts.ScriptTarget.ES2022,
+          experimentalDecorators: true,
+          esModuleInterop: true,
+        },
+      },
+    ).outputText;
+    new Function("require", "module", "exports", output)(
+      (id: string) => {
+        if (id === "@drts/contracts") return contracts;
+        if (id.startsWith("node:") || !id.startsWith("."))
+          return realRequire(id);
+        if (id === "../../common/api-envelope")
+          return load("common/api-envelope.ts");
+        return {};
+      },
+      module,
+      module.exports,
+    );
+    return module.exports;
+  }
+  const serviceModule = load(
+    "modules/tenant-partner/tenant-partner.service.ts",
+    true,
+  );
+  const Service = serviceModule.TenantPartnerService as {
+    prototype: {
+      listTenantServicePrograms(tenantId: string): {
+        programId: string;
+        displayName: string;
+        programType: string;
+      }[];
+      listTenantOrders(tenantId: string, query: object): unknown[];
+    };
+  };
+  const service = Object.assign(Object.create(Service.prototype), {
+    partnerEntries: serviceModule.PARTNER_ENTRY_SEED,
+    orderFeedProvider: () => [],
+  }) as typeof Service.prototype & {
+    partnerEntries: PartnerChannelEntryRecord[];
+    orderFeedProvider: () => unknown[];
+  };
+  const { toApiListData, toApiSuccessEnvelope } = load(
+    "common/api-envelope.ts",
+  ) as {
+    toApiListData(items: unknown[]): unknown;
+    toApiSuccessEnvelope(data: unknown): unknown;
+  };
+  const { deepToSnakeCase } = load("common/snake-case.interceptor.ts") as {
+    deepToSnakeCase(value: unknown): unknown;
+  };
+  return {
+    service,
+    wire: (items: unknown[]) =>
+      new Response(
+        JSON.stringify(
+          deepToSnakeCase(toApiSuccessEnvelope(toApiListData(items))),
+        ),
+      ),
+  };
+}
 function response(items: unknown[]) {
   return new Response(
     JSON.stringify({ data: { items }, meta: { request_id: "formal-wire" } }),
@@ -309,23 +390,115 @@ it.each([
       },
     ],
   },
-  {
-    records: [
-      {
-        program_id: "program-1",
-        tenant_id: identity.tenantId,
-        display_name: "One",
-      },
-      {
-        program_id: "program-1",
-        tenant_id: identity.tenantId,
-        display_name: "Two",
-      },
-    ],
-  },
-])("rejects malformed or duplicate program records %#", async ({ records }) => {
+])("rejects malformed program records %#", async ({ records }) => {
   programs = records;
   const result = await loadBankBookingsData();
   expect(result.status).toBe("invalid");
   expect(result.data.bookings).toEqual([]);
+});
+
+describe("production service catalog multiplicity", () => {
+  it.each(["mixed source seed", "multiple airport entries"])(
+    "preserves authorized bookings/details and unique program options with %s",
+    async (scenario) => {
+      const { service, wire } = producer();
+      const tenantId = "tenant-demo-001";
+      getIdentity.mockResolvedValue({ ...identity, tenantId });
+      const airport = service.partnerEntries.find(
+        (entry) =>
+          entry.tenantId === tenantId &&
+          entry.businessDispatchSubtype === "credit_card_airport_transfer",
+      )!;
+      expect(airport).toBeDefined();
+      if (scenario === "multiple airport entries") {
+        service.partnerEntries = [
+          {
+            ...airport,
+            entrySlug: "airport-b",
+            displayName: "B airport entry",
+          },
+          {
+            ...airport,
+            entrySlug: "airport-a",
+            displayName: "A airport entry",
+          },
+        ];
+      }
+      service.orderFeedProvider = () => [
+        {
+          orderId: "producer-order",
+          orderNo: "PRODUCER-ORDER",
+          tenantId,
+          orderDomain: "owned",
+          serviceBucket: "business_dispatch",
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          partnerProgramId: airport.programId,
+          status: "assigned",
+          direction: "pickup",
+          pickup: { address: "Private street", maskedAddress: "City ••••" },
+          dropoff: {
+            address: "Private airport",
+            maskedAddress: "Airport ••••",
+          },
+          passenger: { name: "Private passenger", phone: "0912345678" },
+          createdAt: "2026-10-01T00:00:00Z",
+          updatedAt: "2026-10-02T00:00:00Z",
+          approvalState: "approved",
+        },
+      ];
+      const catalog = service.listTenantServicePrograms(tenantId);
+      const orders = service.listTenantOrders(tenantId, {
+        serviceProduct: "credit_card_airport_transfer",
+      });
+      expect(orders).toHaveLength(1);
+      expect(new Set(catalog.map((p) => p.programId)).size).toBeLessThan(
+        catalog.length,
+      );
+      expect(catalog.some((p) => p.programType === "enterprise_dispatch")).toBe(
+        true,
+      );
+      request.mockImplementation(async (url: string) =>
+        wire(url.includes("service-programs") ? catalog : orders),
+      );
+      const result = await loadBankBookingsData();
+      expect(result.status).toBe("ready");
+      expect(result.data.bookings).toHaveLength(1);
+      expect(result.data.detailById.get("producer-order")).toMatchObject({
+        orderNo: "PRODUCER-ORDER",
+        programCode: airport.programId,
+        programLabel: catalog.find((p) => p.programId === airport.programId)!
+          .displayName,
+        pickupLabel: "City ••••",
+        cardholderRefMasked: "09••••78",
+      });
+      const uniqueIds = [...new Set(catalog.map((p) => p.programId))];
+      expect(result.data.programs.map((p) => p.code)).toEqual(uniqueIds);
+      for (const option of result.data.programs)
+        expect(option.label).toBe(
+          catalog.find((p) => p.programId === option.code)!.displayName,
+        );
+      expect((await loadBankBookingsData()).data.programs).toEqual(
+        result.data.programs,
+      );
+    },
+  );
+
+  it.each(["foreign tenant", "malformed label"])(
+    "still validates every repeated program entry: %s",
+    async (scenario) => {
+      programs.push({
+        program_id: "program-1",
+        tenant_id:
+          scenario === "foreign tenant" ? "foreign" : identity.tenantId,
+        display_name: scenario === "malformed label" ? 123 : "Another entry",
+      });
+      const result = await loadBankBookingsData();
+      expect(result.status).toBe(
+        scenario === "foreign tenant" ? "denied" : "invalid",
+      );
+      expect(result.data.bookings).toEqual([]);
+      expect(result.data.programs).toEqual([]);
+      expect(result.data.detailById.size).toBe(0);
+    },
+  );
 });
