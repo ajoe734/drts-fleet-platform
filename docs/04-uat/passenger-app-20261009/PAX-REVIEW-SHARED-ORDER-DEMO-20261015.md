@@ -1223,3 +1223,88 @@ does not edit dependencies. No product/preview/HTTP listener, PG, browser,
 Playwright CLI or Compose runtime was started here. No old known-red workflow
 was rerun or manually cancelled. Its original collector retains natural
 partial/cancelled results. All three required acceptance keys remain pending.
+
+## R19 — diagnose the first real Ops assignment rejection
+
+**The assignment defect remains unresolved. This is a diagnostic candidate.**
+Adjacent candidate `22a75b20144b55077ac33b9a77aaee66e1025d8f`, generation
+`6f2e96e0198e4b7f87caec6b668f86f2`, actually created A through the Passenger
+UI: order `533a6ed1-f265-4431-9bfd-26e75f91dc77`, rides POST 201 and
+detail/events GET 200. Ops read that UUID and created dispatch
+`789393cb-ae33-4e9e-8f9f-5877fd43a039` with POST 201; candidates GET was 200.
+The first assign to `pax-review-driver-b` returned 409 at spec 198:27,
+callsite 473:9. Reassignment, Passenger offline recovery, Driver acceptance and
+B/C were not reached. Run `38742300946`, job `116449427281` reports one failed
+case, zero skips. Artifact `11977911069` contains report, error context and
+safe progress only; there is no screenshot, trace or completed-order fact JSON.
+It provides no assignment error code. A database serialization error elsewhere
+in the raw log is not evidence of this request's guard or cause.
+
+The collector's qualified receipt SHA256 is
+`c0f3fc0daaf0955121bd5b72e5221f1231caa98f80368a1c6910ea5a2a351521`.
+The raw job log SHA256 is
+`4e72cba7591f1b0091b2e60e463fa4734b5a72955252143ef2b052b764d12a28`.
+The artifact ZIP matches GitHub's digest
+`781d6248a691438d7664382a0eb3d339f3c838b3d744287c97ceccc39cc06e6b`.
+These are actual 22a results, not a replay or a successful three-order run.
+
+The actual caller is `SharedOrderReviewOps.command` → `getOpsClient` /
+`ApiClient.post` → existing Ops `control-plane-proxy` →
+`OwnedMobilityController.assignDispatch` / `reassignDispatch` →
+`prepareOrderAction` → existing idempotency and `createDispatchAssignment`.
+The latter locks current order/job/assignment authority, checks the operating
+authorization, builds passenger disclosure/credential/rating/fare snapshots,
+rechecks product/supply/training/leave/platform eligibility, and reserves
+resources before committing. All of these product sources remain byte-identical
+to 22a. The accepted ServiceProduct ACK and R18 product preparation/readback
+are retained. No unverified mapping, guard or concurrency change is guessed.
+
+Only the existing hosted helper's HTTP assertion gains
+`dispatchResponseDiagnostic(result, reassign)` as its message. It projects
+22 literal public codes from the formal Owned/idempotency sources. For the
+single wrapping `ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT` code, it may also
+project seven fixed public `reasonCodes` enums, in bounded stable order without
+duplicates. Unknown values, messages, other details, identities, headers, URLs,
+tokens and parsing exceptions never enter the diagnostic. Successful responses
+are not parsed by it. The original `<300` assertion, response handling,
+assign/reassign UI clicks, payloads, idempotency keys, business waits, three
+UUIDs, payment/cancellation/history assertions and all earlier findings remain.
+The original booking diagnostic is unchanged.
+
+| Finding / acceptance                                        | Source and change                                                                                                                     | Old result → replacement result                                                                                                                                                                                                                        | Commands / execution / evidence                                                                                                                                           | Remaining limit                                                                                                                                                                  |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R19: first actual assign rejects 409 without a public code  | Original hosted `assign` helper; new `dispatch-diagnostic.ts`; formal Owned and idempotency code mappings in `source-invariants.json` | 22a hosted: actual 409, no code. Same real Ops DOM → SDK → BFF → actual spec helper with controlled upstream responses: immutable 22a has 2 successful cases and 8 missing-diagnostic failures; replacement has 10 pass, still rejecting every 409/502 | `hosted-dispatch-caller.test.tsx`; `immutable22a-before.log` exit 1; `ops-caller-final.log` and `focused-final.log` exit 0                                                | Controlled responses locate the diagnostic gap only. Their P5/eligibility codes cannot be assigned to the historic 409; actual source repair still requires the next hosted code |
+| Preserve command, response and failure boundaries           | Actual rendered Ops buttons, real client/BFF, bounded parser; no product edits                                                        | Assign and reassign success return the existing data; public, unknown and non-JSON failures still throw. Actual UUID/driver/vehicle/reason payload and matching idempotency headers are asserted; only fixed code/reason enums appear                  | Focused 4 files / 32 pass, exit 0; full AST after removing one import and one assertion message equals 22a; all 29 literals mapped to formal source                       | HTTP transport is the external substitute; no production assignment, PG or browser claim                                                                                         |
+| Preserve R1–R18 source and regressions                      | Original task UAT/finding history, unchanged apps/packages/workflows/config and evidence/progress/booking helpers                     | Existing product and guard behavior retained                                                                                                                                                                                                           | Final regression and type/lint/format results below; source invariants exit 0                                                                                             | Earlier candidate CI/PG results are not new-candidate credit                                                                                                                     |
+| `pax-review-demo_real-shared-order-across-roles`            | Existing same-order role and peer assertions retained                                                                                 | Pending, zero acceptance credit. 22a reached one real A UUID and Ops dispatch, then rejected assign                                                                                                                                                    | Original three formal-schema PG companions and new same-source hosted run remain required                                                                                 | No B/C UUID, Driver acceptance or complete cross-role journey yet                                                                                                                |
+| `pax-review-demo_external-simulation-and-complete-journeys` | Original external ports and A/B/C flow retained                                                                                       | Pending, zero acceptance credit                                                                                                                                                                                                                        | All original assertions, real waits and actions unchanged                                                                                                                 | No completed three-order browser evidence; no inference from controlled diagnostic fixtures                                                                                      |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`    | Existing hosted CI and immutable shared-dev delivery retained                                                                         | Pending, zero acceptance credit                                                                                                                                                                                                                        | New exact-SHA review/full CI, three PG cases without skips, three-role browser, normal merge, sole combined immutable Cloud Run deployment and fresh smoke still required | No VM runtime, workflow rerun/manual cancellation, separate deployment or delivery claim                                                                                         |
+
+Execution source is `882b942f13884730cf2af298daf6623d44e492d1`; the
+handoff candidate adds only this UAT prose. Evidence is preserved under canonical
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate22a-dispatch-diagnostic/`
+with source/evidence hashes and exact command/exit records. Commands include:
+
+- `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/hosted-dispatch-caller.test.tsx --config .local/pax-review-shared-order-demo-20261015/r19-hosted-followup/vitest.before.config.mts --maxWorkers=2 --reporter=verbose`: exit 1, 8 diagnostic-message assertion failures / 2 success cases. The local transform changes only the spec read path to a `git show` copy of immutable 22a; it neither resets the worktree nor mocks product logic. This reproduces missing diagnostics, not the historical assignment root cause.
+- Focused original booking/progress plus new dispatch parser/caller: exit 0, 32 pass (`focused-final.log`), including real `ApiRequestError` envelopes and the actual Ops DOM/SDK/BFF. The upstream HTTP fixtures deliberately control public-code, eligibility, unknown-code and non-JSON responses; they do not execute a production assignment.
+- `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015 tests/unit/pax-booking-history-20261009 tests/unit/pax-shared-order-flow-20261015 tests/unit/pax-payment-core-20261009 tests/unit/pax-account-session-20261009 tests/unit/pax-web-shell-20261009 tests/unit/service-product.test.ts tests/unit/service-product-persistence-ack-20261015 --maxWorkers=2 --reporter=verbose`: exit 0, 745 pass / 22 original environment skips, 54 passing / 7 skipped files (`regression-final.log`, final source 882b942f). The three original review PG companions and original native HTTP/PG suites remain skipped on this VM. The earlier 745/22 run preceded the type-only test-adapter correction and is retained separately; the final run above used the committed corrected source. Counts overlap with focused cases and are not additive.
+- Root TypeScript and an explicit TSX caller typecheck: exit 0 (`typecheck-root.log`, `typecheck-caller-final.log`). Scoped ESLint, Prettier, source invariants and `git diff --check`: exit 0.
+
+The first new DOM fixture incorrectly decoded the BFF's ArrayBuffer request
+as a string, so all ten cases timed out before the simulated upstream replied.
+The next fixture exposed `request.method` as a string rather than Playwright's
+method function, causing ten adapter failures. Both are preserved as fixture
+errors, not product reproductions. After correcting those external adapters,
+the actual caller's ten cases pass. The initial explicit TSX check also rejected
+two Testing Library `exact` options; they were removed, preserving its default
+exact string matching, then the final typed source passed. The final focused
+run uses that corrected source. Existing DOM `act` warnings remain warnings.
+
+Node 22.23.2, pnpm 10.33.0, Vitest 4.1.4 and locked Next 16.3.8 / React 19.3.0
+were used. Only this worktree's 22 dependency symlinks were replaced by an
+offline frozen installation with scripts disabled, exit 0; canonical dependencies
+and lockfiles were not edited. No VM product/preview/HTTP/PG/browser/Compose
+runtime or Playwright CLI ran. The old known-red run was naturally cancelled by
+ordinary checkpoint pushes; its original sole collector retains partial results.
+All checks started in this owner turn are terminal and their results were read.
+All three required acceptance keys remain pending.
