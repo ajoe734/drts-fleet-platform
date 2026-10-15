@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { isDemoMode, subscribeDemo } from "../../lib/demo/store";
 
 const ReviewContext = createContext(false);
@@ -17,10 +18,21 @@ export const useReviewDemo = () => useContext(ReviewContext);
 export const useReviewOpsUrl = () => useContext(OpsUrlContext);
 
 export function ReviewDemoProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const demoEntry =
+    pathname === "/demo" || pathname?.startsWith("/demo/") === true;
   const [enabled, setEnabled] = useState(false);
   const [localDemo, setLocalDemo] = useState(false);
   const [opsUrl, setOpsUrl] = useState("");
   useEffect(() => {
+    const update = () => setLocalDemo(isDemoMode());
+    update();
+    return subscribeDemo(update);
+  }, []);
+  useEffect(() => {
+    // The existing local demo never needs a backend, including its initial
+    // entry before startDemo and reloads of a persisted local journey.
+    if (demoEntry || isDemoMode()) return;
     let active = true;
     void fetch("/api/passenger-app/review-demo/config", { cache: "no-store" })
       .then(async (response) => (response.ok ? response.json() : null))
@@ -35,15 +47,11 @@ export function ReviewDemoProvider({ children }: { children: ReactNode }) {
       .catch(() => {
         if (active) setEnabled(false);
       });
-    const update = () => setLocalDemo(isDemoMode());
-    update();
-    const unsubscribe = subscribeDemo(update);
     return () => {
       active = false;
-      unsubscribe();
     };
-  }, []);
-  const review = enabled && !localDemo;
+  }, [demoEntry, localDemo]);
+  const review = enabled && !localDemo && !demoEntry;
   return (
     <ReviewContext.Provider value={review}>
       <OpsUrlContext.Provider value={opsUrl}>

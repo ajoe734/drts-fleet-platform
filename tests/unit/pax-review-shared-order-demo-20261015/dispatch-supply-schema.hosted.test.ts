@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { OpsDispatchEventsService } from "../../../apps/api/src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { DriverProfileService } from "../../../apps/api/src/modules/driver-profile/driver-profile.service";
 import { RegulatoryRegistryRepository } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
@@ -25,7 +27,7 @@ describe.skipIf(!hostedPaymentEnabled)(
     it("reads synthetic IDs and normalized license metadata in the same bucket snapshot", async () => {
       const audit = new AuditNotificationService();
       const registry = new RegulatoryRegistryService(
-        undefined,
+        new OpsDispatchEventsService(new EventEmitter() as never),
         audit,
         new DriverProfileService(audit),
       );
@@ -48,21 +50,21 @@ describe.skipIf(!hostedPaymentEnabled)(
             ...base,
             vehicleId: textualId,
             plateNo: "SCHEMA-TEXT",
-            supportedServiceBuckets: ["multi_taxi"],
+            supportedServiceBuckets: ["standard_taxi"],
             licenseType: "multi_purpose_taxi",
           },
           {
             ...base,
             vehicleId: normalizedId,
             plateNo: "SCHEMA-UUID",
-            supportedServiceBuckets: ["multi_taxi"],
+            supportedServiceBuckets: ["standard_taxi"],
             licenseType: null,
           },
           {
             ...base,
             vehicleId: "review-schema-other-bucket",
             plateNo: "SCHEMA-OTHER",
-            supportedServiceBuckets: ["standard_taxi"],
+            supportedServiceBuckets: ["business_dispatch"],
           },
         ],
         drivers: [driver],
@@ -70,7 +72,7 @@ describe.skipIf(!hostedPaymentEnabled)(
           { vehicleId: textualId, driverId: driver.driverId, etaMinutes: 4 },
         ],
       });
-      const { state } = await store.findDispatchSupplyContext("multi_taxi");
+      const { state } = await store.findDispatchSupplyContext("standard_taxi");
       expect(state.vehicles).toHaveLength(2);
       expect(state.vehicles).toEqual(
         expect.arrayContaining([

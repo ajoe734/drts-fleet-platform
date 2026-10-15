@@ -369,3 +369,37 @@ skips, exit 0 (`review-namespace-after.log`); those skips are not PG passes.
 All three required acceptance keys remain pending with zero credit. The full
 old-candidate hosted unit/browser results will be retained before ordinary push;
 the next candidate must obtain fresh same-SHA checks and review.
+
+### R5: preserve the original offline demo under the new global provider
+
+Exact candidate `507584277ab764aa67b2f9e62e5b12ff9edc3181` completed hosted
+UI job `116330597209` with failure in the unchanged
+`tests/e2e/pax-functional-demo.spec.ts:225`: the original local journey made
+four unexpected `GET /api/passenger-app/review-demo/config` requests. The
+subsequent new three-role browser command therefore did not execute, and its
+missing artifact is not a browser pass. Full log:
+`ui-route-job116330597209.log` in this round's evidence directory.
+
+`ReviewDemoProvider` was mounted globally and fetched unconditionally. The
+repair uses the real local demo store subscription and current route to skip
+configuration requests on `/demo`, its child routes and any persisted active
+local journey. Exiting local mode loads the existing shared configuration;
+normal `/review` still enables the real shared flow. The old browser assertion
+and all original local-demo behavior remain unchanged.
+
+The new `review-context.test.tsx` renders the actual provider and uses the real
+`startDemo` / `stopDemo` storage and events. Only Next's pathname and the external
+configuration HTTP response are substituted. The provider was byte-identical
+to candidate 507 when the new case reproduced 2 failures / 1 pass (exit 1,
+`review-context-before.log`). Current source: 3 pass, exit 0
+(`review-context-after-fixed-resolver.log`), covering initial local entry/terms, active local
+journey reload and exit, and the positive shared review entry. Production
+browser execution remains required; this React regression is not browser or
+shared-dev delivery evidence.
+
+The first post-change provider run resolved Next from the root peer variant,
+so its pathname substitute did not reach the app dependency and the run failed.
+The final fixture targets the app's own Next dependency; the successful result
+above uses that resolution. The PG companion's initial typecheck errors were
+fixture construction/bucket errors, corrected to the existing event publisher
+and `standard_taxi` / `business_dispatch` contract before final verification.
