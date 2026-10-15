@@ -26,7 +26,7 @@ it("the unchanged real guard refuses the general order route and admits the task
   const guard = new BootstrapAuthGuard(new Reflector());
   async function admit(
     path: string,
-    handler: () => unknown,
+    handler: object,
     headers = {
       "x-actor-type": "driver_user",
       "x-actor-id": "review-driver",

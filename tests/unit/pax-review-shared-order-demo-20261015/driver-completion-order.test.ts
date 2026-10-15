@@ -4,7 +4,7 @@ import { expect, it } from "vitest";
 
 const execute = promisify(execFile);
 
-it.each(["metered", "fixed", "unavailable", "mismatch"])(
+it.each(["metered", "fixed", "unavailable", "mismatch", "jobs"])(
   "actual Trip and SDK load assigned completion requirements: %s",
   async (scenario) => {
     const result = await execute(

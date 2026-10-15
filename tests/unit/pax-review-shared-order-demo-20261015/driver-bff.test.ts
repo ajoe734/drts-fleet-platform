@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { createDriverBearerClient } from "@drts/api-client";
 import {
   GET,
   POST,
@@ -8,6 +9,54 @@ import {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+});
+
+it("the real SDK and mounted Driver BFF carry the task order read without substituting role or order IDs", async () => {
+  vi.stubEnv("PAX_REVIEW_DEMO_ENABLED", "true");
+  vi.stubEnv("DRTS_API_URL", "https://api-test.a.run.app");
+  vi.stubEnv("DRTS_API_AUTH_AUDIENCE", "");
+  const paths: string[] = [];
+  vi.stubGlobal("fetch", async (url: string | URL, init?: RequestInit) => {
+    const target = new URL(String(url));
+    if (target.hostname === "metadata.google.internal")
+      return new Response("synthetic-google-service-proof");
+    if (target.origin === "https://pax.test") {
+      return GET(new NextRequest(target, init), {
+        params: Promise.resolve({
+          path: target.pathname
+            .slice("/api/review-driver-api/".length)
+            .split("/"),
+        }),
+      });
+    }
+    expect(target.origin).toBe("https://api-test.a.run.app");
+    paths.push(target.pathname);
+    const headers = new Headers(init?.headers);
+    expect(headers.get("authorization")).toBe(
+      "Bearer synthetic-device-session",
+    );
+    expect(headers.get("x-serverless-authorization")).toBe(
+      "Bearer synthetic-google-service-proof",
+    );
+    expect(headers.get("x-actor-id")).toBeNull();
+    return Response.json({
+      data: {
+        order_id: "assigned-order",
+        fixed_price: false,
+        proof_requirements: { min_photo_count: 0 },
+      },
+    });
+  });
+  const client = createDriverBearerClient(
+    "https://pax.test/api/review-driver-api",
+    "synthetic-device-session",
+  );
+  expect(await client.getDriverTaskOrder("assigned-task")).toMatchObject({
+    orderId: "assigned-order",
+    fixedPrice: false,
+    proofRequirements: { minPhotoCount: 0 },
+  });
+  expect(paths).toEqual(["/api/driver/tasks/assigned-task/order"]);
 });
 
 it("the review driver BFF retains the device Bearer separately from existing Google service auth and preserves an API refusal", async () => {

@@ -406,6 +406,24 @@ async function run() {
     await api.registerDriverDevice("synthetic-registration-code");
   if (completionCase) {
     try {
+      if (scenario === "completion-jobs") {
+        await open("jobs");
+        assert.equal(
+          visibleText("85.00", false),
+          true,
+          "Actual Jobs card must display its assigned order's quoted fare",
+        );
+        console.log(
+          JSON.stringify({
+            scenario,
+            actualScreens: true,
+            actualSDK: true,
+            commandCount: 0,
+            upstreamHTTP: "fixture; no runtime acceptance credit",
+          }),
+        );
+        return;
+      }
       await open("trip");
       const inputs = () =>
         renderer.root.findAll((node) => node.type === "TextInput");
