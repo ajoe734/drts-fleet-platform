@@ -65,10 +65,11 @@ export class PlatformEarningsController {
   async getSummary(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Query("driverId") requestedDriverId?: string,
+    @Query("period") period?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const driverId = this.resolveDriverId(identity, requestedDriverId);
-    const summary = await this.service.summary(driverId);
+    const summary = await this.service.summary(driverId, period);
     return toApiSuccessEnvelope(summary, requestId);
   }
 
@@ -78,10 +79,11 @@ export class PlatformEarningsController {
   async getByPlatform(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Query("driverId") requestedDriverId?: string,
+    @Query("period") period?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const driverId = this.resolveDriverId(identity, requestedDriverId);
-    const breakdown = await this.service.byPlatform(driverId);
+    const breakdown = await this.service.byPlatform(driverId, period);
     return toApiSuccessEnvelope(breakdown, requestId);
   }
 }
