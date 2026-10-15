@@ -1631,6 +1631,19 @@ export class PlatformAdminService implements OnModuleInit {
       );
     }
 
+    const mergedWebhookStatus =
+      current.webhookStatus || command.webhookStatus
+        ? {
+            url: null,
+            isEnabled: false,
+            lastEventTimestamp: null,
+            lastStatus: "UNKNOWN" as const,
+            ...current.webhookStatus,
+            ...command.webhookStatus,
+          }
+        : null;
+    this.validateUpdatePlatformAdapterCommand(command, mergedWebhookStatus);
+
     const previousRevision = current.revision ?? 1;
     const newRevision = previousRevision + 1;
     const now = new Date().toISOString();
@@ -1644,6 +1657,18 @@ export class PlatformAdminService implements OnModuleInit {
       occurredAt: now,
     };
 
+    const normalizedCredentialExpiry =
+      command.credentialExpiry !== undefined
+        ? command.credentialExpiry === null
+          ? null
+          : {
+              reference: command.credentialExpiry.reference!.trim(),
+              expiresAt:
+                this.normalizeNullableText(command.credentialExpiry.expiresAt) ??
+                null,
+            }
+        : (current.credentialExpiry ?? null);
+
     const updated: PlatformAdapter = {
       ...current,
       config: command.config
@@ -1651,10 +1676,7 @@ export class PlatformAdminService implements OnModuleInit {
         : current.config,
       rolloutStatus: command.rolloutStatus ?? current.rolloutStatus,
       rolloutStage: command.rolloutStage ?? current.rolloutStage,
-      credentialExpiry:
-        command.credentialExpiry !== undefined
-          ? command.credentialExpiry
-          : (current.credentialExpiry ?? null),
+      credentialExpiry: normalizedCredentialExpiry,
       policies: command.policies
         ? {
             ...current.policies,
@@ -1667,23 +1689,11 @@ export class PlatformAdminService implements OnModuleInit {
       featureFlags: command.featureFlags
         ? { ...current.featureFlags, ...command.featureFlags }
         : current.featureFlags,
-      webhookStatus:
-        current.webhookStatus || command.webhookStatus
-          ? {
-              url: null,
-              isEnabled: false,
-              lastEventTimestamp: null,
-              lastStatus: "UNKNOWN",
-              ...current.webhookStatus,
-              ...command.webhookStatus,
-            }
-          : null,
+      webhookStatus: mergedWebhookStatus,
       revision: newRevision,
       lastMutationAudit: mutationAudit,
       updatedAt: now,
     };
-
-    this.adapters[index] = updated;
 
     await this.persistAdapterMutation(
       current.id,
@@ -1692,7 +1702,7 @@ export class PlatformAdminService implements OnModuleInit {
       mutationAudit,
     );
 
-    this.recordAudit(
+    await this.recordAdapterAudit(
       {
         actorId: mutationAudit.actorId,
         actorType: "platform_admin",
@@ -1718,44 +1728,170 @@ export class PlatformAdminService implements OnModuleInit {
       requestId,
     );
 
+    this.adapters[index] = updated;
+
     return this.attachCredentialExpiryWarning(
       this.clonePlatformAdapter(updated),
     );
   }
 
-  registerPlatformAdapter(adapter: PlatformAdapter): PlatformAdapter {
+  async registerPlatformAdapter(
+    adapter: PlatformAdapter,
+    requestId?: string,
+    actorId?: string | null,
+  ): Promise<PlatformAdapter> {
+    this.validateRegisterPlatformAdapterInput(adapter);
+
     const existingIndex = this.adapters.findIndex((a) => a.id === adapter.id);
     const now = new Date().toISOString();
+    const normalizedCredentialExpiry =
+      adapter.credentialExpiry !== undefined &&
+      adapter.credentialExpiry !== null
+        ? {
+            reference: adapter.credentialExpiry.reference!.trim(),
+            expiresAt:
+              this.normalizeNullableText(adapter.credentialExpiry.expiresAt) ??
+              null,
+          }
+        : null;
     const cloned = this.clonePlatformAdapter({
       ...adapter,
+      id: adapter.id.trim(),
+      platformCode: adapter.platformCode.trim() as PlatformAdapter["platformCode"],
+      name: adapter.name.trim(),
+      description: adapter.description?.trim() ?? "",
+      version: adapter.version.trim(),
+      credentialExpiry: normalizedCredentialExpiry,
       revision: adapter.revision ?? 1,
       lastMutationAudit: adapter.lastMutationAudit ?? null,
       updatedAt: now,
     });
+
+    await this.persistAdapterRegistration(cloned);
+
+    await this.recordAdapterAudit(
+      {
+        actorId: this.normalizeNullableText(actorId),
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "register_platform_adapter",
+        resourceType: "platform_adapter",
+        resourceId: cloned.id,
+        newValuesSummary: {
+          id: cloned.id,
+          platformCode: cloned.platformCode,
+          revision: cloned.revision ?? 1,
+          credentialExpiry: cloned.credentialExpiry ?? null,
+        },
+      },
+      requestId,
+    );
+
     if (existingIndex >= 0) {
       this.adapters[existingIndex] = cloned;
     } else {
       this.adapters.push(cloned);
     }
 
-    this.persistChanges(
-      { platformAdapters: [this.clonePlatformAdapter(cloned)] },
-      "register_platform_adapter",
-    );
-    this.recordAudit({
-      actorId: null,
-      actorType: "platform_admin",
-      tenantId: null,
-      moduleName: "platform-admin",
-      actionName: "register_platform_adapter",
-      resourceType: "platform_adapter",
-      resourceId: cloned.id,
-      newValuesSummary: { id: cloned.id, platformCode: cloned.platformCode },
-    });
-
     return this.attachCredentialExpiryWarning(
       this.clonePlatformAdapter(cloned),
     );
+  }
+
+  private validateRegisterPlatformAdapterInput(adapter: PlatformAdapter) {
+    this.assertNonBlank(adapter?.id, "id");
+    this.assertNonBlank(adapter?.platformCode, "platformCode");
+    this.assertNonBlank(adapter?.name, "name");
+    this.assertNonBlank(adapter?.version, "version");
+    if (adapter.credentialExpiry !== undefined) {
+      this.validateCredentialExpiryInput(adapter.credentialExpiry);
+    }
+    this.validateAdapterPoliciesInput(adapter.policies);
+    this.validateWebhookStatusInput(adapter.webhookStatus);
+  }
+
+  private validateUpdatePlatformAdapterCommand(
+    command: UpdatePlatformAdapterCommand,
+    mergedWebhookStatus: PlatformAdapter["webhookStatus"],
+  ) {
+    if (command.credentialExpiry !== undefined) {
+      this.validateCredentialExpiryInput(command.credentialExpiry);
+    }
+    if (command.policies !== undefined) {
+      this.validateAdapterPoliciesInput(command.policies);
+    }
+    if (command.webhookStatus !== undefined) {
+      this.validateWebhookStatusInput(mergedWebhookStatus);
+    }
+  }
+
+  private validateCredentialExpiryInput(
+    credentialExpiry: AdapterCredentialExpiry | null | undefined,
+  ) {
+    if (credentialExpiry === null || credentialExpiry === undefined) {
+      return;
+    }
+    this.assertNonBlank(
+      credentialExpiry.reference,
+      "credentialExpiry.reference",
+    );
+  }
+
+  private validateAdapterPoliciesInput(
+    policies: Partial<PlatformAdapter["policies"]> | undefined,
+  ) {
+    if (!policies) {
+      return;
+    }
+    const numericFields = [
+      ["policies.maxCandidates", policies.maxCandidates],
+      ["policies.acceptTimeoutSeconds", policies.acceptTimeoutSeconds],
+      [
+        "policies.manualFallbackThresholdSeconds",
+        policies.manualFallbackThresholdSeconds,
+      ],
+    ] as const;
+
+    for (const [field, value] of numericFields) {
+      if (
+        value !== undefined &&
+        (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "VALIDATION_ERROR",
+          `${field} must be a positive finite number.`,
+          { field },
+        );
+      }
+    }
+  }
+
+  private validateWebhookStatusInput(
+    webhookStatus: PlatformAdapter["webhookStatus"] | undefined,
+  ) {
+    if (webhookStatus?.isEnabled) {
+      this.assertNonBlank(webhookStatus.url, "webhookStatus.url");
+    }
+  }
+
+  private async persistAdapterRegistration(adapter: PlatformAdapter) {
+    if (!this.platformAdminRepository?.isEnabled()) {
+      return;
+    }
+
+    try {
+      await this.platformAdminRepository.persistChanges({
+        platformAdapters: [this.clonePlatformAdapter(adapter)],
+      });
+    } catch (error) {
+      this.platformAdminRepository.reportPersistenceFailure(
+        error,
+        "register_platform_adapter",
+      );
+      throw error;
+    }
   }
 
   private async persistAdapterMutation(
@@ -1782,24 +1918,50 @@ export class PlatformAdminService implements OnModuleInit {
       );
     } catch (error) {
       if (error instanceof PlatformAdapterRevisionConflictError) {
-        // The in-memory row above is this process's authority for the HTTP
-        // response already returned; a persisted-row mismatch here means the
-        // durable copy has not caught up (e.g. first mutation before the
-        // initial seed row landed) rather than a real concurrent writer in
-        // this single-instance service, so it is logged, not surfaced to the
-        // caller who already has a consistent in-memory result.
         this.platformAdminRepository.reportPersistenceFailure(
           error,
           "update_platform_adapter revision",
         );
-        return;
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PLATFORM_ADAPTER_REVISION_CONFLICT",
+          error.message,
+          {
+            id: error.adapterId,
+            expectedRevision: error.expectedRevision,
+          },
+        );
       }
 
       this.platformAdminRepository.reportPersistenceFailure(
         error,
         "update_platform_adapter",
       );
+      throw error;
     }
+  }
+
+  private async recordAdapterAudit(
+    input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
+    requestId?: string,
+  ) {
+    const auditLogInput: Omit<
+      AuditLogRecord,
+      "auditId" | "createdAt" | "requestId"
+    > & {
+      requestId?: string;
+    } = {
+      ...input,
+    };
+    if (requestId) {
+      auditLogInput.requestId = requestId;
+    }
+    if (
+      typeof this.auditNotificationService.recordAuditLogAsync === "function"
+    ) {
+      return this.auditNotificationService.recordAuditLogAsync(auditLogInput);
+    }
+    return this.auditNotificationService.recordAuditLog(auditLogInput);
   }
 
   /**

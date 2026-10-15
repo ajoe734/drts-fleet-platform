@@ -13,7 +13,6 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolve } from "node:path";
 import type {
-  AdapterCredentialExpiry,
   PlatformAdapter,
   UpdatePlatformAdapterCommand,
 } from "@drts/contracts";
@@ -440,9 +439,14 @@ describe("ADAPTER-REGISTRY-COMMAND-AND-FRESHNESS-FLOW-20261015: C104 & C105 prod
     await waitFor(() => {
       expect(screen.getByText("北捷轉乘接駁轉接器")).toBeTruthy();
     });
-    expect(screen.getByText(/adapter-taiwan-metro-01/)).toBeTruthy();
+    const registeredCard = screen.getByTestId(
+      "adapter-card-adapter-taiwan-metro-01",
+    );
     expect(
-      screen.getByText(
+      within(registeredCard).getByText("adapter-taiwan-metro-01"),
+    ).toBeTruthy();
+    expect(
+      within(registeredCard).getByText(
         /kms:\/\/projects\/drts\/locations\/tw\/keyRings\/metro-v1/,
       ),
     ).toBeTruthy();
@@ -468,11 +472,15 @@ describe("ADAPTER-REGISTRY-COMMAND-AND-FRESHNESS-FLOW-20261015: C104 & C105 prod
       expect(screen.queryByText(tt("adapterRegistry.loading"))).toBeNull();
     });
 
-    // 1. Edit config on owned-dispatch
-    const editConfigButtons = screen.getAllByRole("button", {
-      name: tt("adapterRegistry.editConfig"),
-    });
-    fireEvent.click(editConfigButtons[0]!);
+    // 1. Edit config on cityride-forwarder
+    const cityCardInitial = screen.getByTestId(
+      "adapter-card-cityride-forwarder",
+    );
+    fireEvent.click(
+      within(cityCardInitial).getByRole("button", {
+        name: tt("adapterRegistry.editConfig"),
+      }),
+    );
 
     const configModal = screen.getByTestId("adapter-config-modal");
     fireEvent.change(within(configModal).getByTestId("config-max-candidates"), {
@@ -520,15 +528,19 @@ describe("ADAPTER-REGISTRY-COMMAND-AND-FRESHNESS-FLOW-20261015: C104 & C105 prod
     await waitFor(() => {
       expect(screen.getByText("42s")).toBeTruthy();
       expect(
-        screen.getByText(/Q4 尖峰派遣候選上限與逾時參數調整/),
-      ).toBeTruthy();
+        screen.getAllByText(/Q4 尖峰派遣候選上限與逾時參數調整/).length,
+      ).toBeGreaterThanOrEqual(1);
     });
 
-    // 2. Edit credential reference & expiry on the same adapter
-    const editCredentialButtons = screen.getAllByRole("button", {
-      name: tt("adapterRegistry.editCredential"),
-    });
-    fireEvent.click(editCredentialButtons[0]!);
+    // 2. Edit credential reference & expiry on the same adapter (cityride-forwarder)
+    const cityCardAfterConfig = screen.getByTestId(
+      "adapter-card-cityride-forwarder",
+    );
+    fireEvent.click(
+      within(cityCardAfterConfig).getByRole("button", {
+        name: tt("adapterRegistry.editCredential"),
+      }),
+    );
 
     const credModal = screen.getByTestId("adapter-credential-modal");
     const newExpiry = new Date(
@@ -566,18 +578,51 @@ describe("ADAPTER-REGISTRY-COMMAND-AND-FRESHNESS-FLOW-20261015: C104 & C105 prod
 
     await waitFor(() => {
       expect(screen.getByText(/kms-ref-2026-q4-v2/)).toBeTruthy();
-      expect(screen.getByText(/登錄 Q4 KMS 金鑰版本參照與新效期/)).toBeTruthy();
+      expect(
+        screen.getAllByText(/登錄 Q4 KMS 金鑰版本參照與新效期/).length,
+      ).toBeGreaterThanOrEqual(1);
     });
 
     // 3. Rotate credential button remains an honest governance notice, never fabricating a provider secret rotation PATCH
     const rotateButtons = screen.getAllByRole("button", {
-      name: tt("adapterRegistry.rotateCredential"),
+      name: new RegExp(tt("adapterRegistry.rotateCredential")),
     });
     fireEvent.click(rotateButtons[0]!);
     const patchRequestsAfterRotateClick = harness.requests.filter(
       (req) => req.method === "PATCH",
     );
     expect(patchRequestsAfterRotateClick).toHaveLength(2);
+
+    // 4. Existing enable/disable control works alongside the new governance forms and bumps revision to 3
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const promptSpy = vi
+      .spyOn(window, "prompt")
+      .mockReturnValue("例行維護停用正式環境 SMS 轉接器");
+    try {
+      const disableButtons = screen.getAllByRole("button", {
+        name: new RegExp(tt("adapterRegistry.disableAdapter")),
+      });
+      fireEvent.click(disableButtons[0]!);
+
+      await waitFor(() => {
+        const patches = harness.requests.filter(
+          (req) =>
+            req.method === "PATCH" &&
+            req.path.startsWith("/api/platform-admin/adapters/"),
+        );
+        expect(patches).toHaveLength(3);
+        expect(patches[2]!.body).toEqual({
+          config: {
+            isEnabled: false,
+          },
+          expectedRevision: 3,
+          reason: "例行維護停用正式環境 SMS 轉接器",
+        });
+      });
+    } finally {
+      confirmSpy.mockRestore();
+      promptSpy.mockRestore();
+    }
   });
 
   it("C104-F3: enabled repository rejecting create or update propagates failure before mutating memory, recording success audit, or returning 2xx ACK; subsequent recovery persists and reloads cleanly", async () => {
@@ -856,6 +901,21 @@ describe("ADAPTER-REGISTRY-COMMAND-AND-FRESHNESS-FLOW-20261015: C104 & C105 prod
     const harness = createAdapterRegistryWireHarness();
     await harness.platformAdminService.onModuleInit();
 
+    await harness.platformAdminService.updatePlatformAdapter(
+      "cityride-forwarder",
+      {
+        credentialExpiry: {
+          reference: "vault://cityride/prod/token-v1",
+          expiresAt: new Date(
+            t0.getTime() + 30 * 24 * 60 * 60 * 1000,
+          ).toISOString(),
+        },
+        reason: "Set valid future expiry for refresh failure distinction test",
+      },
+      "req-cityride-seed",
+      "principal_platform_admin_001",
+    );
+
     vi.stubGlobal("fetch", harness.fetchImpl);
     activeClient = new ApiClient({ baseUrl: "http://localhost" });
 
@@ -991,5 +1051,100 @@ describe("ADAPTER-REGISTRY-COMMAND-AND-FRESHNESS-FLOW-20261015: C104 & C105 prod
     expect(
       harness.platformAdminService.getPlatformAdapter("unauthorized-adapter"),
     ).toBeUndefined();
+  });
+
+  it("preserves deliberate noDB/demo mode, propagates rejected audit writes honestly, and validates command inputs", async () => {
+    const disabledRepo = {
+      isEnabled: () => false,
+      loadState: vi.fn(),
+      persistChanges: vi.fn(),
+      mutateAdapterWithAudit: vi.fn(),
+      reportPersistenceFailure: vi.fn(),
+    } as unknown as PlatformAdminRepository;
+
+    const auditService = new AuditNotificationService();
+    const noDbService = new PlatformAdminService(auditService, disabledRepo);
+    await noDbService.onModuleInit();
+
+    const baseAdapter = noDbService.listPlatformAdapters()[0]!;
+    const registeredInNoDb = await noDbService.registerPlatformAdapter(
+      {
+        ...baseAdapter,
+        id: "nodb-demo-adapter",
+        platformCode: "NODB" as PlatformAdapter["platformCode"],
+        name: "NoDB Demo Adapter",
+        version: "1.0.0",
+      },
+      "req-nodb-reg",
+      "principal_platform_admin_001",
+    );
+    expect(registeredInNoDb.id).toBe("nodb-demo-adapter");
+    expect(disabledRepo.persistChanges).not.toHaveBeenCalled();
+
+    const updatedInNoDb = await noDbService.updatePlatformAdapter(
+      "nodb-demo-adapter",
+      {
+        expectedRevision: 1,
+        config: { isEnabled: false },
+        reason: "NoDB toggle test",
+      },
+      "req-nodb-upd",
+      "principal_platform_admin_001",
+    );
+    expect(updatedInNoDb?.revision).toBe(2);
+    expect(disabledRepo.mutateAdapterWithAudit).not.toHaveBeenCalled();
+
+    await expect(
+      noDbService.registerPlatformAdapter({
+        ...baseAdapter,
+        id: "   ",
+      }),
+    ).rejects.toMatchObject({ code: "FIELD_REQUIRED" });
+
+    await expect(
+      noDbService.updatePlatformAdapter("nodb-demo-adapter", {
+        credentialExpiry: {
+          reference: "   ",
+          expiresAt: new Date().toISOString(),
+        },
+      }),
+    ).rejects.toMatchObject({ code: "FIELD_REQUIRED" });
+
+    await expect(
+      noDbService.updatePlatformAdapter("nodb-demo-adapter", {
+        policies: {
+          ...baseAdapter.policies,
+          maxCandidates: 0,
+        },
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+
+    await expect(
+      noDbService.updatePlatformAdapter("nodb-demo-adapter", {
+        webhookStatus: {
+          url: "   ",
+          isEnabled: true,
+          lastEventTimestamp: null,
+          lastStatus: "UNKNOWN",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "FIELD_REQUIRED" });
+
+    vi.spyOn(auditService, "recordAuditLogAsync").mockRejectedValueOnce(
+      new Error("AUDIT_LOG_APPEND_REJECTED"),
+    );
+    await expect(
+      noDbService.updatePlatformAdapter("nodb-demo-adapter", {
+        expectedRevision: 2,
+        config: { isEnabled: true },
+        reason: "Should fail when audit append rejects",
+      }),
+    ).rejects.toThrow(/AUDIT_LOG_APPEND_REJECTED/);
+    expect(noDbService.getPlatformAdapter("nodb-demo-adapter")?.revision).toBe(
+      2,
+    );
+    expect(
+      noDbService.getPlatformAdapter("nodb-demo-adapter")?.config.isEnabled,
+    ).toBe(false);
   });
 });
