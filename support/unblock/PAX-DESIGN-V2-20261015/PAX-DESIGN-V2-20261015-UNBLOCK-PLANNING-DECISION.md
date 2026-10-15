@@ -156,5 +156,36 @@ Supervisor 必須透過其授權 CLI context 執行並回讀：
 
 ## 發布與完成的文件檢查
 
-第一個可描述的規劃版本立即 anchor commit；本節在檢查與普通 push／PR 建立後
-補記實際結果。未取得 Supervisor 寫入前保留 draft PR，既不 handoff 也不呼叫 done。
+- Anchor `7cdfc20fb64ecce04bd16d38cacdf44bbac76ce0` 已普通 push 至
+  `codex2/pax-design-v2-20261015-unblock-planning-decision`，exit 0。
+  [Draft PR #2668](https://github.com/ajoe734/drts-fleet-platform/pull/2668)
+  建立及 readback exit 0，base `dev`，建立時 PR head 等於該 anchor。
+  本節證據另以 append-only commit、普通 push 保存；最終 local／remote／PR
+  完整 head 以本 helper 的 CLI progress／blocker 記錄，不假裝已鎖 candidate。
+- 在該 anchor 對固定 base `abffadbbcba5fe236f4ae7b49ee59003910fd9b5`
+  執行 `python3 tools/ci/git/check_canonical_consistency.py --ci --base
+abffadbbcba5fe236f4ae7b49ee59003910fd9b5 --head HEAD`：exit 0，四類零 findings。
+- `python3 tools/ci/git/check_commit_trailers.py --base
+abffadbbcba5fe236f4ae7b49ee59003910fd9b5 --head HEAD`：exit 0，anchor 一個 commit
+  通過。`git diff --check abffadbbcba5fe236f4ae7b49ee59003910fd9b5...HEAD`：exit 0。
+  證據 commit 後對完整範圍重跑；實際結果由 CLI closeout 記錄。
+- `pnpm exec prettier --check
+support/unblock/PAX-DESIGN-V2-20261015/PAX-DESIGN-V2-20261015-UNBLOCK-PLANNING-DECISION.md`：
+  exit 0。`node tools/ci/check-repo-classification.mjs`：exit 0，6671 files。
+  Node v22.23.2、pnpm 10.33.0；只對本 artifact 做格式化，既有 open-question 內容保留。
+- `python3 /home/lupin/workspace/drts-fleet-platform/.local/pax-design-v2-unblock-planning-20261015/check-document-links.py`：
+  exit 0。只改兩個 task-owned 文件；移除新增 Q entry 後，既有問題內容逐位元組相同；
+  9 個本地引用及 3 個 immutable parent-revision 路徑全部存在。腳本／輸出均在同一
+  `.local` 證據目錄，檢查實際路徑，未新增產品鏡像測試。
+- Source probe SHA256：`af6971f4c5b6075246d45bf81e998394e6f13f7b6114385a5e757f83b8ca28ed`；
+  輸出 SHA256：`c24d33d9387fd8f76facea4da7091b41bc34792985403593a36717a076251c12`。
+  exit 1 的缺陷重現與 exit 0 的文件 gates 分開記錄。
+- Anchor 前 `python3 tools/ci/git/check_staged_generated_files.py --staged`：exit 0；
+  commit 使用 `HUSKY=0`，避免 lint-staged 自動重排既有 open-question 全文，
+  generated-file guard 與本次文件／格式／trailer gates 手動執行。
+- 所有本輪手動啟動的檢查皆已結束並讀取結果。產品測試／PG／browser／部署不適用此
+  兩文件路由變更，沒有執行；hosted CI／獨立 review／merge 尚未授予本 helper 通過。
+- PR 建立後的 release-CLI readback：helper 三個 `resolved_parent_*` 處置欄位仍為
+  null；parent-next 寫入 acceptance 仍未滿足。需要 Supervisor 按上節執行與回讀，
+  才能將本 helper 以最終完整 SHA handoff 指定 reviewer Codex。來源補稿和母任務驗收
+  仍分開追蹤。未取得寫入前保留 draft PR，既不 handoff 也不呼叫 done。
