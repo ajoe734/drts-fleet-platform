@@ -215,7 +215,13 @@ describe("C112 durable commands and first in-flight restart", () => {
       const gate = new Promise<void>((resolve) => {
         releaseCommit = resolve;
       });
-      if (enabled) p.holdCommit(() => gate);
+      let retryCommits = 0;
+      if (enabled)
+        p.holdCommit(async () => {
+          // Preparation commits first; preserve this case's original coverage
+          // of the delivery outcome ACK, after HTTP has already completed.
+          if (++retryCommits === 2) await gate;
+        });
       const retrying = service.retryWebhookDelivery(
         tenantId,
         endpoint.webhookId,
@@ -226,6 +232,12 @@ describe("C112 durable commands and first in-flight restart", () => {
       if (enabled) {
         await new Promise((resolve) => setImmediate(resolve));
         try {
+          expect(retryCommits).toBe(2);
+          expect(service.listWebhookDeliveries(tenantId)[0]).toMatchObject({
+            status: "queued",
+            attempt: 1,
+            httpStatus: 410,
+          });
           expect(
             auditSpy.mock.calls.some(
               ([entry]) => entry.actionName === "retry_webhook_delivery",
