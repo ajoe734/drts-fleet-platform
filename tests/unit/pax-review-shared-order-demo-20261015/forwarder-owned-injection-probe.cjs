@@ -168,8 +168,14 @@ async function main() {
   ])
     moduleRef.addProvider(provider);
   // Use Nest's actual optional-dependency resolution and constructor injection.
+  // InstanceLoader creates the prototype first, which forwardRef requires.
+  const injector = new Injector();
+  injector.loadPrototype(
+    moduleRef.providers.get(ForwarderService),
+    moduleRef.providers,
+  );
   const wrapper = moduleRef.providers.get(ForwarderService);
-  await new Injector().loadProvider(wrapper, moduleRef);
+  await injector.loadProvider(wrapper, moduleRef);
   const forwarder = wrapper.instance;
   const controller = new ForwarderController(forwarder);
   const identity = {
