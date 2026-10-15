@@ -1129,3 +1129,97 @@ delivery supplement, the new fixed diagnostic candidate can be pushed without
 waiting for the known-red generation's remaining CI. Its sole collector records
 any natural cancellation as partial/cancelled, never PASS. All three acceptance
 keys remain pending.
+
+## R18 — prepare the real reservation product and read it across instances
+
+The adjacent candidate is `24ca09a5eb6218689dac958cc4a4a1fb9a890e53`,
+generation `9a5788a10dfe4939b777ef0a36e036fa`. Its actual hosted run
+`38737881286`, job `116433168022`, failed with zero skips: quote HTTP 201,
+then ride HTTP 409. Raw log line 2324 reports the existing fixed diagnostic
+`Passenger booking status=409 code=SERVICE_PRODUCT_INACTIVE`. A never acquired
+an order UUID; B/C were not reached. The qualified receipt SHA256 is
+`464a645c54dac2558814f68d2dc304bba69a26b0878751fb56a128a94352efff`;
+the raw log SHA256 is
+`0997f89f1099c3bc65be4157240a254784bc4717c5e1f6628f72090fe93f1ee0`.
+Artifact `11974284903` has ZIP/GitHub digest
+`3d7ac58ad8b032a66b1ed541cc946e060872842e4f609a2eb2d77c80f2e6858c`.
+This locates 24ca's rejection; it does not retrospectively assign a code to
+f4's unrecorded response.
+
+The actual path is `PassengerBookingService.createRide` →
+`MultiTaxiService.createTrustedPassengerRide` →
+`OwnedMobilityService.createMultiTaxiRide` / `buildAndPersistMultiTaxiRide`.
+The last method rejects the reservation product when its master is inactive.
+`DEFAULT_RUNTIME_SERVICE_PRODUCTS` deliberately defaults
+`seed-taxi-reservation` to `active: false`. V0057 enables the independent
+`multi_taxi_direct` / `taxi_reservation` policy, but does not create or enable
+a product master. The original `ReviewSupplyService.prepare` prepared only
+qualification, authorization and supply data. Initialization-only product
+snapshots also leave previously initialized peers stale after preparation.
+
+The enabled nonproduction preparation now refreshes that exact product context,
+then awaits the established `ServiceProductService.createServiceProduct` or
+`updateServiceProduct` to enable the real master. Existing IDs, billing,
+meter/license/proof configuration and unrelated products are retained. It
+creates no orders, assignments, tasks or payments, and does not change the
+runtime policy or the ordinary inactive default. `PassengerAppModule` imports
+the existing `ServiceProductModule` to share its singleton with the existing
+MultiTaxi/Owned modules.
+
+`ServiceProductRepository.findRuntimeContext` reads only the requested type
+and profile/policy key using the official V0027/V0057 tables.
+`ServiceProductService.prepareRuntimeProfileServiceProduct` replaces only that
+context; missing rows remove stale values, and read errors reject the command.
+All three MultiTaxi intake paths refresh before the original policy check.
+The native Owned intake refreshes before its original builder and active check,
+including direct internal callers. Its existing no-repository synchronous
+behavior and call-center voice-intent fence are retained.
+
+Per Supervisor's integration supplement, the owner normally merged
+`abffadbbc` from `origin/dev` as `8f5292e2611c25abe79fb54f7d83b003ad6dcc2f`.
+This preserves accepted `SERVICE-PRODUCT-PERSISTENCE-ACK-20261015`, merge
+`48980f0efa0a6572e21b93ada16a123a2a77399b` / PR #2663. No published history
+was rewritten. Every accepted ServiceProduct class member is unchanged except
+for the new narrow reader. Preparation uses its real ACK-before-cache/audit
+create/update behavior; the earlier direct repository-write anchor is superseded.
+
+| Finding / acceptance                                                               | Source and change                                                                                                            | Old result → replacement result                                                                                                                                                                                                                | Commands / execution / evidence                                                                                                                                                                     | Remaining limit                                                                          |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| R18: real reservation booking rejects `SERVICE_PRODUCT_INACTIVE` after preparation | `ReviewSupplyService.prepare`, existing ServiceProduct create/update, module injection; original Owned active guard retained | Same genuine preparation and PassengerBooking/MultiTaxi/Owned/repository caller with SQL-response fixtures: immutable 24ca rejects HTTP-equivalent 409; replacement commits order, ownership history and digest-only access with the same UUID | `service-product-preparation.test.ts`; immutable command below exits 1 with the exact code; replacement 16/16 pass, exit 0 (`integrated-focused.log`)                                               | SQL transport responses are controlled; no PG/browser acceptance credit                  |
+| R18: preinitialized peers must read the prepared master                            | Targeted repository/service reader, three MultiTaxi entry points and native Owned intake                                     | Preinitialized B reads A's persisted master; subsequent deactivation/deletion and read failures still reject without a new order                                                                                                               | Focused 16 cases and full root/API regressions below; native Owned positive and negative cases included                                                                                             | Actual cross-instance PG case remains hosted                                             |
+| Preserve accepted ACK and all independent rejection boundaries                     | Formal create/update/policy methods, existing defaults/guards, unchanged V0027/V0057 schema                                  | Existing master fields and unrelated products survive repeated prepare; disabled/production modes, write failure, pending ACK, inactive/expired/future/missing policy remain correct; accepted ACK regression 6/6 pass                         | `integrated-source-invariants.json` checks all accepted class members against merged dev, original product defaults/guard/readers and Owned validator/builder; root/API checks below                | No new policy, schema, clock or external-service exemption                               |
+| `pax-review-demo_real-shared-order-across-roles`                                   | Existing real three-role order and UUID assertions retained                                                                  | Pending, zero acceptance credit                                                                                                                                                                                                                | `dynamic-supply.hosted.test.ts` now injects real ServiceProductService/Repository into both preinitialized peers and verifies persisted master plus B's stale→fresh snapshot around genuine booking | New exact-candidate hosted PG, Driver registration/task and cross-role readback required |
+| `pax-review-demo_external-simulation-and-complete-journeys`                        | Original A/B/C, payment, support, cancellation, history and business waits unchanged                                         | Pending, zero acceptance credit                                                                                                                                                                                                                | Whole hosted browser spec and evidence/progress/diagnostic helpers are byte-identical to 24ca                                                                                                       | All three real UUID journeys still required; local order fixture is not their substitute |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`                           | Existing workflow/config and immutable Cloud Run delivery unchanged                                                          | Pending, zero acceptance credit                                                                                                                                                                                                                | New same-SHA review/full CI, normal merge, combined shared-dev immutable source and fresh smoke remain mandatory                                                                                    | No workflow rerun, separate deployment or VM product/browser/PG runtime                  |
+
+Final execution source is `4640d199dd785b1addc0bf85a3910db79a9f9d1c`;
+the handoff candidate adds only this UAT prose. The final commands were:
+
+- `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/service-product-preparation.test.ts --config .local/pax-review-shared-order-demo-20261015/r18-service-product/vitest.before.config.mts -t 'prepares on A, then commits' --maxWorkers=2 --reporter=verbose`: **exit 1**, one genuine `SERVICE_PRODUCT_INACTIVE` failure, 15 cases filtered by the explicit name selection (`integrated-qualified-before-corrected.log`). The load hook uses `git show` of immutable 24ca for the five affected product/supply/MultiTaxi/Owned sources; it does not reset the worktree or mock product logic.
+- `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015 tests/unit/pax-booking-history-20261009 tests/unit/pax-shared-order-flow-20261015 tests/unit/pax-payment-core-20261009 tests/unit/pax-account-session-20261009 tests/unit/pax-web-shell-20261009 tests/unit/service-product.test.ts tests/unit/service-product-persistence-ack-20261015 --maxWorkers=2 --reporter=verbose`: **exit 0**, **724 pass / 22 original environment skips**, 52 passing files / 7 skipped (`integrated-regression.log`). The skips include the original formal PG/native HTTP suites and the three review PG companions; no skip was added or relaxed. DOM `act` warnings remain warnings.
+- `pnpm exec vitest run apps/api/tests/unit/service-product.service.test.ts apps/api/tests/unit/multi-taxi.service.test.ts apps/api/tests/unit/multi-taxi-passenger-authority.test.ts apps/api/tests/unit/vehicle-eligibility.service.test.ts apps/api/tests/unit/owned-mobility.service.test.ts apps/api/tests/integration/int-mtx-001-runtime-authority.test.ts --config .local/pax-review-shared-order-demo-20261015/r18-service-product/vitest.api.config.mts --maxWorkers=2 --reporter=verbose`: **exit 0**, **175 pass**, 6 files (`integrated-api-regression.log`). The local config only includes these existing native suites and the root aliases.
+- `pnpm exec tsc -p tsconfig.json --noEmit` and `pnpm exec tsc -p apps/api/tsconfig.json --noEmit`: **exit 0** (`integrated-typecheck-root.log`, `integrated-typecheck-api.log`). Scoped ESLint with `--max-warnings=0`, Prettier, source-invariant checks and `git diff --check`: **exit 0**.
+
+All started checks were terminal and their results were read. Initial fixture
+attempts omitted profile/master persistence dependencies and failed before the
+target behavior; they are retained as fixture errors, not reproduction evidence.
+The initial root typecheck identified missing address/agent fields in the new
+direct-intake fixture; its corrected typed fixture passed. The initial standalone
+API typecheck lacked the control-plane-auth build output; the existing package
+was compiled with `pnpm --filter @drts/control-plane-auth build`, exit 0, before
+the passing final API check. The first integrated immutable hook omitted Owned
+and produced an old/new interface TypeError; the corrected five-source hook
+above produces the actual original 409. Earlier pre-merge checks are retained
+separately and do not substitute for the final integrated results.
+
+Evidence is copied to canonical
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate24ca-service-product/`,
+with source and evidence SHA256 manifests. Node 22.23.2, pnpm 10.33.0,
+Vitest 4.1.4 and locked Next 16.3.8 / React 19.3.0 were used. Only this task
+worktree's 22 dependency symlinks were replaced by an offline frozen install
+with scripts disabled, exit 0; canonical dependencies were not changed. The
+merged trunk's existing lockfile addition is preserved; owner implementation
+does not edit dependencies. No product/preview/HTTP listener, PG, browser,
+Playwright CLI or Compose runtime was started here. No old known-red workflow
+was rerun or manually cancelled. Its original collector retains natural
+partial/cancelled results. All three required acceptance keys remain pending.
