@@ -85,6 +85,17 @@ function isAllowedPassengerPath(path: string[], method: string) {
   }
   if (method === "POST" && fullPath === "auth/mfa/verify") return true;
   if (method === "POST" && fullPath === "quotes") return true;
+  if (method === "GET" && fullPath === "review-demo/config") return true;
+  if (method === "POST" && fullPath === "review-demo/otp") return true;
+  if (
+    method === "POST" &&
+    path.length === 4 &&
+    path[0] === "review-demo" &&
+    path[1] === "rides" &&
+    /^[0-9a-f-]{36}$/i.test(path[2] ?? "") &&
+    path[3] === "retry-payment"
+  )
+    return true;
   if (method === "POST" && fullPath === "auth/refresh") return true;
   if (method === "POST" && fullPath === "auth/logout") return true;
   if (method === "GET" && fullPath === "me") return true;

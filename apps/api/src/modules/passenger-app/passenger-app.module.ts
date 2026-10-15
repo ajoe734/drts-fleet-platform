@@ -54,6 +54,9 @@ import { PAYMENT_CAPTURE_POLICY } from "./payment/payment-capture.policy";
 import { paymentCapturePolicyFromEnv } from "./payment/payment-capture.config";
 import type { PaymentRuntime } from "./payment/payment-runtime.config";
 import { MultiTaxiRepository } from "../multi-taxi/multi-taxi.repository";
+import { reviewDemoEnabled } from "./review-demo/review-demo.config";
+import { ReviewSmsPort } from "./review-demo/review-sms.port";
+import { ReviewDemoController } from "./review-demo/review-demo.controller";
 import {
   PAYMENT_RECOVERY_NOTICE_EXPIRY,
   PAYMENT_RECOVERY_NOTICE_OUTBOX,
@@ -82,6 +85,7 @@ import {
     PassengerReceiptController,
     PaymentMethodController,
     PaymentRefundController,
+    ReviewDemoController,
   ],
   providers: [
     PassengerJwtService,
@@ -106,6 +110,7 @@ import {
     PaymentChargeWorker,
     PaymentRefundRepository,
     PaymentRefundService,
+    ReviewSmsPort,
     {
       provide: PAYMENT_RUNTIME,
       useFactory: () => paymentRuntimeFromEnv(process.env),
@@ -128,7 +133,12 @@ import {
       useFactory: (database: DatabaseService) =>
         new MultiTaxiRepository(database),
     },
-    { provide: SMS_PORT, useClass: UnconfiguredSmsPort },
+    {
+      provide: SMS_PORT,
+      inject: [ReviewSmsPort],
+      useFactory: (reviewSms: ReviewSmsPort) =>
+        reviewDemoEnabled(process.env) ? reviewSms : new UnconfiguredSmsPort(),
+    },
     { provide: OTP_OPTIONS, useFactory: () => otpOptionsFromEnv(process.env) },
     {
       provide: OTP_MAIL_DELIVERY,

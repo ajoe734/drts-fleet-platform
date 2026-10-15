@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import "./globals.css";
 import { DemoBanner } from "../components/demo/demo-banner";
+import { ReviewDemoProvider } from "../components/review-demo/review-context";
 
 export const metadata = {
   title: "智行叫車",
@@ -15,8 +16,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           id="passenger-app-root"
           style={{ width: "100%", maxWidth: "390px", margin: "0 auto" }}
         >
-          <DemoBanner />
-          {children}
+          <ReviewDemoProvider>
+            <DemoBanner />
+            {children}
+          </ReviewDemoProvider>
         </div>
       </body>
     </html>
