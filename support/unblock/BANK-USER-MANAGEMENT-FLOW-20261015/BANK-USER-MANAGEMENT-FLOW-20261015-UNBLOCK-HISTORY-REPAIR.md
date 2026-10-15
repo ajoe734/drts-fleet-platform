@@ -130,16 +130,53 @@ Machine-specific evidence is under this helper worktree's
 
 ## Finding / acceptance evidence mapping
 
-| Finding / acceptance              | Source and change boundary                                                                       | Old → current result                                                        | Command / evidence and exit                                                             | Unverified / next gate                                                         |
-| --------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Identify exact contamination / C1 | Actual workflow `commit-trailers`; checker `SUBJECT_RE`; three published ancestor subjects above | Old final checkpoint still fails exactly 3 commits                          | Whole-range checker above, exit 1; local log and hosted failed job linked above         | Successor source range must pass after owner replay                            |
-| Non-destructive repair path       | Accepted R7; existing successor; no product or old ref mutation by helper                        | Original 21-file diff inside 15 scopes; fresh-base patch check passes       | Scope audit and `git apply --check`, exit 0 at `afbcbba5...`                            | Product behavior and hunk preservation must be revalidated on actual successor |
-| Task-scoped commit/push/PR        | This helper changes only this artifact                                                           | Helper delivery follows ordinary commit/push/PR                             | Exact helper candidate/branch/PR recorded by lifecycle handoff; delivery evidence below | Independent Codex2 review and hosted helper CI/merge                           |
-| Parent concrete next step         | R7 remains the parent authority; helper note references this artifact                            | Parent already resumed to `todo`; owner can proceed on existing r2 worktree | Release CLI `note`, preserving parent status; helper disposition metadata               | No source acceptance, merge or automatic resolution of later parent blockers   |
+| Finding / acceptance              | Source and change boundary                                                                       | Old → current result                                                  | Command / evidence and exit                                                             | Unverified / next gate                                                         |
+| --------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Identify exact contamination / C1 | Actual workflow `commit-trailers`; checker `SUBJECT_RE`; three published ancestor subjects above | Old final checkpoint still fails exactly 3 commits                    | Whole-range checker above, exit 1; local log and hosted failed job linked above         | Successor source range must pass after owner replay                            |
+| Non-destructive repair path       | Accepted R7; existing successor; no product or old ref mutation by helper                        | Original 21-file diff inside 15 scopes; fresh-base patch check passes | Scope audit and `git apply --check`, exit 0 at `afbcbba5...`                            | Product behavior and hunk preservation must be revalidated on actual successor |
+| Task-scoped commit/push/PR        | This helper changes only this artifact                                                           | Helper delivery follows ordinary commit/push/PR                       | Exact helper candidate/branch/PR recorded by lifecycle handoff; delivery evidence below | Independent Codex2 review and hosted helper CI/merge                           |
+| Parent concrete next step         | R7 remains authoritative; actionable r2 replay specified above                                   | Parent already `todo`; owner can continue                             | Supervisor note/disposition pending: dispatch fence rejects worker metadata mutation    | Required before helper merge; no Source/merge credit                           |
 
 This is a documentation-only helper. Product unit/runtime/provider/PG/browser
 tests were not launched or credited here; the parent owns those applicable
 checks. No VM service or deployment was started. To avoid a later helper merge
-silently resuming a newly blocked parent, helper disposition remains `blocked`
-for outstanding original-owner implementation/validation; it does not revoke
-the Supervisor's already-issued `todo` or R7 authorization.
+silently resuming a newly blocked parent, Supervisor must record the conservative
+disposition below before merge. This does not revoke the already-issued `todo`
+or R7 authorization.
+
+## Helper delivery evidence
+
+- Task-scoped anchor `eb485f141` was committed and normally pushed on
+  `codex/bank-user-management-flow-20261015-unblock-history-repair`.
+- Helper PR: [#2658](https://github.com/ajoe734/drts-fleet-platform/pull/2658),
+  base `dev`. The final handoff pins the subsequent closeout SHA to this PR
+  after checking local, remote and PR-head equality.
+- The attempted release CLI `assign` transaction for helper disposition exited
+  1: `Dispatched workers must use their assigned task lifecycle commands`.
+  No metadata or parent note was written. The same guard explicitly forbids
+  mutating a different task, so no parent-note attempt or fence bypass followed.
+- Final content checks use `pnpm exec prettier --check` on this file,
+  `git diff --check`, and the actual whole-range commit checker. No new
+  product tests are appropriate for this one-file report. Hosted helper CI
+  and independent review remain lifecycle gates after handoff.
+
+## Supervisor transaction required before helper merge
+
+The dispatched helper can use only its own lifecycle commands. Supervisor must
+use the specified release CLI to perform the following administrative updates;
+they are an outstanding acceptance item, not a request for new user permission.
+
+1. Append this report/PR2658 and the scoped r2 replay next step to the parent
+   using `note`, preserving the latest parent status, R7 authority and any
+   intervening findings. The history disposition is already resolved; source
+   implementation, checks, review, CI/merge and four keys remain the owner flow.
+2. On this helper, use the existing `TASK_METADATA_JSON` / `assign` transaction
+   with unchanged Codex/Codex2 roles to set `resolved_parent_status: blocked`,
+   `resolved_parent_waiting_for: Codex`, and `resolved_parent_next` describing
+   the original-owner scoped r2 replay/validation and preserving later blockers.
+   Do not manufacture `resolved_parent_at`; lifecycle owns that timestamp.
+
+Until those writes are verified, the parent-update acceptance remains pending.
+Reviewer must not treat the report alone as that machine-truth evidence or
+approve a helper merge that could clear subsequent parent blockers. The helper
+progress/handoff records this exact gate for Supervisor and assigned reviewer.
