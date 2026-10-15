@@ -986,9 +986,10 @@ The actual root is `Home` → `PaymentBookingHome` → `BookingScreen` →
 `BookingScreen` first loads settings and any required fee acknowledgement,
 then displays `BookingForm`; its payment radio controls are in the subsequent
 `BookingConfirmationSheet`, after quote. The old `book()` instead requires a
-heading, samples the fee button before loading completes, and selects payment
-before quote. These are test caller mismatches; product UI and business rules
-are retained.
+heading, uses ordinary address labels instead of the actual `DEMO_T.pickup` /
+`dropoff` values (`示範上車地點` / `示範下車地點`), samples the fee button
+before loading completes, and selects payment before quote. These are test caller
+mismatches; product UI and business rules are retained.
 
 The new socket-free regression reads/transpiles the actual `book()` declaration
 from the hosted spec and drives the real root components, SDK and BFF through a
@@ -998,5 +999,47 @@ With all five relevant source hashes matching immutable 4981, both cases fail at
 the title lookup (`before.log`, exit 1), with the real title and form/disclosure
 present in DOM. An initial harness run lacked Next's router context and failed
 before exercising the caller (`before-harness-error.log`); it is not qualified
-reproduction evidence. Repair and final checks are in progress; no new candidate
-or acceptance credit is recorded at this checkpoint.
+reproduction evidence.
+
+| Finding / acceptance                                                            | Source / repair                                                                                                                    | Old → repaired result                                                                                                         | Command / evidence                                                                                                                                                                                                                                                                                                                               | Remaining limits                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R16: nonexistent heading, ordinary address labels and early fee-button sampling | Actual `Home`, `PaymentBookingHome`, `BookingScreen`, `BookingForm`, `P5Header`, `DEMO_T`; only the hosted `book()` caller changes | Same final two regressions against immutable 4981 fail at the heading; repaired caller passes for both acknowledgement states | `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/hosted-booking-caller.test.tsx --config .local/pax-review-shared-order-demo-20261015/r16-hosted/vitest.before.config.mts --maxWorkers=2 --reporter=verbose`, exit 1, two assertion failures (`final-immutable-before.log`); source hashes in `before-source-binding.json` | Socket-free DOM driver and external HTTP fixtures, not Chromium or PG. The historical browser proves only its first locator failure; subsequent caller mismatches are from production source and the DOM regression |
+| R16: payment controls belong to the quote confirmation                          | `BookingScreen` confirmation branch and `PaymentMethodChoice`; move exact method selection after quote in `book()`                 | Repaired caller submits exactly one ride using the requested nondefault card even with another default card present           | Final focused run of `hosted-booking-caller.test.tsx` plus `journey-progress.test.ts`, 3 pass, exit 0 (`final-focused.log`)                                                                                                                                                                                                                      | External quote/payment/order responses are fixtures; no claim of real booking or PSP capture                                                                                                                        |
+| Safe booking failure localization                                               | Existing `createJourneyProgress.response` adds exact settings/fares/quotes/payment-methods paths                                   | Real journal regression retains status/method/path without response bodies or URL secrets                                     | Same focused run, exit 0; existing secret omission and failed-stage assertions retained                                                                                                                                                                                                                                                          | New same-source hosted execution still required                                                                                                                                                                     |
+| `pax-review-demo_real-shared-order-across-roles`                                | Original same-UUID, independent instances, refresh and relational assertions retained                                              | Pending, zero new acceptance credit                                                                                           | Replacement candidate's full hosted CI and three PG companions                                                                                                                                                                                                                                                                                   | No runtime/PG/browser on this VM                                                                                                                                                                                    |
+| `pax-review-demo_external-simulation-and-complete-journeys`                     | Original three independent A/B/C journeys and business waits retained                                                              | Pending, zero credit                                                                                                          | Replacement hosted three-order browser evidence                                                                                                                                                                                                                                                                                                  | This source repair's single-order fixture is not a completed journey                                                                                                                                                |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`                        | Existing authorized workflow, normal merge and combined immutable Cloud Run release retained                                       | Pending, zero credit                                                                                                          | Same-SHA review/full CI, merge, original combined publish/deploy and fresh smoke                                                                                                                                                                                                                                                                 | No old candidate rerun or separate deployment                                                                                                                                                                       |
+
+The affected review / booking / payment / account-session / web-shell regression
+completed **424 pass / 3 original hosted-PG skips**, exit 0 (`regression.log`).
+The last test-only fixture strengthens the requested-card case by adding another
+default card; the final focused rerun then completed 3 pass, exit 0. Root typecheck,
+explicit TSX/caller typecheck, scoped ESLint and formatting/diff checks are
+recorded with this evidence. The DOM adapter emits React `act` warnings during
+the simulated route transition; these are not browser results. Intermediate
+`after-focused.log` / `title-only-before-payment.log` still fail at the original
+address label mismatch, not at the payment radios. `after-labels.log` reached the
+final HTTP assertion but the first assertion adapter omitted a matcher; it is
+not a product failure. The first immutable load hook failed at transform due to
+replacement-string expansion (`immutable-before-hook-error.log`), not at a
+product assertion; the corrected function replacement produced the qualified
+two failures above. The initial explicit TSX check lacked the locked Next
+router's required fixture `bfcacheId`; the final fixture typecheck passes.
+
+`source-invariants.cjs` / `.json` establish that the hosted spec outside `book()`
+is byte-identical to 4981, all 16 remaining business assertion-call nodes inside
+`book()` are retained, and its two locator assertions were adapted to the actual
+visible title and exact card. Two additional readiness assertion-call nodes bring
+the helper from 20 to 22. Every tracked product app/package, CI/deploy workflow
+and hosted config remains unchanged. There is no timeout, clock, retry, skip,
+order-count or business-guard change.
+
+Evidence is copied at handoff to canonical
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate4981-booking-caller-rework/`.
+Node 22.23.2, pnpm 10.33.0, locked Next 16.3.8 and Vitest 4.1.4 were used.
+Only this isolated worktree's 22 dependency symlinks were removed and replaced by
+an offline frozen installation with scripts disabled, exit 0; canonical
+dependencies and lockfiles remain unchanged. No Playwright CLI, browser, product
+HTTP/preview/server, PG or Compose runtime was started on this VM. The original
+4981 run's remaining jobs are being allowed to finish before the normal push;
+no cancellation or rerun was requested. All three acceptance keys remain pending.
