@@ -33,7 +33,12 @@ async function createHarness(
     init?: RequestInit,
   ) => Promise<WebhookFetchResponse>,
 ) {
-  const webhookDispatchService = new WebhookDispatchService((url, init) => (init?.headers as Record<string, string>)["x-drts-event-type"] === "tenant.webhook.test" ? Promise.resolve({ ok: true, status: 204 }) : fetchImpl(url, init));
+  const webhookDispatchService = new WebhookDispatchService((url, init) =>
+    (init?.headers as Record<string, string>)["x-drts-event-type"] ===
+    "tenant.webhook.test"
+      ? Promise.resolve({ ok: true, status: 204 })
+      : fetchImpl(url, init),
+  );
   const service = new TenantPartnerService(
     new AuditNotificationService(),
     undefined,

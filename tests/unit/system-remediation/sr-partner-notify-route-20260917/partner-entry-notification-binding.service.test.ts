@@ -58,7 +58,12 @@ async function createHarness(
     init?: RequestInit,
   ) => Promise<WebhookFetchResponse>,
 ) {
-  const webhookDispatchService = new WebhookDispatchService((url, init) => (init?.headers as Record<string, string>)["x-drts-event-type"] === "tenant.webhook.test" ? Promise.resolve({ ok: true, status: 204 }) : fetchImpl(url, init));
+  const webhookDispatchService = new WebhookDispatchService((url, init) =>
+    (init?.headers as Record<string, string>)["x-drts-event-type"] ===
+    "tenant.webhook.test"
+      ? Promise.resolve({ ok: true, status: 204 })
+      : fetchImpl(url, init),
+  );
   const tenantPartnerService = new TenantPartnerService(
     new AuditNotificationService(),
     undefined,
@@ -94,10 +99,20 @@ async function createHarness(
       events: [WIRE_EVENT, TEST_WIRE_EVENT],
     },
   );
-  await tenantPartnerService.sendTestWebhook(entry.tenantId, { webhookId: createdEndpoint.webhookId });
-  const endpoint = tenantPartnerService.listWebhookEndpoints(entry.tenantId)[0]!;
+  await tenantPartnerService.sendTestWebhook(entry.tenantId, {
+    webhookId: createdEndpoint.webhookId,
+  });
+  const endpoint = tenantPartnerService.listWebhookEndpoints(
+    entry.tenantId,
+  )[0]!;
 
-  return { tenantPartnerService, bindingService, bindingRepository, entry, endpoint };
+  return {
+    tenantPartnerService,
+    bindingService,
+    bindingRepository,
+    entry,
+    endpoint,
+  };
 }
 
 describe("PartnerEntryNotificationBindingService", () => {
@@ -177,10 +192,15 @@ describe("PartnerEntryNotificationBindingService", () => {
   });
 
   it("testBinding runs a passenger.notification.test.v1 dispatch and records the current endpoint fingerprint on success", async () => {
-    const { bindingService, endpoint } = await createHarness(async (_url, init) => {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      return jsonResponse(200, acceptedAckBody(body.delivery_id, body.data.notification_id));
-    });
+    const { bindingService, endpoint } = await createHarness(
+      async (_url, init) => {
+        const body = JSON.parse(String(init?.body ?? "{}"));
+        return jsonResponse(
+          200,
+          acceptedAckBody(body.delivery_id, body.data.notification_id),
+        );
+      },
+    );
     await bindingService.putBinding(
       ENTRY_SLUG,
       {
@@ -191,10 +211,16 @@ describe("PartnerEntryNotificationBindingService", () => {
       PLATFORM_IDENTITY,
     );
 
-    const result = await bindingService.testBinding(ENTRY_SLUG, PLATFORM_IDENTITY);
+    const result = await bindingService.testBinding(
+      ENTRY_SLUG,
+      PLATFORM_IDENTITY,
+    );
     expect(result.kind).toBe("accepted");
 
-    const binding = await bindingService.getBinding(ENTRY_SLUG, PLATFORM_IDENTITY);
+    const binding = await bindingService.getBinding(
+      ENTRY_SLUG,
+      PLATFORM_IDENTITY,
+    );
     expect(binding.validatedAt).not.toBeNull();
     expect(binding.validatedEndpointFingerprint).toBe(
       computeEndpointFingerprint(endpoint),
@@ -217,17 +243,23 @@ describe("PartnerEntryNotificationBindingService", () => {
       PLATFORM_IDENTITY,
     );
     await expect(
-      bindingService.enableBinding(ENTRY_SLUG, binding.version, PLATFORM_IDENTITY),
+      bindingService.enableBinding(
+        ENTRY_SLUG,
+        binding.version,
+        PLATFORM_IDENTITY,
+      ),
     ).rejects.toThrow(ApiRequestError);
   });
 
   it("enableBinding rejects a stale validation after the endpoint URL rotates (fingerprint mismatch)", async () => {
-    const { bindingService, tenantPartnerService, entry, endpoint } = await createHarness(
-      async (_url, init) => {
+    const { bindingService, tenantPartnerService, entry, endpoint } =
+      await createHarness(async (_url, init) => {
         const body = JSON.parse(String(init?.body ?? "{}"));
-        return jsonResponse(200, acceptedAckBody(body.delivery_id, body.data.notification_id));
-      },
-    );
+        return jsonResponse(
+          200,
+          acceptedAckBody(body.delivery_id, body.data.notification_id),
+        );
+      });
     const binding = await bindingService.putBinding(
       ENTRY_SLUG,
       {
@@ -249,15 +281,24 @@ describe("PartnerEntryNotificationBindingService", () => {
     );
 
     await expect(
-      bindingService.enableBinding(ENTRY_SLUG, binding.version, PLATFORM_IDENTITY),
+      bindingService.enableBinding(
+        ENTRY_SLUG,
+        binding.version,
+        PLATFORM_IDENTITY,
+      ),
     ).rejects.toThrow(ApiRequestError);
   });
 
   it("enableBinding succeeds once validated against the current endpoint, and disableBinding reverts it", async () => {
-    const { bindingService, endpoint } = await createHarness(async (_url, init) => {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      return jsonResponse(200, acceptedAckBody(body.delivery_id, body.data.notification_id));
-    });
+    const { bindingService, endpoint } = await createHarness(
+      async (_url, init) => {
+        const body = JSON.parse(String(init?.body ?? "{}"));
+        return jsonResponse(
+          200,
+          acceptedAckBody(body.delivery_id, body.data.notification_id),
+        );
+      },
+    );
     const binding = await bindingService.putBinding(
       ENTRY_SLUG,
       {
@@ -298,10 +339,16 @@ describe("PartnerEntryNotificationBindingService", () => {
       PLATFORM_IDENTITY,
     );
 
-    const result = await bindingService.testBinding(ENTRY_SLUG, PLATFORM_IDENTITY);
+    const result = await bindingService.testBinding(
+      ENTRY_SLUG,
+      PLATFORM_IDENTITY,
+    );
     expect(result.kind).toBe("failed");
 
-    const binding = await bindingService.getBinding(ENTRY_SLUG, PLATFORM_IDENTITY);
+    const binding = await bindingService.getBinding(
+      ENTRY_SLUG,
+      PLATFORM_IDENTITY,
+    );
     expect(binding.validatedAt).toBeNull();
     expect(binding.validatedEndpointFingerprint).toBeNull();
   });
@@ -317,17 +364,28 @@ describe("computeEndpointFingerprint", () => {
   };
 
   it("is deterministic for identical inputs", () => {
-    expect(computeEndpointFingerprint(base)).toBe(computeEndpointFingerprint({ ...base }));
+    expect(computeEndpointFingerprint(base)).toBe(
+      computeEndpointFingerprint({ ...base }),
+    );
   });
 
   it("changes when url, events, secretVersion, or ownerRef change", () => {
     const fp = computeEndpointFingerprint(base);
-    expect(computeEndpointFingerprint({ ...base, url: base.url + "/v2" })).not.toBe(fp);
     expect(
-      computeEndpointFingerprint({ ...base, events: [...base.events, "passenger.eta_changed.v1"] }),
+      computeEndpointFingerprint({ ...base, url: base.url + "/v2" }),
     ).not.toBe(fp);
-    expect(computeEndpointFingerprint({ ...base, secretVersion: 2 })).not.toBe(fp);
-    expect(computeEndpointFingerprint({ ...base, ownerRef: "owner-2" })).not.toBe(fp);
+    expect(
+      computeEndpointFingerprint({
+        ...base,
+        events: [...base.events, "passenger.eta_changed.v1"],
+      }),
+    ).not.toBe(fp);
+    expect(computeEndpointFingerprint({ ...base, secretVersion: 2 })).not.toBe(
+      fp,
+    );
+    expect(
+      computeEndpointFingerprint({ ...base, ownerRef: "owner-2" }),
+    ).not.toBe(fp);
   });
 
   it("is insensitive to event array order", () => {

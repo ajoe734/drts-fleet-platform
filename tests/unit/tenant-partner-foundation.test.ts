@@ -84,10 +84,15 @@ function createMemoryTenantPartnerRepository(
 
   const repository: Pick<
     TenantPartnerRepository,
-    "loadState" | "persistChanges" | "persistConfigurationChanges" | "isEnabled" | "reportPersistenceFailure"
+    | "loadState"
+    | "persistChanges"
+    | "persistConfigurationChanges"
+    | "isEnabled"
+    | "reportPersistenceFailure"
   > = {
     isEnabled: () => true,
-    persistConfigurationChanges: (changes) => repository.persistChanges(changes),
+    persistConfigurationChanges: (changes) =>
+      repository.persistChanges(changes),
     loadState: vi.fn(async () => clonePartnerState(state)),
     persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
       if (changes.notificationPreferences) {
@@ -1074,11 +1079,14 @@ describe("tenant partner foundation service", () => {
         fullName: "Other Tenant Passenger",
       },
     );
-    const otherAddress = await tenantPartnerService.upsertAddress(OTHER_TENANT_ID, {
-      ownerPassengerId: otherPassenger.passengerId,
-      addressName: "Other Tenant HQ",
-      addressText: "台中市西屯區台灣大道 99 號",
-    });
+    const otherAddress = await tenantPartnerService.upsertAddress(
+      OTHER_TENANT_ID,
+      {
+        ownerPassengerId: otherPassenger.passengerId,
+        addressName: "Other Tenant HQ",
+        addressText: "台中市西屯區台灣大道 99 號",
+      },
+    );
 
     let passengerError: unknown;
     try {

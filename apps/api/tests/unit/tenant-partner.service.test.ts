@@ -665,9 +665,13 @@ describe("TenantPartnerService sensitive-data governance", () => {
     persistedState.passengers = [
       localSeedService.listPassengers("tenant-demo-001")[0]!,
     ];
-    persistedState.addresses = [localSeedService.listAddresses("tenant-demo-001")[0]!];
-    persistedState.costCenters = localSeedService.listCostCenters("tenant-demo-001");
-    persistedState.userRoles = localSeedService.listTenantUsers("tenant-demo-001");
+    persistedState.addresses = [
+      localSeedService.listAddresses("tenant-demo-001")[0]!,
+    ];
+    persistedState.costCenters =
+      localSeedService.listCostCenters("tenant-demo-001");
+    persistedState.userRoles =
+      localSeedService.listTenantUsers("tenant-demo-001");
     persistedState.apiKeys = [
       localSeedService.listApiKeys("tenant-demo-001")[0] as never,
     ];
@@ -1220,14 +1224,14 @@ describe("TenantPartnerService sensitive-data governance", () => {
         },
         "req-partner-credential-auth-002",
       ),
-      ).toThrowError(
-        expect.objectContaining({
-          response: expect.objectContaining({
-            error: expect.objectContaining({
-              code: "PARTNER_API_KEY_REVOKED",
-            }),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "PARTNER_API_KEY_REVOKED",
           }),
         }),
+      }),
     );
 
     expect(auditNotificationService.listAuditLogs()).toEqual(
@@ -1267,7 +1271,9 @@ describe("TenantPartnerService sensitive-data governance", () => {
 
       expect(issued.overlapEndsAt).toBe("2026-08-03T12:00:00.000Z");
       expect(
-        service.listPlatformPartnerIngressCredentials("bank-demo-alpha-airport"),
+        service.listPlatformPartnerIngressCredentials(
+          "bank-demo-alpha-airport",
+        ),
       ).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1331,7 +1337,9 @@ describe("TenantPartnerService sensitive-data governance", () => {
       );
 
       expect(
-        service.listPlatformPartnerIngressCredentials("bank-demo-alpha-airport"),
+        service.listPlatformPartnerIngressCredentials(
+          "bank-demo-alpha-airport",
+        ),
       ).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -2082,11 +2090,14 @@ describe("TenantPartnerService sensitive-data governance", () => {
   it("allows duplicate cost-center codes across different tenants", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    const otherTenantCostCenter = await service.upsertCostCenter("tenant-demo-002", {
-      code: "cc-fin-04",
-      name: "Shared Finance Code",
-      description: "Scoped to a different tenant",
-    });
+    const otherTenantCostCenter = await service.upsertCostCenter(
+      "tenant-demo-002",
+      {
+        code: "cc-fin-04",
+        name: "Shared Finance Code",
+        description: "Scoped to a different tenant",
+      },
+    );
 
     expect(otherTenantCostCenter).toMatchObject({
       tenantId: "tenant-demo-002",
@@ -2437,7 +2448,8 @@ describe("TenantPartnerService sensitive-data governance", () => {
     for (const record of endpoint.secretHistory) {
       expect(record).not.toHaveProperty("secretValue");
     }
-    for (const record of endpoint.runtimeMetadata.secretRotation.history ?? []) {
+    for (const record of endpoint.runtimeMetadata.secretRotation.history ??
+      []) {
       expect(record).not.toHaveProperty("secretValue");
     }
 
@@ -2994,11 +3006,9 @@ describe("TenantPartnerService sensitive-data governance", () => {
         rotatable.apiKey.apiKeyId,
         { overlapDays: 2 },
       );
-      service.rotateApiKey(
-        "tenant-demo-001",
-        rotatedOnce.apiKey.apiKeyId,
-        { overlapDays: 2 },
-      );
+      service.rotateApiKey("tenant-demo-001", rotatedOnce.apiKey.apiKeyId, {
+        overlapDays: 2,
+      });
       vi.setSystemTime(new Date("2026-10-05T00:00:00.000Z"));
       expectAuthErrorCode(
         () => service.authenticateTenantApiKey(rotatedOnce.plaintextKey),
@@ -5169,16 +5179,20 @@ describe("TenantPartnerService approval rules", () => {
       identityRepository,
     );
     const jwtAuthService = new JwtAuthService(identityRepository, service);
-    const activeUser = service.listTenantUsers("tenant-demo-001").find(
-      (candidate) =>
-        candidate.status === "active" && candidate.roleCode !== "tenant_admin",
-    );
+    const activeUser = service
+      .listTenantUsers("tenant-demo-001")
+      .find(
+        (candidate) =>
+          candidate.status === "active" &&
+          candidate.roleCode !== "tenant_admin",
+      );
     expect(activeUser).toBeDefined();
     if (!activeUser) {
       throw new Error("expected a seeded active tenant user");
     }
 
-    const snapshot = await identityRepository.syncLegacyTenantUserRole(activeUser);
+    const snapshot =
+      await identityRepository.syncLegacyTenantUserRole(activeUser);
     const scopes = getTenantRoleScopes(activeUser.roleCode);
     expect(scopes).toBeDefined();
     if (!scopes) {
@@ -5201,7 +5215,9 @@ describe("TenantPartnerService approval rules", () => {
       requestId: "req-tenant-session-issue-001",
     });
 
-    await expect(jwtAuthService.verifyAccessToken(issued.token)).resolves.not.toBeNull();
+    await expect(
+      jwtAuthService.verifyAccessToken(issued.token),
+    ).resolves.not.toBeNull();
 
     const updated = await service.updateTenantUserRole(
       activeUser.tenantId,
@@ -5225,12 +5241,16 @@ describe("TenantPartnerService approval rules", () => {
     );
 
     expect(updated.status).toBe("suspended");
-    const revokedSession = await identityRepository.getSession(issued.sessionId);
+    const revokedSession = await identityRepository.getSession(
+      issued.sessionId,
+    );
     expect(revokedSession).toMatchObject({
       status: "revoked",
       revokeReason: "TENANT_ACCOUNT_STATUS_CHANGED",
     });
-    await expect(jwtAuthService.verifyAccessToken(issued.token)).resolves.toBeNull();
+    await expect(
+      jwtAuthService.verifyAccessToken(issued.token),
+    ).resolves.toBeNull();
   });
 
   it("ships a tenant governance dashboard with the required panels and metric bindings", async () => {

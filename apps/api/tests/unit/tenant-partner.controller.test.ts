@@ -95,20 +95,21 @@ function signReferralWifToken(overrides?: Record<string, unknown>): string {
 function mockReferralWifJwks() {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () =>
-      new Response(
-        JSON.stringify({
-          keys: [
-            {
-              kty: referralWifJwk.kty,
-              kid: REFERRAL_WIF_KID,
-              n: referralWifJwk.n,
-              e: referralWifJwk.e,
-            },
-          ],
-        }),
-        { status: 200 },
-      ),
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            keys: [
+              {
+                kty: referralWifJwk.kty,
+                kid: REFERRAL_WIF_KID,
+                n: referralWifJwk.n,
+                e: referralWifJwk.e,
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
     ),
   );
 }
@@ -640,7 +641,9 @@ describe("tenant partner ingress handoff controller", () => {
           },
           "req-referral-handoff-no-adapter",
         ),
-      ).rejects.toMatchObject({ code: "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED" });
+      ).rejects.toMatchObject({
+        code: "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED",
+      });
     });
   });
 

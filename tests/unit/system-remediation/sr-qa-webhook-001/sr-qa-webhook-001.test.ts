@@ -234,7 +234,11 @@ function createInMemoryWebhookRepository() {
       }
     },
   };
-  return Object.assign(repository, { persistConfigurationChanges: (changes: PersistTenantPartnerChanges) => repository.persistChanges(changes), reportPersistenceFailure: vi.fn() });
+  return Object.assign(repository, {
+    persistConfigurationChanges: (changes: PersistTenantPartnerChanges) =>
+      repository.persistChanges(changes),
+    reportPersistenceFailure: vi.fn(),
+  });
 }
 
 function createInMemoryBillingSettlementRepository() {
