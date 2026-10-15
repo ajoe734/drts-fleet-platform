@@ -1697,3 +1697,94 @@ already authorized R19b recovery branch / PR 2673 in the assigned isolated cwd;
 no rebase, amend, reset, force push or canonical-root branch switch occurred.
 All checks started for this repair reached terminal results and were read.
 Hosted CI for the new handoff SHA remains pending under the original bus/collector.
+
+## R24 / R25 — retain the real empty Jobs evidence and inject its owned reader
+
+**Correction to the first 041 artifact listing:** the absence of a separate PNG
+in the ZIP did not mean there was no screenshot. Candidate
+`04105926cd6cefd795505b71174407ad4c6c646b`, generation
+`4cac082f38c34758820874e943860ee8`, has an inline
+`driver-assigned-trip-failure` image in `report.json`. The owner independently
+decoded its original bytes and viewed it: Jobs has All selected, all three
+counts are zero, and the empty-task panel replaces the current-trip action.
+The review GPS banner says awaiting acceptance, coordinate 1/9. The PNG is
+55,125 bytes, SHA256
+`b5b1d19cc9fbdf7a02745febff708d4a48c4877d742e521f54a083053f4ca60b`.
+The literal final URL and original task response body remain unrecorded.
+
+Actual hosted run `38765467677`, job `116529004287`, reached A order
+`6efbcc80-4892-4ac0-b8f4-ca2a5eaf3515`: booking, dispatch, assign and reassign
+passed; `開啟目前行程` then timed out after 30 seconds at spec line 222.
+Dispatch job `16b792cb-f40d-4ece-924c-216b9bfc696e` is not a proven Driver
+Task ID. Driver tasks/task-views returned 200; acceptance and B/C were not
+reached. Artifact `11989171420` ZIP SHA256 matches GitHub's digest
+`e088b8d75bf86be9113787eabb9ece51584719478830f6ba34303ad6ac5e735b`.
+The job failed before the run's later natural cancellation. Its actual execution
+commit was synthetic merge `4f2dc095892fef0af97814b21ee5b0078d824397`
+(041 into `409bad360e89ec4e8e6e48c337f42295e15210d8`). These results are
+not completion or acceptance credit for this repair.
+
+The R25 source receipt identifies an additional real integration defect:
+evaluating the production CommonJS AppModule import graph records `Object` at
+ForwarderService's optional OwnedMobilityService constructor parameter. Direct
+isolated loading records the correct class. With no explicit token, Nest can
+omit this dependency; the actual `listDriverTaskViewsForRead` then returns its
+existing empty fallback without reaching OwnedMobility's persisted reader.
+Jobs treats that successful empty list as authoritative. This source defect
+matches the observed empty Jobs; it does not retroactively reveal the hosted
+process's unrecorded provider instance or response body.
+
+The only product change imports Nest `forwardRef` and adds
+`@Inject(forwardRef(() => OwnedMobilityService))` to that existing parameter.
+Its position and `@Optional`, every service method, existing PG ForRead paths,
+controller contracts, driver scoping and business rules remain unchanged.
+The module already imports OwnedMobilityModule via forwardRef. No module,
+identity, SDK, guard, workflow, deploy or configuration change is needed.
+
+The new regression loads the complete actual AppModule import graph in fresh
+CommonJS processes with production decorator metadata enabled. It uses Nest's
+real prototype creation, optional dependency resolution and constructor
+injection, then calls the real ForwarderController → ForwarderService →
+OwnedMobilityService → OwnedMobilityRepository. Only unrelated providers and
+external SQL responses are fixtures. A valid synthetic DriverTaskRecord and a
+foreign-driver row exercise the real filtering/mapping; the assigned caller's
+query cannot substitute another driver. A refused database read must propagate.
+No Nest application/bootstrap/hooks, socket listener, PG, order creation or
+successful acceptance is run or fabricated as runtime evidence.
+
+The already-published small R24 failure-hook change is retained in this same
+functional candidate. It records only a fixed route classification and three
+fixed UI visibility flags from the active A/B Page. Queries, raw URLs, arbitrary
+page text and HTTP bodies are excluded. Jobs/trip trailing slashes are handled;
+onboarding, query-bearing or closed pages are not photographed. A navigation
+during those probes prevents capture. The original three-order try block and
+all 11 helpers remain identical, including UUID/2xx/accept assertions, the
+720-second case and zero retries.
+
+| Finding / acceptance                                              | Source and change                                                                               | Old → corrected result                                                                                                                                                                                                                                              | Commands / evidence                                                                                                                             | Remaining limitation                                                                                                   |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| R24: actual 041 empty Jobs picture was missed in ZIP-only listing | Original inline report attachment, independently decoded and viewed                             | Corrected the evidence interpretation; actual zero-task Jobs is observed                                                                                                                                                                                            | `hosted-failure-qualification.json`, original ZIP/report, decoded PNG and hashes                                                                | Literal final URL and original HTTP body remain unknown; screenshot alone cannot prove DI internals                    |
+| R25: AppModule import order silently omits the owned task reader  | `ForwarderService` constructor; actual Nest injector and controller/Owned repository regression | Frozen 041: direct control passes, App caller returns no tasks/executes no SQL and succeeds in the database-error scenario; **2 fail / 1 pass**, exit 1. Corrected: **3 pass**, exit 0, with assigned task/UUID/actions, foreign isolation and DB-error propagation | `forwarder-owned-injection.test.ts`, `old-041-injection-final.log`, `new-injection-final.log`; final regression reruns all three                | SQL responses and unrelated providers are fixtures; not full Nest app initialization, PG or browser acceptance         |
+| Retain existing failure and cold-reload behavior                  | Actual complete E2E callback, Jobs/Trip caller and identity regressions                         | Same final hook tests on frozen 041: **12 fail / 12 pass**, exit 1; corrected hook cases pass, including navigation during capture; original caller/identity cases pass                                                                                             | `old-041-hook-source72.log`; `regression-r25-final.log`; `source-invariants.json` proves unchanged helpers/three-order flow and product methods | Hook Page/image boundaries are fixtures, not new hosted screenshots or completed journeys                              |
+| `pax-review-demo_real-shared-order-across-roles`                  | Existing real shared-order API/PG/peer assertions retained                                      | Pending, zero credit                                                                                                                                                                                                                                                | New candidate independent review/full CI and three formal-schema PG companions without skips still required                                     | No old candidate PG result is transferred; 16 local environment skips remain unverified                                |
+| `pax-review-demo_external-simulation-and-complete-journeys`       | Original independent A/B/C, payment/retry/case/rating/cancel/history retained                   | Pending, zero credit                                                                                                                                                                                                                                                | All original browser operations and successful acceptance assertions retained                                                                   | Full real three-order browser journey remains required; source/SQL fixtures are insufficient                           |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`          | Existing hosted workflow and combined immutable Cloud Run delivery retained                     | Pending, zero credit                                                                                                                                                                                                                                                | Same-SHA review/full CI/browser, normal merge, sole immutable shared-dev deployment and fresh smoke still required                              | No VM product/HTTP/PG/browser/preview/Compose or Playwright CLI; no workflow dispatch/rerun/manual cancellation/deploy |
+
+Executable verification source is
+`31e0aa24559bbffd4f255e934b0fff02917eb684`; the handoff commit adds only
+this UAT evidence. Canonical owner evidence, exact command/result ledger and
+source/evidence SHA256 manifest are under
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate041-r24-r25-owned-injection/`.
+
+- Old: `PAX_REVIEW_FORWARDER_SOURCE_REF=04105926cd6cefd795505b71174407ad4c6c646b pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/forwarder-owned-injection.test.ts --maxWorkers=2 --reporter=verbose`: exit 1, **2 behavioral assertion failures / 1 direct-load control pass**. All old source is read through `git show`; no active worktree is reset. The final old and new comparisons use the same corrected prototype fixture.
+- New narrow injection test, same command without the source override: exit 0, **3 pass**. Initial replacement-probe failures came from omitting Nest's prototype setup before using its injector; that fixture error is retained in `new-injection.log` and is not a product reproduction. The fixture now follows the real InstanceLoader's `loadPrototype` → `loadProvider` order.
+- Final affected regression: `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015 tests/unit/pax-shared-order-flow-20261015 tests/unit/pax-booking-history-20261009 tests/unit/forwarder.test.ts tests/unit/cross-app/owned-mobility-ops-map-api-closeout-proof.test.ts tests/security/iam-route-driver-negative.test.ts tests/security/iam-driver-authz-enforcement.test.ts --maxWorkers=2 --reporter=dot`: exit 0, **355 pass / 16 original environment skips**, 38 passing / six skipped files. Existing React act and intentional rejected-write warnings remain warnings. No skip or business assertion was relaxed.
+- `pnpm --filter @drts/api exec vitest run tests/unit/forwarder.controller.test.ts tests/unit/forwarder.service.test.ts tests/unit/owned-mobility.controller.test.ts tests/unit/ops-driver-tasks-scope.test.ts --maxWorkers=2 --reporter=dot`: exit 0, **56 pass / zero skips**. Narrow probes are already included in the final root regression.
+- API production build and final root TypeScript: exit 0. The build ran at `6b67c2473f95e0dff668bd5f51c9c6ddb3e20759`; its product blob is unchanged at the final verification source. Scoped ESLint (`--max-warnings=0`), Prettier, source invariants, trailers and diff checks pass. The earlier fixture `this` alias lint failure is retained and corrected without a rule exemption.
+- Node 22.23.2, pnpm 10.33.0, TypeScript 5.9.3, Vitest 4.1.4, Nest 11.2.7 and Next 16.3.8. Only this assigned worktree's 22 dependency symlinks were detached before an offline frozen installation with scripts disabled, exit 0; canonical dependencies and lockfiles were untouched.
+
+All checks started in this owner turn reached terminal results and were read.
+Earlier checkpoints and their logs remain preserved; they are not separate
+review candidates. The final functional candidate retains the original recovery
+branch and PR 2673 with ordinary non-force pushes. New hosted CI remains pending
+under the original bus/collector; all three acceptance keys remain pending.
