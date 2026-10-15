@@ -74,7 +74,9 @@ describe("F3 SLA authorization before canonical recovery", () => {
         h.p.rejectReadbacks(!recoverable);
         const before = structuredClone(h.service["slaProfiles"]);
         const tokenA = signedIdentity(h.jwt, tenantA);
-        const identityA = await h.jwt.verifyAccessToken(tokenA);
+        const identityA = h.jwt.toRequestIdentity(
+          (await h.jwt.verifyAccessToken(tokenA))!,
+        );
         expect(identityA?.tenantId).toBe(tenantA);
         const serviceSpy = vi.spyOn(h.service, "updateSlaProfile");
         // Promise.then also captures the original synchronous service denial.
@@ -147,7 +149,7 @@ describe("F3 SLA authorization before canonical recovery", () => {
               { waitThresholdMin: 40 },
               undefined,
               undefined,
-              await h.jwt.verifyAccessToken(token),
+              h.jwt.toRequestIdentity((await h.jwt.verifyAccessToken(token))!),
             );
           expect(
             h.p.query.mock.calls.some(([sql]) => sql.includes("SELECT")),
