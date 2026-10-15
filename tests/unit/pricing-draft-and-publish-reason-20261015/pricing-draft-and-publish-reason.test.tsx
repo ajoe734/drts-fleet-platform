@@ -360,9 +360,11 @@ describe("PRICING-DRAFT-AND-PUBLISH-REASON-20261015: C076 Create draft & publish
       screen.getByRole("button", { name: tt("pricing.confirmPublish") }),
     );
 
-    // Wait for publish receipt banner to render.
+    // Wait for publish receipt banner and stepper step to render.
     await waitFor(() => {
-      expect(screen.getByText(new RegExp(expectedTrimmedReason))).toBeTruthy();
+      expect(
+        screen.getAllByText(new RegExp(expectedTrimmedReason)).length,
+      ).toBeGreaterThan(0);
     });
 
     // Verify the publish HTTP request carried the trimmed reason and authenticated actor (not cosmetic locale persona).
