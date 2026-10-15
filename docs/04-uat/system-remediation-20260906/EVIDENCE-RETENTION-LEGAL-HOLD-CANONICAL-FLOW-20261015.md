@@ -1,6 +1,6 @@
 # EVIDENCE-RETENTION-LEGAL-HOLD-CANONICAL-FLOW-20261015
 
-Owner: Codex. Assigned independent reviewer: Codex2. Status: scoped Source verification retained; F-CI-01 delivery gate failed on published candidate `ac3d5f69c6a600fcf92b71ec7e08a360fe45ca0f`; replacement branch routing, fresh exact-candidate review, mandatory CI and protected merge pending.
+Owner: Codex. Assigned independent reviewer: Codex2. Current status: complete Source/UAT recovery on the Supervisor-assigned recovery-r2 branch; fresh socket-free verification passes. Fresh exact-candidate review, mandatory same-candidate CI, protected merge and own-key acceptance remain pending. The recovery appendix below supersedes the historical routing blocker; all original findings and review history remain preserved.
 
 Accepted original source: `2c36cad43376f848bd2a7edc06e27369c060c819`.
 Immutable R1 spec: `/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T1226-remaining-original-audits-root/EVIDENCE-RETENTION-LEGAL-HOLD-CANONICAL-FLOW-20261015-R1.task-spec.json`, SHA256 `83adbcf0f5041a30d896f9d3419929c15c51b34c5ebac5ad1e3af518fed87e79`.
@@ -371,3 +371,60 @@ push normally, create the replacement PR and hand off its immutable SHA to
 Codex2. No amend, rebase, reset, force-push, prior-ref deletion or CI bypass is
 part of this recovery. This evidence-only checkpoint on the assigned branch is
 not a replacement review candidate and does not satisfy the failed gate.
+
+## Recovery-r2: complete Source continuation on the assigned accepted base
+
+Supervisor routed the replacement branch at `2026-10-15T15:00:46Z`. This dispatch
+confirmed its assigned isolated cwd already held
+`codex/evidence-retention-legal-hold-canonical-flow-20261015-recovery-r2`, based on
+accepted `62bd0fee263d01152d61a4bcc1eb31e1b47ebced`. No task path changed between
+the original accepted source and that base. The preserved full eleven-path
+Source/UAT patch SHA256 is
+`c86447e61abaa82e2de2fea655b6be58ee9104acc828ca35e8cc1c1239da6abf`.
+`git apply --check` and application both exited 0. After staging all eleven
+paths, `git diff --cached --exit-code 403d9f1058bb5aea6b9af1a81ffae58244e9cd27
+-- <eleven task paths>` exited 0: the restored production code, regressions and
+original UAT are byte-identical to the preserved published result. No accepted
+fix was overwritten and no old invalid-subject ancestor was imported.
+
+Anchor `9242829f3e9ce6b1f6b242e55db24a2d271d6bc8` contains the entire recovery
+(2545 insertions / 347 deletions), with a valid task-ID subject and all required
+trailers; its ordinary push completed. The following closeout only updates this
+UAT with fresh evidence. Old branch and open PR
+[#2667](https://github.com/ajoe734/drts-fleet-platform/pull/2667) remain at
+`403d9f1058bb5aea6b9af1a81ffae58244e9cd27`. No reset, amend, rebase, force push,
+old PR closure, ref deletion or checker weakening was used.
+
+Fresh diagnostics are under this assigned worktree's
+`.local/evidence-retention-20261015/recovery-r2/`; `evidence-index.json` records
+commands, exits, versions and file hashes. The closeout's full candidate SHA,
+branch, replacement PR and local/remote/PR-head equality are recorded after
+commit in `candidate.json` there and in the canonical handoff. This avoids
+embedding a commit's own hash in its contents. Node is `v22.23.2`, pnpm
+`10.33.0`, and Vitest `4.1.4`.
+
+| Finding / required key suffix (prefix `evidence-retention_`)                           | Production basis and fresh before → fixed result                                                                                                                                                                                                                                                                                                                                                                                | Evidence / exits                                                                                                                                                                                                                                    | Remaining boundary                                                                                                                                                                                           |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| C099-F1; `four-governance-commands-canonical-ACK-and-rejected-state-readback`          | Original actual controller/service bytes produce eight early ACK failures; restored production handlers stage each of four commands and publish only after repository ACK. Deferred/rejected readback, cache and replay assertions pass.                                                                                                                                                                                        | `governance-before.log`: exit 1, 10 failed / 1 passed / 17 deliberately unselected. `root.log`: exit 0, 63/63 including all 28 governance cases.                                                                                                    | Only DB query transport controlled; no live write.                                                                                                                                                           |
+| C099-F2; `authoritative-governance-unknown-empty-noDB-and-original-access-boundaries`  | Original failed trail returns empty; recent-feed failure loses protection. Fixed lists/subject/commands/report artifact projection expose unavailable authority, recovery works, and empty/noDB/ordinary-feed fallback, roles, tenant/manifest, Phase1 family and transient buffer boundaries pass. Tenant and audit UUID spelling repairs and opaque identity controls are retained.                                           | Same fresh original and root logs; `api.log`: exit 0, 28/28 across five impacted API suites. Original C099 five and C100 four cases are unchanged and included in root run.                                                                         | No live access/download/provider or Phase2 authority credit.                                                                                                                                                 |
+| C100-F1/F2/F3; `legal-hold-exception-exact-archive-set-and-honest-SQL-result`          | Original shell exports/purges protected targets/history/references and deletes concurrent/boundary rows outside its export. Fixed actual shell selects one lawful set, verifies archived rows and deletes by exact IDs; release/resolution/expiry, tenant authority, UUID cases, no-op and failure controls pass. Original SQL rejection exits 0 and prints success; fixed exits 3 with source retained and no success receipt. | `archival-before.log`: exit 1, 20 failed / 1 passed. Fixed 21 archival cases included in root 63/63. `archival-before-trace.jsonl` and `root-trace.jsonl` record actual generated SQL, arguments, stdout/stderr and selected/archive/remaining IDs. | Actual SELECT uses documented SQLite dialect projection over V0009 columns; COPY/transaction failure transport controlled. No PostgreSQL parser/lock/role/trigger/live purge/restore claim. V0080 unchanged. |
+| All original findings; `actual-production-before-fixed-after-and-original-regressions` | Original production service/controller/script extracted with `git archive 2c36cad43376f848bd2a7edc06e27369c060c819`; Vite loads original bytes at original module IDs, preserving real controller/repository imports. Fixed checks use restored production with no override.                                                                                                                                                    | Root 63/63, API 28/28, scoped eslint, Prettier, shell syntax and diff checks exit 0. Contracts/control-plane-auth declaration builds and full API typecheck exit 0.                                                                                 | Root broad typecheck not rerun; its prior failed diagnostics remain historical above. No server, browser, PG or Docker started.                                                                              |
+| F-CI-01; `exact-candidate-review-CI-and-protected-merge`                               | Actual validator still rejects old `ac3d5f69c6a6` solely for invalid subject (exit 1). Replacement anchor's entire `origin/dev..HEAD` passes (one commit, exit 0); final range is checked again after closeout, before handoff.                                                                                                                                                                                                 | `trailers-before.log`, `trailers-anchor.log`, final `trailers-candidate.log` and `candidate.json`. New exact-SHA review and hosted CI are required; old approvals/CI are not reused.                                                                | Protected merge and own-key acceptance remain pending. Owner does not call `done`.                                                                                                                           |
+
+Fresh commands (from the assigned worktree; each completed result was read):
+
+```bash
+pnpm exec vitest run --config .local/evidence-retention-20261015/recovery-r2/vitest.before.config.ts tests/unit/evidence-retention-legal-hold-canonical-flow-20261015/governance.test.ts -t 'controls actual envelope|failed configured|successful empty|recent-feed'
+RETENTION_SCRIPT="$PWD/.local/evidence-retention-20261015/recovery-r2/original-source/operations/database/audit-log-retention-archival.sh" RETENTION_TRACE="$PWD/.local/evidence-retention-20261015/recovery-r2/archival-before-trace.jsonl" pnpm exec vitest run tests/unit/evidence-retention-legal-hold-canonical-flow-20261015/archival.test.ts
+RETENTION_TRACE="$PWD/.local/evidence-retention-20261015/recovery-r2/root-trace.jsonl" pnpm exec vitest run tests/unit/evidence-retention-legal-hold-canonical-flow-20261015 tests/unit/audit-notification.test.ts tests/unit/system-remediation/sr-qa-reports-001/c099-evidence-governance-controlled-export.test.ts tests/unit/system-remediation/sr-qa-reports-001/c100-audit-immutability-retention-boundary.test.ts
+pnpm --dir apps/api exec vitest run tests/unit/audit-notification.service.test.ts tests/unit/reporting-filing.service.test.ts tests/unit/regulatory-reporting.service.test.ts tests/unit/multi-taxi-controlled-export.test.ts tests/unit/evidence-governance.test.ts
+pnpm exec tsc -p packages/contracts/tsconfig.json
+pnpm exec tsc -p packages/control-plane-auth/tsconfig.json
+pnpm --dir apps/api exec tsc -p tsconfig.json --noEmit
+python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD
+```
+
+All preceding Source-only boundaries remain. Fresh current evidence supersedes
+neither the original failing candidates nor the missing external operational
+credit. Replacement candidate delivery is not a live archive/delete, recovery
+rehearsal, shared-dev deployment, whole-capability or whole-goal completion.
