@@ -5,7 +5,7 @@
 - **Reviewer**: `Claude`
 - **Branch**: `claude2/approval-mail-durable-delivery-readback-20261015`
 - **Base (`origin/dev`)**: `409bad360e89ec4e8e6e48c337f42295e15210d8` (HEAD at dispatch time)
-- **Implementation Commit SHA**: `54831b375e1a353e2b9fd785f40d71016a496230`
+- **Implementation Commit SHA**: `1437456877e7ba645e3e7d1348145dcedb118518`
 - **Task Spec Ref**: `/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T1531-original-booking-mail-host-root/APPROVAL-MAIL-DURABLE-DELIVERY-READBACK-20261015-R1.task-spec.json`
 
 ---
