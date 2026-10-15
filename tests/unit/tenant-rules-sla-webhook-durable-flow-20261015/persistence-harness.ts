@@ -5,7 +5,10 @@ import { TenantPartnerRepository } from "../../../apps/api/src/modules/tenant-pa
 // No schema/SQL/business rules are reimplemented; PostgreSQL checks are hosted.
 export function persistenceHarness() {
   let records = new Map<string, Map<string, unknown>>();
-  type Session = { transaction?: typeof records; insertCount: number };
+  type Session = {
+    transaction?: typeof records | undefined;
+    insertCount: number;
+  };
   let rejectInsert: number | undefined;
   let loseCommitAck = false;
   let beforeCommit: (() => Promise<void>) | undefined;
