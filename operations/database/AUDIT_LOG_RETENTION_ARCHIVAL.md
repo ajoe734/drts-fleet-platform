@@ -88,7 +88,10 @@ Apply uses one connection and transaction:
    references, with their tenant associations. A known physical `tenant_id`
    determines the audit row's tenant even if `new_value.tenantId` disagrees.
    Only a NULL physical tenant falls back to the payload tenant (including
-   non-UUID logical tenants normalized away by the repository). Expired or
+   non-UUID logical tenants normalized away by the repository). UUID tenant
+   spellings accepted by the repository (versions 1–5) compare without case,
+   including payload fallback. Opaque logical tenant strings remain case-sensitive;
+   a differently cased non-UUID tenant does not become the same tenant. Expired or
    resolved exceptions and released holds follow the existing rules. Unknown normalized physical
    tenants do not justify purging an otherwise matching protected reference.
 3. Active protection history stays in the source. Closed/expired entity history

@@ -2,7 +2,7 @@
 """Socket-free psql boundary double; NOT PostgreSQL permission/transaction proof.
 
 Candidate SELECT is executed, not reimplemented: SQLite evaluates production SQL
-against columns extracted from V0009. Only PG casts/interval clock are translated.
+against V0009 columns. PG casts/interval clock/regex syntax are translated.
 COPY/transaction and error exits are controlled protocol inputs to the real shell.
 """
 import datetime as dt
@@ -39,6 +39,7 @@ if match:
     body = re.search(r'CREATE TABLE IF NOT EXISTS admin.audit_logs \((.*?)\n\);', schema, re.S)[1]
     columns = re.findall(r'^\s+(\w+)\s+', body, re.M)
     db = sqlite3.connect(':memory:')
+    db.create_function('regexp', 2, lambda pattern, value: None if value is None else bool(re.search(pattern, value)))
     db.row_factory = sqlite3.Row
     db.execute("ATTACH DATABASE ':memory:' AS admin")
     db.execute('CREATE TABLE admin.audit_logs (' + ','.join('"' + name + '" TEXT' for name in columns) + ')')
@@ -47,6 +48,7 @@ if match:
         db.execute('INSERT INTO admin.audit_logs VALUES (' + ','.join('?' for _ in columns) + ')', values)
     days = int(re.search(r'-v retention_days=(\d+)', ' '.join(args))[1])
     query = match[1].replace('::text', '').replace('::timestamptz', '')
+    query = re.sub(r"lower\(([^)]*)\) ~ '([^']*)'", r"regexp('\2', lower(\1))", query)
     query = query.replace("(CURRENT_TIMESTAMP - (:'retention_days'::integer * INTERVAL '1 day'))", "'" + iso(now - dt.timedelta(days=days)) + "'")
     query = query.replace('CURRENT_TIMESTAMP', "'" + iso(now) + "'")
     selected_ids = [row['audit_id'] for row in db.execute(query)]

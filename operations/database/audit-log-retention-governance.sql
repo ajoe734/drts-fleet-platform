@@ -38,7 +38,12 @@ WITH latest_governance AS (
           (NULLIF(p.new_value->>'tenantId', '') IS NULL
             OR COALESCE(a.tenant_id::text, NULLIF(a.new_value->>'tenantId', '')) IS NULL
             OR p.new_value->>'tenantId' = COALESCE(
-              a.tenant_id::text, NULLIF(a.new_value->>'tenantId', '')))
+              a.tenant_id::text, NULLIF(a.new_value->>'tenantId', ''))
+            -- The repository accepts UUID versions 1-5 in either case. Compare
+            -- those identities canonically, keeping opaque tenants case-sensitive.
+            OR (lower(p.new_value->>'tenantId') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+              AND lower(p.new_value->>'tenantId') = lower(COALESCE(
+                a.tenant_id::text, NULLIF(a.new_value->>'tenantId', '')))))
           AND (
             (p.new_value->>'family' = 'audit_log'
               AND p.new_value->>'subjectId' = a.audit_id::text)

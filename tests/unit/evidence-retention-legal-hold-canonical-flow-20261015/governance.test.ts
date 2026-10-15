@@ -235,11 +235,28 @@ describe("C099 canonical governance ACK and unavailable authority", () => {
       await f.service.onModuleInit();
       const tenant = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
       const subjectId = "11111111-1111-4111-8111-111111111111";
-      const result = operation === "place"
-        ? await f.controller.placeEvidenceLegalHold({ ...holdCommand, subjectId, tenantId: tenant }, identity)
-        : await f.controller.registerEvidenceDeletionException({ ...exceptionCommand, subjectId, tenantId: tenant }, identity);
-      expect(result.data).toMatchObject({ status: "active", tenantId: tenant, subjectId });
-      const persisted = f.stored.find((r) => r.resourceType === (operation === "place" ? "evidence_legal_hold" : "evidence_deletion_exception"))!;
+      const result =
+        operation === "place"
+          ? await f.controller.placeEvidenceLegalHold(
+              { ...holdCommand, subjectId, tenantId: tenant },
+              identity,
+            )
+          : await f.controller.registerEvidenceDeletionException(
+              { ...exceptionCommand, subjectId, tenantId: tenant },
+              identity,
+            );
+      expect(result.data).toMatchObject({
+        status: "active",
+        tenantId: tenant,
+        subjectId,
+      });
+      const persisted = f.stored.find(
+        (r) =>
+          r.resourceType ===
+          (operation === "place"
+            ? "evidence_legal_hold"
+            : "evidence_deletion_exception"),
+      )!;
       // Observe the real repository INSERT inputs before simulating PostgreSQL's
       // canonical UUID text at the controlled query transport read boundary.
       expect(persisted.tenantId).toBe(tenant);
@@ -248,9 +265,55 @@ describe("C099 canonical governance ACK and unavailable authority", () => {
       const restarted = new AuditNotificationService(f.repository);
       await restarted.onModuleInit();
       for (const service of [f.service, restarted]) {
+        const controller = new AuditController(service);
         for (const tenantId of [tenant, tenant.toLowerCase()])
-          expect(service.getEvidenceSubjectGovernance("audit_log", subjectId, { tenantId }).deletionSuppressed).toBe(true);
-        expect(service.getEvidenceSubjectGovernance("audit_log", subjectId, { tenantId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }).deletionSuppressed).toBe(false);
+          expect(
+            controller.getEvidenceSubjectGovernance(
+              "audit_log",
+              subjectId,
+              tenantId,
+            ).data.deletionSuppressed,
+          ).toBe(true);
+        expect(
+          service.getEvidenceSubjectGovernance("audit_log", subjectId, {
+            tenantId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          }).deletionSuppressed,
+        ).toBe(false);
+      }
+      for (const tenantId of [
+        "Tenant-A",
+        "AAAAAAAA-AAAA-7AAA-8AAA-AAAAAAAAAAAA",
+      ]) {
+        const opaqueSubject = `${subjectId}-${tenantId}`;
+        if (operation === "place")
+          await f.controller.placeEvidenceLegalHold(
+            { ...holdCommand, subjectId: opaqueSubject, tenantId },
+            identity,
+          );
+        else
+          await f.controller.registerEvidenceDeletionException(
+            { ...exceptionCommand, subjectId: opaqueSubject, tenantId },
+            identity,
+          );
+        const replayed = new AuditNotificationService(f.repository);
+        await replayed.onModuleInit();
+        for (const service of [f.service, replayed]) {
+          const controller = new AuditController(service);
+          expect(
+            controller.getEvidenceSubjectGovernance(
+              "audit_log",
+              opaqueSubject,
+              tenantId,
+            ).data.deletionSuppressed,
+          ).toBe(true);
+          expect(
+            controller.getEvidenceSubjectGovernance(
+              "audit_log",
+              opaqueSubject,
+              tenantId.toLowerCase(),
+            ).data.deletionSuppressed,
+          ).toBe(false);
+        }
       }
     });
   }

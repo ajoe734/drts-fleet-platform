@@ -39,6 +39,7 @@ import {
   BOOTSTRAP_AUDIT_LOG,
   cloneAuditLog,
   createAuditLogRecord,
+  isUuidLike,
 } from "./audit-log.persistence";
 import {
   AuditNotificationEmailAdapter,
@@ -728,7 +729,7 @@ export class AuditNotificationService implements OnModuleInit {
         (hold) =>
           hold.family === family &&
           hold.subjectId === subjectId &&
-          (!tenantId || hold.tenantId === tenantId) &&
+          (!tenantId || this.sameEvidenceTenant(hold.tenantId, tenantId)) &&
           (!manifestHash || hold.manifestHash === manifestHash) &&
           hold.status === "active",
       )
@@ -741,7 +742,8 @@ export class AuditNotificationService implements OnModuleInit {
         (exception) =>
           exception.family === family &&
           exception.subjectId === subjectId &&
-          (!tenantId || exception.tenantId === tenantId) &&
+          (!tenantId ||
+            this.sameEvidenceTenant(exception.tenantId, tenantId)) &&
           (!manifestHash || exception.manifestHash === manifestHash) &&
           exception.status === "active",
       )
@@ -1048,6 +1050,15 @@ export class AuditNotificationService implements OnModuleInit {
   private normalizeOptional(value: string | null | undefined) {
     const normalized = value?.trim();
     return normalized ? normalized : null;
+  }
+
+  private sameEvidenceTenant(left: string | null, right: string) {
+    return (
+      left === right ||
+      (isUuidLike(left) &&
+        isUuidLike(right) &&
+        left.toLowerCase() === right.toLowerCase())
+    );
   }
 
   private requireFutureIso(value: string, field: string) {
