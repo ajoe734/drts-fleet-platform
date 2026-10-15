@@ -1108,10 +1108,11 @@ export class PlatformAdminService implements OnModuleInit {
       // rather than reporting success for a record that does not actually
       // reflect it.
       if (this.platformAdminRepository) {
-        const finalized = await this.platformAdminRepository.finalizePlacardPublish(
-          stripClaimToken(wonClaim),
-          claimToken,
-        );
+        const finalized =
+          await this.platformAdminRepository.finalizePlacardPublish(
+            stripClaimToken(wonClaim),
+            claimToken,
+          );
         if (!finalized) {
           // (R10 byte-ownership compensation) The DB CAS above is the
           // actual source of truth on ownership and has just said this
@@ -2026,14 +2027,34 @@ export class PlatformAdminService implements OnModuleInit {
     command: CreatePlatformPricingRuleCommand,
     requestId?: string,
   ): PlatformPricingRuleRecord {
-    this.assertNonBlank(command.ruleName, "ruleName");
-    this.assertNonBlank(command.version, "version");
+    this.assertNonBlank(command?.ruleName, "ruleName");
+    this.assertNonBlank(command?.version, "version");
+    this.assertNonBlank(command?.applicableTo, "applicableTo");
+    if (
+      typeof command.serviceFeeBps !== "number" ||
+      !Number.isFinite(command.serviceFeeBps) ||
+      command.serviceFeeBps < 0 ||
+      command.serviceFeeBps > 10000
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "serviceFeeBps must be a finite number between 0 and 10000.",
+        {
+          field: "serviceFeeBps",
+        },
+      );
+    }
+
+    const normalizedRuleName = command.ruleName.trim();
+    const normalizedVersion = command.version.trim();
+    const normalizedApplicableTo = command.applicableTo.trim();
 
     const duplicate = this.pricingRules.find(
       (rule) =>
-        rule.ruleName === command.ruleName.trim() &&
-        rule.version === command.version.trim() &&
-        rule.applicableTo === command.applicableTo,
+        rule.ruleName === normalizedRuleName &&
+        rule.version === normalizedVersion &&
+        rule.applicableTo === normalizedApplicableTo,
     );
     if (duplicate) {
       throw new ApiRequestError(
@@ -2041,9 +2062,9 @@ export class PlatformAdminService implements OnModuleInit {
         "PRICING_RULE_VERSION_CONFLICT",
         "A pricing rule with this version already exists.",
         {
-          ruleName: command.ruleName,
-          version: command.version,
-          applicableTo: command.applicableTo,
+          ruleName: normalizedRuleName,
+          version: normalizedVersion,
+          applicableTo: normalizedApplicableTo,
         },
       );
     }
@@ -2051,16 +2072,17 @@ export class PlatformAdminService implements OnModuleInit {
     const now = new Date().toISOString();
     const rule: PlatformPricingRuleRecord = {
       ruleId: `rule_${randomUUID()}`,
-      ruleName: command.ruleName.trim(),
-      version: command.version.trim(),
+      ruleName: normalizedRuleName,
+      version: normalizedVersion,
       serviceFeeBps: command.serviceFeeBps,
       reimbursementMode: command.reimbursementMode,
-      applicableTo: command.applicableTo,
+      applicableTo: normalizedApplicableTo,
       status: "draft",
       effectiveFrom: this.normalizeNullableText(command.effectiveFrom) ?? now,
       effectiveTo: null,
       publishedBy: null,
       publishedAt: null,
+      publishReason: null,
       notes: this.normalizeNullableText(command.notes),
       createdAt: now,
       updatedAt: now,
@@ -2096,8 +2118,32 @@ export class PlatformAdminService implements OnModuleInit {
     ruleId: string,
     command: PublishPlatformPricingRuleCommand,
     requestId?: string,
+    actorId?: string | null,
   ): PlatformPricingRuleRecord {
     const rule = this.requirePricingRule(ruleId);
+    this.assertNonBlank(command?.reason, "reason");
+    const reason = command.reason.trim();
+    if (reason.length < 12) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "Publish reason must be at least 12 characters after trimming.",
+        {
+          field: "reason",
+          minLength: 12,
+          actualLength: reason.length,
+        },
+      );
+    }
+
+    const candidateActor =
+      this.normalizeNullableText(actorId) ??
+      this.normalizeNullableText(command.publishedBy);
+    const publishedBy =
+      candidateActor && !/^platform_admin:(zh|en)$/i.test(candidateActor)
+        ? candidateActor
+        : null;
+
     const previousActive = this.pricingRules.find(
       (candidate) =>
         candidate.ruleId !== rule.ruleId &&
@@ -2115,8 +2161,9 @@ export class PlatformAdminService implements OnModuleInit {
     }
 
     rule.status = "active";
-    rule.publishedBy = this.normalizeNullableText(command.publishedBy);
+    rule.publishedBy = publishedBy;
     rule.publishedAt = publishedAt;
+    rule.publishReason = reason;
     rule.effectiveFrom =
       this.normalizeNullableText(command.effectiveFrom) ?? rule.effectiveFrom;
     rule.effectiveTo = this.normalizeNullableText(command.effectiveTo);
@@ -2124,7 +2171,7 @@ export class PlatformAdminService implements OnModuleInit {
 
     this.recordAudit(
       {
-        actorId: null,
+        actorId: publishedBy,
         actorType: "platform_admin",
         tenantId: null,
         moduleName: "platform-admin",
@@ -2144,6 +2191,8 @@ export class PlatformAdminService implements OnModuleInit {
           ruleId: rule.ruleId,
           version: rule.version,
           publishedAt,
+          publishedBy,
+          reason,
           applicableTo: rule.applicableTo,
         },
       },
@@ -2880,9 +2929,7 @@ export class PlatformAdminService implements OnModuleInit {
     };
 
     if (options.recover) {
-      const { record } = await this.documentArtifactStore.putIfAbsent(
-        command,
-      );
+      const { record } = await this.documentArtifactStore.putIfAbsent(command);
       return record;
     }
     if (options.fenceGeneration !== undefined) {
@@ -2956,9 +3003,10 @@ export class PlatformAdminService implements OnModuleInit {
 
     let authoritative: PlacardVersionRecord | null;
     try {
-      authoritative = await this.platformAdminRepository.getPlacardVersionRecord(
-        placardVersionId,
-      );
+      authoritative =
+        await this.platformAdminRepository.getPlacardVersionRecord(
+          placardVersionId,
+        );
     } catch {
       return;
     }
@@ -3367,8 +3415,8 @@ export class PlatformAdminService implements OnModuleInit {
     return normalized ? normalized : null;
   }
 
-  private assertNonBlank(value: string, fieldName: string) {
-    if (!value.trim()) {
+  private assertNonBlank(value: string | null | undefined, fieldName: string) {
+    if (typeof value !== "string" || !value.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "FIELD_REQUIRED",

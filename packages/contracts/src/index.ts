@@ -7652,6 +7652,7 @@ export interface PlatformPricingRuleRecord {
   effectiveTo: string | null;
   publishedBy: string | null;
   publishedAt: string | null;
+  publishReason?: string | null;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -7671,6 +7672,7 @@ export interface PublishPlatformPricingRuleCommand {
   effectiveFrom?: string | null;
   effectiveTo?: string | null;
   publishedBy?: string | null;
+  reason: string;
 }
 
 export interface SetTenantStatusCommand {
