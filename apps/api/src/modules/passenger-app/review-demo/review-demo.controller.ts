@@ -9,6 +9,7 @@ import {
   RequireRealms,
 } from "../../../common/auth/auth.decorators";
 import type { RequestIdentity } from "../../../common/auth/auth.types";
+import { DatabaseService } from "../../../common/db/database.service";
 import { PassengerAccountService } from "../account/passenger-account.service";
 import { PassengerBookingService } from "../booking/passenger-booking.service";
 import { PassengerOtpService } from "../otp/passenger-otp.service";
@@ -19,6 +20,7 @@ import {
 import { PaymentChargeService } from "../payment/payment-charge.service";
 import { reviewDemoEnabled } from "./review-demo.config";
 import { ReviewSmsPort } from "./review-sms.port";
+import { ReviewSupplyService } from "./review-supply.service";
 
 @Controller("passenger-app/review-demo")
 export class ReviewDemoController {
@@ -28,6 +30,8 @@ export class ReviewDemoController {
     private readonly accounts: PassengerAccountService,
     private readonly bookings: PassengerBookingService,
     private readonly charges: PaymentChargeService,
+    private readonly database: DatabaseService,
+    private readonly supply: ReviewSupplyService,
   ) {}
 
   private enabled() {
@@ -38,7 +42,17 @@ export class ReviewDemoController {
   @Get("config")
   @OpenRoute()
   config() {
-    return toApiSuccessEnvelope({ enabled: reviewDemoEnabled(process.env) });
+    return toApiSuccessEnvelope({
+      enabled: reviewDemoEnabled(process.env),
+      opsUrl: process.env.PAX_REVIEW_OPS_URL || "",
+    });
+  }
+
+  @Post("prepare")
+  @RequireRealms("ops", "platform", "system")
+  async prepare() {
+    this.enabled();
+    return toApiSuccessEnvelope(await this.supply.prepare());
   }
 
   @Post("otp")
@@ -86,5 +100,32 @@ export class ReviewDemoController {
     return toApiSuccessEnvelope(
       await this.bookings.getRide(account.drtsPassengerId, id),
     );
+  }
+
+  @Get("rides/:id/record")
+  @RequireRealms("passenger")
+  async record(
+    @CurrentIdentity() identity: RequestIdentity | null,
+    @Param("id") id: string,
+  ) {
+    this.enabled();
+    const { account } = await this.accounts.getMe(identity);
+    const ride = await this.bookings.getRide(account.drtsPassengerId, id);
+    // Read actual persisted trip/charge facts only, after the ordinary account
+    // and booking ownership check. Never manufacture a formal receipt row.
+    const trip = await this.database.query<{ record: Record<string, unknown> }>(
+      `SELECT record FROM ops.phase1_driver_tasks WHERE order_id=$1 AND status='completed' ORDER BY updated_at DESC LIMIT 1`,
+      [id],
+    );
+    const charge = await this.database.query(
+      `SELECT payment_id,status,attempt_count,retry_at,last_error_code FROM passenger.payment_charge_records WHERE order_id=$1 AND drts_passenger_id=$2`,
+      [id, account.drtsPassengerId],
+    );
+    return toApiSuccessEnvelope({
+      notice: "演練紀錄・非正式憑證。外部資格、圖資、GPS、付款及通知均為模擬。",
+      ride,
+      trip: trip.rows[0]?.record ?? null,
+      charge: charge.rows[0] ?? null,
+    });
   }
 }

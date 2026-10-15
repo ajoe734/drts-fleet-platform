@@ -65,6 +65,8 @@ env:
   DEV_ARTIFACT_REPOSITORY: ${{ vars.DEV_ARTIFACT_REPOSITORY }}
   DEV_SECRET_PREFIX: ${{ vars.DEV_SECRET_PREFIX }}
   DEV_MAP_PROVIDER_ALLOWED_ORIGINS: ${{ vars.DEV_MAP_PROVIDER_ALLOWED_ORIGINS }}
+  # Explicit shared rehearsal selection. No public access or role policy change.
+  DEV_PAX_REVIEW_DEMO_ENABLED: ${{ vars.DEV_PAX_REVIEW_DEMO_ENABLED }}
   DEV_JWT_ISSUER: ${{ vars.DEV_JWT_ISSUER }}
   DEV_JWT_AUDIENCE: ${{ vars.DEV_JWT_AUDIENCE }}
   DEV_GCP_API_SERVICE: ${{ vars.DEV_GCP_API_SERVICE }}
@@ -1050,6 +1052,14 @@ jobs:
           env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@AUTH_MODE=explicit@API_PORT=3001@DATABASE_POOL_MAX=6@JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }}@JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }}@AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}@DRTS_INTERNAL_KEY_ENFORCED=false@PLATFORM_ADMIN_ASSISTANT_ENABLED=true@WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER}@WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE}@WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=${DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED:-false}@LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }}@LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}@LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}@MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }}@MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}@MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
           env_vars="${env_vars}@OIDC_ENABLED=${{ steps.api_secrets.outputs.oidc_enabled }}"
           env_vars="${env_vars}@OAUTH_REDIRECT_ALLOWLIST=${oauth_redirect_allowlist}@REQUIRE_SMS_VERIFICATION=false"
+          env_vars="${env_vars}@PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
+          if [[ "${DEV_PAX_REVIEW_DEMO_ENABLED:-false}" == "true" ]]; then
+            # Only external adapters are synthetic. The existing secret groups
+            # still supply the OTP pepper and payment-token encryption key.
+            # Sandbox merchant/API values are simulation configuration, not a
+            # requirement for a real SMS/PSP account or actual monetary traffic.
+            env_vars="${env_vars}@PSP_PROVIDER=fake@PAX_PAYMENT_CAPTURE_ENABLED=true@PAX_PAYMENT_CAPTURE_POLICY={\"retryDelaysMs\":[60000],\"retryDefinitiveDeclines\":false,\"unknownReadbackDelaysMs\":[1000,3000]}@MULTI_TAXI_DEFAULT_AUTHORIZATION_ID=bc39e4f3-72d8-4383-bdc1-2426c1330dfa@PAX_REVIEW_OPS_URL=${{ needs.prepare.outputs.ops_console_origin }}/review"
+          fi
           if [[ "${{ steps.api_secrets.outputs.oidc_enabled }}" == "true" ]]; then
             tenant_login_origin="${{ needs.prepare.outputs.tenant_console_origin }}"
             tenant_login_origin="${tenant_login_origin:-$tenant_console_cloud_run_origin}"
@@ -1392,6 +1402,7 @@ jobs:
           IMAGE="${{ needs.prepare.outputs.registry }}/passenger-app-web:${{ needs.build-push.outputs.image_tag }}"
           # Dedicated BFF env: no tenant identity, client secret, or browser API URL.
           env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},DRTS_API_URL=${{ steps.api_url.outputs.url }},DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}"
+          env_vars="${env_vars},PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
           operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.passenger_app_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \

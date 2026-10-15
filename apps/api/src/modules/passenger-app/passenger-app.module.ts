@@ -57,6 +57,8 @@ import { MultiTaxiRepository } from "../multi-taxi/multi-taxi.repository";
 import { reviewDemoEnabled } from "./review-demo/review-demo.config";
 import { ReviewSmsPort } from "./review-demo/review-sms.port";
 import { ReviewDemoController } from "./review-demo/review-demo.controller";
+import { ReviewSupplyService } from "./review-demo/review-supply.service";
+import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
 import {
   PAYMENT_RECOVERY_NOTICE_EXPIRY,
   PAYMENT_RECOVERY_NOTICE_OUTBOX,
@@ -71,6 +73,7 @@ import {
     ServiceAreaModule,
     MultiTaxiModule,
     ComplaintModule,
+    RegulatoryRegistryModule,
   ],
   controllers: [
     PassengerAccountController,
@@ -111,6 +114,7 @@ import {
     PaymentRefundRepository,
     PaymentRefundService,
     ReviewSmsPort,
+    ReviewSupplyService,
     {
       provide: PAYMENT_RUNTIME,
       useFactory: () => paymentRuntimeFromEnv(process.env),

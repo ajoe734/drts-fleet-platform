@@ -206,11 +206,14 @@ describe("shared rehearsal replaces external ports, retaining product commands",
       challenge: requested.challenge,
     };
     const login = await otp.verify(command, null, "rehearsal-unit");
-    expect(login).toMatchObject({
-      result: "logged_in",
-      account: { status: "active" },
-    });
+    expect(login.result).toBe("logged_in");
     expect(login).toHaveProperty("accessToken");
+    if (login.result !== "logged_in") throw new Error("login failed");
+    const identity = new PassengerJwtService().verify(login.accessToken);
+    expect(identity?.realm).toBe("passenger");
+    expect(await accounts.getMe(identity)).toMatchObject({
+      account: { status: "active", verifiedPhone: "+886900000001" },
+    });
     await expect(otp.verify(command, null)).rejects.toMatchObject({
       code: "invalid_code",
     });

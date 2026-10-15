@@ -31,7 +31,7 @@ export function paymentFieldsForRuntime(
         : process.env.NODE_ENV === "production"
           ? "production"
           : "nonproduction",
-      captureResult: options.captureResult,
+      captureResult: options.captureResult ?? "success",
       issueSyntheticNonce: () => `synthetic_${crypto.randomUUID()}`,
     }),
   };
