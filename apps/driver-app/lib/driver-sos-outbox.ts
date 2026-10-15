@@ -433,8 +433,8 @@ export function markDriverSosCaseSubmitted(
     syncState: "submitted",
     lastError: null,
     receipt: result.receipt,
-    dutyAcknowledgement: { ...result.event.dutyAcknowledgement },
-    status: result.event.status,
+    dutyAcknowledgement: { ...activeCase.dutyAcknowledgement },
+    status: activeCase.status ?? "submitted",
   };
 
   nextCase = appendTimelineEntry(nextCase, {
@@ -464,6 +464,11 @@ export function markDriverSosCaseSubmitted(
       tone: "success",
     });
   }
+
+  nextCase = applyDriverSosDutyReadback(nextCase, {
+    status: result.event.status,
+    dutyAcknowledgement: result.event.dutyAcknowledgement,
+  });
 
   return nextCase;
 }

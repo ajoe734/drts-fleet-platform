@@ -257,7 +257,10 @@ describe("driver-sos-outbox", () => {
     });
 
     const submitted = markDriverSosCaseSubmitted(activeCase, {
-      event: {} as any,
+      event: {
+        status: "submitted",
+        dutyAcknowledgement: { acknowledgedAt: null, acknowledgedByActorId: null },
+      } as any,
       receipt: {
         sosEventId: "sos-1",
         incidentId: "INC-999",

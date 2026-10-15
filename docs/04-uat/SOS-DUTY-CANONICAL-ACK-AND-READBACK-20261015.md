@@ -182,3 +182,27 @@ Full re-verification after all round-2 fixes:
   current concurrency bar (the same bar `submitSosEvent`'s dedup and
   `recordOpsAlertsRendered`'s observation dedup already rely on); it is not a
   new cross-process distributed lock.
+
+## Round 3: reviewer reopen (2026-10-15T19:46:55Z) findings and fixes
+
+Gemini2 reopened candidate `afc24da61` with two findings. Both addressed:
+
+| Finding / acceptance key | Code location | Before → after | Command / result |
+| --- | --- | --- | --- |
+| (1) `sos_exact_candidate_validation` — CI `pnpm run typecheck` TS2322: `actorA.actorId` (`BootstrapRequestIdentity.actorId: string \| null`) passed directly as `acknowledgedByActorId: string` in a test mock's `deferred.resolve(...)`. | `tests/unit/sos-duty-canonical-ack-and-readback-20261015/duty-ack-race-and-readback.test.ts:170` | Already fixed on this branch by a prior commit (`4e974c2e`, `actorA.actorId as string`) before this session started; re-verified it is present and root `pnpm run typecheck` no longer reports this error. | `npx tsc -p tsconfig.json --noEmit` from repo root → no errors referencing this file or any `apps/driver-app`/`apps/api` SOS file. Remaining root typecheck errors (tenant-console-web, bank-console-web, passenger-app-web, `packages/api-client` duplicate-instance `baseUrl` privacy) are pre-existing, outside this task's `write_scopes`, and unmodified by this branch — confirmed via `git status` showing no diff in those paths. |
+| (2) `sos_native_honest_pending_ack_and_canonical_readback` — `markDriverSosCaseSubmitted` copied `result.event.dutyAcknowledgement`/`result.event.status` directly onto `nextCase` without going through `applyDriverSosDutyReadback`, so a retry/replay submit that comes back already-acknowledged never appended a `duty_acknowledged` timeline entry (and a later `pollDutyReadback` would see `ackChanged === false` since the ack was already silently absorbed). | `apps/driver-app/lib/driver-sos-outbox.ts` `markDriverSosCaseSubmitted` | `nextCase` is now initialized from `activeCase.dutyAcknowledgement` / `activeCase.status ?? "submitted"` (i.e. carries forward what the case already honestly knew), and at the end of the function `applyDriverSosDutyReadback(nextCase, { status: result.event.status, dutyAcknowledgement: result.event.dutyAcknowledgement })` is applied so any ack/status jump present in the submit response is surfaced through the same honest-timeline path used by polling. | New test in `apps/driver-app/tests/unit/driver-sos-end-to-end-platform.test.ts`: "honestly surfaces duty acknowledgment on a retry/replay submit that returns an already-acknowledged event" — submits with `result.event.status === "acknowledged"` and a populated `dutyAcknowledgement`, asserts the resulting case carries the acknowledgement, `status === "acknowledged"`, and the timeline contains a `duty_acknowledged` entry. Also fixed a pre-existing unrelated test in `driver-sos-outbox.test.ts` ("ensures timeline entries contain clean Chinese strings...") that passed `event: {} as any` — a `{}` event no longer satisfies the new readback call, so the fixture now supplies a minimal real `status`/`dutyAcknowledgement` shape. |
+
+Full re-verification after round-3 fixes:
+
+- `apps/driver-app`: `pnpm --filter driver-app test` → 546/546 passed (up from
+  545: the one new regression case). `pnpm --filter driver-app typecheck` →
+  clean.
+- `apps/ops-console-web`: `pnpm --filter ops-console-web typecheck` → clean.
+- Root: `npx vitest run tests/unit/system-remediation/sr-qa-call-001/c047-sos-duty-lifecycle.test.ts tests/unit/sos-duty-canonical-ack-and-readback-20261015/duty-ack-race-and-readback.test.ts` → 21/21 passed (no regression from round 2).
+- Root: `npx vitest run tests/security/iam-auth-negative-matrix.test.ts tests/security/iam-driver-authz-enforcement.test.ts tests/security/iam-route-driver-negative.test.ts tests/security/iam-route-inventory.test.ts tests/unit/fleet-statement-decisions-20261013/incident-links.test.ts tests/unit/system-remediation/sr-qa-call-001/c046-incident-suppression-recovery.test.ts` → 53/53 passed.
+- `apps/api`: `npx vitest run tests/unit/driver-sos.service.test.ts tests/unit/driver-sos-provider-adapters.test.ts tests/unit/driver-sos-attachment.service.test.ts tests/unit/driver-sos-incident.test.ts tests/unit/driver-sos-verification.repository.test.ts` → 27/27 passed (these files are untouched this round; confirms no incidental regression).
+- Not re-run this round: `apps/api`'s full `vitest run` (its integration
+  suite requires a live `DATABASE_URL`, which this VM's dispatch runtime
+  restriction does not provide; this is a pre-existing environment
+  limitation, not introduced by this change) — scoped unit coverage above
+  substitutes for it.
