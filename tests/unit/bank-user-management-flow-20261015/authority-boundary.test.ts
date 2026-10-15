@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
+import jwt from "jsonwebtoken";
 import * as controlPlaneAuth from "../../../packages/control-plane-auth/src/index";
 import { BootstrapAuthGuard } from "../../../apps/api/src/common/auth/bootstrap-auth.guard";
 import { JwtAuthService } from "../../../apps/api/src/common/auth/jwt-auth.service";
@@ -44,6 +45,52 @@ afterEach(() => vi.unstubAllEnvs());
 // These probes establish the missing authority boundary. They do not claim
 // that the unimplemented Bank management flow passes its acceptance gates.
 describe("Bank display sessions cannot authorize tenant user commands", () => {
+  it("a verified IAP Bank login still issues only a display session, not a tenant mutation session", async () => {
+    vi.stubEnv("BANK_SESSION_SECRET", "bank-authority-probe-secret");
+    vi.stubEnv("BANK_CONSOLE_DEMO_LOGIN", "false");
+    vi.stubEnv("IAP_JWT_SECRET", "bank-authority-probe-iap-secret");
+    vi.stubEnv("IAP_AUDIENCE", "bank-authority-probe");
+    vi.stubEnv("IAP_ISSUER", "https://cloud.google.com/iap");
+    const assertion = jwt.sign(
+      {
+        sub: "verified-bank-subject",
+        email: "admin@acme.example",
+        tenant: "acme",
+        role: "bank_program_admin",
+      },
+      "bank-authority-probe-iap-secret",
+      {
+        algorithm: "HS256",
+        audience: "bank-authority-probe",
+        issuer: "https://cloud.google.com/iap",
+        expiresIn: "5m",
+      },
+    );
+    const response = await login.POST(
+      new NextRequest("https://bank.example/api/auth/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-goog-iap-jwt-assertion": assertion,
+        },
+        body: JSON.stringify({ role: "bank_program_admin", bank: "acme" }),
+      }),
+    );
+    expect(response.status).toBe(303);
+    const token = response.cookies.get("drts_bank_console_session")?.value;
+    expect(token).toBeTruthy();
+    expect(session.verifySessionRole(token!)).toEqual({
+      role: "bank_program_admin",
+      bankCode: "acme",
+    });
+    vi.stubEnv("APP_ENV", "production");
+    await expect(
+      authorize({ authorization: `Bearer ${token}` }),
+    ).rejects.toMatchObject({
+      code: "JWT_INVALID",
+    });
+  });
+
   it("the real dev login emits a signed display cookie that the real API guard rejects", async () => {
     vi.stubEnv("BANK_SESSION_SECRET", "bank-authority-probe-secret");
     vi.stubEnv("DRTS_ENV", "development");
@@ -63,7 +110,9 @@ describe("Bank display sessions cannot authorize tenant user commands", () => {
       bankCode: "acme",
     });
     vi.stubEnv("APP_ENV", "production");
-    await expect(authorize({ authorization: `Bearer ${token}` })).rejects.toMatchObject({
+    await expect(
+      authorize({ authorization: `Bearer ${token}` }),
+    ).rejects.toMatchObject({
       code: "JWT_INVALID",
     });
   });
@@ -74,8 +123,13 @@ describe("Bank display sessions cannot authorize tenant user commands", () => {
       vi.stubEnv("BANK_SESSION_SECRET", "bank-authority-probe-secret");
       vi.stubEnv("APP_ENV", "production");
       const token = session.signSessionRole(role, "acme");
-      expect(session.verifySessionRole(token)).toEqual({ role, bankCode: "acme" });
-      await expect(authorize({ authorization: `Bearer ${token}` })).rejects.toMatchObject({
+      expect(session.verifySessionRole(token)).toEqual({
+        role,
+        bankCode: "acme",
+      });
+      await expect(
+        authorize({ authorization: `Bearer ${token}` }),
+      ).rejects.toMatchObject({
         code: "JWT_INVALID",
       });
     },
@@ -83,11 +137,13 @@ describe("Bank display sessions cannot authorize tenant user commands", () => {
 
   it("the existing Bank read headers do not create a strict-environment mutation identity", async () => {
     vi.stubEnv("APP_ENV", "production");
-    await expect(authorize({
-      "x-actor-type": "tenant_admin",
-      "x-actor-id": "bank-console:tenant-demo-001:bank_program_admin",
-      "x-realm": "tenant",
-      "x-tenant-id": "tenant-demo-001",
-    })).rejects.toMatchObject({ code: "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN" });
+    await expect(
+      authorize({
+        "x-actor-type": "tenant_admin",
+        "x-actor-id": "bank-console:tenant-demo-001:bank_program_admin",
+        "x-realm": "tenant",
+        "x-tenant-id": "tenant-demo-001",
+      }),
+    ).rejects.toMatchObject({ code: "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN" });
   });
 });
