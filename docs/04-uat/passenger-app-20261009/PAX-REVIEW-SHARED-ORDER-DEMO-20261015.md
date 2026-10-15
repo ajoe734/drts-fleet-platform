@@ -1839,8 +1839,16 @@ archive/log receipts are under
 The replacement executable source is
 `dc84c6dd3419efcd1d35f84035dfafd56ba4a084`; subsequent source changes only add
 this UAT evidence. Before replacement, root and Driver TypeScript, API production
-build, scoped ESLint/Prettier and diff checks passed. The new-base checks are
-recorded separately and must reach terminal results before handoff.
+build, scoped ESLint/Prettier and diff checks passed. All checks started in this
+turn have now reached terminal results and have been read. On the replacement
+base, the same affected regression finished with **431 pass / 16 original
+environment skips**, 44 passing / six skipped files (`recovery-final-regression.log`,
+exit 0). The four API suites finished with **56 pass / zero skips**
+(`recovery-api-scope.log`, exit 0); root TypeScript and the API production build
+also finished with exit 0 (`recovery-root-typecheck.log`,
+`recovery-api-build.log`). The exact commands and source identities are in the
+canonical ledger. New hosted CI is pending under the original bus; none of
+these socket-free results grants PG/browser/deployment acceptance.
 
 The first new probe incorrectly expected NTD instead of canonical TWD and used
 a nonterminal fixture refusal that triggered the existing replay behavior.
