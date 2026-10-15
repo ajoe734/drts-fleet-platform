@@ -514,3 +514,31 @@ other two PG companion outcomes are pending collection; this failure is
 retained as unresolved and is not inferred to be the config-loader defect.
 The next source candidate has not been pushed while these original hosted
 results remain outstanding.
+
+### R8 reachable evidence helper and R9 final PG evidence query
+
+The actual browser import graph contains one more `import.meta.url`, in
+`tests/e2e/pax-review-shared-order/evidence.ts::requireApi`. After the config
+repair, the real Playwright `loadTestFile` reproduces the same module-format
+error there, exit 1 (`suite-before-fixed-probe.log`). Its source was unchanged
+from 33fb. The helper now resolves the same API package path with `__dirname`,
+retaining its real `pg` dependency and relational query. The collection-only
+probe blocks server listen and child-process APIs and does not execute tests.
+Its first invocation passed the wrong config argument to the internal loader
+(`suite-before.log`, TypeError); this was a probe error and receives no product
+reproduction credit. The corrected probe uses the actual loaded config.
+
+All original 33fb jobs have now finished and were read before pushing:
+regular product-smoke job `116342345746` has 9602 passes / 47 skips / 1 failure,
+exit 1; integration-trunk unit job `116342719683` is cancelled, with no final
+full-unit summary or pass credit. Owner did not cancel it or push new source
+while it ran. The regular `test-results` artifact `11961980499` contains the
+actual structured result; `regular-root-summary.json` extracts the three new
+PG companions and their statuses. Raw logs and the original artifact ZIP are
+retained in this round's canonical evidence directory.
+
+| Finding / acceptance                                                 | Actual result / source                                                                                                                                                                                                                                                                                                                                                                                                                                | Repair and remaining verification                                                                                                                                                                                                                                                                                                       |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R9: final dynamic-supply proof selects a nonexistent physical column | Real hosted `dynamic-supply.hosted.test.ts:335` fails with `column "driver_id" does not exist` after the actual prepare, cross-instance registration/profile/token/work-state, booking, dispatch/candidate/assignment, native acceptance and suspension assertions. V0011 defines the task row with `record jsonb`; production `OwnedMobilityRepository.persistChanges` writes the driver's ID inside that record, not a physical `driver_id` column. | Select `record->>'driverId' AS driver_id` from the same committed row. Preserve the existing order/driver/status equality assertion and all preceding guards. No product, migration, fixture, skip, timeout or retry changes. Replacement hosted PG is pending; static schema review and local hosted skips are not a repaired PG pass. |
+| Prior R4 / R6 formal PG companions                                   | On 33fb regular CI, `persisted-roles.hosted.test.ts` and `dispatch-supply-schema.hosted.test.ts` each execute and pass without skips; integration-trunk also reports the former passed before cancellation.                                                                                                                                                                                                                                           | These establish the original source's targeted peer/ACK and supply-join repairs. They are retained as historical evidence; replacement CI must still execute them.                                                                                                                                                                      |
+| All three required acceptance keys                                   | Still pending with zero credit. New browser never executed on 33fb.                                                                                                                                                                                                                                                                                                                                                                                   | Replacement source review, same-SHA full CI/browser/PG, normal merge, immutable shared-dev delivery and new smoke remain required.                                                                                                                                                                                                      |

@@ -333,7 +333,7 @@ describe.skipIf(!hostedPaymentEnabled)(
         ),
       ).rejects.toMatchObject({ code: "DRIVER_AUTH_SUSPENDED" });
       const rows = await h.pool!.query(
-        "SELECT order_id,driver_id,status FROM ops.phase1_driver_tasks WHERE task_id=$1",
+        "SELECT order_id,record->>'driverId' AS driver_id,status FROM ops.phase1_driver_tasks WHERE task_id=$1",
         [assignment.taskId],
       );
       expect(rows.rows).toEqual([

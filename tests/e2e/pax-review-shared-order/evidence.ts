@@ -1,7 +1,8 @@
 import { createRequire } from "node:module";
+import { resolve } from "node:path";
 import type { Page, TestInfo } from "@playwright/test";
 const requireApi = createRequire(
-  new URL("../../../apps/api/package.json", import.meta.url),
+  resolve(__dirname, "../../../apps/api/package.json"),
 );
 const { Pool } = requireApi("pg") as typeof import("pg");
 
