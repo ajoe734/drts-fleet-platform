@@ -154,7 +154,7 @@ async function forward(
         status: "down",
         error: error instanceof Error ? error.message : String(error),
       },
-      { status: 503 },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
 

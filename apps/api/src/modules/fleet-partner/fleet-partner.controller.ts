@@ -165,6 +165,8 @@ export class FleetPartnerController {
     return actorId;
   }
 
+  // The undecorated _untrustedActorId positions retain direct-call source
+  // compatibility only. HTTP attribution always comes from CurrentIdentity.
   private requirePartnerActorId(identity: BootstrapRequestIdentity | null) {
     const actorId = identity?.actorId?.trim();
     if (!actorId) {

@@ -1,8 +1,8 @@
-import {
-  fleetStorageFixture,
-} from "../helpers/fleet-document-fixture";
+import { fleetStorageFixture } from "../helpers/fleet-document-fixture";
 import { createRequire } from "node:module";
-const { EventEmitter2 } = createRequire(new URL("../../../apps/api/package.json", import.meta.url))("@nestjs/event-emitter");
+const { EventEmitter2 } = createRequire(
+  new URL("../../../apps/api/package.json", import.meta.url),
+)("@nestjs/event-emitter");
 
 import { OpsDispatchEventsService } from "../../../apps/api/src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -98,9 +98,9 @@ function buildSharedServices() {
 export function createFixture() {
   const services = buildSharedServices();
   const supplyReviewService = new SupplyReviewService(
-        services.regulatoryRegistryService,
-        services.supplySubmissionRepository,
-      );
+    services.regulatoryRegistryService,
+    services.supplySubmissionRepository,
+  );
 
   return {
     ...services,
@@ -110,9 +110,13 @@ export function createFixture() {
       services.supplyDocumentService,
       supplyReviewService,
       services.supplyReadinessService,
-      new FleetPartnerCaseService(undefined, services.fleetPartnerService, services.auditNotificationService, services.storage),
+      new FleetPartnerCaseService(
+        undefined,
+        services.fleetPartnerService,
+        services.auditNotificationService,
+        services.storage,
+      ),
     ),
     supplyReviewService,
   };
 }
-

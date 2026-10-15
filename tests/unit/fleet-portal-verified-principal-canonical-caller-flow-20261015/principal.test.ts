@@ -117,7 +117,11 @@ beforeEach(async () => {
           data = await controller.createDriverSupplySubmission(
             headers.get("x-fleet-partner-id")!,
             headers.get("x-actor-id") ?? undefined,
-            JSON.parse(init.body instanceof ArrayBuffer ? new TextDecoder().decode(init.body) : String(init.body)),
+            JSON.parse(
+              init.body instanceof ArrayBuffer
+                ? new TextDecoder().decode(init.body)
+                : String(init.body),
+            ),
             "request-1",
             verified,
           );
@@ -232,4 +236,43 @@ it("rejects missing principal instead of treating environment fleet or IAP email
     { params: Promise.resolve({ path: ["fleet-partner", "drivers"] }) },
   );
   expect(response.status).toBe(401);
+});
+
+it("actual controller ignores a supplied actor and requires CurrentIdentity rather than the portal fallback", async () => {
+  await controller.createDriverSupplySubmission(
+    identity.partnerId!,
+    "spoofed-owner",
+    { name: "Draft" } as never,
+    "request-actor",
+    identity,
+  );
+  expect(createDraft).toHaveBeenCalledWith(
+    identity.partnerId,
+    identity.actorId,
+    { name: "Draft" },
+    "request-actor",
+  );
+  createDraft.mockClear();
+  await expect(
+    controller.createDriverSupplySubmission(
+      identity.partnerId!,
+      "spoofed-owner",
+      { name: "Draft" } as never,
+      "missing-principal",
+      null,
+    ),
+  ).rejects.toMatchObject({ code: "FLEET_SCOPE_DENIED" });
+  expect(createDraft).not.toHaveBeenCalled();
+});
+
+it("inner application bearer stays separate when authorization contains infrastructure proof", async () => {
+  inbound.headers = new Headers({
+    "x-drts-authorization": `Bearer ${bearer}`,
+    authorization: "Bearer infrastructure-proof",
+    "x-scopes": "*",
+  });
+  const { client } = await getServerFleetPartnerClient();
+  expect(await client.listFleetPortalDrivers()).toEqual([]);
+  expect(calls.at(-1)!.headers.get("authorization")).toBe(`Bearer ${bearer}`);
+  expect(calls.at(-1)!.headers.has("x-drts-authorization")).toBe(false);
 });

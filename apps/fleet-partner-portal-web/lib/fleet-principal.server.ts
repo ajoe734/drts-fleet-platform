@@ -44,9 +44,17 @@ export async function readFleetResponse<T>(response: Response): Promise<T> {
       traceId?: string;
     } = {};
     try {
-      const candidate = (JSON.parse(rawBody) as { error?: typeof error & { trace_id?: string } }).error;
+      const candidate = (
+        JSON.parse(rawBody) as { error?: typeof error & { trace_id?: string } }
+      ).error;
       const traceId = candidate?.traceId ?? candidate?.trace_id;
-      if (candidate && typeof candidate.code === "string" && typeof candidate.message === "string" && typeof candidate.retryable === "boolean" && typeof traceId === "string") {
+      if (
+        candidate &&
+        typeof candidate.code === "string" &&
+        typeof candidate.message === "string" &&
+        typeof candidate.retryable === "boolean" &&
+        typeof traceId === "string"
+      ) {
         // Match the accepted SDK error contract: preserve business metadata
         // keys inside details and normalize only the envelope trace ID.
         error = { ...candidate, traceId };
