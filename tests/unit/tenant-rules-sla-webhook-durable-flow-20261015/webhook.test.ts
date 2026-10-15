@@ -1,0 +1,201 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
+import { createHmac } from "node:crypto";
+import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { TenantPartnerService } from "../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
+import { WebhookDispatchService } from "../../../apps/api/src/modules/tenant-partner/webhook-dispatch.service";
+import { persistenceHarness } from "./persistence-harness";
+
+const tenantId = "tenant-durable-webhook";
+const command = {
+  url: "https://receiver.example.test/hook",
+  secret: "original-webhook-secret",
+  events: ["dispatch.assigned"],
+};
+const services: TenantPartnerService[] = [];
+afterEach(() => {
+  for (const service of services.splice(0)) service.onModuleDestroy();
+  vi.useRealTimers();
+});
+
+function serviceFor(
+  repository?: ReturnType<typeof persistenceHarness>["repository"],
+  fetcher = vi.fn(async () => ({ ok: true, status: 204 })),
+) {
+  const audit = new AuditNotificationService();
+  const service = new TenantPartnerService(
+    audit,
+    repository,
+    new WebhookDispatchService(fetcher),
+    [],
+  );
+  services.push(service);
+  return { service, audit, fetcher };
+}
+
+describe("C112 durable commands and first in-flight restart", () => {
+  it("status-only activation cannot bypass successful current test, including rotation and disable", async () => {
+    const { service } = serviceFor();
+    const endpoint = await service.createWebhookEndpoint(tenantId, command);
+    const activate = () =>
+      service.updateWebhookEndpoint(tenantId, endpoint.webhookId, {
+        status: "active",
+      });
+    await activate();
+    expect(service.listWebhookEndpoints(tenantId)[0]?.status).toBe(
+      "test_pending",
+    );
+    await service.sendTestWebhook(tenantId, { webhookId: endpoint.webhookId });
+    expect(service.listWebhookEndpoints(tenantId)[0]?.status).toBe("active");
+    await service.rotateWebhookSecret(tenantId, {
+      webhookId: endpoint.webhookId,
+      secret: "rotated-webhook-secret",
+    });
+    await activate();
+    expect(service.listWebhookEndpoints(tenantId)[0]?.status).toBe(
+      "test_pending",
+    );
+    await service.sendTestWebhook(tenantId, { webhookId: endpoint.webhookId });
+    await service.updateWebhookEndpoint(tenantId, endpoint.webhookId, {
+      status: "disabled",
+      disableReason: "maintenance",
+    });
+    await activate();
+    expect(service.listWebhookEndpoints(tenantId)[0]?.status).toBe(
+      "test_pending",
+    );
+    await service.sendTestWebhook(tenantId, { webhookId: endpoint.webhookId });
+    expect(service.listWebhookEndpoints(tenantId)[0]?.status).toBe("active");
+  });
+
+  it.each(["create", "edit", "disable", "rotate"] as const)(
+    "%s holds cache and audit until the actual repository COMMIT",
+    async (kind) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const persistence = persistenceHarness();
+      const { service, audit } = serviceFor(persistence.repository);
+      const created =
+        kind === "create"
+          ? undefined
+          : await service.createWebhookEndpoint(tenantId, command);
+      const before = service.listWebhookEndpoints(tenantId);
+      const auditSpy = vi.spyOn(audit, "recordAuditLog");
+      let release!: () => void;
+      persistence.holdCommit(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      const pending =
+        kind === "create"
+          ? service.createWebhookEndpoint(tenantId, command)
+          : kind === "rotate"
+            ? service.rotateWebhookSecret(tenantId, {
+                webhookId: created!.webhookId,
+                secret: "new-secret",
+              })
+            : service.updateWebhookEndpoint(
+                tenantId,
+                created!.webhookId,
+                kind === "disable"
+                  ? { status: "disabled", disableReason: "maintenance" }
+                  : { url: command.url + "/edited" },
+              );
+      let settled = false;
+      void Promise.resolve(pending).then(() => {
+        settled = true;
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      try {
+        expect(settled).toBe(false);
+        expect(service.listWebhookEndpoints(tenantId)).toEqual(before);
+        expect(auditSpy).not.toHaveBeenCalled();
+      } finally {
+        release?.();
+      }
+      await pending;
+      expect(auditSpy).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("recovers first HTTP interrupted after enqueue from persisted state only, with original payload/key/policy and completed dedupe", async () => {
+    vi.useFakeTimers();
+    const persistence = persistenceHarness();
+    const first = serviceFor(persistence.repository);
+    const endpoint = await first.service.createWebhookEndpoint(
+      tenantId,
+      command,
+    );
+    await first.service.sendTestWebhook(tenantId, {
+      webhookId: endpoint.webhookId,
+    });
+    let releaseHttp!: (result: { ok: boolean; status: number }) => void;
+    first.fetcher.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseHttp = resolve;
+        }),
+    );
+    const event = {
+      eventType: "dispatch.assigned",
+      occurredAt: "2026-10-15T12:34:56.000Z",
+      data: { orderId: "original-order", nested: { amount: 17 } },
+      outboxKey: "original-outbox-key",
+    };
+    const interrupted = first.service.publishWebhookEvent(tenantId, event);
+    await vi.advanceTimersByTimeAsync(0);
+    const state = await persistence.repository.loadState();
+    const queued = state.webhookDeliveries.find(
+      (item) => item.eventType === event.eventType,
+    )!;
+    expect(queued.status).toBe("queued");
+    expect(queued.attempt).toBe(0);
+    expect(queued.rawBody).toEqual(
+      deepToSnakeCase({
+        event: event.eventType,
+        tenantId,
+        occurredAt: event.occurredAt,
+        deliveryId: queued.deliveryId,
+        data: event.data,
+      }),
+    );
+    expect(queued.nextAttemptAt).toBeTruthy();
+    first.service.onModuleDestroy();
+    const second = serviceFor(persistence.repository);
+    await second.service.onModuleInit();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(second.fetcher).toHaveBeenCalledOnce();
+    const [, request] = second.fetcher.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    const payload = JSON.parse(request.body as string);
+    expect(payload).toEqual(queued.rawBody);
+    const headers = request.headers as Record<string, string>;
+    const signature = headers["x-drts-webhook-signature"]!;
+    const timestamp = /;t=([^;]+);/.exec(signature)![1];
+    expect(signature).toContain(
+      createHmac("sha256", command.secret)
+        .update(`${timestamp}.${request.body as string}`)
+        .digest("hex"),
+    );
+    const recovered = (
+      await persistence.repository.loadState()
+    ).webhookDeliveries.find((item) => item.deliveryId === queued.deliveryId)!;
+    expect(recovered).toMatchObject({
+      status: "delivered",
+      secretVersion: queued.secretVersion,
+      retryPolicySnapshot: queued.retryPolicySnapshot,
+      attempt: 1,
+    });
+    const dedupe = await second.service.publishWebhookEvent(tenantId, {
+      ...event,
+      data: { orderId: "changed-retry-data", nested: { amount: 18 } },
+    });
+    expect(dedupe[0]?.deliveryId).toBe(queued.deliveryId);
+    expect(second.fetcher).toHaveBeenCalledOnce();
+    releaseHttp({ ok: true, status: 204 });
+    await interrupted;
+  });
+});

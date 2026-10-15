@@ -58,7 +58,7 @@ async function createHarness(
     init?: RequestInit,
   ) => Promise<WebhookFetchResponse>,
 ) {
-  const webhookDispatchService = new WebhookDispatchService(fetchImpl);
+  const webhookDispatchService = new WebhookDispatchService((url, init) => (init?.headers as Record<string, string>)["x-drts-event-type"] === "tenant.webhook.test" ? Promise.resolve({ ok: true, status: 204 }) : fetchImpl(url, init));
   const tenantPartnerService = new TenantPartnerService(
     new AuditNotificationService(),
     undefined,
@@ -86,7 +86,7 @@ async function createHarness(
     eligibilityMode: "none",
   });
 
-  const createdEndpoint = tenantPartnerService.createWebhookEndpoint(
+  const createdEndpoint = await tenantPartnerService.createWebhookEndpoint(
     entry.tenantId,
     {
       url: "https://partner.example.test/webhooks/passenger",
@@ -94,11 +94,8 @@ async function createHarness(
       events: [WIRE_EVENT, TEST_WIRE_EVENT],
     },
   );
-  const endpoint = tenantPartnerService.updateWebhookEndpoint(
-    entry.tenantId,
-    createdEndpoint.webhookId,
-    { status: "active" },
-  );
+  await tenantPartnerService.sendTestWebhook(entry.tenantId, { webhookId: createdEndpoint.webhookId });
+  const endpoint = tenantPartnerService.listWebhookEndpoints(entry.tenantId)[0]!;
 
   return { tenantPartnerService, bindingService, bindingRepository, entry, endpoint };
 }
@@ -243,9 +240,13 @@ describe("PartnerEntryNotificationBindingService", () => {
     await bindingService.testBinding(ENTRY_SLUG, PLATFORM_IDENTITY);
 
     // Endpoint URL rotates after the successful test.
-    tenantPartnerService.updateWebhookEndpoint(entry.tenantId, endpoint.webhookId, {
-      url: "https://partner.example.test/webhooks/passenger-v2",
-    });
+    await tenantPartnerService.updateWebhookEndpoint(
+      entry.tenantId,
+      endpoint.webhookId,
+      {
+        url: "https://partner.example.test/webhooks/passenger-v2",
+      },
+    );
 
     await expect(
       bindingService.enableBinding(ENTRY_SLUG, binding.version, PLATFORM_IDENTITY),

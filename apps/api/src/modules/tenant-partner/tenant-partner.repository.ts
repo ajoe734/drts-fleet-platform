@@ -91,6 +91,7 @@ type WebhookRuntimeMetadata = {
 };
 
 export type StoredWebhookEndpointRecord = TenantWebhookEndpoint & {
+  verificationNonce?: string | undefined;
   secretValue: string;
   secretCredentials?: StoredWebhookSecretRecord[];
   retryPolicy: WebhookRetryPolicy;
@@ -99,6 +100,8 @@ export type StoredWebhookEndpointRecord = TenantWebhookEndpoint & {
 };
 
 export type StoredWebhookDeliveryRecord = WebhookDeliveryRecord & {
+  verificationNonce?: string | undefined;
+  verificationFingerprint?: string | undefined;
   attemptedAt: string;
   nextAttemptAt: string | null;
   signatureHeader: string;

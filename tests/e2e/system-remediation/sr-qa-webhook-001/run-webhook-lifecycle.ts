@@ -153,9 +153,13 @@ async function main() {
 
     // ---- C112: real HTTP dispatch, HMAC verified against wire bytes ----
     const webhookSecret = "whsec_e2e_verified_signing_secret_999";
-    const createdWebhook = service.createWebhookEndpoint(
+    const createdWebhook = await service.createWebhookEndpoint(
       tenantId,
-      { url: receiver.url, secret: webhookSecret, events: ["tenant.webhook.test"] },
+      {
+        url: receiver.url,
+        secret: webhookSecret,
+        events: ["tenant.webhook.test"],
+      },
       "req-e2e-create-wh-001",
     );
 
@@ -203,9 +207,13 @@ async function main() {
 
     // Secret rotation v2 + recovery redelivery
     const secretV2 = "whsec_rotated_e2e_secret_v2";
-    const rotatedSecret = service.rotateWebhookSecret(
+    const rotatedSecret = await service.rotateWebhookSecret(
       tenantId,
-      { webhookId: createdWebhook.webhookId, secret: secretV2, rotationReason: "e2e_recovery_rotation" },
+      {
+        webhookId: createdWebhook.webhookId,
+        secret: secretV2,
+        rotationReason: "e2e_recovery_rotation",
+      },
       "req-e2e-secret-rotate-001",
     );
     const endpointAfterSecretRotation = service.listWebhookEndpoints(tenantId)[0]!;

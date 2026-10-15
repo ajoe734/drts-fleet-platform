@@ -744,7 +744,7 @@ test("Next POST valid IAP assertion -> Guard -> Controller mutation allowed with
     const canActivate = await guard.canActivate(mockContext);
     expect(canActivate).toBe(true);
 
-    controller.createWebhookEndpoint(
+    await controller.createWebhookEndpoint(
       mockRequest.body as any,
       mockRequest.headers["x-tenant-id"],
       "req-5",
@@ -885,7 +885,7 @@ test("Next POST valid IAP assertion without step-up proof -> Guard -> Controller
     let err: any;
     try {
       if (await guard.canActivate(mockContext)) {
-        controller.createWebhookEndpoint(
+        await controller.createWebhookEndpoint(
           {
             url: "https://example.com/webhook",
             secret: "whsec_1",
@@ -1251,7 +1251,7 @@ test("Next GET cross-tenant selection boundary -> selecting A isolates from B", 
       recordAuditLog: vi.fn(),
       recordSecurityEvent: vi.fn(),
     } as any);
-    realService.createWebhookEndpoint(
+    await realService.createWebhookEndpoint(
       "review-tenant-a",
       {
         url: "https://a.com/webhook",
@@ -1260,7 +1260,7 @@ test("Next GET cross-tenant selection boundary -> selecting A isolates from B", 
       },
       "req-1",
     );
-    realService.createWebhookEndpoint(
+    await realService.createWebhookEndpoint(
       "review-tenant-b",
       {
         url: "https://b.com/webhook",
