@@ -555,6 +555,26 @@ function mapAuditEntity(record: AuditLogRecord) {
   };
 }
 
+// The scoped contract endpoint uses snake_case JSON (including nested records).
+// Normalize keys only at this read boundary; keep values such as SLA metric
+// enums, nulls and zero measurements intact and accept existing camelCase data.
+function normalizeContractKeys(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(normalizeContractKeys);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [
+        key.replace(/_([a-z])/g, (_match, letter: string) =>
+          letter.toUpperCase(),
+        ),
+        normalizeContractKeys(nested),
+      ]),
+    );
+  }
+  return value;
+}
+
 async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
   const actorId = `bank-console:${tenantId}:${role}`;
   const [
@@ -581,11 +601,7 @@ async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
       tenantId,
       actorId,
     ),
-    bankApiGetList<IssuerContractStatusRecord>(
-      "api/tenant/contracts",
-      tenantId,
-      actorId,
-    ),
+    bankApiGetList<unknown>("api/tenant/contracts", tenantId, actorId),
     bankApiGetList<ApiSettlementStatementRecord>(
       "api/tenant/settlement-statements",
       tenantId,
@@ -614,7 +630,12 @@ async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
   const usage = usageResult.status === "fulfilled" ? usageResult.value : [];
   const orders = ordersResult.status === "fulfilled" ? ordersResult.value : [];
   const contracts =
-    contractsResult.status === "fulfilled" ? contractsResult.value : [];
+    contractsResult.status === "fulfilled"
+      ? contractsResult.value.map(
+          (record) =>
+            normalizeContractKeys(record) as IssuerContractStatusRecord,
+        )
+      : [];
   const statements =
     statementsResult.status === "fulfilled" ? statementsResult.value : [];
   const rawUsers = usersResult.status === "fulfilled" ? usersResult.value : [];
