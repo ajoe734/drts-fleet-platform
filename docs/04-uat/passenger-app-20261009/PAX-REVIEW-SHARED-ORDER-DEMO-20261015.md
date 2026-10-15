@@ -440,3 +440,28 @@ R3–R7 are one continued task. All earlier findings and all three original
 required acceptance keys are retained; none receives acceptance credit from
 these scoped checks. Source repairs still require the original reviewer and
 replacement hosted evidence, normal merge and immutable shared-dev delivery.
+
+Final replacement-source checks (all completed and results read):
+
+- `final-root-regression.log`: 131 pass / 3 deliberately hosted-only skips,
+  exit 0. Includes original OwnedMobility/idempotency/Ops map/session/registry/
+  IAM cases, all new namespace cases, both dispatch-write probes and all seven
+  original C050 assertions.
+- `final-api-regression.log`: 243 pass, exit 0, including original Owned
+  service/controller/repository/durable sinks/compliance, Forwarder/controller
+  scope, registry, MultiTaxi and the three socket-free integration files.
+- `heartbeat-restart-after.log`: 1 pass / 1 deliberately unselected HTTP case,
+  exit 0; `final-root-typecheck.log`, `final-api-build.log` and `final-lint.log`
+  all exit 0. Counts overlap earlier runs and must not be summed.
+- Production Passenger build, original i18n guard and source format checks
+  completed with exit 0 as recorded above. No product changes were made after
+  these checks; the closeout adds documentation and evidence identity only.
+
+R6's final success checks the returned `dispatchJobId` equals the ID of the
+actually acknowledged INSERT for this order; failure returns the original
+write rejection. R7's old 6 failures / 1 pass become all 7 passes. These
+socket-free probes do not grant PG, HTTP-server, browser or shared-dev credit.
+The original hosted R3 HTTP/PG assertions, R4 formal-schema and dynamic-supply
+companions, R6 peer assignment and R5 unchanged demo browser must still pass
+for the replacement candidate. All three required acceptance keys remain
+pending until their original lifecycle evidence is recorded.
