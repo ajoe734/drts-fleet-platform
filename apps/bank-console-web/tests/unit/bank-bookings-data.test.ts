@@ -481,6 +481,8 @@ describe("production service catalog multiplicity", () => {
         result.data.programs,
       );
     },
+    // Includes in-memory transpilation of the full production service module.
+    15_000,
   );
 
   it.each(["foreign tenant", "malformed label"])(
