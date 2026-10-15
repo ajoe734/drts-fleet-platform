@@ -1,4 +1,6 @@
 "use client";
+import { t } from "../../../../components/review-demo/translations";
+
 import { useEffect, useState, use } from "react";
 import {
   PassengerClient,
@@ -25,7 +27,7 @@ export default function ReviewRecordPage({
           if (active) setRecord(result);
         })
         .catch(() => {
-          if (active) setError("無法讀取本人同單演練紀錄，請重新登入後重試。");
+          if (active) setError(t.recordFailed);
         });
     return () => {
       active = false;
@@ -33,15 +35,21 @@ export default function ReviewRecordPage({
   }, [enabled, id]);
   return (
     <main style={{ padding: 18 }}>
-      <h1>演練紀錄・非正式憑證</h1>
-      <p>訂單 UUID：{id}</p>
+      <h1>{t.recordTitle}</h1>
+      <p>
+        {t.recordOrderId}
+        {id}
+      </p>
       <p role="alert">{error}</p>
       {record && (
         <>
           <p>{record.notice}</p>
           <p>
-            狀態：{record.ride.order.status}；付款：
-            {record.ride.payment?.status ?? "未扣款"}；扣款次數：
+            {t.recordStatus}
+            {record.ride.order.status}
+            {t.recordPayment}
+            {record.ride.payment?.status ?? t.notCharged}
+            {t.recordAttempts}
             {record.charge?.attemptCount ?? 0}
           </p>
           <p>
@@ -62,12 +70,12 @@ export default function ReviewRecordPage({
               setTimeout(() => URL.revokeObjectURL(url), 1000);
             }}
           >
-            下載演練紀錄 HTML
+            {t.downloadHtml}
           </button>
         </>
       )}
       <p>
-        <a href={`/rides/${encodeURIComponent(id)}`}>回同單行程</a>
+        <a href={`/rides/${encodeURIComponent(id)}`}>{t.backToRide}</a>
       </p>
     </main>
   );

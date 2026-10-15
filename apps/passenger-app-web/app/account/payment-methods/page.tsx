@@ -1,4 +1,6 @@
 "use client";
+import { t } from "../../../components/review-demo/translations";
+
 import { isDemoMode } from "../../../lib/demo/store";
 import { demoPaymentFields } from "../../../lib/demo/payment-fields";
 import { useEffect, useState } from "react";
@@ -39,18 +41,18 @@ export default function PaymentMethodsPage() {
     <>
       {review && (
         <label>
-          模擬 PSP 結果（新綁的付款方式）
+          {t.pspScenario}
           <select
-            aria-label="模擬 PSP 結果"
+            aria-label={t.pspLabel}
             value={captureResult}
             onChange={(event) =>
               setCaptureResult(event.target.value as "success" | "retry_once")
             }
           >
-            <option value="success">完程扣款成功</option>
-            <option value="retry_once">首次完程扣款失敗，依政策補繳成功</option>
+            <option value="success">{t.captureSuccess}</option>
+            <option value="retry_once">{t.captureRetry}</option>
           </select>
-          <p>結果隨本次演練 token 保存；每張訂單各自重試，不修改已建立訂單。</p>
+          <p>{t.captureNotice}</p>
         </label>
       )}
       <PaymentMethodsScreen

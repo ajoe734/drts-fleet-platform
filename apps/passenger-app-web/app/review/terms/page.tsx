@@ -1,18 +1,12 @@
+import { t } from "../../../components/review-demo/translations";
 export default function ReviewTerms() {
   return (
     <main style={{ padding: 18 }}>
-      <h1>共享演練條款與隱私說明</h1>
-      <p>
-        版本 review-terms-v1 /
-        review-privacy-v1。本入口供審查演練，不提供實際運輸服務。
-      </p>
-      <p>
-        僅使用合成聯絡資料。演練帳戶、預約、派遣、司機任務、模擬付款、評價及內部案件寫入共享開發資料庫，由授權演練人員操作與讀取；重新整理不會刪除。
-      </p>
-      <p>
-        簡訊、圖資、車司資格、定位、支付及通知為模擬，無實際派車、收款或真人通知。請勿輸入真卡號、證件、電話或真實乘車個資。下載文件不供正式報帳，不代表已取得營運許可。
-      </p>
-      <a href="/review">回演練入口</a>
+      <h1>{t.termsTitle}</h1>
+      <p>{t.termsVersion}</p>
+      <p>{t.termsPersistence}</p>
+      <p>{t.termsSimulation}</p>
+      <a href="/review">{t.backToReview}</a>
     </main>
   );
 }

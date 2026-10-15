@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "../../lib/i18n";
+import { reviewCopy } from "./translations";
 import { useEffect, useRef, useState } from "react";
 import type {
   OwnedOrderRecord,
@@ -16,6 +18,8 @@ const SUPPLY = ["a", "b"].map((suffix) => ({
  * It creates no alternate order, session or dispatch state in the browser.
  */
 export default function SharedOrderReviewOps() {
+  const { locale } = useTranslation();
+  const t = reviewCopy(locale);
   const [enabled, setEnabled] = useState(false);
   const [orderId, setOrderId] = useState("");
   const [order, setOrder] = useState<OwnedOrderRecord>();
@@ -47,11 +51,7 @@ export default function SharedOrderReviewOps() {
     try {
       await operation();
     } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "操作失敗，請核對權限／當前狀態後重試。",
-      );
+      setMessage(error instanceof Error ? error.message : t.operationFailed);
     } finally {
       lock.current = false;
       setBusy(false);
@@ -67,7 +67,7 @@ export default function SharedOrderReviewOps() {
         body: pending.current.body,
       }) !== fingerprint
     )
-      throw new Error("上一個命令結果尚待讀回，請先重試原命令。");
+      throw new Error(t.pendingCommand);
     pending.current ??= { path, body, key: crypto.randomUUID() };
     const result = await client.post<T>(path, {
       body,
@@ -80,8 +80,7 @@ export default function SharedOrderReviewOps() {
     return result;
   }
   async function load() {
-    if (!/^[0-9a-f-]{36}$/i.test(orderId))
-      throw new Error("請貼上乘客剛建立的 UUID。");
+    if (!/^[0-9a-f-]{36}$/i.test(orderId)) throw new Error(t.invalidOrderId);
     const current = await client.get<OwnedOrderRecord>(
       `/api/orders/${encodeURIComponent(orderId)}`,
     );
@@ -105,30 +104,27 @@ export default function SharedOrderReviewOps() {
   }
   return (
     <main style={{ padding: 24, maxWidth: 900 }}>
-      <h1>同單審查演練・Ops</h1>
-      <p>
-        沿既有 Ops 身分與 BFF
-        權限操作真正後端；車司資格／供給與定位為虛構演練資料，通知不送真人。
-      </p>
+      <h1>{t.title}</h1>
+      <p>{t.intro}</p>
       {!enabled ? (
-        <p role="status">此 API 未啟用共享演練。</p>
+        <p role="status">{t.disabled}</p>
       ) : (
         <>
           <section>
-            <h2>演練供給與司機裝置</h2>
+            <h2>{t.supplyTitle}</h2>
             <button
               disabled={busy}
               onClick={() =>
                 void run(async () => {
                   await command("/api/passenger-app/review-demo/prepare", {});
-                  setMessage("已準備兩組合成車司；未建立訂單、派遣或付款。");
+                  setMessage(t.prepared);
                 })
               }
             >
-              準備虛構演練車司
+              {t.prepare}
             </button>
             <select
-              aria-label="演練司機"
+              aria-label={t.driverLabel}
               value={selected}
               onChange={(e) => setSelected(e.target.value)}
               disabled={busy}
@@ -149,32 +145,30 @@ export default function SharedOrderReviewOps() {
                 })
               }
             >
-              發出既有司機裝置註冊碼
+              {t.invite}
             </button>
             {registrationCode && (
               <label>
-                單次註冊碼（交給本場司機視窗，不納入證據）
+                {t.registrationNotice}
                 <input
                   type="password"
                   readOnly
                   value={registrationCode}
-                  aria-label="演練裝置註冊碼"
+                  aria-label={t.registrationLabel}
                 />
                 <button
                   onClick={() =>
                     void navigator.clipboard.writeText(registrationCode)
                   }
                 >
-                  複製註冊碼
+                  {t.copyCode}
                 </button>
                 <button onClick={() => setRegistrationCode("")}>
-                  隱藏註冊碼
+                  {t.hideCode}
                 </button>
               </label>
             )}
-            <p>
-              無車情境只切換這兩位演練司機的既有供給狀態；有進行中任務時請先完成或取消。
-            </p>
+            <p>{t.supplyNotice}</p>
             {(["offline", "available"] as const).map((workState) => (
               <button
                 key={workState}
@@ -188,22 +182,22 @@ export default function SharedOrderReviewOps() {
                       );
                     setMessage(
                       workState === "offline"
-                        ? "演練供給已離線；新派遣走真正無車流程。"
-                        : "演練供給已恢復；請依原流程重新派遣。",
+                        ? t.supplyPaused
+                        : t.supplyRestored,
                     );
                   })
                 }
               >
-                {workState === "offline" ? "暫停演練供給" : "恢復演練供給"}
+                {workState === "offline" ? t.pauseSupply : t.restoreSupply}
               </button>
             ))}
           </section>
           <section>
-            <h2>乘客新建的同一張訂單</h2>
+            <h2>{t.orderTitle}</h2>
             <label>
-              訂單 UUID
+              {t.orderId}
               <input
-                aria-label="訂單 UUID"
+                aria-label={t.orderId}
                 value={orderId}
                 disabled={busy}
                 onChange={(e) => {
@@ -215,7 +209,7 @@ export default function SharedOrderReviewOps() {
               />
             </label>
             <button disabled={busy} onClick={() => void run(load)}>
-              讀回同單
+              {t.readOrder}
             </button>
             {order && (
               <>
@@ -224,7 +218,7 @@ export default function SharedOrderReviewOps() {
                   <output data-testid="ops-review-order-id">
                     {order.orderId}
                   </output>
-                  ；狀態：
+                  {t.orderStatus}
                   <output data-testid="ops-review-order-status">
                     {order.status}
                   </output>
@@ -233,9 +227,9 @@ export default function SharedOrderReviewOps() {
                   {order.pickup.address} → {order.dropoff.address}
                 </p>
                 <a href={`/dispatch/${job?.dispatchJobId ?? orderId}`}>
-                  既有派遣詳情／候選指派
+                  {t.dispatchDetails}
                 </a>{" "}
-                · <a href="/dispatch">既有調度看板</a>
+                · <a href="/dispatch">{t.dispatchBoard}</a>
                 <button
                   disabled={busy || !!job}
                   onClick={() =>
@@ -247,12 +241,12 @@ export default function SharedOrderReviewOps() {
                     })
                   }
                 >
-                  建立同單派遣
+                  {t.createDispatch}
                 </button>
                 {job && (
                   <>
                     <p>
-                      派遣：
+                      {t.dispatchId}
                       <output data-testid="ops-review-job-id">
                         {job.dispatchJobId}
                       </output>
@@ -264,13 +258,13 @@ export default function SharedOrderReviewOps() {
                         void run(async () => {
                           await command(`/api/orders/${orderId}/redispatch`, {
                             reasonCode: "review_supply_restored",
-                            reasonNote: "演練供給恢復，沿真派遣",
+                            reasonNote: t.redispatchNote,
                           });
                           await load();
                         })
                       }
                     >
-                      依原流程重新派遣
+                      {t.redispatch}
                     </button>
                     <ul>
                       {candidates.map((candidate) => (
@@ -289,7 +283,8 @@ export default function SharedOrderReviewOps() {
                               })
                             }
                           >
-                            指派 {candidate.driverId}
+                            {t.assign}
+                            {candidate.driverId}
                           </button>
                           <button
                             disabled={busy}
@@ -300,13 +295,14 @@ export default function SharedOrderReviewOps() {
                                   driverId: candidate.driverId,
                                   vehicleId: candidate.vehicleId,
                                   reasonCode: "review_reassignment",
-                                  reasonNote: "演練改派，請乘客重新核對車牌",
+                                  reasonNote: t.reassignNote,
                                 });
                                 await load();
                               })
                             }
                           >
-                            改派 {candidate.driverId}
+                            {t.reassign}
+                            {candidate.driverId}
                           </button>
                         </li>
                       ))}
@@ -318,7 +314,7 @@ export default function SharedOrderReviewOps() {
           </section>
         </>
       )}
-      <p role="status">{busy ? "處理中…" : message}</p>
+      <p role="status">{busy ? t.working : message}</p>
     </main>
   );
 }

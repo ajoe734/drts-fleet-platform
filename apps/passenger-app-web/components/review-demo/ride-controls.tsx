@@ -1,4 +1,6 @@
 "use client";
+import { t } from "./translations";
+
 import { useState } from "react";
 import Link from "next/link";
 import { useReviewDemo } from "./review-context";
@@ -9,14 +11,12 @@ export function ReviewRideControls({ orderId }: { orderId: string }) {
   const [message, setMessage] = useState("");
   if (!review) return null;
   return (
-    <section aria-label="演練同單核對" style={{ padding: 12 }}>
+    <section aria-label={t.rideLabel} style={{ padding: 12 }}>
       <p>
-        真實訂單 UUID：<output data-testid="review-order-id">{orderId}</output>
+        {t.realOrderId}
+        <output data-testid="review-order-id">{orderId}</output>
       </p>
-      <p>
-        調度與司機視窗必須核對同一 UUID。付款結果由模擬 PSP
-        寫入真實演練付款紀錄。
-      </p>
+      <p>{t.rideNotice}</p>
       <button
         disabled={busy}
         onClick={async () => {
@@ -32,21 +32,19 @@ export function ReviewRideControls({ orderId }: { orderId: string }) {
               },
             );
             if (!response.ok) throw new Error("retry_failed");
-            setMessage(
-              "已交由原付款程序處理；未到重試時間不會提早扣款。請等待行程付款狀態更新。",
-            );
+            setMessage(t.retryQueued);
           } catch {
-            setMessage("補繳未完成，請確認登入與付款配置後重試。");
+            setMessage(t.retryFailed);
           } finally {
             setBusy(false);
           }
         }}
       >
-        依既有政策重試演練付款
+        {t.retryPayment}
       </button>
       <p role="status">{message}</p>
       <Link href={`/review/records/${encodeURIComponent(orderId)}`}>
-        下載同單演練紀錄（非正式憑證）
+        {t.downloadRecord}
       </Link>
     </section>
   );
