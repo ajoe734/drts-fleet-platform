@@ -3,6 +3,17 @@ import { defineConfig } from "vitest/config";
 import rootConfig from "../../../vitest.config";
 export default defineConfig({
   ...rootConfig,
+  resolve: {
+    ...rootConfig.resolve,
+    alias: {
+      ...rootConfig.resolve?.alias,
+      "@/lib/i18n": resolve(
+        __dirname,
+        "../../../apps/fleet-partner-portal-web/lib/i18n.tsx",
+      ),
+      "@": resolve(__dirname, "../../../apps/fleet-partner-portal-web"),
+    },
+  },
   test: {
     ...rootConfig.test,
     include: [
