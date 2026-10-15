@@ -5,16 +5,16 @@ import type {
   ComplaintCaseRecord,
   ComplaintExportViewRecord,
 } from "@drts/contracts";
-import { getServerOpsClient } from "@/lib/api-client.server";
+import { getServerOpsClient } from "../../../lib/api-client.server";
 import {
   CanvasActivityFeed,
   CanvasSequenceRail,
   type CanvasActivityItem,
   type CanvasSequenceItem,
-} from "@/lib/canvas-workflow";
-import { formatOpsCodeLabel } from "@/lib/localized-labels";
-import { getServerLocale } from "@/lib/server-locale";
-import type { Locale } from "@/lib/translations";
+} from "../../../lib/canvas-workflow";
+import { formatOpsCodeLabel } from "../../../lib/localized-labels";
+import { getServerLocale } from "../../../lib/server-locale";
+import type { Locale } from "../../../lib/translations";
 import {
   CanvasBanner as Banner,
   CanvasCard as Card,
@@ -169,11 +169,15 @@ function deriveCaseActions(complaint: ComplaintCaseRecord): CaseAction[] {
   const resolved = complaint.status === "resolved";
   const closed = complaint.status === "closed";
   return [
-    { action: "add_note", labelEn: "Add note", labelZh: "新增備註", risk: "low", enabled: !closed },
-    { action: "assign", labelEn: "Assign / reassign", labelZh: "指派 / 改派", risk: "medium", enabled: !closed },
+    // assertCaseOpenForAction rejects add_note/assign once resolved or
+    // closed (409 COMPLAINT_NOT_ACTIONABLE); only offer them while open.
+    { action: "add_note", labelEn: "Add note", labelZh: "新增備註", risk: "low", enabled: open },
+    { action: "assign", labelEn: "Assign / reassign", labelZh: "指派 / 改派", risk: "medium", enabled: open },
     { action: "resolve", labelEn: "Resolve", labelZh: "結案處理", risk: "medium", enabled: open },
     { action: "close", labelEn: "Close", labelZh: "關閉案件", risk: "medium", enabled: resolved },
-    { action: "reopen", labelEn: "Reopen", labelZh: "重啟案件", risk: "high", enabled: resolved || closed, requiresReason: true },
+    // Original backend reopen contract only accepts status === "closed"
+    // (409 COMPLAINT_NOT_CLOSED otherwise); a resolved case must close first.
+    { action: "reopen", labelEn: "Reopen", labelZh: "重啟案件", risk: "high", enabled: closed, requiresReason: true },
     {
       action: "escalate",
       labelEn: "Escalate to incident",

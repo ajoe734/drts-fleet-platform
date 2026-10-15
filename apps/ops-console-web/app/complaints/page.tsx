@@ -44,14 +44,14 @@ import {
   COMPLAINT_CATEGORIES,
   COMPLAINT_CATEGORY_VALID_RESOLUTIONS,
 } from "@drts/contracts";
-import { getOpsClient } from "@/lib/api-client";
+import { getOpsClient } from "../../lib/api-client";
 import {
   useAssistantActionBridgeRegistration,
   useAssistantSelection,
-} from "@/components/ops-assistant";
-import { useTranslation } from "@/lib/i18n";
+} from "../../components/ops-assistant";
+import { useTranslation } from "../../lib/i18n";
 import { createIdempotencyKey } from "@drts/api-client";
-import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import { formatOpsCodeLabel, getOpsLabel } from "../../lib/localized-labels";
 
 // ── canvas theme + per-page operating context ──────────────────────────────
 const theme = buildCanvasTheme({
@@ -285,14 +285,11 @@ function deriveComplaintActions(
         : { action: "mark_sla_breach", enabled: true, riskLevel: "low" },
     );
   } else if (record.status === "resolved") {
-    list.push({ action: "add_note", enabled: true, riskLevel: "low" });
+    // Original backend reopen contract only accepts status === "closed"
+    // (409 COMPLAINT_NOT_CLOSED otherwise); a resolved case must go through
+    // close first. assertCaseOpenForAction also rejects add_note/assign once
+    // resolved (409 COMPLAINT_NOT_ACTIONABLE), so only close is offered here.
     list.push({ action: "close", enabled: true, riskLevel: "medium" });
-    list.push({
-      action: "reopen",
-      enabled: true,
-      requiresReason: true,
-      riskLevel: "high",
-    });
   } else if (record.status === "closed") {
     list.push({
       action: "reopen",

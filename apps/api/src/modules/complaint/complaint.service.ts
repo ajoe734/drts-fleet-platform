@@ -31,7 +31,10 @@ import type {
   PassengerRideAccessToken,
 } from "@drts/contracts";
 import type { PassengerIntakeResult } from "./complaint.repository";
-import { ComplaintRepository } from "./complaint.repository";
+import {
+  ComplaintCommitOutcomeUnknownError,
+  ComplaintRepository,
+} from "./complaint.repository";
 import {
   normalizePassengerComplaintIntake,
   type PassengerComplaintIntake,
@@ -76,6 +79,19 @@ const TIMELINE_ACTIONS = {
   incidentLinked: "incident_linked",
 } as const;
 
+/** Captured when an ordinary write's COMMIT outcome is unknown (the rollback
+ * must NOT run, since the transaction may have actually landed). Lets a
+ * retry of the same mutation resend the identical case/timeline snapshot
+ * (same IDs) instead of either allocating a second case or being blocked by
+ * the optimistic in-memory state that already looks "done". */
+type PendingUncertainComplaintCommit = {
+  action: string;
+  complaintCase: ComplaintCaseRecord;
+  complaintTimelines: ComplaintTimelineEntry[];
+  rollback?: () => void;
+  matchCommand?: unknown;
+};
+
 @Injectable()
 export class ComplaintService implements OnModuleInit {
   private caseSequence = 1;
@@ -87,11 +103,20 @@ export class ComplaintService implements OnModuleInit {
 
   private settlementMutationRevision = 0;
 
+  /** Keyed by caseNo; tracks the in-flight canonical write for every
+   * category, not only settlement_dispute, so awaitSettlementPersistence
+   * can honestly observe an ordinary case's write failure too. */
   private settlementPersistence = new Map<string, Promise<void>>();
 
   private settlementRefresh: Promise<void> | undefined;
 
   private incidentLinkOperations = new Map<string, Promise<void>>();
+
+  /** Keyed by caseNo; see PendingUncertainComplaintCommit. */
+  private pendingUncertainCommits = new Map<
+    string,
+    PendingUncertainComplaintCommit
+  >();
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
@@ -220,6 +245,37 @@ export class ComplaintService implements OnModuleInit {
     this.assertValidCategory(command.category);
     this.assertNonBlank(command.description, "description");
 
+    // A retry of an uncertain-commit create must not allocate a second
+    // case; reuse the pending attempt's caseNo/entryId instead.
+    const pendingRetry = this.findPendingUncertainCreate(
+      "create_complaint_case",
+      command,
+    );
+    if (pendingRetry) {
+      return this.retryUncertainComplaintWrite(pendingRetry, () =>
+        this.recordAudit(
+          {
+            actorId: null,
+            actorType: "system",
+            tenantId: null,
+            moduleName: "complaint",
+            actionName: "create_complaint_case",
+            resourceType: "complaint_case",
+            resourceId: pendingRetry.complaintCase.caseNo,
+            newValuesSummary: {
+              caseSource: command.caseSource,
+              category: command.category,
+              severity: command.severity,
+              status: pendingRetry.complaintCase.status,
+              relatedOrderId: pendingRetry.complaintCase.relatedOrderId,
+              relatedCallId: pendingRetry.complaintCase.relatedCallId,
+            },
+          },
+          requestId,
+        ),
+      );
+    }
+
     const now = new Date();
     const createdAt = now.toISOString();
     const caseNo = this.nextCaseNo(now);
@@ -252,32 +308,39 @@ export class ComplaintService implements OnModuleInit {
 
     this.complaintCases = [complaintCase, ...this.complaintCases];
     this.complaintTimelines.set(caseNo, [createdEntry]);
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(command.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [complaintCase],
         complaintTimelines: [createdEntry],
       },
       "create_complaint_case",
+      isOrdinaryDbWrite
+        ? () => this.revertComplaintCaseMutation(caseNo, null, [createdEntry.entryId])
+        : undefined,
+      command,
     );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "system",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "create_complaint_case",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          caseSource: command.caseSource,
-          category: command.category,
-          severity: command.severity,
-          status: complaintCase.status,
-          relatedOrderId: complaintCase.relatedOrderId,
-          relatedCallId: complaintCase.relatedCallId,
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "system",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "create_complaint_case",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            caseSource: command.caseSource,
+            category: command.category,
+            severity: command.severity,
+            status: complaintCase.status,
+            relatedOrderId: complaintCase.relatedOrderId,
+            relatedCallId: complaintCase.relatedCallId,
+          },
         },
-      },
-      requestId,
+        requestId,
+      ),
     );
 
     return this.cloneComplaintCase(complaintCase);
@@ -624,28 +687,37 @@ export class ComplaintService implements OnModuleInit {
       TIMELINE_ACTIONS.assigned,
       note ?? `Assigned to ${updated.assigneeId}.`,
     );
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [updated],
         complaintTimelines: [timelineEntry],
       },
       "assign_complaint_case",
+      isOrdinaryDbWrite
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, complaintCase, [
+              timelineEntry.entryId,
+            ])
+        : undefined,
     );
-    this.recordAudit(
-      {
-        actorId: updated.assigneeId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "assign_complaint_case",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          assigneeId: updated.assigneeId,
-          status: updated.status,
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
+      this.recordAudit(
+        {
+          actorId: updated.assigneeId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "assign_complaint_case",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            assigneeId: updated.assigneeId,
+            status: updated.status,
+          },
         },
-      },
-      requestId,
+        requestId,
+      ),
     );
 
     return this.cloneComplaintCase(updated);
@@ -708,28 +780,37 @@ export class ComplaintService implements OnModuleInit {
       TIMELINE_ACTIONS.noteAdded,
       command.note.trim(),
     );
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [updated],
         complaintTimelines: [timelineEntry],
       },
       "add_complaint_case_note",
+      isOrdinaryDbWrite
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, complaintCase, [
+              timelineEntry.entryId,
+            ])
+        : undefined,
     );
-    this.recordAudit(
-      {
-        actorId: updated.assigneeId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "add_complaint_case_note",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          status: updated.status,
-          note: command.note.trim(),
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
+      this.recordAudit(
+        {
+          actorId: updated.assigneeId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "add_complaint_case_note",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            status: updated.status,
+            note: command.note.trim(),
+          },
         },
-      },
-      requestId,
+        requestId,
+      ),
     );
 
     return this.cloneComplaintCase(updated);
@@ -758,7 +839,41 @@ export class ComplaintService implements OnModuleInit {
 
     const complaintCase = this.requireComplaintCase(caseNo);
     if (complaintCase.status === "resolved") {
+      // A retry of an uncertain-commit resolve must actually re-attempt the
+      // write, not silently no-op on the optimistic in-memory "resolved".
+      const pending = this.pendingUncertainCommits.get(caseNo);
+      if (pending?.action === "resolve_complaint_case") {
+        return this.retryUncertainComplaintWrite(pending, () =>
+          this.recordAudit(
+            {
+              actorId: null,
+              actorType: "ops_user",
+              tenantId: null,
+              moduleName: "complaint",
+              actionName: "resolve_complaint_case",
+              resourceType: "complaint_case",
+              resourceId: caseNo,
+              newValuesSummary: {
+                status: pending.complaintCase.status,
+                resolutionCode: pending.complaintCase.resolutionCode,
+              },
+            },
+            requestId,
+          ),
+        );
+      }
       return this.cloneComplaintCase(complaintCase);
+    }
+    if (complaintCase.status === "closed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "COMPLAINT_ALREADY_CLOSED",
+        "A closed complaint case must be reopened before it can be resolved again.",
+        {
+          caseNo,
+          currentStatus: complaintCase.status,
+        },
+      );
     }
 
     this.assertValidResolutionCode(
@@ -779,28 +894,37 @@ export class ComplaintService implements OnModuleInit {
       TIMELINE_ACTIONS.resolved,
       command.closingNote,
     );
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [updated],
         complaintTimelines: [timelineEntry],
       },
       "resolve_complaint_case",
+      isOrdinaryDbWrite
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, complaintCase, [
+              timelineEntry.entryId,
+            ])
+        : undefined,
     );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "resolve_complaint_case",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          status: updated.status,
-          resolutionCode: command.resolutionCode,
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "resolve_complaint_case",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            status: updated.status,
+            resolutionCode: command.resolutionCode,
+          },
         },
-      },
-      requestId,
+        requestId,
+      ),
     );
 
     return this.cloneComplaintCase(updated);
@@ -816,6 +940,29 @@ export class ComplaintService implements OnModuleInit {
 
     const complaintCase = this.requireComplaintCase(caseNo);
     if (complaintCase.status === "closed") {
+      // A retry of an uncertain-commit close must actually re-attempt the
+      // write, not silently no-op on the optimistic in-memory "closed".
+      const pending = this.pendingUncertainCommits.get(caseNo);
+      if (pending?.action === "close_complaint_case") {
+        return this.retryUncertainComplaintWrite(pending, () =>
+          this.recordAudit(
+            {
+              actorId: null,
+              actorType: "ops_user",
+              tenantId: null,
+              moduleName: "complaint",
+              actionName: "close_complaint_case",
+              resourceType: "complaint_case",
+              resourceId: caseNo,
+              newValuesSummary: {
+                status: pending.complaintCase.status,
+                resolutionCode: pending.complaintCase.resolutionCode,
+              },
+            },
+            requestId,
+          ),
+        );
+      }
       return this.cloneComplaintCase(complaintCase);
     }
 
@@ -837,28 +984,37 @@ export class ComplaintService implements OnModuleInit {
       TIMELINE_ACTIONS.closed,
       command.closingNote,
     );
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [updated],
         complaintTimelines: [timelineEntry],
       },
       "close_complaint_case",
+      isOrdinaryDbWrite
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, complaintCase, [
+              timelineEntry.entryId,
+            ])
+        : undefined,
     );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "close_complaint_case",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          status: updated.status,
-          resolutionCode: command.resolutionCode,
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "close_complaint_case",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            status: updated.status,
+            resolutionCode: command.resolutionCode,
+          },
         },
-      },
-      requestId,
+        requestId,
+      ),
     );
 
     return this.cloneComplaintCase(updated);
@@ -873,6 +1029,36 @@ export class ComplaintService implements OnModuleInit {
 
     const complaintCase = this.requireComplaintCase(caseNo);
     if (complaintCase.status !== "closed") {
+      // A retry of an uncertain-commit reopen must actually re-attempt the
+      // write instead of being rejected by the optimistic in-memory
+      // "reopened" state that the original, never-confirmed attempt left.
+      const pending = this.pendingUncertainCommits.get(caseNo);
+      if (
+        complaintCase.status === "reopened" &&
+        pending?.action === "reopen_complaint_case"
+      ) {
+        return this.retryUncertainComplaintWrite(pending, () =>
+          this.recordAudit(
+            {
+              actorId: null,
+              actorType: "ops_user",
+              tenantId: null,
+              moduleName: "complaint",
+              actionName: "reopen_complaint_case",
+              resourceType: "complaint_case",
+              resourceId: caseNo,
+              newValuesSummary: {
+                status: pending.complaintCase.status,
+                reason: command.reason,
+                reopenCount: pending.complaintCase.reopenCount,
+                slaDueAt: pending.complaintCase.slaDueAt,
+                slaBreach: false,
+              },
+            },
+            requestId,
+          ),
+        );
+      }
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "COMPLAINT_NOT_CLOSED",
@@ -912,31 +1098,41 @@ export class ComplaintService implements OnModuleInit {
       `SLA recalculated on reopen. New due: ${newSlaDueAt}. Reopen #${updated.reopenCount}.`,
       now.toISOString(),
     );
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [updated],
         complaintTimelines: [reopenEntry, slaEntry],
       },
       "reopen_complaint_case",
+      isOrdinaryDbWrite
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, complaintCase, [
+              reopenEntry.entryId,
+              slaEntry.entryId,
+            ])
+        : undefined,
     );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "reopen_complaint_case",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          status: updated.status,
-          reason: command.reason,
-          reopenCount: updated.reopenCount,
-          slaDueAt: newSlaDueAt,
-          slaBreach: false,
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "reopen_complaint_case",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            status: updated.status,
+            reason: command.reason,
+            reopenCount: updated.reopenCount,
+            slaDueAt: newSlaDueAt,
+            slaBreach: false,
+          },
         },
-      },
-      requestId,
+        requestId,
+      ),
     );
 
     return this.cloneComplaintCase(updated);
@@ -959,37 +1155,46 @@ export class ComplaintService implements OnModuleInit {
       TIMELINE_ACTIONS.slaBreached,
       `SLA breached while case remained ${complaintCase.status}.`,
     );
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [updated],
         complaintTimelines: [timelineEntry],
       },
       "mark_complaint_sla_breach",
+      isOrdinaryDbWrite
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, complaintCase, [
+              timelineEntry.entryId,
+            ])
+        : undefined,
     );
-    this.auditNotificationService.recordNotification({
-      tenantId: null,
-      channel: "ops_notice",
-      title: "Complaint SLA breached",
-      message: `Complaint ${caseNo} exceeded SLA due at ${complaintCase.slaDueAt}.`,
-      status: "unread",
-    });
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "system",
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () => {
+      this.auditNotificationService.recordNotification({
         tenantId: null,
-        moduleName: "complaint",
-        actionName: "mark_complaint_sla_breach",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          status: updated.status,
-          slaBreach: true,
-          slaDueAt: complaintCase.slaDueAt,
+        channel: "ops_notice",
+        title: "Complaint SLA breached",
+        message: `Complaint ${caseNo} exceeded SLA due at ${complaintCase.slaDueAt}.`,
+        status: "unread",
+      });
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "system",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "mark_complaint_sla_breach",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            status: updated.status,
+            slaBreach: true,
+            slaDueAt: complaintCase.slaDueAt,
+          },
         },
-      },
-      requestId,
-    );
+        requestId,
+      );
+    });
 
     return this.cloneComplaintCase(updated);
   }
@@ -1004,6 +1209,34 @@ export class ComplaintService implements OnModuleInit {
 
     const complaintCase = this.requireComplaintCase(caseNo);
     if (complaintCase.relatedIncidentId) {
+      // A retry of the same uncertain-commit escalation must actually
+      // re-attempt the write instead of being rejected as already-escalated
+      // by its own never-confirmed optimistic state. A different incident
+      // target is a genuine conflict and still throws.
+      const pending = this.pendingUncertainCommits.get(caseNo);
+      if (
+        pending?.action === "escalate_to_incident" &&
+        complaintCase.relatedIncidentId === incidentId
+      ) {
+        return this.retryUncertainComplaintWrite(pending, () =>
+          this.recordAudit(
+            {
+              actorId: null,
+              actorType: "ops_user",
+              tenantId: null,
+              moduleName: "complaint",
+              actionName: "escalate_to_incident",
+              resourceType: "complaint_case",
+              resourceId: caseNo,
+              newValuesSummary: {
+                relatedIncidentId: incidentId,
+                reason,
+              },
+            },
+            requestId,
+          ),
+        );
+      }
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "COMPLAINT_ALREADY_ESCALATED",
@@ -1026,28 +1259,37 @@ export class ComplaintService implements OnModuleInit {
       TIMELINE_ACTIONS.escalatedToIncident,
       `Escalated to incident ${incidentId}: ${reason}`,
     );
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [updated],
         complaintTimelines: [timelineEntry],
       },
       "escalate_to_incident",
+      isOrdinaryDbWrite
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, complaintCase, [
+              timelineEntry.entryId,
+            ])
+        : undefined,
     );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "escalate_to_incident",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          relatedIncidentId: incidentId,
-          reason,
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "escalate_to_incident",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            relatedIncidentId: incidentId,
+            reason,
+          },
         },
-      },
-      requestId,
+        requestId,
+      ),
     );
 
     return this.cloneComplaintCase(updated);
@@ -1092,27 +1334,36 @@ export class ComplaintService implements OnModuleInit {
       TIMELINE_ACTIONS.incidentLinked,
       `Linked to incident ${incidentId}.`,
     );
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [updated],
         complaintTimelines: [timelineEntry],
       },
       "link_incident",
+      isOrdinaryDbWrite
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, complaintCase, [
+              timelineEntry.entryId,
+            ])
+        : undefined,
     );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "link_incident",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          relatedIncidentId: incidentId,
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "link_incident",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            relatedIncidentId: incidentId,
+          },
         },
-      },
-      requestId,
+        requestId,
+      ),
     );
 
     return this.cloneComplaintCase(updated);
@@ -1296,9 +1547,19 @@ export class ComplaintService implements OnModuleInit {
       complaintTimelines?: readonly ComplaintTimelineEntry[];
     },
     context: string,
-  ) {
+    // Only consulted for ordinary (non-settlement) writes: undoes the
+    // optimistic in-memory mutation when the write is known NOT to have
+    // committed. Never invoked for a ComplaintCommitOutcomeUnknownError,
+    // since that outcome must not be assumed to be a rollback.
+    rollback?: () => void,
+    // Only consulted for create-type ordinary writes (no existing caseNo to
+    // key a retry by): stashed on an uncertain-commit outcome so a later
+    // call with an equal command can be recognized as a retry of this same
+    // attempt rather than a brand-new case.
+    matchCommand?: unknown,
+  ): Promise<void> {
     if (!this.complaintRepository) {
-      return;
+      return Promise.resolve();
     }
 
     const persistPayload: {
@@ -1318,35 +1579,190 @@ export class ComplaintService implements OnModuleInit {
       );
     }
 
-    const settlementCaseNos = (changes.complaintCases ?? [])
-      .filter((item) => item.category === "settlement_dispute")
-      .map((item) => item.caseNo);
-    if (settlementCaseNos.length && this.complaintRepository.isEnabled()) {
-      this.settlementMutationRevision += 1;
-      const previous = settlementCaseNos.flatMap((caseNo) => {
+    // Track every affected case's write, not only settlement ones, so the
+    // existing awaitSettlementPersistence(caseNo) callers every mutation
+    // already invokes can honestly observe and propagate an ordinary
+    // canonical write failure instead of it being silently logged while the
+    // in-memory cache keeps reporting the case as saved.
+    const affectedCaseNos = [
+      ...new Set((changes.complaintCases ?? []).map((item) => item.caseNo)),
+    ];
+    if (affectedCaseNos.length && this.canonicalDbEnabled()) {
+      const settlementCaseNos = (changes.complaintCases ?? [])
+        .filter((item) => item.category === "settlement_dispute")
+        .map((item) => item.caseNo);
+      if (settlementCaseNos.length) {
+        this.settlementMutationRevision += 1;
+      }
+      const previous = affectedCaseNos.flatMap((caseNo) => {
         const persistence = this.settlementPersistence.get(caseNo);
         return persistence ? [persistence] : [];
       });
       const persistence = Promise.all(previous)
         .then(() => this.complaintRepository!.persistChanges(persistPayload))
+        .then(() => {
+          for (const caseNo of affectedCaseNos) {
+            this.pendingUncertainCommits.delete(caseNo);
+          }
+        })
         .catch((error: unknown) => {
           this.complaintRepository!.reportPersistenceFailure(error, context);
+          if (error instanceof ComplaintCommitOutcomeUnknownError) {
+            if (rollback) {
+              for (const caseNo of affectedCaseNos) {
+                const complaintCase = (changes.complaintCases ?? []).find(
+                  (item) => item.caseNo === caseNo,
+                );
+                if (!complaintCase) continue;
+                this.pendingUncertainCommits.set(caseNo, {
+                  action: context,
+                  complaintCase,
+                  complaintTimelines: (changes.complaintTimelines ?? []).filter(
+                    (entry) => entry.caseNo === caseNo,
+                  ),
+                  rollback,
+                  matchCommand,
+                });
+              }
+            }
+          } else {
+            for (const caseNo of affectedCaseNos) {
+              this.pendingUncertainCommits.delete(caseNo);
+            }
+            if (rollback) rollback();
+          }
           throw error;
         });
-      for (const caseNo of settlementCaseNos) {
+      for (const caseNo of affectedCaseNos) {
         this.settlementPersistence.set(caseNo, persistence);
       }
       // Shared synchronous callers can start a mutation before the HTTP layer
       // awaits it. Keep its rejection observable without an unhandled promise.
       void persistence.catch(() => undefined);
-      return;
+      return persistence;
     }
 
-    void this.complaintRepository
+    return this.complaintRepository
       .persistChanges(persistPayload)
       .catch((error: unknown) => {
         this.complaintRepository!.reportPersistenceFailure(error, context);
       });
+  }
+
+  /** Resends the exact case/timeline snapshot from an earlier attempt whose
+   * COMMIT outcome was unknown, reusing its caseNo/entryIds so the
+   * repository's ON CONFLICT DO UPDATE upserts idempotently instead of a
+   * retry allocating a second case or row. Returns the same optimistic
+   * snapshot synchronously, consistent with every other mutation method. */
+  private retryUncertainComplaintWrite(
+    pending: PendingUncertainComplaintCommit,
+    onConfirmed: () => void,
+  ): ComplaintCaseRecord {
+    const persistence = this.persistChanges(
+      {
+        complaintCases: [pending.complaintCase],
+        complaintTimelines: pending.complaintTimelines,
+      },
+      pending.action,
+      pending.rollback,
+      pending.matchCommand,
+    );
+    this.emitAfterOrdinaryPersistence(persistence, true, onConfirmed);
+    return this.cloneComplaintCase(pending.complaintCase);
+  }
+
+  /** Finds an uncertain-commit create (createComplaintCase /
+   * transferCallToComplaint) whose original command matches this one, so a
+   * retry reuses its already-allocated caseNo instead of minting a new one. */
+  private findPendingUncertainCreate(
+    action: string,
+    command: unknown,
+  ): PendingUncertainComplaintCommit | undefined {
+    const target = this.stableStringify(command);
+    for (const pending of this.pendingUncertainCommits.values()) {
+      if (
+        pending.action === action &&
+        this.stableStringify(pending.matchCommand) === target
+      ) {
+        return pending;
+      }
+    }
+    return undefined;
+  }
+
+  private stableStringify(value: unknown): string {
+    if (value === null || typeof value !== "object") {
+      return JSON.stringify(value);
+    }
+    if (Array.isArray(value)) {
+      return `[${value.map((item) => this.stableStringify(item)).join(",")}]`;
+    }
+    const keys = Object.keys(value as Record<string, unknown>).sort();
+    return `{${keys
+      .map(
+        (key) =>
+          `${JSON.stringify(key)}:${this.stableStringify(
+            (value as Record<string, unknown>)[key],
+          )}`,
+      )
+      .join(",")}}`;
+  }
+
+  /** Some lightweight test doubles implement only the repository methods
+   * their scenario exercises; tolerate an absent isEnabled rather than
+   * throwing, matching how an unconfigured repository behaves. */
+  private canonicalDbEnabled() {
+    return typeof this.complaintRepository?.isEnabled === "function"
+      ? this.complaintRepository.isEnabled()
+      : false;
+  }
+
+  /** Settlement-dispute writes keep their existing dedicated transaction and
+   * wait/refresh machinery untouched; only ordinary, DB-backed writes get
+   * the rollback-on-failure and commit-gated audit behavior below. */
+  private isOrdinaryDbWrite(category: ComplaintCategory) {
+    return category !== "settlement_dispute" && this.canonicalDbEnabled();
+  }
+
+  /** Undoes an ordinary mutation's optimistic in-memory update once its
+   * canonical write is known not to have committed. `previousCase` is null
+   * for a create (the phantom case is removed entirely rather than restored). */
+  private revertComplaintCaseMutation(
+    caseNo: string,
+    previousCase: ComplaintCaseRecord | null,
+    addedTimelineEntryIds: readonly string[],
+  ) {
+    if (previousCase) {
+      this.replaceComplaintCase(previousCase);
+    } else {
+      this.complaintCases = this.complaintCases.filter(
+        (item) => item.caseNo !== caseNo,
+      );
+    }
+    const remaining = (this.complaintTimelines.get(caseNo) ?? []).filter(
+      (entry) => !addedTimelineEntryIds.includes(entry.entryId),
+    );
+    if (previousCase) {
+      this.complaintTimelines.set(caseNo, remaining);
+    } else {
+      this.complaintTimelines.delete(caseNo);
+    }
+  }
+
+  /** Ordinary (non-settlement) canonical writes must not let their audit log
+   * / notification side effects represent the mutation as committed before
+   * it actually settles. Settlement-dispute writes and the disabled/noDB
+   * path keep their existing, unaffected synchronous emission. */
+  private emitAfterOrdinaryPersistence(
+    persistence: Promise<void>,
+    isOrdinaryDbWrite: boolean,
+    emit: () => void,
+  ) {
+    if (!isOrdinaryDbWrite) {
+      emit();
+      return;
+    }
+    void persistence.then(emit, () => undefined);
   }
 
   private assertValidCategory(

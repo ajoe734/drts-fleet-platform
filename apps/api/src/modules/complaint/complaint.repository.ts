@@ -33,6 +33,20 @@ export interface PassengerIntakeResult {
   replayed: boolean;
 }
 
+/** Thrown when the client failed after issuing COMMIT: the transaction may
+ * have actually been applied server-side. Callers must not assume rollback
+ * (and must not treat the write as a fresh, safely-retryable attempt). */
+export class ComplaintCommitOutcomeUnknownError extends Error {
+  constructor(public readonly cause: unknown) {
+    super(
+      cause instanceof Error
+        ? `Complaint persistence commit outcome is unknown: ${cause.message}`
+        : "Complaint persistence commit outcome is unknown.",
+    );
+    this.name = "ComplaintCommitOutcomeUnknownError";
+  }
+}
+
 @Injectable()
 export class ComplaintRepository {
   private readonly logger = new Logger(ComplaintRepository.name);
@@ -92,22 +106,37 @@ export class ComplaintRepository {
       return;
     }
 
-    if (
-      !transaction &&
-      changes.complaintCases?.some(
-        (item) => item.category === "settlement_dispute",
-      )
-    ) {
+    // Every top-level call commits its case + timeline rows atomically, not
+    // only settlement_dispute ones, so an ordinary case can never commit
+    // without its timeline (or vice versa).
+    if (!transaction) {
       const client = await this.databaseService!.connect();
+      let committed = false;
+      let commitAttempted = false;
       try {
         await client.query("BEGIN");
         await this.persistChanges(changes, client);
+        commitAttempted = true;
         await client.query("COMMIT");
+        committed = true;
       } catch (error) {
-        await client.query("ROLLBACK");
-        throw error;
+        throw commitAttempted
+          ? new ComplaintCommitOutcomeUnknownError(error)
+          : error;
       } finally {
-        client.release();
+        if (!committed) {
+          try {
+            await client.query("ROLLBACK");
+          } catch {
+            this.logger.warn(
+              "Complaint persistence rollback failed; discarding the transaction connection.",
+            );
+          } finally {
+            client.release(true);
+          }
+        } else {
+          client.release();
+        }
       }
       return;
     }
