@@ -1,51 +1,163 @@
-import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { Tokens } from "@/components/ui/tokens";
 import { ActionButton } from "@/components/ui/ActionButton";
+import { formatCategoryLabel, type AcademyCourseDetail } from "./types";
 import {
-  formatCategoryLabel,
-  type AcademyCourseDetail,
-  type AcademyModule,
-} from "./types";
+  formatAcademyMaterialError,
+  getModuleTypeLabel,
+  openAcademyMaterialResource,
+  resolveAcademyMaterialResource,
+  type AcademyMaterialOpenedSession,
+  type AcademyMaterialOpener,
+} from "./material-resource";
 
-interface ModuleReaderProps {
+export * from "./material-resource";
+
+export interface ModuleReaderProps {
   course: AcademyCourseDetail;
   onStartQuiz: () => void;
   onBack: () => void;
-}
-
-function getModuleTypeLabel(type: AcademyModule["type"]): string {
-  switch (type) {
-    case "video":
-      return "教學影片";
-    case "sop":
-      return "SOP 指引";
-    case "article":
-      return "專業講義";
-    default:
-      return type;
-  }
+  onOpenMaterial?: AcademyMaterialOpener;
+  onMaterialOpened?: (session: AcademyMaterialOpenedSession) => void;
 }
 
 export function ModuleReader({
   course,
   onStartQuiz,
   onBack,
+  onOpenMaterial,
+  onMaterialOpened,
 }: ModuleReaderProps) {
   const [selectedModuleId, setSelectedModuleId] = useState<string>(
     course.modules[0]?.moduleId ?? "",
+  );
+  const [activeSession, setActiveSession] =
+    useState<AcademyMaterialOpenedSession | null>(null);
+  const [isOpening, setIsOpening] = useState<boolean>(false);
+  const [openError, setOpenError] = useState<string | null>(null);
+
+  const inFlight = useRef(false);
+  const generation = useRef(0);
+  const previousCourseKey = useRef(`${course.courseId}:${course.version}`);
+
+  useEffect(() => {
+    const nextCourseKey = `${course.courseId}:${course.version}`;
+    if (previousCourseKey.current !== nextCourseKey) {
+      previousCourseKey.current = nextCourseKey;
+      generation.current += 1;
+      inFlight.current = false;
+      setIsOpening(false);
+      setOpenError(null);
+      setActiveSession(null);
+      setSelectedModuleId(course.modules[0]?.moduleId ?? "");
+    }
+  }, [course.courseId, course.version, course.modules]);
+
+  useEffect(
+    () => () => {
+      generation.current += 1;
+      inFlight.current = false;
+    },
+    [],
   );
 
   const selectedModule =
     course.modules.find((m) => m.moduleId === selectedModuleId) ??
     course.modules[0];
 
+  const resolution = selectedModule
+    ? resolveAcademyMaterialResource(course, selectedModule)
+    : null;
+
+  const isCurrentModuleOpened = Boolean(
+    activeSession &&
+    selectedModule &&
+    resolution?.state === "ready" &&
+    activeSession.courseId === course.courseId &&
+    activeSession.courseVersion === course.version &&
+    activeSession.moduleId === selectedModule.moduleId &&
+    activeSession.contentUrl === resolution.url,
+  );
+
+  const handleSelectModule = (moduleId: string) => {
+    if (moduleId === selectedModule?.moduleId) {
+      return;
+    }
+    generation.current += 1;
+    inFlight.current = false;
+    setIsOpening(false);
+    setOpenError(null);
+    setActiveSession(null);
+    setSelectedModuleId(moduleId);
+  };
+
+  const handleOpenMaterial = async () => {
+    if (!selectedModule || inFlight.current) {
+      return;
+    }
+
+    const currentResolution = resolveAcademyMaterialResource(
+      course,
+      selectedModule,
+    );
+    if (currentResolution.state !== "ready") {
+      setActiveSession(null);
+      setOpenError(currentResolution.reason);
+      return;
+    }
+
+    inFlight.current = true;
+    const requestGeneration = generation.current;
+    setIsOpening(true);
+    setOpenError(null);
+
+    try {
+      const session = await openAcademyMaterialResource(
+        course,
+        selectedModule,
+        {
+          opener: onOpenMaterial,
+        },
+      );
+      if (generation.current !== requestGeneration) {
+        return;
+      }
+      setActiveSession(session);
+      setOpenError(null);
+      onMaterialOpened?.(session);
+    } catch (err) {
+      if (generation.current !== requestGeneration) {
+        return;
+      }
+      setActiveSession(null);
+      setOpenError(formatAcademyMaterialError(err));
+    } finally {
+      if (generation.current === requestGeneration) {
+        inFlight.current = false;
+        setIsOpening(false);
+      }
+    }
+  };
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       {/* Course Overview Card */}
       <View style={styles.headerCard}>
         <View style={styles.topRow}>
-          <Pressable onPress={onBack} style={styles.backButton}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="返回清單"
+            onPress={onBack}
+            style={styles.backButton}
+          >
             <Text style={styles.backButtonText}>← 返回清單</Text>
           </Pressable>
           <View style={styles.badgeRow}>
@@ -63,7 +175,9 @@ export function ModuleReader({
         </View>
 
         <Text style={styles.courseTitle}>{course.title}</Text>
-        <Text style={styles.courseCode}>代碼：{course.courseCode} · 版本：v{course.version}</Text>
+        <Text style={styles.courseCode}>
+          代碼：{course.courseCode} · 版本：v{course.version}
+        </Text>
         <Text style={styles.description}>{course.description}</Text>
 
         <View style={styles.requirementBanner}>
@@ -75,7 +189,9 @@ export function ModuleReader({
 
       {/* Module Selector */}
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>教學單元教材 ({course.modules.length})</Text>
+        <Text style={styles.sectionTitle}>
+          教學單元教材 ({course.modules.length})
+        </Text>
       </View>
 
       <View style={styles.moduleList}>
@@ -84,11 +200,15 @@ export function ModuleReader({
           return (
             <Pressable
               key={mod.moduleId}
+              accessibilityRole="button"
+              accessibilityLabel={`選擇單元 ${idx + 1} ${mod.title}`}
+              accessibilityState={{ selected: isSelected }}
+              testID={`academy-module-select-${mod.moduleId}`}
               style={[
                 styles.moduleItem,
                 isSelected && styles.moduleItemSelected,
               ]}
-              onPress={() => setSelectedModuleId(mod.moduleId)}
+              onPress={() => handleSelectModule(mod.moduleId)}
             >
               <View style={styles.moduleItemHeader}>
                 <View style={styles.moduleNumberBadge}>
@@ -109,9 +229,12 @@ export function ModuleReader({
         })}
       </View>
 
-      {/* Selected Module Content Preview */}
-      {selectedModule && (
-        <View style={styles.contentViewerCard}>
+      {/* Selected Module Resource Reader / Player */}
+      {selectedModule && resolution ? (
+        <View
+          style={styles.contentViewerCard}
+          testID={`academy-material-viewer-${selectedModule.moduleId}`}
+        >
           <View style={styles.contentViewerHeader}>
             <Text style={styles.contentViewerType}>
               [{getModuleTypeLabel(selectedModule.type)}]
@@ -121,29 +244,158 @@ export function ModuleReader({
             </Text>
           </View>
 
-          {selectedModule.type === "video" ? (
-            <View style={styles.videoPlaceholder}>
-              <Text style={styles.videoIcon}>▶</Text>
-              <Text style={styles.videoPromptText}>
-                教學影片播放器（時長 {selectedModule.durationMinutes} 分鐘）
-              </Text>
-              <Text style={styles.videoUrlText}>
-                影片資源位址：{selectedModule.contentUrl}
-              </Text>
+          <View
+            style={styles.materialIdentityCard}
+            testID="academy-material-identity"
+          >
+            <Text style={styles.materialIdentityText}>
+              課程：{course.title} ({course.courseCode} · v{course.version})
+            </Text>
+            <Text style={styles.materialIdentityText}>
+              單元代碼：{selectedModule.moduleId} · 預計時長：
+              {selectedModule.durationMinutes} 分鐘
+            </Text>
+          </View>
+
+          {resolution.state !== "ready" ? (
+            <View
+              style={styles.unavailableCard}
+              testID="academy-material-unavailable"
+            >
+              <Text style={styles.unavailableTitle}>教材資源無法使用</Text>
+              <Text style={styles.unavailableReason}>{resolution.reason}</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={resolution.actionLabel}
+                accessibilityState={{ disabled: true }}
+                disabled
+                style={[
+                  styles.materialActionButton,
+                  styles.materialActionButtonDisabled,
+                ]}
+                testID={`academy-material-open-${selectedModule.moduleId}`}
+              >
+                <Text
+                  style={[
+                    styles.materialActionButtonText,
+                    styles.materialActionButtonTextDisabled,
+                  ]}
+                >
+                  {resolution.actionLabel}
+                </Text>
+              </Pressable>
             </View>
           ) : (
-            <View style={styles.documentViewer}>
-              <Text style={styles.documentHeading}>教材內文與作業規範：</Text>
-              <Text style={styles.documentBody}>
-                {selectedModule.type === "sop"
-                  ? "【標準作業指引 SOP】\n1. 接單前請確認車輛安全自檢與整潔完成。\n2. 與乘客核對目的地與路線偏好，維持專業禮貌。\n3. 遇突發事故時，依照安全應變標準程序開啟 SOS 通報，切勿慌張。\n4. 行程結束後確認乘客物品，落實服務紀錄回傳。"
-                  : "【專業知識講義】\n本單元涵蓋平台服務法規、責任分工原則與合約條款注意事項。駕駛員需確實理解個人承攬／受僱權利與安全規範，遵循主管機關運輸法遵標準。"}
+            <View
+              style={
+                selectedModule.type === "video"
+                  ? styles.videoPlaceholder
+                  : styles.documentViewer
+              }
+            >
+              <Text style={styles.resourceHeading}>
+                {selectedModule.type === "video"
+                  ? `教學影片資源（時長 ${selectedModule.durationMinutes} 分鐘）`
+                  : `${getModuleTypeLabel(selectedModule.type)}資源（時長 ${selectedModule.durationMinutes} 分鐘）`}
               </Text>
-              <Text style={styles.documentSourceUrl}>
-                文件載點：{selectedModule.contentUrl}
+              <Text style={styles.resourceUrlText}>
+                教材資源位址：{resolution.url}
               </Text>
+
+              {isCurrentModuleOpened && activeSession ? (
+                <View
+                  style={styles.activeSessionCard}
+                  testID="academy-material-active-session"
+                >
+                  <Text style={styles.activeSessionStatus}>
+                    {activeSession.statusLabel}
+                  </Text>
+                  <Text style={styles.activeSessionDetail}>
+                    已開啟單元：{activeSession.moduleTitle} (
+                    {activeSession.moduleId})
+                  </Text>
+                  <Text style={styles.activeSessionDetail}>
+                    所屬課程：{activeSession.courseTitle} (
+                    {activeSession.courseCode} · v{activeSession.courseVersion})
+                  </Text>
+                  <Text style={styles.activeSessionDetail}>
+                    已連線資源：{activeSession.contentUrl}
+                  </Text>
+                  {activeSession.contentBody ? (
+                    <Text
+                      style={styles.documentBody}
+                      testID="academy-material-loaded-content"
+                    >
+                      {activeSession.contentBody}
+                    </Text>
+                  ) : null}
+                </View>
+              ) : (
+                <Text style={styles.readinessHintText}>
+                  {resolution.readinessHint}
+                </Text>
+              )}
+
+              {openError ? (
+                <View
+                  style={styles.errorBanner}
+                  testID="academy-material-error"
+                >
+                  <Text style={styles.errorTitle}>教材開啟失敗</Text>
+                  <Text style={styles.errorBody}>{openError}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="重試開啟教材"
+                    accessibilityState={{ disabled: isOpening }}
+                    disabled={isOpening}
+                    onPress={() => void handleOpenMaterial()}
+                    style={styles.retryButton}
+                    testID="academy-material-retry"
+                  >
+                    <Text style={styles.retryButtonText}>重試開啟教材</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  isCurrentModuleOpened
+                    ? resolution.reopenLabel
+                    : resolution.actionLabel
+                }
+                accessibilityState={{
+                  disabled: isOpening,
+                  busy: isOpening,
+                }}
+                disabled={isOpening}
+                onPress={() => void handleOpenMaterial()}
+                style={[
+                  styles.materialActionButton,
+                  isOpening && styles.materialActionButtonDisabled,
+                ]}
+                testID={`academy-material-open-${selectedModule.moduleId}`}
+              >
+                {isOpening ? (
+                  <ActivityIndicator
+                    size="small"
+                    color={Tokens.colors.textInverse}
+                  />
+                ) : null}
+                <Text style={styles.materialActionButtonText}>
+                  {isOpening
+                    ? "正在開啟教材..."
+                    : isCurrentModuleOpened
+                      ? resolution.reopenLabel
+                      : resolution.actionLabel}
+                </Text>
+              </Pressable>
             </View>
           )}
+        </View>
+      ) : (
+        <View style={styles.unavailableCard} testID="academy-material-empty">
+          <Text style={styles.unavailableTitle}>本課程目前尚無教材單元</Text>
         </View>
       )}
 
@@ -328,49 +580,144 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: Tokens.colors.text,
   },
+  materialIdentityCard: {
+    backgroundColor: Tokens.colors.surfaceLo,
+    borderRadius: Tokens.radius.sm,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    padding: Tokens.spacing.sm,
+    gap: 2,
+  },
+  materialIdentityText: {
+    fontSize: 11,
+    color: Tokens.colors.textMuted,
+  },
   videoPlaceholder: {
     backgroundColor: Tokens.colors.surfaceLo,
     borderRadius: Tokens.radius.md,
-    padding: Tokens.spacing.xl,
-    alignItems: "center",
-    justifyContent: "center",
+    padding: Tokens.spacing.lg,
     gap: Tokens.spacing.sm,
     borderWidth: 1,
     borderColor: Tokens.colors.border,
   },
-  videoIcon: {
-    fontSize: 32,
-    color: Tokens.colors.brandHi,
-  },
-  videoPromptText: {
-    fontSize: 13,
-    color: Tokens.colors.text,
-    fontWeight: "600",
-  },
-  videoUrlText: {
-    fontSize: 11,
-    color: Tokens.colors.textDim,
-  },
   documentViewer: {
     backgroundColor: Tokens.colors.surfaceLo,
     borderRadius: Tokens.radius.md,
-    padding: Tokens.spacing.md,
+    padding: Tokens.spacing.lg,
     gap: Tokens.spacing.sm,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
   },
-  documentHeading: {
+  resourceHeading: {
     fontSize: 13,
-    fontWeight: "600",
+    fontWeight: "700",
+    color: Tokens.colors.text,
+  },
+  resourceUrlText: {
+    fontSize: 11,
+    color: Tokens.colors.textDim,
+  },
+  readinessHintText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: Tokens.colors.textMuted,
+  },
+  activeSessionCard: {
+    backgroundColor: Tokens.colors.successBg,
+    borderColor: Tokens.colors.success,
+    borderWidth: 1,
+    borderRadius: Tokens.radius.sm,
+    padding: Tokens.spacing.md,
+    gap: 4,
+  },
+  activeSessionStatus: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: Tokens.colors.success,
+  },
+  activeSessionDetail: {
+    fontSize: 12,
     color: Tokens.colors.text,
   },
   documentBody: {
     fontSize: 13,
     lineHeight: 20,
-    color: Tokens.colors.textMuted,
-  },
-  documentSourceUrl: {
-    fontSize: 11,
-    color: Tokens.colors.textDim,
+    color: Tokens.colors.text,
     marginTop: Tokens.spacing.xs,
+  },
+  unavailableCard: {
+    backgroundColor: Tokens.colors.dangerBg,
+    borderColor: Tokens.colors.danger,
+    borderWidth: 1,
+    borderRadius: Tokens.radius.md,
+    padding: Tokens.spacing.md,
+    gap: Tokens.spacing.sm,
+  },
+  unavailableTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: Tokens.colors.danger,
+  },
+  unavailableReason: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: Tokens.colors.danger,
+  },
+  errorBanner: {
+    backgroundColor: Tokens.colors.dangerBg,
+    borderColor: Tokens.colors.danger,
+    borderWidth: 1,
+    borderRadius: Tokens.radius.sm,
+    padding: Tokens.spacing.md,
+    gap: Tokens.spacing.xs,
+  },
+  errorTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: Tokens.colors.danger,
+  },
+  errorBody: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: Tokens.colors.danger,
+  },
+  retryButton: {
+    alignSelf: "flex-start",
+    marginTop: Tokens.spacing.xs,
+    backgroundColor: Tokens.colors.surface,
+    borderColor: Tokens.colors.danger,
+    borderWidth: 1,
+    borderRadius: Tokens.radius.sm,
+    paddingVertical: Tokens.spacing.xs,
+    paddingHorizontal: Tokens.spacing.md,
+  },
+  retryButtonText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: Tokens.colors.danger,
+  },
+  materialActionButton: {
+    minHeight: 42,
+    borderRadius: Tokens.radius.md,
+    backgroundColor: Tokens.colors.brand,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Tokens.spacing.xs,
+    paddingHorizontal: Tokens.spacing.lg,
+    paddingVertical: Tokens.spacing.sm,
+    marginTop: Tokens.spacing.xs,
+  },
+  materialActionButtonDisabled: {
+    opacity: 0.5,
+  },
+  materialActionButtonText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: Tokens.colors.textInverse,
+  },
+  materialActionButtonTextDisabled: {
+    color: Tokens.colors.textInverse,
   },
   actionContainer: {
     marginTop: Tokens.spacing.sm,
