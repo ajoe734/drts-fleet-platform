@@ -68,3 +68,124 @@ New Taipei route/supply setup, tracker input, normal/high-score,
 failed-payment/retry/low-score/case, cancelled/history orders, exception
 controls, hosted artifacts and shared-dev delivery. These remain implementation
 work; the initial adapter anchor does not claim them complete.
+
+## Persisted Ops / Driver repair checkpoint
+
+The actual `OwnedMobilityController.listOrders/getOrder/listDispatchJobs`,
+Driver list/detail and mutation access helper, and
+`ForwarderController.listDriverTaskViews/getDriverTaskView` consumed startup
+arrays. A peer initialized before booking could return an empty 200 or 404.
+The unified task-view path is Driver `/jobs`' primary source; forcing legacy
+fallback would not repair it.
+
+New public async read facades use production repository reads. Missing rows
+and database errors remain missing/errors even when the old internal cache was
+previously warm. Internal synchronous APIs retain their contracts. Commands
+load only the target order's jobs/assignments/tasks/attempts/traces/disclosures
+in one MVCC statement, then enter the original dispatch/driver commands and
+their reservation, assignment and task locks. Unrelated orders and outboxes
+are not reloaded. Original Driver alias/ownership checks, forwarded visibility
+and unified sorting remain in effect.
+
+`reproduce-persisted-reads.py` runs the same two real controller cases against
+immutable accepted callers at `a8d9a55dc30c6cf9d37145e4f46ac98c12e6c8b1`.
+It relocates imports only and records two assertion failures (`[]` instead of
+the committed order/task), with current synchronous service contracts intact.
+An initial relocation attempt could not resolve Nest dependencies and is
+explicitly not reproduction evidence; the corrected receipt has
+`product_failure_reproduced: true`. Current cases pass, including warm-cache
+deletion/error authority, native Driver alias access and foreign-driver denials.
+
+The new hosted PG companion initializes a real peer before booking, dispatches
+through that peer's real controller, assigns through the original instance,
+reads Ops jobs/candidates and unified Driver list/detail, accepts through the
+peer's native locked command and rereads the changed status from the original
+instance. It uses the formal migration harness and external qualification
+fixture only. It has not run on this VM and carries no acceptance credit.
+
+Original controller tests now await public reads and provide the new
+repository interfaces. Their business/identity/forbidden/envelope assertions
+were retained. The old socket-free Ops map fixture records and rereads the
+production service's actual write payloads at its existing external persistence
+boundary; it does not claim PG evidence.
+
+## Operator configuration and finite journeys
+
+Entry: Passenger `/review`, Ops `/review`, actual exported Driver Web
+`/review-driver/onboarding` (also standalone in hosted CI). Passenger login
+uses illustrative `0900000000`–`0900000099` simulated delivery followed by
+ordinary OTP verification and HttpOnly account session. Ops uses its existing
+session. Its prepare action creates only two explicitly synthetic qualification
+and supply groups, then issues the existing Driver device-registration code.
+The Driver enters that code through its real onboarding page. Session and
+device storage are credentials/recovery markers, never alternative order state.
+
+API review mode requires `PAX_REVIEW_DEMO_ENABLED=true` and nonproduction
+`DRTS_ENV`. Shared-dev workflow opts in with `DEV_PAX_REVIEW_DEMO_ENABLED=true`,
+retains private Cloud Run access, and passes the existing OTP pepper and grouped
+PSP merchant/key/sandbox/token-cipher configuration. Review uses fake PSP,
+explicit capture policy (60-second retry), synthetic authorization and the
+existing `SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES=1`. Default 15-minute policy
+outside this explicit profile is unchanged. No fake clock or guard bypass is
+used. CI selects a future minute with 2–3 minutes' real margin and waits until
+requested pickup before starting. Actual day/night tariff may be 85/105 TWD;
+it must never be relabelled as daytime evidence.
+
+1. New order A: real quote/booking, assign B then reassign A while Passenger is
+   disconnected, reconnect, real Driver accept/depart/arrive/start/complete,
+   captured synthetic PSP payment, five-star rating and separate HTML download.
+2. New order B: newly bind the explicit first-capture-failure scenario, complete
+   another actual Driver journey, observe failure/attempt 1 and blocked rating,
+   attempt another booking and observe the original unpaid guard's 409, use
+   ordinary charge executor retry after its durable due time, captured attempt 2
+   under the same payment/order/key, one-star contact consent and actual Ops CRM
+   case, then download.
+3. New order C: pause synthetic supply, real no-supply dispatch, restore and
+   redispatch/assign, Passenger cancellation, reload and history. No captured
+   payment or rating may appear for this order.
+
+The explicit GPS port emits real-time samples to the actual tracker listeners
+and existing ingestion queue; completion distance/duration come from that
+tracker. Pause/resume retains a real gap and never backfills. Hosted A waits
+for the real freshness threshold to become stale. Native permission/background
+capability and completion guards are retained. Formal PG joins and deployed
+account-owned record reads verify UUIDs, requested/start/completed timestamps,
+trip metrics, payment attempts, rating consent and CRM link. Screenshots,
+downloads and the whitelisted journal omit authentication/OTP/device secrets.
+
+## Check results and remaining delivery
+
+All commands use Node 22.23.2 / pnpm 10.33.0 / Vitest 4.1.4.
+
+| Check                                                    | Result and log under `.local/pax-review-shared-order-demo-20261015/`                                                                         |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| External-port old-source reproduction                    | Two product assertion failures as expected; `historical/verification.json`                                                                   |
+| Persisted caller old-source reproduction                 | Two product assertion failures as expected; `historical-reads/verification.json`                                                             |
+| Payment / OTP / BFF / shared-order regression            | 577 pass, 10 hosted PG skips; `final-ports-regression.log`                                                                                   |
+| Existing API controller/repository/Forwarder regression  | 63 pass; `api-caller-final.log`                                                                                                              |
+| Existing Driver regression                               | 542 pass; `driver-regression.log`                                                                                                            |
+| New Driver producer / recovery boundary                  | 3 pass; final rerun and separate native tsconfig check pending                                                                               |
+| Ops map existing regression                              | 1 pass after read-interface adaptation; `ops-map-final-fixed.log`                                                                            |
+| Production Passenger and SDK build                       | Exit 0; `passenger-production-build.log`                                                                                                     |
+| Production API build / API, Passenger, Driver typechecks | Exit 0; respective `api-production-build`, `api-typecheck-persisted-fixed`, `web-typecheck-final`, `driver-typecheck-final` logs             |
+| Root typecheck                                           | Initial mixed Expo/Node type context failed; native tests now use Driver tsconfig and retain explicit hosted checks; separated rerun pending |
+| Hosted formal PG / three-role browser / shared dev       | Pending, never run on VM                                                                                                                     |
+
+Checkpoint branches/anchors are `356cbefc3`, `b31fcb44d`, `7c34a5853` and the
+subsequent persisted-reader anchor. They are recovery records, not accepted
+candidates. No PR/candidate/CI/merge/deployment result is claimed here.
+
+Remaining acceptance keys are all pending:
+`pax-review-demo_real-shared-order-across-roles`,
+`pax-review-demo_external-simulation-and-complete-journeys`, and
+`pax-review-demo_hosted-browser-and-shared-dev-delivery`. After final checks and
+exact-SHA handoff, the candidate must pass review/hosted CI, merge, immutable
+publish/release deployment to the live verified shared Cloud Run project and
+the new deployed-browser smoke. Old 14+16 checks are not this feature's proof.
+
+Known external simulator limits: fake PSP capture success is idempotent and
+first-failure selection uses the durable attempt count, but legacy fake
+readback/refund maps remain process memory. This finite rehearsal does not
+claim real provider reconciliation/refund/restart durability. Qualifications,
+SMS, map selection, GPS, PSP and notification are simulated and labelled;
+backend account/order/dispatch/task/payment/rating/case facts remain real.

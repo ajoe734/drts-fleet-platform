@@ -33,6 +33,9 @@ export async function recordOrderEvidence(
       requested_pickup_at: ride.order.requested_pickup_at,
       started_at: data.trip?.started_at,
       completed_at: data.trip?.completed_at,
+      actual_distance_km: data.trip?.actual_distance_km,
+      actual_duration_sec: data.trip?.actual_duration_sec,
+      amount_minor: ride.payment?.amount?.amount_minor,
       contact_requested: data.consent?.contact_requested,
       complaint_case_no: data.consent?.complaint_case_no,
     };

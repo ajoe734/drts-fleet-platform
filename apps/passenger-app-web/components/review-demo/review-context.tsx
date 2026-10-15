@@ -54,6 +54,10 @@ export function ReviewDemoProvider({ children }: { children: ReactNode }) {
             <p>
               簡訊、圖資、車司資格、定位、付款與通知為模擬，不出車、不扣真款、不通知真人。下載資料非正式憑證。
             </p>
+            <p>
+              演練預約前置時間為 1
+              分鐘；請依畫面設定未來時間，實際等到預約時間才開始。車資依當下日夜間費率計算。
+            </p>
             <nav>
               <Link href="/review">演練操作</Link> · <Link href="/">預約</Link>{" "}
               · <Link href="/rides">歷史</Link> ·{" "}

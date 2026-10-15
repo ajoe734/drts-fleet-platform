@@ -671,6 +671,7 @@ jobs:
           EXPO_PUBLIC_API_URL=http://127.0.0.1:3001 \
             EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH= \
             pnpm --filter @drts/driver-app exec expo export -p web --output-dir dist
+          pnpm exec tsc -p tests/unit/pax-review-shared-order-demo-20261015/tsconfig.driver-tests.json --noEmit
           pnpm exec vitest run --config tests/unit/pax-review-shared-order-demo-20261015/driver-vitest.config.ts
           pnpm exec playwright test -c playwright.pax-review-shared-order.config.ts
       - name: Upload passenger demonstration browser results

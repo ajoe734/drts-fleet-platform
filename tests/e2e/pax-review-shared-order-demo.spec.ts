@@ -77,7 +77,11 @@ async function bind(page: Page, scenario: "success" | "retry_once") {
   return result.method.paymentMethodId as string;
 }
 
-async function book(page: Page, paymentMethodId: string) {
+async function book(
+  page: Page,
+  paymentMethodId: string,
+  unpaidRejection = false,
+) {
   await page.goto(`${PAX}/`);
   const ack = page.getByRole("button", { name: "我已閱讀並同意", exact: true });
   await expect(
@@ -117,6 +121,14 @@ async function book(page: Page, paymentMethodId: string) {
   );
   await page.getByRole("button", { name: "確認叫車", exact: true }).click();
   const response = await created;
+  if (unpaidRejection) {
+    expect(response.status()).toBe(409);
+    expect((await response.json()).error.code).toBe("pending_payment_block");
+    await expect(
+      page.getByText("您有一筆行程扣款失敗，請結清後再繼續叫車。").first(),
+    ).toBeVisible();
+    return "";
+  }
   expect(response.status()).toBeLessThan(300);
   const id = camel(await response.json()).data.ride.order.orderId as string;
   expect(id).toMatch(/^[0-9a-f-]{36}$/);
@@ -192,7 +204,7 @@ async function finish(
     ["前往接送點", "depart"],
     ["抵達上車點", "arrived_pickup"],
     ["開始行程", "start"],
-  ]) {
+  ] as const) {
     if (action === "start") {
       const scheduledAt = Date.parse(
         (await authority(pax, orderId)).order.requestedPickupAt,
@@ -238,8 +250,8 @@ async function finish(
       .getByRole("button", { name: "恢復模擬定位", exact: true })
       .click();
   }
-  // Explicit simulated meter facts, consistent with this sub-1.25km daytime
-  // route and the approved engine's minimum, not the old local demo tariff.
+  // Explicit simulated meter facts, consistent with this sub-1.25km route
+  // and the approved engine's minimum, not the old local demo tariff.
   const bookedQuote = (await authority(pax, orderId)).bookingQuote;
   const minimum = bookedQuote.estimatedMin as number;
   const baseFare = bookedQuote.tariffSnapshot.baseFare as number;
@@ -249,7 +261,7 @@ async function finish(
     ["實際延滯費", "0"],
     ["實際夜間加成", String(minimum - baseFare)],
     ["實際車資總額", String(minimum)],
-  ]) {
+  ] as const) {
     const field = driver
       .getByText(label, { exact: true })
       .locator("../..")
@@ -285,6 +297,24 @@ async function download(pax: Page, orderId: string, info: TestInfo) {
     contentType: "text/html",
   });
   await pax.goto(`${PAX}/rides/${orderId}`);
+}
+
+function assertCompletedFacts(rows: any[], orderId: string) {
+  const completed = rows.filter((row) => row.started_at && row.completed_at);
+  expect(completed.length).toBeGreaterThan(0);
+  for (const row of completed) {
+    expect(row.order_id).toBe(orderId);
+    expect(Date.parse(row.started_at)).toBeGreaterThanOrEqual(
+      Date.parse(row.requested_pickup_at),
+    );
+    expect(Date.parse(row.completed_at)).toBeGreaterThanOrEqual(
+      Date.parse(row.started_at),
+    );
+    expect(Number(row.actual_distance_km)).toBeGreaterThan(0.2);
+    expect(Number(row.actual_distance_km)).toBeLessThan(0.5);
+    expect(Number(row.actual_duration_sec)).toBeGreaterThan(20);
+    expect(Number(row.amount_minor)).toBeGreaterThanOrEqual(8500);
+  }
 }
 
 test("three new PG orders travel through real Passenger, Ops and Driver UIs, including retry/case, cancellation and exception controls", async ({
@@ -404,6 +434,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
       { pax, ops, driver },
       info,
     );
+    assertCompletedFacts(normalFacts, normal);
     expect(
       normalFacts.some(
         (r) =>
@@ -438,6 +469,10 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         (r) => r.attempt_count === 1 && r.payment_status === "failed",
       ),
     ).toBe(true);
+    // A fourth booking attempt is rejected by the real unpaid obligation
+    // guard; only the three accepted journeys may create backend orders.
+    expect(await book(pax, retryMethod, true)).toBe("");
+    await pax.goto(`${PAX}/rides/${retry}`);
     await pax.getByRole("button", { name: "依既有政策重試演練付款" }).click();
     await expect
       .poll(async () => (await authority(pax, retry)).payment?.status, {
@@ -457,6 +492,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
       { pax, ops, driver: mountedDriver },
       info,
     );
+    assertCompletedFacts(retriedFacts, retry);
     const row = retriedFacts.find((r) => r.complaint_case_no);
     expect(row?.attempt_count).toBe(2);
     expect(row?.payment_id).toBe(

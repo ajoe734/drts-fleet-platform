@@ -75,7 +75,7 @@ export default function ReviewEntry() {
               </p>
               <Link href="/account/payment-methods">1. 綁定演練付款方式</Link>
               <br />
-              <Link href="/">2. 選新北起訖與日間預約，試算並確認叫車</Link>
+              <Link href="/">2. 選新北起訖與未來預約時間，試算並確認叫車</Link>
               <br />
               <Link href="/rides">3. 歷史與取消紀錄</Link>
               <br />

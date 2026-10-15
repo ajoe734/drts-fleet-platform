@@ -25,7 +25,7 @@ const config = mergeConfig(
     },
     test: {
       include: [
-        "tests/unit/pax-review-shared-order-demo-20261015/driver-*.spec.ts",
+        "tests/unit/pax-review-shared-order-demo-20261015/driver-*.spec.tsx",
       ],
       environment: "jsdom",
     },
@@ -33,6 +33,6 @@ const config = mergeConfig(
 );
 // mergeConfig concatenates arrays; keep this a finite socket-free check.
 config.test!.include = [
-  "tests/unit/pax-review-shared-order-demo-20261015/driver-*.spec.ts",
+  "tests/unit/pax-review-shared-order-demo-20261015/driver-*.spec.tsx",
 ];
 export default config;

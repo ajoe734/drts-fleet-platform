@@ -2307,6 +2307,86 @@ export class OwnedMobilityService
     return this.orders.map((order) => this.cloneOrder(order));
   }
 
+  // Public HTTP reads use committed rows. Synchronous internal callers retain
+  // their original contract; a database miss/error must never revive a cache.
+  async listOrdersForRead(orderIds?: readonly string[]) {
+    const orders = this.ownedMobilityRepository?.isEnabled()
+      ? await this.ownedMobilityRepository.listOrdersForRead(orderIds)
+      : this.orders.filter(
+          (order) => !orderIds || orderIds.includes(order.orderId),
+        );
+    return orders.map((order) => this.cloneOrder(order));
+  }
+
+  async getOrderForRead(orderId: string) {
+    if (!this.ownedMobilityRepository?.isEnabled())
+      return this.getOrder(orderId);
+    const order = await this.ownedMobilityRepository.findOrderById(orderId);
+    if (!order)
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "ORDER_NOT_FOUND",
+        "Order was not found.",
+      );
+    return this.cloneOrder(order);
+  }
+
+  /** Refresh only the target aggregate before entering the unchanged command
+   * implementation. Its row/resource locks and ownership checks remain authoritative. */
+  async prepareOrderAction(
+    key: { orderId: string } | { taskId: string } | { dispatchJobId: string },
+  ) {
+    if (!this.ownedMobilityRepository?.isEnabled()) return;
+    const context =
+      await this.ownedMobilityRepository.loadOrderActionContext(key);
+    if (!context) {
+      if ("taskId" in key)
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "DRIVER_TASK_NOT_FOUND",
+          "Driver task was not found.",
+        );
+      if ("dispatchJobId" in key)
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "DISPATCH_JOB_NOT_FOUND",
+          "Dispatch job was not found.",
+        );
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "ORDER_NOT_FOUND",
+        "Order was not found.",
+      );
+    }
+    const orderId = context.orders[0]!.orderId;
+    const replace = <T extends { orderId: string }>(
+      current: T[],
+      committed: T[],
+    ) => [
+      ...structuredClone(committed),
+      ...current.filter((row) => row.orderId !== orderId),
+    ];
+    this.orders = replace(this.orders, context.orders);
+    this.dispatchJobs = replace(this.dispatchJobs, context.dispatchJobs);
+    this.dispatchAttempts = replace(
+      this.dispatchAttempts,
+      context.dispatchAttempts,
+    );
+    this.dispatchAssignments = replace(
+      this.dispatchAssignments,
+      context.dispatchAssignments,
+    );
+    this.driverTasks = replace(this.driverTasks, context.driverTasks);
+    this.dispatchTraceLogs = replace(
+      this.dispatchTraceLogs,
+      context.dispatchTraceLogs,
+    );
+    this.passengerDisclosureSnapshots = replace(
+      this.passengerDisclosureSnapshots,
+      context.passengerDisclosureSnapshots,
+    );
+  }
+
   getOrder(orderId: string, identity?: BootstrapRequestIdentity | null) {
     const order = this.requireOrder(orderId);
     this.assertPartnerOrderIdentity(identity, order);
@@ -4825,6 +4905,22 @@ export class OwnedMobilityService
     return this.dispatchJobs.map((job) => this.buildDispatchJobSnapshot(job));
   }
 
+  async listDispatchJobsForRead() {
+    if (!this.ownedMobilityRepository?.isEnabled())
+      return this.listDispatchJobs();
+    const jobs = await this.ownedMobilityRepository.listDispatchJobsForRead();
+    const orders = new Map(
+      (
+        await this.listOrdersForRead([
+          ...new Set(jobs.map((job) => job.orderId)),
+        ])
+      ).map((order) => [order.orderId, order]),
+    );
+    return jobs.map((job) =>
+      this.buildDispatchJobSnapshot(job, orders.get(job.orderId) ?? null),
+    );
+  }
+
   listDispatchTrace(orderId: string) {
     this.requireOrder(orderId);
     return this.dispatchTraceLogs
@@ -4846,10 +4942,16 @@ export class OwnedMobilityService
     return candidates.map((candidate) => ({ ...candidate }));
   }
 
-  private buildDispatchJobSnapshot(dispatchJob: DispatchJobRecord) {
-    const order = this.orders.find(
-      (candidateOrder) => candidateOrder.orderId === dispatchJob.orderId,
-    );
+  private buildDispatchJobSnapshot(
+    dispatchJob: DispatchJobRecord,
+    authoritativeOrder?: OwnedOrderRecord | null,
+  ) {
+    const order =
+      authoritativeOrder === undefined
+        ? this.orders.find(
+            (candidateOrder) => candidateOrder.orderId === dispatchJob.orderId,
+          )
+        : authoritativeOrder;
     if (!order) {
       return { ...dispatchJob };
     }
@@ -6208,6 +6310,56 @@ export class OwnedMobilityService
       }
       return clone;
     });
+  }
+
+  async listDriverTasksForRead() {
+    if (!this.ownedMobilityRepository?.isEnabled())
+      return this.listDriverTasks();
+    const tasks = await this.ownedMobilityRepository.listDriverTasksForRead();
+    const orders = new Map(
+      (
+        await this.listOrdersForRead([
+          ...new Set(tasks.map((task) => task.orderId)),
+        ])
+      ).map((order) => [order.orderId, order]),
+    );
+    return tasks.map((task) =>
+      this.cloneDriverTaskForRead(task, orders.get(task.orderId) ?? null),
+    );
+  }
+
+  async findDriverTaskForRead(taskId: string) {
+    if (!this.ownedMobilityRepository?.isEnabled())
+      return this.driverTasks.some((task) => task.taskId === taskId)
+        ? this.getDriverTask(taskId)
+        : null;
+    const task =
+      await this.ownedMobilityRepository.findDriverTaskForRead(taskId);
+    if (!task) return null;
+    const order = await this.ownedMobilityRepository.findOrderById(
+      task.orderId,
+    );
+    return this.cloneDriverTaskForRead(task, order);
+  }
+
+  private cloneDriverTaskForRead(
+    task: DriverTaskRecord,
+    order: OwnedOrderRecord | null,
+  ) {
+    const clone = this.cloneTask(task, order);
+    clone.sourcePlatform ??= this.forwarderSourceMap.get(task.orderId) ?? null;
+    return clone;
+  }
+
+  async getDriverTaskForRead(taskId: string) {
+    const task = await this.findDriverTaskForRead(taskId);
+    if (!task)
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "DRIVER_TASK_NOT_FOUND",
+        "Driver task was not found.",
+      );
+    return task;
   }
 
   getReportingSnapshot(): OwnedMobilityReportingSnapshot {
@@ -14718,10 +14870,16 @@ export class OwnedMobilityService
     };
   }
 
-  private cloneTask(task: DriverTaskRecord): DriverTaskRecord {
-    const order = this.orders.find(
-      (candidateOrder) => candidateOrder.orderId === task.orderId,
-    );
+  private cloneTask(
+    task: DriverTaskRecord,
+    authoritativeOrder?: OwnedOrderRecord | null,
+  ): DriverTaskRecord {
+    const order =
+      authoritativeOrder === undefined
+        ? this.orders.find(
+            (candidateOrder) => candidateOrder.orderId === task.orderId,
+          )
+        : authoritativeOrder;
     return {
       ...this.cloneTaskWithDetachedActualFare(task),
       ...(task.bookingQualification

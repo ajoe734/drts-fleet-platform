@@ -67,5 +67,5 @@ export function renderPassengerReviewRecord(
     ["扣款次數", charge?.attemptCount ?? 0],
     ["評價", ride.rating?.score],
   ];
-  return `<!doctype html><html lang="zh-TW"><meta charset="utf-8"><title>演練紀錄 ${escape(ride.order.orderId)}</title><h1>演練紀錄・非正式憑證</h1><p>${escape(record.notice)}</p><p>未實際出車、扣款、通知真人或開立正式報帳憑證。</p><dl>${fields.map(([label, value]) => `<dt>${escape(label)}</dt><dd>${escape(value)}</dd>`).join("")}</dl></html>`;
+  return `<!doctype html><html lang="zh-TW"><meta charset="utf-8"><title>演練紀錄 ${escape(ride.order.orderId)}</title><h1>演練紀錄・非正式憑證</h1><p>${escape(record.notice)}</p><p>未實際出車、扣款、通知真人或開立正式報帳憑證。演練採 1 分鐘預約前置設定，開始時間不得早於預約時間；報價與車資依真實日夜間費率及時間計算。</p><dl>${fields.map(([label, value]) => `<dt>${escape(label)}</dt><dd>${escape(value)}</dd>`).join("")}</dl></html>`;
 }
