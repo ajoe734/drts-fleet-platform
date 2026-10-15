@@ -209,3 +209,35 @@ This single-file report uses content / reference and repository policy checks.
 No product implementation, classifier repair, mirror tests, runtime, DB, browser,
 VM hosting, deployment or external provider calls are needed or performed.
 Hosted CI, independent review and merge remain separate lifecycle gates.
+
+## Publication and completed checks
+
+- Anchor `b8608a6f1e99260005db7a00fbdbc67dde2755d7` was committed with
+  command-local Codex identity and required task / reviewer trailers, then
+  normally pushed (exit 0). [Draft PR #2701](https://github.com/ajoe734/drts-fleet-platform/pull/2701)
+  targets `dev`; readback confirmed its head equals the anchor. This evidence
+  appendix is a subsequent task-scoped commit, not an amend. Final local / live
+  remote / PR identity and full SHA are recorded in the helper CLI closeout.
+- `python3 tools/ci/git/check_commit_trailers.py --base
+6eaa96168580242ca356f83a393ae08095876b03 --head HEAD`: exit 0 (anchor).
+  `python3 tools/ci/git/check_canonical_consistency.py --ci --base
+6eaa96168580242ca356f83a393ae08095876b03 --head HEAD`: exit 0, all four
+  categories zero findings. These range checks are repeated after this appendix
+  commit; final results are recorded with the full head in machine truth.
+- `python3 tools/ci/git/check_staged_generated_files.py --staged`,
+  `git diff --cached --check`, and `git diff --check
+6eaa96168580242ca356f83a393ae08095876b03...HEAD`: exit 0.
+- `pnpm exec prettier --check
+support/unblock/PAX-DESIGN-V2-20261015/PAX-DESIGN-V2-20261015-UNBLOCK-HISTORY-REPAIR.md`:
+  exit 0. `node tools/ci/check-repo-classification.mjs`: exit 0, 6705 files.
+  Node v22.23.2 / pnpm 10.33.0. No dependencies added.
+- Local required checks have finished and outputs were read. At draft creation,
+  automatic hosted checks were queued / pending (one metadata check skipped);
+  no hosted CI success, candidate review or merge is claimed. No candidate was
+  handed off while the blocked-parent disposition is missing.
+- Helper readback after the rejected metadata write remains `in_progress`, with
+  no `resolved_parent_status`, `resolved_parent_waiting_for` or
+  `resolved_parent_next`. Progress records the Supervisor coordination need;
+  final blocker records the published report and remaining gate. Parent-note
+  acceptance remains pending until the Supervisor writes and reads back both
+  task slices. Parent source repair remains independently pending.
