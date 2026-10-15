@@ -656,6 +656,88 @@ describe("C100 actual archival shell with controlled client (no PG/socket/server
       );
     });
   }
+  for (const protection of ["hold", "exception", "audit-source"] as const) {
+    for (const spelling of ["upper", "lower"] as const) {
+      it(`${protection} preserves UUID audit reference ${spelling} spelling and opaque identity boundaries`, () => {
+        const targets = [
+          row("abcdefab-cdef-4abc-8abc-abcdefabcdef"),
+          row("abcdefab-cdef-7abc-8abc-abcdefabcdef"),
+          row("different-audit-id"),
+          row(
+            "other-tenant-reference",
+            undefined,
+            undefined,
+            null,
+            undefined,
+            "tenant-b",
+          ),
+          row("opaque-case", "report_artifact", "opaque-subject"),
+          row("opaque-exact", "report_artifact", "Opaque-Subject"),
+          row(
+            "other-family-uuid",
+            "report_artifact",
+            "abcdefab-cdef-4abc-8abc-abcdefabcdef",
+          ),
+          row(
+            "other-family-uuid-exact",
+            "report_artifact",
+            "ABCDEFAB-CDEF-4ABC-8ABC-ABCDEFABCDEF",
+          ),
+        ];
+        const protections = targets.map((target, index) => {
+          const opaque = index >= 4;
+          let reference =
+            index === 2 ? uuid("unrelated-audit-id") : target.audit_id;
+          if (opaque)
+            reference =
+              index < 6
+                ? "Opaque-Subject"
+                : "ABCDEFAB-CDEF-4ABC-8ABC-ABCDEFABCDEF";
+          else
+            reference =
+              spelling === "upper"
+                ? reference.toUpperCase()
+                : reference.toLowerCase();
+          const family = opaque ? "report_artifact" : "audit_log";
+          const event =
+            protection === "hold"
+              ? hold(`reference-h-${index}`, reference, { family })
+              : exception(
+                  `reference-e-${index}`,
+                  protection === "audit-source" ? "unrelated" : reference,
+                  {
+                    family,
+                    ...(protection === "audit-source"
+                      ? {
+                          sourceResourceType: family,
+                          sourceResourceId: reference,
+                        }
+                      : {}),
+                  },
+                );
+          // Keep the persisted reference verbatim (the fixture's normal UUID
+          // factory is only appropriate for physical audit/tenant columns).
+          if (protection === "audit-source")
+            event.new_value!.sourceResourceId = reference;
+          else event.new_value!.subjectId = reference;
+          return event;
+        });
+        const r = run([...targets, ...protections]);
+        const lawful = [2, 3, 4, 6]
+          .map((index) => targets[index]!.audit_id)
+          .sort();
+        expect(r.result.status, r.result.stderr).toBe(0);
+        expect(r.state.selected?.sort()).toEqual(lawful);
+        expect(r.archived.map((r) => r.audit_id).sort()).toEqual(lawful);
+        expect(r.state.rows.map((r) => r.audit_id).sort()).toEqual(
+          [...targets, ...protections]
+            .filter((r) => !lawful.includes(r.audit_id))
+            .map((r) => r.audit_id)
+            .sort(),
+        );
+      });
+    }
+  }
   for (const failure of ["sql", "write", "verify"] as const) {
     it(`${failure} failure is nonzero, retains source and cannot print purge success`, () => {
       const r = run([row("free")], { failure });

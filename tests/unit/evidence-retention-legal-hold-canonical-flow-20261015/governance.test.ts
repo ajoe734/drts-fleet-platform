@@ -318,6 +318,107 @@ describe("C099 canonical governance ACK and unavailable authority", () => {
     });
   }
 
+  for (const operation of ["place", "register"] as const) {
+    for (const family of ["audit_log", "report_artifact"] as const) {
+      for (const subjectId of [
+        "ABCDEFAB-CDEF-4ABC-8ABC-ABCDEFABCDEF",
+        "ABCDEFAB-CDEF-7ABC-8ABC-ABCDEFABCDEF",
+        "Opaque-Subject",
+      ]) {
+        it(`${operation} ${family} UUID subject identity ${subjectId} survives command ACK and persisted replay`, async () => {
+          const f = fixture();
+          await f.service.onModuleInit();
+          const tenantId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+          const result =
+            operation === "place"
+              ? await f.controller.placeEvidenceLegalHold(
+                  { ...holdCommand, family, subjectId, tenantId },
+                  identity,
+                )
+              : await f.controller.registerEvidenceDeletionException(
+                  { ...exceptionCommand, family, subjectId, tenantId },
+                  identity,
+                );
+          expect(result.data).toMatchObject({ status: "active", subjectId });
+          const persisted = f.stored.find(
+            (r) =>
+              r.resourceType ===
+              (operation === "place"
+                ? "evidence_legal_hold"
+                : "evidence_deletion_exception"),
+          )!;
+          expect(persisted.newValuesSummary?.subjectId).toBe(subjectId);
+          const restarted = new AuditNotificationService(f.repository);
+          await restarted.onModuleInit();
+          for (const service of [f.service, restarted]) {
+            const controller = new AuditController(service);
+            expect(
+              controller.getEvidenceSubjectGovernance(
+                family,
+                subjectId,
+                tenantId,
+              ).data.deletionSuppressed,
+            ).toBe(true);
+            expect(
+              controller.getEvidenceSubjectGovernance(
+                family,
+                subjectId.toLowerCase(),
+                tenantId,
+              ).data.deletionSuppressed,
+            ).toBe(family === "audit_log" && subjectId !== "Opaque-Subject");
+            expect(
+              controller.getEvidenceSubjectGovernance(
+                family,
+                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                tenantId,
+              ).data.deletionSuppressed,
+            ).toBe(false);
+            expect(
+              controller.getEvidenceSubjectGovernance(
+                family,
+                subjectId.toLowerCase(),
+                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+              ).data.deletionSuppressed,
+            ).toBe(false);
+          }
+          // Duplicate detection uses the same identity, including persisted legacy
+          // payloads, while opaque/family-specific subjects remain distinct.
+          const duplicate =
+            operation === "place"
+              ? restarted.placeEvidenceLegalHold(
+                  {
+                    ...holdCommand,
+                    family,
+                    subjectId: subjectId.toLowerCase(),
+                    tenantId,
+                  },
+                  identity,
+                )
+              : restarted.registerEvidenceDeletionException(
+                  {
+                    ...exceptionCommand,
+                    family,
+                    subjectId: subjectId.toLowerCase(),
+                    tenantId,
+                  },
+                  identity,
+                );
+          if (family === "audit_log" && subjectId !== "Opaque-Subject")
+            await expect(duplicate).rejects.toMatchObject({
+              code:
+                operation === "place"
+                  ? "EVIDENCE_LEGAL_HOLD_ALREADY_ACTIVE"
+                  : "EVIDENCE_DELETION_EXCEPTION_ALREADY_ACTIVE",
+            });
+          else
+            await expect(duplicate).resolves.toMatchObject({
+              status: "active",
+            });
+        });
+      }
+    }
+  }
+
   it("failed configured trail is unavailable in lists, controller, commands and report projection; audit feed retains fallback", async () => {
     const f = fixture();
     await f.service.onModuleInit();
