@@ -31,7 +31,10 @@ import type {
   PassengerRideAccessToken,
 } from "@drts/contracts";
 import type { PassengerIntakeResult } from "./complaint.repository";
-import { ComplaintRepository } from "./complaint.repository";
+import {
+  ComplaintCommitOutcomeUnknownError,
+  ComplaintRepository,
+} from "./complaint.repository";
 import {
   normalizePassengerComplaintIntake,
   type PassengerComplaintIntake,
@@ -255,32 +258,38 @@ export class ComplaintService implements OnModuleInit {
 
     this.complaintCases = [complaintCase, ...this.complaintCases];
     this.complaintTimelines.set(caseNo, [createdEntry]);
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(command.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [complaintCase],
         complaintTimelines: [createdEntry],
       },
       "create_complaint_case",
+      isOrdinaryDbWrite
+        ? () => this.revertComplaintCaseMutation(caseNo, null, [createdEntry.entryId])
+        : undefined,
     );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "system",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "create_complaint_case",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          caseSource: command.caseSource,
-          category: command.category,
-          severity: command.severity,
-          status: complaintCase.status,
-          relatedOrderId: complaintCase.relatedOrderId,
-          relatedCallId: complaintCase.relatedCallId,
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "system",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "create_complaint_case",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            caseSource: command.caseSource,
+            category: command.category,
+            severity: command.severity,
+            status: complaintCase.status,
+            relatedOrderId: complaintCase.relatedOrderId,
+            relatedCallId: complaintCase.relatedCallId,
+          },
         },
-      },
-      requestId,
+        requestId,
+      ),
     );
 
     return this.cloneComplaintCase(complaintCase);
@@ -627,28 +636,37 @@ export class ComplaintService implements OnModuleInit {
       TIMELINE_ACTIONS.assigned,
       note ?? `Assigned to ${updated.assigneeId}.`,
     );
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [updated],
         complaintTimelines: [timelineEntry],
       },
       "assign_complaint_case",
+      isOrdinaryDbWrite
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, complaintCase, [
+              timelineEntry.entryId,
+            ])
+        : undefined,
     );
-    this.recordAudit(
-      {
-        actorId: updated.assigneeId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "assign_complaint_case",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          assigneeId: updated.assigneeId,
-          status: updated.status,
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
+      this.recordAudit(
+        {
+          actorId: updated.assigneeId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "assign_complaint_case",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            assigneeId: updated.assigneeId,
+            status: updated.status,
+          },
         },
-      },
-      requestId,
+        requestId,
+      ),
     );
 
     return this.cloneComplaintCase(updated);
@@ -711,28 +729,37 @@ export class ComplaintService implements OnModuleInit {
       TIMELINE_ACTIONS.noteAdded,
       command.note.trim(),
     );
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [updated],
         complaintTimelines: [timelineEntry],
       },
       "add_complaint_case_note",
+      isOrdinaryDbWrite
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, complaintCase, [
+              timelineEntry.entryId,
+            ])
+        : undefined,
     );
-    this.recordAudit(
-      {
-        actorId: updated.assigneeId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "add_complaint_case_note",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          status: updated.status,
-          note: command.note.trim(),
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
+      this.recordAudit(
+        {
+          actorId: updated.assigneeId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "add_complaint_case_note",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            status: updated.status,
+            note: command.note.trim(),
+          },
         },
-      },
-      requestId,
+        requestId,
+      ),
     );
 
     return this.cloneComplaintCase(updated);
@@ -793,28 +820,37 @@ export class ComplaintService implements OnModuleInit {
       TIMELINE_ACTIONS.resolved,
       command.closingNote,
     );
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [updated],
         complaintTimelines: [timelineEntry],
       },
       "resolve_complaint_case",
+      isOrdinaryDbWrite
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, complaintCase, [
+              timelineEntry.entryId,
+            ])
+        : undefined,
     );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "resolve_complaint_case",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          status: updated.status,
-          resolutionCode: command.resolutionCode,
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "resolve_complaint_case",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            status: updated.status,
+            resolutionCode: command.resolutionCode,
+          },
         },
-      },
-      requestId,
+        requestId,
+      ),
     );
 
     return this.cloneComplaintCase(updated);
@@ -851,28 +887,37 @@ export class ComplaintService implements OnModuleInit {
       TIMELINE_ACTIONS.closed,
       command.closingNote,
     );
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [updated],
         complaintTimelines: [timelineEntry],
       },
       "close_complaint_case",
+      isOrdinaryDbWrite
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, complaintCase, [
+              timelineEntry.entryId,
+            ])
+        : undefined,
     );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "close_complaint_case",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          status: updated.status,
-          resolutionCode: command.resolutionCode,
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "close_complaint_case",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            status: updated.status,
+            resolutionCode: command.resolutionCode,
+          },
         },
-      },
-      requestId,
+        requestId,
+      ),
     );
 
     return this.cloneComplaintCase(updated);
@@ -926,31 +971,41 @@ export class ComplaintService implements OnModuleInit {
       `SLA recalculated on reopen. New due: ${newSlaDueAt}. Reopen #${updated.reopenCount}.`,
       now.toISOString(),
     );
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [updated],
         complaintTimelines: [reopenEntry, slaEntry],
       },
       "reopen_complaint_case",
+      isOrdinaryDbWrite
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, complaintCase, [
+              reopenEntry.entryId,
+              slaEntry.entryId,
+            ])
+        : undefined,
     );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "reopen_complaint_case",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          status: updated.status,
-          reason: command.reason,
-          reopenCount: updated.reopenCount,
-          slaDueAt: newSlaDueAt,
-          slaBreach: false,
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "reopen_complaint_case",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            status: updated.status,
+            reason: command.reason,
+            reopenCount: updated.reopenCount,
+            slaDueAt: newSlaDueAt,
+            slaBreach: false,
+          },
         },
-      },
-      requestId,
+        requestId,
+      ),
     );
 
     return this.cloneComplaintCase(updated);
@@ -973,37 +1028,46 @@ export class ComplaintService implements OnModuleInit {
       TIMELINE_ACTIONS.slaBreached,
       `SLA breached while case remained ${complaintCase.status}.`,
     );
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [updated],
         complaintTimelines: [timelineEntry],
       },
       "mark_complaint_sla_breach",
+      isOrdinaryDbWrite
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, complaintCase, [
+              timelineEntry.entryId,
+            ])
+        : undefined,
     );
-    this.auditNotificationService.recordNotification({
-      tenantId: null,
-      channel: "ops_notice",
-      title: "Complaint SLA breached",
-      message: `Complaint ${caseNo} exceeded SLA due at ${complaintCase.slaDueAt}.`,
-      status: "unread",
-    });
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "system",
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () => {
+      this.auditNotificationService.recordNotification({
         tenantId: null,
-        moduleName: "complaint",
-        actionName: "mark_complaint_sla_breach",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          status: updated.status,
-          slaBreach: true,
-          slaDueAt: complaintCase.slaDueAt,
+        channel: "ops_notice",
+        title: "Complaint SLA breached",
+        message: `Complaint ${caseNo} exceeded SLA due at ${complaintCase.slaDueAt}.`,
+        status: "unread",
+      });
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "system",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "mark_complaint_sla_breach",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            status: updated.status,
+            slaBreach: true,
+            slaDueAt: complaintCase.slaDueAt,
+          },
         },
-      },
-      requestId,
-    );
+        requestId,
+      );
+    });
 
     return this.cloneComplaintCase(updated);
   }
@@ -1040,28 +1104,37 @@ export class ComplaintService implements OnModuleInit {
       TIMELINE_ACTIONS.escalatedToIncident,
       `Escalated to incident ${incidentId}: ${reason}`,
     );
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [updated],
         complaintTimelines: [timelineEntry],
       },
       "escalate_to_incident",
+      isOrdinaryDbWrite
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, complaintCase, [
+              timelineEntry.entryId,
+            ])
+        : undefined,
     );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "escalate_to_incident",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          relatedIncidentId: incidentId,
-          reason,
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "escalate_to_incident",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            relatedIncidentId: incidentId,
+            reason,
+          },
         },
-      },
-      requestId,
+        requestId,
+      ),
     );
 
     return this.cloneComplaintCase(updated);
@@ -1106,27 +1179,36 @@ export class ComplaintService implements OnModuleInit {
       TIMELINE_ACTIONS.incidentLinked,
       `Linked to incident ${incidentId}.`,
     );
-    this.persistChanges(
+    const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
+    const persistence = this.persistChanges(
       {
         complaintCases: [updated],
         complaintTimelines: [timelineEntry],
       },
       "link_incident",
+      isOrdinaryDbWrite
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, complaintCase, [
+              timelineEntry.entryId,
+            ])
+        : undefined,
     );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "complaint",
-        actionName: "link_incident",
-        resourceType: "complaint_case",
-        resourceId: caseNo,
-        newValuesSummary: {
-          relatedIncidentId: incidentId,
+    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "link_incident",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            relatedIncidentId: incidentId,
+          },
         },
-      },
-      requestId,
+        requestId,
+      ),
     );
 
     return this.cloneComplaintCase(updated);
@@ -1310,9 +1392,14 @@ export class ComplaintService implements OnModuleInit {
       complaintTimelines?: readonly ComplaintTimelineEntry[];
     },
     context: string,
-  ) {
+    // Only consulted for ordinary (non-settlement) writes: undoes the
+    // optimistic in-memory mutation when the write is known NOT to have
+    // committed. Never invoked for a ComplaintCommitOutcomeUnknownError,
+    // since that outcome must not be assumed to be a rollback.
+    rollback?: () => void,
+  ): Promise<void> {
     if (!this.complaintRepository) {
-      return;
+      return Promise.resolve();
     }
 
     const persistPayload: {
@@ -1340,7 +1427,7 @@ export class ComplaintService implements OnModuleInit {
     const affectedCaseNos = [
       ...new Set((changes.complaintCases ?? []).map((item) => item.caseNo)),
     ];
-    if (affectedCaseNos.length && this.complaintRepository.isEnabled()) {
+    if (affectedCaseNos.length && this.canonicalDbEnabled()) {
       const settlementCaseNos = (changes.complaintCases ?? [])
         .filter((item) => item.category === "settlement_dispute")
         .map((item) => item.caseNo);
@@ -1355,6 +1442,9 @@ export class ComplaintService implements OnModuleInit {
         .then(() => this.complaintRepository!.persistChanges(persistPayload))
         .catch((error: unknown) => {
           this.complaintRepository!.reportPersistenceFailure(error, context);
+          if (rollback && !(error instanceof ComplaintCommitOutcomeUnknownError)) {
+            rollback();
+          }
           throw error;
         });
       for (const caseNo of affectedCaseNos) {
@@ -1363,14 +1453,71 @@ export class ComplaintService implements OnModuleInit {
       // Shared synchronous callers can start a mutation before the HTTP layer
       // awaits it. Keep its rejection observable without an unhandled promise.
       void persistence.catch(() => undefined);
-      return;
+      return persistence;
     }
 
-    void this.complaintRepository
+    return this.complaintRepository
       .persistChanges(persistPayload)
       .catch((error: unknown) => {
         this.complaintRepository!.reportPersistenceFailure(error, context);
       });
+  }
+
+  /** Some lightweight test doubles implement only the repository methods
+   * their scenario exercises; tolerate an absent isEnabled rather than
+   * throwing, matching how an unconfigured repository behaves. */
+  private canonicalDbEnabled() {
+    return typeof this.complaintRepository?.isEnabled === "function"
+      ? this.complaintRepository.isEnabled()
+      : false;
+  }
+
+  /** Settlement-dispute writes keep their existing dedicated transaction and
+   * wait/refresh machinery untouched; only ordinary, DB-backed writes get
+   * the rollback-on-failure and commit-gated audit behavior below. */
+  private isOrdinaryDbWrite(category: ComplaintCategory) {
+    return category !== "settlement_dispute" && this.canonicalDbEnabled();
+  }
+
+  /** Undoes an ordinary mutation's optimistic in-memory update once its
+   * canonical write is known not to have committed. `previousCase` is null
+   * for a create (the phantom case is removed entirely rather than restored). */
+  private revertComplaintCaseMutation(
+    caseNo: string,
+    previousCase: ComplaintCaseRecord | null,
+    addedTimelineEntryIds: readonly string[],
+  ) {
+    if (previousCase) {
+      this.replaceComplaintCase(previousCase);
+    } else {
+      this.complaintCases = this.complaintCases.filter(
+        (item) => item.caseNo !== caseNo,
+      );
+    }
+    const remaining = (this.complaintTimelines.get(caseNo) ?? []).filter(
+      (entry) => !addedTimelineEntryIds.includes(entry.entryId),
+    );
+    if (previousCase) {
+      this.complaintTimelines.set(caseNo, remaining);
+    } else {
+      this.complaintTimelines.delete(caseNo);
+    }
+  }
+
+  /** Ordinary (non-settlement) canonical writes must not let their audit log
+   * / notification side effects represent the mutation as committed before
+   * it actually settles. Settlement-dispute writes and the disabled/noDB
+   * path keep their existing, unaffected synchronous emission. */
+  private emitAfterOrdinaryPersistence(
+    persistence: Promise<void>,
+    isOrdinaryDbWrite: boolean,
+    emit: () => void,
+  ) {
+    if (!isOrdinaryDbWrite) {
+      emit();
+      return;
+    }
+    void persistence.then(emit, () => undefined);
   }
 
   private assertValidCategory(

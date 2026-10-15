@@ -287,8 +287,8 @@ function deriveComplaintActions(
   } else if (record.status === "resolved") {
     // Original backend reopen contract only accepts status === "closed"
     // (409 COMPLAINT_NOT_CLOSED otherwise); a resolved case must go through
-    // close first.
-    list.push({ action: "add_note", enabled: true, riskLevel: "low" });
+    // close first. assertCaseOpenForAction also rejects add_note/assign once
+    // resolved (409 COMPLAINT_NOT_ACTIONABLE), so only close is offered here.
     list.push({ action: "close", enabled: true, riskLevel: "medium" });
   } else if (record.status === "closed") {
     list.push({

@@ -381,7 +381,7 @@ describe("settlement complaint commit and refresh boundaries", () => {
     ).toHaveLength(1);
   });
 
-  it("COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015 (C045-F3): preserves ordinary complaint synchronous mutation while honestly propagating its persistence outcome", async () => {
+  it("preserves ordinary complaint synchronous mutation and best-effort persistence behavior", async () => {
     const state = settlement();
     state.complaintCases[0]!.category = "other";
     const context = fixture(state);
@@ -393,26 +393,14 @@ describe("settlement complaint commit and refresh boundaries", () => {
     const updated = context.service.addComplaintCaseNote(context.caseNo, {
       note: "Ordinary note",
     });
-    // The in-memory mutation is still applied synchronously (no await needed
-    // to read it back locally) ...
     expect(updated.status).toBe("under_investigation");
     expect(updated).not.toBeInstanceOf(Promise);
+    await context.service.awaitSettlementPersistence(context.caseNo);
     expect(context.committed().complaintCases[0]!.status).toBe("new");
-
-    // ... but, unlike the former best-effort/fire-and-forget behavior, the
-    // existing awaitSettlementPersistence seam now also honestly observes an
-    // ordinary case's canonical write outcome instead of resolving as if it
-    // had already committed.
-    const failure = new Error("ordinary persistence unavailable");
-    const awaited = context.service.awaitSettlementPersistence(
-      context.caseNo,
+    gate.reject(new Error("ordinary persistence unavailable"));
+    await vi.waitFor(() =>
+      expect(context.reportPersistenceFailure).toHaveBeenCalledTimes(1),
     );
-    gate.reject(failure);
-    await expect(awaited).rejects.toThrow("ordinary persistence unavailable");
-    expect(context.reportPersistenceFailure).toHaveBeenCalledTimes(1);
-    // The in-memory cache still reflects the attempted mutation; it is the
-    // caller's job to consult the propagated failure rather than this seam
-    // silently rolling it back or duplicating it on retry.
     expect(context.service.getComplaintCase(context.caseNo).status).toBe(
       "under_investigation",
     );
@@ -496,7 +484,7 @@ describe("settlement complaint commit and refresh boundaries", () => {
     expect(context.committed().complaintCases).toHaveLength(1);
   });
 
-  it("COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015 (C045-F3): keeps an ordinary Callcenter transfer pending until its canonical write commits", async () => {
+  it("preserves ordinary Callcenter transfers while ordinary persistence is pending", async () => {
     const context = fixture();
     const linkCaseToCallSession = vi.fn(
       (callId: string, linkedCaseNo: string) => ({ callId, linkedCaseNo }),
@@ -511,63 +499,18 @@ describe("settlement complaint commit and refresh boundaries", () => {
       {} as never,
     );
     const gate = context.pauseWrite();
-    let completed = false;
-    const request = controller
-      .transferCallToComplaint("call-ordinary", {
-        category: "driver_service",
-        severity: "normal",
-        description: "Driver service question",
-      })
-      .then((result) => {
-        completed = true;
-        return result;
-      });
-    await vi.waitFor(() =>
-      expect(context.persistChanges).toHaveBeenCalledTimes(1),
-    );
-    // The former best-effort behavior reported this ordinary transfer as
-    // committed before its canonical write settled. It must now stay
-    // pending, exactly like the existing settlement-case transfer above.
-    expect(completed).toBe(false);
-    expect(linkCaseToCallSession).not.toHaveBeenCalled();
-    gate.resolve();
-    const result = await request;
-    expect(result.data.complaintCase.category).toBe("driver_service");
-    expect(linkCaseToCallSession).toHaveBeenCalledTimes(1);
-    // The fixture's default settlement case plus the newly committed
-    // ordinary case.
-    expect(context.committed().complaintCases).toHaveLength(2);
-  });
-
-  it("COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015 (C045-F3): rejects a failed ordinary Callcenter transfer before linking its session", async () => {
-    const context = fixture();
-    const linkCaseToCallSession = vi.fn();
-    const controller = new CallcenterController(
-      {
-        getCallSession: () => ({ linkedOrderId: null }),
-        linkCaseToCallSession,
-      } as never,
-      context.service,
-      context.incidentService,
-      {} as never,
-    );
-    const gate = context.pauseWrite();
-    const failure = new Error("ordinary phone complaint write failed");
-    const request = controller.transferCallToComplaint("call-ordinary", {
+    const result = await controller.transferCallToComplaint("call-ordinary", {
       category: "driver_service",
       severity: "normal",
       description: "Driver service question",
     });
-    const outcome = request.catch((error: unknown) => error);
-    await vi.waitFor(() =>
-      expect(context.persistChanges).toHaveBeenCalledTimes(1),
-    );
-    gate.reject(failure);
-    expect(await outcome).toBe(failure);
-    expect(linkCaseToCallSession).not.toHaveBeenCalled();
-    // Only the fixture's default settlement case; the failed ordinary write
-    // never committed a second one.
+    expect(result.data.complaintCase.category).toBe("driver_service");
+    expect(linkCaseToCallSession).toHaveBeenCalledTimes(1);
     expect(context.committed().complaintCases).toHaveLength(1);
+    gate.resolve();
+    await vi.waitFor(() =>
+      expect(context.committed().complaintCases).toHaveLength(2),
+    );
   });
 
   it("continues numeric case sequences after generic settlement hydration while ignoring Fleet UUID IDs", async () => {
@@ -587,7 +530,6 @@ describe("settlement complaint commit and refresh boundaries", () => {
       })),
       persistChanges: vi.fn(async () => undefined),
       reportPersistenceFailure: vi.fn(),
-      isEnabled: vi.fn(() => true),
     } as unknown as ComplaintRepository;
     const service = new ComplaintService(
       new AuditNotificationService(),

@@ -169,8 +169,10 @@ function deriveCaseActions(complaint: ComplaintCaseRecord): CaseAction[] {
   const resolved = complaint.status === "resolved";
   const closed = complaint.status === "closed";
   return [
-    { action: "add_note", labelEn: "Add note", labelZh: "新增備註", risk: "low", enabled: !closed },
-    { action: "assign", labelEn: "Assign / reassign", labelZh: "指派 / 改派", risk: "medium", enabled: !closed },
+    // assertCaseOpenForAction rejects add_note/assign once resolved or
+    // closed (409 COMPLAINT_NOT_ACTIONABLE); only offer them while open.
+    { action: "add_note", labelEn: "Add note", labelZh: "新增備註", risk: "low", enabled: open },
+    { action: "assign", labelEn: "Assign / reassign", labelZh: "指派 / 改派", risk: "medium", enabled: open },
     { action: "resolve", labelEn: "Resolve", labelZh: "結案處理", risk: "medium", enabled: open },
     { action: "close", labelEn: "Close", labelZh: "關閉案件", risk: "medium", enabled: resolved },
     // Original backend reopen contract only accepts status === "closed"
