@@ -1,4 +1,4 @@
-import type { Locale } from "@/lib/translations";
+import type { Locale } from "../../lib/translations";
 import type { TrainingStatus } from "@drts/contracts";
 
 type TrainingDict = Record<string, Record<Locale, string>>;
