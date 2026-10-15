@@ -1,10 +1,12 @@
 import * as SecureStore from "expo-secure-store";
 import type { ImagePickerAsset } from "expo-image-picker";
 import type {
+  DriverSosEventRecord,
   DriverSosEventType,
   DriverSosAttachmentScanStatus,
   DriverSosLocationSnapshot,
   DriverSosSeverity,
+  DriverSosStatus,
   DriverSosSubmissionReceipt,
   PendingSosOutboxItem,
   SubmitDriverSosEventCommand,
@@ -97,6 +99,21 @@ export interface DriverSosActiveCase {
     dismissedAt: string | null;
     note: string | null;
   };
+  /**
+   * Honest canonical duty-ack state from the server. Must stay null until a
+   * server readback actually reports an acknowledging actor — submission
+   * alone never implies a duty person has been assigned.
+   */
+  dutyAcknowledgement: {
+    acknowledgedAt: string | null;
+    acknowledgedByActorId: string | null;
+  };
+  /**
+   * Last authoritative S-3 status observed from the server (submitted,
+   * duty_alerted, acknowledged, investigating, resolved, closed, ...). Null
+   * until the first submit response or readback arrives.
+   */
+  status: DriverSosStatus | null;
   timeline: DriverSosTimelineRecord[];
 }
 
@@ -325,6 +342,11 @@ export function createDriverSosActiveCase(params: {
       dismissedAt: null,
       note: null,
     },
+    dutyAcknowledgement: {
+      acknowledgedAt: null,
+      acknowledgedByActorId: null,
+    },
+    status: null,
     timeline: [],
   };
 
@@ -411,6 +433,8 @@ export function markDriverSosCaseSubmitted(
     syncState: "submitted",
     lastError: null,
     receipt: result.receipt,
+    dutyAcknowledgement: { ...activeCase.dutyAcknowledgement },
+    status: activeCase.status ?? "submitted",
   };
 
   nextCase = appendTimelineEntry(nextCase, {
@@ -418,7 +442,7 @@ export function markDriverSosCaseSubmitted(
     title: result.receipt.duplicate ? "伺服器已確認既有 SOS" : "已送達安全值班",
     detail: result.receipt.duplicate
       ? `伺服器已確認既有通報，事件編號 ${result.receipt.eventNo}。`
-      : `事件編號 ${result.receipt.eventNo} 已建立並指派值班人員（事件編號：${result.receipt.incidentId}）。`,
+      : `事件編號 ${result.receipt.eventNo} 已送達車隊安全值班，等待值班人員認領（安全事件：${result.receipt.incidentId}）。`,
     occurredAt: receivedAt,
     tone: "success",
   });
@@ -439,6 +463,111 @@ export function markDriverSosCaseSubmitted(
       occurredAt: receivedAt,
       tone: "success",
     });
+  }
+
+  nextCase = applyDriverSosDutyReadback(nextCase, {
+    status: result.event.status,
+    dutyAcknowledgement: result.event.dutyAcknowledgement,
+  });
+
+  return nextCase;
+}
+
+const DRIVER_SOS_TERMINAL_STATUSES: ReadonlySet<DriverSosStatus> = new Set([
+  "resolved",
+  "closed",
+  "false_alarm_dismissed",
+]);
+
+/** Whether the server has reported a final S-3 state: no further readback
+ * polling can observe any later transition past this point. */
+export function isDriverSosStatusTerminal(
+  status: DriverSosStatus | null,
+): boolean {
+  return status !== null && DRIVER_SOS_TERMINAL_STATUSES.has(status);
+}
+
+/**
+ * Applies an authoritative server readback of the own SOS event. This is
+ * the only path that is allowed to report duty acknowledgment or any later
+ * investigating/resolved/closed progression: it only reflects what the
+ * server's canonical status/dutyAcknowledgement actually says, never a
+ * locally-inferred guess.
+ */
+export function applyDriverSosDutyReadback(
+  activeCase: DriverSosActiveCase,
+  readback: Pick<DriverSosEventRecord, "status" | "dutyAcknowledgement">,
+): DriverSosActiveCase {
+  const previouslyAcknowledged = Boolean(
+    activeCase.dutyAcknowledgement.acknowledgedByActorId,
+  );
+  const nowAcknowledged = Boolean(
+    readback.dutyAcknowledgement.acknowledgedByActorId,
+  );
+  const ackChanged =
+    activeCase.dutyAcknowledgement.acknowledgedByActorId !==
+      readback.dutyAcknowledgement.acknowledgedByActorId ||
+    activeCase.dutyAcknowledgement.acknowledgedAt !==
+      readback.dutyAcknowledgement.acknowledgedAt;
+  const statusChanged = activeCase.status !== readback.status;
+
+  if (!ackChanged && !statusChanged) {
+    return activeCase;
+  }
+
+  let nextCase: DriverSosActiveCase = {
+    ...activeCase,
+    dutyAcknowledgement: { ...readback.dutyAcknowledgement },
+    status: readback.status,
+  };
+
+  if (ackChanged && !previouslyAcknowledged && nowAcknowledged) {
+    nextCase = appendTimelineEntry(nextCase, {
+      kind: "duty_acknowledged",
+      title: "值班人員已認領",
+      detail: `值班人員已認領本次 SOS 通報，目前由 ${readback.dutyAcknowledgement.acknowledgedByActorId} 處理中。`,
+      occurredAt:
+        readback.dutyAcknowledgement.acknowledgedAt ??
+        new Date().toISOString(),
+      tone: "success",
+    });
+  }
+
+  if (statusChanged) {
+    const now = new Date().toISOString();
+    if (readback.status === "duty_alerted") {
+      nextCase = appendTimelineEntry(nextCase, {
+        kind: "duty_alert_dispatched",
+        title: "已通知值班人員",
+        detail: "安全值班主控台已顯示本次 SOS 警示。",
+        occurredAt: now,
+        tone: "info",
+      });
+    } else if (readback.status === "investigating") {
+      nextCase = appendTimelineEntry(nextCase, {
+        kind: "investigation_started",
+        title: "事件調查中",
+        detail: "值班人員正在調查本次安全事件。",
+        occurredAt: now,
+        tone: "info",
+      });
+    } else if (readback.status === "resolved") {
+      nextCase = appendTimelineEntry(nextCase, {
+        kind: "resolved",
+        title: "事件已處理完成",
+        detail: "安全事件已由值班人員標記為已解決。",
+        occurredAt: now,
+        tone: "success",
+      });
+    } else if (readback.status === "closed") {
+      nextCase = appendTimelineEntry(nextCase, {
+        kind: "closed",
+        title: "事件已結案",
+        detail: "安全事件已結案歸檔。",
+        occurredAt: now,
+        tone: "neutral",
+      });
+    }
   }
 
   return nextCase;
@@ -636,6 +765,10 @@ export async function loadDriverSosActiveCase(): Promise<DriverSosActiveCase | n
       timeline: Array.isArray(parsed.timeline)
         ? parsed.timeline.map(cloneTimelineEntry)
         : [],
+      dutyAcknowledgement: parsed.dutyAcknowledgement ?? {
+        acknowledgedAt: null,
+        acknowledgedByActorId: null,
+      },
     };
   } catch {
     await SecureStore.deleteItemAsync(DRIVER_SOS_ACTIVE_CASE_KEY);
