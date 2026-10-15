@@ -427,6 +427,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
   const pax = await step("Passenger browser context", () => newRole("pax")),
     ops = await step("Ops browser context", () => newRole("ops")),
     driver = await step("Driver browser context", () => newRole("driver"));
+  let activeDriver = { page: driver, base: DRIVER };
   const requests: {
     role: string;
     method: string;
@@ -578,6 +579,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
     // service, including its real driver BFF and SQLite/WASM headers.
     const mountedDriver = await newRole("driver");
     observe("driver", mountedDriver);
+    activeDriver = { page: mountedDriver, base: `${PAX}/review-driver` };
     await registerDriver(ops, mountedDriver, `${PAX}/review-driver`, step);
     await finish(mountedDriver, `${PAX}/review-driver`, pax, retry, ops, step);
     await step(
@@ -662,6 +664,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         await ops.getByRole("button", { name: "恢復演練供給" }).click();
         await ops.getByRole("button", { name: "依原流程重新派遣" }).click();
         const cancelledAssignment = await assign(ops);
+        activeDriver = { page: driver, base: DRIVER };
         await driver.goto(`${DRIVER}/jobs`);
         await driver
           .getByRole("button")
@@ -741,11 +744,14 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
   } catch (error) {
     // Only these post-registration Driver pages are safe to capture. Never
     // record onboarding, invitation fields, session storage or HTTP bodies.
+    const { page: failedDriver, base: failedDriverBase } = activeDriver;
     if (
-      [`${DRIVER}/jobs`, `${DRIVER}/trip`].includes(driver.url()) &&
-      !driver.isClosed()
+      [`${failedDriverBase}/jobs`, `${failedDriverBase}/trip`].includes(
+        failedDriver.url(),
+      ) &&
+      !failedDriver.isClosed()
     ) {
-      const screenshot = await driver
+      const screenshot = await failedDriver
         .screenshot({ fullPage: true, timeout: 5000 })
         .catch(() => null);
       if (screenshot)
