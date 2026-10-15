@@ -3,12 +3,14 @@ import * as jsxRuntime from "react/jsx-runtime";
 import { renderToStaticMarkup } from "react-dom/server";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { IssuerContractStatusRecord } from "../../../packages/contracts/src/index";
 import * as auth from "../../../packages/control-plane-auth/src/index";
 import * as tokens from "../../../packages/ui-tokens/src/index";
 import * as ui from "../../../packages/ui-web/src/index";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../../apps/api/src/modules/billing-settlement/billing-settlement.service";
 import type { SettlementStatementRecord } from "../../../apps/api/src/modules/billing-settlement/settlement-statement.types";
+import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
 import { createUiModuleLoader } from "../system-remediation/sr-wire-001/ui-module-loader";
 
 type StatementInput = Partial<SettlementStatementRecord> & {
@@ -27,6 +29,59 @@ type PageProps = {
 };
 const roles = ["bank_program_admin", "bank_finance", "bank_ops_viewer"];
 const seedId = "ctr_acme_world_elite_2026";
+const scopedContract: IssuerContractStatusRecord = {
+  contractId: "scoped-contract",
+  tenantId: "tenant-contoso-001",
+  programId: "scoped-program",
+  programCode: "SCOPED-CODE",
+  displayName: "Scoped contract only",
+  status: "at_risk",
+  term: {
+    startsAt: "2026-01-02T00:00:00+08:00",
+    endsAt: null,
+    billingCycle: "monthly",
+    serviceProduct: "credit_card_airport_transfer",
+    issuerTenantId: "tenant-contoso-001",
+  },
+  slaTargets: [
+    {
+      metric: "pickup_punctuality",
+      thresholdPercent: 96,
+      comparator: "gte",
+      window: "current_period",
+    },
+    {
+      metric: "completion_rate",
+      thresholdPercent: 98,
+      comparator: "gte",
+      window: "current_period",
+    },
+  ],
+  periodAttainment: {
+    period: "2026-10",
+    evaluatedAt: "2026-10-15T00:00:00+08:00",
+    completedTrips: 37,
+    totalTrips: 40,
+    pickupPunctualityPercent: 0,
+    completionRatePercent: null,
+    breachedTargets: ["pickup_punctuality", "completion_rate"],
+  },
+  exceptions: [
+    {
+      exceptionId: "scoped-exception",
+      orderId: "scoped-order",
+      occurredAt: "2026-10-14T00:00:00+08:00",
+      reasonCode: "pickup_delay",
+      summary: "Scoped exception only",
+      status: "open",
+      benefitReferenceMasked: "BEN-****-0123",
+      issuerAuthorizationRefMasked: null,
+    },
+  ],
+};
+const contractCases = roles.flatMap((role) =>
+  (["snake", "camel"] as const).map((wire) => ({ role, wire })),
+);
 // An immutable git-archive copy can be selected for before/fixed comparison.
 const appRoot = resolve(
   process.env.BANK_READBACK_APP_ROOT ?? "apps/bank-console-web",
@@ -38,6 +93,7 @@ function harness(
   options: {
     statements?: StatementInput[];
     contracts?: unknown[];
+    contractWire?: "snake" | "camel";
     failure?: number | "timeout" | undefined;
     cookieRole?: string;
   } = {},
@@ -64,7 +120,15 @@ function harness(
           : url.pathname === "/api/tenant/settlement-statements"
             ? (options.statements ?? [])
             : [];
-      return new Response(JSON.stringify({ data: { items } }));
+      const envelope = { data: { items } };
+      return new Response(
+        JSON.stringify(
+          url.pathname === "/api/tenant/contracts" &&
+            options.contractWire === "snake"
+            ? deepToSnakeCase(envelope)
+            : envelope,
+        ),
+      );
     },
   );
   vi.stubEnv("DRTS_API_URL", "https://synthetic-bank-api.invalid");
@@ -109,6 +173,20 @@ function harness(
       role: string,
     ) => Promise<{
       data: { statements: Statement[] };
+      degradedMessage: string | null;
+    }>;
+    loadBankContractsData: (
+      tenant: string,
+      role: string,
+    ) => Promise<{
+      data: { contracts: IssuerContractStatusRecord[] };
+      degradedMessage: string | null;
+    }>;
+    loadBankHomeSnapshot: (
+      tenant: string,
+      role: string,
+    ) => Promise<{
+      data: { contracts: IssuerContractStatusRecord[] };
       degradedMessage: string | null;
     }>;
   }>(resolve(appRoot, "lib/bank-dev-read-models.ts"));
@@ -342,21 +420,12 @@ describe("C085 scoped contract detail", () => {
     },
   );
 
-  it.each(roles)(
-    "%s renders authorized scoped details and aliases read-only without SSR errors",
-    async (role) => {
+  it.each(contractCases)(
+    "$role renders authorized $wire scoped details and aliases read-only without SSR errors",
+    async ({ role, wire }) => {
       const h = harness({
-        contracts: [
-          {
-            contractId: "scoped-contract",
-            programId: "scoped-program",
-            programCode: "SCOPED-CODE",
-            displayName: "Scoped contract only",
-            status: "active",
-            exceptions: [],
-            slaTargets: [],
-          },
-        ],
+        contracts: [scopedContract],
+        contractWire: wire,
       });
       for (const alias of [
         "scoped-contract",
@@ -369,9 +438,40 @@ describe("C085 scoped contract detail", () => {
           ),
         );
         expect(html).toContain("Scoped contract only");
+        expect(html).toContain("2026-01-02");
+        expect(html).toContain("2026/10/15");
+        expect(html).toContain("37");
+        expect(html).toContain("40");
+        expect(html).toContain("96%");
+        expect(html).toContain("0.0%");
+        expect(html).toContain("-96.0%");
+        expect(html).toContain("N/A");
+        expect(html).toContain("scoped-order");
+        expect(html).toContain("2026/10/14");
+        expect(html).toContain("Scoped exception only");
+        expect(html).toContain("BEN-****-0123");
         expect(html).not.toContain("<form");
         expect(html).not.toContain("<button");
       }
+      // Both consumers receive the complete contract, including fields that
+      // are not rendered, nulls, zero metrics and unchanged enum values.
+      expect(
+        await h.model.loadBankContractsData("tenant-contoso-001", role),
+      ).toEqual({
+        data: { contracts: [scopedContract] },
+        degradedMessage: null,
+      });
+      expect(
+        (await h.model.loadBankHomeSnapshot("tenant-contoso-001", role)).data
+          .contracts,
+      ).toEqual([scopedContract]);
+    },
+  );
+
+  it.each(contractCases)(
+    "$role rejects an unrelated seed ID with nonempty $wire scoped data",
+    async ({ role, wire }) => {
+      const h = harness({ contracts: [scopedContract], contractWire: wire });
       await expect(
         h.page("app/contracts/[contractId]/page.tsx")(h.props(role, seedId)),
       ).rejects.toThrow("NEXT_NOT_FOUND");
