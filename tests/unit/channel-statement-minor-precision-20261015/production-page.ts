@@ -2,7 +2,7 @@ import { readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import ts from "typescript";
-import * as ui from "@drts/ui-web";
+import * as ui from "../../../packages/ui-web/src";
 import * as data from "../../../apps/channel-partner-portal-web/lib/channel-portal-data.server";
 
 // Same approach as ui17-iam's production component loader: transpile actual

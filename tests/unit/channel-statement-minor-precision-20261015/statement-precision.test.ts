@@ -21,6 +21,7 @@ import {
   loadReferralStatements,
   loadReferralUsage,
 } from "../../../apps/channel-partner-portal-web/lib/channel-portal-data.server";
+import { t } from "../../../apps/channel-partner-portal-web/lib/translations";
 
 const slug = "referral-demo-community";
 const period = "2026-06";
@@ -179,11 +180,13 @@ describe("canonical channel statement minor precision", () => {
       expect(minor(cells[4]!.textContent!)).toBe(minor(csv[index]![5]!));
       expect(minor(cells[5]!.textContent!)).toBe(minor(csv[index]![8]!));
     });
-    const totals = [...document.querySelectorAll("dd")].map(
-      (item) => item.textContent,
-    );
-    expect(totals).toContain("NT$ 201.01");
-    expect(totals).toContain("NT$ 30.15");
+    const totalValue = (key: string) =>
+      [...document.querySelectorAll("div")].find(
+        (item) =>
+          item.childElementCount === 0 && item.textContent === t(key, "zh"),
+      )?.nextElementSibling?.textContent;
+    expect(totalValue("referral.table.gmv")).toBe("NT$ 201.01");
+    expect(totalValue("referral.statements.share")).toBe("NT$ 30.15");
     expect(
       document
         .querySelector('[data-drt-operation="channel-statement-download"]')
