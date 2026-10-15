@@ -125,7 +125,10 @@ function getArrayDecoratorArgs(decorator: ts.Decorator): string[] {
   return args;
 }
 
-function normalizeRoutePath(controllerPath: string, methodPath: string): string {
+function normalizeRoutePath(
+  controllerPath: string,
+  methodPath: string,
+): string {
   const cleanController = controllerPath.replace(/^\/+|\/+$/g, "");
   const cleanMethod = methodPath.replace(/^\/+|\/+$/g, "");
   if (!cleanController && !cleanMethod) {
@@ -174,7 +177,8 @@ function discoverAllDriverRoutes(): DiscoveredDriverRoute[] {
       );
       if (!controllerDec) continue;
 
-      const controllerName = statement.name?.getText(sourceFile) ?? "AnonymousController";
+      const controllerName =
+        statement.name?.getText(sourceFile) ?? "AnonymousController";
       const controllerPath = getStringDecoratorArg(controllerDec);
 
       const classRealmsDec = classDecorators.find(
@@ -187,8 +191,12 @@ function discoverAllDriverRoutes(): DiscoveredDriverRoute[] {
         (d) => getDecoratorName(d) === "OpenRoute",
       );
 
-      const classRealms = classRealmsDec ? getArrayDecoratorArgs(classRealmsDec) : [];
-      const classScopes = classScopesDec ? getArrayDecoratorArgs(classScopesDec) : [];
+      const classRealms = classRealmsDec
+        ? getArrayDecoratorArgs(classRealmsDec)
+        : [];
+      const classScopes = classScopesDec
+        ? getArrayDecoratorArgs(classScopesDec)
+        : [];
       const isClassOpen = Boolean(classOpenDec);
 
       for (const member of statement.members) {
@@ -215,11 +223,17 @@ function discoverAllDriverRoutes(): DiscoveredDriverRoute[] {
           (d) => getDecoratorName(d) === "OpenRoute",
         );
 
-        const methodRealms = methodRealmsDec ? getArrayDecoratorArgs(methodRealmsDec) : [];
-        const methodScopes = methodScopesDec ? getArrayDecoratorArgs(methodScopesDec) : [];
+        const methodRealms = methodRealmsDec
+          ? getArrayDecoratorArgs(methodRealmsDec)
+          : [];
+        const methodScopes = methodScopesDec
+          ? getArrayDecoratorArgs(methodScopesDec)
+          : [];
         const effectiveOpen = Boolean(methodOpenDec) || isClassOpen;
-        const effectiveRealms = methodRealms.length > 0 ? methodRealms : classRealms;
-        const effectiveScopes = methodScopes.length > 0 ? methodScopes : classScopes;
+        const effectiveRealms =
+          methodRealms.length > 0 ? methodRealms : classRealms;
+        const effectiveScopes =
+          methodScopes.length > 0 ? methodScopes : classScopes;
 
         const strippedRoute = routePath.replace(/^\/+/, "");
         const centralPolicy = resolveRouteAuthPolicy(httpMethod, strippedRoute);
@@ -378,7 +392,12 @@ describe("BE-DRV-AUTHZ-001: Driver Authorization Server-Side Enforcement", () =>
       realm: "driver",
       tenantId: null,
       roles: ["driver_user"],
-      scopes: ["driver:read", "driver:write", "incident:write", "dispatch:read"],
+      scopes: [
+        "driver:read",
+        "driver:write",
+        "incident:write",
+        "dispatch:read",
+      ],
       roleFamilies: ["driver"],
       requestId: null,
     };
@@ -389,22 +408,34 @@ describe("BE-DRV-AUTHZ-001: Driver Authorization Server-Side Enforcement", () =>
       const profile = new DriverProfileService(audit);
       const registry = new RegulatoryRegistryService(ops, audit, profile);
       const callcenter = new CallcenterService(audit);
-      const taskEvents = new OwnedMobilityTaskEventsService(new EventEmitter() as never);
-      const owned = new OwnedMobilityService(registry, audit, callcenter, taskEvents, ops);
+      const taskEvents = new OwnedMobilityTaskEventsService(
+        new EventEmitter() as never,
+      );
+      const owned = new OwnedMobilityService(
+        registry,
+        audit,
+        callcenter,
+        taskEvents,
+        ops,
+      );
       const idempotency = new IdempotencyService({} as any);
       const controller = new OwnedMobilityController(owned, idempotency);
 
       // 1. listDriverTasks: when drv-001 passes driverId=drv-002 -> throws 403 DRIVER_IDENTITY_MISMATCH
-      expect(() => controller.listDriverTasks(driver1Identity, "drv-002")).toThrowError(ApiRequestError);
+      await expect(
+        controller.listDriverTasks(driver1Identity, "drv-002"),
+      ).rejects.toThrowError(ApiRequestError);
       try {
-        controller.listDriverTasks(driver1Identity, "drv-002");
+        await controller.listDriverTasks(driver1Identity, "drv-002");
       } catch (err: any) {
         expect(err.getStatus()).toBe(403);
         expect(err.code).toBe("DRIVER_IDENTITY_MISMATCH");
       }
 
       // 2. streamDriverTaskEvents: when drv-001 requests drv-002 -> throws 403 DRIVER_IDENTITY_MISMATCH
-      expect(() => controller.streamDriverTaskEvents(driver1Identity, "drv-002")).toThrowError(ApiRequestError);
+      expect(() =>
+        controller.streamDriverTaskEvents(driver1Identity, "drv-002"),
+      ).toThrowError(ApiRequestError);
       try {
         controller.streamDriverTaskEvents(driver1Identity, "drv-002");
       } catch (err: any) {
@@ -426,9 +457,11 @@ describe("BE-DRV-AUTHZ-001: Driver Authorization Server-Side Enforcement", () =>
       });
 
       // 3. getDriverTask on drv-002 task -> throws 403 DRIVER_IDENTITY_MISMATCH
-      expect(() => controller.getDriverTask("task-drv-002", driver1Identity)).toThrowError(ApiRequestError);
+      await expect(
+        controller.getDriverTask("task-drv-002", driver1Identity),
+      ).rejects.toThrowError(ApiRequestError);
       try {
-        controller.getDriverTask("task-drv-002", driver1Identity);
+        await controller.getDriverTask("task-drv-002", driver1Identity);
       } catch (err: any) {
         expect(err.getStatus()).toBe(403);
         expect(err.code).toBe("DRIVER_IDENTITY_MISMATCH");
@@ -436,20 +469,64 @@ describe("BE-DRV-AUTHZ-001: Driver Authorization Server-Side Enforcement", () =>
 
       // 4. Mutating actions on drv-002 task -> throws 403 DRIVER_IDENTITY_MISMATCH
       const now = new Date().toISOString();
-      await expect(controller.acceptDriverTask("task-drv-002", { acceptedAt: now } as any, driver1Identity)).rejects.toThrowError(ApiRequestError);
-      await expect(controller.rejectDriverTask("task-drv-002", { reasonCode: "vehicle_issue", rejectedAt: now } as any, driver1Identity)).rejects.toThrowError(ApiRequestError);
-      await expect(controller.departDriverTask("task-drv-002", { departedAt: now } as any, driver1Identity)).rejects.toThrowError(ApiRequestError);
-      await expect(controller.arrivePickup("task-drv-002", { arrivedAt: now } as any, driver1Identity)).rejects.toThrowError(ApiRequestError);
-      await expect(controller.startDriverTask("task-drv-002", { startedAt: now } as any, driver1Identity)).rejects.toThrowError(ApiRequestError);
-      await expect(controller.completeDriverTask("task-drv-002", { completedAt: now, actualDistanceKm: 10, actualDurationSec: 600 } as any, driver1Identity)).rejects.toThrowError(ApiRequestError);
+      await expect(
+        controller.acceptDriverTask(
+          "task-drv-002",
+          { acceptedAt: now } as any,
+          driver1Identity,
+        ),
+      ).rejects.toThrowError(ApiRequestError);
+      await expect(
+        controller.rejectDriverTask(
+          "task-drv-002",
+          { reasonCode: "vehicle_issue", rejectedAt: now } as any,
+          driver1Identity,
+        ),
+      ).rejects.toThrowError(ApiRequestError);
+      await expect(
+        controller.departDriverTask(
+          "task-drv-002",
+          { departedAt: now } as any,
+          driver1Identity,
+        ),
+      ).rejects.toThrowError(ApiRequestError);
+      await expect(
+        controller.arrivePickup(
+          "task-drv-002",
+          { arrivedAt: now } as any,
+          driver1Identity,
+        ),
+      ).rejects.toThrowError(ApiRequestError);
+      await expect(
+        controller.startDriverTask(
+          "task-drv-002",
+          { startedAt: now } as any,
+          driver1Identity,
+        ),
+      ).rejects.toThrowError(ApiRequestError);
+      await expect(
+        controller.completeDriverTask(
+          "task-drv-002",
+          {
+            completedAt: now,
+            actualDistanceKm: 10,
+            actualDurationSec: 600,
+          } as any,
+          driver1Identity,
+        ),
+      ).rejects.toThrowError(ApiRequestError);
     });
 
     it("PlatformPresenceController: rejects cross-driver presence query and updates", async () => {
       const presenceService = new PlatformPresenceService();
-      const presenceController = new PlatformPresenceController(presenceService);
+      const presenceController = new PlatformPresenceController(
+        presenceService,
+      );
 
       // getSummary with drv-002 -> 403
-      await expect(presenceController.getSummary(driver1Identity, "drv-002")).rejects.toThrowError(ApiRequestError);
+      await expect(
+        presenceController.getSummary(driver1Identity, "drv-002"),
+      ).rejects.toThrowError(ApiRequestError);
       try {
         await presenceController.getSummary(driver1Identity, "drv-002");
       } catch (err: any) {
@@ -458,18 +535,38 @@ describe("BE-DRV-AUTHZ-001: Driver Authorization Server-Side Enforcement", () =>
       }
 
       // setOnline with drv-002 -> 403
-      await expect(presenceController.setOnline(driver1Identity, { platformCode: "uber" }, "drv-002")).rejects.toThrowError(ApiRequestError);
+      await expect(
+        presenceController.setOnline(
+          driver1Identity,
+          { platformCode: "uber" },
+          "drv-002",
+        ),
+      ).rejects.toThrowError(ApiRequestError);
       try {
-        await presenceController.setOnline(driver1Identity, { platformCode: "uber" }, "drv-002");
+        await presenceController.setOnline(
+          driver1Identity,
+          { platformCode: "uber" },
+          "drv-002",
+        );
       } catch (err: any) {
         expect(err.getStatus()).toBe(403);
         expect(err.code).toBe("DRIVER_IDENTITY_MISMATCH");
       }
 
       // setOffline with drv-002 -> 403
-      await expect(presenceController.setOffline(driver1Identity, { platformCode: "uber" }, "drv-002")).rejects.toThrowError(ApiRequestError);
+      await expect(
+        presenceController.setOffline(
+          driver1Identity,
+          { platformCode: "uber" },
+          "drv-002",
+        ),
+      ).rejects.toThrowError(ApiRequestError);
       try {
-        await presenceController.setOffline(driver1Identity, { platformCode: "uber" }, "drv-002");
+        await presenceController.setOffline(
+          driver1Identity,
+          { platformCode: "uber" },
+          "drv-002",
+        );
       } catch (err: any) {
         expect(err.getStatus()).toBe(403);
         expect(err.code).toBe("DRIVER_IDENTITY_MISMATCH");
@@ -478,10 +575,14 @@ describe("BE-DRV-AUTHZ-001: Driver Authorization Server-Side Enforcement", () =>
 
     it("PlatformEarningsController: rejects cross-driver earnings queries", async () => {
       const earningsService = new PlatformEarningsService();
-      const earningsController = new PlatformEarningsController(earningsService);
+      const earningsController = new PlatformEarningsController(
+        earningsService,
+      );
 
       // getSummary with drv-002 -> 403
-      await expect(earningsController.getSummary(driver1Identity, "drv-002")).rejects.toThrowError(ApiRequestError);
+      await expect(
+        earningsController.getSummary(driver1Identity, "drv-002"),
+      ).rejects.toThrowError(ApiRequestError);
       try {
         await earningsController.getSummary(driver1Identity, "drv-002");
       } catch (err: any) {
@@ -490,7 +591,9 @@ describe("BE-DRV-AUTHZ-001: Driver Authorization Server-Side Enforcement", () =>
       }
 
       // getByPlatform with drv-002 -> 403
-      await expect(earningsController.getByPlatform(driver1Identity, "drv-002")).rejects.toThrowError(ApiRequestError);
+      await expect(
+        earningsController.getByPlatform(driver1Identity, "drv-002"),
+      ).rejects.toThrowError(ApiRequestError);
       try {
         await earningsController.getByPlatform(driver1Identity, "drv-002");
       } catch (err: any) {
@@ -543,7 +646,9 @@ describe("BE-DRV-AUTHZ-001: Driver Authorization Server-Side Enforcement", () =>
       }
 
       // getTrackingStatus with drv-002 -> 403
-      await expect(controller.getTrackingStatus("drv-002", driver1Identity)).rejects.toThrowError(ApiRequestError);
+      await expect(
+        controller.getTrackingStatus("drv-002", driver1Identity),
+      ).rejects.toThrowError(ApiRequestError);
       try {
         await controller.getTrackingStatus("drv-002", driver1Identity);
       } catch (err: any) {
@@ -558,7 +663,9 @@ describe("BE-DRV-AUTHZ-001: Driver Authorization Server-Side Enforcement", () =>
       const controller = new DriverSettingsController(service);
 
       // getSettings on drv-002 by drv-001 -> 404 DRIVER_SETTINGS_NOT_FOUND
-      expect(() => controller.getSettings("drv-002", driver1Identity)).toThrowError(ApiRequestError);
+      expect(() =>
+        controller.getSettings("drv-002", driver1Identity),
+      ).toThrowError(ApiRequestError);
       try {
         controller.getSettings("drv-002", driver1Identity);
       } catch (err: any) {
@@ -567,9 +674,19 @@ describe("BE-DRV-AUTHZ-001: Driver Authorization Server-Side Enforcement", () =>
       }
 
       // updateSettings on drv-002 by drv-001 -> 404 DRIVER_SETTINGS_NOT_FOUND
-      expect(() => controller.updateSettings("drv-002", { autoAcceptDispatch: true } as any, driver1Identity)).toThrowError(ApiRequestError);
+      expect(() =>
+        controller.updateSettings(
+          "drv-002",
+          { autoAcceptDispatch: true } as any,
+          driver1Identity,
+        ),
+      ).toThrowError(ApiRequestError);
       try {
-        controller.updateSettings("drv-002", { autoAcceptDispatch: true } as any, driver1Identity);
+        controller.updateSettings(
+          "drv-002",
+          { autoAcceptDispatch: true } as any,
+          driver1Identity,
+        );
       } catch (err: any) {
         expect(err.getStatus()).toBe(404);
         expect(err.code).toBe("DRIVER_SETTINGS_NOT_FOUND");
@@ -647,11 +764,23 @@ describe("BE-DRV-AUTHZ-001: Driver Authorization Server-Side Enforcement", () =>
 
       // checkQualification with another operator ID -> 403 SAFETY_OPERATOR_IDENTITY_MISMATCH
       expect(() =>
-        controller.checkQualification("op-other", "sb-1", undefined, undefined, driver1Identity),
+        controller.checkQualification(
+          "op-other",
+          "sb-1",
+          undefined,
+          undefined,
+          driver1Identity,
+        ),
       ).toThrowError(ApiRequestError);
 
       try {
-        controller.checkQualification("op-other", "sb-1", undefined, undefined, driver1Identity);
+        controller.checkQualification(
+          "op-other",
+          "sb-1",
+          undefined,
+          undefined,
+          driver1Identity,
+        );
       } catch (err: any) {
         expect(err.getStatus()).toBe(403);
         expect(err.code).toBe("SAFETY_OPERATOR_IDENTITY_MISMATCH");
@@ -708,9 +837,15 @@ describe("BE-DRV-AUTHZ-001: Driver Authorization Server-Side Enforcement", () =>
       const driverProfileService = new DriverProfileService(audit);
       const mockJwtAuthService = {
         sign: () => "mock-jwt-token",
-        issueSessionToken: async () => ({ token: "mock-jwt-token", expiresAt: new Date().toISOString() }),
+        issueSessionToken: async () => ({
+          token: "mock-jwt-token",
+          expiresAt: new Date().toISOString(),
+        }),
       };
-      const service = new DriverDeviceSessionService(mockJwtAuthService as any, driverProfileService);
+      const service = new DriverDeviceSessionService(
+        mockJwtAuthService as any,
+        driverProfileService,
+      );
 
       const issued = await service.issueRegistrationInvitation({
         driverId: "drv-002",

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PaymentChargeService } from "../../../apps/api/src/modules/passenger-app/payment/payment-charge.service";
 import { PaymentTokenCipher } from "../../../apps/api/src/modules/passenger-app/payment/payment-token-cipher";
@@ -6,7 +7,10 @@ import type {
   PaymentChargeRepository,
   StoredCharge,
 } from "../../../apps/api/src/modules/passenger-app/payment/payment-charge.repository";
-import { PassengerOtpService } from "../../../apps/api/src/modules/passenger-app/otp/passenger-otp.service";
+import {
+  PassengerOtpService,
+  otpOptionsFromEnv,
+} from "../../../apps/api/src/modules/passenger-app/otp/passenger-otp.service";
 import { PassengerAccountService } from "../../../apps/api/src/modules/passenger-app/account/passenger-account.service";
 import { PassengerJwtService } from "../../../apps/api/src/common/auth/passenger-jwt.service";
 import { ReviewSmsPort } from "../../../apps/api/src/modules/passenger-app/review-demo/review-sms.port";
@@ -180,17 +184,21 @@ describe("shared rehearsal replaces external ports, retaining product commands",
       new MemoryPassengerStore(),
       new PassengerJwtService(),
     );
+    const profile = JSON.parse(
+      readFileSync(
+        new URL(
+          "../../../apps/api/src/modules/passenger-app/review-demo/simulation-profile.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
     const otp = new PassengerOtpService(
       new MemoryOtpStore(),
       accounts,
       null,
       sms,
-      {
-        pepper: "synthetic-unit-pepper-at-least-32-characters",
-        fromEmail: "",
-        ipHourlyLimit: 20,
-        trustedProxyHops: 0,
-      },
+      otpOptionsFromEnv({ NODE_ENV: "production", ...profile.otp }),
     );
     const target = "0900000001";
     const requested = await otp.request(

@@ -519,7 +519,18 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
     );
     await ops.getByRole("button", { name: "恢復演練供給" }).click();
     await ops.getByRole("button", { name: "依原流程重新派遣" }).click();
-    await assign(ops);
+    const cancelledAssignment = await assign(ops);
+    await driver.goto(`${DRIVER}/jobs`);
+    await driver
+      .getByRole("button")
+      .filter({
+        has: driver.getByText(cancelledAssignment.taskId, { exact: true }),
+      })
+      .click();
+    const cancellationHeader = `${cancelledAssignment.taskId} · ${cancelled}`;
+    await expect(
+      driver.getByText(cancellationHeader, { exact: true }),
+    ).toBeVisible();
     pax.on("dialog", (dialog) => void dialog.accept());
     await pax
       .getByRole("button", { name: "取消行程", exact: true })
@@ -533,7 +544,17 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
       pax.getByText("此行程已取消", { exact: false }).first(),
     ).toBeVisible();
     await opsRead(ops, cancelled);
-    await driver.goto(`${DRIVER}/jobs`);
+    await driver.reload();
+    await expect(
+      driver.getByText(cancellationHeader, { exact: true }),
+    ).toBeVisible();
+    await expect(driver.getByText(/已取消|平台取消/).first()).toBeVisible();
+    for (const name of ["接受任務", "開始行程", "完成行程"]) {
+      for (const button of await driver
+        .getByRole("button", { name, exact: true })
+        .all())
+        await expect(button).toBeDisabled();
+    }
     const cancelledFacts = await recordOrderEvidence(
       cancelled,
       "C-cancelled-history",
@@ -553,6 +574,13 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
       expect(historyText).toContain(id);
     await pax.goto(`${PAX}/rides`);
     await pax.reload();
+    for (const id of [normal, retry, cancelled])
+      await expect(pax.locator(`a[href="/rides/${id}"]`)).toBeVisible();
+    await expect(
+      pax
+        .locator(`a[href="/rides/${cancelled}"]`)
+        .getByText("乘客取消", { exact: true }),
+    ).toBeVisible();
     await info.attach("history-after-refresh", {
       body: await pax.screenshot({ fullPage: true }),
       contentType: "image/png",

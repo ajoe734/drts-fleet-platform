@@ -1,4 +1,27 @@
 import { defineConfig } from "@playwright/test";
+import { readFileSync } from "node:fs";
+
+const simulation = JSON.parse(
+  readFileSync(
+    new URL(
+      "./apps/api/src/modules/passenger-app/review-demo/simulation-profile.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+) as {
+  otp: Record<string, string>;
+  payment: Record<
+    string,
+    string | { activeKeyId: string; keys: Record<string, string> }
+  >;
+};
+const simulationPayment = Object.fromEntries(
+  Object.entries(simulation.payment).map(([name, value]) => [
+    name,
+    typeof value === "string" ? value : JSON.stringify(value),
+  ]),
+);
 
 // Runtime and browser services belong solely to the existing hosted lane.
 if (process.env.GITHUB_ACTIONS !== "true")
@@ -15,15 +38,9 @@ const apiEnvironment = {
   JWT_AUDIENCE: "drts-api",
   DRTS_DEV_MFA_WAIVED: "true",
   PAX_REVIEW_DEMO_ENABLED: "true",
-  PASSENGER_OTP_PEPPER: "public-ci-rehearsal-pepper-at-least-32-characters",
+  ...simulation.otp,
+  ...simulationPayment,
   PSP_PROVIDER: "fake",
-  PSP_MERCHANT_ID: "synthetic-ci-merchant",
-  PSP_API_KEY: "synthetic-ci-key",
-  PSP_SANDBOX: "true",
-  PSP_TOKEN_ENCRYPTION_KEY_NAME: JSON.stringify({
-    activeKeyId: "ci",
-    keys: { ci: Buffer.alloc(32, 7).toString("base64") },
-  }),
   PAX_PAYMENT_CAPTURE_ENABLED: "true",
   PAX_PAYMENT_CAPTURE_POLICY: JSON.stringify({
     retryDelaysMs: [60_000],

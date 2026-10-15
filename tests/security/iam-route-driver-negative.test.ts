@@ -541,7 +541,7 @@ describe("IAM Route Driver Operations Negative Matrix", () => {
   });
 
   describe("3. Forwarder Driver Task Views & Assignment Boundary", () => {
-    it("scopes driver task views query strictly to self without trusting driverId query", () => {
+    it("scopes driver task views query strictly to self without trusting driverId query", async () => {
       const { forwarderController } = createDriverFixture();
 
       const driver1Identity: BootstrapRequestIdentity = {
@@ -556,7 +556,7 @@ describe("IAM Route Driver Operations Negative Matrix", () => {
         requestId: null,
       };
 
-      const response = forwarderController.listDriverTaskViews(
+      const response = await forwarderController.listDriverTaskViews(
         driver1Identity,
         "drv-002", // mismatched requested driver ID is ignored in favor of self
       );
@@ -590,15 +590,15 @@ describe("IAM Route Driver Operations Negative Matrix", () => {
       };
 
       // Driver 1 viewing Driver 2's task view
-      expect(() =>
+      await expect(
         forwarderController.getDriverTaskView(
           order.mirrorOrderId,
           driver1Identity,
         ),
-      ).toThrowError(ApiRequestError);
+      ).rejects.toThrowError(ApiRequestError);
 
       try {
-        forwarderController.getDriverTaskView(
+        await forwarderController.getDriverTaskView(
           order.mirrorOrderId,
           driver1Identity,
         );

@@ -157,19 +157,19 @@ downloads and the whitelisted journal omit authentication/OTP/device secrets.
 
 All commands use Node 22.23.2 / pnpm 10.33.0 / Vitest 4.1.4.
 
-| Check                                                    | Result and log under `.local/pax-review-shared-order-demo-20261015/`                                                                         |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| External-port old-source reproduction                    | Two product assertion failures as expected; `historical/verification.json`                                                                   |
-| Persisted caller old-source reproduction                 | Two product assertion failures as expected; `historical-reads/verification.json`                                                             |
-| Payment / OTP / BFF / shared-order regression            | 577 pass, 10 hosted PG skips; `final-ports-regression.log`                                                                                   |
-| Existing API controller/repository/Forwarder regression  | 63 pass; `api-caller-final.log`                                                                                                              |
-| Existing Driver regression                               | 542 pass; `driver-regression.log`                                                                                                            |
-| New Driver producer / recovery boundary                  | 3 pass; final rerun and separate native tsconfig check pending                                                                               |
-| Ops map existing regression                              | 1 pass after read-interface adaptation; `ops-map-final-fixed.log`                                                                            |
-| Production Passenger and SDK build                       | Exit 0; `passenger-production-build.log`                                                                                                     |
-| Production API build / API, Passenger, Driver typechecks | Exit 0; respective `api-production-build`, `api-typecheck-persisted-fixed`, `web-typecheck-final`, `driver-typecheck-final` logs             |
-| Root typecheck                                           | Initial mixed Expo/Node type context failed; native tests now use Driver tsconfig and retain explicit hosted checks; separated rerun pending |
-| Hosted formal PG / three-role browser / shared dev       | Pending, never run on VM                                                                                                                     |
+| Check                                                    | Result and log under `.local/pax-review-shared-order-demo-20261015/`                                                             |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| External-port old-source reproduction                    | Two product assertion failures as expected; `historical/verification.json`                                                       |
+| Persisted caller old-source reproduction                 | Two product assertion failures as expected; `historical-reads/verification.json`                                                 |
+| Payment / OTP / BFF / shared-order regression            | 577 pass, 10 hosted PG skips; `final-ports-regression.log`                                                                       |
+| Existing API controller/repository/Forwarder regression  | 63 pass; `api-caller-final.log`                                                                                                  |
+| Existing Driver regression                               | 542 pass; `driver-regression.log`                                                                                                |
+| New Driver producer / recovery boundary                  | 3 pass, Driver tsconfig exit 0; `driver-finite-final.log`, `driver-tests-typecheck.log`                                          |
+| Ops map existing regression                              | 1 pass after read-interface adaptation; `ops-map-final-fixed.log`                                                                |
+| Production Passenger and SDK build                       | Exit 0; `passenger-production-build.log`                                                                                         |
+| Production API build / API, Passenger, Driver typechecks | Exit 0; respective `api-production-build`, `api-typecheck-persisted-fixed`, `web-typecheck-final`, `driver-typecheck-final` logs |
+| Root typecheck                                           | Exit 0 after native type-context separation and original async caller adaptation; `root-typecheck-candidate.log`                 |
+| Hosted formal PG / three-role browser / shared dev       | Pending, never run on VM                                                                                                         |
 
 Checkpoint branches/anchors are `356cbefc3`, `b31fcb44d`, `7c34a5853` and the
 subsequent persisted-reader anchor. They are recovery records, not accepted
@@ -189,3 +189,55 @@ readback/refund maps remain process memory. This finite rehearsal does not
 claim real provider reconciliation/refund/restart durability. Qualifications,
 SMS, map selection, GPS, PSP and notification are simulated and labelled;
 backend account/order/dispatch/task/payment/rating/case facts remain real.
+
+## Delivery wiring and final caller feedback
+
+Supervisor's immutable `7c34a5853` delivery check found D2: the most recent
+release run `38656657549` had absent/partial OTP and payment groups, while
+review capture was enabled. The original runtime correctly rejects unavailable
+capture; CI's previous separate filled configuration could not prove shared-dev
+startup. The new explicit `review-demo/simulation-profile.json` supplies PUBLIC
+synthetic OTP/provider/cipher environment values only for absent groups during
+the opt-in review deployment. Complete existing groups retain their references;
+ordinary optional-group behavior is unchanged. No cipher implementation, real
+provider credential, Secret Manager value, IAM policy or crypto fallback was
+added. The stable named public simulation ring is passed explicitly into the
+original cipher contract, is identical in hosted CI and shared dev, and is
+strictly for synthetic provider tokens. This is not protection for real
+customer financial tokens. Keep its historical key entries if this simulation
+profile is deliberately rotated; do not swap it for an unrelated ring while
+retained rehearsal tokens still need to decrypt.
+
+`simulation-profile.test.ts` calls the real runtime/capture configuration
+readers, confirms missing groups remain unavailable, proves the explicit
+profile configures capture, binds a retry token, encrypts it with one runtime
+and decrypts with a fresh peer, then observes first failure/second success.
+The existing real OTP/account/session/replay test now consumes the exact same
+profile through `otpOptionsFromEnv`. `final-simulation-iam.log` records 27 passes
+(five adapter/profile cases plus 22 existing IAM cases). An initial profile
+test used the wrong capture-command field; it was corrected to the actual
+`token` contract before these passes and is not product-failure evidence.
+
+The exact Python selector embedded in the workflow was executed for all four
+OTP/payment completeness combinations, injecting only the absent slots:
+`workflow-profile-selector.json`. Both workflow YAML files parse, all 87 shell
+blocks pass `bash -n`, and no runtime/deployment was started. D1 (optional empty
+Ops origin) is not triggered on the current target: live Ops origin is absolute.
+The reviewed entry requires that existing configured origin; this checkpoint
+does not claim a new empty-origin fallback.
+
+Root typecheck exposed two existing security-test callers of the newly async
+HTTP facade. Supervisor granted those exact files; only await/rejection
+adaptation and formatting changed. Original Driver self/query mismatch,
+cross-driver 403/404, hidden existence and all business assertions remain.
+`iam-route-final.log` records 10 passes and the combined final log also includes
+all 12 authz cases. These adapt existing checks and add no security mechanism.
+
+Supervisor's early static browser feedback at fixed `7c34a5853` identified
+`C_DRIVER_SAME_ORDER_ASSERTION` and `HISTORY_RENDERED_UUID_ASSERTIONS`. The C
+journey now opens the actual assigned task in Driver and asserts the exact
+task/order header before Passenger cancellation, reloads the same view and
+asserts terminal cancellation with no enabled accept/start/complete controls.
+History now asserts the three rendered `/rides/<UUID>` links and C's rendered
+Passenger cancellation status before its screenshot. These assertions are
+implemented and typechecked, with actual hosted results still pending.

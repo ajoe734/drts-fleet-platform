@@ -1054,10 +1054,23 @@ jobs:
           env_vars="${env_vars}@OAUTH_REDIRECT_ALLOWLIST=${oauth_redirect_allowlist}@REQUIRE_SMS_VERIFICATION=false"
           env_vars="${env_vars}@PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
           if [[ "${DEV_PAX_REVIEW_DEMO_ENABLED:-false}" == "true" ]]; then
-            # Only external adapters are synthetic. The existing secret groups
-            # still supply the OTP pepper and payment-token encryption key.
-            # Sandbox merchant/API values are simulation configuration, not a
-            # requirement for a real SMS/PSP account or actual monetary traffic.
+            # Existing complete groups keep their references. Absent groups
+            # receive the explicit PUBLIC synthetic profile; never generate a
+            # new key at boot or require a real SMS/financial account. The
+            # original OTP/provider/cipher readers validate these env values.
+            review_simulation_env="$(python3 - '${{ steps.passenger_secrets.outputs.otp_mounts_complete }}' '${{ steps.passenger_secrets.outputs.payment_mounts_complete }}' <<'PY_REVIEW'
+          import json
+          import sys
+          from pathlib import Path
+          profile = json.loads(Path('apps/api/src/modules/passenger-app/review-demo/simulation-profile.json').read_text())
+          values = {}
+          for group, complete in zip(('otp', 'payment'), sys.argv[1:]):
+              if complete != 'true':
+                  values.update(profile[group])
+          print(''.join('@' + key + '=' + (value if isinstance(value, str) else json.dumps(value, separators=(',', ':'))) for key, value in values.items()))
+          PY_REVIEW
+          )"
+            env_vars="${env_vars}${review_simulation_env}"
             env_vars="${env_vars}@PSP_PROVIDER=fake@PAX_PAYMENT_CAPTURE_ENABLED=true@PAX_PAYMENT_CAPTURE_POLICY={\"retryDelaysMs\":[60000],\"retryDefinitiveDeclines\":false,\"unknownReadbackDelaysMs\":[1000,3000]}@MULTI_TAXI_DEFAULT_AUTHORIZATION_ID=bc39e4f3-72d8-4383-bdc1-2426c1330dfa@PAX_REVIEW_OPS_URL=${{ needs.prepare.outputs.ops_console_origin }}/review@SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES=1"
           fi
           if [[ "${{ steps.api_secrets.outputs.oidc_enabled }}" == "true" ]]; then
