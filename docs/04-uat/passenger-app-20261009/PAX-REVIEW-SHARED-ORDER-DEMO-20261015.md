@@ -942,4 +942,28 @@ locked Next 16.3.8 and Vitest 4.1.4. Only this worktree's 22 restored canonical
 dependency symlinks were unlinked, followed by offline frozen installation with
 scripts disabled, exit 0; canonical dependencies and tracked lockfiles remain
 unchanged. No product server, browser, Playwright CLI, PG or Compose was started.
-Affected regression/type/lint/format results will be appended after completion.
+Final affected review/OTP/account-session/web-shell/web-auth regression completed
+**384 pass / 3 original hosted-PG skips**, exit 0 (`regression.log`). The focused
+three-case run also completed, exit 0 (`after-focused.log`); counts overlap.
+Root typecheck, Passenger `next typegen && tsc --noEmit`, explicit typecheck of
+both TSX regressions, scoped ESLint, Prettier and `git diff --check` all completed
+with exit 0. The TypeScript AST/source probe confirms all 28 original login
+assertion-call nodes remain in order (30 now), and the original browser spec,
+config, CI/deploy workflows, SDK, BFF and OTP/account controllers/services are
+byte-identical to 469 (`source-invariants.cjs` / `.json`).
+
+The final identical two regressions were also run with a local Vite load hook
+reading only the two product pages from immutable 469 via `git show`, without
+resetting or editing the active tree. Both fail specifically at the receiver
+assertions, exit 1 (`immutable-before.log`), while their repaired sources pass
+in the final regression. Command: `pnpm exec vitest run
+tests/unit/pax-review-shared-order-demo-20261015/review-login.test.tsx
+tests/unit/pax-review-shared-order-demo-20261015/review-record-fetch.test.tsx
+--config .local/pax-review-shared-order-demo-20261015/r15-login/vitest.before.config.ts
+--maxWorkers=2 --reporter=verbose`. The earlier hook-config attempt used an
+incorrect relative config import and failed at startup
+(`immutable-before-config-error.log`); it is not reproduction evidence.
+All local checks have terminated and their results were read. The original
+469 run's remaining jobs are left to its existing collector; no rerun or
+cancellation was requested. These changes require new same-source review and
+hosted CI/browser/PG results before any of the original acceptance keys qualify.
