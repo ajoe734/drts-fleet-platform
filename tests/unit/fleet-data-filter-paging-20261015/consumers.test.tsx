@@ -215,7 +215,7 @@ afterEach(() => {
 
 const pairs = [
   ["insurance_replacement_vehicle", "insurance", "Insurance replacement"],
-  ["travel_agency_transfer", "travel", "Travel agency"],
+  ["travel_agency_transfer", "travel", "Travel partner"],
   ["enterprise_dispatch", "business", "Business dispatch"],
   ["credit_card_airport_transfer", "airport", "Airport transfer"],
 ] as const;
@@ -232,7 +232,7 @@ describe("C069 legitimate producer subtypes through SDK, mapper, badges and CSV"
       const view = await h.data.loadTrips(period);
       expect(view.error).toBeNull();
       expect(view.rows.map((r) => r.svc)).toEqual(pairs.map(([, svc]) => svc));
-      for (const [i, [, svc]] of pairs.entries()) {
+      for (const [i, [, svc, label]] of pairs.entries()) {
         const ui = h.wrap(
           await h.trips({
             searchParams: Promise.resolve({
@@ -246,6 +246,7 @@ describe("C069 legitimate producer subtypes through SDK, mapper, badges and CSV"
         const rows = within(screen.getByRole("table")).getAllByRole("row");
         expect(rows).toHaveLength(2);
         expect(rows[1]?.textContent).toContain(`order-${i}`);
+        expect(within(rows[1]!).getByText(label)).toBeTruthy();
         const response = await h.csv(
           new NextRequest(
             `https://portal.test/trips/export?period=${period}&svc=${svc}&q=MATCH&status=completed&page=999`,
@@ -314,7 +315,7 @@ describe("C069 actual trips page pagination and whole matching export", () => {
       ).toBe(false);
       expect(ui.container.querySelector('form input[name="page"]')).toBeNull();
       const exportHref = screen
-        .getByRole("link", { name: "Export" })
+        .getByRole("link", { name: /Export/ })
         .getAttribute("href")!;
       const csv = await h.csv(
         new NextRequest(new URL(exportHref, "https://portal.test")),
