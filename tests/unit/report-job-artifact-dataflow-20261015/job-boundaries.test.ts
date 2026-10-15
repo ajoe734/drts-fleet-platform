@@ -195,7 +195,7 @@ describe("report job record routing boundaries", () => {
     for (const identity of [
       { ...tenant, tenantId: "tenant-b" },
       { ...tenant, scopes: ["unrelated:read"] },
-      { ...tenant, actorType: "tenant_user" },
+      { ...tenant, actorType: "ops_observer" as const },
     ]) {
       expect(() =>
         service.renderReportArtifact(

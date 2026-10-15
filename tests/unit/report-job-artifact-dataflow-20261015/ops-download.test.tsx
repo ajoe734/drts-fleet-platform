@@ -110,4 +110,43 @@ describe("Ops completed-report download action", () => {
     await screen.findByText("EVIDENCE_ACCESS_FORBIDDEN");
     expect(open).not.toHaveBeenCalled();
   });
+
+  it("displays the queried partnerRevenueRows through the same download action", async () => {
+    const job = {
+      ...report("/reports/JOB-123/artifact"),
+      rows: [],
+      partnerRevenueRows: [
+        {
+          orderNo: "REVENUE-ORDER-1",
+          partnerId: "partner-test",
+          partnerEntrySlug: "airport-test",
+          partnerProgramId: "program-test",
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          eligibilityVerificationId: "verification-test",
+          issuerAuthorizationRef: "issuer-a...2468",
+          benefitReference: "benefit-...2468",
+          amount: { currency: "TWD", amountMinor: 150000 },
+        },
+      ],
+    };
+    client.listReportJobs.mockResolvedValue([job]);
+    client.getReportJob.mockResolvedValue(job);
+    vi.spyOn(window, "open").mockReturnValue(null);
+    render(<ReportsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Download/ }));
+    await screen.findByText("REVENUE-ORDER-1");
+    expect(screen.getAllByText("REVENUE-ORDER-1")).toHaveLength(
+      job.partnerRevenueRows.length,
+    );
+    for (const value of [
+      "partner-test",
+      "airport-test",
+      "verification-test",
+      "issuer-a...2468",
+      "benefit-...2468",
+      "TWD 1500",
+    ]) {
+      expect(screen.getByText(value)).toBeTruthy();
+    }
+  });
 });
