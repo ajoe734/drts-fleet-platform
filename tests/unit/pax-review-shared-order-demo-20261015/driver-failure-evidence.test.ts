@@ -67,13 +67,12 @@ async function exercise(options: Options) {
     },
     isClosed: () => options.closed ?? false,
     getByText(label: string, locatorOptions: { exact: boolean }) {
-      const page = this;
       expect(locatorOptions.exact).toBe(true);
       return {
         first: () => ({
           isVisible: async () => {
             if (options.redirectDuringProbe)
-              page.currentURL = new URL("onboarding", page.currentURL).href;
+              this.currentURL = new URL("onboarding", this.currentURL).href;
             if (options.uiProbeFails) throw new Error("UI probe unavailable");
             return options.visibleLabels?.includes(label) ?? false;
           },
