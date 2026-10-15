@@ -25,6 +25,12 @@ import {
   type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
+import {
+  REIMBURSEMENT_WORKFLOW_STEPS,
+  deriveReimbursementWorkflowState,
+  formatReimbursementMoney,
+  type ReimbursementWorkflowState,
+} from "../reimbursement-readback";
 import { proofT } from "../translations";
 
 const theme = buildCanvasTheme({
@@ -32,16 +38,9 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-const WORKFLOW_STEPS = [
-  "draft",
-  "pending_approval",
-  "approved",
-  "exported",
-  "paid",
-  "reconciled",
-] as const;
+const WORKFLOW_STEPS = REIMBURSEMENT_WORKFLOW_STEPS;
 
-type WorkflowStep = (typeof WORKFLOW_STEPS)[number];
+type WorkflowStep = ReimbursementWorkflowState;
 
 type TimelineEntry = {
   at: string;
@@ -266,28 +265,8 @@ function GateRow({
   );
 }
 
-function formatMoney(
-  amount?: { amountMinor: number; currency: string } | null,
-) {
-  if (!amount) return "—";
-  return `${amount.amountMinor.toLocaleString()} ${amount.currency}`;
-}
-
-function getWorkflowState(batch: ReimbursementBatchRecord): WorkflowStep {
-  if (batch.status === "paid") {
-    return "paid";
-  }
-  if (batch.remittanceProofId) {
-    return "exported";
-  }
-  if (batch.approvedAt) {
-    return "approved";
-  }
-  if (batch.items.length === 0) {
-    return "draft";
-  }
-  return "pending_approval";
-}
+const formatMoney = formatReimbursementMoney;
+const getWorkflowState = deriveReimbursementWorkflowState;
 
 function workflowTone(step: WorkflowStep): CanvasTone {
   switch (step) {
