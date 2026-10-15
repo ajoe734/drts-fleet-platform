@@ -70,8 +70,7 @@ it("the real review buttons send only OTP command fields through SDK/BFF, retain
     otp,
     sms,
     accounts,
-    // Unused booking/payment/database/supply dependencies are never called.
-    null!,
+    // Unused booking/payment/database dependencies are never called.
     null!,
     null!,
     null!,

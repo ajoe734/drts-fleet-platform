@@ -56,7 +56,10 @@ import type { PaymentRuntime } from "./payment/payment-runtime.config";
 import { MultiTaxiRepository } from "../multi-taxi/multi-taxi.repository";
 import { reviewDemoEnabled } from "./review-demo/review-demo.config";
 import { ReviewSmsPort } from "./review-demo/review-sms.port";
-import { ReviewDemoController } from "./review-demo/review-demo.controller";
+import {
+  ReviewDemoController,
+  ReviewDemoOpsController,
+} from "./review-demo/review-demo.controller";
 import { ReviewSupplyService } from "./review-demo/review-supply.service";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
 import {
@@ -89,6 +92,7 @@ import {
     PaymentMethodController,
     PaymentRefundController,
     ReviewDemoController,
+    ReviewDemoOpsController,
   ],
   providers: [
     PassengerJwtService,

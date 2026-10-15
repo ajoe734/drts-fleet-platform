@@ -116,7 +116,7 @@ export default function SharedOrderReviewOps() {
               disabled={busy}
               onClick={() =>
                 void run(async () => {
-                  await command("/api/passenger-app/review-demo/prepare", {});
+                  await command("/api/ops/review-demo/prepare", {});
                   setMessage(t.prepared);
                 })
               }

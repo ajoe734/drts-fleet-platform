@@ -22,6 +22,19 @@ import { reviewDemoEnabled } from "./review-demo.config";
 import { ReviewSmsPort } from "./review-sms.port";
 import { ReviewSupplyService } from "./review-supply.service";
 
+@Controller("ops/review-demo")
+export class ReviewDemoOpsController {
+  constructor(private readonly supply: ReviewSupplyService) {}
+
+  @Post("prepare")
+  @RequireRealms("ops", "platform", "system")
+  async prepare() {
+    if (!reviewDemoEnabled(process.env))
+      throw new ApiRequestError(404, "not_found", "Rehearsal is not enabled.");
+    return toApiSuccessEnvelope(await this.supply.prepare());
+  }
+}
+
 @Controller("passenger-app/review-demo")
 export class ReviewDemoController {
   constructor(
@@ -31,7 +44,6 @@ export class ReviewDemoController {
     private readonly bookings: PassengerBookingService,
     private readonly charges: PaymentChargeService,
     private readonly database: DatabaseService,
-    private readonly supply: ReviewSupplyService,
   ) {}
 
   private enabled() {
@@ -46,13 +58,6 @@ export class ReviewDemoController {
       enabled: reviewDemoEnabled(process.env),
       opsUrl: process.env.PAX_REVIEW_OPS_URL || "",
     });
-  }
-
-  @Post("prepare")
-  @RequireRealms("ops", "platform", "system")
-  async prepare() {
-    this.enabled();
-    return toApiSuccessEnvelope(await this.supply.prepare());
   }
 
   @Post("otp")

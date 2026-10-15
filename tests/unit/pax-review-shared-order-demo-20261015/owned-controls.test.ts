@@ -33,7 +33,6 @@ it("review retry/download use the real booking ownership admission before charge
     booking,
     charge as never,
     database as never,
-    {} as never,
   );
   const id = "b18bd875-0b10-4d89-b3d8-90f9e9d3a372";
   await expect(controller.retryPayment(null, id)).rejects.toMatchObject({
