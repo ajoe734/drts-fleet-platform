@@ -8,6 +8,7 @@ import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { afterEach, expect, it, vi } from "vitest";
 import { accumulateTripDistanceKm } from "../../../apps/driver-app/lib/trip-metrics";
+import * as heartbeat from "../../../apps/driver-app/lib/driver-location-heartbeat";
 
 // Browser Worker/CSP enforcement and native queue persistence are external
 // boundaries. Next's header resolver, Expo's worker factory and the actual
@@ -77,6 +78,7 @@ async function headersFor(url: string) {
   const resolve = getResolveRoutes(
     {
       buildId: "socket-free-header-probe",
+      onMatchHeaders: [],
       headers: routes.headers.map((route: { source: string }) => ({
         ...route,
         match: getPathMatch(route.source),
@@ -169,8 +171,6 @@ it("the mounted Driver can initialize Expo's real worker and feed real trip dist
   vi.stubEnv("EXPO_PUBLIC_REVIEW_DEMO", "true");
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-10-15T06:00:00Z"));
-  const heartbeat =
-    await import("../../../apps/driver-app/lib/driver-location-heartbeat");
   let previous: { latitude: number; longitude: number } | null = null;
   let distance = 0;
   const unsubscribe = heartbeat.subscribeToDriverLocationUpdates((update) => {
