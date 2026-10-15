@@ -858,6 +858,8 @@ export class MultiTaxiService implements OnModuleInit {
           this.passengerViewVersionKey(current.view, current.eventType),
       ),
       map(({ view, eventType }) => ({
+        type: eventType,
+        retry: 3_000,
         data: {
           eventId: randomUUID(),
           eventType,
