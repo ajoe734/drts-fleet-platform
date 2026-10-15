@@ -74,6 +74,7 @@ import {
   PlatformAdminRepository,
   type PersistPlatformAdminChanges,
 } from "./platform-admin.repository";
+import { buildMinimalPdf, buildPlacardPdfRows } from "./placard-pdf.renderer";
 
 /**
  * Warning window for adapter credential expiry (SR-ADMIN-ADAPTER-001):
@@ -91,123 +92,6 @@ const CREDENTIAL_EXPIRY_WARNING_WINDOW_DAYS = 14;
  * retry here is always safe.
  */
 const PLACARD_PUBLICATION_RESTORE_ATTEMPTS = 3;
-
-// ── Placard PDF rendering (SR-PLACARD-001) ──────────────────────────────────
-// Dependency-free, minimal PDF-1.4 writer for vehicle placards.
-// Matches the minimal PDF-1.4 writer used by billing settlement (SR-INVOICE-001).
-
-const PLACARD_PDF_LINES_PER_PAGE = 40;
-
-function toPdfAsciiText(value: string): string {
-  return value.replace(/[^\x20-\x7e]/g, "?");
-}
-
-function escapePdfLiteralText(value: string): string {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/\(/g, "\\(")
-    .replace(/\)/g, "\\)");
-}
-
-function chunkPdfLines(lines: string[], size: number): string[][] {
-  const chunks: string[][] = [];
-  for (let index = 0; index < lines.length; index += size) {
-    chunks.push(lines.slice(index, index + size));
-  }
-  return chunks.length > 0 ? chunks : [[]];
-}
-
-function buildPdfPageContentStream(lines: string[]): string {
-  const operators: string[] = ["BT", "/F1 10 Tf", "40 760 Td"];
-  lines.forEach((line, index) => {
-    if (index > 0) {
-      operators.push("0 -16 Td");
-    }
-    operators.push(`(${escapePdfLiteralText(toPdfAsciiText(line))}) Tj`);
-  });
-  operators.push("ET");
-  return operators.join("\n");
-}
-
-function buildMinimalPdf(lines: string[]): Buffer {
-  const pages = chunkPdfLines(lines, PLACARD_PDF_LINES_PER_PAGE);
-  const pageCount = pages.length;
-  const fontId = 3 + pageCount * 2;
-  const totalObjects = fontId;
-  const objectBodies: string[] = new Array(totalObjects + 1).fill("");
-  const kids = Array.from(
-    { length: pageCount },
-    (_, index) => `${3 + index * 2} 0 R`,
-  ).join(" ");
-
-  objectBodies[1] = `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`;
-  objectBodies[2] = `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>\nendobj\n`;
-
-  pages.forEach((pageLines, index) => {
-    const pageId = 3 + index * 2;
-    const contentId = 4 + index * 2;
-    const content = buildPdfPageContentStream(pageLines);
-    const contentByteLength = Buffer.byteLength(content, "latin1");
-    objectBodies[pageId] =
-      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 ${fontId} 0 R >> >> /MediaBox [0 0 612 792] /Contents ${contentId} 0 R >>\nendobj\n`;
-    objectBodies[contentId] =
-      `${contentId} 0 obj\n<< /Length ${contentByteLength} >>\nstream\n${content}\nendstream\nendobj\n`;
-  });
-
-  objectBodies[fontId] =
-    `${fontId} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`;
-
-  const header = "%PDF-1.4\n";
-  const offsets: number[] = new Array(totalObjects + 1).fill(0);
-  let offset = Buffer.byteLength(header, "latin1");
-  let body = "";
-  for (let id = 1; id <= totalObjects; id += 1) {
-    offsets[id] = offset;
-    const objectBody = objectBodies[id]!;
-    body += objectBody;
-    offset += Buffer.byteLength(objectBody, "latin1");
-  }
-
-  const xrefOffset = offset;
-  let xref = `xref\n0 ${totalObjects + 1}\n0000000000 65535 f \n`;
-  for (let id = 1; id <= totalObjects; id += 1) {
-    xref += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
-  }
-  const trailer = `trailer\n<< /Size ${totalObjects + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-
-  return Buffer.from(header + body + xref + trailer, "latin1");
-}
-
-function buildPlacardPdfRows(
-  placard: Pick<
-    PlacardVersionRecord,
-    | "placardVersionId"
-    | "versionCode"
-    | "templateName"
-    | "publishedAt"
-    | "createdAt"
-  >,
-  source: PublicInfoVersionRecord,
-): string[] {
-  return [
-    `Vehicle Service Placard`,
-    `========================================`,
-    `Version Code: ${placard.versionCode}`,
-    `Placard ID: ${placard.placardVersionId}`,
-    `Template: ${placard.templateName}`,
-    `Public Info Source: ${toPdfAsciiText(source.title)} (${source.versionId})`,
-    `Source Status: ${source.status}`,
-    `Booking / Dispatch Phone: ${toPdfAsciiText(source.callPhone ?? "N/A")}`,
-    `Customer Complaint Hotline: ${toPdfAsciiText(source.complaintPhone ?? "N/A")}`,
-    `Call Rate: ${toPdfAsciiText(source.callRateText ?? "N/A")}`,
-    `Fare Rule: ${toPdfAsciiText(source.fareText ?? "N/A")}`,
-    `Payment Methods: ${toPdfAsciiText(source.paymentMethodText ?? "N/A")}`,
-    `Effective Period: ${source.effectiveFrom ?? "N/A"} to ${source.effectiveTo ?? "indefinite"}`,
-    `Published At: ${placard.publishedAt ?? "Draft"}`,
-    `Generated At: ${placard.createdAt}`,
-    `========================================`,
-  ];
-}
 
 const PUBLIC_INFO_SEED: PublicInfoVersionRecord[] = [
   {
