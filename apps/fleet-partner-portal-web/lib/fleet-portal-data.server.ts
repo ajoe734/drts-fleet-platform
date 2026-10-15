@@ -587,6 +587,12 @@ function mapTripService(record: FleetPartnerPortalTripRecord): ServiceKey {
   if (record.businessDispatchSubtype === "enterprise_dispatch") {
     return "business";
   }
+  if (record.businessDispatchSubtype === "insurance_replacement_vehicle") {
+    return "insurance";
+  }
+  if (record.businessDispatchSubtype === "travel_agency_transfer") {
+    return "travel";
+  }
   return "realtime";
 }
 
