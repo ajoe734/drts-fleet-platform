@@ -186,6 +186,9 @@ export class DriverDeviceSessionService implements OnModuleInit {
         // same as the manual revoke() path: binding.status can already read
         // "revoked" here from an earlier attempt that failed after mutating
         // it but before this profile sync ran, so that flag cannot gate it.
+        await this.driverProfileService.prepareProfileAuthority?.(
+          binding.driverId,
+        );
         this.driverProfileService.recordDeviceBindingRevocation(
           binding.driverId,
           invitation.boundBindingId,
@@ -289,7 +292,8 @@ export class DriverDeviceSessionService implements OnModuleInit {
     }
 
     const driverId = invitation.driverId;
-    this.assertDriverAuthEligible(driverId);
+    await this.assertDriverAuthEligible(driverId);
+    await this.driverProfileService.prepareProfileAuthority?.(driverId);
 
     const oldBindingId = await this.revokeActiveBindingForDevice(
       deviceId,
@@ -536,7 +540,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
     }
 
     try {
-      this.assertDriverAuthEligible(binding.driverId);
+      await this.assertDriverAuthEligible(binding.driverId);
     } catch (authError) {
       await this.revokeBindingAndFamily(
         binding.bindingId,
@@ -572,6 +576,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
     }
     this.bindingsById.set(binding.bindingId, binding);
 
+    await this.driverProfileService.prepareProfileAuthority?.(binding.driverId);
     this.driverProfileService.recordDeviceBindingRefresh(
       binding.driverId,
       binding.bindingId,
@@ -651,6 +656,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
       "MANUAL_REVOKE",
     );
 
+    await this.driverProfileService.prepareProfileAuthority?.(binding.driverId);
     this.driverProfileService.recordDeviceBindingRevocation(
       binding.driverId,
       binding.bindingId,
@@ -756,7 +762,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
     }
 
     if (driverId) {
-      this.assertDriverAuthEligible(driverId);
+      await this.assertDriverAuthEligible(driverId);
     }
   }
 
@@ -915,6 +921,9 @@ export class DriverDeviceSessionService implements OnModuleInit {
       reasonCode,
     );
 
+    await this.driverProfileService.prepareProfileAuthority?.(
+      existing.driverId,
+    );
     this.driverProfileService.recordDeviceBindingRevocation(
       existing.driverId,
       existing.bindingId,
@@ -1072,7 +1081,8 @@ export class DriverDeviceSessionService implements OnModuleInit {
     };
   }
 
-  private assertDriverAuthEligible(driverId: string) {
+  private async assertDriverAuthEligible(driverId: string) {
+    await this.regulatoryRegistryService?.prepareDriverAuthority?.(driverId);
     this.regulatoryRegistryService?.assertDriverAuthEligible(driverId);
   }
 

@@ -25,6 +25,7 @@ import { BookingForm, type BookingDraft } from "./booking-form";
 import { FeeDisclosure } from "./disclosure";
 import { BookingConfirmationSheet } from "./confirmation-sheet";
 import { BOOK_T as T } from "../../lib/booking/translations";
+import { useReviewDemo } from "../review-demo/review-context";
 
 type ServiceableQuote = Extract<
   FareQuoteResponse,
@@ -58,6 +59,7 @@ export function BookingScreen({
   paymentSlot,
 }: BookingScreenProps) {
   const router = useRouter();
+  const review = useReviewDemo();
   const [client] = useState(() => supplied ?? createBookingClient());
   const [account, setAccount] = useState<PassengerAccount>();
   const [fare, setFare] = useState<FareVersion>();
@@ -333,7 +335,9 @@ export function BookingScreen({
       submitted.current = true;
       pending.current = null;
       router.push(
-        `/ride?rideId=${encodeURIComponent(result.ride.order.orderId)}`,
+        review
+          ? `/rides/${encodeURIComponent(result.ride.order.orderId)}`
+          : `/ride?rideId=${encodeURIComponent(result.ride.order.orderId)}`,
       );
     } catch (reason) {
       const code =
