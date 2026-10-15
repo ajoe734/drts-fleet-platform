@@ -1027,3 +1027,271 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
     });
   });
 });
+
+// R2 additions exercise gaps in the preserved checkpoint's assertions.
+describe("R2 production query, calendar edges and failure negatives", () => {
+  it("binds period on both real Nest routes and retains third-argument request IDs", async () => {
+    // Actual decorator metadata, rather than trusting the in-process URL adapter.
+    const { ROUTE_ARGS_METADATA } = createRequire(
+      resolve(__dirname, "../../../apps/api/package.json"),
+    )("@nestjs/common/constants") as { ROUTE_ARGS_METADATA: string };
+    for (const method of ["getByPlatform", "getSummary"] as const) {
+      const metadata = Reflect.getMetadata(
+        ROUTE_ARGS_METADATA,
+        PlatformEarningsController,
+        method,
+      ) as Record<string, { index: number; data: string }>;
+      expect(Object.values(metadata)).toContainEqual(
+        expect.objectContaining({ index: 3, data: "period" }),
+      );
+      const controller = new PlatformEarningsController(
+        new PlatformEarningsService(),
+      );
+      const response = await controller[method](
+        makeDriverIdentity("drv-demo-001"),
+        undefined,
+        "legacy-request-id",
+      );
+      expect(response.meta.requestId).toBe("legacy-request-id");
+    }
+  });
+
+  it.each([
+    [
+      "2026-09-30T15:59:59.999Z",
+      "today",
+      "2026-09-30",
+      "2026-09-30",
+      "2026-09-29",
+      "2026-10-01",
+    ],
+    [
+      "2026-09-30T16:00:00.000Z",
+      "today",
+      "2026-10-01",
+      "2026-10-01",
+      "2026-09-30",
+      "2026-10-02",
+    ],
+    [
+      "2026-10-18T15:59:59.999Z",
+      "week",
+      "2026-10-12",
+      "2026-10-18",
+      "2026-10-11",
+      "2026-10-19",
+    ],
+    [
+      "2026-10-18T16:00:00.000Z",
+      "week",
+      "2026-10-19",
+      "2026-10-25",
+      "2026-10-18",
+      "2026-10-26",
+    ],
+    [
+      "2026-12-31T16:00:00.000Z",
+      "week",
+      "2026-12-28",
+      "2027-01-03",
+      "2026-12-27",
+      "2027-01-04",
+    ],
+    [
+      "2026-12-31T16:00:00.000Z",
+      "month",
+      "2027-01-01",
+      "2027-01-31",
+      "2026-12-31",
+      "2027-02-01",
+    ],
+    [
+      "2028-02-15T04:00:00.000Z",
+      "month",
+      "2028-02-01",
+      "2028-02-29",
+      "2028-01-31",
+      "2028-03-01",
+    ],
+  ])(
+    "uses inclusive DATE bounds via controller at %s for %s",
+    async (now, period, from, to, before, after) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(now));
+      const rows = [before, from, to, after].map((date, index) => ({
+        driver_id: OWN_DRIVER_UUID,
+        platform_code: PLATFORM_CODE_UBER,
+        period_date: date,
+        currency_code: "TWD",
+        gross_minor: (index + 1) * 100,
+        fee_minor: index + 1,
+        subsidy_minor: 2 * (index + 1),
+        net_minor: (index + 1) * 101,
+      }));
+      const { db, recordedQueries } = createCanonicalLedgerDatabaseDouble(rows);
+      const controller = new PlatformEarningsController(
+        new PlatformEarningsService(new PlatformEarningsRepository(db)),
+      );
+      const response = await controller.getByPlatform(
+        makeDriverIdentity(),
+        undefined,
+        "date-edge",
+        period,
+      );
+      expect(recordedQueries[0]?.params).toEqual([OWN_DRIVER_UUID, from, to]);
+      expect(response.data.items).toEqual([
+        {
+          platformCode: PLATFORM_CODE_UBER,
+          grossEarning: { currency: "TWD", amountMinor: 500 },
+          serviceFee: { currency: "TWD", amountMinor: 5 },
+          subsidy: { currency: "TWD", amountMinor: 10 },
+          netAmount: { currency: "TWD", amountMinor: 505 },
+        },
+      ]);
+    },
+  );
+
+  it.each([
+    OWN_DRIVER_UUID,
+    "drv-demo-001",
+    "demo-driver",
+    "unseeded-string-driver",
+  ])(
+    "never converts SQL cast/connection rejection into success for %s",
+    async (driverId) => {
+      for (const code of ["22P02", "08006"]) {
+        const query = vi
+          .fn()
+          .mockRejectedValue(
+            Object.assign(new Error("query rejected"), { code }),
+          );
+        const db = {
+          isEnabled: () => true,
+          query,
+        } as unknown as DatabaseService;
+        const controller = new PlatformEarningsController(
+          new PlatformEarningsService(new PlatformEarningsRepository(db)),
+        );
+        for (const method of ["getByPlatform", "getSummary"] as const) {
+          try {
+            await controller[method](
+              makeDriverIdentity(driverId),
+              undefined,
+              "error-request",
+              "today",
+            );
+            expect.fail("query rejection must not return an earnings envelope");
+          } catch (error) {
+            expect(error).toBeInstanceOf(ApiRequestError);
+            expect((error as ApiRequestError).getStatus()).toBe(503);
+            expect((error as ApiRequestError).getResponse()).toMatchObject({
+              error: {
+                code: "PLATFORM_EARNINGS_READ_UNAVAILABLE",
+                retryable: true,
+              },
+            });
+          }
+        }
+        expect(query).toHaveBeenCalledTimes(2);
+      }
+    },
+  );
+
+  it("rejects unauthenticated, missing actor, foreign driver and malformed periods before SQL on both endpoints", async () => {
+    const { db } = createCanonicalLedgerDatabaseDouble([]);
+    const controller = new PlatformEarningsController(
+      new PlatformEarningsService(new PlatformEarningsRepository(db)),
+    );
+    for (const method of ["getByPlatform", "getSummary"] as const) {
+      for (const [identity, requested, code] of [
+        [null, undefined, "AUTH_REQUIRED"],
+        [makeDriverIdentity(null), undefined, "DRIVER_IDENTITY_REQUIRED"],
+        [makeDriverIdentity(), FOREIGN_DRIVER_UUID, "DRIVER_IDENTITY_MISMATCH"],
+      ] as const) {
+        await expect(
+          controller[method](identity, requested, "negative", "month"),
+        ).rejects.toMatchObject({ code });
+      }
+      for (const period of [
+        "",
+        " ",
+        "year",
+        "MONTH",
+        "today OR true",
+        ["today", "month"],
+        {},
+      ]) {
+        await expect(
+          controller[method](
+            makeDriverIdentity(),
+            undefined,
+            "invalid",
+            period as string,
+          ),
+        ).rejects.toMatchObject({
+          code: "INVALID_EARNINGS_PERIOD",
+          status: 400,
+        });
+      }
+    }
+    expect(db.query).not.toHaveBeenCalled();
+  });
+
+  it("keeps canonical platform/currency buckets and every supplied integer money field intact", async () => {
+    const { db, recordedQueries } = createCanonicalLedgerDatabaseDouble([
+      {
+        driver_id: OWN_DRIVER_UUID,
+        platform_code: PLATFORM_CODE_UBER,
+        period_date: "2026-10-15",
+        currency_code: "TWD",
+        gross_minor: 123,
+        fee_minor: 11,
+        subsidy_minor: 7,
+        net_minor: 119,
+      },
+      {
+        driver_id: OWN_DRIVER_UUID,
+        platform_code: PLATFORM_CODE_UBER,
+        period_date: "2026-10-15",
+        currency_code: "USD",
+        gross_minor: 450,
+        fee_minor: 30,
+        subsidy_minor: 0,
+        net_minor: 420,
+      },
+      {
+        driver_id: FOREIGN_DRIVER_UUID,
+        platform_code: PLATFORM_CODE_UBER,
+        period_date: "2026-10-15",
+        currency_code: "TWD",
+        gross_minor: 999999,
+        fee_minor: 0,
+        subsidy_minor: 0,
+        net_minor: 999999,
+      },
+    ]);
+    const controller = new PlatformEarningsController(
+      new PlatformEarningsService(new PlatformEarningsRepository(db)),
+    );
+    const response = await controller.getByPlatform(makeDriverIdentity());
+    expect(recordedQueries[0]?.sql).toContain(
+      "GROUP BY platform_code, currency_code",
+    );
+    expect(response.data.items).toEqual([
+      {
+        platformCode: PLATFORM_CODE_UBER,
+        grossEarning: { currency: "TWD", amountMinor: 123 },
+        serviceFee: { currency: "TWD", amountMinor: 11 },
+        subsidy: { currency: "TWD", amountMinor: 7 },
+        netAmount: { currency: "TWD", amountMinor: 119 },
+      },
+      {
+        platformCode: PLATFORM_CODE_UBER,
+        grossEarning: { currency: "USD", amountMinor: 450 },
+        serviceFee: { currency: "USD", amountMinor: 30 },
+        subsidy: { currency: "USD", amountMinor: 0 },
+        netAmount: { currency: "USD", amountMinor: 420 },
+      },
+    ]);
+  });
+});
