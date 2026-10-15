@@ -5,11 +5,12 @@ import { REALM_COLORS } from "@drts/ui-tokens";
 import { CanvasPill } from "@drts/ui-web";
 import { CalloutPanel, PageHero } from "@/components/page-primitives";
 import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
-import { loadBankBookingsData } from "@/lib/bank-dev-read-models";
+import { loadBankBookingsData } from "@/lib/bank-bookings-data";
 import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
 import { tenantDisplayText, tenantIssuerVars } from "@/lib/tenant-display";
 import {
   type BookingActorRealm,
+  bookingReturnFilters,
   type BookingDirection,
   type BookingOpsLinkState,
   type BookingState,
@@ -139,8 +140,16 @@ export default async function BookingDetailPage({
     locale,
     resolvedSearchParams.role,
   );
-  const bookingData = await loadBankBookingsData(tenant.tenantId, session.role);
+  const bookingData = await loadBankBookingsData();
   const booking = bookingData.data.detailById.get(bookingId);
+
+  if (bookingData.status !== "ready") {
+    return (
+      <div className="page-shell bank-booking-detail-page">
+        <p role="alert">{bookingData.degradedMessage}</p>
+      </div>
+    );
+  }
 
   if (!booking) {
     notFound();
@@ -154,7 +163,13 @@ export default async function BookingDetailPage({
     <div className="page-shell bank-booking-detail-page" style={issuerVars}>
       <Link
         className="text-link"
-        href={bankConsoleHref("/bookings", tenant, locale, session.role)}
+        href={bankConsoleHref(
+          "/bookings",
+          tenant,
+          locale,
+          session.role,
+          bookingReturnFilters(resolvedSearchParams),
+        )}
       >
         {t("bookings.detail.back", locale)}
       </Link>

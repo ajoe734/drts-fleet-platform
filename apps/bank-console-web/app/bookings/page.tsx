@@ -12,12 +12,15 @@ import {
   resolveBankDemoTenant,
   resolveLocale,
 } from "@/lib/demo-tenants";
-import { loadBankBookingsData } from "@/lib/bank-dev-read-models";
+import { loadBankBookingsData } from "@/lib/bank-bookings-data";
 import { getBankConsoleSession, bankConsoleHref } from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
 import {
+  BOOKING_PAGE_SIZES,
+  paginateBookingItems,
   deriveBookingPeriods,
   filterBookingItems,
+  bookingReturnFilters,
   type BookingDirection,
   type BookingState,
 } from "@/lib/bookings";
@@ -66,6 +69,7 @@ function one(value: string | string[] | undefined): string | undefined {
 }
 
 function formatPeriod(period: string) {
+  if (!period) return "—";
   return `${period.slice(0, 4)} / ${period.slice(5, 7)}`;
 }
 
@@ -92,7 +96,7 @@ export default async function BookingsPage({
     locale,
     resolvedSearchParams.role,
   );
-  const bookingData = await loadBankBookingsData(tenant.tenantId, session.role);
+  const bookingData = await loadBankBookingsData();
   const issuerBrand = tenant.template;
   const baseQuery = {
     bank: tenant.code,
@@ -114,6 +118,17 @@ export default async function BookingsPage({
     ...(cardholder ? { cardholder } : {}),
   };
   const bookings = filterBookingItems(bookingData.data.bookings, filters);
+  const pagination = paginateBookingItems(
+    bookings,
+    one(resolvedSearchParams.page),
+    one(resolvedSearchParams.pageSize),
+  );
+  const pageHref = (page: number) =>
+    bankConsoleHref("/bookings", tenant, locale, session.role, {
+      ...bookingReturnFilters(resolvedSearchParams),
+      page: String(page),
+      pageSize: String(pagination.pageSize),
+    });
   const activeCount = bookings.filter(
     (item) => item.state === "assigned" || item.state === "en_route",
   ).length;
@@ -121,7 +136,7 @@ export default async function BookingsPage({
     (item) => item.state === "completed",
   ).length;
   const bookingPeriods = deriveBookingPeriods(bookingData.data.bookings);
-  const currentPeriod = filters.period ?? bookingPeriods[0] ?? "2026-06";
+  const currentPeriod = filters.period ?? bookingPeriods[0] ?? "";
 
   // Counts for the state tabs ignore the state filter but keep every other
   // active filter, so each tab badge reflects the current scope.
@@ -131,7 +146,10 @@ export default async function BookingsPage({
     ...(period ? { period } : {}),
     ...(cardholder ? { cardholder } : {}),
   };
-  const scopedBookings = filterBookingItems(bookingData.data.bookings, baseFilters);
+  const scopedBookings = filterBookingItems(
+    bookingData.data.bookings,
+    baseFilters,
+  );
   const stateTabHref = (tabState?: BookingState) => {
     const params = new URLSearchParams();
     params.set("bank", baseQuery.bank);
@@ -142,6 +160,7 @@ export default async function BookingsPage({
     if (period) params.set("period", period);
     if (cardholder) params.set("cardholder", cardholder);
     if (tabState) params.set("state", tabState);
+    params.set("pageSize", String(pagination.pageSize));
     return `/bookings?${params.toString()}`;
   };
 
@@ -191,11 +210,13 @@ export default async function BookingsPage({
         description={t("bookings.readonlyBody", locale)}
       />
       {bookingData.degradedMessage ? (
-        <CalloutPanel
-          title={t("common.apiDegraded", locale)}
-          description={bookingData.degradedMessage}
-          tone="warning"
-        />
+        <div role="alert">
+          <CalloutPanel
+            title={t("common.apiDegraded", locale)}
+            description={bookingData.degradedMessage}
+            tone="warning"
+          />
+        </div>
       ) : null}
 
       <nav
@@ -301,6 +322,16 @@ export default async function BookingsPage({
             />
           </label>
 
+          <label className="filter-field">
+            <span>{locale === "en" ? "Rows per page" : "每頁筆數"}</span>
+            <select name="pageSize" defaultValue={pagination.pageSize}>
+              {BOOKING_PAGE_SIZES.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </label>
           <button className="filters-submit" type="submit">
             {t("bookings.filters.apply", locale)}
           </button>
@@ -356,17 +387,22 @@ export default async function BookingsPage({
             { label: t("bookings.columns.benefit", locale), width: "136px" },
           ]}
         >
-          {bookings.map((item) => (
+          {pagination.items.map((item) => (
             <Tr key={item.orderId}>
               <Td mono>
                 <div className="cell-stack">
                   <Link
                     className="text-link"
                     href={bankConsoleHref(
-                      `/bookings/${item.orderId}`,
+                      `/bookings/${encodeURIComponent(item.orderId)}`,
                       tenant,
                       locale,
                       session.role,
+                      {
+                        ...bookingReturnFilters(resolvedSearchParams),
+                        page: String(pagination.page),
+                        pageSize: String(pagination.pageSize),
+                      },
                     )}
                   >
                     {item.orderNo}
@@ -406,6 +442,22 @@ export default async function BookingsPage({
             </Tr>
           ))}
         </DataTable>
+        <nav aria-label={locale === "en" ? "Booking pages" : "預約分頁"}>
+          <span>
+            {pagination.from}–{pagination.to} / {pagination.total} ·{" "}
+            {pagination.page} / {pagination.totalPages}
+          </span>{" "}
+          {pagination.page > 1 ? (
+            <Link href={pageHref(pagination.page - 1)}>
+              {locale === "en" ? "Previous" : "上一頁"}
+            </Link>
+          ) : null}{" "}
+          {pagination.page < pagination.totalPages ? (
+            <Link href={pageHref(pagination.page + 1)}>
+              {locale === "en" ? "Next" : "下一頁"}
+            </Link>
+          ) : null}
+        </nav>
       </section>
     </div>
   );
