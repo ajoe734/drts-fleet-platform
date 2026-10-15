@@ -21,6 +21,8 @@ import {
   bookingActor,
   type BookingActor,
 } from "../pax-booking-history-20261009/native-booking-actions-fixture";
+import type { TestInfo } from "@playwright/test";
+import { recordOrderEvidence } from "../../e2e/pax-review-shared-order/evidence";
 
 describe.skipIf(!hostedPaymentEnabled)(
   "committed same-order Ops/Driver reads on peers initialized before booking",
@@ -169,6 +171,25 @@ describe.skipIf(!hostedPaymentEnabled)(
         status: "accepted",
         record: { taskId: assignment.taskId, orderId: f.orderId },
       });
+      // Execute the actual browser evidence query against this case's formal
+      // schema and production-created order, without substituting SQL or rows.
+      // Only Playwright's attachment sink is replaced; no browser is needed.
+      const caseUrl = h.pool!.options.connectionString;
+      if (!caseUrl) throw new Error("Missing hosted case database URL.");
+      vi.stubEnv("DATABASE_URL", caseUrl);
+      vi.stubEnv("PAX_REVIEW_SHARED_DEV_SMOKE", "false");
+      const facts = await recordOrderEvidence(f.orderId, "peer-accepted", {}, {
+        attach: vi.fn().mockResolvedValue(undefined),
+      } as unknown as TestInfo);
+      const order = (await original.getOrder(f.orderId)).data;
+      expect(Number.isFinite(Date.parse(order.reservationWindowStart!))).toBe(
+        true,
+      );
+      expect(facts.length).toBeGreaterThan(0);
+      for (const row of facts) {
+        expect(row.order_id).toBe(f.orderId);
+        expect(row.requested_pickup_at).toBe(order.reservationWindowStart);
+      }
       process.stdout.write(
         `PAX review peer PG ${JSON.stringify({ orderId: f.orderId, taskId: assignment.taskId, peerAccepted: true })}\n`,
       );

@@ -62,7 +62,7 @@ export async function recordOrderEvidence(
     const facts = await pool.query(
       `
       SELECT o.order_id,o.status,h.drts_passenger_id,h.fare_snapshot_id,
-        o.record->>'requestedPickupAt' AS requested_pickup_at,t.record->>'startedAt' AS started_at,t.record->>'completedAt' AS completed_at,
+        o.record->>'reservationWindowStart' AS requested_pickup_at,t.record->>'startedAt' AS started_at,t.record->>'completedAt' AS completed_at,
         j.dispatch_job_id,a.assignment_id,a.record->>'driverId' AS driver_id,a.record->>'vehicleId' AS vehicle_id,t.task_id,t.status AS task_status,
         t.record->>'actualDistanceKm' AS actual_distance_km,t.record->>'actualDurationSec' AS actual_duration_sec,
         c.payment_id,c.status AS charge_status,c.attempt_count,p.status AS payment_status,p.amount_minor,
