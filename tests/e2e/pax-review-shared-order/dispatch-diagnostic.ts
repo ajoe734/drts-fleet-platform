@@ -51,13 +51,19 @@ export async function dispatchResponseDiagnostic(
   if (status >= 400) {
     try {
       const body = (await response.json()) as {
-        error?: string | { code?: unknown; details?: { reasonCodes?: unknown } };
+        error?:
+          | string
+          | { code?: unknown; details?: { reasonCodes?: unknown } };
       } | null;
       const error = body?.error;
       const candidate = typeof error === "string" ? error : error?.code;
-      if (typeof candidate === "string" && PUBLIC_DISPATCH_CODES.has(candidate)) {
+      if (
+        typeof candidate === "string" &&
+        PUBLIC_DISPATCH_CODES.has(candidate)
+      ) {
         code = candidate;
-        const reported = typeof error === "object" ? error?.details?.reasonCodes : null;
+        const reported =
+          typeof error === "object" ? error?.details?.reasonCodes : null;
         if (
           code === "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT" &&
           Array.isArray(reported)
