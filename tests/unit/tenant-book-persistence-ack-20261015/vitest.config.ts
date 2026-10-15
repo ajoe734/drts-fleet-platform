@@ -11,6 +11,14 @@ export default defineConfig({
         __dirname,
         "../../../apps/api/tests/unit/tenant-partner.service.test.ts",
       ),
+      resolve(
+        __dirname,
+        "../../../apps/api/tests/unit/tenant-partner.controller.test.ts",
+      ),
+      resolve(
+        __dirname,
+        "../../../apps/api/tests/unit/tenant-partner.repository.test.ts",
+      ),
       resolve(__dirname, "*.test.ts"),
     ],
   },
