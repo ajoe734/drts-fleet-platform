@@ -206,15 +206,15 @@ describe("SR-QA-TENANT-001 — users & invites (C006/C008)", () => {
 });
 
 describe("SR-QA-TENANT-001 — addresses & passengers, including their relationship (C027 常用地址／預約乘客)", () => {
-  it("links a tenant address to a tenant passenger and both are readable back through independent getters", () => {
+  it("links a tenant address to a tenant passenger and both are readable back through independent getters", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    const passenger = service.upsertPassenger(TENANT_ID, {
+    const passenger = await service.upsertPassenger(TENANT_ID, {
       fullName: "QA Passenger",
       mobile: "0912345678",
     } as never);
 
-    const address = service.upsertAddress(TENANT_ID, {
+    const address = await service.upsertAddress(TENANT_ID, {
       addressName: "HQ Reception",
       addressText: "Taipei HQ, 1F Reception",
       ownerPassengerId: passenger.passengerId,
@@ -237,11 +237,11 @@ describe("SR-QA-TENANT-001 — addresses & passengers, including their relations
     ).toContain(passenger.passengerId);
   });
 
-  it("negative: an address cannot claim ownership of a passenger that does not exist in the tenant (PASSENGER_NOT_FOUND)", () => {
+  it("negative: an address cannot claim ownership of a passenger that does not exist in the tenant (PASSENGER_NOT_FOUND)", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
     expect(
-      codeOf(() =>
+      await asyncCodeOf(() =>
         service.upsertAddress(TENANT_ID, {
           addressName: "Orphan Address",
           addressText: "Nowhere",
@@ -251,9 +251,9 @@ describe("SR-QA-TENANT-001 — addresses & passengers, including their relations
     ).toBe("PASSENGER_NOT_FOUND");
   });
 
-  it("negative: reading a passenger that was created under a different tenant fails closed (PASSENGER_NOT_FOUND), confirming tenant isolation still holds", () => {
+  it("negative: reading a passenger that was created under a different tenant fails closed (PASSENGER_NOT_FOUND), confirming tenant isolation still holds", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
-    const passenger = service.upsertPassenger(OTHER_TENANT_ID, {
+    const passenger = await service.upsertPassenger(OTHER_TENANT_ID, {
       fullName: "Other Tenant Passenger",
     } as never);
 
@@ -266,10 +266,10 @@ describe("SR-QA-TENANT-001 — addresses & passengers, including their relations
 });
 
 describe("SR-QA-TENANT-001 — cost centres directory (C027)", () => {
-  it("creates, lists, and disables a cost center, with the disabled state visible on re-read", () => {
+  it("creates, lists, and disables a cost center, with the disabled state visible on re-read", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    const created = service.upsertCostCenter(TENANT_ID, {
+    const created = await service.upsertCostCenter(TENANT_ID, {
       code: "cc-directory-01",
       name: "Directory Test Cost Center",
     } as never);
@@ -279,7 +279,7 @@ describe("SR-QA-TENANT-001 — cost centres directory (C027)", () => {
       service.listCostCenters(TENANT_ID).map((c) => c.code),
     ).toContain("CC-DIRECTORY-01");
 
-    service.disableCostCenter(TENANT_ID, {
+    await service.disableCostCenter(TENANT_ID, {
       code: "cc-directory-01",
       reason: "qa_regression_disable",
     } as never);

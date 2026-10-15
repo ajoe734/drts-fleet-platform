@@ -397,7 +397,7 @@ describe("tenant governance e2e integration", () => {
       billingSettlementService,
     } = await createHarness(tenantId);
 
-    tenantPartnerService.upsertCostCenter(tenantId, {
+    await tenantPartnerService.upsertCostCenter(tenantId, {
       code: "CC-FIN",
       name: "Finance",
       ownerUserId: `${tenantId}-finance`,
@@ -619,12 +619,12 @@ describe("tenant governance e2e integration", () => {
     const { tenantPartnerService, ownedMobilityService } =
       await createHarness(tenantId);
 
-    tenantPartnerService.upsertCostCenter(tenantId, {
+    await tenantPartnerService.upsertCostCenter(tenantId, {
       code: "CC-OPS",
       name: "Operations",
       ownerUserId: `${tenantId}-ops`,
     });
-    tenantPartnerService.upsertCostCenter(tenantId, {
+    await tenantPartnerService.upsertCostCenter(tenantId, {
       code: "CC-FIN",
       name: "Finance",
       ownerUserId: `${tenantId}-finance`,
@@ -739,32 +739,32 @@ describe("tenant governance e2e integration", () => {
       ownedMobilityService,
     } = await createHarness(tenantId);
 
-    const ops = tenantPartnerService.upsertCostCenter(tenantId, {
+    const ops = await tenantPartnerService.upsertCostCenter(tenantId, {
       code: "CC-OPS",
       name: "Operations",
       ownerUserId: `${tenantId}-ops`,
     });
-    tenantPartnerService.upsertCostCenter(tenantId, {
+    await tenantPartnerService.upsertCostCenter(tenantId, {
       code: "CC-OPS",
       name: "Operations HQ",
       ownerUserId: `${tenantId}-ops`,
     });
-    const fin = tenantPartnerService.upsertCostCenter(tenantId, {
+    const fin = await tenantPartnerService.upsertCostCenter(tenantId, {
       code: "CC-FIN",
       name: "Finance",
       ownerUserId: `${tenantId}-finance`,
     });
-    const exec = tenantPartnerService.upsertCostCenter(tenantId, {
+    const exec = await tenantPartnerService.upsertCostCenter(tenantId, {
       code: "CC-EXEC",
       name: "Executive",
       ownerUserId: null,
     });
-    const old = tenantPartnerService.upsertCostCenter(tenantId, {
+    const old = await tenantPartnerService.upsertCostCenter(tenantId, {
       code: "CC-OLD",
       name: "Legacy",
       ownerUserId: `${tenantId}-ops`,
     });
-    tenantPartnerService.disableCostCenter(tenantId, {
+    await tenantPartnerService.disableCostCenter(tenantId, {
       code: old.code,
       reason: "legacy sunset",
     });
