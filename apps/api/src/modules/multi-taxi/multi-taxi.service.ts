@@ -981,8 +981,18 @@ export class MultiTaxiService implements OnModuleInit {
   ) {
     const token = await this.requireAccessToken(accessToken, "ride:rate");
     const order = await this.requireMultiTaxiOrder(token.orderId);
-    if (this.resolvePassengerSubjectRef(order) !== token.passengerSubjectRef)
+    const durable = this.repository?.isEnabled?.() ?? false;
+    if (this.resolvePassengerSubjectRef(order) !== token.passengerSubjectRef) {
+      // The order now comes from durable authority. Match the writer's public
+      // ownership refusal even when this read detects the change before BEGIN.
+      if (durable)
+        throw new ApiRequestError(
+          404,
+          "PASSENGER_RIDE_NOT_FOUND",
+          "Ride not found.",
+        );
       throw this.invalidPassengerToken();
+    }
     if (order.status !== "completed") {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -1016,7 +1026,6 @@ export class MultiTaxiService implements OnModuleInit {
         "PASSENGER_RATING_CONTACT_INVALID",
         "contactRequested must be a boolean when provided.",
       );
-    const durable = this.repository?.isEnabled?.() ?? false;
     if (!durable && command.contactRequested !== undefined)
       throw new ApiRequestError(
         503,

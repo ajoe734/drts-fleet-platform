@@ -644,6 +644,7 @@ describe("token choice transaction, original replay and durable Ops source", () 
   );
 
   it.each([
+    "legacy_foreign_subject",
     "foreign_subject",
     "durable_foreign_subject",
     "durable_incomplete",
@@ -654,6 +655,10 @@ describe("token choice transaction, original replay and durable Ops source", () 
     "missing_completion",
   ] as const)("%s cannot obtain a rating or consent", async (reason) => {
     const f = fixture();
+    if (reason === "legacy_foreign_subject") {
+      f.authority.enabled = false;
+      f.authority.subject = "other-subject";
+    }
     if (reason === "foreign_subject") f.authority.subject = "other-subject";
     if (reason === "durable_foreign_subject")
       f.authority.durableSubject = "other-subject";
@@ -667,9 +672,9 @@ describe("token choice transaction, original replay and durable Ops source", () 
     if (reason === "missing_completion") f.authority.completedAt = "";
     await expect(f.submit()).rejects.toMatchObject({
       code:
-        reason === "foreign_subject"
+        reason === "legacy_foreign_subject"
           ? "PASSENGER_RIDE_TOKEN_INVALID"
-          : reason === "durable_foreign_subject"
+          : reason === "foreign_subject" || reason === "durable_foreign_subject"
             ? "PASSENGER_RIDE_NOT_FOUND"
             : reason === "durable_incomplete"
               ? "PASSENGER_RATING_TRIP_NOT_COMPLETED"
