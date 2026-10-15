@@ -13,6 +13,7 @@ import { DriverSettingsRepository } from "./driver-settings.repository";
 @Injectable()
 export class DriverSettingsService implements OnModuleInit {
   private settings: DriverSettings[] = [];
+  private readonly settingsWrites = new Map<string, Promise<void>>();
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
@@ -28,7 +29,13 @@ export class DriverSettingsService implements OnModuleInit {
     try {
       const data = await this.repository.loadAll();
       if (data.length === 0) return;
-      this.settings = data.map((s) => this.clone(s));
+      const deduplicated = new Map<string, DriverSettings>();
+      for (const item of data) {
+        if (!deduplicated.has(item.driverId)) {
+          deduplicated.set(item.driverId, this.clone(item));
+        }
+      }
+      this.settings = [...deduplicated.values()];
     } catch (error) {
       this.repository.reportPersistenceFailure(error, "module init");
     }
@@ -55,52 +62,58 @@ export class DriverSettingsService implements OnModuleInit {
     driverId: string,
     command: UpdateDriverSettingsCommand,
     requestId?: string,
-  ) {
-    const existing = this.getSettings(driverId);
-    const now = new Date().toISOString();
+  ): Promise<DriverSettings> {
+    return this.enqueueSettingsWrite(driverId, async () => {
+      const existing = this.getSettings(driverId);
+      const now = new Date().toISOString();
 
-    const updated: DriverSettings = {
-      ...existing,
-      ...(command.language !== undefined && { language: command.language }),
-      ...(command.notificationsEnabled !== undefined && {
-        notificationsEnabled: command.notificationsEnabled,
-      }),
-      ...(command.autoAcceptEnabled !== undefined && {
-        autoAcceptEnabled: command.autoAcceptEnabled,
-      }),
-      ...(command.maxAcceptRadius !== undefined && {
-        maxAcceptRadius: command.maxAcceptRadius,
-      }),
-      ...(command.preferredAreas !== undefined && {
-        preferredAreas: command.preferredAreas,
-      }),
-      updatedAt: now,
-    };
+      const updated: DriverSettings = {
+        ...existing,
+        ...(command.language !== undefined && { language: command.language }),
+        ...(command.notificationsEnabled !== undefined && {
+          notificationsEnabled: command.notificationsEnabled,
+        }),
+        ...(command.autoAcceptEnabled !== undefined && {
+          autoAcceptEnabled: command.autoAcceptEnabled,
+        }),
+        ...(command.maxAcceptRadius !== undefined && {
+          maxAcceptRadius: command.maxAcceptRadius,
+        }),
+        ...(command.preferredAreas !== undefined && {
+          preferredAreas: [...command.preferredAreas],
+        }),
+        updatedAt: now,
+      };
 
-    // Replace or add
-    const idx = this.settings.findIndex((s) => s.driverId === driverId);
-    if (idx >= 0) {
-      this.settings[idx] = updated;
-    } else {
-      this.settings.push(updated);
-    }
+      if (this.repository?.isEnabled()) {
+        await this.persist(updated);
+      }
 
-    this.persist(updated);
-    this.recordAudit(
-      {
-        actorId: driverId,
-        actorType: "system",
-        tenantId: null,
-        moduleName: "driver-settings",
-        actionName: "update_driver_settings",
-        resourceType: "driver_settings",
-        resourceId: driverId,
-        newValuesSummary: command as Record<string, unknown>,
-      },
-      requestId,
-    );
+      // Replace or add only after authoritative persistence ACK (or immediately in no-DB mode)
+      const stored = this.clone(updated);
+      const idx = this.settings.findIndex((s) => s.driverId === driverId);
+      if (idx >= 0) {
+        this.settings[idx] = stored;
+      } else {
+        this.settings.push(stored);
+      }
 
-    return this.clone(updated);
+      this.recordAudit(
+        {
+          actorId: driverId,
+          actorType: "system",
+          tenantId: null,
+          moduleName: "driver-settings",
+          actionName: "update_driver_settings",
+          resourceType: "driver_settings",
+          resourceId: driverId,
+          newValuesSummary: command as Record<string, unknown>,
+        },
+        requestId,
+      );
+
+      return this.clone(stored);
+    });
   }
 
   listAll() {
@@ -190,15 +203,45 @@ export class DriverSettingsService implements OnModuleInit {
     };
   }
 
-  private clone(settings: DriverSettings) {
-    return { ...settings };
+  private clone(settings: DriverSettings): DriverSettings {
+    return {
+      ...settings,
+      preferredAreas: Array.isArray(settings.preferredAreas)
+        ? [...settings.preferredAreas]
+        : [],
+    };
   }
 
-  private persist(settings: DriverSettings) {
-    if (!this.repository) return;
-    void this.repository.upsert(settings).catch((error: unknown) => {
-      this.repository!.reportPersistenceFailure(error, "update_settings");
+  private enqueueSettingsWrite<T>(
+    driverId: string,
+    write: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.settingsWrites.get(driverId);
+    if (!this.repository?.isEnabled() && !previous) {
+      return write();
+    }
+    const result = previous ? previous.then(write) : write();
+    const settled = result.then(
+      () => {},
+      () => {},
+    );
+    this.settingsWrites.set(driverId, settled);
+    void settled.then(() => {
+      if (this.settingsWrites.get(driverId) === settled) {
+        this.settingsWrites.delete(driverId);
+      }
     });
+    return result;
+  }
+
+  private async persist(settings: DriverSettings) {
+    if (!this.repository?.isEnabled()) return;
+    try {
+      await this.repository.upsert(settings);
+    } catch (error: unknown) {
+      this.repository.reportPersistenceFailure(error, "update_settings");
+      throw error;
+    }
   }
 
   private recordAudit(
