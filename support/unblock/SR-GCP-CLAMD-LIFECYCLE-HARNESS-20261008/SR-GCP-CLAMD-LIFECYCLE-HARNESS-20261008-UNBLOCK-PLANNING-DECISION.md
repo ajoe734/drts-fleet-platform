@@ -200,7 +200,32 @@ These saved planning files include pre-execution snapshots; actual authorization
 and resume are verified from the current helper CLI readback, not inferred from
 their draft status labels.
 
-Publication and final local checks are pending at this anchor. No product
-runtime, browser/E2E server, Docker, cloud workload or deployment is started for
-this documentation delivery. Hosted CI triggered by the new PR remains a
-separate required gate; no review/CI/merge/acceptance success is claimed here.
+Anchor `05587020681fc75079a230f5f0046426318f0b74` was normally pushed on the
+assigned new branch. The following completed content checks apply to that
+anchor, against full immutable base `998ab2f638a59fd5eea5e76f8e8ed5dc604b4839`:
+
+| Check                                                                                                         | Completed result / receipt                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Historical full range `504550cb..edcd59aa` with `COMMIT_TRAILER_BYPASS` absent                                | **FAIL exit 1**, exactly aef's missing Task-ID subject; `historical-trailers-expected-fail.log` retains the expected defect            |
+| New full range with the same formal `tools/ci/git/check_commit_trailers.py`                                   | **PASS exit 0**, nonempty range; `new-full-range-trailers.log`                                                                         |
+| Literal actual-helper subject, all three exact trailers, Codex author and committer for every new commit      | **PASS**, independent content assertions in `verify.py`; each commit message/identity logged                                           |
+| `git diff --check <full-base> HEAD`                                                                           | **PASS exit 0**, `full-diff-whitespace.log`                                                                                            |
+| `python3 tools/ci/git/check_canonical_consistency.py --ci --base <full-base> --head HEAD` without bypass      | **PASS exit 0**, all four categories zero findings; `canonical-consistency.log`                                                        |
+| `pnpm exec prettier --check <sole-artifact>`                                                                  | **PASS exit 0**, `prettier.log`                                                                                                        |
+| Four local Markdown references and original parent specification SHA256                                       | **PASS**, `verify.py` content assertions                                                                                               |
+| Full new diff allowlist, accepted base ancestry, absence of aef ancestor                                      | **PASS**, exactly the sole artifact; `full-scope.log`, `base-ancestor.log`, `bad-excluded.log` (exit 1 means aef is not an ancestor)   |
+| Whole parent object equality and protected helper metadata/history, including every `resolved_parent_*` field | **PASS**, original CLI snapshots compared to fresh release `show` results; `parent-after.log`, `helper-after.log`, `verification.json` |
+| Original local/remote branch and PR #2444 head                                                                | **PASS**, still exact edcd59aa; `old-local-head.log`, `old-remote-head.log`, `old-pr.log`                                              |
+
+Re-run `python3 .local/clamd-governance-r2-20261015/verify.py` on the final
+closeout commit, then verify local HEAD = remote branch HEAD = new PR head
+before exact-SHA handoff. Final-range results, publication URL and candidate
+identity are recorded in the release-CLI handoff and local receipts; the
+anchor result above is not claimed as final candidate approval. Mandatory
+hosted CI, original independent Codex2 review and protected merge remain
+separate gates.
+
+No product runtime, browser/E2E server, Docker, cloud workload or deployment is
+started for this documentation delivery. No new source/runtime tests or parent
+acceptance are claimed; no review/CI/merge success is inferred from these
+document checks.
