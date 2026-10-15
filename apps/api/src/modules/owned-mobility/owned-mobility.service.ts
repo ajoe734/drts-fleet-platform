@@ -10395,13 +10395,7 @@ export class OwnedMobilityService
   ): MaybePromise<void> {
     const capabilities =
       this.vehicleEligibilityService?.prepareVehicleCapabilities?.(
-        vehicleIds ??
-          this.regulatoryRegistryService
-            .listVehicles()
-            .filter((vehicle) =>
-              vehicle.supportedServiceBuckets.includes(order.serviceBucket),
-            )
-            .map((vehicle) => vehicle.vehicleId),
+        vehicleIds ?? order.serviceBucket,
       );
     const product =
       order.runtimeProfileCode && order.serviceProductCode

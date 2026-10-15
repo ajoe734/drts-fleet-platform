@@ -191,7 +191,6 @@ const DEFAULT_MATRIX: VehicleEligibilityMatrixRecord[] = [
     licenseType: "multi_purpose_taxi",
     supportedProducts: [
       "taxi_realtime",
-      "taxi_reservation",
       "enterprise_dispatch",
       "credit_card_airport_transfer",
       "third_party_forwarded_order",
@@ -216,11 +215,7 @@ const DEFAULT_MATRIX: VehicleEligibilityMatrixRecord[] = [
   {
     capabilityId: "seed-taxi",
     licenseType: "taxi",
-    supportedProducts: [
-      "taxi_realtime",
-      "taxi_reservation",
-      "third_party_forwarded_order",
-    ],
+    supportedProducts: ["taxi_realtime", "third_party_forwarded_order"],
     seatCount: 4,
     luggageCapacity: 2,
     airportPermit: false,
@@ -359,8 +354,17 @@ export class VehicleEligibilityService implements OnModuleInit {
    * matrix that omits a type must reject it, rather than reuse a cached/default
    * capability. Storage failure also propagates to the existing command.
    */
-  prepareVehicleCapabilities(vehicleIds: readonly string[]) {
+  prepareVehicleCapabilities(context: readonly string[] | Phase1ServiceBucket) {
     if (!this.repository?.isEnabled()) return;
+    const vehicleIds =
+      typeof context === "string"
+        ? this.regulatoryRegistryService
+            .listVehicles()
+            .filter((vehicle) =>
+              vehicle.supportedServiceBuckets.includes(context),
+            )
+            .map((vehicle) => vehicle.vehicleId)
+        : context;
     const licenseTypes = [
       ...new Set(
         vehicleIds.flatMap((id) => {
