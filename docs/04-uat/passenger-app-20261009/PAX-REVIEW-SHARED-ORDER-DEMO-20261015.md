@@ -1400,3 +1400,114 @@ Command logs, configuration, preservation bundle, source mapping and hash
 manifest are copied to canonical
 `.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidatea9e-r19a-recovery/`.
 All three required acceptance keys remain pending.
+
+## R21 / R21b — opt-in reservation capability preparation and native authority
+
+The source repair and socket-free reproduction are complete; the replacement
+still needs its own hosted assignment, complete A/B/C journeys and delivery.
+Adjacent candidate `af0cc0a9c87d6cd9ec03ef802588ee4ea59769ce`, generation
+`3bc08899bc9a4d4e9d7aa814e51dbd1d`, actually failed in run `38748481563`,
+job `116472642648`: `Ops assign status=409
+code=ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT
+reasons=VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT` (raw line 2351).
+A order `a191b1b8-0b63-4ada-9eca-48bd28f16cfe` and dispatch job
+`96554269-a558-4530-9f73-62be09d27a4f` were created. The latter is a
+dispatchJobId, not evidence of a DriverTask.taskId. Reassign, Driver acceptance,
+the trip and B/C were not reached. The qualified receipt SHA256 is
+`0e5bbdcb277640d2217794fbde30fe20e10326b49c86e72f1aa6960a86035b8c`;
+artifact `11980817300` matches GitHub digest
+`0cba4f0fa7827401f556d6a4dcc8b155826d4b214888eefc141709a46f76ad4e`.
+Its report, safe progress and error context contain no completed-three-order
+facts, screenshot or trace. Its narrower public reason is not retrospectively
+assigned to a9e or 22a, and `unsupported_product` was not printed by that run.
+
+The actual source path is the Ops review page / SDK / BFF →
+`OwnedMobilityController.assignDispatch` or `reassignDispatch` →
+`prepareOrderAction` → `OwnedMobilityService.createDispatchAssignment` →
+`assertAssignmentEligibilityRecheck` →
+`VehicleEligibilityService.assertDispatchAssignmentEligible`. The latter
+checks the precise booking product against the registry's real vehicle license
+and canonical capability matrix. `ReviewSupplyService.prepare` previously
+created vehicles with the original template's `multi_purpose_taxi` license and
+enabled the reservation product, while its native capability mapping omitted
+`taxi_reservation`. Actual prepare data sent to the real validator reproduces
+`unsupported_product` for both rehearsal vehicles; this locates a definite
+source defect without claiming access to the historical PG matrix's finer reason.
+
+The opt-in prepare now uses the same `VehicleEligibilityService` exported by
+`VehicleEligibilityModule`, with the real repository and matrix. It extends
+only `supportedProducts` for active, currently effective capabilities of the
+offered, product-allowed license types. Existing IDs, other products, license
+types, inactive/expired status, seats, meter/permit/training/document fields and
+other matrix records remain intact. An empty table is materialized from the
+existing defaults, then amended for the offered type. `amendMatrix` serializes
+with the existing replace-all writer using the formal table, upserts only new
+or changed records, and acknowledges COMMIT before publishing cache/audit or
+reporting readiness. Prepare then runs the ordinary qualification assertion
+for both offered pairs. Failure is propagated through the existing command.
+
+`findByLicenseTypes` reads only the requested types and whether native matrix
+configuration exists, in one PG statement. `prepareVehicleCapabilities` merges
+that context into the existing cache; missing configured capabilities and read
+errors cannot authorize from stale/default capability. Owned's async candidate
+entries and both final assignment paths await that reader and the existing
+targeted service-product reader before the unchanged qualification recheck.
+The persisted assignment branch retains its original order/resource locks,
+authorization, disclosure/rating/fare snapshots and transaction. Its in-memory
+branch retains synchronous behavior when no persistence reader is enabled.
+Bucket-to-vehicle selection happens only after the reader's existing enabled
+check, avoiding an unnecessary dependency on registry listing in that mode.
+
+R21b is applied: ordinary `DEFAULT_MATRIX` is AST-identical to af0. The initial
+checkpoint's two global mapping additions were removed by ordinary follow-up
+commit, preserving published history. Only explicit review preparation enables
+this simulated supply mapping through canonical configuration. No validator,
+ordinary product activation policy, business guard or browser assertion was
+relaxed. All original R1–R20 evidence/limits remain above. Original ServiceProduct,
+Tenant/Fleet/C117 ACK source and browser/workflow/deploy/config remain preserved;
+no new workflow, acceptance key, timeout, authentication policy or hosting mode
+was introduced.
+
+| Finding / acceptance                                              | Source and repair                                                                                                                         | Old → replacement result                                                                                                                                                                                                                                                      | Command / source / evidence                                                                                                                                                      | Remaining limit                                                                                                                             |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| R19/R20/R21: first real assign rejects the prepared vehicle       | Native ReviewSupply → VehicleEligibility service/repository; Passenger module imports the exported eligibility module                     | Immutable af0's two real-prepare/real-validator cases fail their eligibility assertions; replacement passes both, plus eleven authority/ACK/refusal cases                                                                                                                     | `reservation-capability.test.ts`; `immutable-af0c-matching-before.log` exit 1, two fail / eleven name-filtered; final root regression exit 0                                     | SQL transport is controlled. Full product assignment after this repair still requires new hosted evidence; af0's failure is not erased      |
+| R21: peer capability/product authority and last-moment revocation | Owned candidate entries and final assign/reassign preparation; native targeted matrix and existing product readers                        | Real Owned candidate query offers the prepared vehicle; a later native matrix revocation causes real assign to reject with `ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT` and creates no task                                                                                        | Same new test; final root regression; the existing dynamic-supply PG companion now injects/initializes the real eligibility service instead of omitting this optional dependency | In-memory Owned case verifies the caller and guard, not PG locking; formal-schema companion still needs hosted execution                    |
+| R21: preserve existing configuration and persistence ACK          | Locked native matrix amendment, COMMIT-before-cache/audit; ordinary qualification assertions retained                                     | Repeated prepare preserves custom ID/fields/other licenses; delayed COMMIT delays readiness/audit; failed write rejects without durable change/success audit; later unsupported/inactive/expired/missing/meter, inactive product, offline driver and failed reads are refused | Thirteen new cases in final regression; original five API unit files retain every assertion                                                                                      | SQL result/transaction transport is the substitute. No PG concurrency claim; inactive and other normal qualification guards remain required |
+| R21b: ordinary configuration remains unchanged                    | Original DEFAULT_MATRIX and disabled-reader path                                                                                          | Original default AST is identical; all four API cases initially exposed by eager listing now pass unchanged after selection moves behind the persistence-enabled check                                                                                                        | `source-invariants.json`; final five-file API regression, exit 0 / 193 pass                                                                                                      | No fixture, guard or expectation was weakened to obtain the pass                                                                            |
+| `pax-review-demo_real-shared-order-across-roles`                  | Original same-UUID roles/peer tests retained; dynamic-supply PG case gains the real qualification dependency                              | Pending, zero acceptance credit                                                                                                                                                                                                                                               | New exact candidate must execute all three formal-schema PG companions without skips, plus real Passenger/Ops/Driver flow                                                        | af0 reached A booking/job only; no replacement hosted success is claimed                                                                    |
+| `pax-review-demo_external-simulation-and-complete-journeys`       | Original opt-in simulated external ports, independent A/B/C, actual business waits/payment/rating/case/cancel/history assertions retained | Pending, zero acceptance credit                                                                                                                                                                                                                                               | Complete original browser spec and all assertions are byte-unchanged from af0                                                                                                    | Three independent completed journeys and exceptions remain unverified on the new candidate                                                  |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`          | Original hosted lane and combined immutable Cloud Run delivery retained                                                                   | Pending, zero acceptance credit                                                                                                                                                                                                                                               | Same-SHA independent review/full CI, normal merge, sole combined immutable shared-dev deployment and fresh smoke remain required                                                 | No VM product runtime, manual rerun/cancellation, deployment or delivery claim                                                              |
+
+Execution source for the final checks is
+`e64c548958669396ba426d3db867ace7f970a030`; the final handoff adds only this
+UAT evidence. Canonical evidence is under
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate-af0c-r21-repair/`:
+
+- The immutable-before command is `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/reservation-capability.test.ts -t 'real prepare makes' --config .local/pax-review-shared-order-demo-20261015/r20-vehicle-eligibility/vitest.before.config.mts --maxWorkers=2 --reporter=verbose`: exit 1, two actual eligibility assertion failures. Eleven other cases were filtered by `-t`, not executed or credited. The load hook reads only the four original production modules via `git show af0:<path>`; it never resets the worktree or substitutes core behavior. The initial separate valid old probe additionally records the exact `unsupported_product` error from the real validator.
+- The original full task namespace plus booking-history/shared-order/payment/account-session/web-shell, product/accepted-ACK, vehicle-eligibility and UV013 regressions: `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015 tests/unit/pax-booking-history-20261009 tests/unit/pax-shared-order-flow-20261015 tests/unit/pax-payment-core-20261009 tests/unit/pax-account-session-20261009 tests/unit/pax-web-shell-20261009 tests/unit/service-product.test.ts tests/unit/service-product-persistence-ack-20261015 tests/unit/vehicle-eligibility.test.ts tests/unit/uv-exec-013.test.ts --maxWorkers=2 --reporter=verbose`: exit 0, **798 pass / 22 original environment skips**, 57 passing / seven skipped files (`regression-final.log`). The three review PG companions and original native HTTP/PG suites remain unexecuted on this VM; no skip was added or relaxed.
+- From `apps/api`, `pnpm exec vitest run tests/unit/vehicle-eligibility.service.test.ts tests/unit/owned-mobility.service.test.ts tests/unit/owned-mobility.controller.test.ts tests/unit/forwarder.service.test.ts tests/unit/regulatory-registry.service.test.ts --config ../../vitest.config.ts --maxWorkers=2 --reporter=verbose`: exit 0, **193 pass / zero skips**, five passing files (`api-regression-final.log`). These are socket-free service/controller tests, not a PG or mounted HTTP execution. Counts overlap with narrower checks and are not additive.
+- Root `pnpm exec tsc -p tsconfig.json --noEmit`: exit 0 (`typecheck-final-optin.log`). API `pnpm --filter @drts/api typecheck`: exit 0 after the existing contracts/control-plane-auth prebuild sequence (`build-contracts.log`, `build-auth.log`, `typecheck-api-final.log`). Its first attempt exited 2 because this fresh worktree lacked the control-plane-auth build output; no product or dependency source changed to correct that prerequisite. Final lint/format, source invariants, commit trailer and canonical/diff checks are recorded alongside the command results in the manifest.
+
+Earlier iterations are retained separately, without claiming green final credit.
+The first local config accidentally selected the broad root include and was
+terminated (exit 143). Probe fixtures initially omitted profile storage and a
+driver-key filter; later new-test iterations omitted the fifth constructor
+argument, treated a location timestamp as a JSON record, lacked initial
+persisted templates/authorization rows or the event publisher. Those fixture
+errors are not product reproductions. After the SQL transport was corrected and
+the real event service used, the immutable module run fails at the intended
+eligibility assertion. The initial API regression was 189 pass / four failures
+from eager listing in the no-persistence path; the final run preserves the
+original fixture and all assertions. An earlier root 798/22 run started before
+the final R21b corrections and is retained without fixed-source credit;
+the final log above uses the corrected committed source. Existing DOM `act`
+warnings remain warnings.
+
+Node 22.23.2 / pnpm 10.33.0 / Vitest 4.1.4 and locked dependencies were used for
+final checks. Only this isolated worktree's 22 dependency symlinks were detached
+for an offline frozen install with scripts disabled (exit 0); canonical
+dependencies and lockfiles were untouched. No product/preview/HTTP listener,
+PG, browser, Playwright CLI or Compose runtime ran on this VM. All locally
+started required checks are read to completion before handoff. New hosted CI
+may remain pending at handoff under the original candidate lifecycle; none of
+the three acceptance keys receives credit from these local checks.
