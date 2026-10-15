@@ -9493,88 +9493,120 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const endpoint = this.webhookEndpoints.find(
-      (candidate) =>
-        candidate.tenantId === tenantId && candidate.webhookId === webhookId,
-    );
-    if (!endpoint) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "WEBHOOK_ENDPOINT_NOT_FOUND",
-        `Webhook endpoint ${webhookId} was not found for tenant ${tenantId}.`,
+    // Persist the operator's retry intent before changing the read model or
+    // sending HTTP. A restart can resume this same queued delivery after ACK.
+    const prepared = this.runConfigurationCommand(tenantId, () => {
+      const storedEndpoint = this.webhookEndpoints.find(
+        (candidate) =>
+          candidate.tenantId === tenantId && candidate.webhookId === webhookId,
       );
-    }
+      if (!storedEndpoint) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "WEBHOOK_ENDPOINT_NOT_FOUND",
+          `Webhook endpoint ${webhookId} was not found for tenant ${tenantId}.`,
+        );
+      }
 
-    const delivery = this.webhookDeliveries.find(
-      (candidate) =>
-        candidate.tenantId === tenantId &&
-        candidate.webhookId === webhookId &&
-        candidate.deliveryId === deliveryId,
-    );
-    if (!delivery) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "WEBHOOK_DELIVERY_NOT_FOUND",
-        `Webhook delivery ${deliveryId} was not found for endpoint ${webhookId}.`,
+      const endpoint = this.cloneStoredWebhookEndpoint(storedEndpoint);
+      const storedDelivery = this.webhookDeliveries.find(
+        (candidate) =>
+          candidate.tenantId === tenantId &&
+          candidate.webhookId === webhookId &&
+          candidate.deliveryId === deliveryId,
       );
-    }
-    if (delivery.eventType.startsWith("passenger.")) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "PASSENGER_NOTIFICATION_RETRY_OWNER",
-        "Retry passenger notifications through the consumer outbox.",
-      );
-    }
-    if (delivery.status !== "delivery_failed") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "WEBHOOK_DELIVERY_NOT_RETRYABLE",
-        "Only failed webhook deliveries can be retried manually.",
-      );
-    }
+      if (!storedDelivery) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "WEBHOOK_DELIVERY_NOT_FOUND",
+          `Webhook delivery ${deliveryId} was not found for endpoint ${webhookId}.`,
+        );
+      }
+      const delivery = this.cloneStoredWebhookDelivery(storedDelivery);
+      if (delivery.eventType.startsWith("passenger.")) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PASSENGER_NOTIFICATION_RETRY_OWNER",
+          "Retry passenger notifications through the consumer outbox.",
+        );
+      }
+      if (delivery.status !== "delivery_failed") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "WEBHOOK_DELIVERY_NOT_RETRYABLE",
+          "Only failed webhook deliveries can be retried manually.",
+        );
+      }
 
-    this.clearWebhookRetry(delivery.deliveryId);
-    delivery.status = "queued";
-    delivery.nextAttemptAt = null;
+      delivery.status = "queued";
+      delivery.nextAttemptAt = new Date().toISOString();
 
-    const now = new Date().toISOString();
-    const previousEndpointValues = this.toWebhookResponse(endpoint, identity);
-    if (endpoint.status === "disabled") {
-      this.markWebhookValidationPending(endpoint, now);
-      this.recordTenantAudit(
+      const now = new Date().toISOString();
+      const previousEndpointValues = this.toWebhookResponse(endpoint, identity);
+      if (endpoint.status === "disabled") {
+        this.markWebhookValidationPending(endpoint, now);
+      }
+
+      if (
+        delivery.eventType === "tenant.webhook.test" &&
+        delivery.secretVersion === endpoint.secretVersion &&
+        delivery.verificationFingerprint ===
+          computeEndpointFingerprint(endpoint)
+      ) {
+        delivery.verificationNonce = endpoint.verificationNonce;
+      }
+
+      const persisted = this.persistConfigurationChanges(
         {
-          actorId: identity?.actorId ?? null,
-          actorType:
-            (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
-            "system",
-          tenantId,
-          moduleName: "tenant-partner",
-          actionName: "prepare_webhook_retry",
-          resourceType: "webhook_endpoint",
-          resourceId: endpoint.webhookId,
-          oldValuesSummary: previousEndpointValues as Record<string, unknown>,
-          newValuesSummary: this.toWebhookResponse(
-            endpoint,
-            identity,
-          ) as Record<string, unknown>,
+          webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
+          webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
         },
-        requestId,
+        "prepare_webhook_retry",
+        tenantId,
       );
-    }
-
-    if (
-      delivery.eventType === "tenant.webhook.test" &&
-      delivery.secretVersion === endpoint.secretVersion &&
-      delivery.verificationFingerprint === computeEndpointFingerprint(endpoint)
-    ) {
-      delivery.verificationNonce = endpoint.verificationNonce;
-    }
-
-    return this.retryQueuedWebhookDelivery(
-      webhookId,
-      deliveryId,
-      requestId,
-      identity,
+      return this.afterPersistence(persisted, () => {
+        this.webhookEndpoints = this.webhookEndpoints.map((item) =>
+          item.webhookId === endpoint.webhookId ? endpoint : item,
+        );
+        this.webhookDeliveries = this.webhookDeliveries.map((item) =>
+          item.deliveryId === delivery.deliveryId ? delivery : item,
+        );
+        this.clearWebhookRetry(delivery.deliveryId);
+        if (previousEndpointValues.status === "disabled") {
+          this.recordTenantAudit(
+            {
+              actorId: identity?.actorId ?? null,
+              actorType:
+                (identity?.actorType as
+                  | AuditLogRecord["actorType"]
+                  | undefined) ?? "system",
+              tenantId,
+              moduleName: "tenant-partner",
+              actionName: "prepare_webhook_retry",
+              resourceType: "webhook_endpoint",
+              resourceId: endpoint.webhookId,
+              oldValuesSummary: previousEndpointValues as Record<
+                string,
+                unknown
+              >,
+              newValuesSummary: this.toWebhookResponse(
+                endpoint,
+                identity,
+              ) as Record<string, unknown>,
+            },
+            requestId,
+          );
+        }
+      });
+    });
+    // HTTP must stay outside the configuration lock; its outcome joins it again.
+    return this.afterPersistence(prepared, () =>
+      this.retryQueuedWebhookDelivery(
+        webhookId,
+        deliveryId,
+        requestId,
+        identity,
+      ),
     );
   }
 

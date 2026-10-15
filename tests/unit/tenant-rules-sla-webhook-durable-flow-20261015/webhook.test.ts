@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { IdentityContext } from "@drts/contracts";
 import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
 import { createHmac } from "node:crypto";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -7,6 +8,17 @@ import { WebhookDispatchService } from "../../../apps/api/src/modules/tenant-par
 import { persistenceHarness } from "./persistence-harness";
 
 const tenantId = "tenant-durable-webhook";
+const retryIdentity = {
+  authMode: "jwt_bearer",
+  actorId: "tenant-integration-manager",
+  actorType: "tenant_admin",
+  realm: "tenant",
+  tenantId,
+  roles: ["tc_integration_mgr"],
+  roleFamilies: ["tenant"],
+  scopes: ["tenant:webhooks:write"],
+  supportedExecutionModes: [],
+} satisfies IdentityContext;
 const command = {
   url: "https://receiver.example.test/hook",
   secret: "original-webhook-secret",
@@ -64,17 +76,7 @@ describe("C112 durable commands and first in-flight restart", () => {
           endpoint.webhookId,
           failed.deliveryId,
           "req-manual-retry-preparation",
-          {
-            authMode: "jwt_bearer",
-            actorId: "tenant-integration-manager",
-            actorType: "tenant_admin",
-            realm: "tenant",
-            tenantId,
-            roles: ["tc_integration_mgr"],
-            roleFamilies: ["tenant"],
-            scopes: ["tenant:webhooks:write"],
-            supportedExecutionModes: [],
-          },
+          retryIdentity,
         ),
       );
       const outcome = retrying.then(
@@ -120,6 +122,82 @@ describe("C112 durable commands and first in-flight restart", () => {
     },
   );
 
+  it("manual retry preparation with lost COMMIT ACK recovers the original intent in a fresh service", async () => {
+    vi.useFakeTimers();
+    const p = persistenceHarness();
+    const first = serviceFor(p.repository);
+    const endpoint = await first.service.createWebhookEndpoint(
+      tenantId,
+      command,
+    );
+    first.fetcher.mockResolvedValueOnce({ ok: false, status: 410 });
+    const failed = await first.service.sendTestWebhook(tenantId, {
+      webhookId: endpoint.webhookId,
+    });
+    const original = (await p.repository.loadState()).webhookDeliveries[0]!;
+    const auditSpy = vi.spyOn(first.audit, "recordAuditLog");
+    first.fetcher.mockClear();
+    p.loseCommitAck();
+    await expect(
+      first.service.retryWebhookDelivery(
+        tenantId,
+        endpoint.webhookId,
+        failed.deliveryId,
+        "req-manual-retry-lost-ack",
+        retryIdentity,
+      ),
+    ).rejects.toThrow("COMMIT ACK lost");
+    expect(first.fetcher).not.toHaveBeenCalled();
+    expect(
+      auditSpy.mock.calls.some(([entry]) =>
+        ["prepare_webhook_retry", "retry_webhook_delivery"].includes(
+          entry.actionName,
+        ),
+      ),
+    ).toBe(false);
+    const queued = (await p.repository.loadState()).webhookDeliveries[0]!;
+    expect(queued).toMatchObject({
+      deliveryId: original.deliveryId,
+      webhookId: original.webhookId,
+      tenantId: original.tenantId,
+      status: "queued",
+      attempt: original.attempt,
+      rawBody: original.rawBody,
+      secretVersion: original.secretVersion,
+      retryPolicySnapshot: original.retryPolicySnapshot,
+    });
+    expect(queued.nextAttemptAt).toBeTruthy();
+    first.service.onModuleDestroy();
+    const second = serviceFor(p.repository);
+    await second.service.onModuleInit();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(second.fetcher).toHaveBeenCalledOnce();
+    const [, request] = second.fetcher.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(JSON.parse(request.body as string)).toEqual(original.rawBody);
+    const signature = (request.headers as Record<string, string>)[
+      "x-drts-webhook-signature"
+    ]!;
+    const timestamp = /;t=([^;]+);/.exec(signature)![1];
+    expect(signature).toContain(
+      createHmac("sha256", command.secret)
+        .update(`${timestamp}.${request.body as string}`)
+        .digest("hex"),
+    );
+    expect((await p.repository.loadState()).webhookDeliveries[0]).toMatchObject(
+      {
+        deliveryId: original.deliveryId,
+        status: "delivered",
+        attempt: original.attempt + 1,
+      },
+    );
+    expect(second.service.listWebhookEndpoints(tenantId)[0]?.status).toBe(
+      "active",
+    );
+  });
+
   it.each([true, false])(
     "manual retry audit describes the committed delivery outcome (persistence=%s)",
     async (enabled) => {
@@ -137,24 +215,13 @@ describe("C112 durable commands and first in-flight restart", () => {
       const gate = new Promise<void>((resolve) => {
         releaseCommit = resolve;
       });
-      if (enabled)
-        p.holdCommit(() => gate);
+      if (enabled) p.holdCommit(() => gate);
       const retrying = service.retryWebhookDelivery(
         tenantId,
         endpoint.webhookId,
         failed.deliveryId,
         "req-manual-retry-audit",
-        {
-          authMode: "jwt_bearer",
-          actorId: "tenant-integration-manager",
-          actorType: "tenant_admin",
-          realm: "tenant",
-          tenantId,
-          roles: ["tc_integration_mgr"],
-          roleFamilies: ["tenant"],
-          scopes: ["tenant:webhooks:write"],
-          supportedExecutionModes: [],
-        },
+        retryIdentity,
       );
       if (enabled) {
         await new Promise((resolve) => setImmediate(resolve));
