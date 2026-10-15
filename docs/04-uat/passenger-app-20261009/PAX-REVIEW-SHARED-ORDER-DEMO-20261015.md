@@ -537,6 +537,43 @@ actual structured result; `regular-root-summary.json` extracts the three new
 PG companions and their statuses. Raw logs and the original artifact ZIP are
 retained in this round's canonical evidence directory.
 
+### R8/R9 replacement-source verification closeout
+
+Final source changes are limited to the two CommonJS-compatible path reads and
+the real task-row JSON projection. Product services, SQL migrations, original
+assertions, workflow gates, timeouts, role guards and deployment configuration
+are unchanged in this follow-up. Anchors `090b6507d`, `540731931` and
+`573bbcb2d` preserve the original candidate and each repair/evidence unit.
+
+All locally started checks completed and their results were read:
+
+- `suite-after-hosted-fixed-resolver.log` and
+  `suite-after-shared-dev-fixed-resolver.log`: the actual Playwright 1.59.1
+  loaders load config plus the real test module/helper and collect the original
+  three-order test, exit 0 in each mode. No test body, server or browser runs.
+  Earlier `suite-after-hosted.log` / `suite-after-shared-dev.log` used the
+  canonical loader alongside the isolated worktree's Playwright instance,
+  causing a duplicate-suite tooling error (exit 1), not a product regression.
+  The corrected resolver is anchored to this worktree's `package.json`.
+- `final-root-typecheck.log`, `final-lint.log`, final Prettier and diff checks:
+  exit 0. Prior namespace results remain 20 passes / 3 hosted-only skips; none
+  executes R9's repaired final PG query on this VM.
+- `test-results.zip` matches GitHub artifact `11961980499`'s declared SHA-256
+  `6762adc2dbb685e28298c4a269ddd8e86714fa61bde87539bf002020bc573f53`.
+  `regular-root-summary.json` retains its actual one failed dynamic-supply
+  assertion plus two passed PG companions. Regular full CI failed; cancelled
+  integration-trunk unit has no full pass credit. Both runs' candidate head
+  is 33fb; their checkout in the logs is the synthetic PR merge
+  `15eb580a4bccae49f80a082e2dc3ba27ddf730aa`, not a deployment/merge claim.
+
+The canonical evidence directory above includes `manifest.json` with command
+results, original run/artifact identities and file hashes. The replacement
+full SHA is recorded by the owner handoff after ordinary non-force push and
+local/remote/PR-head agreement. New CI is pending and must establish the fixed
+PG query and actual browser journeys. Original reviewer approval of 33fb does
+not transfer to the replacement SHA. All three required acceptance keys
+remain pending; no shared-dev deployment or completion is claimed.
+
 | Finding / acceptance                                                 | Actual result / source                                                                                                                                                                                                                                                                                                                                                                                                                                | Repair and remaining verification                                                                                                                                                                                                                                                                                                       |
 | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | R9: final dynamic-supply proof selects a nonexistent physical column | Real hosted `dynamic-supply.hosted.test.ts:335` fails with `column "driver_id" does not exist` after the actual prepare, cross-instance registration/profile/token/work-state, booking, dispatch/candidate/assignment, native acceptance and suspension assertions. V0011 defines the task row with `record jsonb`; production `OwnedMobilityRepository.persistChanges` writes the driver's ID inside that record, not a physical `driver_id` column. | Select `record->>'driverId' AS driver_id` from the same committed row. Preserve the existing order/driver/status equality assertion and all preceding guards. No product, migration, fixture, skip, timeout or retry changes. Replacement hosted PG is pending; static schema review and local hosted skips are not a repaired PG pass. |
