@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
@@ -12,9 +14,22 @@ const load = createUiModuleLoader(appRoot, {
     BANK_CONSOLE_ROLE_COOKIE: "drts_bank_console_role",
   },
 });
-const { proxy } = load<{ proxy(req: NextRequest): NextResponse }>(
-  resolve(appRoot, "proxy.ts"),
-);
+function sourcePath() {
+  if (!process.env.BANK_ENTRY_REF) return resolve(appRoot, "proxy.ts");
+  mkdirSync(".local/bank-user-management-flow-20261015", { recursive: true });
+  const path = resolve(
+    ".local/bank-user-management-flow-20261015/old-proxy.ts",
+  );
+  writeFileSync(
+    path,
+    execFileSync("git", [
+      "show",
+      `${process.env.BANK_ENTRY_REF}:apps/bank-console-web/proxy.ts`,
+    ]),
+  );
+  return path;
+}
+const { proxy } = load<{ proxy(req: NextRequest): NextResponse }>(sourcePath());
 describe("Bank actual proxy managed-session entry lifecycle", () => {
   it.each([
     "tenant/login",

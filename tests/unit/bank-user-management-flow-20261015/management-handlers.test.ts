@@ -423,6 +423,34 @@ describe("Bank managed caller -> production guards/commands/readback", () => {
       status: "suspended",
     });
   });
+  it.each([
+    "tenant_admin",
+    "tenant_ops_admin",
+    "tenant_finance_admin",
+    "tenant_viewer",
+  ])(
+    "accepts assignable catalog role %s as an actual invite payload",
+    async (roleCode) => {
+      const f = await fixture();
+      const result = await f.request({
+        action: "invite",
+        email: `${roleCode}@issuer.example`,
+        displayName: "Catalog member",
+        roleCode,
+      });
+      expect(result.status).toBe(200);
+      expect((await result.json()).data.users).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ roleCode, status: "invited", tenantId }),
+        ]),
+      );
+      expect(
+        f.calls.find(
+          (call) => call.method === "POST" && call.path === "/api/tenant/users",
+        )!.body,
+      ).toMatchObject({ roleCode });
+    },
+  );
   it.each(["", "forged", "bank_program_admin:acme.signature"])(
     "rejects missing/forged/display-only session %j without user calls",
     async (token) => {

@@ -1,0 +1,103 @@
+// @vitest-environment jsdom
+import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import * as React from "react";
+import { resolve } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import * as constants from "../../../packages/tenant-auth/src/constants";
+import { createUiModuleLoader } from "../system-remediation/sr-wire-001/ui-module-loader";
+const appRoot = resolve("apps/bank-console-web");
+const bank = { code: "acme", tenantId: "demo-brand-only" };
+const load = createUiModuleLoader(appRoot, {
+  react: React,
+  "next/link": {
+    __esModule: true,
+    default: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) =>
+      React.createElement("a", props),
+  },
+  "@drts/tenant-auth/constants": constants,
+  "@/lib/demo-tenants": {
+    BANK_DEMO_TENANTS: { acme: bank },
+    getBankTenantName: () => "Brand",
+    getBankTenantShortName: () => "Brand",
+  },
+  "@/lib/session": {
+    getBankConsoleSession: () => ({
+      actorName: "Display persona",
+      actorEmail: "display@example.org",
+      roleLabel: "Display role",
+    }),
+  },
+});
+function sourcePath() {
+  if (!process.env.BANK_ENTRY_REF)
+    return resolve(appRoot, "components/bank-demo-controls.tsx");
+  mkdirSync(".local/bank-user-management-flow-20261015", { recursive: true });
+  const path = resolve(
+    ".local/bank-user-management-flow-20261015/old-bank-demo-controls.tsx",
+  );
+  writeFileSync(
+    path,
+    execFileSync("git", [
+      "show",
+      `${process.env.BANK_ENTRY_REF}:apps/bank-console-web/components/bank-demo-controls.tsx`,
+    ]),
+  );
+  return path;
+}
+const { BankDemoControls } = load<{
+  BankDemoControls: React.ComponentType<{
+    bank: typeof bank;
+    locale: "en";
+    pathname: string;
+    searchParams: URLSearchParams;
+    signedOut: boolean;
+  }>;
+}>(sourcePath());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  document.cookie = `${constants.TENANT_CSRF_COOKIE_NAME}=; max-age=0; path=/`;
+});
+describe("Existing Bank account controls consume the managed logout rail", () => {
+  it.each(["Sign out", "Switch account"])(
+    "%s invokes CSRF-protected session logout and surfaces denial",
+    async (name) => {
+      document.cookie = `${constants.TENANT_CSRF_COOKIE_NAME}=managed-csrf; path=/`;
+      const fetcher = vi.fn(async () =>
+        Response.json({ error: "revocation unavailable" }, { status: 503 }),
+      );
+      vi.stubGlobal("fetch", fetcher);
+      render(
+        React.createElement(BankDemoControls, {
+          bank,
+          locale: "en",
+          pathname: "/users",
+          searchParams: new URLSearchParams(),
+          signedOut: false,
+        }),
+      );
+      const menu = screen.getByText("Display persona").closest("details")!;
+      menu.open = true;
+      const control = screen.getByText(name);
+      fireEvent.click(control);
+      await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+      expect(fetcher.mock.calls[0]).toEqual([
+        "/api/auth/logout",
+        expect.objectContaining({
+          method: "POST",
+          credentials: "same-origin",
+          headers: { [constants.TENANT_CSRF_HEADER_NAME]: "managed-csrf" },
+        }),
+      ]);
+      expect(await screen.findByRole("alert")).toBeTruthy();
+    },
+  );
+});
