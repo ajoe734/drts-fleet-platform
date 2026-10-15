@@ -268,6 +268,70 @@ describe("C069 legitimate producer subtypes through SDK, mapper, badges and CSV"
   );
 });
 
+describe("existing realtime compatibility", () => {
+  it("retains realtime for legacy null/absent subtype after actual SDK normalization", async () => {
+    const h = harness();
+    for (const businessDispatchSubtype of [null, undefined]) {
+      h.fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              items: [
+                {
+                  ...trip("legacy-realtime", "enterprise_dispatch"),
+                  businessDispatchSubtype,
+                },
+              ],
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+      const view = await h.data.loadTrips(period);
+      expect(view.rows[0]?.svc).toBe("realtime");
+      expect(view.error).toBeNull();
+    }
+  });
+});
+
+describe("insurance/travel multi-page consumers", () => {
+  it.each(pairs.slice(0, 2))(
+    "exports all matching %s rows from the second page",
+    async (subtype, svc, label) => {
+      const records = Array.from({ length: 25 }, (_, i) =>
+        trip(`match-${i}`, subtype),
+      );
+      const h = harness(records);
+      h.wrap(
+        await h.trips({
+          searchParams: Promise.resolve({
+            period,
+            svc,
+            page: "2",
+            q: "MATCH",
+            status: "completed",
+          }),
+        }),
+      );
+      const rows = within(screen.getByRole("table"))
+        .getAllByRole("row")
+        .slice(1);
+      expect(rows).toHaveLength(5);
+      expect(within(rows[0]!).getByText(label)).toBeTruthy();
+      const exportHref = screen
+        .getByRole("link", { name: /Export/ })
+        .getAttribute("href")!;
+      const response = await h.csv(
+        new NextRequest(new URL(exportHref, "https://portal.test")),
+      );
+      const csv = await response.text();
+      expect(csv.trim().split("\n")).toHaveLength(26);
+      expect(csv).toContain(`match-0,${svc},`);
+      expect(csv).toContain(`match-24,${svc},`);
+    },
+  );
+});
+
 function multiPageTrips() {
   // Larger than the established Host list page size (20), with excluded rows
   // both inside and outside that window. Filter first, then slice.

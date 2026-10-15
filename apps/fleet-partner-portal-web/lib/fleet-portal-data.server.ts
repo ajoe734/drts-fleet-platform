@@ -1219,23 +1219,14 @@ export async function loadDashboard(
   let dispatchable: string;
 
   if (driversError === null) {
-    driverCount = (
-      dashboardRecord ? dashboardRecord.activeDriverCount : activeDriverCount
-    ).toLocaleString("en-US");
-
+    // Use the same mapDriverStatus projection as the list, over the complete
+    // partner-scoped affiliation roster, before any page-local q/tab filters.
+    // The aggregate's workState !== offline count includes held drivers; it is
+    // only a fallback when the authoritative list cannot be read.
+    driverCount = activeDriverCount.toLocaleString("en-US");
     driverStatusSummary = {
-      online: (dashboardRecord
-        ? dashboardRecord.onlineDriverCount
-        : onlineDriverCount
-      ).toLocaleString("en-US"),
-      offline: (dashboardRecord
-        ? Math.max(
-            dashboardRecord.activeDriverCount -
-              dashboardRecord.onlineDriverCount,
-            0,
-          )
-        : offlineDriverCount
-      ).toLocaleString("en-US"),
+      online: onlineDriverCount.toLocaleString("en-US"),
+      offline: offlineDriverCount.toLocaleString("en-US"),
     };
 
     dispatchable = (
