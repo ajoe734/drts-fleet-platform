@@ -1907,3 +1907,73 @@ tested at the anchor, prior candidate source verification, command/exit/source h
 review and all terminal check logs. Node 22.23.2, pnpm 10.33.0, TypeScript 5.9.3,
 Vitest 4.1.4, Prettier 3.8.2. This section supplements every earlier finding and
 acceptance row; none is deleted or granted substitute credit.
+
+## R27 — inject the existing complaint service into the real rating caller (2026-10-15)
+
+Independent review reopened candidate `c81b576c77ae1e630e962fd9581ca6e2305262af`,
+generation `bc6f4ef3b1e94835bee5c9fd4ace5337`, for the still-unrepaired R27.
+Its review is
+`.local/passenger-transport-bureau-review-20261015/codex-review-candidate-c81b576-r27/review.json`,
+SHA256 `0109c921d993f9ca392f69ed5078f102af3481c5fdde4fd682edc3720f6f3cd4`.
+The previous rejection concerned Home; this was the first independent R27
+rejection, with a different trigger. All earlier findings and acceptance rows
+remain above, verbatim.
+
+`PassengerBookingService` now annotates its existing optional complaint
+parameter with `@Inject(ComplaintService)`. Strict CommonJS decorator metadata
+still describes the union as `Object`, but Nest now resolves the explicit class
+token exported by the existing `ComplaintModule`. The real AppModule import
+order passes with that token; no forward reference or module change is needed.
+The optional constructor contract, missing-storage failure, ownership and input
+validation, completed/payment/24-hour rules, and original rating/consent/case
+transaction remain intact. The sole product change is this injection annotation.
+Executable source is `5dc76a0b81a0f0f3b0ee1801dec5d5b442626543`; the final candidate
+adds this evidence to the original UAT. The Home/Jobs/Trip, SDK/BFF, accepted ACK,
+other product, original full A/B/C spec, CI and deployment blobs are unchanged
+from c81b576.
+
+The new regression imports the actual AppModule under strict CommonJS with
+`emitDecoratorMetadata`, checks the production ComplaintModule export/import,
+and uses the real Nest Injector, PassengerBookingController, booking service
+and ComplaintService hook. Each of seven scenarios gets fresh provider state.
+Ride lookup/submission and complaint persistence are fixtures in this DI probe;
+it does not test real MultiTaxi admission or SQL commit behavior. Those execute
+through production services/repositories in the existing rating regressions
+with controlled database responses, and still require formal PG acceptance.
+No lifecycle hook, server, browser or database is started by this probe.
+
+| Finding / acceptance                                                                                  | Source / change                                                                                                                   | Frozen old → corrected result                                                                                                                                                                                                                                                                                                            | Command / exit / evidence                                                                                                                                                | Remaining limitation                                                                                                                                                                                                      |
+| ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R27: valid rating returns 503 despite an available complaint provider                                 | `PassengerBookingService` optional parameter, explicit `ComplaintService` token; actual controller and complaint hook             | Same final probe against frozen c81b576: six injection assertions fail, missing-provider control passes; all three valid rating requests return 503 and zero writes. Corrected source: all seven scenarios pass; high score, low opt-in and low opt-out each execute one rating/consent hook, only low opt-in prepares a complaint draft | `old-rating-final.json/log`: exit 1; `new-rating-final.json/log`: exit 0; identical final harness hash. All seven scenarios complete, no timeout                         | Simulated ride submission/complaint persistence; no PG, browser or durable business completion credit                                                                                                                     |
+| R27: preserve refusal and existing transaction behavior                                               | Original owner/score/storage checks and original rating, consent, case, audit and idempotency code                                | Foreign owner remains 404; invalid score 400; absent provider and disabled storage 503; all have zero writes. Existing rating/CRM/eligibility regression: 227 pass, zero skips. Seven API suites: 84 pass, zero skips                                                                                                                    | `rating-regression.json/log`, `api-regression.json/log`; exact commands, executable hashes and terminal results retained                                                 | API command also listed an unmatched provider-routes filename; the actual result is seven files / 84 tests, with no coverage claimed for that unmatched filter. Existing SQL response fixtures are not formal PG evidence |
+| Preserve R1–R26, including Home/Trip/Jobs, proof/fare, identity, authorization and shared-order reads | Prior candidate's source; no other product changes                                                                                | Final affected regression: 606 pass / 16 original environment skips, 52 passing files; root/Driver TypeScript both exit 0                                                                                                                                                                                                                | `affected-regression.json/log`, `root-typecheck.json/log`, `driver-typecheck.json/log`; scoped ESLint/Prettier, diff/trailers and publication checks are in the manifest | Original environment skips grant no PG/HTTP acceptance. The previous full Driver suite is preserved as prior evidence, not claimed as rerun in this round                                                                 |
+| Preserve published history and prior evidence                                                         | Existing recovery-r26 branch / PR 2687; assigned isolated cwd                                                                     | Prior 127 source / 42 evidence hashes, six R27 review evidence hashes and seven original hosted input hashes all verified. Original old branch 5bd188 and prior recovery refs retained. Ordinary non-force pushes only                                                                                                                   | `prior-source-verification.json`, `review-and-hosted-evidence-verified.json`, `publication.json`; final manifest binds candidate and checked blobs                       | No rebase/reset/amend/force push or trunk synchronization; final candidate needs its own review/CI                                                                                                                        |
+| `pax-review-demo_real-shared-order-across-roles`                                                      | Original real order/task/PG paths and three formal-schema companions                                                              | Pending, zero credit                                                                                                                                                                                                                                                                                                                     | New exact candidate full CI and all three PG cases without skips still required                                                                                          | Local fixtures and previous-candidate results grant no substitute credit                                                                                                                                                  |
+| `pax-review-demo_external-simulation-and-complete-journeys`                                           | Original three independent A/B/C orders, time waits, high/low rating, consent/case, payment/retry, cancellation/history/documents | Pending, zero credit                                                                                                                                                                                                                                                                                                                     | New exact candidate must complete all original browser journeys and assertions                                                                                           | Earlier d3c A completion/captured poll followed by ratings503 remains partial; HTML/final facts/B/C were not reached                                                                                                      |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`                                              | Original hosted bus and sole immutable combined Cloud Run release                                                                 | Pending, zero credit                                                                                                                                                                                                                                                                                                                     | Same-SHA independent review/CI/browser, normal merge, authorized shared-dev release and fresh smoke remain required                                                      | No VM product/HTTP/PG/browser/preview/Compose/Playwright CLI, workflow dispatch/rerun/manual cancellation or deployment                                                                                                   |
+
+All logs are retained, including the first seven-process baseline: five confirmed
+injection assertion failures, one missing-provider control pass, and a final
+subprocess timeout. That timeout is not a product reproduction. The probe now
+imports once and rebuilds a fresh Nest provider slice per scenario with the same
+assertions and time limits. Its first corrected-source batch also exposed a
+noncanonical passenger fixture in low-rating complaint normalization (404).
+Only the fixture changed to `drts_passenger_<UUID>`; both old and corrected source
+were rerun with the identical final harness. The fixture failure is not reported
+as a product regression. The original browser timeouts/retries/assertions did not
+change.
+
+Dispatch had restored generated dependency links to canonical packages. As in
+the previous round, only this assigned cwd's 22 generated links were detached,
+then dependencies were installed offline with frozen lockfile and scripts
+disabled (exit 0). Canonical dependencies and tracked lockfiles were untouched.
+The final checks use the isolated dependencies. Node 22.23.2, pnpm 10.33.0,
+TypeScript 5.9.3, Vitest 4.1.4 and Prettier 3.8.2.
+
+Canonical evidence is
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate-c81b576-r27/`.
+Its `manifest.json` records the final candidate, frozen old source, exact
+commands/exits, source/log hashes, every terminal result, prior evidence
+verification and publication identity. All owner-started repository checks are
+terminal and read before handoff. Hosted checks for the final handoff remain
+pending in the original lifecycle; no acceptance key is credited by this repair.
