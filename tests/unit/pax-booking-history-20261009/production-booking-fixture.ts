@@ -7,6 +7,8 @@ import { PassengerBookingService } from "../../../apps/api/src/modules/passenger
 import { PassengerBookingRepository } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.repository";
 import { PassengerBookingController } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.controller";
 import { PassengerFareRepository } from "../../../apps/api/src/modules/passenger-app/fare/passenger-fare.repository";
+import { estimateFare } from "../../../apps/api/src/modules/passenger-app/fare/fare.engine";
+import { tariff } from "../pax-fare-quote-20261009/fixture";
 import type {
   CreatePassengerRideCommand,
   OwnedOrderRecord,
@@ -228,8 +230,20 @@ export function createProductionBookingFixture(
     fareSnapshotId: QUOTE_ID,
     passengerConfirmedAt: new Date(NOW - 1000).toISOString(),
   };
+  const route = {
+    provider: "unit-geo-port",
+    distanceMeters: 1251,
+    durationSeconds: 600,
+    encodedPolyline: "unit-original-route",
+    generatedAt: new Date(NOW - 2000).toISOString(),
+  };
   const snapshot = {
+    ...estimateFare(tariff, { ...route, scheduledAt: command.scheduledAt }),
     ...command,
+    fareSnapshotId: QUOTE_ID,
+    route,
+    tariffSnapshot: tariff,
+    createdAt: new Date(NOW - 2000).toISOString(),
     drtsPassengerId: OWNER,
     expiresAt: new Date(NOW + 600000).toISOString(),
   };

@@ -450,6 +450,11 @@ export class PassengerBookingService {
   }
 
   async getRide(passengerId: string, orderId: string) {
+    await this.assertRideOwner(passengerId, orderId);
+    return this.multiTaxiService.getPassengerRideById(orderId, passengerId);
+  }
+
+  async assertRideOwner(passengerId: string, orderId: string) {
     if (
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
         orderId,
@@ -469,6 +474,5 @@ export class PassengerBookingService {
         "Ride not found",
       );
     }
-    return this.multiTaxiService.getPassengerRideById(orderId, passengerId);
   }
 }

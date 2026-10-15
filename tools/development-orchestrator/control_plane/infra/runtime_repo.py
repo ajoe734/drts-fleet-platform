@@ -39,6 +39,7 @@ def default_state() -> dict[str, Any]:
         "deadlock_recovery": {},
         "failure_streaks": {},
         "chair_reassignment_guards": {},
+        "governance_escalations": {},
         "dispatch_pauses": [],
         "disk_guard": {
             "last_check_at": None,

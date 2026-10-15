@@ -309,7 +309,7 @@ describe("Native real client/XHR stream lifecycle with injected boundaries", () 
     expect(h.stream.lastEventVersion).toBe(5);
     h.stream.stop();
   });
-  it("background aborts and foreground re-reads before subscribing with rotated token; cursor/ETA survive", async () => {
+  it("background aborts and foreground re-reads with rotated token; new process cursor resets while captured ETA survives", async () => {
     const h = streamSetup();
     await h.stream.start();
     h.requests[0]!.append(frame(8));
@@ -332,7 +332,9 @@ describe("Native real client/XHR stream lifecycle with injected boundaries", () 
     );
     h.requests[1]!.append(frame(7) + frame(9));
     await flush();
-    expect(h.onEvent.mock.calls.map((c) => c[0].eventVersion)).toEqual([8, 9]);
+    expect(h.onEvent.mock.calls.map((c) => c[0].eventVersion)).toEqual([
+      8, 7, 9,
+    ]);
     expect(h.onRide.mock.calls[1]?.[0].assignment.eta.calculatedAt).toBe(
       calculatedAt,
     );
@@ -429,7 +431,7 @@ describe("Native real client/XHR stream lifecycle with injected boundaries", () 
     expect(h.onEvent).not.toHaveBeenCalled();
     h.stream.stop();
   });
-  it("network failure preserves authority/cursor and explicit retry re-reads", async () => {
+  it("network failure preserves authority and explicit retry re-reads before resetting the connection cursor", async () => {
     const h = streamSetup();
     await h.stream.start();
     h.requests[0]!.append(frame(2));
@@ -438,7 +440,7 @@ describe("Native real client/XHR stream lifecycle with injected boundaries", () 
     expect(h.onError.mock.calls[0]?.[0]).toMatchObject({ status: 503 });
     await h.stream.reconnect();
     expect(h.reads).toHaveLength(2);
-    expect(h.stream.lastEventVersion).toBe(2);
+    expect(h.stream.lastEventVersion).toBe(0);
     h.stream.stop();
   });
   it("does not subscribe in background, then opens only after first active read", async () => {
