@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  forwardRef,
   HttpStatus,
   Inject,
   Injectable,
@@ -104,7 +105,9 @@ export class ForwarderService implements OnModuleInit {
     @Inject(FORWARDER_ADAPTERS)
     private readonly adapters: readonly ForwarderAdapterInterface[] = [],
     @Optional() private readonly forwarderRepository?: ForwarderRepository,
-    @Optional() private readonly ownedMobilityService?: OwnedMobilityService,
+    @Optional()
+    @Inject(forwardRef(() => OwnedMobilityService))
+    private readonly ownedMobilityService?: OwnedMobilityService,
     // NOTE(integration 20260605): appended LAST (@Optional) to preserve the
     // original positional order for unit-test harnesses; e2e-svc-013 had
     // inserted it at position 2, shifting auditNotificationService/adapters.
