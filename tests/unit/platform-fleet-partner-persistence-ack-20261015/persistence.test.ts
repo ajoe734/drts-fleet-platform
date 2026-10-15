@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createRequire } from "node:module";
 import type { CreateFleetPartnerCommand } from "@drts/contracts";
 
+import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
+import { BootstrapAuthGuard } from "../../../apps/api/src/common/auth/bootstrap-auth.guard";
+import type { AuthenticatedRequestLike } from "../../../apps/api/src/common/auth/auth.types";
 import type { DatabaseService } from "../../../apps/api/src/common/db";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../../apps/api/src/modules/billing-settlement/billing-settlement.service";
@@ -9,6 +13,14 @@ import { FleetPartnerRepository } from "../../../apps/api/src/modules/fleet-part
 import { FleetPartnerService } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.service";
 
 const partnerId = "fleet-demo-001";
+// Nest is an API package dependency, so resolve it from that workspace.
+const { Reflector } = createRequire(
+  new URL("../../../apps/api/package.json", import.meta.url),
+)("@nestjs/core");
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 const createCommand: CreateFleetPartnerCommand = {
   legalName: " ACK Fleet Ltd. ",
   displayName: " ACK Fleet ",
@@ -182,7 +194,7 @@ describe.each(mutations)("canonical ACK: $name", (mutation) => {
       const gate = f.delay();
       let settled = false;
       const call = Promise.resolve()
-        .then(() => mutation[entry](f))
+        .then(async () => mutation[entry](f))
         .then((result) => {
           settled = true;
           return result;
@@ -223,7 +235,7 @@ describe.each(mutations)("canonical ACK: $name", (mutation) => {
       const gate = f.delay();
       // Observe both outcomes immediately, including the original broken path.
       const call = Promise.resolve()
-        .then(() => mutation[entry](f))
+        .then(async () => mutation[entry](f))
         .then(
           (value) => ({ value }),
           (reason: unknown) => ({ reason }),
@@ -238,6 +250,265 @@ describe.each(mutations)("canonical ACK: $name", (mutation) => {
       await mutation[entry](f);
       expect(readback(f.service)).not.toEqual(before);
       expect(readback(await f.restart())).toEqual(readback(f.service));
+    });
+  }
+});
+
+describe("acknowledged updates and recovery", () => {
+  it.each([false, true])(
+    "serializes partial edits of one partner and releases after rejection=%s while other partners proceed",
+    async (rejectFirst) => {
+      const f = await fixture();
+      const before = f.service.getFleetPartner(partnerId);
+      const gate = f.delay();
+      const error = new Error("first edit rejected");
+      const first = f.service
+        .updateFleetPartner(partnerId, { displayName: "First edit" })
+        .then(
+          (value) => ({ value }),
+          (reason: unknown) => ({ reason }),
+        );
+      let secondSettled = false;
+      const second = f.service
+        .updateFleetPartner(partnerId, { contactName: "Second edit" })
+        .then((value) => {
+          secondSettled = true;
+          return value;
+        });
+      const unrelated = await f.service.createFleetPartner({
+        ...createCommand,
+        displayName: "Independent partner",
+      });
+      try {
+        await tick();
+        expect(secondSettled).toBe(false);
+        expect(f.service.getFleetPartner(partnerId)).toEqual(before);
+        expect(f.service.getFleetPartner(unrelated.fleetPartnerId)).toEqual(
+          unrelated,
+        );
+      } finally {
+        if (rejectFirst) gate.reject(error);
+        else gate.resolve();
+        await first;
+        await second;
+      }
+      if (rejectFirst) expect(await first).toEqual({ reason: error });
+      else
+        expect(await first).toMatchObject({
+          value: { displayName: "First edit" },
+        });
+      expect(await second).toMatchObject({
+        displayName: rejectFirst ? before.displayName : "First edit",
+        contactName: "Second edit",
+      });
+      expect(f.service.getFleetPartner(unrelated.fleetPartnerId)).toEqual(
+        unrelated,
+      );
+      expect(readback(await f.restart())).toEqual(readback(f.service));
+    },
+  );
+
+  it("does not roll back an unrelated acknowledged create or affiliation after a delayed create fails", async () => {
+    const f = await fixture();
+    const gate = f.delay();
+    const error = new Error("create rejected");
+    const failed = f.service
+      .createFleetPartner(createCommand)
+      .catch((reason: unknown) => reason);
+    const other = await f.service.createFleetPartner({
+      ...createCommand,
+      displayName: "Retained partner",
+    });
+    const affiliation = await f.service.createDriverFleetAffiliation(
+      "retained-driver",
+      { ...affiliationCommand, fleetPartnerId: other.fleetPartnerId },
+    );
+    gate.reject(error);
+    expect(await failed).toBe(error);
+    expect(
+      f.service.listFleetPartners().map((partner) => partner.displayName),
+    ).not.toContain("ACK Fleet");
+    expect(f.service.getFleetPartner(other.fleetPartnerId)).toEqual(other);
+    expect(f.service.listFleetPartnerDrivers(other.fleetPartnerId)).toEqual([
+      affiliation,
+    ]);
+    expect(readback(await f.restart())).toEqual(readback(f.service));
+  });
+
+  it("rejects invalid partial edits without publishing earlier fields or calling SQL", async () => {
+    const f = await fixture();
+    const before = readback(f.service);
+    await expect(
+      f.service.updateFleetPartner(partnerId, {
+        displayName: "Must not leak",
+        contactPhone: " ",
+      }),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    expect(f.query).not.toHaveBeenCalled();
+    expect(readback(f.service)).toEqual(before);
+    await expect(
+      f.service.updateFleetPartner(partnerId, { displayName: "Retry" }),
+    ).resolves.toMatchObject({ displayName: "Retry" });
+    expect(readback(await f.restart())).toEqual(readback(f.service));
+  });
+});
+
+describe.each(["absent", "disabled"] as const)(
+  "supported %s repository mode",
+  (mode) => {
+    it("keeps create/edit/soft-disable/reference records and safe envelopes without a DB requirement", async () => {
+      const { service, controller } = makeService(
+        mode === "disabled" ? new FleetPartnerRepository() : undefined,
+      );
+      await service.onModuleInit();
+      const created = await controller.createFleetPartner(
+        createCommand,
+        "req-no-db",
+      );
+      const other = await service.createFleetPartner(createCommand);
+      expect(other.fleetPartnerId).not.toBe(created.data.fleetPartnerId);
+      expect(created).toMatchObject({
+        data: { legalName: "ACK Fleet Ltd.", active: true },
+        meta: { requestId: "req-no-db" },
+      });
+      const updated = await controller.updateFleetPartner(
+        created.data.fleetPartnerId,
+        {
+          legalName: " Updated Ltd. ",
+          displayName: " Updated ",
+          businessRegistrationNo: " updated-registration ",
+          contactName: " Updated contact ",
+          contactPhone: " 555-0101 ",
+          partnershipType: "vehicle_owner_group",
+          active: false,
+        },
+      );
+      expect(updated.data).toMatchObject({
+        legalName: "Updated Ltd.",
+        displayName: "Updated",
+        businessRegistrationNo: "updated-registration",
+        contactName: "Updated contact",
+        contactPhone: "555-0101",
+        partnershipType: "vehicle_owner_group",
+        active: false,
+      });
+      expect(service.getFleetPartner(created.data.fleetPartnerId)).toEqual(
+        updated.data,
+      );
+      // Existing reference rules require a master, and allow a disabled master.
+      const linked = await controller.createDriverFleetAffiliation(
+        " no-db-driver ",
+        {
+          ...affiliationCommand,
+          fleetPartnerId: created.data.fleetPartnerId,
+        },
+      );
+      expect(
+        service.listFleetPartnerDrivers(created.data.fleetPartnerId),
+      ).toEqual([linked.data]);
+      expect(
+        controller.listFleetPartnerDrivers(created.data.fleetPartnerId).data
+          .items,
+      ).toEqual([linked.data]);
+      expect(service.getFleetPartner(other.fleetPartnerId)).toEqual(other);
+      updated.data.displayName = "caller mutation";
+      linked.data.driverId = "caller mutation";
+      expect(
+        service.getFleetPartner(created.data.fleetPartnerId).displayName,
+      ).toBe("Updated");
+      expect(
+        service.listFleetPartnerDrivers(created.data.fleetPartnerId)[0]
+          ?.driverId,
+      ).toBe("no-db-driver");
+    });
+  },
+);
+
+describe("original validation and resource guards", () => {
+  it("refuses blank partner fields, missing masters and invalid affiliation dates before SQL", async () => {
+    const f = await fixture();
+    const before = readback(f.service);
+    for (const field of [
+      "legalName",
+      "displayName",
+      "businessRegistrationNo",
+      "contactName",
+      "contactPhone",
+    ]) {
+      await expect(
+        f.controller.createFleetPartner({ ...createCommand, [field]: " " }),
+      ).rejects.toBeInstanceOf(ApiRequestError);
+    }
+    await expect(
+      f.controller.updateFleetPartner("missing-master", { active: false }),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    for (const [driverId, command] of [
+      [" ", affiliationCommand],
+      ["driver", { ...affiliationCommand, fleetPartnerId: "missing-master" }],
+      ["driver", { ...affiliationCommand, effectiveFrom: "invalid-date" }],
+      ["driver", { ...affiliationCommand, effectiveUntil: "invalid-date" }],
+    ] as const) {
+      await expect(
+        f.controller.createDriverFleetAffiliation(driverId, command),
+      ).rejects.toBeInstanceOf(ApiRequestError);
+    }
+    expect(f.query).not.toHaveBeenCalled();
+    expect(readback(f.service)).toEqual(before);
+  });
+
+  for (const route of [
+    {
+      method: "POST",
+      path: "/api/admin/fleet-partners",
+      handler: "createFleetPartner",
+    },
+    {
+      method: "PUT",
+      path: `/api/admin/fleet-partners/${partnerId}`,
+      handler: "updateFleetPartner",
+    },
+    {
+      method: "POST",
+      path: "/api/admin/drivers/driver/fleet-affiliations",
+      handler: "createDriverFleetAffiliation",
+    },
+  ] as const) {
+    it(`${route.method} ${route.path} retains actual platform/ops foundation:write guard and tenant/partner/read-only refusals`, async () => {
+      // Exercise the real guard with existing development bootstrap identities;
+      // live login and deployed role provisioning remain external acceptance.
+      vi.stubEnv("DRTS_ENV", "dev");
+      vi.stubEnv("NODE_ENV", "test");
+      const guard = new BootstrapAuthGuard(new Reflector());
+      for (const [realm, actorType, scopes, allowed] of [
+        ["platform", "platform_admin", "foundation:write", true],
+        ["ops", "ops_user", "foundation:write", true],
+        ["platform", "platform_admin", "foundation:read", false],
+        ["tenant", "tenant_admin", "foundation:write", false],
+        ["partner", "partner_user", "foundation:write", false],
+      ] as const) {
+        const request: AuthenticatedRequestLike = {
+          method: route.method,
+          originalUrl: route.path,
+          headers: {
+            "x-actor-id": "ack-actor",
+            "x-actor-type": actorType,
+            "x-realm": realm,
+            "x-scopes": scopes,
+            "x-tenant-id": "other-tenant",
+            "x-partner-id": "other-partner",
+          },
+        };
+        const context = {
+          switchToHttp: () => ({ getRequest: () => request }),
+          getHandler: () => FleetPartnerController.prototype[route.handler],
+          getClass: () => FleetPartnerController,
+        } as unknown as Parameters<BootstrapAuthGuard["canActivate"]>[0];
+        const activation = Promise.resolve().then(() =>
+          guard.canActivate(context),
+        );
+        if (allowed) await expect(activation).resolves.toBe(true);
+        else await expect(activation).rejects.toBeInstanceOf(ApiRequestError);
+      }
     });
   }
 });
