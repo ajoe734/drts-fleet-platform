@@ -311,8 +311,8 @@ function createMountedDriverEarningsAppHarness(options: {
         const envelope = await options.earningsController.getByPlatform(
           options.identity,
           driverId,
-          period,
           "req-driver-ui",
+          period,
         );
         return new Response(JSON.stringify(envelope), {
           status: 200,
@@ -329,8 +329,8 @@ function createMountedDriverEarningsAppHarness(options: {
         const envelope = await options.earningsController.getSummary(
           options.identity,
           driverId,
-          period,
           "req-driver-ui",
+          period,
         );
         return new Response(JSON.stringify(envelope), {
           status: 200,
@@ -548,8 +548,8 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
       const todayResponse = await controller.getByPlatform(
         identity,
         undefined,
-        "today",
         "req-today",
+        "today",
       );
       expect(recordedQueries[0]?.sql).toContain("WHERE driver_id = $1");
       expect(recordedQueries[0]?.sql).toContain("period_date >= $2::date");
@@ -573,8 +573,8 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
       const weekResponse = await controller.getByPlatform(
         identity,
         undefined,
-        "week",
         "req-week",
+        "week",
       );
       expect(recordedQueries[1]?.params).toEqual([
         OWN_DRIVER_UUID,
@@ -589,8 +589,8 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
       const weekSummary = await controller.getSummary(
         identity,
         undefined,
-        "week",
         "req-week-summary",
+        "week",
       );
       expect(weekSummary.data.totalGross).toEqual({
         currency: "TWD",
@@ -605,8 +605,8 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
       const monthResponse = await controller.getByPlatform(
         identity,
         undefined,
-        "month",
         "req-month",
+        "month",
       );
       expect(recordedQueries[3]?.params).toEqual([
         OWN_DRIVER_UUID,
@@ -620,8 +620,8 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
       const monthSummary = await controller.getSummary(
         identity,
         undefined,
-        "month",
         "req-month-summary",
+        "month",
       );
       expect(monthSummary.data.totalNet).toEqual({
         currency: "TWD",
@@ -632,8 +632,8 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
       const allTimeResponse = await controller.getByPlatform(
         identity,
         undefined,
-        undefined,
         "req-all-time",
+        undefined,
       );
       expect(recordedQueries[5]?.sql).not.toContain("period_date >=");
       expect(recordedQueries[5]?.params).toEqual([OWN_DRIVER_UUID]);
@@ -709,6 +709,7 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
         await expect(
           controller.getByPlatform(
             makeDriverIdentity(OWN_DRIVER_UUID),
+            undefined,
             undefined,
             invalidPeriod,
           ),
@@ -820,6 +821,7 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
         rejectingController.getByPlatform(
           makeDriverIdentity(OWN_DRIVER_UUID),
           undefined,
+          undefined,
           "month",
         ),
       ).rejects.toMatchObject({
@@ -830,6 +832,7 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
       await expect(
         rejectingController.getByPlatform(
           makeDriverIdentity("drv-demo-001"),
+          undefined,
           undefined,
           "month",
         ),
@@ -847,6 +850,7 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
       const genuineEmpty = await emptyController.getByPlatform(
         makeDriverIdentity(OWN_DRIVER_UUID),
         undefined,
+        undefined,
         "today",
       );
       expect(genuineEmpty.data.items).toEqual([]);
@@ -854,6 +858,7 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
       // 4. Successful zero-row lookup for E2E-006 demo driver preserves seeded demo fallback
       const demoFallback = await emptyController.getByPlatform(
         makeDriverIdentity("drv-demo-001"),
+        undefined,
         undefined,
         "month",
       );
@@ -865,6 +870,7 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
       );
       const noDbDemo = await noDbController.getByPlatform(
         makeDriverIdentity("drv-demo-001"),
+        undefined,
         undefined,
         "month",
       );
@@ -978,6 +984,7 @@ describe("DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015", () => {
         earningsController.getByPlatform(
           demoDriverIdentity,
           "drv-demo-002",
+          undefined,
           "month",
         ),
       ).rejects.toMatchObject({
