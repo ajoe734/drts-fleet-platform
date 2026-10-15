@@ -115,7 +115,7 @@ async function scenario(mode) {
   const low = mode === "low" || mode === "low-no-contact";
   const contactRequested = mode === "low";
   const orderId = "92bbfe0b-bd78-49a0-b7cd-8036c55d2901";
-  const passenger = "fixture-passenger";
+  const passenger = "drts_passenger_11111111-1111-4111-8111-111111111111";
   const client = {};
   let ratingWrites = 0;
   const consentWrites = [];
