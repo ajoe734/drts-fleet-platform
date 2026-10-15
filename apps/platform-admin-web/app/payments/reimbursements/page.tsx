@@ -179,7 +179,13 @@ function getScopeLabel(batch: ReimbursementBatchRecord): string {
   }
 }
 
-const deriveQueueStatus = deriveReimbursementWorkflowState;
+// Prefer the backend's authoritative `workflowState` (C080) over the
+// display-task's heuristic, which has no notion of the real export/
+// reconcile actions this task adds -- see the batch detail page's own
+// `getWorkflowState` for the full rationale.
+function deriveQueueStatus(batch: ReimbursementBatchRecord): QueueStatus {
+  return batch.workflowState ?? deriveReimbursementWorkflowState(batch);
+}
 
 function getSubmittedAt(
   batch: ReimbursementBatchRecord,
