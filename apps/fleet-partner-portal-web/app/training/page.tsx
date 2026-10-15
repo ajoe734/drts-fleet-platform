@@ -6,17 +6,17 @@ import {
   CanvasPill,
   type CanvasPillTone,
 } from "@drts/ui-web";
-import { buildFleetTheme } from "@/lib/fleet-portal-theme";
+import { buildFleetTheme } from "../../lib/fleet-portal-theme";
 import {
   computeRosterTabCounts,
   filterRosterByTab,
   loadFleetDriverQuizAttempt,
   loadFleetTraining,
   scopeRosterRows,
-} from "@/lib/academy-data.server";
-import { BiLabel, DataSourceNotice } from "@/lib/fleet-portal-ui";
-import { getServerLocale } from "@/lib/server-locale";
-import { t } from "@/lib/translations";
+} from "../../lib/academy-data.server";
+import { BiLabel, DataSourceNotice } from "../../lib/fleet-portal-ui";
+import { getServerLocale } from "../../lib/server-locale";
+import { t } from "../../lib/translations";
 import type { TrainingStatus } from "@drts/contracts";
 import { mapTrainingStatusLabel, trTraining } from "./translations";
 
