@@ -7,7 +7,10 @@ export default defineConfig({
     ...rootConfig.test,
     include: [
       resolve(__dirname, "*.test.ts"),
-      resolve(__dirname, "../../../apps/api/tests/unit/fleet-partner.controller.test.ts"),
+      resolve(
+        __dirname,
+        "../../../apps/api/tests/unit/fleet-partner.controller.test.ts",
+      ),
     ],
   },
 });
