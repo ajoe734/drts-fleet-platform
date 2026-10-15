@@ -236,7 +236,11 @@ import {
   ReferenceTokenEligibilityAdapter,
 } from "./reference-token-eligibility.adapter";
 import { computeEndpointFingerprint } from "./partner-notification-fingerprint";
-import { IdentityRepository, type TenantOidcProof, type OidcBoundTenantUser } from "../identity/identity.repository";
+import {
+  IdentityRepository,
+  type TenantOidcProof,
+  type OidcBoundTenantUser,
+} from "../identity/identity.repository";
 import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
 import {
   ReferralEmbedHandoffRepository,
@@ -2902,11 +2906,24 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         command.ruleName ?? command.name ?? "",
         "ruleName",
       );
-      const requestedRuleId =
-        command.ruleId ??
-        (requestId
+      const creationRuleId =
+        !command.ruleId && requestId
           ? `rule-${generateDeterministicUuid("tenant_approval_rule", `${tenantId}:${requestId}`)}`
-          : undefined);
+          : undefined;
+      const requestedRuleId = command.ruleId ?? creationRuleId;
+      if (
+        command.ruleId &&
+        this.approvalRules.some(
+          (item) =>
+            item.ruleId === command.ruleId && item.tenantId !== tenantId,
+        )
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "TENANT_APPROVAL_RULE_NOT_FOUND",
+          "The tenant approval rule could not be found.",
+        );
+      }
       const existing = requestedRuleId
         ? (this.approvalRules.find(
             (rule) =>
@@ -2915,7 +2932,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         : null;
 
       const record: TenantApprovalRuleRecord = {
-        ruleId: existing?.ruleId ?? requestedRuleId ?? `rule-${randomUUID()}`,
+        ruleId: existing?.ruleId ?? creationRuleId ?? `rule-${randomUUID()}`,
         tenantId,
         ruleName,
         name: ruleName,
@@ -8560,7 +8577,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         deliveryIdOverride,
         input.data,
       );
-      if (delivery.status === "delivered") {
+      if (
+        delivery.status === "delivered" ||
+        (delivery.attempt > 0 &&
+          delivery.nextAttemptAt &&
+          Date.parse(delivery.nextAttemptAt) > Date.now())
+      ) {
         results.push({
           webhookId: endpoint.webhookId,
           deliveryId: delivery.deliveryId,
@@ -8819,11 +8841,21 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ...(options?.partnerAckV1 ? { partnerAckV1: options.partnerAckV1 } : {}),
     });
 
+    // Configuration may have changed while HTTP was in flight. Apply the
+    // outcome to the current committed configuration; an old test nonce must
+    // never restore an earlier URL/secret or activate the replacement.
+    endpoint = this.cloneStoredWebhookEndpoint(
+      this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId),
+    );
+    const currentSigningSecret = this.resolveWebhookSecretMaterial(
+      endpoint,
+      delivery.secretVersion,
+    );
     this.applyWebhookDispatchResult(
       endpoint,
       delivery,
       result,
-      signingSecret,
+      currentSigningSecret,
       options?.retryPolicySnapshot ?? delivery.retryPolicySnapshot,
       previousEndpointValues,
       false,
@@ -9979,7 +10011,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           );
         }
       }
-      const currentProfile = this.slaProfiles.get(tenantId) ?? this.createDefaultSlaProfile(tenantId);
+      const currentProfile =
+        this.slaProfiles.get(tenantId) ??
+        this.createDefaultSlaProfile(tenantId);
       const slaProfile: TenantSlaProfile = {
         tenantId,
         waitThresholdMin:

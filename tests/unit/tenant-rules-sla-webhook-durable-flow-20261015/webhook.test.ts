@@ -34,6 +34,67 @@ function serviceFor(
 }
 
 describe("C112 durable commands and first in-flight restart", () => {
+  it("an old successful test cannot activate or restore configuration edited while HTTP was in flight", async () => {
+    const { service, fetcher } = serviceFor();
+    const endpoint = await service.createWebhookEndpoint(tenantId, command);
+    let resolveHttp!: (result: { ok: boolean; status: number }) => void;
+    fetcher.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveHttp = resolve;
+        }),
+    );
+    const pending = service.sendTestWebhook(tenantId, {
+      webhookId: endpoint.webhookId,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await service.updateWebhookEndpoint(tenantId, endpoint.webhookId, {
+      url: command.url + "/new-config",
+    });
+    resolveHttp({ ok: true, status: 204 });
+    await pending;
+    expect(service.listWebhookEndpoints(tenantId)[0]).toMatchObject({
+      status: "test_pending",
+      url: command.url + "/new-config",
+    });
+    await service.sendTestWebhook(tenantId, { webhookId: endpoint.webhookId });
+    expect(service.listWebhookEndpoints(tenantId)[0]?.status).toBe("active");
+  });
+
+  it.each(["create", "edit", "disable", "rotate"] as const)(
+    "%s SQL rejection restores canonical state without success audit",
+    async (kind) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const p = persistenceHarness();
+      const { service, audit } = serviceFor(p.repository);
+      const created =
+        kind === "create"
+          ? undefined
+          : await service.createWebhookEndpoint(tenantId, command);
+      const before = service.listWebhookEndpoints(tenantId);
+      const auditSpy = vi.spyOn(audit, "recordAuditLog");
+      p.failInsert(1);
+      const pending =
+        kind === "create"
+          ? service.createWebhookEndpoint(tenantId, command)
+          : kind === "rotate"
+            ? service.rotateWebhookSecret(tenantId, {
+                webhookId: created!.webhookId,
+                secret: "new-secret",
+              })
+            : service.updateWebhookEndpoint(
+                tenantId,
+                created!.webhookId,
+                kind === "disable"
+                  ? { status: "disabled", disableReason: "maintenance" }
+                  : { url: command.url + "/edited" },
+              );
+      await expect(pending).rejects.toThrow("SQL rejected");
+      expect(service.listWebhookEndpoints(tenantId)).toEqual(before);
+      expect(auditSpy).not.toHaveBeenCalled();
+    },
+  );
+
   it("status-only activation cannot bypass successful current test, including rotation and disable", async () => {
     const { service } = serviceFor();
     const endpoint = await service.createWebhookEndpoint(tenantId, command);

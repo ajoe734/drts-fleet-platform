@@ -72,6 +72,39 @@ function harness() {
 }
 
 describe("C028 production command ACK", () => {
+  it("keeps uncertainty explicit when canonical readback also fails and refreshes before normal retry", async () => {
+    const p = persistenceHarness();
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      p.repository,
+    );
+    try {
+      p.loseCommitAck();
+      vi.spyOn(p.repository, "loadState").mockRejectedValueOnce(
+        new Error("readback unavailable"),
+      );
+      await expect(
+        service.upsertApprovalRule(tenantId, rule, "uncertain-create"),
+      ).rejects.toThrow("COMMIT ACK lost");
+      expect(() => service.listApprovalRules(tenantId)).toThrowError(
+        expect.objectContaining({
+          code: "TENANT_CONFIGURATION_READBACK_PENDING",
+        }),
+      );
+      const retried = await service.upsertApprovalRule(
+        tenantId,
+        rule,
+        "uncertain-create",
+      );
+      expect(service.listApprovalRules(tenantId)).toHaveLength(1);
+      expect(service.getApprovalRule(tenantId, retried.ruleId)).toEqual(
+        retried,
+      );
+    } finally {
+      service.onModuleDestroy();
+    }
+  });
+
   it("rule update, reorder and disable hold the old order/version until ACK, reject coherently and retry", async () => {
     const p = persistenceHarness();
     const service = new TenantPartnerService(

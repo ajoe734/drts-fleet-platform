@@ -1,7 +1,7 @@
 # Tenant API Key And Webhook Governance Runbook
 
-Last updated: 2026-09-13
-Task ref: `OPX-IN-003`, `SR-QA-WEBHOOK-001-FIX-API-KEY-USAGE-TRACKING` (`C111`)
+Last updated: 2026-10-15
+Task ref: `OPX-IN-003`, `SR-QA-WEBHOOK-001-FIX-API-KEY-USAGE-TRACKING` (`C111`), `TENANT-RULES-SLA-WEBHOOK-DURABLE-FLOW-20261015` (`C028`, `C112`, original `C008/C009` regressions)
 
 This runbook defines the canonical governance package for tenant API access,
 credential usage tracking, and webhook delivery. It turns authority endpoints
@@ -58,6 +58,31 @@ Operational rules:
   maximum, not the target.
 - Capture the integration owner and rollback owner before handing over a
   production key.
+- API-key inventory and governance remain readable for catalog-authorized
+  viewers and finance administrators. Issue, rotate and revoke require the
+  existing signed `tenant:write` scope. The shared `tenant_admin` actor type
+  alone does not enable those page actions.
+
+### Configuration command acknowledgements
+
+With persistence enabled, quota-policy upsert, approval-rule create/update,
+reorder/disable, SLA update, and webhook create/update/manual-disable/rotation
+return success and publish their read model and success audit only after the
+repository commit acknowledgement. A multi-rule reorder uses one transaction.
+The explicit noDB mode retains its in-memory behavior.
+
+A failed SQL or COMMIT response does not establish whether a commit happened.
+The service reads canonical state back before reconciling its local view. If
+that read also fails, configuration reads return
+`TENANT_CONFIGURATION_READBACK_PENDING` until a normal command retry can read
+the authority again. Preserve the original approval-rule create request ID
+when retrying that same command; its rule identity remains stable after an
+ACK loss. Existing rule IDs continue to belong to their original tenant.
+
+Tenant resource selectors are bound to the verified principal before the
+controller reads or writes tenant data. An `x-tenant-id` value selects a
+resource; it does not grant access to that tenant. Existing platform/system
+authority remains supported.
 
 ### Authoritative Consumer & Guard Architecture
 
@@ -65,6 +90,7 @@ Tenant API keys are issued with a `tk_` prefix and hashed via SHA-256 (`sha256:.
 Raw secret material is never stored or returned after initial creation.
 
 Transport options supported by the consumer plane:
+
 1. `Authorization: Bearer tk_...`
 2. `x-api-key: tk_...`
 3. `x-tenant-api-key: tk_...`
@@ -75,6 +101,7 @@ Transport options supported by the consumer plane:
 `request.authenticatedApiKey`.
 
 Dedicated authoritative endpoints:
+
 - `POST /api/tenant/api-keys/authenticate`: Accepts `{ apiKey, requiredScopes }` in
   body or header, records usage, and returns `{ authenticated: true, apiKey, identity }`.
 - `POST /api/tenant/api-keys/exchange`: M2M exchange returning scoped session token
@@ -85,6 +112,7 @@ Dedicated authoritative endpoints:
 ### Usage Tracking Write Path & DB Readback Contract
 
 Every successful authentication through `TenantPartnerService.authenticateTenantApiKey`:
+
 1. **Timestamp Update**: Mutates `lastUsedAt` to the current ISO-8601 timestamp.
 2. **Workload Attribution**: Updates `lastUsedWorkload` to identify the consumer
    workload (e.g. `tenant_api`, `tenant_api_authenticate`, `tenant_api_list`,
@@ -104,6 +132,7 @@ Every successful authentication through `TenantPartnerService.authenticateTenant
 ### Minimal Product Scope & Error Contract
 
 All requests must satisfy tenant isolation and requested scope boundaries:
+
 - `TENANT_API_KEY_REQUIRED` (`401`): API key was omitted from headers and payload.
 - `TENANT_API_KEY_INVALID` (`401`): Secret hash could not be matched with any key.
 - `TENANT_API_KEY_EXPIRED` (`401`): Key has exceeded its `expiresAt` timestamp.
@@ -156,9 +185,16 @@ Webhook endpoint states:
   - Overdue attempts (`nextAttemptAt <= now`) are scheduled with `delayMs = 0` to
     re-dispatch on the immediate next tick.
   - Future attempts are scheduled with the remaining difference (`nextAttemptAt - now`).
-  - In-flight attempts interrupted by a sudden process termination remain recorded
-    as `queued` (since the database write occurs upon attempt completion), ensuring
-    zero dropped webhook delivery attempts across server restarts.
+  - Before the first HTTP request, one transaction persists the complete
+    original wire payload, delivery/tenant/event identity, signing-secret version,
+    retry-policy snapshot and a due `nextAttemptAt`, with `attempt = 0` and
+    `status = queued`. Boot recovery also covers an interruption before that
+    first request returns; it does not require an earlier failed HTTP result.
+  - Recovery reuses that stored envelope and logical delivery ID. A receiver may
+    already have accepted an interrupted request, so receiver deduplication by
+    that identity remains necessary. Completed outbox-key replay stays deduped;
+    queued replay retains the original backoff. Passenger notifications keep
+    their separate consumer-outbox retry owner.
 
 ### Retry contract
 
@@ -174,7 +210,9 @@ Validation and disable rules:
   `test_pending`
 - Rotating the webhook secret forces the endpoint back to `test_pending`
 - A successful `tenant.webhook.test` delivery promotes `test_pending` to
-  `active`
+  `active` only for the current configuration and secret version. A status-only
+  update cannot certify a new, rotated or disabled endpoint. A test response
+  from an earlier in-flight configuration cannot restore or activate an edit.
 - A final delivery failure auto-disables the endpoint and records an authority
   notification for the tenant
 - Disabled endpoints do not receive live tenant events until they are tested

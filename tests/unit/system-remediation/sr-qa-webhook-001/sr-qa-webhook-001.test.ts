@@ -214,7 +214,7 @@ function createInMemoryWebhookRepository() {
     };
   }
 
-  return {
+  const repository = {
     isEnabled: () => true,
     loadState: async () => snapshot(),
     persistChanges: async (changes: PersistTenantPartnerChanges) => {
@@ -234,6 +234,7 @@ function createInMemoryWebhookRepository() {
       }
     },
   };
+  return Object.assign(repository, { persistConfigurationChanges: (changes: PersistTenantPartnerChanges) => repository.persistChanges(changes), reportPersistenceFailure: vi.fn() });
 }
 
 function createInMemoryBillingSettlementRepository() {
