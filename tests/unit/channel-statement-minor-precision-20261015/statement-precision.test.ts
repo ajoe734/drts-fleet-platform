@@ -1,3 +1,4 @@
+import { loadDetailPage } from "./production-page";
 import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
@@ -8,40 +9,6 @@ vi.mock("next/headers", () => ({
   headers: async () => new Headers(),
   cookies: async () => ({ get: () => undefined }),
 }));
-// Root Vitest resolves @/ to tenant-console. Route these imports to the real
-// channel modules so the production page, table, translations and mapper run.
-vi.mock(
-  "@/lib/channel-portal-data.server",
-  () =>
-    import("../../../apps/channel-partner-portal-web/lib/channel-portal-data.server"),
-);
-vi.mock(
-  "@/components/referral-tables",
-  () =>
-    import("../../../apps/channel-partner-portal-web/components/referral-tables"),
-);
-vi.mock(
-  "@/lib/fleet-portal-theme",
-  () =>
-    import("../../../apps/channel-partner-portal-web/lib/fleet-portal-theme"),
-);
-vi.mock(
-  "@/lib/fleet-portal-ui",
-  () => import("../../../apps/channel-partner-portal-web/lib/fleet-portal-ui"),
-);
-vi.mock(
-  "@/lib/server-locale",
-  () => import("../../../apps/channel-partner-portal-web/lib/server-locale"),
-);
-vi.mock(
-  "@/lib/translations",
-  () => import("../../../apps/channel-partner-portal-web/lib/translations"),
-);
-vi.mock(
-  "@/lib/i18n",
-  () => import("../../../apps/channel-partner-portal-web/lib/i18n"),
-);
-
 import type { IdentityContext } from "@drts/contracts";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../../apps/api/src/modules/billing-settlement/billing-settlement.service";
@@ -150,11 +117,7 @@ function csvLines(statement: ReferralStatementRecord) {
 }
 
 async function renderedDetail() {
-  // Dynamic path keeps channel's @/ imports out of root tsc's tenant context;
-  // the channel package typecheck checks the actual page and table separately.
-  const pagePath =
-    "../../../apps/channel-partner-portal-web/app/statements/[period]/page";
-  const { default: Page } = (await vi.importActual(pagePath)) as {
+  const { default: Page } = loadDetailPage() as {
     default: (props: {
       params: Promise<{ period: string }>;
     }) => Promise<ReactElement>;
