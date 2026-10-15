@@ -479,3 +479,42 @@ recorded in the closeout below after completion.
 pnpm exec vitest run tests/unit/evidence-retention-legal-hold-canonical-flow-20261015/governance.test.ts -t 'terminal replay'
 RETENTION_TRACE="$PWD/.local/evidence-retention-20261015/terminal-replay/fixed-narrow-trace.jsonl" pnpm exec vitest run tests/unit/evidence-retention-legal-hold-canonical-flow-20261015 -t 'terminal replay'
 ```
+
+F-REPLAY-01 closeout: repair anchor `8352ef693` was normally pushed. All checks
+started in this dispatch completed and their results were read. The first API
+typecheck exited 2 using stale worktree package declarations (`api-typecheck.log`).
+Both declaration builds then exited 0; the same full API command and the scoped
+production/test TypeScript check both exited 0. The initial failure is retained
+as superseded evidence, not silently counted as a pass. No dependency, generated
+declaration, migration or unrelated source file is part of this candidate.
+
+| Finding / required key suffix (prefix `evidence-retention_`) | Production basis and before → fixed result | Command / exit / evidence | Remaining boundary |
+| --- | --- | --- | --- |
+| F-REPLAY-01; `four-governance-commands-canonical-ACK-and-rejected-state-readback` | Production controller → serialized command → enabled repository append → restart replay. Unchanged reviewed production: 2 failed / 6 passed; fixed: all eight new matrix cases pass. Original eight deferred/rejected ACK cases remain passing. | Reproduction command above, exit 1 (`before.log`); full root command below, exit 0 (`root.log`), 36 governance tests. | Query transport and Date controlled; no live DB credit. |
+| `authoritative-governance-unknown-empty-noDB-and-original-access-boundaries` | Failed authority, successful empty/noDB, audit-feed fallback, reason/actor/expiry/family refusal, UUID/opaque subject/tenant/source and direct reporting/family regressions retained. | Root 75/75 and API 28/28, both exit 0 (`root.log`, `api.log`). | Original Phase1/Phase2 and live-provider limitations remain. |
+| F-REPLAY-01 selector consistency; `legal-hold-exception-exact-archive-set-and-honest-SQL-result` | Four new actual-shell tie cases agree with service replay and assert exact selected/archived/remaining identities, including adversarial UUID order. All existing protected-row, terminal-history, exact-set, concurrent-boundary, empty-set and output/SQL failure controls retained. | Root command exit 0; 25 archival cases; `root-trace.jsonl` records actual shell SQL, receipt and row identities. | SQLite evaluates production SELECT over formal V0009 columns with documented dialect projection; no live PG/role/trigger/purge/restore proof. |
+| `actual-production-before-fixed-after-and-original-regressions` | Original reviewed production fails for the identified behavior, fixed production passes; original C099 five and C100 four remain in the complete root run. | Root/API tests, eslint, Prettier, shell syntax, diff and full PR-range commit gate exit 0. Full API and scoped TypeScript exit 0 after declaration builds. Logs/hashes/versions/commands in local `evidence-index.json`. | Root-wide typecheck and full repository tests were not run; prior historical checks are not relabeled. |
+| `exact-candidate-review-CI-and-protected-merge` | Four-path repair increment retains the full recovered Source candidate and prior published history on PR #2678. Final closeout commit is normally pushed; full SHA, branch and local/remote/PR-head equality recorded in local `candidate.json` and canonical handoff. | `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`: complete five-commit range, exit 0 after closeout. | Fresh independent Codex2 exact-SHA review, matching mandatory hosted CI, protected merge and own-key acceptance pending. Earlier candidate/anchor CI is not final-candidate evidence. |
+
+Final commands (from this assigned isolated worktree):
+
+```bash
+RETENTION_TRACE="$PWD/.local/evidence-retention-20261015/terminal-replay/root-trace.jsonl" pnpm exec vitest run tests/unit/evidence-retention-legal-hold-canonical-flow-20261015 tests/unit/audit-notification.test.ts tests/unit/system-remediation/sr-qa-reports-001/c099-evidence-governance-controlled-export.test.ts tests/unit/system-remediation/sr-qa-reports-001/c100-audit-immutability-retention-boundary.test.ts
+pnpm --dir apps/api exec vitest run tests/unit/audit-notification.service.test.ts tests/unit/reporting-filing.service.test.ts tests/unit/regulatory-reporting.service.test.ts tests/unit/multi-taxi-controlled-export.test.ts tests/unit/evidence-governance.test.ts
+pnpm exec tsc -p packages/contracts/tsconfig.json
+pnpm exec tsc -p packages/control-plane-auth/tsconfig.json
+pnpm --dir apps/api exec tsc -p tsconfig.json --noEmit
+pnpm exec tsc -p .local/evidence-retention-20261015/terminal-replay/tsconfig.scoped.json --noEmit
+pnpm exec eslint apps/api/src/modules/audit-notification/audit-notification.service.ts tests/unit/evidence-retention-legal-hold-canonical-flow-20261015/governance.test.ts tests/unit/evidence-retention-legal-hold-canonical-flow-20261015/archival.test.ts
+pnpm exec prettier --check apps/api/src/modules/audit-notification/audit-notification.service.ts tests/unit/evidence-retention-legal-hold-canonical-flow-20261015/governance.test.ts tests/unit/evidence-retention-legal-hold-canonical-flow-20261015/archival.test.ts
+bash -n operations/database/audit-log-retention-archival.sh
+git diff --check
+python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD
+```
+
+The local scoped TypeScript config extends the unchanged root config and includes
+the production service and two task tests; it disables incremental caching only.
+There are no type stubs or compiler-rule relaxations. All required local checks
+finished before handoff. No product/preview/browser/E2E/DB server, Docker, cloud
+operation, actual archive/delete, restore or deployment ran. This Source repair
+does not claim operational, whole-capability or full-goal acceptance.
