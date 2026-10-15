@@ -1,0 +1,43 @@
+# BANK-USER-MANAGEMENT-FLOW-20261015
+
+Owner: Codex. Reviewer: Codex2. Investigation base: `a64749b436f2d9ca96c69c80f918e663fa6e8755` (also fetched `origin/dev` at investigation start). Predecessor BANK-STATEMENT-CONTRACT-READBACK-20261015 is done. This artifact records an unresolved authority dependency, not a completed implementation or C085 acceptance.
+
+## B1 — Bank login does not carry an authoritative tenant mutation principal
+
+The existing Bank login cannot currently supply the identity required by the existing tenant user commands. This is a Source binding/design dependency, independent of whether Cloud Run is reachable. No product code is changed while that dependency remains unresolved.
+
+| Actual caller / authority | Source and symbol | Finding |
+| --- | --- | --- |
+| Bank login | `apps/bank-console-web/app/api/auth/login/route.ts`: `POST`, `allowsDevDemoLogin` | A trusted IAP/proxy check or the explicit dev demo bypass selects a display role/bank. Both paths call `signSessionRole` and set only Bank display cookies. No API access token, principal/membership ID or durable session is issued or preserved. |
+| Bank signed session | `apps/bank-console-web/lib/session.ts`: `signSessionRole`, `verifySessionRole`, `verifyAuthenticatedIdentityAndRole` | HMAC payload is `role:bankCode`; verification returns only those two fields. IAP role extraction and email inference are display-role checks, not authoritative tenant membership lookup. A valid signature does not add `tenant:write`. |
+| Users UI | `apps/bank-console-web/app/users/page.tsx`: `UsersPage` | Reads only display cookies and query selectors. `canManageUsers` compares display role to `bank_program_admin`. Invite/change-role/lifecycle buttons have no command caller. `bank` query selects a demo tenant; it cannot establish a principal's tenant. |
+| Current Bank transport | `apps/bank-console-web/lib/server-bank-api.ts`: `buildDefaultHeaders`, `bankApiGet` | Generates `x-actor-type: tenant_admin` and synthetic actor IDs. Optional metadata token is infrastructure invocation proof. Neither is an end-user mutation principal. The protected-audience branch uses Authorization for metadata, so reusing this transport for writes would also overwrite a user bearer. |
+| Canonical identity authority | `apps/api/src/common/auth/bootstrap-auth.guard.ts`: `activateNonIap`; `jwt-auth.service.ts`: `verifyAccessToken`, `validateDurableState`; `apps/api/src/modules/auth/auth.controller.ts`: `getAuthSession` | API-issued bearer sessions check signature, active durable session, current token ID/version and tenant user state. `GET /api/auth/session` exposes the verified identity. Bank login does not obtain or retain one. |
+| IAP authority | `apps/api/src/common/auth/bootstrap-auth.guard.ts`: `resolveIapAssertionAndActivate`; `apps/api/src/modules/auth/iap-subject.adapter.ts`: `resolveSubject` | Existing workforce resolution is platform/ops membership, not a Bank-to-tenant membership or delegation. Forwarding a Bank IAP display assertion is not a replacement tenant session. |
+| Existing tenant portal session | `packages/tenant-auth/src/verified-tenant-session.server.ts`: `verifyTenantSession`; `constants.ts`; `api-fetch.ts`: `tenantAuthFetch` | Tenant portal verifies its own `drts_tenant_session` through the API and keeps user bearer separate from Cloud Run proof. Bank neither issues nor consumes this cookie, and no Bank account/session handoff is defined. The existence of this verifier alone does not establish a Bank user's membership. |
+| Backend capability | `apps/api/src/modules/tenant-partner/tenant-partner.controller.ts`: `createTenantUser`, `updateTenantRole`; service counterparts | Existing POST commands are available. The service checks tenant ownership, allowed role codes, self-change/last-admin constraints and session invalidation. Missing backend CRUD is not the blocker. |
+| Route gate | `apps/api/src/common/auth/auth.policy.ts`: tenant default policy; `bootstrap-auth.guard.ts`: `canActivate`, `tryGoogleWorkloadIdentityFallback` | POST requires `tenant:write` and an allowed realm; strict environments reject bootstrap identity headers. Google bearer fallback is limited to system-only routes, excluding tenant user commands. |
+| Read-model identity loss | `apps/bank-console-web/lib/bank-dev-read-models.ts`: `BankUserRow`, `mapUserRole`, `loadBankUsersData` | Canonical `userId`, `tenantId`, `roleCode` are dropped. Unknown canonical roles project to `bank_program_admin`; this lossy display projection must never be reversed to mint tenant permissions. API snake-case normalization also needs coverage for this endpoint. |
+
+Product basis: PRD §12.2 grants tenant administrators user/role management; service contracts §tenant-partner makes tenant user-role mapping authoritative. `docs/02-architecture/credit-card-airport-transfer-sd-20260610.md` §1 D1 and S3 reuse the tenant data/BFF plane but require a separate Bank app/auth scope. They do not define a Bank display-role-to-tenant-admin delegation. `.github/workflows/deploy-dev.yml` Bank deploy explicitly enables the dev demo login; that flag is not a membership grant. No deployment was attempted.
+
+### Required resolution and repair boundary
+
+Supervisor should route the existing authority/design dependency to the identity owner: identify the accepted Bank end-user authentication/session path and its durable tenant membership binding (principal ID, membership/actor ID, canonical tenant ID, authoritative roles/scopes and session revision). If the intended solution reuses tenant-issued sessions, specify the Bank login/callback handoff and logout/account-switch lifecycle; a separate app cannot assume it receives the tenant portal's host cookie. If delegation is intended, it needs an existing authoritative policy/record and verifier; a display-role reverse map or service-account-only identity cannot substitute.
+
+Once that binding is provided, the original owner can implement the task-scoped Bank adapter/BFF, retain canonical IDs, use the real POST commands and role-scoped readback, and preserve API denial/session-revision behavior. Bank login/session files are outside this task's write scopes, so any necessary minimal login/callback change also needs normal Supervisor scope coordination. No new global auth system is proposed. The task remains incomplete until the authorized Source positive path actually calls the commands.
+
+## Reproducible evidence and acceptance matrix
+
+`tests/unit/bank-user-management-flow-20261015/authority-boundary.test.ts` invokes the real Bank login/session helpers and the real backend `BootstrapAuthGuard`/`JwtAuthService`; only the Next module-loading boundary is supplied. No HTTP listener, browser, database or provider is started. The diagnostic demonstrates the existing authority gap; it is not an implementation acceptance suite.
+
+Initial attempt: `pnpm exec vitest run tests/unit/bank-user-management-flow-20261015/` exited 1 before collecting tests because this isolated worktree inherited stale dependency symlinks (`next/server` unresolved). This is not behavioral reproduction evidence. Only worktree dependency symlinks were removed for a frozen-lockfile install; tracked dependencies and the canonical root are untouched.
+
+| Finding / required acceptance | Modification / evidence | Before → after | Commands / exits / version | Unverified / limitation |
+| --- | --- | --- | --- | --- |
+| B1 / `bank-users_verified-principal-and-command-binding` | Production login/session/guard diagnostic above | Pending probe result; product authority unchanged | Base `a64749b…`; logs `.local/bank-user-management-flow-20261015/` | No Bank mutation principal binding identified; authorized positive path blocked |
+| `bank-users_management-mutations-and-readback` | Exact existing commands and dropped canonical fields identified above | Unimplemented | Static caller audit at base | Invite/role/active/suspended UI command/readback not delivered |
+| `bank-users_identity-role-denial-regressions` | Existing IAM regression scope and new authority diagnostic | Pending checks | Commands/results to be appended | Full Bank BFF/UI positive and negative suite depends on binding |
+| `bank-users_exact-candidate-validation` | Task-scoped evidence checkpoint only | No implementation candidate | Commit/push reference to be recorded in machine status | No handoff/independent implementation review/same-candidate CI/merge/acceptance claimed |
+
+Live shared-dev, real IAM/PG, invitation provider delivery and hosted full C085 remain unverified. Source diagnostics cannot establish those outcomes.
