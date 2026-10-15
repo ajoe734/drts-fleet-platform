@@ -8785,27 +8785,22 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       retryPolicySnapshot?: WebhookRetryPolicyRecord;
     },
   ): Promise<WebhookDispatchAttemptResult> {
-    this.assertConfigurationReadable(endpoint.tenantId);
     endpoint = this.cloneStoredWebhookEndpoint(
       this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId),
     );
     // An edit can also commit after enqueue or before a process resumes its
-    // first interrupted attempt. That intent never authorizes a replacement
-    // configuration. Leave its original identity/payload/policy intact.
+    // first interrupted attempt. Recheck the original live-event predicate
+    // before sending; leave the original identity/payload/key/policy intact.
     if (
       delivery.attempt === 0 &&
       delivery.eventType !== "tenant.webhook.test" &&
-      (endpoint.status !== "active" ||
-        !endpoint.events.includes(delivery.eventType) ||
-        (delivery.verificationFingerprint &&
-          delivery.verificationFingerprint !==
-            computeEndpointFingerprint(endpoint)))
+      (this.pendingConfigurationReadbacks.has(endpoint.tenantId) ||
+        endpoint.status !== "active" ||
+        !endpoint.events.includes(delivery.eventType))
     ) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "WEBHOOK_CONFIGURATION_CHANGED",
-        "The current configuration does not authorize this first webhook attempt.",
-      );
+      // No attempt occurred. In particular, do not fabricate a failure or
+      // delivery receipt, consume a retry, or reject the boot timer promise.
+      return this.cloneStoredWebhookDelivery(delivery);
     }
     delivery = this.cloneStoredWebhookDelivery(delivery);
     const effects: Array<() => void> = [];
