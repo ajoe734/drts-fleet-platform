@@ -142,6 +142,31 @@ is therefore recorded using the authorized owner `progress` command, keeping
 the task `in_progress` with this concrete blocker in its machine-truth summary.
 No alternative agent identity or direct status-file edit is used.
 
+### Next owner dispatch: scope unchanged; supported blocker route
+
+The next dispatch rechecked the task slice: all seven requested additional
+leaves below remain outside `write_scopes`. Reading the actual three mutation
+callers and middleware confirms the same omission; no product source changed.
+`git ls-remote` confirms published head
+`587d88ec7a0149239c8c36b061d47086ac09bb89` equals the starting local head;
+`gh pr list --head codex/fleet-portal-verified-principal-canonical-caller-flow-20261015`
+returns no PR. No candidate is locked.
+
+Inspection of the dispatch's release `control_plane/usecases/task_board_commands.py`
+shows `_guard_worker_command` explicitly permits `system-block` for the assigned
+task and `_record_worker_outcome` records it as `blocked`.
+`bin/ai_status.py::command_system_block` needs no `waiting-for` agent. Use that
+supported release command with `AI_NAME=Codex` and this evidence reference to
+record the scope blocker, rather than retrying the rejected `Supervisor` agent
+argument or changing identity/control-plane files. Supervisor must check exact
+writer conflicts and extend the original task scopes before these repairs.
+
+This dispatch performs source/status/publication checks only. It does not rerun
+unchanged tests or replace the previous completed results above. In particular,
+the four passing 403 reproductions remain unresolved defects, not fixed flows.
+The next repair unit remains the three caller CSRF fixes followed by the four
+existing test adaptations and actual fixed-after regression verification.
+
 ## Exact remaining repair boundary (Supervisor scope coordination)
 
 Current assigned write scopes are the original seven leaves/directories. No
