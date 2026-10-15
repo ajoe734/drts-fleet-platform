@@ -1977,3 +1977,85 @@ commands/exits, source/log hashes, every terminal result, prior evidence
 verification and publication identity. All owner-started repository checks are
 terminal and read before handoff. Hosted checks for the final handoff remain
 pending in the original lifecycle; no acceptance key is credited by this repair.
+
+## R28 — read the persisted reservation timestamp in browser PG evidence (2026-10-15)
+
+Candidate `cbebeaab2b96a0b71a5ec72365d308af456bcb7f`, generation
+`166e67b893b44ca6aa3655aa99a57db8`, passed independent source review but its
+first hosted browser attempt failed the final A chronology assertion. Run
+`38782090128`, job `116586947520`, artifact `11995864800` records real A order
+`5fcb4d64-21a0-4c77-81d6-097dd513c5b0`, completed Driver task
+`46dfca55-49ae-441d-861e-7c732201bb03`, captured payment, rating POST 201 / score 5,
+and a downloaded nonformal same-order HTML document. Both relational fact rows
+had `requested_pickup_at: null`; the completed row had a real start timestamp.
+The unchanged `assertCompletedFacts` at spec385 therefore compared the start
+against `NaN` and failed. B and C were not reached. This is partial A evidence,
+not a complete A/B/C pass or a formal legal receipt. The reported legal-receipt
+fields error remains distinct from the successful nonformal rehearsal download.
+
+The actual production booking caller sends the quote's `scheduledAt` as
+`CreateMultiTaxiRideCommand.requestedPickupAt`. Owned's
+`buildAndPersistMultiTaxiRide` stores it in
+`OwnedOrderRecord.reservationWindowStart`; the production repository persists
+`JSON.stringify(order)` as its JSONB record. The browser evidence SQL mistakenly
+looked up the command field name in that record. It now reads
+`o.record->>'reservationWindowStart' AS requested_pickup_at`. Only that JSON key
+changes in the existing helper. The shared-dev API branch is already correct:
+the real `MultiTaxiService.getPassengerRideById` explicitly exposes
+`reservationWindowStart` as `requestedPickupAt`, serialized as
+`requested_pickup_at`. Its projection is unchanged.
+
+The existing formal-schema peer PG case now calls the actual
+`recordOrderEvidence` after its real booking/assignment/acceptance. It uses its
+owned case database URL and compares every returned order UUID and timestamp
+with the production order read, requiring a finite reservation time and at least
+one joined row. Only the Playwright attachment sink is substituted; SQL, schema,
+rows, repositories and lifecycle commands are real. It remains the original one
+PG case, with its original hosted-only guard and timeout. It is skipped on this
+VM, so the new SQL execution and regression outcome are pending hosted CI.
+The previous hosted failure is the actual old-version reproduction; local
+source checks are not presented as PostgreSQL or replacement-browser success.
+
+| Finding / acceptance                                                | Source and change                                                                                                             | Old result → replacement result                                                                                                                                                | Command / exit / evidence                                                                                                                                    | Remaining limitation                                                                                                           |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| R28: A chronology assertion receives no requested time              | `recordOrderEvidence`, one PG JSON key; formal booking producer and persistence paths above                                   | cbeb hosted: null in both joined rows, spec385 fails against NaN. Corrected projection is aligned with the production persisted contract; new actual PG/browser result pending | Original report/ZIP/inline facts independently hash-verified; `source-verification.json/log` exit 0 checks the one-key diff and original complete spec bytes | No local PG/socket/browser execution. The raw persisted order record was not in the old artifact; no retroactive raw-row claim |
+| R28: protect the real evidence reader from a caller/schema mismatch | Original `persisted-roles.hosted.test.ts`, same formal migrated schema and production-created order/task                      | New assertions call the actual helper against the owned PG database; local skip, no substitute pass                                                                            | Existing hosted PG companion, not an extra workflow/acceptance key; terminal local regression/type/format results recorded below and in manifest             | New same-candidate three PG cases must execute with zero skips                                                                 |
+| Preserve R1–R27 and original complete journeys                      | Product apps/packages, SDK/BFF, identity/proof/fare/payment/rating/ACK, complete browser spec, config and workflows unchanged | Source verification confirms byte-identical original browser spec and no product/workflow diff                                                                                 | `source-and-hosted-verification.json`; scoped checks and terminal regression below                                                                           | Prior green checks or partial A results provide no new-candidate acceptance credit                                             |
+| `pax-review-demo_real-shared-order-across-roles`                    | Original three formal-schema companions and true cross-role UUID assertions                                                   | Pending, zero credit                                                                                                                                                           | New exact-SHA full CI / three PG companions and actual role readback required                                                                                | Existing old A facts do not establish B/C or a new candidate pass                                                              |
+| `pax-review-demo_external-simulation-and-complete-journeys`         | Original A/B/C independent orders, true time waits, payment/retry/rating/case/cancellation/history/documents                  | Pending, zero credit                                                                                                                                                           | All existing browser actions, assertions, 720-second case and zero retry remain unchanged                                                                    | B/C not reached in cbeb; external ports remain explicitly simulated                                                            |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`            | Existing hosted lifecycle and sole immutable combined Cloud Run delivery                                                      | Pending, zero credit                                                                                                                                                           | Same-SHA review/full CI/browser, normal merge, authorized shared-dev release and fresh smoke remain necessary                                                | No VM runtime, manual workflow dispatch/rerun/cancel, deployment or delivery claim                                             |
+
+The original artifact ZIP SHA256 is
+`62d1fee842222f7b42f363a0fd6982050d87f89fc7fc222e750aa9ee8df7a3a2`,
+matching GitHub's recorded digest; report SHA256 is
+`63aa5895d6777bcc1ffe0af7d3f01093d21a519dc2bdc374a80d5ab444f68b09`;
+decoded inline facts SHA256 is
+`b176de0abe544ca75a33e5c0ca2592ab68b15129dcda34bfe9a0e5b49a27a977`.
+The original browser first-failure receipt SHA256 is
+`71eea4f1ef81925d63e0ff63d50cc41c0403956c5a964a30faa52307adf117f2`.
+These inputs and the prior immutable-source manifest were independently checked,
+including report bytes inside the ZIP and the actual base64 attachment body.
+
+Canonical evidence is
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate-cbeb-timestamp-evidence/`.
+Its manifest binds the final candidate to checked executable blobs, the original
+cbeb evidence, exact check commands/exits and terminal logs. All earlier UAT
+findings and acceptance rows remain verbatim above. The existing recovery-r26
+branch and PR 2687 retain published history; the old 5bd188 branch is preserved.
+Only this cwd's 22 generated dependency symlinks were detached before an offline,
+frozen, scripts-disabled install (exit 0). Canonical dependencies and lockfiles
+were untouched. Node 22.23.2, pnpm 10.33.0, TypeScript 5.9.3, Vitest 4.1.4.
+
+Terminal local verification on executable source
+`1c2f7aa7325980b8e63f2859fbccdfa6d705c73f`:
+
+- `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015 tests/unit/pax-shared-order-flow-20261015 --maxWorkers=2 --reporter=dot`: exit 0, 32 passing / four skipped files; 184 passing / six original environment-skipped cases (`review-regression.json/log`). The three original review PG cases and the original shared-order PG/environment cases remain skipped; those skips grant no credit. Existing DOM `act` warnings are retained in the log.
+- `pnpm exec tsc -p tsconfig.json --noEmit`: exit 0 (`root-typecheck.json/log`).
+- Scoped ESLint and Prettier for the two changed TypeScript files: exit 0 (`scoped-lint.json/log`, `scoped-format.json/log`). Final UAT format, diff and commit-trailer checks are recorded separately in the manifest.
+- `python3 .../verify-source.py`: exit 0 (`source-verification.json/log`), a source/artifact check only. It verifies the exact one-key change, unchanged full browser spec/product/workflows and immutable cbeb report/ZIP/inline facts. It does not execute SQL or claim a new browser pass.
+
+The final candidate adds only this UAT section to the tested executable source.
+All owner-started checks are terminal and read before handoff. Hosted checks for
+the final candidate follow the existing lifecycle; review, merge and all three
+required acceptance keys remain pending. No product/preview/HTTP/PG/browser/
+Compose runtime or Playwright CLI was started on this VM.
