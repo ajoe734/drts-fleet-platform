@@ -7,8 +7,8 @@ Owner：Codex。Reviewer：Codex2。日期：2026-10-15（UTC）。只改文件�
 - 依據：本 task spec、canonical root 的 `.local/passenger-app-20261009/common.md`（含 2026-10-10 補充）、`claude-design-20261015/design-spec-20261010.md`、SA／SD §3、既有 P5 canvas 與 `packages/ui-tokens/src/realms.ts` passenger 品牌。
 - 基線：`df77ae3586694b9ad753eecf2b3ceab3fbfacb90`。匯入 anchor：`04f539b8c`。內容修訂與檢查執行版本：`d91754c635a72af88e4fb8209cacf2569d02e5aa`，後續 closeout 僅新增本證據文件。
 - 候選分支：`codex/pax-design-v2-20261015`。最終完整 `CANDIDATE_SHA` 取本文件所在候選的 `git rev-parse HEAD`，並由 status CLI handoff 與同一 PR head 鎖定；不把 anchor SHA 當 candidate，也不在文件自填無法自參照的 commit hash。
-- PR 與同 SHA 的 CI／review 結果由 task machine truth 記錄；本文件提交時尚待建立 PR、讀取該候選 CI 並交 Codex2 獨立審查，沒有宣稱已 merge 或完成 acceptance。
-- 沒有前輪候選退修。本輪已知來源缺口保留於下表，不以匯入成功覆蓋缺口。
+- 首次提交本文件時尚待建立 PR／交審；其後 PR #2657、同 SHA CI 與首輪退修見文末「SRC-AU04 首輪退修回應」。沒有宣稱已 merge 或完成 acceptance。
+- 首次交審前沒有前輪候選退修；本次為 Codex2 首輪獨立退修後的 owner 回應。來源缺口保留於下表，不以匯入成功覆蓋缺口。
 
 ## Finding／驗收對照
 
@@ -451,3 +451,51 @@ PASS Passenger.html inline JSX blocks: 1
 - 未啟動開發服務、preview、瀏覽器／E2E 或 Docker；沒有外部 OAuth／簡訊／金流呼叫。這些不是本次文件變更的靜態驗收，不宣稱通過。
 - `.dc.html` 的實際視覺／互動需 Claude Design 執行環境；repo 缺 `support.js` 為原來源交付形式，非新增可執行入口。
 - 正式條款／隱私頁、7 天上限、客訴 500 字、案件格式、標誌素材、重扣 API 等示意或缺口，在 README 明確區分；沒有虛構新文號、電話或政策網址。
+
+## SRC-AU04 首輪退修回應（2026-10-15，Owner Codex）
+
+Codex2 於 2026-10-15T11:31:19Z 退修候選 `8e20b183098674e75fe4ad2924f3b92dc88718c3`，generation `80009a7775814e5a8e92e680e0b85534`。這是首次獨立退修；本節是定位與來源補稿協調紀錄，不是修正版交審，也不消除 SRC-AU04。
+
+本次 `git fetch origin` 後，本機 HEAD、遠端 `origin/codex/pax-design-v2-20261015` 與 [PR #2657](https://github.com/ajoe734/drts-fleet-platform/pull/2657) head 均為上述 SHA；修改前工作樹乾淨。未因 dev 前進而 merge／rebase。後續本節的 anchor 只保存退修證據，不能沿用舊候選的 CI／review 結論。
+
+### 定位與最小重現
+
+- 規格：原來源 `design-spec-20261010.md:82,84`，AU-04「同 AU-02」要求空白、格式錯誤、傳送中、傳送太頻繁（稍後再試）。規格 SHA256：`dcd81a8b71b589f8cfc071fd9d697996019fb9f90f8226b7cac656c67cca64a2`。
+- 實際路徑：唯讀 `generator/au04.py` 的 `board(...)` 只傳入 `已填寫`／`格式錯誤` 兩框；原來源 `project/AU-04.dc.html:25` → 原樣匯入 `docs/05-ui/passenger-app-design-20261015/AU-04.dc.html:25` → README AU-04 列。原稿頂端「沿用 AU-02 的樣式」說明沒有建立缺少的三個狀態畫框。
+- 原稿與匯入檔 SHA256 都仍為 `c30a99cafab3ced8f5844337f3de4d8f50e4d0944abf0404748d4cc6a2647b38`，未收到可用的補稿版本或明確變更驗收邊界的決定。
+
+在 task worktree 執行下列最小靜態 probe（Python 3.12.3）；`exit 1` 是缺陷重現，不是通過：
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+import re
+source = Path('/home/lupin/workspace/drts-fleet-platform/.local/passenger-app-20261009/claude-design-20261015/project/AU-04.dc.html')
+imported = Path('docs/05-ui/passenger-app-design-20261015/AU-04.dc.html')
+assert source.read_bytes() == imported.read_bytes()
+states = re.findall(r'>｜([^<]+)<', imported.read_text())
+missing = [s for s in ('空白', '格式錯誤', '傳送中', '傳送太頻繁') if not any(v.startswith(s) for v in states)]
+print('ACTUAL', states)
+print('MISSING', missing)
+raise SystemExit(1 if missing else 0)
+PY
+```
+
+```text
+ACTUAL ['已填寫', '格式錯誤']
+MISSING ['空白', '傳送中', '傳送太頻繁']
+```
+
+另已執行從規格 AU-02 列動態讀取必要狀態的 probe，結果相同，exit 1；本機腳本與輸出在 `.local/pax-design-v2-20261015/probe-au04.py`、`owner-recheck-au04.txt`。此檢查只驗證正式設計狀態標籤，沒有新增鏡像單元測試，也未執行 UI runtime。
+
+### 既有項目回歸與修正邊界
+
+| Finding／驗收項                            | 本次核對與結果                                                                                                                                                                                                                                                                                 | 未滿足項／下一步                                                                          |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| SRC-AU04／pax-design-v2_artboards_imported | 在退修 SHA 重跑本文件既有 `check-import.py`：exit 0；29 檔逐檔 bytes／SHA256 仍全數 MATCH、28 HTML 標籤配對、28 README 原標籤逐字對照、50 舊 ID 映射通過。完整輸出保存 `.local/pax-design-v2-20261015/owner-recheck-import.txt`，逐檔 hash 與上表相同。獨立狀態 probe exit 1。                 | **未通過**完整設計狀態符合性。不可用匯入成功或 README 揭露代替此驗收。                    |
+| pax-design-v2_policy_text_aligned          | 重跑本文件指定 `git grep`（排除 archive）：無輸出，exit 1（預期）；本輪未修改任何畫板或政策文字，保留前輪 Babel 與 reviewer 的政策核對證據。                                                                                                                                                   | 未重新執行 Babel（僅本 Markdown 有變更）；新 SHA 仍需新 CI／獨立 review，不挪用前輪綠燈。 |
+| 前輪 candidate CI                          | `gh pr view 2657 --json headRefOid,state,statusCheckRollup`：舊 SHA 的 28 success、2 條件 skipped、0 pending；[CI](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38723272678)、[integration](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38723272735) 均已結束。 | 只屬於退修 SHA；CI 未覆蓋 AU-04 狀態缺口，不能據此通過 acceptance。                       |
+
+交 Supervisor（Claude）協調原互動設計來源：補交 AU-04 的空白、傳送中、傳送太頻繁三個實際畫框，保留既有合法狀態與 Email 欄位／按鈕行為；若尺寸或索引變動，須一併交付 `canvas.json`。另一條可解除路徑是使用者明確變更本 task 的狀態驗收邊界，須保留原決定與新決定的依據；owner 無權自行降低要求。
+
+收到來源交付後，原 owner 才能記錄補稿來源／版本及新舊逐檔 hash、原樣重新匯入、同步 README 真實狀態，重跑 AU-04 狀態 probe、全部匯入／HTML／README／舊 ID 對照及指定 policy grep；如有 JSX 變更再跑 Babel。再普通 push，確認 local／remote／PR head 一致，對新 SHA 取得 CI 並 handoff Codex2。現階段僅保存此證據並用 status CLI 記錄等待 Supervisor 協調；不重送未修候選、不改 immutable 檔、不自行 done。PM-04／Geo 已揭露契約缺口維持原範圍；未啟動任何 VM 服務或 browser。
