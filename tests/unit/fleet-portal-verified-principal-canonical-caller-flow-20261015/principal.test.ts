@@ -46,8 +46,8 @@ let createDraft: ReturnType<typeof vi.fn>;
 async function authenticate(
   url: URL,
   init: RequestInit,
-  handler: Function,
-  klass: Function,
+  handler: unknown,
+  klass: unknown,
 ) {
   const request: AuthenticatedRequestLike = {
     method: init.method ?? "GET",
@@ -117,7 +117,7 @@ beforeEach(async () => {
           data = await controller.createDriverSupplySubmission(
             headers.get("x-fleet-partner-id")!,
             headers.get("x-actor-id") ?? undefined,
-            JSON.parse(String(init.body)),
+            JSON.parse(init.body instanceof ArrayBuffer ? new TextDecoder().decode(init.body) : String(init.body)),
             "request-1",
             verified,
           );

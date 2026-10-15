@@ -15,10 +15,7 @@ import {
   resolveFleetPrincipal,
 } from "./fleet-principal.server";
 
-type ListEnvelope<T> = {
-  items: T[];
-  pageInfo?: { nextCursor: string | null; hasNextPage: boolean };
-};
+type ListEnvelope<T> = { items: T[] };
 
 /** Only HTTP dispatch is local. Inherited SDK endpoint methods, list handling,
  * command bodies and errors keep the accepted API contract. */
