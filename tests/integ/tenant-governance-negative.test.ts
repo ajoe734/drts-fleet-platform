@@ -200,7 +200,7 @@ describe("tenant governance negative-path integration", () => {
       ownedMobilityService,
     } = createHarness();
 
-    tenantPartnerService.disableCostCenter(TENANT_ID, {
+    await tenantPartnerService.disableCostCenter(TENANT_ID, {
       code: "CC-OPS-02",
       reason: "sunset",
     });
@@ -237,7 +237,7 @@ describe("tenant governance negative-path integration", () => {
       ownedMobilityService,
     } = createHarness();
 
-    tenantPartnerService.upsertCostCenter(OTHER_TENANT_ID, {
+    await tenantPartnerService.upsertCostCenter(OTHER_TENANT_ID, {
       code: "CC-XTEN-01",
       name: "Other Tenant Shared Code",
     });

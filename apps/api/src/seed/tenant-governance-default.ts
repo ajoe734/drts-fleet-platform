@@ -284,45 +284,47 @@ export async function seedTenantGovernance(
     options.ownerUserIdsByCostCenterCode,
   );
 
-  const costCenters = template.costCenters.map((costCenter) => {
-    const existing = existingCostCenterByCode.get(costCenter.code);
-    if (existing) {
-      return {
-        code: existing.code,
-        name: existing.name,
-        status: "skipped" as const,
-        ownerUserId: existing.ownerUserId,
-        ownerName: existing.ownerName,
-      };
-    }
+  const costCenters = await Promise.all(
+    template.costCenters.map(async (costCenter) => {
+      const existing = existingCostCenterByCode.get(costCenter.code);
+      if (existing) {
+        return {
+          code: existing.code,
+          name: existing.name,
+          status: "skipped" as const,
+          ownerUserId: existing.ownerUserId,
+          ownerName: existing.ownerName,
+        };
+      }
 
-    const owner = ownerAssignments.get(costCenter.code);
-    if (!owner) {
-      throw new Error(
-        `Missing owner assignment for ${costCenter.code}; this is a seed configuration error.`,
+      const owner = ownerAssignments.get(costCenter.code);
+      if (!owner) {
+        throw new Error(
+          `Missing owner assignment for ${costCenter.code}; this is a seed configuration error.`,
+        );
+      }
+
+      const created = await services.tenantPartnerService.upsertCostCenter(
+        normalizedTenantId,
+        {
+          code: costCenter.code,
+          name: costCenter.name,
+          description: costCenter.description,
+          ownerUserId: owner.userId,
+          ownerName: owner.ownerName,
+        },
+        `${requestIdPrefix}:cost-center:${costCenter.code}`,
       );
-    }
 
-    const created = services.tenantPartnerService.upsertCostCenter(
-      normalizedTenantId,
-      {
-        code: costCenter.code,
-        name: costCenter.name,
-        description: costCenter.description,
-        ownerUserId: owner.userId,
-        ownerName: owner.ownerName,
-      },
-      `${requestIdPrefix}:cost-center:${costCenter.code}`,
-    );
-
-    return {
-      code: created.code,
-      name: created.name,
-      status: "created" as const,
-      ownerUserId: created.ownerUserId,
-      ownerName: created.ownerName,
-    };
-  });
+      return {
+        code: created.code,
+        name: created.name,
+        status: "created" as const,
+        ownerUserId: created.ownerUserId,
+        ownerName: created.ownerName,
+      };
+    }),
+  );
 
   recordSeedAudit(
     services.auditNotificationService,
