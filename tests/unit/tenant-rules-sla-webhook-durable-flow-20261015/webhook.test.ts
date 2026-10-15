@@ -46,6 +46,79 @@ function serviceFor(
 }
 
 describe("C112 durable commands and first in-flight restart", () => {
+  it.each(["url", "disabled", "removed-event", "verified"] as const)(
+    "business publication reauthorizes the committed %s configuration after waiting for metadata ACK",
+    async (change) => {
+      const p = persistenceHarness();
+      const { service, fetcher } = serviceFor(p.repository);
+      const endpoint = await service.createWebhookEndpoint(tenantId, command);
+      await service.sendTestWebhook(tenantId, {
+        webhookId: endpoint.webhookId,
+      });
+      expect(service.listWebhookEndpoints(tenantId)[0]?.status).toBe("active");
+      fetcher.mockClear();
+      const deliveriesBefore = service.listWebhookDeliveries(tenantId);
+      let releaseCommit!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        releaseCommit = resolve;
+      });
+      p.holdCommit(() => gate);
+      const editing =
+        change === "disabled"
+          ? service.updateWebhookEndpoint(tenantId, endpoint.webhookId, {
+              status: "disabled",
+              disableReason: "operator pause",
+            })
+          : service.updateWebhookEndpoint(
+              tenantId,
+              endpoint.webhookId,
+              change === "url"
+                ? { url: "https://unverified.example.test/hook" }
+                : change === "removed-event"
+                  ? { events: ["booking.created"] }
+                  : { status: "active" },
+            );
+      await new Promise((resolve) => setImmediate(resolve));
+      const publishing = service.publishWebhookEvent(tenantId, {
+        eventType: "dispatch.assigned",
+        data: { orderId: "private-order" },
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      const requestsBeforeAck = fetcher.mock.calls.length;
+      releaseCommit();
+      await editing;
+      const result = await publishing;
+      p.holdCommit();
+      expect(requestsBeforeAck).toBe(0);
+      const canonical = await p.repository.loadState();
+      if (change === "verified") {
+        expect(result).toHaveLength(1);
+        expect(fetcher).toHaveBeenCalledOnce();
+        const [url, request] = fetcher.mock.calls[0] as unknown as [
+          string,
+          RequestInit,
+        ];
+        expect(url).toBe(command.url);
+        expect(JSON.parse(request.body as string)).toMatchObject({
+          event: "dispatch.assigned",
+          data: { order_id: "private-order" },
+        });
+        expect(canonical.webhookDeliveries).toHaveLength(
+          deliveriesBefore.length + 1,
+        );
+      } else {
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(result).toEqual([]);
+        expect(service.listWebhookDeliveries(tenantId)).toEqual(
+          deliveriesBefore,
+        );
+        expect(canonical.webhookDeliveries).toHaveLength(
+          deliveriesBefore.length,
+        );
+      }
+    },
+  );
+
   it.each(["pending", "rejected"] as const)(
     "manual retry preparation preserves committed state before its %s ACK",
     async (mode) => {

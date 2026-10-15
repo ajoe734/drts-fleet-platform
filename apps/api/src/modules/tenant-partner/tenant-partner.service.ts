@@ -8606,6 +8606,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         deliveryIdOverride,
         input.data,
       );
+      if (!delivery) continue;
       if (
         delivery.status === "delivered" ||
         (delivery.attempt > 0 &&
@@ -8658,6 +8659,22 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private enqueueWebhookDelivery(
+    endpoint: StoredWebhookEndpoint,
+    eventType: "tenant.webhook.test",
+    createdAt: string,
+    context: string,
+    deliveryIdOverride?: string,
+    data?: Record<string, unknown>,
+  ): Promise<StoredWebhookDelivery>;
+  private enqueueWebhookDelivery(
+    endpoint: StoredWebhookEndpoint,
+    eventType: string,
+    createdAt: string,
+    context: string,
+    deliveryIdOverride?: string,
+    data?: Record<string, unknown>,
+  ): Promise<StoredWebhookDelivery | null>;
   private async enqueueWebhookDelivery(
     endpoint: StoredWebhookEndpoint,
     eventType: string,
@@ -8665,12 +8682,21 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     context: string,
     deliveryIdOverride?: string,
     data: Record<string, unknown> = {},
-  ): Promise<StoredWebhookDelivery> {
+  ): Promise<StoredWebhookDelivery | null> {
     return this.runConfigurationCommand(endpoint.tenantId, async () => {
       endpoint = this.cloneStoredWebhookEndpoint(
         this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId),
       );
       this.reconcileStoredWebhookEndpoint(endpoint, createdAt);
+      // The publisher's initial cache selection can predate a metadata COMMIT.
+      // Reapply the original live-event predicate under the configuration lock
+      // before accepting an intent or incrementing its delivery counter.
+      if (
+        eventType !== "tenant.webhook.test" &&
+        (endpoint.status !== "active" || !endpoint.events.includes(eventType))
+      ) {
+        return null;
+      }
       const deliveryId = deliveryIdOverride ?? `wd_${randomUUID()}`;
       const existingIndex = this.webhookDeliveries.findIndex(
         (d) => d.deliveryId === deliveryId,
