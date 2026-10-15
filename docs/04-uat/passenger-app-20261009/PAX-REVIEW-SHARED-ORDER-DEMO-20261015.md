@@ -2143,3 +2143,66 @@ dependency symlinks were detached before the offline/frozen/scripts-disabled
 install, exit 0; canonical dependencies and lockfiles were untouched. Published
 history remains on recovery-r26 / PR 2687 with ordinary pushes. Every owner-started
 check is terminal and read; all three acceptance keys remain pending.
+
+## R30 — wait for live duration before completing the rehearsal (2026-10-15)
+
+Candidate `fcd42021fbb3b5133f0536903ec160443a2d5cb2`, generation
+`e032e9a47cc54cb5ab7353e7234f3d62`, passed source review, but its own hosted
+run `38791982451` / job `116619623159` failed the unchanged
+`assertCompletedFacts` requirement `actual_duration_sec > 20`. A completed its
+entire phase, order `6f703d4b-ed96-4051-b0a7-496ed67cc71c`, with 112 seconds,
+0.23 km, captured payment, score 5 and its nonformal document. B mounted Driver
+now genuinely tracked distance and completed order
+`7baa9876-e8d9-4c6c-8bdb-2fd0d6fd55f4`, task
+`3d57e29c-65e8-432b-9b8f-2ab755452eb3`. Its first capture failed; the same payment
+then became captured on attempt 2, and its score-1/contact-requested complaint
+row was present. However, B completed after only 18 seconds. The final facts
+assertion failed before the CRM page/document checks and C; neither a complete
+B phase nor the three-order acceptance passed.
+
+The verified hosted artifact `12001930505` has ZIP/GitHub digest
+`4e2127c0a398cae17ab33790e627aee2ee093eb84a4be9266999d7030472a59f`.
+Its unmodified report attachment records B start `19:26:00.412Z`, completion
+`19:26:18.580Z`, `actual_duration_sec: "18"` and distance `"0.23"`.
+The actual B Driver PNG was decoded and viewed: its clock also shows
+`00:00:18`. This is an actual old-candidate failure, not a fixture failure or
+an inferred tracking outage. The previous R29 initialization fix is retained.
+
+Only the existing browser `finish` helper changes executable behavior. The
+distance threshold can be reached before twenty seconds on this short route.
+After the existing distance/freshness steps, it now polls the actual Driver
+`RouteMetricChip` labelled `時長`, parses its displayed `HH:MM:SS` and waits for
+more than 20 seconds before the original meter/complete actions. The selector
+matches the real sibling Text values in `trip.tsx::RouteMetricChip`. The real
+Trip ticker and completion both use `calculateTripDurationSec` with
+`tripStartTimeRef`; no duration is injected into the UI, API or database.
+This bounded 30-second local wait uses the existing expectation budget; the
+40-second distance wait, 720-second whole-case limit, zero retries, production
+clock, original final PG assertion and all A/B/C business actions remain.
+All product code, evidence SQL, browser config and workflows are byte-identical
+to fcd42021. No new unit test duplicates this small test-sequencing change.
+
+| Finding / acceptance                                        | Source and change                                                                                                       | Old result → replacement result                                                                                 | Commands / exit / evidence                                                                                              | Remaining limitation                                                         |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| R30: B completes before its required real duration          | Existing `finish` in `tests/e2e/pax-review-shared-order-demo.spec.ts`; real Trip duration chip/ticker/completion caller | Old hosted case fails with 18 seconds; new caller waits for displayed duration >20. New runtime outcome pending | Original hosted log/report/decoded B facts and PNG; `source-verification.json`                                          | No browser/runtime executed on this VM; must pass original hosted case       |
+| Preserve prior caller/diagnostic behavior                   | Existing Driver acceptance caller and active-page failure-evidence regressions                                          | 2 files / 28 pass / zero skips                                                                                  | `caller-regression.log`, exit 0                                                                                         | These tests use external UI/HTTP boundaries; no browser/PG acceptance credit |
+| Preserve R29, producer, pause and Web/native storage        | Existing original Driver Vitest configuration                                                                           | 3 files / 8 pass / zero skips                                                                                   | `driver-regression.log`, exit 0                                                                                         | Worker/CSP and persistence remain external fixtures as documented in R29     |
+| Changed spec/config contracts and content                   | Original spec/config and helpers; scoped lint, format, source/prefix verification                                       | Scoped TypeScript and ESLint pass; checks terminal                                                              | `targeted-types.log`, `lint.log`, `format.log`, `source-verification.json`, all exit 0                                  | Scoped checks are not a full root/app typecheck or full CI                   |
+| `pax-review-demo_real-shared-order-across-roles`            | Original same-UUID and formal-schema PG assertions retained                                                             | Pending, zero credit                                                                                            | New same-candidate full CI and all three original formal-schema PG companions required                                  | Old A/B progress does not prove the new candidate or C                       |
+| `pax-review-demo_external-simulation-and-complete-journeys` | Original complete A/B/C and explicit simulated external ports retained                                                  | Pending, zero credit                                                                                            | Original journey spec, final duration/distance/chronology/payment/rating/CRM/history assertions retained                | New actual B CRM/document and complete C still required                      |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`    | Existing PR 2687 / recovery-r26 and original candidate lifecycle                                                        | Pending, zero credit                                                                                            | New exact-SHA review/full CI/browser, normal merge, sole immutable combined Cloud Run delivery and fresh smoke required | No VM runtime, workflow dispatch/rerun/cancel or deployment performed        |
+
+Executable source is checkpoint `aefa4a8b0`; the final candidate adds only this
+UAT evidence. Commands, terminal exits, source/evidence hashes and the actual
+hosted inputs are preserved under the canonical root at
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate-fcd-duration/manifest.json`.
+Scoped TypeScript command: `pnpm exec tsc --noEmit --strict --skipLibCheck --esModuleInterop --target ES2022 --module ESNext --moduleResolution Bundler --types node tests/e2e/pax-review-shared-order-demo.spec.ts playwright.pax-review-shared-order.config.ts`.
+The two existing root regression files were run with `GITHUB_ACTIONS=false pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/driver-acceptance-caller.test.ts tests/unit/pax-review-shared-order-demo-20261015/driver-failure-evidence.test.ts --maxWorkers=2 --reporter=verbose`;
+the three Driver files used `GITHUB_ACTIONS=false pnpm exec vitest run --config tests/unit/pax-review-shared-order-demo-20261015/driver-vitest.config.ts --maxWorkers=1 --reporter=verbose`.
+Node 22.23.2, pnpm 10.33.0, TypeScript 5.9.3 and Vitest 4.1.4; dependencies and
+lockfiles were untouched. All prior UAT bytes and the original branch/ref
+`5bd1886938eeef8b3b82afda6464304772faf81a` remain preserved. Work stayed inside
+the assigned isolated cwd, reusing the already published recovery-r26 branch;
+no reset, rebase, amend or force push. All owner-started local checks are
+terminal and read; the final candidate's hosted checks are pending in the
+original lifecycle and all three acceptance keys remain pending.
