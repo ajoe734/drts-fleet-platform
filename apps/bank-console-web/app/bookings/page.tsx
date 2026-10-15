@@ -322,7 +322,7 @@ export default async function BookingsPage({
           </label>
 
           <label className="filter-field">
-            <span>{locale === "en" ? "Rows per page" : "每頁筆數"}</span>
+            <span>{t("bookings.pagination.pageSize", locale)}</span>
             <select name="pageSize" defaultValue={pagination.pageSize}>
               {BOOKING_PAGE_SIZES.map((size) => (
                 <option key={size} value={size}>
@@ -439,19 +439,19 @@ export default async function BookingsPage({
             </Tr>
           ))}
         </DataTable>
-        <nav aria-label={locale === "en" ? "Booking pages" : "預約分頁"}>
+        <nav aria-label={t("bookings.pagination.label", locale)}>
           <span>
             {pagination.from}–{pagination.to} / {pagination.total} ·{" "}
             {pagination.page} / {pagination.totalPages}
           </span>{" "}
           {pagination.page > 1 ? (
             <Link href={pageHref(pagination.page - 1)}>
-              {locale === "en" ? "Previous" : "上一頁"}
+              {t("bookings.pagination.previous", locale)}
             </Link>
           ) : null}{" "}
           {pagination.page < pagination.totalPages ? (
             <Link href={pageHref(pagination.page + 1)}>
-              {locale === "en" ? "Next" : "下一頁"}
+              {t("bookings.pagination.next", locale)}
             </Link>
           ) : null}
         </nav>
