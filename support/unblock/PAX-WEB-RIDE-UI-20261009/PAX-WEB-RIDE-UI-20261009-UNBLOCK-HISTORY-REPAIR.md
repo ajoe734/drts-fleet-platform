@@ -7,15 +7,19 @@
 > applying a net diff. It must NOT be merged. That whole incident — and every
 > subsequent branch-naming/trailer/ancestry problem it produced — is superseded
 > by the clean 2026-10-14 dev-continuation merge documented in **Section 11**.
-> Sections 1-10's body text is preserved verbatim from commit
-> `94195322681ede1962659216f1c624c0ec164a0e`, and that body is byte-identical
-> to the equivalent body text in the separate, never-reviewed sibling commit
-> `bca5cc068a4cfd1ffbfff3d9db82274ad2bb6631` — **but their respective §0.7
-> sections are NOT identical**, are no longer merged into one, and are each
-> preserved separately below bound to its own commit SHA (§0.7a, §0.7b),
-> marked historical/superseded. Do not act on the "pending" framing of
-> §1-§10/§0.7a/§0.7b or their draft Supervisor commands — those are stale.
-> Read **Sections 11-16** for the current state.
+> Sections 1-9's body text is preserved verbatim from commit
+> `94195322681ede1962659216f1c624c0ec164a0e`, and (apart from §9's own
+> header/warning, annotated in place) that body is byte-identical to the
+> equivalent body text in the separate, never-reviewed sibling commit
+> `bca5cc068a4cfd1ffbfff3d9db82274ad2bb6631`. **Unlike §1-§9, neither §0.7 nor
+> §10 is byte-identical between the two commits** — each commit's own §0.7
+> and §10 text is genuinely different (a real difference in what the two
+> commits originally said, not a rewrite introduced by this file), so each is
+> preserved separately below bound to its own commit SHA: §0.7a/§0.7b for the
+> two §0.7 texts, **§10a/§10b for the two §10 texts**, all four marked
+> historical/superseded. Do not act on the "pending" framing of
+> §1-§10a/§10b/§0.7a/§0.7b or their draft Supervisor commands — those are
+> stale. Read **Sections 11-16** for the current state.
 
 Owner: Claude · Reviewer: Codex2 · 2026-10-15
 
@@ -490,6 +494,62 @@ this helper task.
 > branch discussed anywhere in §1-§9) actually implemented the "True Safe
 > Path" below and merged via PR #2622. See §11 for the resolution and §15 for
 > the corrected parent-metadata state.
+>
+> Unlike §1-§9, the two source commits' own §10 text is **not** byte-identical
+> (see the top-of-file warning) — the inline checker reference and the
+> closing paragraph genuinely differ between them. It is preserved below as
+> two distinct historical texts, mirroring the §0.7a/§0.7b split: **§10a**
+> (from `94195322681ede1962659216f1c624c0ec164a0e`, this task's
+> actually-reviewed candidate) and **§10b** (from the sibling
+> `bca5cc068a4cfd1ffbfff3d9db82274ad2bb6631`).
+
+## 10a. Corrected Safe Repair Path & Actual Resolution — as originally written in candidate `94195322681ede1962659216f1c624c0ec164a0e` (HISTORICAL/SUPERSEDED, preserved verbatim)
+
+> [!WARNING]
+> This is the exact §10 text as it existed in the reviewed candidate
+> `94195322681ede1962659216f1c624c0ec164a0e` (sha256 of the whole artifact at
+> that commit: `70f79a022779590a7f379b99e1d8224536ff931dd83747caafb5d6b56ed3811a`
+> — the same commit as §0.7a above). Its second paragraph cites the formal
+> checker with only `--head 94307fe0287658dea4074db6c1ddeba399d2a462`, no
+> explicit `--base` — preserved as originally written rather than corrected
+> in place; the checker's `--base` defaults to `origin/main`, not the PR's
+> actual base, the same footgun §0.7a already flags.
+
+The repair path proposed in §2-§8 (PR #2529) was rejected by the reviewer (Codex2) in R1.
+**Why PR #2529 was invalid:** It used the exact tree `debc788a...` from the old branch tip `96102377a...`, which was based on an older `dev` commit. Applying this old tree directly to the newer `dev` tip `d36ca2f80...` silently deleted recently merged `dev` files (e.g., dev operational cleanup fixtures) and reverted recent voice test fixes, acting as a destructive revert of shared work.
+
+### The True Safe Path
+To properly reconstruct history without force-pushing and without destroying `dev` work:
+1. Create a new branch from current `dev`.
+2. Extract the net differences (the `diff` from the `merge-base` to the old tip) and apply them onto the new `dev` branch, ensuring dev's new files and changes remain intact.
+3. Commit these changes with properly formatted commit messages, including the missing `Reviewer` trailer.
+4. Open a new PR. Do not force-push the original published branch.
+
+### Current Status & Pending Parent Resolution (H4)
+
+The parent task is NOT fully unblocked and is NOT safely resting on the clean PR #2535. The parent task's active worktree (`.artifacts/worktrees/auto/gemini-pax-web-ride-ui-20261009`, snapshot `94307fe0287658dea4074db6c1ddeba399d2a462`) is still contaminated because it merged the polluted PR 2513 lineage (parents `a4054262...` and `38c3fecd...`). 
+
+Running the formal checker against the parent's current snapshot (`check_commit_trailers.py --head 94307fe0287658dea4074db6c1ddeba399d2a462`) fails with 5 non-compliant commits:
+- `46df5aad681eba8b1cd4b694459bcce55c4a8c57` (Missing Reviewer)
+- `bfc9701f7a849c13dcd6bce23fa36d329ac36c3b` (Invalid subject)
+- `42bc39e0cedcca690147d80b81369d29d3cb84a8` (Invalid subject and trailers)
+- `f0d75acc1e4a5e6535c6e99be7c1f35d067a375c` (Non-compliant)
+- `a4054262d2f619779ad5c7ace781d072e02a963b` (Invalid subject and trailers)
+
+**Next Action (Pending):** The parent task owner and Supervisor must align on the concrete safe next step. The parent owner must preserve their unpublished work, but must port their valid UI changes onto a completely clean `dev` branch using the net-diff approach. They must NOT merge the polluted `ours` ancestry, and they must not force-push the active worktree. This history repair helper has fulfilled its scope by documenting the exact contamination and safe path; resolving the parent's worktree state is now deferred to the parent's lifecycle and Supervisor coordination.
+
+## 10b. Corrected Safe Repair Path & Actual Resolution (H4) — as recorded in commit `bca5cc068a4cfd1ffbfff3d9db82274ad2bb6631` (HISTORICAL, preserved for audit)
+
+> [!WARNING]
+> This §10 text comes from the same **sibling commit** as §0.7b above —
+> `bca5cc068a4cfd1ffbfff3d9db82274ad2bb6631` (sha256 of the whole artifact at
+> that commit: `452acb9ac7b3f2bb07ca8bb27324b456d11152882668cdfa3f806af256f48204`).
+> Compared to §10a, this version states the formal-checker command explicitly
+> (`--base`+`--head`, on its own line) instead of citing only `--head`
+> inline, and closes with a two-part "Concrete Unblocked Next Step" /
+> "Yielding to Supervisor Gateway" structure instead of §10a's single
+> "Next Action (Pending)" paragraph. Preserved here verbatim rather than
+> merged with §10a, for the same reason §0.7b is kept separate from §0.7a.
 
 The repair path proposed in §2-§8 (PR #2529) was rejected by the reviewer (Codex2) in R1.
 **Why PR #2529 was invalid:** It used the exact tree `debc788a...` from the old branch tip `96102377a...`, which was based on an older `dev` commit. Applying this old tree directly to the newer `dev` tip `d36ca2f80...` silently deleted recently merged `dev` files (e.g., dev operational cleanup fixtures) and reverted recent voice test fixes, acting as a destructive revert of shared work.
@@ -623,9 +683,9 @@ Per `AI_COLLABORATION_GUIDE.md` §0.7 and the Codex2 reopen of
 PR #2705, 2026-10-15T20:40:09Z), the previous round replaced 347 lines of
 traceable history with a 141-line fresh summary, losing the per-finding/
 per-acceptance evidence trail. This section restores it, together with the
-§1-§10 body and the §0.7a/§0.7b split above (two genuinely different §0.7
-texts, from two different commits, no longer merged into one — see the
-top-of-file warning), and adds the current round.
+§1-§9 body and the §0.7a/§0.7b / §10a/§10b splits above (genuinely different
+§0.7 and §10 texts, each pair from the same two commits, no longer merged
+into one — see the top-of-file warning), and adds each later round.
 
 | Round (candidate / generation) | R1 (old #2529 whole-tree revert) | H1 (commit-trailer graph/gate) | H2 (helper PR scope) | H3 (traceability) | H4 (parent-metadata safety) |
 | --- | --- | --- | --- | --- | --- |
@@ -638,7 +698,8 @@ top-of-file warning), and adds the current round.
 | `0660ce29d219` (separate dev-continuation branch, gen `cb96c18f8f`) | **MOOT** — different branch entirely, built from current `dev`, not from any `96102377a`-derived tree; no `ours` merges in its history | **MOOT/PASS** — reviewer-approved, CI green | **MOOT/PASS** | — (this branch belongs to the *parent* task's own lifecycle, not this helper; its evidence lives in `PAX-WEB-RIDE-UI-20261009`'s own `worker_outcomes`, not here) | — |
 | `5e4cfd4c54dc` / PR #2705 (gen `fc5562ed9d`) | credited correctly (confirmed §0.7 current round) | credited correctly | credited correctly | **FAIL (3rd round)** — reviewer H3 2026-10-15T20:40:09Z: 347→141 line rewrite (`git diff --numstat 94195322681ede1962659216f1c624c0ec164a0e 5e4cfd4c54dcd35384298c90385f856821bafe2f -- <artifact>` → +134/-340) deleted the `94195322681e`/`bca5` evidence entirely; stale generation id left on line 6 | **FAIL** — reviewer H4 2026-10-15T20:40:09Z: artifact wrongly claimed `resolved_parent_*` was still pending and offered a destructive replacement command (see §15) |
 | `81ccb3bf0` / PR #2705 (gen `2b5376b957`) | credited correctly | credited correctly | credited correctly | **FAIL (4th round)** — reviewer H3 2026-10-15T20:58:37Z: restored §1-§10 and the detailed evidence table, but collapsed `94195322681e`'s own §0.7 and `bca5cc068a4c`'s distinct §0.7 into one "content-identical" claim, silently discarding `94195322681e`'s actual (shorter, erroring) §0.7 text — exactly what this row flagged above. | credited correctly (§15 withdrawal of the destructive replacement command stands) |
-| this round (current artifact fix) | credited, unchanged | credited, unchanged | credited, unchanged | **Fixed** — splits the single merged §0.7 back into **§0.7a** (`94195322681e`'s own, short, erroring text, verbatim) and **§0.7b** (`bca5cc068a4c`'s detailed table, verbatim), each bound to its real commit SHA/sha256/trailers/branch and marked historical; corrects this table's own prior mis-attribution of §0.7b's content to the `94195322681e` round (the row above, and the top-of-file warning). | unchanged — see §15: the correct, already-live binding is quoted verbatim instead of describing it as missing |
+| `fcc2475eb` / PR #2705 (gen `ee20608766`) | credited, unchanged | credited, unchanged | credited, unchanged | **Partially fixed, FAIL (5th round)** — reviewer H3 2026-10-15T~21:15Z: correctly split the single merged §0.7 back into **§0.7a** (`94195322681e`'s own, short, erroring text, verbatim) and **§0.7b** (`bca5cc068a4c`'s detailed table, verbatim), each bound to its real commit SHA/sha256/trailers/branch. But it left §10 using **only** `bca5cc068a4c`'s version of §10 under both the shared heading and the top-of-file "byte-identical" claim — the same silent-substitution bug it had just fixed for §0.7, now reproduced for §10 (the explicit `--base`+`--head` checker line and the "Concrete Unblocked Next Step"/"Yielding to Supervisor Gateway" close are `bca5cc068a4c`-only text; `94195322681e`'s own `--head`-only checker reference and "Next Action (Pending)" closing paragraph were never restored). | unchanged — see §15: the correct, already-live binding is quoted verbatim instead of describing it as missing |
+| this round (current artifact fix) | credited, unchanged | credited, unchanged | credited, unchanged | **Fixed** — applies the same split to §10 that the previous round applied to §0.7: **§10a** (`94195322681e`'s own text, verbatim, including its `--head`-only checker reference and "Next Action (Pending)" close) and **§10b** (`bca5cc068a4c`'s text, verbatim, including its explicit `--base`+`--head` line and two-part "Concrete Unblocked Next Step"/"Yielding to Supervisor Gateway" close), each bound to its real commit SHA/sha256 and marked historical; corrects the top-of-file warning's claim that §1-§10 (not just §1-§9) are byte-identical between the two commits. | unchanged — see §15: the correct, already-live binding is quoted verbatim instead of describing it as missing |
 
 Four original acceptance criteria, current-round cross-walk (fresh evidence
 cited inline in §11-§13/§15, not re-derived here):
