@@ -80,7 +80,8 @@ require("node:net").Server.prototype.listen = () => {
   throw new Error("This repository probe must never start a server");
 };
 
-async function main() {
+const scenarios = [];
+async function scenario(mode) {
   require(path.join(api, "src/app.module.ts"));
   const { Logger } = apiRequire("@nestjs/common");
   Logger.overrideLogger(false);
@@ -111,7 +112,6 @@ async function main() {
     Reflect.getMetadata("exports", ComplaintModule).includes(ComplaintService),
   );
 
-  const mode = process.argv[2];
   const low = mode === "low" || mode === "low-no-contact";
   const contactRequested = mode === "low";
   const orderId = "92bbfe0b-bd78-49a0-b7cd-8036c55d2901";
@@ -255,7 +255,7 @@ async function main() {
     limits:
       "Socket-free Nest/controller/hook regression; ride lookup/submission and complaint persistence fixtures, no lifecycle hooks or PG/browser/runtime acceptance credit.",
   };
-  console.log(JSON.stringify(report, null, 2));
+  scenarios.push(report);
   if (mode === "missing-provider")
     assert.equal(service.complaintService, undefined);
   else
@@ -285,6 +285,31 @@ async function main() {
     assert.equal(consentWrites[0].consent, contactRequested);
     assert.equal(consentWrites[0].hasDraft, low && contactRequested);
   }
+}
+async function main() {
+  const modes = process.argv[2]
+    ? [process.argv[2]]
+    : [
+        "high",
+        "low",
+        "low-no-contact",
+        "foreign-owner",
+        "invalid-score",
+        "missing-provider",
+        "disabled-storage",
+      ];
+  const failures = [];
+  // Import the graph once, then create a fresh provider slice per scenario.
+  // Reusing Node's normal module cache avoids seven expensive AppModule builds.
+  for (const mode of modes) {
+    try {
+      await scenario(mode);
+    } catch (error) {
+      failures.push({ mode, error: error.message });
+    }
+  }
+  console.log(JSON.stringify({ scenarios, failures }, null, 2));
+  assert.deepEqual(failures, []);
 }
 main().catch((error) => {
   console.error(error);
