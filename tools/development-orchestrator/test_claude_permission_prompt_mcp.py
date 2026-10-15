@@ -96,6 +96,33 @@ class SubprocessTransportTests(unittest.TestCase):
         proc = self.run_bridge(b"")
         self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"", b""))
 
+    def test_tools_call_preserves_allow_deny_and_defer_over_both_transports(self):
+        self.config.write_text(json.dumps({
+            "paths": {"activity_log": str(self.root / "activity.jsonl"),
+                      "approval_queue": str(self.root / "queue.json")},
+            "providers": {"claude": {"broker": {"approval_wait_seconds": 0}}}}))
+        # Isolate policy lookup from the user's actual settings.
+        self.env.update(ORCH_CANONICAL_ROOT=str(self.root), ORCH_WORKSPACE_ROOT=str(self.root))
+        for legacy in (False, True):
+            with self.subTest(legacy=legacy):
+                messages = [{"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {
+                    "name": bridge.TOOL_NAME, "arguments": arguments}}
+                    for i, arguments in enumerate((
+                        {"tool_name": "Read", "input": {"file_path": "測試.txt"}},
+                        {"tool_name": "Edit", "input": {"file_path": "/outside-test-boundary/file"}},
+                        {"tool_name": "UnknownTool", "input": {"once": True}}))]
+                proc = self.run_bridge(b"".join(frame(m, legacy) for m in messages))
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(proc.stderr, b"")
+                responses = self.decode_responses(proc.stdout, legacy)
+                payloads = [json.loads(r["result"]["content"][0]["text"]) for r in responses]
+                self.assertEqual([p["behavior"] for p in payloads], ["allow", "deny", "deny"])
+                self.assertEqual(payloads[0]["updatedInput"], {"file_path": "測試.txt"})
+                self.assertEqual(payloads[2]["message"], "Approval timed out")
+                queued = json.loads((self.root / "queue.json").read_text())["pending"]
+                self.assertEqual(len(queued), 1 + int(legacy))
+                self.assertTrue(all(not item["remember"] for item in queued))
+
     def test_malformed_or_truncated_input_fails_closed(self):
         for data in (b"{oops}\n", b"\xff\n", b"[]\n", b"null\n",
                      b'{"method":"ping"}', b"Content-Length: nope\r\n\r\n",
@@ -115,6 +142,48 @@ class SubprocessTransportTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(self.decode_responses(proc.stdout, False),
                          [{"jsonrpc": "2.0", "id": 4, "result": {}}])
+
+
+class CodecTests(unittest.TestCase):
+    def test_fragmented_reads_and_unicode_byte_lengths(self):
+        class FragmentedStream(io.RawIOBase):
+            def __init__(self, data):
+                self.data = io.BytesIO(data)
+
+            def readable(self):
+                return True
+
+            def readinto(self, target):
+                chunk = self.data.read(min(len(target), 3))
+                target[:len(chunk)] = chunk
+                return len(chunk)
+
+        payload = {"jsonrpc": "2.0", "id": "中文🚦", "method": "ping"}
+        response = {"jsonrpc": "2.0", "id": "中文🚦", "result": {"text": "a\nb"}}
+        for legacy in (False, True):
+            with self.subTest(legacy=legacy):
+                output = io.BytesIO()
+                codec = bridge.StdioCodec(io.BufferedReader(FragmentedStream(frame(payload, legacy) * 2)), output)
+                self.assertEqual(codec.read_message(), payload)
+                codec.write_message(response)
+                self.assertEqual(codec.read_message(), payload)
+                codec.write_message(response)
+                self.assertIsNone(codec.read_message())
+                self.assertEqual(output.getvalue(), frame(response, legacy) * 2)
+
+    def test_size_limits_and_framing_cannot_switch_mid_session(self):
+        for data in (b"x" * (bridge.StdioCodec.MAX_MESSAGE_BYTES + 1),
+                     b"Content-Length: 1048577\r\n\r\n",
+                     b"Content-Length: 2\r\nX: " + b"x" * 8192 + b"\r\n\r\n{}"):
+            with self.subTest(prefix=data[:50]):
+                with self.assertRaises(ValueError):
+                    bridge.StdioCodec(io.BytesIO(data), io.BytesIO()).read_message()
+        message = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+        for legacy in (False, True):
+            codec = bridge.StdioCodec(io.BytesIO(frame(message, legacy) + frame(message, not legacy)), io.BytesIO())
+            self.assertEqual(codec.read_message(), message)
+            with self.assertRaises(ValueError):
+                codec.read_message()
 
 
 class PermissionDecisionTests(unittest.TestCase):
