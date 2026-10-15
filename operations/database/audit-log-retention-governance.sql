@@ -33,7 +33,7 @@ WITH latest_governance AS (
         -- Preserve the persisted authority for every active protection.
         (a.resource_type = p.resource_type AND a.resource_id = p.resource_id)
         OR (
-          -- Physical tenant is authoritative; an arbitrary audit summary cannot
+          -- Physical tenant is authoritative. An arbitrary audit summary cannot
           -- replace it. Fall back to payload only when normalization left NULL.
           (NULLIF(p.new_value->>'tenantId', '') IS NULL
             OR COALESCE(a.tenant_id::text, NULLIF(a.new_value->>'tenantId', '')) IS NULL

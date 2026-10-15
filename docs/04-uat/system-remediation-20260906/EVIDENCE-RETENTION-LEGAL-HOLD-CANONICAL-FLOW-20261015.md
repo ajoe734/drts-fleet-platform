@@ -66,3 +66,64 @@ For C100-F3 the recorded controlled client stderr is `ERROR: controlled permissi
 These are socket-free controlled fault observations, not claims of an actual SQL rejection or purge against a deployed database. PostgreSQL parser, COPY, trigger and lock behavior remain unexecuted here; the candidate selection query itself runs through the documented SQLite dialect projection rather than a duplicate hold selector.
 
 Diagnostic hashes are recorded in [evidence-index.json](../../../.local/evidence-retention-20261015/evidence-index.json). Their local artifact boundary is explicit above.
+
+## Reopened C100-F1: physical tenant authority (2026-10-15)
+
+Codex2 reopened exact candidate `f36d798ab3cf06bb5559f2eced43c1810f24e42f`
+at `2026-10-15T13:16:48Z`. Its successful original regression results above
+remain historical evidence, but did not cover conflicting summary tenants.
+The finding is retained here rather than treating the earlier C100-F1 result
+as complete. This is the first review rejection of this trigger.
+
+Actual ownership sources: `AuditLogRepository.append` independently writes
+`normalizeUuidOrNull(record.tenantId)` and arbitrary `newValuesSummary`;
+V0009's UUID `tenant_id` and JSONB `new_value` have no equality constraint.
+The archival SQL's payload-first `COALESCE` could therefore displace a known
+physical tenant A with an unrelated summary tenant B. Its shared tenant gate
+then excluded active holds, unresolved unexpired exceptions and audit source
+references even for an exact audit ID match.
+
+Repair: `audit-log-retention-governance.sql` uses
+`COALESCE(a.tenant_id::text, NULLIF(a.new_value->>'tenantId', ''))` in both tenant
+checks. The existing payload fallback remains for NULL physical tenants,
+including normalized non-UUID tenants; both unknown remains conservative.
+The shared gate still excludes known cross-tenant rows. No matching branch,
+retention threshold, event status, V0080, shell export or deletion rail changes.
+The operational runbook now states this precedence explicitly.
+
+The three new actual-shell tests each provide seven old target rows and seven
+complete persisted protections: hold subject, exception subject, or exception
+audit source reference. Each matrix covers physical A/payload B, physical A/no
+payload, physical B/payload A, NULL physical/payload A, NULL physical/payload B,
+NULL physical/no payload, and NULL physical/non-UUID logical tenant. The tests
+assert selected IDs, actual archive contents and all remaining source IDs.
+
+| Finding / acceptance                                                                                                                               | Source and regression                                                                                                                               | Before → fixed result                                                                                                                                                                | Commands / exits / evidence                                                                                                                                                                                                                                                                                                                                                                       | Remaining limit                                                                                                                                           |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C100-F1 conflicting summary tenant; `legal-hold-exception-exact-archive-set-and-honest-SQL-result`                                                 | SQL tenant gate; `archival.test.ts` three `uses physical tenant` cases                                                                              | Reopened candidate: 3 fail, each shell exits 0 and wrongly exports/removes physical A/payload B. Fixed: 3 pass, that exact ID stays; only the two legitimate cross-tenant rows leave | Before extracted actual shell: `RETENTION_SCRIPT=<reopened-source>/operations/database/audit-log-retention-archival.sh pnpm exec vitest run tests/unit/evidence-retention-legal-hold-canonical-flow-20261015/archival.test.ts -t 'uses physical tenant'`, exit 1 (`before-extracted.log`, trace). Fixed full archival: same test file without override/filter, exit 0, 12/12 (`fixed.log`, trace) | Actual SELECT evaluated over V0009 columns with SQLite dialect projection; COPY/transaction/client error behavior controlled, no PostgreSQL runtime proof |
+| `four-governance-commands-canonical-ACK-and-rejected-state-readback`; `authoritative-governance-unknown-empty-noDB-and-original-access-boundaries` | Previous actual handler/repository/load tests retained; API audit/reporting/regulatory/multi-taxi callers                                           | Root 39/39 and API 26/26 pass, including original C099 five/C100 four                                                                                                                | Root and API commands below, both exit 0 (`root.log`, `api.log`)                                                                                                                                                                                                                                                                                                                                  | Enabled repository transport controlled; no live DB or external export                                                                                    |
+| `actual-production-before-fixed-after-and-original-regressions`                                                                                    | Actual reopened script extracted with `git archive f36d798ab3cf06bb5559f2eced43c1810f24e42f` (script, db-common, governance SQL), no worktree reset | Same final test fixture fails old selection, passes fixed selection. Release/resolution/expiry, exact set and failure regressions remain green                                       | `before-extracted.log`, `root.log`; scoped eslint, `bash -n`, `git diff --check` exit 0                                                                                                                                                                                                                                                                                                           | Broad typecheck was not rerun for this SQL/test/docs-only repair; prior broad failures remain documented above                                            |
+| `exact-candidate-review-CI-and-protected-merge`                                                                                                    | New final commit and plain push; local/remote/PR head equality recorded in task-local `tenant-precedence/candidate.json` and canonical handoff      | Pending new Codex2 exact-candidate review, mandatory same-SHA CI, protected merge and own-key acceptance                                                                             | PR #2667; owner handoff after completed local checks                                                                                                                                                                                                                                                                                                                                              | Prior candidate CI does not count for the new SHA; no owner `done` claim                                                                                  |
+
+Root command:
+`pnpm exec vitest run tests/unit/evidence-retention-legal-hold-canonical-flow-20261015 tests/unit/audit-notification.test.ts tests/unit/system-remediation/sr-qa-reports-001/c099-evidence-governance-controlled-export.test.ts tests/unit/system-remediation/sr-qa-reports-001/c100-audit-immutability-retention-boundary.test.ts`.
+API command:
+`pnpm --dir apps/api exec vitest run tests/unit/audit-notification.service.test.ts tests/unit/reporting-filing.service.test.ts tests/unit/regulatory-reporting.service.test.ts tests/unit/multi-taxi-controlled-export.test.ts`.
+
+New diagnostics live at this worktree's
+`.local/evidence-retention-20261015/tenant-precedence/`; `evidence-index.json`
+there records their hashes. Both old and fixed traces show shell exit 0 and a
+two-record success receipt, so count-only assertions would miss the bug:
+old archive includes held physical A ID `09949f40-3393-4d1a-8428-f15da766dd10`;
+fixed archive replaces it with lawful physical B ID
+`f64f6339-5100-460f-861e-84fa5224f1db`. The other lawful ID is unchanged.
+An initial fixed probe (`after.log`) failed because the controlled client's
+statement extractor stopped at a semicolon in a new SQL comment; that comment
+was reworded before the successful full runs. That harness failure is not
+counted as product evidence. Anchor `6ff60eb37fd18dd1479cd45478938ded826bb64e`
+preserves the repair/tests before that comment-only correction and closeout.
+
+All checks started for this repair completed and results were read before
+handoff. No product/DB/browser server, live archive/delete, restore, deployment
+or cloud operation ran. The Source-only and independent lifecycle limits above
+continue to apply.

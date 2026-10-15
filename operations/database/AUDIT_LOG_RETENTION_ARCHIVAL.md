@@ -85,8 +85,11 @@ Apply uses one connection and transaction:
    The cutoff uses the transaction's `CURRENT_TIMESTAMP` and the unchanged
    operator-selected retention threshold (default 730 days). Latest persisted
    hold/exception events suppress active subjects, manifests and source
-   references, with their tenant associations. Expired or resolved exceptions
-   and released holds follow the existing rules. Unknown normalized physical
+   references, with their tenant associations. A known physical `tenant_id`
+   determines the audit row's tenant even if `new_value.tenantId` disagrees.
+   Only a NULL physical tenant falls back to the payload tenant (including
+   non-UUID logical tenants normalized away by the repository). Expired or
+   resolved exceptions and released holds follow the existing rules. Unknown normalized physical
    tenants do not justify purging an otherwise matching protected reference.
 3. Active protection history stays in the source. Closed/expired entity history
    leaves only when its whole event chain is old enough and otherwise eligible,
