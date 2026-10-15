@@ -10,6 +10,9 @@ import type {
 } from "@drts/contracts";
 
 import { bankApiGet, bankApiGetList } from "./server-bank-api";
+import { loadBankUserDirectory } from "./bank-user-mutations";
+import type { BankUserIdentity } from "./bank-user-identity";
+export type { BankUserRow } from "./users-data";
 import {
   type BookingDetailRecord,
   type BookingDirection,
@@ -169,14 +172,6 @@ export type BankStatement = {
     disputeHref: string;
     disputed: boolean;
   }>;
-};
-
-export type BankUserRow = {
-  name: string;
-  email: string;
-  role: BankConsoleRole;
-  status: "active" | "invited" | "suspended";
-  lastActivity: string;
 };
 
 export type BankAuditRow = {
@@ -488,16 +483,6 @@ function mapBookingDetail(
     },
     timeline: buildTimeline(order),
   };
-}
-
-function mapUserRole(roleCode: string): BankConsoleRole {
-  if (roleCode === "bank_finance") {
-    return "bank_finance";
-  }
-  if (roleCode === "bank_ops_viewer") {
-    return "bank_ops_viewer";
-  }
-  return "bank_program_admin";
 }
 
 function mapAuditType(record: AuditLogRecord): BankAuditRow["type"] {
@@ -951,31 +936,10 @@ export async function loadBankProgramsData(
   };
 }
 
-export async function loadBankUsersData(
-  tenantId: string,
-  role: BankConsoleRole,
-): Promise<BankLoadState<{ users: BankUserRow[] }>> {
-  try {
-    const core = await loadCoreBankData(tenantId, role);
-    return {
-      data: {
-        users: core.users.map((user) => ({
-          name: user.displayName,
-          email: user.email,
-          role: mapUserRole(user.roleCode),
-          status: user.status,
-          lastActivity: formatLastActivity(user.updatedAt),
-        })),
-      },
-      degradedMessage: core.degradedMessage,
-    };
-  } catch (error) {
-    return {
-      data: { users: [] },
-      degradedMessage:
-        error instanceof Error ? error.message : "Failed to load users.",
-    };
-  }
+// User management reads only through the verified tenant bearer, independently
+// of the legacy demo read aggregation used by the other Bank pages.
+export async function loadBankUsersData(identity: BankUserIdentity) {
+  return loadBankUserDirectory(identity);
 }
 
 export async function loadBankAuditData(
