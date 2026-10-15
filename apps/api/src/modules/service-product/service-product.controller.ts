@@ -39,14 +39,14 @@ export class ServiceProductController {
   }
 
   @Put("runtime-policies/:runtimeProfileCode/:serviceProductCode")
-  upsertRuntimePolicy(
+  async upsertRuntimePolicy(
     @Param("runtimeProfileCode") runtimeProfileCode: string,
     @Param("serviceProductCode") serviceProductCode: string,
     @Body() command: UpsertRuntimeProfileServiceProductPolicyCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.serviceProductService.upsertRuntimeProfilePolicy({
+      await this.serviceProductService.upsertRuntimeProfilePolicy({
         ...command,
         runtimeProfileCode: runtimeProfileCode as never,
         serviceProductCode: serviceProductCode as never,
@@ -56,11 +56,11 @@ export class ServiceProductController {
   }
 
   @Post()
-  createServiceProduct(
+  async createServiceProduct(
     @Body() command: CreateServiceProductCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const result = this.serviceProductService.createServiceProduct(
+    const result = await this.serviceProductService.createServiceProduct(
       command,
       requestId,
       { captureAudit: true },
@@ -76,12 +76,12 @@ export class ServiceProductController {
   }
 
   @Put(":serviceProductId")
-  updateServiceProduct(
+  async updateServiceProduct(
     @Param("serviceProductId") serviceProductId: string,
     @Body() command: UpdateServiceProductCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const result = this.serviceProductService.updateServiceProduct(
+    const result = await this.serviceProductService.updateServiceProduct(
       serviceProductId,
       command,
       requestId,

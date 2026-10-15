@@ -20,10 +20,10 @@ describe("service product service", () => {
     expect(service.listServiceProducts()).toEqual([]);
   });
 
-  it("creates a new service product and records audit", () => {
+  it("creates a new service product and records audit", async () => {
     const { auditService, service } = createService();
 
-    const created = service.createServiceProduct(
+    const created = await service.createServiceProduct(
       {
         serviceProductType: "travel_agency_transfer",
         serviceProductId: "SVP-TRAVEL-001",
@@ -49,10 +49,10 @@ describe("service product service", () => {
     );
   });
 
-  it("updates mutable service product fields and records audit", () => {
+  it("updates mutable service product fields and records audit", async () => {
     const { auditService, service } = createService();
 
-    const created = service.createServiceProduct({
+    const created = await service.createServiceProduct({
       serviceProductType: "enterprise_dispatch",
       serviceProductId: "SVP-000003",
       displayName: "Enterprise Dispatch",
@@ -61,7 +61,7 @@ describe("service product service", () => {
       defaultProofRequirements: ["signoff_required"],
     });
 
-    const updated = service.updateServiceProduct(
+    const updated = await service.updateServiceProduct(
       created.serviceProductId,
       {
         active: false,
@@ -92,50 +92,56 @@ describe("service product service", () => {
     ]);
   });
 
-  it("rejects duplicate service product types", () => {
+  it("rejects duplicate service product types", async () => {
     const { service } = createService();
 
-    service.createServiceProduct({
+    await service.createServiceProduct({
       serviceProductType: "enterprise_dispatch",
       displayName: "Enterprise Dispatch",
       timing: "reservation",
       defaultBillingMode: "tenant_invoice",
     });
 
-    expect(() =>
-      service.createServiceProduct({
-        serviceProductType: "enterprise_dispatch",
-        displayName: "Enterprise Dispatch 2",
-        timing: "reservation",
-        defaultBillingMode: "tenant_invoice",
-      }),
-    ).toThrow(ApiRequestError);
+    await expect(
+      Promise.resolve().then(() =>
+        service.createServiceProduct({
+          serviceProductType: "enterprise_dispatch",
+          displayName: "Enterprise Dispatch 2",
+          timing: "reservation",
+          defaultBillingMode: "tenant_invoice",
+        }),
+      ),
+    ).rejects.toThrow(ApiRequestError);
   });
 
-  it("rejects unknown service product ids on update", () => {
+  it("rejects unknown service product ids on update", async () => {
     const { service } = createService();
 
-    expect(() =>
-      service.updateServiceProduct("SVP-999999", {
-        active: false,
-      }),
-    ).toThrow(ApiRequestError);
+    await expect(
+      Promise.resolve().then(() =>
+        service.updateServiceProduct("SVP-999999", {
+          active: false,
+        }),
+      ),
+    ).rejects.toThrow(ApiRequestError);
   });
 
-  it("rejects invalid timing values", () => {
+  it("rejects invalid timing values", async () => {
     const { service } = createService();
 
-    expect(() =>
-      service.createServiceProduct({
-        serviceProductType: "travel_agency_transfer",
-        displayName: "Travel Agency Transfer",
-        timing: "scheduled_only" as any,
-        defaultBillingMode: "partner_settlement",
-      }),
-    ).toThrow(ApiRequestError);
+    await expect(
+      Promise.resolve().then(() =>
+        service.createServiceProduct({
+          serviceProductType: "travel_agency_transfer",
+          displayName: "Travel Agency Transfer",
+          timing: "scheduled_only" as any,
+          defaultBillingMode: "partner_settlement",
+        }),
+      ),
+    ).rejects.toThrow(ApiRequestError);
   });
 
-  it("activates service products only inside an effective runtime policy", () => {
+  it("activates service products only inside an effective runtime policy", async () => {
     const { service } = createService();
 
     expect(() =>
@@ -145,7 +151,7 @@ describe("service product service", () => {
       ),
     ).toThrow(ApiRequestError);
 
-    const policy = service.upsertRuntimeProfilePolicy({
+    const policy = await service.upsertRuntimeProfilePolicy({
       runtimeProfileCode: "multi_taxi_direct",
       serviceProductCode: "taxi_reservation",
       active: true,
@@ -162,9 +168,9 @@ describe("service product service", () => {
     expect(service.listRuntimeProfilePolicies()).toEqual([policy]);
   });
 
-  it("denies inactive and expired runtime policies", () => {
+  it("denies inactive and expired runtime policies", async () => {
     const { service } = createService();
-    service.upsertRuntimeProfilePolicy({
+    await service.upsertRuntimeProfilePolicy({
       runtimeProfileCode: "multi_taxi_direct",
       serviceProductCode: "taxi_reservation",
       active: false,
@@ -178,7 +184,7 @@ describe("service product service", () => {
       ),
     ).toThrow(ApiRequestError);
 
-    service.upsertRuntimeProfilePolicy({
+    await service.upsertRuntimeProfilePolicy({
       runtimeProfileCode: "multi_taxi_direct",
       serviceProductCode: "taxi_reservation",
       active: true,

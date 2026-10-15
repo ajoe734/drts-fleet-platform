@@ -14062,7 +14062,7 @@ export class OwnedMobilityService
     try {
       this.tenantPartnerService.getPassengerMasterRecord(tenantId, passengerId);
     } catch {
-      this.tenantPartnerService.upsertPassenger(tenantId, {
+      await this.tenantPartnerService.upsertPassenger(tenantId, {
         passengerId,
         fullName: command.passengerName || "Referral Passenger",
         mobile: command.passengerPhone || "0912345678",

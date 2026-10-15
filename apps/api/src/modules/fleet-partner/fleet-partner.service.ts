@@ -105,6 +105,7 @@ export class FleetPartnerService implements OnModuleInit {
     ...rule,
   }));
   private statements: FleetPartnerStatementRecord[] = [];
+  private readonly fleetPartnerUpdates = new Map<string, Promise<void>>();
 
   constructor(
     private readonly billingSettlementService: BillingSettlementService,
@@ -184,7 +185,7 @@ export class FleetPartnerService implements OnModuleInit {
     return this.cloneFleetPartner(this.requireFleetPartner(fleetPartnerId));
   }
 
-  createFleetPartner(command: CreateFleetPartnerCommand) {
+  async createFleetPartner(command: CreateFleetPartnerCommand) {
     this.assertNonBlank(command.legalName, "legalName");
     this.assertNonBlank(command.displayName, "displayName");
     this.assertNonBlank(
@@ -204,55 +205,62 @@ export class FleetPartnerService implements OnModuleInit {
       active: command.active ?? true,
       partnershipType: command.partnershipType,
     };
-    this.fleetPartners = [partner, ...this.fleetPartners];
-    this.persistChanges(
+    await this.persistMasterDataChanges(
       { fleetPartners: [this.cloneFleetPartner(partner)] },
       "create fleet partner",
     );
+    this.fleetPartners = [partner, ...this.fleetPartners];
     return this.cloneFleetPartner(partner);
   }
 
-  updateFleetPartner(
+  async updateFleetPartner(
     fleetPartnerId: string,
     command: UpdateFleetPartnerCommand,
   ) {
-    const partner = this.requireFleetPartner(fleetPartnerId);
-
-    if (command.legalName !== undefined) {
-      this.assertNonBlank(command.legalName, "legalName");
-      partner.legalName = command.legalName.trim();
-    }
-    if (command.displayName !== undefined) {
-      this.assertNonBlank(command.displayName, "displayName");
-      partner.displayName = command.displayName.trim();
-    }
-    if (command.businessRegistrationNo !== undefined) {
-      this.assertNonBlank(
-        command.businessRegistrationNo,
-        "businessRegistrationNo",
+    return this.serializeFleetPartnerUpdate(fleetPartnerId, async () => {
+      const partner = this.cloneFleetPartner(
+        this.requireFleetPartner(fleetPartnerId),
       );
-      partner.businessRegistrationNo = command.businessRegistrationNo.trim();
-    }
-    if (command.contactName !== undefined) {
-      this.assertNonBlank(command.contactName, "contactName");
-      partner.contactName = command.contactName.trim();
-    }
-    if (command.contactPhone !== undefined) {
-      this.assertNonBlank(command.contactPhone, "contactPhone");
-      partner.contactPhone = command.contactPhone.trim();
-    }
-    if (command.active !== undefined) {
-      partner.active = command.active;
-    }
-    if (command.partnershipType !== undefined) {
-      partner.partnershipType = command.partnershipType;
-    }
 
-    this.persistChanges(
-      { fleetPartners: [this.cloneFleetPartner(partner)] },
-      "update fleet partner",
-    );
-    return this.cloneFleetPartner(partner);
+      if (command.legalName !== undefined) {
+        this.assertNonBlank(command.legalName, "legalName");
+        partner.legalName = command.legalName.trim();
+      }
+      if (command.displayName !== undefined) {
+        this.assertNonBlank(command.displayName, "displayName");
+        partner.displayName = command.displayName.trim();
+      }
+      if (command.businessRegistrationNo !== undefined) {
+        this.assertNonBlank(
+          command.businessRegistrationNo,
+          "businessRegistrationNo",
+        );
+        partner.businessRegistrationNo = command.businessRegistrationNo.trim();
+      }
+      if (command.contactName !== undefined) {
+        this.assertNonBlank(command.contactName, "contactName");
+        partner.contactName = command.contactName.trim();
+      }
+      if (command.contactPhone !== undefined) {
+        this.assertNonBlank(command.contactPhone, "contactPhone");
+        partner.contactPhone = command.contactPhone.trim();
+      }
+      if (command.active !== undefined) {
+        partner.active = command.active;
+      }
+      if (command.partnershipType !== undefined) {
+        partner.partnershipType = command.partnershipType;
+      }
+
+      await this.persistMasterDataChanges(
+        { fleetPartners: [this.cloneFleetPartner(partner)] },
+        "update fleet partner",
+      );
+      this.fleetPartners = this.fleetPartners.map((current) =>
+        current.fleetPartnerId === fleetPartnerId ? partner : current,
+      );
+      return this.cloneFleetPartner(partner);
+    });
   }
 
   listFleetPartnerDrivers(fleetPartnerId: string) {
@@ -265,7 +273,7 @@ export class FleetPartnerService implements OnModuleInit {
       .map((affiliation) => this.cloneAffiliation(affiliation));
   }
 
-  createDriverFleetAffiliation(
+  async createDriverFleetAffiliation(
     driverId: string,
     command: CreateDriverFleetAffiliationCommand,
   ) {
@@ -285,11 +293,11 @@ export class FleetPartnerService implements OnModuleInit {
       effectiveUntil: command.effectiveUntil ?? null,
       driverGroupId: command.driverGroupId?.trim() || null,
     };
-    this.driverAffiliations = [affiliation, ...this.driverAffiliations];
-    this.persistChanges(
+    await this.persistMasterDataChanges(
       { driverAffiliations: [this.cloneAffiliation(affiliation)] },
       "create driver fleet affiliation",
     );
+    this.driverAffiliations = [affiliation, ...this.driverAffiliations];
     return this.cloneAffiliation(affiliation);
   }
 
@@ -1237,6 +1245,44 @@ export class FleetPartnerService implements OnModuleInit {
       });
     }
     return rule;
+  }
+
+  // Serialize only edits of the same master record, so a queued partial edit
+  // starts from the last acknowledged state. A failed edit releases the queue.
+  private async serializeFleetPartnerUpdate(
+    fleetPartnerId: string,
+    update: () => Promise<FleetPartnerRecord>,
+  ) {
+    const previous = this.fleetPartnerUpdates.get(fleetPartnerId);
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.fleetPartnerUpdates.set(fleetPartnerId, current);
+    try {
+      if (previous) await previous;
+      return await update();
+    } finally {
+      if (this.fleetPartnerUpdates.get(fleetPartnerId) === current) {
+        this.fleetPartnerUpdates.delete(fleetPartnerId);
+      }
+      release();
+    }
+  }
+
+  // C101 master-data commands must propagate the canonical write outcome.
+  // Other callers retain the existing best-effort persistChanges behavior.
+  private async persistMasterDataChanges(
+    changes: PersistFleetPartnerChanges,
+    context: string,
+  ) {
+    if (!this.fleetPartnerRepository) return;
+    try {
+      await this.fleetPartnerRepository.persistChanges(changes);
+    } catch (error) {
+      this.fleetPartnerRepository.reportPersistenceFailure(error, context);
+      throw error;
+    }
   }
 
   private async persistChanges(

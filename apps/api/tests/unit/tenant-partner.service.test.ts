@@ -934,7 +934,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       [],
     );
 
-    service.upsertPassenger(
+    await service.upsertPassenger(
       "tenant-demo-001",
       {
         fullName: "王小美",
@@ -1913,7 +1913,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
   it("applies passenger/address governance quality rules and masks export views", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    const passenger = service.upsertPassenger("tenant-demo-001", {
+    const passenger = await service.upsertPassenger("tenant-demo-001", {
       passengerId: "passenger-governance-001",
       fullName: "王小美",
       roles: ["employee", "passenger"],
@@ -1924,7 +1924,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       expect.arrayContaining(["missing_contact", "missing_employee_no"]),
     );
 
-    const address = service.upsertAddress("tenant-demo-001", {
+    const address = await service.upsertAddress("tenant-demo-001", {
       addressId: "address-governance-001",
       ownerPassengerId: passenger.passengerId,
       addressName: "Sensitive Pickup",
@@ -1960,7 +1960,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       true,
     );
 
-    const created = service.upsertCostCenter(
+    const created = await service.upsertCostCenter(
       "tenant-demo-001",
       {
         code: "cc-rd-12",
@@ -1990,7 +1990,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(filtered).toHaveLength(1);
     expect(filtered[0]?.code).toBe("CC-RD-12");
 
-    const disabled = service.disableCostCenter(
+    const disabled = await service.disableCostCenter(
       "tenant-demo-001",
       {
         code: "cc-rd-12",
@@ -2047,12 +2047,12 @@ describe("TenantPartnerService sensitive-data governance", () => {
 
     await service.onModuleInit();
 
-    service.upsertCostCenter("tenant-demo-001", {
+    await service.upsertCostCenter("tenant-demo-001", {
       code: "CC-BD-09",
       name: "業務開發",
       ownerName: "Regional GM",
     });
-    service.disableCostCenter("tenant-demo-001", {
+    await service.disableCostCenter("tenant-demo-001", {
       code: "CC-BD-09",
       reason: "merged into ops",
     });
@@ -2077,7 +2077,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
   it("allows duplicate cost-center codes across different tenants", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    const otherTenantCostCenter = service.upsertCostCenter("tenant-demo-002", {
+    const otherTenantCostCenter = await service.upsertCostCenter("tenant-demo-002", {
       code: "cc-fin-04",
       name: "Shared Finance Code",
       description: "Scoped to a different tenant",
@@ -2154,7 +2154,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     }
 
     // Disabled code rejected with the dedicated error code.
-    service.disableCostCenter("tenant-demo-001", {
+    await service.disableCostCenter("tenant-demo-001", {
       code: "CC-OPS-02",
       reason: "sunset",
     });
@@ -2191,7 +2191,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     ).toEqual({ value: "CC-FIN-04", matchedDirectory: true });
 
     // After tenant B onboards CC-X, tenant A still cannot use CC-X.
-    service.upsertCostCenter("tenant-demo-002", {
+    await service.upsertCostCenter("tenant-demo-002", {
       code: "CC-X",
       name: "Tenant B Special",
     });

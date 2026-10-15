@@ -40,14 +40,14 @@ function formatMoney(amount: MoneyAmount | null | undefined): string {
     : `${amount.currency} ${grouped}`;
 }
 
-function formatDecimalMoney(amount: MoneyAmount | null | undefined): string {
+// Statements display canonical integer minor units, unlike dashboard estimates.
+function formatStatementMoney(amount: MoneyAmount | null | undefined): string {
   if (!amount) {
     return "—";
   }
   const major = amount.amountMinor / 100;
   const formatted = major.toLocaleString("en-US", {
-    minimumFractionDigits: Number.isInteger(major) ? 0 : 1,
-    maximumFractionDigits: 1,
+    maximumFractionDigits: 2,
   });
   return amount.currency === "TWD"
     ? `NT$ ${formatted}`
@@ -98,8 +98,8 @@ function mapReferralLine(
     date: formatStatementLineDate(line.completedAt),
     route: inferReferralRoute(line.tripId),
     rider: maskReferralRider(line.tripId),
-    fare: formatMoney(line.fare),
-    share: formatDecimalMoney(line.shareAmount),
+    fare: formatStatementMoney(line.fare),
+    share: formatStatementMoney(line.shareAmount),
   };
 }
 
@@ -111,8 +111,8 @@ function mapReferralStatement(
     period: record.period,
     trips: record.totals.tripCount.toLocaleString("en-US"),
     activeUsers: record.totals.activeRiderCount.toLocaleString("en-US"),
-    gmv: formatMoney(record.totals.gmv),
-    share: formatMoney(record.totals.shareTotal),
+    gmv: formatStatementMoney(record.totals.gmv),
+    share: formatStatementMoney(record.totals.shareTotal),
     status: mapReferralStatementStatus(record.status),
     issued: record.generatedAt.slice(0, 10),
     artifactId: record.artifactRef.artifactId,
@@ -219,7 +219,9 @@ export async function loadReferralDashboard(
       ? FX_REFERRAL_STATEMENTS.find((item) => item.period === normalizedPeriod)
       : null;
     const foundUsage = normalizedPeriod
-      ? FX_REFERRAL_USAGE_PERIODS.find((item) => item.period === normalizedPeriod)
+      ? FX_REFERRAL_USAGE_PERIODS.find(
+          (item) => item.period === normalizedPeriod,
+        )
       : null;
     const fallbackSummary: ReferralDashboardFixture = foundStatement
       ? {

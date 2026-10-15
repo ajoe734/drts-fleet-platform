@@ -1252,13 +1252,13 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/passengers")
-  upsertPassenger(
+  async upsertPassenger(
     @Body() command: UpsertTenantPassengerCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertPassenger(
+      await this.tenantPartnerService.upsertPassenger(
         this.requireTenantId(tenantId),
         command,
         requestId,
@@ -1335,13 +1335,13 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/cost-centers")
-  upsertCostCenter(
+  async upsertCostCenter(
     @Body() command: UpsertTenantCostCenterCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertCostCenter(
+      await this.tenantPartnerService.upsertCostCenter(
         this.requireTenantId(tenantId),
         command,
         requestId,
@@ -1351,13 +1351,13 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/cost-centers/disable")
-  disableCostCenter(
+  async disableCostCenter(
     @Body() command: DisableTenantCostCenterCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.disableCostCenter(
+      await this.tenantPartnerService.disableCostCenter(
         this.requireTenantId(tenantId),
         command,
         requestId,
@@ -1686,13 +1686,13 @@ export class TenantPartnerController {
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
   @Post("tenant/addresses")
-  upsertAddress(
+  async upsertAddress(
     @Body() command: UpsertTenantAddressCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertAddress(
+      await this.tenantPartnerService.upsertAddress(
         this.requireTenantId(tenantId),
         command,
         requestId,

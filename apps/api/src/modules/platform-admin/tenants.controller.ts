@@ -28,21 +28,25 @@ export class TenantsController {
   }
 
   @Post("tenants")
-  create(
+  async create(
     @Body() body: CreatePlatformTenantCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const created = this.tenants.create(body, requestId);
+    const created = await this.tenants.create(body, requestId);
     return toApiSuccessEnvelope(created, requestId);
   }
 
   @Post("tenants/:tenantId/settings")
-  updateSettings(
+  async updateSettings(
     @Param("tenantId") tenantId: string,
     @Body() body: UpdatePlatformTenantSettingsCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.updateSettings(tenantId, body, requestId);
+    const updated = await this.tenants.updateSettings(
+      tenantId,
+      body,
+      requestId,
+    );
     return toApiSuccessEnvelope(updated, requestId);
   }
 
@@ -55,69 +59,81 @@ export class TenantsController {
   }
 
   @Post("tenants/:tenantId/onboarding")
-  updateOnboarding(
+  async updateOnboarding(
     @Param("tenantId") tenantId: string,
     @Body() body: UpdatePlatformTenantOnboardingCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.updateOnboarding(tenantId, body, requestId);
+    const updated = await this.tenants.updateOnboarding(
+      tenantId,
+      body,
+      requestId,
+    );
     return toApiSuccessEnvelope(updated, requestId);
   }
 
   @Post("tenants/:tenantId/rollout")
-  setRolloutStage(
+  async setRolloutStage(
     @Param("tenantId") tenantId: string,
     @Body() body: SetPlatformTenantRolloutStageCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.setRolloutStage(tenantId, body, requestId);
+    const updated = await this.tenants.setRolloutStage(
+      tenantId,
+      body,
+      requestId,
+    );
     return toApiSuccessEnvelope(updated, requestId);
   }
 
   @Post("tenants/:tenantId/roles/invite")
-  inviteRole(
+  async inviteRole(
     @Param("tenantId") tenantId: string,
     @Body() body: InviteTenantRoleCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.inviteRole(tenantId, body, requestId);
+    const updated = await this.tenants.inviteRole(tenantId, body, requestId);
     return toApiSuccessEnvelope(updated, requestId);
   }
 
   @Post("tenants/:tenantId/roles/acknowledge")
-  acknowledgeRole(
+  async acknowledgeRole(
     @Param("tenantId") tenantId: string,
     @Body() body: AcknowledgeTenantRoleCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.acknowledgeRole(tenantId, body, requestId);
+    const updated = await this.tenants.acknowledgeRole(
+      tenantId,
+      body,
+      requestId,
+    );
     return toApiSuccessEnvelope(updated, requestId);
   }
 
   @Post("tenants/:tenantId/rollback-hold")
-  rollbackHold(
+  async rollbackHold(
     @Param("tenantId") tenantId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.setRollbackHold(tenantId, requestId);
+    const updated = await this.tenants.setRollbackHold(tenantId, requestId);
     return toApiSuccessEnvelope(updated, requestId);
   }
 
   @Post("tenants/:tenantId/suspend")
-  suspend(
+  async suspend(
     @Param("tenantId") tenantId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.setStatus(tenantId, "paused", requestId);
+    const updated = await this.tenants.setStatus(tenantId, "paused", requestId);
     return toApiSuccessEnvelope(updated, requestId);
   }
 
   @Post("tenants/:tenantId/activate")
-  activate(
+  async activate(
     @Param("tenantId") tenantId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.setStatus(tenantId, "active", requestId);
+    const updated = await this.tenants.setStatus(tenantId, "active", requestId);
     return toApiSuccessEnvelope(updated, requestId);
   }
 }

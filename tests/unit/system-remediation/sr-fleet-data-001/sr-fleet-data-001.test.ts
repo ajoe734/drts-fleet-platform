@@ -453,7 +453,17 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
     });
 
     it("overview export properly quotes grouped numbers containing commas to preserve column count", async () => {
-      mockDrivers.mockResolvedValue([]);
+      // Grouped totals come from the complete live roster when available.
+      mockDrivers.mockResolvedValue(
+        Array.from({ length: 1250 }, (_, i) => ({
+          driverId: `driver-${i}`,
+          name: `Driver ${i}`,
+          workState: i < 1100 ? "available" : "offline",
+          dispatchEligible: i < 1050,
+          supportedServiceBuckets: ["standard_taxi"],
+          licensesValid: true,
+        })),
+      );
       mockVehicles.mockResolvedValue([]);
       mockTrips.mockResolvedValue([]);
       mockDashboard.mockResolvedValue({
@@ -651,7 +661,9 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
           pickupAddress: "台北市信義區松仁路",
         },
       ]);
-      mockDashboard.mockRejectedValue(new Error("Aggregate endpoint unavailable"));
+      mockDashboard.mockRejectedValue(
+        new Error("Aggregate endpoint unavailable"),
+      );
 
       const dashboard = await loadDashboard("2026-09");
       // Aggregate error is preserved
@@ -683,7 +695,9 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
     it("aggregate-only failure with legitimate zero trips returns zero revenue", async () => {
       mockDrivers.mockResolvedValue([]);
       mockTrips.mockResolvedValue([]);
-      mockDashboard.mockRejectedValue(new Error("Aggregate endpoint unavailable"));
+      mockDashboard.mockRejectedValue(
+        new Error("Aggregate endpoint unavailable"),
+      );
 
       const dashboard = await loadDashboard("2026-09");
       expect(dashboard.aggregateError).toBe("Aggregate endpoint unavailable");
@@ -803,14 +817,18 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
       const tripsView = await loadTrips();
       expect(tripsView.rows).toEqual([]);
       // Must NOT contain ord-previous-month
-      expect(tripsView.rows.some((r) => r.id === "ord-previous-month")).toBe(false);
+      expect(tripsView.rows.some((r) => r.id === "ord-previous-month")).toBe(
+        false,
+      );
 
       // Verify exact API calls: both used currentPeriod, neither passed undefined
       expect(mockTrips).toHaveBeenCalledWith(currentPeriod);
       expect(mockTrips).not.toHaveBeenCalledWith(undefined);
 
       // 3. Export default scope matches current month: 0 completed trips
-      const summaryReq = new NextRequest("http://localhost:3000/trips/export?type=summary");
+      const summaryReq = new NextRequest(
+        "http://localhost:3000/trips/export?type=summary",
+      );
       const summaryRes = await exportHandler(summaryReq);
       expect(summaryRes.status).toBe(200);
       const summaryBody = await summaryRes.text();
@@ -963,10 +981,14 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
         ]);
 
         const driversView = await loadDrivers();
-        const filtered = filterDriversForTab(driversView.rows, "trainingIncomplete", {
-          docsAvailable: driversView.docsAvailable,
-          trainingAvailable: driversView.trainingAvailable,
-        });
+        const filtered = filterDriversForTab(
+          driversView.rows,
+          "trainingIncomplete",
+          {
+            docsAvailable: driversView.docsAvailable,
+            trainingAvailable: driversView.trainingAvailable,
+          },
+        );
 
         // Driver must NOT be hidden as completed
         expect(filtered).toHaveLength(1);
@@ -1099,11 +1121,16 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
         const serviceAirportRows = filterTripsForService(scopedRows, "airport");
         expect(serviceAirportRows).toHaveLength(1);
 
-        const serviceRealtimeRows = filterTripsForService(scopedRows, "realtime");
+        const serviceRealtimeRows = filterTripsForService(
+          scopedRows,
+          "realtime",
+        );
         expect(serviceRealtimeRows).toHaveLength(0);
 
         // CSV export with same q=ord-001 MUST also have exactly 1 trip
-        const exportReq = new NextRequest("http://localhost:3000/trips/export?q=ord-001");
+        const exportReq = new NextRequest(
+          "http://localhost:3000/trips/export?q=ord-001",
+        );
         const exportRes = await exportHandler(exportReq);
         expect(exportRes.status).toBe(200);
         const csvBody = await exportRes.text();
@@ -1134,7 +1161,9 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
         expect(completedAllRows).toHaveLength(2);
 
         // CSV export with status=completed has exactly 2 trips
-        const exportReq = new NextRequest("http://localhost:3000/trips/export?status=completed");
+        const exportReq = new NextRequest(
+          "http://localhost:3000/trips/export?status=completed",
+        );
         const exportRes = await exportHandler(exportReq);
         expect(exportRes.status).toBe(200);
         const csvBody = await exportRes.text();
@@ -1144,10 +1173,18 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
       });
 
       it("getDriverNoticeBody returns authoritative bilingual copy without violating i18n guard", () => {
-        expect(getDriverNoticeBody("trainingIncomplete", "zh")).toContain("駕駛教育訓練資料尚未串接後端 API");
-        expect(getDriverNoticeBody("trainingIncomplete", "en")).toContain("Driver training status is not yet integrated");
-        expect(getDriverNoticeBody("missingDocs", "zh")).toContain("駕駛文件審查資料尚未串接後端 API");
-        expect(getDriverNoticeBody("missingDocs", "en")).toContain("Driver document review is not yet integrated");
+        expect(getDriverNoticeBody("trainingIncomplete", "zh")).toContain(
+          "駕駛教育訓練資料尚未串接後端 API",
+        );
+        expect(getDriverNoticeBody("trainingIncomplete", "en")).toContain(
+          "Driver training status is not yet integrated",
+        );
+        expect(getDriverNoticeBody("missingDocs", "zh")).toContain(
+          "駕駛文件審查資料尚未串接後端 API",
+        );
+        expect(getDriverNoticeBody("missingDocs", "en")).toContain(
+          "Driver document review is not yet integrated",
+        );
       });
 
       it("dashboard supplemental missingDocsDrivers respects docsAvailable and aligns with driver tab badge (Codex2 reproduction)", async () => {
@@ -1189,7 +1226,9 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
         expect(driversView.docsAvailable).toBe(false);
         expect(tabCounts.missingDocs).toBe("—");
         expect(dashboard.supplemental.missingDocsDrivers).toBe("—");
-        expect(dashboard.supplemental.missingDocsDrivers).toBe(tabCounts.missingDocs);
+        expect(dashboard.supplemental.missingDocsDrivers).toBe(
+          tabCounts.missingDocs,
+        );
       });
 
       it("computeDriverTabCounts excludes unavailable doc status from missing count even when docsAvailable is true", () => {

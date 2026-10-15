@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
+import { assertArtifactRecords } from "./report-job-artifact-dataflow-20261015/artifact-readers";
 
 import {
   IMPLEMENTED_REPORT_JOB_TYPES,
@@ -231,35 +232,37 @@ describe("reporting and filing service", () => {
       reportingFilingService,
     } = createServices();
 
-    const missingRecordingOrder = await ownedMobilityService.createCallCenterOrder({
-      callId: "CALL-20260411-000100",
-      agentId: "AGENT-0091",
-      pickup: {
-        address: "台中市梧棲區中二路一段9號",
-      },
-      dropoff: {
-        address: "台中市大安區興安路378號",
-      },
-      passenger: {
-        name: "王小姐",
-        phone: "0911000001",
-      },
-    });
+    const missingRecordingOrder =
+      await ownedMobilityService.createCallCenterOrder({
+        callId: "CALL-20260411-000100",
+        agentId: "AGENT-0091",
+        pickup: {
+          address: "台中市梧棲區中二路一段9號",
+        },
+        dropoff: {
+          address: "台中市大安區興安路378號",
+        },
+        passenger: {
+          name: "王小姐",
+          phone: "0911000001",
+        },
+      });
 
-    const recordingBoundOrder = await ownedMobilityService.createCallCenterOrder({
-      callId: "CALL-20260411-000101",
-      agentId: "AGENT-0092",
-      pickup: {
-        address: "台中市梧棲區中二路一段9號",
-      },
-      dropoff: {
-        address: "台中市大安區興安路378號",
-      },
-      passenger: {
-        name: "陳先生",
-        phone: "0911000002",
-      },
-    });
+    const recordingBoundOrder =
+      await ownedMobilityService.createCallCenterOrder({
+        callId: "CALL-20260411-000101",
+        agentId: "AGENT-0092",
+        pickup: {
+          address: "台中市梧棲區中二路一段9號",
+        },
+        dropoff: {
+          address: "台中市大安區興安路378號",
+        },
+        passenger: {
+          name: "陳先生",
+          phone: "0911000002",
+        },
+      });
 
     callcenterService.attachRecordingCallback("CALL-20260411-000101", {
       recordingId: "REC-20260411-000101",
@@ -353,92 +356,130 @@ describe("reporting and filing service", () => {
     ).toBe(true);
   });
 
-  it("exports partner benefit revenue rows for airport-transfer review", async () => {
-    const auditService = new AuditNotificationService();
-    const tenantPartnerService = new TenantPartnerService(auditService);
-    const verification = await tenantPartnerService.verifyPartnerEligibility({
-      entrySlug: "bank-demo-alpha-airport",
-      cardLast4: "2468",
-    });
-    const callcenterService = new CallcenterService(auditService);
-    const regulatoryRegistryService = new RegulatoryRegistryService(
-      new OpsDispatchEventsService(new EventEmitter() as never),
-      auditService,
-      new DriverProfileService(auditService),
-    );
-    const ownedMobilityService = new OwnedMobilityService(
-      regulatoryRegistryService,
-      auditService,
-      callcenterService,
-      new OwnedMobilityTaskEventsService(new EventEmitter() as never),
-      new OpsDispatchEventsService(new EventEmitter() as never),
-      undefined,
-      tenantPartnerService,
-    );
-    const reportingFilingService = new ReportingFilingService(auditService);
-    reportingFilingService.registerOrderFeedProvider(() =>
-      ownedMobilityService.listOrders(),
-    );
+  it.each(["csv", "xlsx", "pdf"] as const)(
+    "exports partner benefit revenue rows for airport-transfer review (%s)",
+    async (format) => {
+      const auditService = new AuditNotificationService();
+      const tenantPartnerService = new TenantPartnerService(auditService);
+      const verification = await tenantPartnerService.verifyPartnerEligibility({
+        entrySlug: "bank-demo-alpha-airport",
+        cardLast4: "2468",
+      });
+      const callcenterService = new CallcenterService(auditService);
+      const regulatoryRegistryService = new RegulatoryRegistryService(
+        new OpsDispatchEventsService(new EventEmitter() as never),
+        auditService,
+        new DriverProfileService(auditService),
+      );
+      const ownedMobilityService = new OwnedMobilityService(
+        regulatoryRegistryService,
+        auditService,
+        callcenterService,
+        new OwnedMobilityTaskEventsService(new EventEmitter() as never),
+        new OpsDispatchEventsService(new EventEmitter() as never),
+        undefined,
+        tenantPartnerService,
+      );
+      const reportingFilingService = new ReportingFilingService(auditService);
+      reportingFilingService.registerOrderFeedProvider(() =>
+        ownedMobilityService.listOrders(),
+      );
 
-    const created = await ownedMobilityService.createTenantBooking(
-      {
-        businessDispatchSubtype: "credit_card_airport_transfer",
-        partnerEntrySlug: "bank-demo-alpha-airport",
-        eligibilityVerificationId: verification.eligibilityVerificationId,
-        direction: "pickup",
-        pickup: { address: "桃園機場第二航廈" },
-        dropoff: { address: "台北市信義區松高路11號" },
-        reservationWindowStart: new Date(Date.now() + 7200000).toISOString(),
-        reservationWindowEnd: new Date(Date.now() + 10800000).toISOString(),
-        passenger: {
-          name: "陳小姐",
-          phone: "0900123456",
+      const created = await ownedMobilityService.createTenantBooking(
+        {
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          partnerEntrySlug: "bank-demo-alpha-airport",
+          eligibilityVerificationId: verification.eligibilityVerificationId,
+          direction: "pickup",
+          pickup: { address: "桃園機場第二航廈" },
+          dropoff: { address: "台北市信義區松高路11號" },
+          reservationWindowStart: new Date(Date.now() + 7200000).toISOString(),
+          reservationWindowEnd: new Date(Date.now() + 10800000).toISOString(),
+          passenger: {
+            name: "陳小姐",
+            phone: "0900123456",
+          },
+          flightNo: "CI-001",
         },
-        flightNo: "CI-001",
-      },
-      "tenant-demo-001",
-    );
+        "tenant-demo-001",
+      );
 
-    await ownedMobilityService.createTenantBooking(
-      {
-        businessDispatchSubtype: "enterprise_dispatch",
-        pickup: { address: "台中市政府" },
-        dropoff: { address: "台中高鐵站" },
-        reservationWindowStart: new Date(Date.now() + 7200000).toISOString(),
-        reservationWindowEnd: new Date(Date.now() + 10800000).toISOString(),
-        passenger: {
-          name: "一般企業乘客",
-          phone: "0900000000",
+      await ownedMobilityService.createTenantBooking(
+        {
+          businessDispatchSubtype: "enterprise_dispatch",
+          pickup: { address: "台中市政府" },
+          dropoff: { address: "台中高鐵站" },
+          reservationWindowStart: new Date(Date.now() + 7200000).toISOString(),
+          reservationWindowEnd: new Date(Date.now() + 10800000).toISOString(),
+          passenger: {
+            name: "一般企業乘客",
+            phone: "0900000000",
+          },
         },
-      },
-      "tenant-demo-001",
-    );
+        "tenant-demo-001",
+      );
 
-    const accepted = reportingFilingService.createReportJob({
-      jobType: "revenue_summary",
-      // Was "xlsx", which has no renderer and is now rejected at creation.
-      format: "csv",
-    });
+      const accepted = reportingFilingService.createReportJob({
+        jobType: "revenue_summary",
+        format,
+      });
 
-    await flushReportingQueue();
+      await flushReportingQueue();
 
-    const job = reportingFilingService.getReportJob(accepted.jobId);
-    expect(job.status).toBe("completed");
-    // Revenue rows mask issuerAuthorizationRef / benefitReference via
-    // maskOpaqueToken(value, 8, 4) — "<first8>...<last4>".
-    expect(job.partnerRevenueRows).toEqual([
-      expect.objectContaining({
-        orderId: created.orderId,
-        partnerId: "partner-bank-demo-001",
-        partnerProgramId: "program-airport-alpha",
-        partnerEntrySlug: "bank-demo-alpha-airport",
-        eligibilityVerificationId: verification.eligibilityVerificationId,
-        issuerAuthorizationRef: "issuer-a...2468",
-        benefitReference: "benefit-...2468",
-        businessDispatchSubtype: "credit_card_airport_transfer",
-      }),
-    ]);
-  });
+      const job = reportingFilingService.getReportJob(accepted.jobId);
+      expect(job.status).toBe("completed");
+      // Revenue rows mask issuerAuthorizationRef / benefitReference via
+      // maskOpaqueToken(value, 8, 4) — "<first8>...<last4>".
+      expect(job.partnerRevenueRows).toEqual([
+        expect.objectContaining({
+          orderId: created.orderId,
+          partnerId: "partner-bank-demo-001",
+          partnerProgramId: "program-airport-alpha",
+          partnerEntrySlug: "bank-demo-alpha-airport",
+          eligibilityVerificationId: verification.eligibilityVerificationId,
+          issuerAuthorizationRef: "issuer-a...2468",
+          benefitReference: "benefit-...2468",
+          businessDispatchSubtype: "credit_card_airport_transfer",
+        }),
+      ]);
+      expect(job.rows).toEqual([]);
+      expect(job.partnerRevenueRows?.[0]?.amount).toEqual(
+        ownedMobilityService.getOrder(created.orderId).quotedFare,
+      );
+      const artifact = await reportingFilingService.renderReportArtifact(
+        accepted.jobId,
+      );
+      await assertArtifactRecords(
+        artifact,
+        format,
+        job.partnerRevenueRows ?? [],
+      );
+      expect(artifact.fileName).toBe(
+        `revenue_summary-${accepted.jobId}.${format}`,
+      );
+      const downloadAudit = auditService
+        .listAuditLogs()
+        .find((entry) => entry.actionName === "download_report_artifact");
+      expect(downloadAudit?.newValuesSummary).toMatchObject({
+        rowCount: job.partnerRevenueRows?.length,
+        byteLength: artifact.buffer.byteLength,
+      });
+      const trip = reportingFilingService.createReportJob({
+        jobType: "trip_summary",
+        format,
+        filters: { from: "2020-01-01" },
+      });
+      await flushReportingQueue();
+      const tripJob = reportingFilingService.getReportJob(trip.jobId);
+      expect(tripJob.rows?.length).toBeGreaterThan(0);
+      expect(tripJob.partnerRevenueRows).toEqual([]);
+      await assertArtifactRecords(
+        await reportingFilingService.renderReportArtifact(trip.jobId),
+        format,
+        tripJob.rows ?? [],
+      );
+    },
+  );
 
   it("rehydrates queued reporting state and writes completed jobs through the repository", async () => {
     const auditService = new AuditNotificationService();
@@ -918,16 +959,24 @@ describe("report export", () => {
   });
 
   it("creates and renders report jobs for newly implemented xlsx and pdf formats", async () => {
-    const { services, jobId: xlsxJobId } = await completedJob("vehicle_roster", "xlsx");
-    const xlsxArtifact = await services.reportingFilingService.renderReportArtifact(xlsxJobId);
+    const { services, jobId: xlsxJobId } = await completedJob(
+      "vehicle_roster",
+      "xlsx",
+    );
+    const xlsxArtifact =
+      await services.reportingFilingService.renderReportArtifact(xlsxJobId);
     expect(xlsxArtifact.contentType).toBe(
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     expect(xlsxArtifact.fileName).toBe(`vehicle_roster-${xlsxJobId}.xlsx`);
     expect(xlsxArtifact.buffer.byteLength).toBeGreaterThan(0);
 
-    const { services: pdfServices, jobId: pdfJobId } = await completedJob("vehicle_roster", "pdf");
-    const pdfArtifact = await pdfServices.reportingFilingService.renderReportArtifact(pdfJobId);
+    const { services: pdfServices, jobId: pdfJobId } = await completedJob(
+      "vehicle_roster",
+      "pdf",
+    );
+    const pdfArtifact =
+      await pdfServices.reportingFilingService.renderReportArtifact(pdfJobId);
     expect(pdfArtifact.contentType).toBe("application/pdf");
     expect(pdfArtifact.fileName).toBe(`vehicle_roster-${pdfJobId}.pdf`);
     expect(pdfArtifact.buffer.byteLength).toBeGreaterThan(0);
