@@ -147,10 +147,7 @@ import {
   submitEnterpriseBookingDraft,
 } from "../../../apps/enterprise-dispatch-web/app/bookings/review/booking-submit-button";
 import SubmittedBookingPage from "../../../apps/enterprise-dispatch-web/app/bookings/submitted/page";
-import {
-  createEnterpriseDispatchSessionClient,
-  getEnterpriseDispatchTenantClient,
-} from "../../../apps/enterprise-dispatch-web/lib/api-client";
+import { getEnterpriseDispatchTenantClient } from "../../../apps/enterprise-dispatch-web/lib/api-client";
 import {
   buildEnterpriseBookingCommand,
   buildEnterpriseBookingUpdateCommand,
