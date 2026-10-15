@@ -67,12 +67,17 @@ afterEach(() => {
   document.cookie = `${constants.TENANT_CSRF_COOKIE_NAME}=; max-age=0; path=/`;
 });
 describe("Existing Bank account controls consume the managed logout rail", () => {
-  it.each(["Sign out", "Switch account"])(
-    "%s invokes CSRF-protected session logout and surfaces denial",
-    async (name) => {
+  it.each([
+    ["Sign out", 403],
+    ["Sign out", 503],
+    ["Switch account", 403],
+    ["Switch account", 503],
+  ] as const)(
+    "%s invokes CSRF-protected logout and surfaces HTTP %s denial",
+    async (name, status) => {
       document.cookie = `${constants.TENANT_CSRF_COOKIE_NAME}=managed-csrf; path=/`;
       const fetcher = vi.fn(async () =>
-        Response.json({ error: "revocation unavailable" }, { status: 503 }),
+        Response.json({ error: "revocation unavailable" }, { status }),
       );
       vi.stubGlobal("fetch", fetcher);
       render(
@@ -158,6 +163,41 @@ describe("Existing Bank account controls consume the managed logout rail", () =>
           "/users?bank=acme&locale=en&signedOut=1",
         );
       }
+    },
+  );
+  it.each(["Sign out", "Switch account"])(
+    "%s preserves the display-only route without inventing a tenant session",
+    async (name) => {
+      const fetcher = vi.fn();
+      vi.stubGlobal("fetch", fetcher);
+      render(
+        React.createElement(BankDemoControls, {
+          bank,
+          locale: "en",
+          pathname: "/users",
+          searchParams: new URLSearchParams(),
+          signedOut: false,
+        }),
+      );
+      screen.getByText("Display persona").closest("details")!.open = true;
+      const navigate = vi.fn();
+      const realWindow = window;
+      vi.stubGlobal(
+        "window",
+        new Proxy(realWindow, {
+          get(target, property) {
+            return property === "location"
+              ? { assign: navigate }
+              : Reflect.get(target, property, target);
+          },
+        }),
+      );
+      fireEvent.click(screen.getByRole("button", { name }));
+      await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1));
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(navigate).toHaveBeenCalledWith(
+        `${name === "Switch account" ? "/login" : "/users"}?bank=acme&locale=en&signedOut=1`,
+      );
     },
   );
 });

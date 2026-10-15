@@ -647,6 +647,25 @@ describe("Bank managed caller -> production guards/commands/readback", () => {
     expect(result.status).toBe(200);
     expect((await result.json()).data.canManageUsers).toBe(false);
   });
+  it("logout CSRF denial retains the valid session so account-switch cannot silently continue", async () => {
+    const f = await fixture();
+    const result = await auth.POST(
+      new NextRequest(`${bankOrigin}/api/auth/logout`, {
+        method: "POST",
+        headers: {
+          cookie: `${constants.TENANT_SESSION_COOKIE_NAME}=${f.token}; ${constants.TENANT_CSRF_COOKIE_NAME}=${f.csrf}`,
+          origin: bankOrigin,
+          [constants.TENANT_CSRF_HEADER_NAME]: "forged",
+        },
+      }),
+      context("logout"),
+    );
+    expect(result.status).toBe(403);
+    expect(
+      result.cookies.get(constants.TENANT_SESSION_COOKIE_NAME),
+    ).toBeUndefined();
+    expect((await f.request()).status).toBe(200);
+  });
   it("Bank host logout clears cookies and revokes the exact durable session", async () => {
     const f = await fixture();
     const result = await auth.POST(
