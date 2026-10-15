@@ -646,16 +646,12 @@ export class MultiTaxiService implements OnModuleInit {
     passengerSubjectRef: string,
     requestId?: string,
   ) {
-    const order = await this.requireMultiTaxiOrder(orderId);
-    if (!this.isPassengerCancelable(order)) {
-      throw new ApiRequestError(
-        409,
-        "ORDER_NOT_CANCELABLE",
-        "The order can no longer be cancelled.",
-      );
-    }
+    // The account controller has checked booking ownership. Evaluate the
+    // multi-taxi/status policy on the cancellation transaction's locked row;
+    // a preliminary authority GET would refresh shared memory even on refusal
+    // and could bypass the assignment -> task -> order lock sequence.
     return this.ownedMobilityService.cancelOwnedOrder(
-      order.orderId,
+      orderId,
       { reason: "passenger_requested" },
       requestId,
       { cancellationPolicy: "account_passenger" },
