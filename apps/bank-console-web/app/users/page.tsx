@@ -8,6 +8,7 @@ import {
 } from "../../lib/bank-user-identity";
 import { t } from "../../lib/translations";
 import UsersManagement from "./users-management";
+import { userManagementText } from "./translations";
 
 export default async function UsersPage({
   searchParams,
@@ -41,9 +42,7 @@ export default async function UsersPage({
     failure =
       error instanceof BankUserApiError
         ? `HTTP ${error.status}`
-        : locale === "en"
-          ? "User service unavailable"
-          : "人員服務暫時無法使用";
+        : userManagementText("serviceUnavailable", locale);
   }
   return (
     <div className="page-shell bank-users-page" style={issuerVars}>
@@ -64,9 +63,7 @@ export default async function UsersPage({
         <section className="surface-card">
           <p role="alert">{failure}</p>
           <Link href="/api/auth/tenant/login?return_url=%2Fusers">
-            {locale === "en"
-              ? "Sign in with tenant account"
-              : "使用租戶帳戶登入"}
+            {userManagementText("managedSignIn", locale)}
           </Link>
         </section>
       )}

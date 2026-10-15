@@ -16,6 +16,7 @@ import {
 } from "@/lib/demo-tenants";
 import { getBankConsoleSession } from "@/lib/session";
 import { t, type Locale } from "@/lib/translations";
+import { userManagementText } from "../app/users/translations";
 
 type QueryUpdate = {
   bank?: BankDemoTenantCode;
@@ -104,11 +105,7 @@ export function BankDemoControls({
           headers: { [TENANT_CSRF_HEADER_NAME]: csrf },
         });
         if (!response.ok)
-          throw new Error(
-            locale === "en"
-              ? "Sign out failed. Please retry."
-              : "登出失敗，請重試。",
-          );
+          throw new Error(userManagementText("signOutFailure", locale));
       }
       const target = switchAccount
         ? csrf
@@ -122,7 +119,9 @@ export function BankDemoControls({
       window.location.assign(target);
     } catch (error) {
       setLogoutError(
-        error instanceof Error ? error.message : "Sign out failed.",
+        error instanceof Error
+          ? error.message
+          : userManagementText("signOutFailure", locale),
       );
     } finally {
       setPending(false);
