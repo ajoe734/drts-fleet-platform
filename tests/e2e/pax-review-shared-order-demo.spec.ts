@@ -321,6 +321,29 @@ async function finish(
       },
     );
   }
+  // Distance can reach this short route's threshold before twenty seconds.
+  // Wait for the same live UI clock used by completion instead of submitting
+  // facts that would fail the unchanged persisted-duration assertion below.
+  await step(
+    "Driver waits for live trip duration above twenty seconds",
+    async () => {
+      const duration = driver
+        .getByText("時長", { exact: true })
+        .locator("..")
+        .getByText(/^\d{2}:\d{2}:\d{2}$/);
+      await expect
+        .poll(
+          async () => {
+            const [hours, minutes, seconds] = (await duration.innerText())
+              .split(":")
+              .map(Number);
+            return hours * 3600 + minutes * 60 + seconds;
+          },
+          { timeout: 30_000, intervals: [1000] },
+        )
+        .toBeGreaterThan(20);
+    },
+  );
   // Explicit simulated meter facts, consistent with this sub-1.25km route
   // and the approved engine's minimum, not the old local demo tariff.
   await step(
