@@ -61,12 +61,15 @@ describe("C112 durable commands and first in-flight restart", () => {
         failed.deliveryId,
         "req-manual-retry-audit",
         {
+          authMode: "jwt_bearer",
           actorId: "tenant-integration-manager",
           actorType: "tenant_admin",
           realm: "tenant",
           tenantId,
           roles: ["tc_integration_mgr"],
+          roleFamilies: ["tenant"],
           scopes: ["tenant:webhooks:write"],
+          supportedExecutionModes: [],
         },
       );
       if (enabled) {
