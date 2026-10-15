@@ -267,6 +267,29 @@ export class ForwarderService implements OnModuleInit {
       ]),
     );
 
+    return this.buildDriverTaskViews(driverId, ownedTasks, ownedOrders);
+  }
+
+  async listDriverTaskViewsForRead(driverId: string) {
+    this.assertNonBlank(driverId, "driverId");
+    const ownedTasks = (
+      (await this.ownedMobilityService?.listDriverTasksForRead()) ?? []
+    ).filter((task) => task.driverId === driverId);
+    const ownedOrders = new Map(
+      (
+        (await this.ownedMobilityService?.listOrdersForRead([
+          ...new Set(ownedTasks.map((task) => task.orderId)),
+        ])) ?? []
+      ).map((order) => [order.orderId, order]),
+    );
+    return this.buildDriverTaskViews(driverId, ownedTasks, ownedOrders);
+  }
+
+  private buildDriverTaskViews(
+    driverId: string,
+    ownedTasks: DriverTaskRecord[],
+    ownedOrders: Map<string, OwnedOrderRecord>,
+  ) {
     const ownedViews = ownedTasks
       .filter((task) => task.driverId === driverId)
       .map((task) =>
@@ -298,6 +321,25 @@ export class ForwarderService implements OnModuleInit {
       return this.mapOwnedTaskToView(ownedTask, ownedOrder ?? null);
     }
 
+    return this.getForwardedDriverTaskView(driverId, taskId);
+  }
+
+  async getDriverTaskViewForRead(driverId: string, taskId: string) {
+    this.assertNonBlank(driverId, "driverId");
+    const ownedTask =
+      await this.ownedMobilityService?.findDriverTaskForRead(taskId);
+    if (ownedTask) {
+      if (ownedTask.driverId !== driverId)
+        throw this.driverTaskViewNotFound(taskId);
+      const orders = await this.ownedMobilityService!.listOrdersForRead([
+        ownedTask.orderId,
+      ]);
+      return this.mapOwnedTaskToView(ownedTask, orders[0] ?? null);
+    }
+    return this.getForwardedDriverTaskView(driverId, taskId);
+  }
+
+  private getForwardedDriverTaskView(driverId: string, taskId: string) {
     const forwardedOrder = this.forwardedOrders.find(
       (order) => order.mirrorOrderId === taskId,
     );
@@ -1310,7 +1352,9 @@ export class ForwarderService implements OnModuleInit {
         rateLimitStatus: baseline.rateLimitStatus,
         platformCode: record.platformCode ?? baseline.platformCode,
         capabilitySummary: this.cloneCapabilitySummary(
-          adapter?.capabilitySummary ?? record.capabilitySummary ?? baseline.capabilitySummary,
+          adapter?.capabilitySummary ??
+            record.capabilitySummary ??
+            baseline.capabilitySummary,
         ),
         lastWebhookReceivedAt: record.lastWebhookReceivedAt ?? null,
         lastRateLimitAt: record.lastRateLimitAt ?? null,
@@ -1323,7 +1367,9 @@ export class ForwarderService implements OnModuleInit {
       ...record,
       platformCode: record.platformCode ?? baseline.platformCode,
       capabilitySummary: this.cloneCapabilitySummary(
-        adapter?.capabilitySummary ?? record.capabilitySummary ?? baseline.capabilitySummary,
+        adapter?.capabilitySummary ??
+          record.capabilitySummary ??
+          baseline.capabilitySummary,
       ),
       lastWebhookReceivedAt: record.lastWebhookReceivedAt ?? null,
       lastRateLimitAt: record.lastRateLimitAt ?? null,
@@ -1420,7 +1466,7 @@ export class ForwarderService implements OnModuleInit {
     );
     const signals =
       `${command.errorCode} ${command.errorMessage} ${command.nativeStatus ?? ""}`.toLowerCase();
-      
+
     if (baseline.status !== "healthy") {
       return {
         status: baseline.status,
@@ -1433,7 +1479,7 @@ export class ForwarderService implements OnModuleInit {
         lastError: `${command.errorCode}: ${command.errorMessage}`,
       };
     }
-    
+
     const patch: Partial<AdapterHealthRecord> = {
       status: command.retryable ? "degraded" : "down",
       reason: "platform",
@@ -1532,15 +1578,21 @@ export class ForwarderService implements OnModuleInit {
         payload,
       });
       if (!verification.accepted) {
-        const baseline = this.buildAdapterHealthBaseline(adapter.platformCode, adapter);
+        const baseline = this.buildAdapterHealthBaseline(
+          adapter.platformCode,
+          adapter,
+        );
         const adapterHealth = this.updateAdapterHealth(adapter.platformCode, {
           status: baseline.status !== "healthy" ? baseline.status : "degraded",
           reason: baseline.status !== "healthy" ? baseline.reason : "webhook",
           credentialStatus:
             verification.credentialStatus ?? baseline.credentialStatus,
-          authStatus:
-            verification.authStatus ?? baseline.authStatus,
-          webhookStatus: verification.webhookStatus ?? (baseline.status !== "healthy" ? baseline.webhookStatus : "failing"),
+          authStatus: verification.authStatus ?? baseline.authStatus,
+          webhookStatus:
+            verification.webhookStatus ??
+            (baseline.status !== "healthy"
+              ? baseline.webhookStatus
+              : "failing"),
           lastCheckedAt: verifiedAt,
           lastError:
             verification.detail ?? "Webhook signature verification failed.",

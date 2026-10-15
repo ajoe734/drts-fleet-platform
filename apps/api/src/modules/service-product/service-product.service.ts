@@ -227,6 +227,34 @@ export class ServiceProductService implements OnModuleInit {
     return this.runtimePolicies.map((policy) => ({ ...policy }));
   }
 
+  /** Refresh only the requested booking context. A failed authoritative read
+   * must reject the command, never authorize it from this instance's cache.
+   * Keep the synchronous readers for existing in-process callers.
+   */
+  prepareRuntimeProfileServiceProduct(
+    runtimeProfileCode: RuntimeProfileServiceProductPolicy["runtimeProfileCode"],
+    serviceProductCode: ServiceProductType,
+  ) {
+    if (!this.repository?.isEnabled()) return;
+    return this.repository
+      .findRuntimeContext(runtimeProfileCode, serviceProductCode)
+      .then((context) => {
+        const record = context.record
+          ? this.hydrateRecord(context.record)
+          : null;
+        this.records = this.records.filter(
+          (candidate) => candidate.serviceProductType !== serviceProductCode,
+        );
+        if (record) this.records.unshift(record);
+        this.runtimePolicies = this.runtimePolicies.filter(
+          (candidate) =>
+            candidate.runtimeProfileCode !== runtimeProfileCode ||
+            candidate.serviceProductCode !== serviceProductCode,
+        );
+        if (context.policy) this.runtimePolicies.unshift({ ...context.policy });
+      });
+  }
+
   upsertRuntimeProfilePolicy(
     command: UpsertRuntimeProfileServiceProductPolicyCommand,
   ): RuntimeProfileServiceProductPolicy {

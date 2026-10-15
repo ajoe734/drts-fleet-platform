@@ -673,8 +673,84 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # The real scheduled journeys need their own existing 25-minute envelope;
+  # the legacy route suites consumed half of it before this case could start.
+  # Both jobs remain required by the original E2E aggregate below.
+  ui-shared-order-e2e:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_route_suite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - run: pnpm install --frozen-lockfile
+      - name: Build API
+        run: pnpm --filter @drts/api build
+      - name: Run the real three-role shared-order journeys
+        run: |
+          PGPASSWORD=postgres psql \
+            postgresql://postgres:postgres@localhost:5432/postgres \
+            -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS drts_route_suite;' \
+            -c 'CREATE DATABASE drts_route_suite;'
+          pnpm db:migrate
+          pnpm db:seed
+          sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \
+            \( -iname "*google*" -o -iname "*chrome*" \) \
+            -exec mv "{}" "{}.disabled" \; || true
+          pnpm exec playwright install --with-deps chromium
+          # Build the exact production Driver mount plus the existing standalone
+          # Driver Web surface. Neither export starts a dev server on this VM.
+          EXPO_PUBLIC_API_URL=/api/review-driver-api \
+            EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH=/review-driver \
+            pnpm --filter @drts/driver-app exec expo export -p web --output-dir dist
+          mkdir -p apps/passenger-app-web/public/review-driver
+          cp -R apps/driver-app/dist/. apps/passenger-app-web/public/review-driver/
+          pnpm --filter @drts/passenger-app-web... build
+          EXPO_PUBLIC_API_URL=http://127.0.0.1:3001 \
+            EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH= \
+            pnpm --filter @drts/driver-app exec expo export -p web --output-dir dist
+          pnpm exec tsc -p tests/unit/pax-review-shared-order-demo-20261015/tsconfig.driver-tests.json --noEmit
+          pnpm exec vitest run --config tests/unit/pax-review-shared-order-demo-20261015/driver-vitest.config.ts
+          pnpm exec playwright test -c playwright.pax-review-shared-order.config.ts
+      - name: Upload new shared-order rehearsal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pax-review-shared-order-${{ github.run_id }}
+          path: .artifacts/pax-review-shared-order
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
   e2e:
-    needs: [candidate, changes, cross-surface-e2e, ui-route-e2e]
+    needs:
+      [candidate, changes, cross-surface-e2e, ui-route-e2e, ui-shared-order-e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: always()
@@ -686,7 +762,7 @@ jobs:
             exit 0
           fi
           [ '${{ needs.changes.result }}' = 'success' ] || { echo "changes gate failed"; exit 1; }
-          for result in '${{ needs.cross-surface-e2e.result }}' '${{ needs.ui-route-e2e.result }}'; do
+          for result in '${{ needs.cross-surface-e2e.result }}' '${{ needs.ui-route-e2e.result }}' '${{ needs.ui-shared-order-e2e.result }}'; do
             case "$result" in
               success) ;;
               skipped) echo "E2E skipped: no changed path can exercise it." ;;

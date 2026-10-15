@@ -475,11 +475,21 @@ it("keeps a real lifecycle reactivation isolated until the existing work-state c
   // are memory boundaries. This is not evidence of the current dev DB state.
   const emit = vi.fn();
   const audit = new AuditNotificationService();
+  const repository = enabledRegistryRepository();
+  const storedDrivers = new Map<string, unknown>();
+  vi.spyOn(repository, "persistChanges").mockImplementation(async (changes) => {
+    for (const driver of changes.drivers ?? [])
+      storedDrivers.set(driver.driverId, structuredClone(driver));
+  });
+  vi.spyOn(repository, "lockDriver").mockImplementation(
+    async (driverId) =>
+      structuredClone(storedDrivers.get(driverId) ?? null) as never,
+  );
   const registry = new RegulatoryRegistryService(
     new OpsDispatchEventsService({ emit } as never),
     audit,
     new DriverProfileService(audit),
-    enabledRegistryRepository(),
+    repository,
   );
   const controller = new RegulatoryRegistryController(registry);
   const driverId = env.DRTS_LIVE_MAP_TEST_DRIVER_ID;
@@ -507,7 +517,7 @@ it("keeps a real lifecycle reactivation isolated until the existing work-state c
     }),
   );
 
-  const restored = controller.updateDriverWorkState(driverId, {
+  const restored = await controller.updateDriverWorkState(driverId, {
     workState: "offline",
   });
   expect(restored.data).toMatchObject({

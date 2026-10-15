@@ -5,8 +5,13 @@ import type {
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import type { TaskManagerTaskBody } from "expo-task-manager";
+import { PAX_REVIEW_TRACK } from "@drts/api-client";
 
-import { formatDriverError, sanitizeLogMessage } from "@/lib/api-client";
+import {
+  formatDriverError,
+  sanitizeLogMessage,
+  isDriverIdentityProvisioned,
+} from "@/lib/api-client";
 import {
   enqueueDriverLocationEvent,
   flushDriverLocationQueue,
@@ -66,6 +71,92 @@ let lastHeartbeatQueuedAtMs: number | null = null;
 let lastHeartbeatQueuedCoord: { latitude: number; longitude: number } | null =
   null;
 let appliedBackgroundCadenceKey: string | null = null;
+
+const reviewLocation = () =>
+  typeof document !== "undefined" &&
+  process.env.EXPO_PUBLIC_REVIEW_DEMO === "true";
+let reviewPosition = 0;
+let reviewPaused = false;
+let reviewSupplySentAt = 0;
+
+/** External position producer only: samples go through the very same listeners,
+ * trip tracker, cadence, offline queue and heartbeat ingestion as Expo GPS.
+ * Clock and completion facts remain the actual tracker clock and measurements.
+ */
+function installReviewLocationProducer() {
+  if (
+    !reviewLocation() ||
+    typeof document === "undefined" ||
+    document.getElementById("review-gps")
+  )
+    return;
+  const panel = document.createElement("aside");
+  panel.id = "review-gps";
+  panel.setAttribute("aria-label", "演練模擬 GPS");
+  Object.assign(panel.style, {
+    background: "#fff3cd",
+    padding: "12px",
+    maxWidth: "100%",
+    color: "#17202a",
+    fontSize: "13px",
+  });
+  const title = document.createElement("strong");
+  title.textContent = "新北同單演練・模擬 GPS（非實車）";
+  const state = document.createElement("p");
+  const toggle = document.createElement("button");
+  toggle.textContent = "暫停模擬定位";
+  toggle.onclick = () => {
+    reviewPaused = !reviewPaused;
+    toggle.textContent = reviewPaused ? "恢復模擬定位" : "暫停模擬定位";
+  };
+  panel.append(title, state, toggle);
+  document.body.append(panel);
+  const tick = () => {
+    state.textContent = `同單任務：${activeTaskId ?? "等待接單"}；座標 ${reviewPosition + 1}/${PAX_REVIEW_TRACK.length}${reviewPaused ? "（已停止；等待真 freshness 過期）" : ""}`;
+    if (reviewPaused) return;
+    if (!activeTaskId) {
+      // Foreground simulated supply position, using the registered driver's
+      // normal device-bound heartbeat. This does not mark the driver online or
+      // grant the OS/background capability required by the online UI.
+      if (
+        !isDriverIdentityProvisioned() ||
+        Date.now() - reviewSupplySentAt < 30_000
+      )
+        return;
+      reviewSupplySentAt = Date.now();
+      const point = PAX_REVIEW_TRACK[0]!;
+      const update = {
+        latitude: point.lat,
+        longitude: point.lng,
+        accuracyM: 5,
+        recordedAt: new Date().toISOString(),
+      };
+      emitLocationUpdate(update);
+      queueHeartbeat(update, "foreground", {
+        preserveKeyEvent: true,
+        workStateOverride: "available",
+      });
+      return;
+    }
+    if (transportMode !== "foreground") return;
+    if (activeTaskStatus === "on_trip")
+      reviewPosition = Math.min(
+        reviewPosition + 1,
+        PAX_REVIEW_TRACK.length - 1,
+      );
+    const point = PAX_REVIEW_TRACK[reviewPosition]!;
+    const update = {
+      latitude: point.lat,
+      longitude: point.lng,
+      accuracyM: 5,
+      recordedAt: new Date().toISOString(),
+    };
+    emitLocationUpdate(update);
+    queueHeartbeat(update, "foreground");
+  };
+  tick();
+  setInterval(tick, 3000);
+}
 
 type EnvelopeWorkState = DriverLocationHeartbeatEnvelope["workState"];
 
@@ -307,7 +398,8 @@ if (!TaskManager.isTaskDefined(DRIVER_LOCATION_TASK_NAME)) {
       if (error) {
         console.error(
           "Driver location task error",
-          sanitizeLogMessage(error.message) ?? formatDriverError(error, "Task error"),
+          sanitizeLogMessage(error.message) ??
+            formatDriverError(error, "Task error"),
         );
         return;
       }
@@ -328,6 +420,7 @@ if (!TaskManager.isTaskDefined(DRIVER_LOCATION_TASK_NAME)) {
 
 export function initializeDriverLocationHeartbeat() {
   void initializeDriverLocationOfflineQueue();
+  installReviewLocationProducer();
   return DRIVER_LOCATION_TASK_NAME;
 }
 
@@ -467,6 +560,29 @@ async function applyHeartbeatTracking(
   target: TrackingTarget,
 ): Promise<HeartbeatSyncResult> {
   await initializeDriverLocationOfflineQueue();
+
+  if (reviewLocation() && !target.requireBackground) {
+    if (activeTaskId !== target.taskId) reviewPosition = 0;
+    activeTaskId = target.taskId;
+    activeTaskStatus = target.taskStatus;
+    transportMode = "foreground";
+    stopForegroundLocationSubscription();
+    installReviewLocationProducer();
+    const point = PAX_REVIEW_TRACK[reviewPosition]!;
+    const update = {
+      latitude: point.lat,
+      longitude: point.lng,
+      accuracyM: 5,
+      recordedAt: new Date().toISOString(),
+    };
+    emitLocationUpdate(update);
+    queueHeartbeat(update, "foreground", { preserveKeyEvent: true });
+    return {
+      status: "active",
+      message: "演練模擬 GPS；非實車定位。",
+      latestUpdate,
+    };
+  }
 
   const permissionResult = await ensureLocationPermissions(
     target.requireBackground,

@@ -1,0 +1,5 @@
+{
+  "extends": "../../../apps/driver-app/tsconfig.json",
+  "compilerOptions": { "noEmit": true },
+  "include": ["driver-*.spec.tsx"]
+}

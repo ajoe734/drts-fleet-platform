@@ -76,6 +76,23 @@ function createAndActivateAuthorization(service: MultiTaxiService) {
   return service.activateAuthorization(authorization.authorizationId);
 }
 
+// Existing repository boundary now also reads back the actual authorization
+// payload saved by the original create/activate commands.
+function authorizationStorage() {
+  const saved = new Map<
+    string,
+    ReturnType<MultiTaxiService["createAuthorization"]>
+  >();
+  return {
+    persistAuthorization: vi.fn(
+      async (record: ReturnType<MultiTaxiService["createAuthorization"]>) => {
+        saved.set(record.authorizationId, structuredClone(record));
+      },
+    ),
+    findEffectiveAuthorizations: vi.fn(async () => [...saved.values()]),
+  };
+}
+
 async function createCompletedPassengerRating() {
   const { service } = createService({
     orderStatus: "completed",
@@ -147,6 +164,7 @@ describe("MultiTaxiService operating authority", () => {
     });
     const { service } = createService({
       serviceProductService: {
+        prepareRuntimeProfileServiceProduct: vi.fn(async () => {}),
         assertRuntimeProfileServiceProductActive,
       },
     });
@@ -274,7 +292,7 @@ describe("MultiTaxiService passenger ride authority", () => {
     const { service, order } = createService({
       repository: {
         isEnabled: () => true,
-        persistAuthorization: vi.fn().mockResolvedValue(undefined),
+        ...authorizationStorage(),
         persistRideAccessToken,
         reportPersistenceFailure: vi.fn(),
       },
@@ -312,7 +330,7 @@ describe("MultiTaxiService passenger ride authority", () => {
     const persistedByDigest = new Map<string, Record<string, unknown>>();
     const repository = {
       isEnabled: () => true,
-      persistAuthorization: vi.fn().mockResolvedValue(undefined),
+      ...authorizationStorage(),
       reportPersistenceFailure: vi.fn(),
       persistRideAccessToken: vi.fn(
         async (token: Record<string, unknown>, digest: string) => {

@@ -57,6 +57,21 @@ export class DriverProfileRepository {
     );
   }
 
+  async findByDriverId(driverId: string): Promise<DriverProfileRecord | null> {
+    if (!this.isEnabled())
+      throw new Error("Profile lookup requires a database.");
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      "SELECT record FROM ops.phase1_driver_profiles WHERE driver_id = $1",
+      [driverId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<DriverProfileRecord>(
+          result.rows[0].record,
+          "ops.phase1_driver_profiles",
+        )
+      : null;
+  }
+
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
     this.logger.warn(

@@ -228,13 +228,16 @@ export class RegulatoryRegistryController {
   }
 
   @Post("drivers/:driverId/work-state")
-  updateDriverWorkState(
+  async updateDriverWorkState(
     @Param("driverId") driverId: string,
     @Body() command: UpdateDriverWorkStateCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.updateDriverWorkState(driverId, command),
+      await this.regulatoryRegistryService.updateDriverWorkStateFromPersistence(
+        driverId,
+        command,
+      ),
       requestId,
     );
   }

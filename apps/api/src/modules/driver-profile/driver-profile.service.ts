@@ -144,6 +144,14 @@ export class DriverProfileService implements OnModuleInit {
     return existing ? this.clone(existing) : null;
   }
 
+  async prepareProfileAuthority(driverId: string) {
+    if (!this.repository?.isEnabled()) return;
+    await this.profileWrites.get(driverId);
+    const profile = await this.repository.findByDriverId(driverId);
+    this.profiles.delete(driverId);
+    if (profile) this.profiles.set(driverId, this.clone(profile));
+  }
+
   resolveProvisionableDriverId(
     registrationCode?: string | null,
   ): string | null {
