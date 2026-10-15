@@ -55,6 +55,8 @@ import {
   getDriverClient,
   getDriverIdentityIssue,
   getPendingDriverTaskCompletion,
+  initializeDriverIdentity,
+  isDriverIdentityHydrated,
   isDriverIdentityProvisioned,
   registerProtectedCacheClearHandler,
   rejectForwardedDriverOffer,
@@ -1165,7 +1167,23 @@ export default function TripScreen() {
     resetDriverAppToOnboarding(router);
   }
 
-  const isProvisioned = isDriverIdentityProvisioned();
+  const [identityReady, setIdentityReady] = useState(isDriverIdentityHydrated);
+  const isProvisioned = identityReady && isDriverIdentityProvisioned();
+
+  useEffect(() => {
+    if (identityReady) return;
+    let cancelled = false;
+    initializeDriverIdentity()
+      .catch((identityError: unknown) => {
+        if (!cancelled) setError(getErrorMessage(identityError));
+      })
+      .finally(() => {
+        if (!cancelled) setIdentityReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [identityReady]);
 
   useEffect(() => {
     const unregister = registerProtectedCacheClearHandler(() => {
@@ -1245,12 +1263,13 @@ export default function TripScreen() {
   }
 
   useEffect(() => {
+    if (!identityReady) return;
     if (isProvisioned) {
       void loadTrip(true);
     } else {
       setLoading(false);
     }
-  }, [isProvisioned]);
+  }, [identityReady, isProvisioned]);
 
   useEffect(() => {
     return subscribeTrackingDiagnostic(setTrackingDiagnostic);
@@ -1687,11 +1706,11 @@ export default function TripScreen() {
     }
   }
 
-  if (!isProvisioned) {
+  if (identityReady && !isProvisioned) {
     return <Redirect href="/onboarding" />;
   }
 
-  if (loading) {
+  if (!identityReady || loading) {
     return (
       <Shell
         theme={driverCanvasTheme}

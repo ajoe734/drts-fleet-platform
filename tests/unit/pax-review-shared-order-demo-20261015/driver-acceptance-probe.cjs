@@ -15,6 +15,10 @@ const JSXRuntime = appRequire("react/jsx-runtime");
 const { act, create } = appRequire("react-test-renderer");
 const ts = require("typescript");
 const [scenario, sourceRef] = process.argv.slice(2);
+const reloadCase =
+  /^(reload|empty|malformed|unreadable)-(web|native)-(jobs|trip)$/.exec(
+    scenario,
+  );
 let route = "/jobs";
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 process.env.EXPO_PUBLIC_API_URL = "https://example.invalid";
@@ -23,6 +27,8 @@ delete process.env.EXPO_PUBLIC_DRIVER_ACTOR_ID;
 const store = new Map();
 const pendingKey = "drts.driver.pendingTaskCompletion";
 let storageFail = false;
+let identityReads = 0;
+const redirects = [];
 const alerts = [];
 const native = Object.fromEntries(
   [
@@ -47,7 +53,14 @@ Object.assign(native, {
   Linking: { canOpenURL: async () => true, openURL: async () => {} },
 });
 const secure = {
-  getItemAsync: async (key) => store.get(key) ?? null,
+  getItemAsync: async (key) => {
+    if (key === "drts.driver.session") {
+      identityReads++;
+      if (reloadCase?.[1] === "unreadable")
+        throw new Error("Fixture storage unavailable");
+    }
+    return store.get(key) ?? null;
+  },
   setItemAsync: async (key, value) => {
     if (storageFail && key === pendingKey)
       throw new Error("fixture storage unavailable");
@@ -58,6 +71,23 @@ const secure = {
     store.delete(key);
   },
 };
+if (reloadCase?.[2] === "web") {
+  globalThis.document = {};
+  globalThis.window = {
+    sessionStorage: {
+      getItem: (key) => {
+        if (key === "drts.driver.session") {
+          identityReads++;
+          if (reloadCase[1] === "unreadable")
+            throw new Error("Fixture storage unavailable");
+        }
+        return store.get(key) ?? null;
+      },
+      setItem: (key, value) => store.set(key, value),
+      removeItem: (key) => store.delete(key),
+    },
+  };
+}
 const tracking = {
   syncDriverLocationHeartbeat: async () => ({
     status: "active",
@@ -81,8 +111,19 @@ const compile = (m, filename, source) =>
     filename,
   );
 for (const ext of [".ts", ".tsx"])
-  Module._extensions[ext] = (m, filename) =>
-    compile(m, filename, fs.readFileSync(filename, "utf8"));
+  Module._extensions[ext] = (m, filename) => {
+    const screenRef = process.env.PAX_REVIEW_DRIVER_SCREEN_SOURCE_REF;
+    const relative = path.relative(root, filename);
+    const source =
+      screenRef && /^apps\/driver-app\/app\/(jobs|trip)\.tsx$/.test(relative)
+        ? require("node:child_process").execFileSync(
+            "git",
+            ["show", `${screenRef}:${relative}`],
+            { cwd: root, encoding: "utf8" },
+          )
+        : fs.readFileSync(filename, "utf8");
+    compile(m, filename, source);
+  };
 const originalLoad = Module._load;
 Module._load = function (request, parent, isMain) {
   if (request === "react") return React;
@@ -95,7 +136,10 @@ Module._load = function (request, parent, isMain) {
     };
   if (request === "expo-router")
     return {
-      Redirect: "Redirect",
+      Redirect: (props) => {
+        redirects.push({ href: props.href, identityReads });
+        return React.createElement("Redirect", props);
+      },
       useRouter: () => ({
         replace: () => {},
         push: (value) => {
@@ -324,8 +368,66 @@ const step = async (name, operation) => {
   }
 };
 async function run() {
-  const api = require(path.join(app, "lib/api-client.ts"));
-  await api.registerDriverDevice("synthetic-registration-code");
+  const apiPath = path.join(app, "lib/api-client.ts");
+  let api = require(apiPath);
+  if (!reloadCase || reloadCase[1] === "reload")
+    await api.registerDriverDevice("synthetic-registration-code");
+  if (reloadCase) {
+    if (reloadCase[1] === "malformed")
+      store.set("drts.driver.session", "{invalid JSON");
+    // A new document has the persisted real registration result but fresh
+    // module state. No pre-hydrated identity is injected into either screen.
+    delete require.cache[require.resolve(apiPath)];
+    api = require(apiPath);
+    assert.equal(api.isDriverIdentityHydrated(), false);
+    assert.equal(api.isDriverIdentityProvisioned(), false);
+    identityReads = 0;
+    await open(reloadCase[3]);
+    // The root heartbeat can complete after the initial screen commit. Its
+    // successful HTTP read cannot undo a Redirect already rendered by Jobs.
+    await act(async () => {
+      await api.initializeDriverIdentity().catch(() => {});
+    });
+    const text = renderer.toJSON();
+    await act(async () => renderer.unmount());
+    if (reloadCase[1] === "reload") {
+      assert.deepEqual(
+        redirects,
+        [],
+        "A persisted device session must hydrate before the actual screen redirects",
+      );
+      assert.ok(
+        JSON.stringify(text).includes(
+          reloadCase[3] === "jobs" ? "開啟目前行程" : orderId,
+        ),
+        "The actual screen must reload its assigned task after hydration",
+      );
+    } else {
+      assert.ok(
+        redirects.length > 0,
+        "An absent/invalid identity still redirects",
+      );
+      assert.ok(
+        redirects.every(
+          (entry) => entry.href === "/onboarding" && entry.identityReads > 0,
+        ),
+        "The actual screen must read stored identity before deciding to redirect",
+      );
+      assert.equal(api.isDriverIdentityProvisioned(), false);
+      assert.equal(JSON.stringify(text).includes(orderId), false);
+    }
+    console.log(
+      JSON.stringify({
+        scenario,
+        redirects,
+        identityReads,
+        actualScreens: true,
+        actualSDK: true,
+        upstreamHTTP: "fixture; no runtime acceptance credit",
+      }),
+    );
+    return;
+  }
   const specPath = "tests/e2e/pax-review-shared-order-demo.spec.ts";
   const source = sourceRef
     ? require("node:child_process").execFileSync(

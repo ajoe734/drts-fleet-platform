@@ -36,6 +36,8 @@ import {
   getDriverClient,
   getDriverIdentityIssue,
   getPendingDriverTaskCompletion,
+  initializeDriverIdentity,
+  isDriverIdentityHydrated,
   isDriverIdentityProvisioned,
   registerProtectedCacheClearHandler,
   rejectForwardedDriverOffer,
@@ -1258,7 +1260,26 @@ export default function JobsScreen() {
   >(null);
   const router = useRouter();
 
-  const isProvisioned = isDriverIdentityProvisioned();
+  const [identityReady, setIdentityReady] = useState(isDriverIdentityHydrated);
+  const isProvisioned = identityReady && isDriverIdentityProvisioned();
+
+  useEffect(() => {
+    if (identityReady) return;
+    let cancelled = false;
+    // A document reload starts with empty module state even when this device
+    // has a stored session. Wait for the existing single-flight restore before
+    // deciding whether to redirect or loading protected tasks.
+    initializeDriverIdentity()
+      .catch((identityError: unknown) => {
+        if (!cancelled) setError(getErrorMessage(identityError));
+      })
+      .finally(() => {
+        if (!cancelled) setIdentityReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [identityReady]);
 
   useEffect(() => {
     const unregister = registerProtectedCacheClearHandler(() => {
@@ -1330,6 +1351,7 @@ export default function JobsScreen() {
   };
 
   useEffect(() => {
+    if (!identityReady) return;
     if (!isProvisioned) {
       setLoading(false);
       return;
@@ -1348,7 +1370,7 @@ export default function JobsScreen() {
       })
       .catch(() => loadTasks())
       .finally(() => setLoading(false));
-  }, [isProvisioned]);
+  }, [identityReady, isProvisioned]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -1495,7 +1517,7 @@ export default function JobsScreen() {
   }
 
   function renderContent() {
-    if (loading) {
+    if (!identityReady || loading) {
       return (
         <View style={styles.loadingState}>
           <ActivityIndicator size="large" color={THEME.accent} />
@@ -1626,7 +1648,7 @@ export default function JobsScreen() {
     );
   }
 
-  if (!isProvisioned) {
+  if (identityReady && !isProvisioned) {
     return <Redirect href="/onboarding" />;
   }
 
