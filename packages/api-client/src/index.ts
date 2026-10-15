@@ -1209,6 +1209,12 @@ export class ApiClient {
     return this.get<OwnedOrderRecord>(`/api/orders/${id}`);
   }
 
+  async getDriverTaskOrder(taskId: string): Promise<OwnedOrderRecord> {
+    return this.get<OwnedOrderRecord>(
+      `/api/driver/tasks/${encodeURIComponent(taskId)}/order`,
+    );
+  }
+
   async getOrderDispatchTrace(
     orderId: string,
   ): Promise<DispatchTraceLogRecord[]> {

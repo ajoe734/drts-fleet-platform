@@ -972,6 +972,22 @@ export class OwnedMobilityController {
     return toApiSuccessEnvelope(task, requestId);
   }
 
+  @Get("driver/tasks/:taskId/order")
+  @RequireRealms("system", "ops", "driver")
+  @RequireScopes("driver:read")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async getDriverTaskOrder(
+    @Param("taskId") taskId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const task = await this.assertDriverTaskAccess(taskId, identity);
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.getOrderForRead(task.orderId),
+      requestId,
+    );
+  }
+
   @Post("driver/tasks/:taskId/accept")
   @RequireRealms("system", "driver")
   @RequireScopes("driver:write")

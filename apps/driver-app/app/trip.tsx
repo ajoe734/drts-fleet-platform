@@ -1244,9 +1244,7 @@ export default function TripScreen() {
       }
 
       try {
-        const order = (await client.getOrder(
-          firstTask.orderId,
-        )) as OwnedOrderRecord;
+        const order = await client.getDriverTaskOrder(firstTask.taskId);
         setOrderDetail(order);
       } catch {
         setOrderDetail(null);
