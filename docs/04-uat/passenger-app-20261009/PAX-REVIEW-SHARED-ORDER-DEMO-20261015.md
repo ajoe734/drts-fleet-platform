@@ -5,6 +5,32 @@ Owner: Codex2. Reviewer: Codex. Accepted base:
 This is the original task's implementation and evidence record. An anchor is
 not a candidate or an acceptance result.
 
+2026-10-15 checkpoint: the external-port historical reproduction uses the same
+real tests against accepted SHA `a8d9a55dc30c6cf9d37145e4f46ac98c12e6c8b1`.
+It records two product assertion failures (production synthetic fields and
+first-capture failure), followed by passing current-source assertions.
+`ports-regression-fixed.log` records 409 passes / 6 PG skips;
+`driver-regression.log` records 542 existing Driver passes. A temporary BFF
+extraction regression (missing original CSRF helper) was found and restored
+before these passes. The finite Driver producer/storage runner still needs its
+Expo dependency aliases verified; its initial import failure is not a product
+reproduction. Hosted browser/PG and shared-dev acceptance remain pending.
+
+The hosted lane now includes the actual production Passenger build, exported
+Driver (standalone and mounted), three independent journeys, real relational
+readback and phase artifacts. It has not been executed on this VM. The explicit
+review profile uses the existing legal 1-minute scheduling configuration,
+retains future/minimum-lead checks, and waits for the requested pickup before
+starting. Normal default remains 15 minutes. Day/night tariffs and timestamps
+must reflect the real clock.
+
+Supervisor granted targeted Owned Mobility and Forwarder source repairs after
+caller diagnosis found that Ops orders/jobs and Driver task views still read
+process-local startup arrays. These are required for a peer API started before
+booking to see and act on the same committed order. The next repair preserves
+the synchronous internal interfaces and existing driver/tenant checks and
+assignment/task locking; it does not reload global state per request.
+
 ## Implementation units and evidence
 
 | Finding / acceptance                                        | Production source and change                                                                                                                                  | Before → after                                                                                       | Command / version / evidence                                                               | Pending and limits                                                                                            |

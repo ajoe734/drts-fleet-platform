@@ -4,10 +4,15 @@ export interface PassengerReviewRecord {
   notice: string;
   ride: PassengerRideAuthorityView;
   trip: {
+    taskId?: string;
     actualDistanceKm?: number;
     actualDurationSec?: number;
     startedAt?: string;
     completedAt?: string;
+  } | null;
+  consent?: {
+    contactRequested: boolean;
+    complaintCaseNo: string | null;
   } | null;
   charge: {
     paymentId: string;

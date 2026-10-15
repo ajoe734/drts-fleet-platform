@@ -18,7 +18,6 @@
  */
 
 import type { DriverLocationHeartbeatEnvelope } from "@drts/contracts";
-import { driverStorage } from "@/lib/api-client";
 
 type DriverWorkState = DriverLocationHeartbeatEnvelope["workState"];
 
@@ -100,6 +99,7 @@ export interface TrackingMarkerStore {
 
 class SecureStoreTrackingMarkerStore implements TrackingMarkerStore {
   async load(): Promise<TrackingSessionMarker | null> {
+    const { driverStorage } = await import("./api-client");
     const raw = await driverStorage.getItemAsync(TRACKING_MARKER_KEY);
     if (!raw) {
       return null;
@@ -114,6 +114,7 @@ class SecureStoreTrackingMarkerStore implements TrackingMarkerStore {
   }
 
   async save(marker: TrackingSessionMarker): Promise<void> {
+    const { driverStorage } = await import("./api-client");
     await driverStorage.setItemAsync(
       TRACKING_MARKER_KEY,
       JSON.stringify(marker),
@@ -121,6 +122,7 @@ class SecureStoreTrackingMarkerStore implements TrackingMarkerStore {
   }
 
   async clear(): Promise<void> {
+    const { driverStorage } = await import("./api-client");
     await driverStorage.deleteItemAsync(TRACKING_MARKER_KEY);
   }
 }

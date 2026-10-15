@@ -20,6 +20,7 @@ vi.mock("@drts/api-client", () => ({
 }));
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   window.sessionStorage.clear();
   external.platform.OS = "web";
 });
@@ -62,11 +63,13 @@ it("native storage selection retains the original SecureStore operations", async
   const { driverStorage } =
     await import("../../../apps/driver-app/lib/api-client");
   external.platform.OS = "ios";
+  const browserStore = window.sessionStorage;
+  vi.stubGlobal("document", undefined);
   external.get.mockResolvedValue("native-value");
   await driverStorage.setItemAsync("native-key", "native-value");
   expect(await driverStorage.getItemAsync("native-key")).toBe("native-value");
   await driverStorage.deleteItemAsync("native-key");
   expect(external.set).toHaveBeenCalledWith("native-key", "native-value");
   expect(external.remove).toHaveBeenCalledWith("native-key");
-  expect(window.sessionStorage.length).toBe(0);
+  expect(browserStore.length).toBe(0);
 });

@@ -7,7 +7,6 @@
 
 import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
-import { Platform } from "react-native";
 import {
   ApiClient,
   createDriverBearerClient,
@@ -46,16 +45,18 @@ const DRIVER_PENDING_TASK_COMPLETION_KEY = "drts.driver.pendingTaskCompletion";
 // payment state are always read from the API, never from this storage adapter.
 export const driverStorage = {
   async getItemAsync(key: string) {
-    return Platform.OS === "web"
+    return typeof window !== "undefined" && typeof document !== "undefined"
       ? window.sessionStorage.getItem(key)
       : SecureStore.getItemAsync(key);
   },
   async setItemAsync(key: string, value: string) {
-    if (Platform.OS === "web") window.sessionStorage.setItem(key, value);
+    if (typeof window !== "undefined" && typeof document !== "undefined")
+      window.sessionStorage.setItem(key, value);
     else await SecureStore.setItemAsync(key, value);
   },
   async deleteItemAsync(key: string) {
-    if (Platform.OS === "web") window.sessionStorage.removeItem(key);
+    if (typeof window !== "undefined" && typeof document !== "undefined")
+      window.sessionStorage.removeItem(key);
     else await SecureStore.deleteItemAsync(key);
   },
 };

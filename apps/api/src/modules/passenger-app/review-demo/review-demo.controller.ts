@@ -121,11 +121,25 @@ export class ReviewDemoController {
       `SELECT payment_id,status,attempt_count,retry_at,last_error_code FROM passenger.payment_charge_records WHERE order_id=$1 AND drts_passenger_id=$2`,
       [id, account.drtsPassengerId],
     );
+    const consent = await this.database.query(
+      "SELECT contact_requested,complaint_case_no FROM passenger.rating_consents WHERE order_id=$1 AND drts_passenger_id=$2",
+      [id, account.drtsPassengerId],
+    );
+    const actual = trip.rows[0]?.record;
     return toApiSuccessEnvelope({
       notice: "演練紀錄・非正式憑證。外部資格、圖資、GPS、付款及通知均為模擬。",
       ride,
-      trip: trip.rows[0]?.record ?? null,
+      trip: actual
+        ? {
+            taskId: actual.taskId,
+            actualDistanceKm: actual.actualDistanceKm,
+            actualDurationSec: actual.actualDurationSec,
+            startedAt: actual.startedAt,
+            completedAt: actual.completedAt,
+          }
+        : null,
       charge: charge.rows[0] ?? null,
+      consent: consent.rows[0] ?? null,
     });
   }
 }

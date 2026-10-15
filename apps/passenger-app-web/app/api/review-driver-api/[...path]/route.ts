@@ -13,11 +13,15 @@ async function forward(
   if (path.some((s) => !/^[A-Za-z0-9_-]+$/.test(s)))
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   const route = path.join("/");
-  if (
-    !/^api\/(?:driver(?:\/|$)|auth\/driver\/device(?:\/|$)|orders\/[A-Za-z0-9_-]+$)/.test(
+  const driverRoute =
+    /^api\/(?:driver(?:\/|$)|auth\/driver\/device(?:\/|$)|orders\/[A-Za-z0-9_-]+$)/.test(
       route,
-    )
-  )
+    );
+  const sharedRead =
+    request.method === "GET" &&
+    ["api/feature-flags", "api/identity/context"].includes(route);
+  const geoRoute = /^api\/geo\/(?:route|resolve|reverse|search)$/.test(route);
+  if (!driverRoute && !sharedRead && !geoRoute)
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   const target = new URL(
     route,

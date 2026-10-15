@@ -659,8 +659,20 @@ jobs:
           pnpm exec playwright test -c playwright.tenant-map-booking.config.ts
           pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts
           pnpm exec playwright test -c playwright.concierge-map-booking.config.ts
+          # Build the exact production Driver mount plus the existing standalone
+          # Driver Web surface. Neither export starts a dev server on this VM.
+          EXPO_PUBLIC_API_URL=/api/review-driver-api \
+            EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH=/review-driver \
+            pnpm --filter @drts/driver-app exec expo export -p web --output-dir dist
+          mkdir -p apps/passenger-app-web/public/review-driver
+          cp -R apps/driver-app/dist/. apps/passenger-app-web/public/review-driver/
           pnpm --filter @drts/passenger-app-web... build
           pnpm exec playwright test -c playwright.passenger-demo.config.ts
+          EXPO_PUBLIC_API_URL=http://127.0.0.1:3001 \
+            EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH= \
+            pnpm --filter @drts/driver-app exec expo export -p web --output-dir dist
+          pnpm exec vitest run --config tests/unit/pax-review-shared-order-demo-20261015/driver-vitest.config.ts
+          pnpm exec playwright test -c playwright.pax-review-shared-order.config.ts
       - name: Upload passenger demonstration browser results
         if: always()
         uses: actions/upload-artifact@v4
@@ -671,6 +683,15 @@ jobs:
             .artifacts/passenger-demo-report
           include-hidden-files: true
           if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload new shared-order rehearsal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pax-review-shared-order-${{ github.run_id }}
+          path: .artifacts/pax-review-shared-order
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 14
 
   e2e:

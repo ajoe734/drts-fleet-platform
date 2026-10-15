@@ -5,10 +5,13 @@ import type {
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import type { TaskManagerTaskBody } from "expo-task-manager";
-import { Platform } from "react-native";
 import { PAX_REVIEW_TRACK } from "@drts/api-client";
 
-import { formatDriverError, sanitizeLogMessage } from "@/lib/api-client";
+import {
+  formatDriverError,
+  sanitizeLogMessage,
+  isDriverIdentityProvisioned,
+} from "@/lib/api-client";
 import {
   enqueueDriverLocationEvent,
   flushDriverLocationQueue,
@@ -70,9 +73,11 @@ let lastHeartbeatQueuedCoord: { latitude: number; longitude: number } | null =
 let appliedBackgroundCadenceKey: string | null = null;
 
 const reviewLocation = () =>
-  Platform.OS === "web" && process.env.EXPO_PUBLIC_REVIEW_DEMO === "true";
+  typeof document !== "undefined" &&
+  process.env.EXPO_PUBLIC_REVIEW_DEMO === "true";
 let reviewPosition = 0;
 let reviewPaused = false;
+let reviewSupplySentAt = 0;
 
 /** External position producer only: samples go through the very same listeners,
  * trip tracker, cadence, offline queue and heartbeat ingestion as Expo GPS.
@@ -89,13 +94,9 @@ function installReviewLocationProducer() {
   panel.id = "review-gps";
   panel.setAttribute("aria-label", "演練模擬 GPS");
   Object.assign(panel.style, {
-    position: "fixed",
-    bottom: "0",
-    right: "0",
-    zIndex: "9999",
     background: "#fff3cd",
     padding: "12px",
-    maxWidth: "340px",
+    maxWidth: "100%",
     color: "#17202a",
     fontSize: "13px",
   });
@@ -112,7 +113,32 @@ function installReviewLocationProducer() {
   document.body.append(panel);
   const tick = () => {
     state.textContent = `同單任務：${activeTaskId ?? "等待接單"}；座標 ${reviewPosition + 1}/${PAX_REVIEW_TRACK.length}${reviewPaused ? "（已停止；等待真 freshness 過期）" : ""}`;
-    if (reviewPaused || !activeTaskId || transportMode !== "foreground") return;
+    if (reviewPaused) return;
+    if (!activeTaskId) {
+      // Foreground simulated supply position, using the registered driver's
+      // normal device-bound heartbeat. This does not mark the driver online or
+      // grant the OS/background capability required by the online UI.
+      if (
+        !isDriverIdentityProvisioned() ||
+        Date.now() - reviewSupplySentAt < 30_000
+      )
+        return;
+      reviewSupplySentAt = Date.now();
+      const point = PAX_REVIEW_TRACK[0]!;
+      const update = {
+        latitude: point.lat,
+        longitude: point.lng,
+        accuracyM: 5,
+        recordedAt: new Date().toISOString(),
+      };
+      emitLocationUpdate(update);
+      queueHeartbeat(update, "foreground", {
+        preserveKeyEvent: true,
+        workStateOverride: "available",
+      });
+      return;
+    }
+    if (transportMode !== "foreground") return;
     if (activeTaskStatus === "on_trip")
       reviewPosition = Math.min(
         reviewPosition + 1,

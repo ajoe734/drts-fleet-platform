@@ -8,6 +8,7 @@ vi.mock("expo-location", () => ({
 }));
 vi.mock("expo-task-manager", () => ({ isTaskDefined: () => true }));
 vi.mock("@/lib/api-client", () => ({
+  isDriverIdentityProvisioned: () => true,
   formatDriverError: () => "location port error",
   sanitizeLogMessage: (value: string) => value,
 }));
