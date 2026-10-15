@@ -881,9 +881,33 @@ export class FleetPartnerCaseService {
         .getComplaintTimeline(caseItem.caseNo)
         .at(-1)?.entryId;
       await this.complaintService.awaitSettlementPersistence(caseItem.caseNo);
+    } else if (this.complaintService) {
+      // Synchronize to authoritative ComplaintService timeline before this
+      // reply is published: a failed canonical write must not leave a
+      // deduplicated-but-never-recorded receipt behind for an idempotency
+      // retry to find.
+      try {
+        this.complaintService.addComplaintCaseNote(
+          caseItem.caseNo,
+          { note: notePayload },
+          requestId,
+        );
+        await this.complaintService.awaitSettlementPersistence(
+          caseItem.caseNo,
+        );
+      } catch (error) {
+        if (error instanceof ApiRequestError && error.code === "NOT_FOUND") {
+          // ComplaintService has no record of this caseNo; the fleet-side
+          // timeline below already holds the authoritative record.
+        } else {
+          // A real canonical write failure must not be swallowed as success.
+          throw error;
+        }
+      }
     }
 
-    // Publish a settlement receipt only after its CRM note has committed.
+    // Publish a reply receipt only after its CRM note has committed (or is
+    // known absent from ComplaintService).
     this.replies.set(replyId, replyRecord);
     if (idempotencyKey) {
       this.repliesByIdempotencyKey.set(
@@ -914,28 +938,6 @@ export class FleetPartnerCaseService {
     const updatedTl = [...currentTl, timelineEntry];
     this.timelines.set(caseItem.id, updatedTl);
     this.timelines.set(caseItem.caseNo, updatedTl);
-
-    // Synchronize to authoritative ComplaintService timeline so Ops can read it immediately
-    if (this.complaintService && caseItem.cat !== "settlement_dispute") {
-      try {
-        this.complaintService.addComplaintCaseNote(
-          caseItem.caseNo,
-          { note: notePayload },
-          requestId,
-        );
-        await this.complaintService.awaitSettlementPersistence(
-          caseItem.caseNo,
-        );
-      } catch (error) {
-        if (error instanceof ApiRequestError && error.code === "NOT_FOUND") {
-          // ComplaintService has no record of this caseNo; the fleet-side
-          // timeline above already holds the authoritative record.
-        } else {
-          // A real canonical write failure must not be swallowed as success.
-          throw error;
-        }
-      }
-    }
 
     // Record audit
     if (this.auditNotificationService) {

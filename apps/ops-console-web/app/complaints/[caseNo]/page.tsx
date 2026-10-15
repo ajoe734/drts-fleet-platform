@@ -5,16 +5,16 @@ import type {
   ComplaintCaseRecord,
   ComplaintExportViewRecord,
 } from "@drts/contracts";
-import { getServerOpsClient } from "@/lib/api-client.server";
+import { getServerOpsClient } from "../../../lib/api-client.server";
 import {
   CanvasActivityFeed,
   CanvasSequenceRail,
   type CanvasActivityItem,
   type CanvasSequenceItem,
-} from "@/lib/canvas-workflow";
-import { formatOpsCodeLabel } from "@/lib/localized-labels";
-import { getServerLocale } from "@/lib/server-locale";
-import type { Locale } from "@/lib/translations";
+} from "../../../lib/canvas-workflow";
+import { formatOpsCodeLabel } from "../../../lib/localized-labels";
+import { getServerLocale } from "../../../lib/server-locale";
+import type { Locale } from "../../../lib/translations";
 import {
   CanvasBanner as Banner,
   CanvasCard as Card,

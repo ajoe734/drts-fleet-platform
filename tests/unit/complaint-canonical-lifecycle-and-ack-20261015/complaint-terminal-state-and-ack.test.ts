@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { ComplaintController } from "../../../apps/api/src/modules/complaint/complaint.controller";
-import type { ComplaintRepository } from "../../../apps/api/src/modules/complaint/complaint.repository";
+import {
+  ComplaintCommitOutcomeUnknownError,
+  type ComplaintRepository,
+} from "../../../apps/api/src/modules/complaint/complaint.repository";
 import { ComplaintService } from "../../../apps/api/src/modules/complaint/complaint.service";
 import { IncidentService } from "../../../apps/api/src/modules/incident/incident.service";
 
@@ -477,5 +480,153 @@ describe("C045-F3: ordinary complaint case + timeline writes commit atomically",
     expect(queries).toContain("ROLLBACK");
     expect(queries).not.toContain("COMMIT");
     expect(client.release).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("C045-F3: ComplaintCommitOutcomeUnknownError retry resends instead of allocating a second case or no-opping", () => {
+  function deferred() {
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<void>((done, fail) => {
+      resolve = done;
+      reject = fail;
+    });
+    return { promise, resolve, reject };
+  }
+
+  function fixtureWithGatedRepository() {
+    const writeGates: ReturnType<typeof deferred>[] = [];
+    const persistChanges = vi.fn(async () => {
+      const gate = writeGates.shift();
+      if (gate) await gate.promise;
+    });
+    const reportPersistenceFailure = vi.fn();
+    const loadSettlementState = vi.fn(async () => ({
+      complaintCases: [],
+      complaintTimelines: [],
+    }));
+    const repository = {
+      isEnabled: () => true,
+      persistChanges,
+      reportPersistenceFailure,
+      loadSettlementState,
+    } as unknown as ComplaintRepository;
+    const audit = new AuditNotificationService();
+    const complaintService = new ComplaintService(audit, repository);
+    return {
+      complaintService,
+      audit,
+      persistChanges,
+      pauseWrite() {
+        const gate = deferred();
+        writeGates.push(gate);
+        return gate;
+      },
+    };
+  }
+
+  it("retries createComplaintCase with the same command after an uncertain-commit create, reusing the pending caseNo instead of inserting a second case", async () => {
+    const context = fixtureWithGatedRepository();
+    const command = {
+      caseSource: "ops" as const,
+      category: "driver_service" as const,
+      severity: "normal" as const,
+      description: "Uncertain-commit create retry regression",
+    };
+
+    const gate = context.pauseWrite();
+    const firstAttempt = context.complaintService.createComplaintCase(command);
+    const outcome = context.complaintService
+      .awaitSettlementPersistence(firstAttempt.caseNo)
+      .catch((error: unknown) => error);
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(1),
+    );
+    const failure = new ComplaintCommitOutcomeUnknownError(
+      new Error("create COMMIT outcome unknown"),
+    );
+    gate.reject(failure);
+    expect(await outcome).toBe(failure);
+
+    // The uncertain case is not rolled back (its commit may have actually
+    // landed), and a retry with the same command must reuse its caseNo
+    // rather than minting a second one.
+    expect(context.complaintService.listComplaintCases()).toHaveLength(1);
+
+    const retryGate = context.pauseWrite();
+    const retryAttempt = context.complaintService.createComplaintCase(command);
+    expect(retryAttempt.caseNo).toBe(firstAttempt.caseNo);
+    retryGate.resolve();
+    await context.complaintService.awaitSettlementPersistence(
+      retryAttempt.caseNo,
+    );
+
+    expect(context.persistChanges).toHaveBeenCalledTimes(2);
+    expect(context.complaintService.listComplaintCases()).toHaveLength(1);
+    expect(
+      context.complaintService.getComplaintTimeline(retryAttempt.caseNo),
+    ).toHaveLength(1);
+  });
+
+  it("retries resolveComplaintCase on an uncertain-commit case instead of no-opping on its optimistic 'resolved' readback", async () => {
+    const context = fixtureWithGatedRepository();
+    const complaintCase = context.complaintService.createComplaintCase({
+      caseSource: "ops",
+      category: "driver_service",
+      severity: "normal",
+      description: "Uncertain-commit resolve retry regression",
+    });
+    await context.complaintService.awaitSettlementPersistence(
+      complaintCase.caseNo,
+    );
+
+    const gate = context.pauseWrite();
+    const firstAttempt = context.complaintService.resolveComplaintCase(
+      complaintCase.caseNo,
+      {
+        resolutionCode: "resolved_driver_warning",
+        closingNote: "First attempt",
+      },
+    );
+    const outcome = context.complaintService
+      .awaitSettlementPersistence(complaintCase.caseNo)
+      .catch((error: unknown) => error);
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(2),
+    );
+    const failure = new ComplaintCommitOutcomeUnknownError(
+      new Error("resolve COMMIT outcome unknown"),
+    );
+    gate.reject(failure);
+    expect(await outcome).toBe(failure);
+
+    // The optimistic "resolved" status is not rolled back for an unknown
+    // commit outcome.
+    expect(firstAttempt.status).toBe("resolved");
+    expect(
+      context.complaintService.getComplaintCase(complaintCase.caseNo).status,
+    ).toBe("resolved");
+
+    const retryGate = context.pauseWrite();
+    const retry = context.complaintService.resolveComplaintCase(
+      complaintCase.caseNo,
+      {
+        resolutionCode: "resolved_driver_warning",
+        closingNote: "Retry after uncertain commit",
+      },
+    );
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(3),
+    );
+    retryGate.resolve();
+    await context.complaintService.awaitSettlementPersistence(
+      complaintCase.caseNo,
+    );
+
+    expect(retry.status).toBe("resolved");
+    const logs = context.audit.listAuditLogs();
+    expect(
+      logs.filter((log) => log.actionName === "resolve_complaint_case"),
+    ).toHaveLength(1);
   });
 });

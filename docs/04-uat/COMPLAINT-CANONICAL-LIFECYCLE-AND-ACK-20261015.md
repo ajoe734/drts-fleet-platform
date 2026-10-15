@@ -147,3 +147,96 @@ $ git diff --stat origin/dev -- tests/unit/fleet-statement-decisions-20261013/se
 - `tests/unit/fleet-statement-decisions-20261013/settlement-persistence.test.ts`（**還原**成與 `origin/dev` 相同，非修改；見第 5 節）
 
 本輪**未**改動 `apps/api/src/modules/complaint/complaint.controller.ts`、`apps/api/src/modules/callcenter/callcenter.controller.ts`、`apps/api/src/modules/incident/incident.controller.ts`、`apps/api/src/modules/fleet-partner/fleet-partner-case.service.ts`（上一輪已在這些檔案補上 `awaitSettlementPersistence` 呼叫，經檢視仍然正確，F3 本輪修復完全由 `complaint.service.ts`/`complaint.repository.ts` 的泛化覆蓋，不需再動這些呼叫端）；`tests/unit/system-remediation/sr-fleet-case-001/sr-fleet-case-001.test.ts`、`tests/unit/complaint.test.ts`（上一輪已補好的 mock，本輪重跑作為回歸證據，未再修改）。
+
+## 8. 第二次 Reopen round（`174c5d35b` 之後）：4 項具體缺口修復
+
+Reopen candidate `174c5d35b02c` 指出 4 個具體缺口（詳見本次 dispatch 的 Short Summary），逐項修復如下：
+
+### 8.1 `apps/ops-console-web/app/complaints/page.tsx` / `[caseNo]/page.tsx`：CI 下的 bare `pnpm run test:unit` 匯入失敗
+
+根因：`174c5d35b` 之前把這兩個檔案的 `@/lib/...`、`@/components/ops-assistant` 改回了 `@/` alias 寫法，但 root `vitest.config.ts` 的 `@` alias 指向 `apps/tenant-console-web`，不是 `apps/ops-console-web`；CI 的 `pnpm run test:unit` 用的正是 root 設定（無 `--config`），導致 `complaint-ops-ui-actions.test.tsx` 匯入 `page.tsx` 時解析到錯誤的目錄而失敗。
+
+修法：比照同目錄既有的 `apps/ops-console-web/app/reports/page.tsx`，把兩個檔案的 `@/...` 全部改成相對路徑（`page.tsx` 用 `../../lib/...`／`../../components/ops-assistant`；`[caseNo]/page.tsx` 多一層用 `../../../lib/...`）。確認改完後兩個檔案已無任何 `@/` 匯入。
+
+驗證：`pnpm exec vitest run tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-ops-ui-actions.test.tsx`（**不帶** `--config`，與 CI 的 bare 呼叫一致）→ 2/2 passed。
+
+### 8.2 `tests/unit/fleet-statement-decisions-20261013/settlement-persistence.test.ts`：重新套用 reviewer 授權的調整（並修正一處斷言）
+
+根因：`174c5d35b` 把這個 write_scopes 外檔案整個還原回 `origin/dev`，但 `origin/dev` 版本的 2 個 ordinary-case 測試斷言的是「`persistChanges` 立刻 resolve／舊版 best-effort 行為」，與本任務已修好的「ordinary 寫入也走 `awaitSettlementPersistence` 誠實等待」行為結構性衝突，會在 `await ...awaitSettlementPersistence(...)` 卡在尚未決議的 gate 上逾時（2 個案例皆然）。
+
+本次 reviewer 在 task brief 中明確重新授權比照 `66f3a4c4c908` 的調整手法（先 `gate.reject`/`gate.resolve` 再 `await`，而非反過來），但額外要求修正一處斷言：`preserves ordinary complaint synchronous mutation ...` 案例裡，`gate.reject(failure)` 之後原本斷言 `under_investigation`（視為「樂觀變更保留不回滾」），改為斷言 `new`（因為 `174c5d35b` 的 F3 修復已讓**失敗**的 ordinary 寫入明確回滾，見本文件 2.2 節第 1 點），以符合現行程式碼的真實行為。另一個案例（Callcenter ordinary transfer 改為「commit 前維持 pending」）照搬 `66f3a4c4c908` 版本，未再變更斷言。
+
+驗證：`pnpm exec vitest run tests/unit/fleet-statement-decisions-20261013/settlement-persistence.test.ts` → 24/24 passed（含這 2 個調整後案例）。
+
+### 8.3 `apps/api/src/modules/fleet-partner/fleet-partner-case.service.ts`：`createReply` 寫入順序
+
+根因：`createReply`（887-938 行附近）對 ordinary（非 `settlement_dispute`）案件的回覆，`this.replies.set`／`this.repliesByIdempotencyKey.set`／`this.timelines.set` 這三個本地副本寫入，發生在呼叫 `complaintService.addComplaintCaseNote` + `awaitSettlementPersistence` 之前；當 canonical 寫入失敗時，這三個副本已經寫入成功，導致 `getCaseTimeline` 仍回傳這筆從未同步成功的回覆，且用同一個 `idempotencyKey` 重送時會在 `repliesByIdempotencyKey` 命中「假的已存在」紀錄，回傳 `deduplicated: true` 卻從未真正寫入 `ComplaintService`。
+
+修法：把非 settlement 的 `complaintService.addComplaintCaseNote` + `awaitSettlementPersistence` 同步區塊，移到 `this.replies.set` 等三個本地寫入**之前**（與既有 `settlement_dispute` 分支的順序一致，改成 `if (settlement) {...} else if (this.complaintService) {...}`），使本地回覆/去重記錄只在 canonical 寫入確認（或確認無此 caseNo）之後才存在。
+
+新增回歸測試：`tests/unit/system-remediation/sr-fleet-case-001/sr-fleet-case-001.test.ts` 新增一案例，驗證失敗的 ordinary 回覆不會出現在 `getCaseTimeline` 的 readback，且用同一 `idempotencyKey` 重送會真正再呼叫一次 `addComplaintCaseNote`（而非回傳假的 `deduplicated: true`）。
+
+驗證：`pnpm exec vitest run tests/unit/system-remediation/sr-fleet-case-001/sr-fleet-case-001.test.ts` → 21/21 passed。
+
+### 8.4 `apps/api/src/modules/complaint/complaint.service.ts`：`ComplaintCommitOutcomeUnknownError` 重試
+
+根因：COMMIT 本身拋出 `ComplaintCommitOutcomeUnknownError` 時，依設計不可回滾（commit 可能已經實際落地）；但重試 `createComplaintCase`/`transferCallToComplaint`（經由同一個 `createComplaintCase`）同一個 command 時，原本每次都用 `nextCaseNo`/新 `randomUUID` 重新配置案號與 timeline entryId，若前次其實已經 commit，會在資料庫插入第二筆重複案件；而重試 `resolveComplaintCase`/`closeComplaintCase`/`reopenComplaintCase`/`escalateToIncident` 時，樂觀的本地狀態已經「看起來像」目標狀態（因為沒有回滾），導致既有的冪等早退（resolve/close 已是目標狀態時直接回傳快取）或狀態機檢查（reopen 409 `COMPLAINT_NOT_CLOSED`、escalate 409 `COMPLAINT_ALREADY_ESCALATED`）擋下重試，從未真正再呼叫一次 `persistChanges`。
+
+修法：新增 `pendingUncertainCommits`（keyed by `caseNo`，記錄 `action`/原始 `complaintCase`/`complaintTimelines`/`rollback` 閉包，create 類再加存 `matchCommand`）；`persistChanges` 在確定（非 unknown）結果時清掉對應 caseNo 的紀錄，在 `ComplaintCommitOutcomeUnknownError` 時才寫入。5 個 mutation 的既有「已是目標狀態」/「狀態機拒絕」分支，改為先檢查是否有符合的 pending 紀錄：有則呼叫新的 `retryUncertainComplaintWrite(pending, onConfirmed)`，重用**同一個** case 快照與 timeline entryId 重新呼叫 `persistChanges`（靠 repository 既有的 `ON CONFLICT DO UPDATE` 達成冪等 upsert），沒有則維持原本行為不變；`createComplaintCase` 額外用 `findPendingUncertainCreate` 比對 command 內容（`stableStringify` 排序鍵值後逐欄比較）找出對應的 pending create，命中則重用其 caseNo 而非配置新案號。
+
+新增回歸測試：`tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-terminal-state-and-ack.test.ts` 新增一個 describe 區塊，涵蓋（a）`createComplaintCase` 同 command 重試重用同一案號、未插入第二筆案件；（b）`resolveComplaintCase` 在 unknown-commit 後重試會真的再呼叫一次 `persistChanges` 並在成功後才記一次稽核（而非 0 次或 2 次）。
+
+驗證：`pnpm exec vitest run tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-terminal-state-and-ack.test.ts` → 13/13 passed（含原 11 個 + 本輪新增 2 個）。
+
+### 8.5 本輪型別檢查與整體回歸
+
+```bash
+$ pnpm exec tsc --noEmit -p apps/api/tsconfig.json          # exit 0，complaint/fleet-partner 模組及全 apps/api 皆 0 錯誤
+$ pnpm exec tsc --noEmit -p apps/ops-console-web/tsconfig.json  # exit 0
+$ pnpm exec eslint apps/api/src/modules/complaint/complaint.service.ts \
+    apps/api/src/modules/fleet-partner/fleet-partner-case.service.ts \
+    apps/ops-console-web/app/complaints/page.tsx \
+    "apps/ops-console-web/app/complaints/[caseNo]/page.tsx"  # exit 0，無警告
+
+$ pnpm exec vitest run \
+    tests/unit/complaint.test.ts \
+    apps/api/tests/unit/complaint-taxonomy-reopen-sla.test.ts \
+    apps/api/tests/unit/complaint-incident-escalation.test.ts \
+    tests/unit/system-remediation/sr-qa-call-001/c045-complaint-lifecycle-sla.test.ts \
+    tests/unit/system-remediation/sr-fleet-case-001/sr-fleet-case-001.test.ts \
+    tests/unit/complaint-canonical-lifecycle-and-ack-20261015/ \
+    tests/unit/fleet-statement-decisions-20261013/settlement-persistence.test.ts
+ Test Files  6 passed (6)
+      Tests  73 passed (73)
+(exit 0)
+
+# 更廣域回歸（incident/fleet/passenger/reporting），確認本輪 service 層改動未破壞既有行為
+$ pnpm exec vitest run \
+    apps/api/tests/unit/incident.controller.test.ts \
+    tests/unit/fleet-document-upload.test.ts \
+    tests/unit/fleet-statement-decisions-20261013/ \
+    tests/unit/pax-booking-history-20261009/booking-access.test.ts \
+    tests/unit/pax-qa-20261009/receipt-complaint-http.test.ts \
+    tests/unit/pax-receipt-complaint-20261009/ \
+    tests/unit/reporting-filing.test.ts \
+    tests/unit/system-remediation/sr-qa-call-001/c043-callcenter-workflow.test.ts \
+    tests/unit/system-remediation/sr-qa-supply-001/sr-qa-supply-001-regression-c067-c069-c070.test.ts \
+    tests/unit/system-remediation/sr-release-001/
+ Test Files  19 passed | 1 skipped (20)
+      Tests  368 passed | 17 skipped (385)
+(exit 0；skipped 為需要 DATABASE_URL/postgres 的整合測試；檔案/案例數較前次記錄略多，
+ 因分支與 origin/dev 分歧期間這些目錄內由其他並行任務新增的既有測試一併被納入，
+ 均為既有 passing 案例，非本任務新增)
+```
+
+以上為本次 session 獨立重跑（非沿用前一次 session 未 commit 時的記錄）的結果，與前次記錄的通過/失敗結論一致；tsc 恢復乾淨，未再出現先前記錄的 `iap-subject.adapter.ts` 既有噪音（write_scopes 外，與本任務無關）。
+
+本輪（8.1-8.4）改動檔案，皆在 write_scopes 內（`tests/unit/fleet-statement-decisions-20261013/settlement-persistence.test.ts` 除外，依本次 task brief 內 reviewer 明文授權調整）：
+
+- `apps/ops-console-web/app/complaints/page.tsx`、`.../[caseNo]/page.tsx`（8.1）
+- `tests/unit/fleet-statement-decisions-20261013/settlement-persistence.test.ts`（8.2，reviewer 授權調整，非擅自修改）
+- `apps/api/src/modules/fleet-partner/fleet-partner-case.service.ts`（8.3）
+- `tests/unit/system-remediation/sr-fleet-case-001/sr-fleet-case-001.test.ts`（8.3 回歸測試）
+- `apps/api/src/modules/complaint/complaint.service.ts`（8.4）
+- `tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-terminal-state-and-ack.test.ts`（8.4 回歸測試）
+- 本文件（8 節）

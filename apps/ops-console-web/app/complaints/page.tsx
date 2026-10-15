@@ -44,14 +44,14 @@ import {
   COMPLAINT_CATEGORIES,
   COMPLAINT_CATEGORY_VALID_RESOLUTIONS,
 } from "@drts/contracts";
-import { getOpsClient } from "@/lib/api-client";
+import { getOpsClient } from "../../lib/api-client";
 import {
   useAssistantActionBridgeRegistration,
   useAssistantSelection,
-} from "@/components/ops-assistant";
-import { useTranslation } from "@/lib/i18n";
+} from "../../components/ops-assistant";
+import { useTranslation } from "../../lib/i18n";
 import { createIdempotencyKey } from "@drts/api-client";
-import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import { formatOpsCodeLabel, getOpsLabel } from "../../lib/localized-labels";
 
 // ── canvas theme + per-page operating context ──────────────────────────────
 const theme = buildCanvasTheme({
