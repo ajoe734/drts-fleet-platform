@@ -34,6 +34,118 @@ function serviceFor(
 }
 
 describe("C112 durable commands and first in-flight restart", () => {
+  it.each(["test", "publish"] as const)(
+    "%s preparation waits for the pending metadata ACK",
+    async (kind) => {
+      const p = persistenceHarness();
+      const { service, fetcher } = serviceFor(p.repository);
+      const endpoint = await service.createWebhookEndpoint(tenantId, command);
+      await service.sendTestWebhook(tenantId, {
+        webhookId: endpoint.webhookId,
+      });
+      let releaseCommit!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        releaseCommit = resolve;
+      });
+      p.holdCommit(() => gate);
+      const editing = service.updateWebhookEndpoint(
+        tenantId,
+        endpoint.webhookId,
+        {
+          url: command.url + "/pending-config",
+        },
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+      const beginsBefore = p.query.mock.calls.filter(
+        ([sql]) => sql === "BEGIN",
+      ).length;
+      const preparing =
+        kind === "test"
+          ? service.sendTestWebhook(tenantId, { webhookId: endpoint.webhookId })
+          : service.publishWebhookEvent(tenantId, {
+              eventType: "dispatch.assigned",
+              data: { orderId: "pending-metadata" },
+            });
+      await new Promise((resolve) => setImmediate(resolve));
+      const beginsAfter = p.query.mock.calls.filter(
+        ([sql]) => sql === "BEGIN",
+      ).length;
+      releaseCommit();
+      const results = await Promise.allSettled([editing, preparing]);
+      p.holdCommit();
+      expect(beginsAfter).toBe(beginsBefore);
+      expect(results.map((result) => result.status)).toEqual([
+        "fulfilled",
+        "fulfilled",
+      ]);
+      expect(service.listWebhookEndpoints(tenantId)[0]?.url).toBe(
+        command.url + "/pending-config",
+      );
+      expect((await p.repository.loadState()).webhookEndpoints[0]?.url).toBe(
+        command.url + "/pending-config",
+      );
+      if (kind === "test")
+        expect((fetcher.mock.calls as unknown[][]).at(-1)?.[0]).toBe(
+          command.url + "/pending-config",
+        );
+    },
+  );
+
+  it("a completed HTTP test waits for a pending configuration ACK before applying its outcome", async () => {
+    const p = persistenceHarness();
+    const { service, fetcher } = serviceFor(p.repository);
+    const endpoint = await service.createWebhookEndpoint(tenantId, command);
+    let resolveHttp!: (result: { ok: boolean; status: number }) => void;
+    fetcher.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveHttp = resolve;
+        }),
+    );
+    const testing = service.sendTestWebhook(tenantId, {
+      webhookId: endpoint.webhookId,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    let releaseCommit!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    p.holdCommit(() => gate);
+    const editing = service.updateWebhookEndpoint(
+      tenantId,
+      endpoint.webhookId,
+      {
+        url: command.url + "/pending-config",
+      },
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    const beginsBeforeOutcome = p.query.mock.calls.filter(
+      ([sql]) => sql === "BEGIN",
+    ).length;
+    resolveHttp({ ok: true, status: 204 });
+    await new Promise((resolve) => setImmediate(resolve));
+    const beginsAfterOutcome = p.query.mock.calls.filter(
+      ([sql]) => sql === "BEGIN",
+    ).length;
+    // Drain both commands even on a regression: no background checks or promises.
+    releaseCommit();
+    const results = await Promise.allSettled([editing, testing]);
+    p.holdCommit();
+    expect(beginsAfterOutcome).toBe(beginsBeforeOutcome);
+    expect(results.map((result) => result.status)).toEqual([
+      "fulfilled",
+      "fulfilled",
+    ]);
+    expect(service.listWebhookEndpoints(tenantId)[0]).toMatchObject({
+      url: command.url + "/pending-config",
+      status: "test_pending",
+    });
+    expect((await p.repository.loadState()).webhookEndpoints[0]).toMatchObject({
+      url: command.url + "/pending-config",
+      status: "test_pending",
+    });
+  });
+
   it("an old successful test cannot activate or restore configuration edited while HTTP was in flight", async () => {
     const { service, fetcher } = serviceFor();
     const endpoint = await service.createWebhookEndpoint(tenantId, command);
