@@ -275,7 +275,8 @@ describe("P5-PAX-001 passenger token secrecy", () => {
     // so everything except the per-request trace id must match.
     const withoutTraceId = (envelope: unknown) => {
       const { error } = envelope as { error: Record<string, unknown> };
-      const { traceId: _traceId, ...rest } = error;
+      const rest = { ...error };
+      delete rest.traceId;
       return rest;
     };
     expect(withoutTraceId(expiredEnvelope)).toEqual(

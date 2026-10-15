@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { once } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
+import type { MessageEvent as NestMessageEvent } from "../../../apps/api/node_modules/@nestjs/common";
 import type { PassengerRideSseEventEnvelope } from "@drts/contracts";
 import { subscribePassengerRideAuthority } from "../../../apps/passenger-app-web/lib/ride/passenger-live";
 import {
@@ -63,7 +64,7 @@ it("first-party production cancellation emits a named Nest frame received by the
       decodeNativePassengerRideEvent(JSON.parse(frame.data), orderId),
     );
   });
-  const events: { data: unknown; type?: string; retry?: number }[] = [];
+  const events: NestMessageEvent[] = [];
   const subscription = f.multi
     .streamTrustedPassengerEvents(orderId, OWNER)
     .subscribe((event) => events.push(event));
@@ -83,7 +84,7 @@ it("first-party production cancellation emits a named Nest frame received by the
     expect(native).toEqual(web);
     expect(bytes).toContain("event: trip_cancelled\n");
     expect(bytes).toContain("retry: 3000\n");
-    expect(web[0].data.order).toMatchObject({ orderId, status: "cancelled" });
+    expect(web[0]!.data.order).toMatchObject({ orderId, status: "cancelled" });
   } finally {
     subscription.unsubscribe();
     closeWeb();
@@ -178,14 +179,14 @@ it("Native reconnect re-reads authority, accepts a restarted instance and fences
   };
   try {
     await stream.start();
-    await deliver(requests[0], 41);
-    const obsolete = requests[0].onprogress;
+    await deliver(requests[0]!, 41);
+    const obsolete = requests[0]!.onprogress;
     await stream.reconnect();
     expect(getRide).toHaveBeenCalledTimes(2);
-    await deliver(requests[1], 1);
-    await deliver(requests[1], 1);
+    await deliver(requests[1]!, 1);
+    await deliver(requests[1]!, 1);
     obsolete?.();
-    await deliver(requests[1], 2);
+    await deliver(requests[1]!, 2);
     expect(versions).toEqual([41, 1, 2]);
   } finally {
     stream.stop();

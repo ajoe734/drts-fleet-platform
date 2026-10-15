@@ -80,7 +80,18 @@ it.each([
     // the hosted PG companion exercises the actual writer and transaction rules.
     const persist = vi
       .spyOn(f.repository, "persistPassengerRating")
-      .mockImplementation(async (rating) => ({ rating, summary: null }));
+      .mockImplementation(async (rating) => ({
+        rating,
+        summary: {
+          driverId: rating.driverId,
+          displayState: "rated",
+          averageRating: rating.score,
+          ratingCount: 1,
+          lastRatedAt: rating.submittedAt,
+          aggregateVersion: 1,
+          calculatedAt: rating.submittedAt,
+        },
+      }));
     await expect(
       f.service.submitTrustedPassengerRating(
         f.order.orderId,
