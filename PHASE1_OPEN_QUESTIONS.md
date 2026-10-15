@@ -4,6 +4,34 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
+### Q-PAX-DESIGN-V2-20261015 — AU-04 source supplement
+
+The original design specification already requires AU-04 to show the AU-02
+states: empty, format error, sending and rate limited. Source and imported
+AU-04 at reviewed `8e20b183098674e75fe4ad2924f3b92dc88718c3` and owner evidence
+anchor `2ebdcae50aa7c64f6a21ce0f2ef2a6f72aadd53e` contain only filled and format
+error frames. SRC-AU04 remains OPEN; referring to AU-02 in the board description
+does not deliver those missing Email frames. No acceptance scope cut is approved.
+
+Supervisor/Claude must coordinate the original interactive Claude Design source
+operator to supply actual empty/sending/rate-limited Email frames, preserving
+the existing states and the other 27 boards. Deliver a versioned AU-04 export,
+consistent canvas.json if dimensions/index change, and old/new hashes. Original
+owner Codex then imports those bytes unchanged on PR #2657, updates the original
+UAT SRC-AU04/README, reruns the import/state/policy checks and submits a new SHA
+to parent reviewer Codex2. Both parent acceptance keys remain binding. A new
+product decision is unnecessary for this repair; only an explicit user decision
+could change the state requirement. No such decision is recorded here.
+
+Keep the parent blocked, waiting for Claude. The dispatched helper's attempts
+to update parent next and helper disposition were rejected by the release CLI
+guard. Before helper handoff/merge, Supervisor must write and read back the
+concrete parent next step and `resolved_parent_status: blocked`,
+`resolved_parent_waiting_for: Claude`, `resolved_parent_next` on the helper;
+let the lifecycle write `resolved_parent_at`. A planning merge must not resume
+the parent without the source delivery. See the [original finding, supplement
+requirements, exact state-write request and verification evidence](support/unblock/PAX-DESIGN-V2-20261015/PAX-DESIGN-V2-20261015-UNBLOCK-PLANNING-DECISION.md).
+
 ### Q-SR-OPS-CAPACITY-FAILCLOSED-20261012 — publication disposition and background-worker evidence
 
 Planning triage confirms the existing C123 workload and report contracts; no
