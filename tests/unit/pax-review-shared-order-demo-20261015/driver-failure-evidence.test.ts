@@ -41,13 +41,19 @@ type Options = {
   screenshotFails?: boolean;
   attachmentFails?: boolean;
   cleanupFails?: boolean;
+  visibleLabels?: string[];
+  uiProbeFails?: boolean;
 };
 
 async function exercise(options: Options) {
   const primary = new Error("controlled Driver operation failure");
   const cleanup = new Error("controlled context cleanup failure");
   const captures: string[] = [];
-  const attachments: { name: string; body: Buffer; contentType: string }[] = [];
+  const attachments: {
+    name: string;
+    body: Buffer | string;
+    contentType: string;
+  }[] = [];
   const closedContexts: string[] = [];
   const calls: string[] = [];
   const pages = ["pax", "ops", "A", "B"].map((name) => ({
@@ -59,6 +65,17 @@ async function exercise(options: Options) {
       return this.currentURL;
     },
     isClosed: () => options.closed ?? false,
+    getByText: (label: string, locatorOptions: { exact: boolean }) => {
+      expect(locatorOptions.exact).toBe(true);
+      return {
+        first: () => ({
+          isVisible: async () => {
+            if (options.uiProbeFails) throw new Error("UI probe unavailable");
+            return options.visibleLabels?.includes(label) ?? false;
+          },
+        }),
+      };
+    },
     screenshot: async () => {
       captures.push(name);
       if (options.screenshotFails) throw new Error("capture unavailable");
@@ -133,7 +150,7 @@ async function exercise(options: Options) {
     outputPath: (name: string) => name,
     attach: async (
       name: string,
-      data: { body: Buffer; contentType: string },
+      data: { body: Buffer | string; contentType: string },
     ) => {
       if (options.attachmentFails) throw new Error("attachment unavailable");
       attachments.push({ name, ...data });
@@ -151,6 +168,7 @@ async function exercise(options: Options) {
     error,
     captures,
     attachments,
+    images: attachments.filter((item) => item.contentType === "image/png"),
     closedContexts,
     calls,
   };
@@ -162,6 +180,8 @@ it.each([
   { role: "B", phase: "register", path: "jobs" },
   { role: "B", phase: "finish", path: "jobs" },
   { role: "B", phase: "finish", path: "trip" },
+  { role: "A", phase: "finish", path: "jobs/" },
+  { role: "B", phase: "finish", path: "trip/" },
 ] as const)(
   "captures the actual $role page after $phase fails on $path",
   async (scenario) => {
@@ -169,7 +189,7 @@ it.each([
     expect(result.calls.at(-1)).toBe(`${scenario.role}:${scenario.phase}`);
     expect(result.error).toBe(result.primary);
     expect(result.captures).toEqual([scenario.role]);
-    expect(result.attachments).toEqual([
+    expect(result.images).toEqual([
       {
         name: "driver-assigned-trip-failure",
         body: Buffer.from(`actual-page-boundary:${scenario.role}`),
@@ -192,7 +212,7 @@ it.each([
     const result = await exercise({ role: "B", phase: "finish", ...options });
     expect(result.error).toBe(result.primary);
     expect(result.captures).toEqual([]);
-    expect(result.attachments).toEqual([]);
+    expect(result.images).toEqual([]);
     expect(result.closedContexts).toEqual(["pax", "ops", "A", "B"]);
   },
 );
@@ -209,7 +229,7 @@ it.each([
     expect(result.captures).toEqual(["B"]);
     expect(result.closedContexts).toEqual(["pax", "ops", "A", "B"]);
     if (options.screenshotFails || options.attachmentFails)
-      expect(result.attachments).toEqual([]);
+      expect(result.images).toEqual([]);
   },
 );
 
@@ -219,4 +239,64 @@ it("still propagates cleanup failure after a successful journey", async () => {
   expect(result.captures).toEqual([]);
   expect(result.attachments).toEqual([]);
   expect(result.closedContexts).toEqual(["pax", "ops", "A", "B"]);
+});
+
+it.each([
+  {
+    path: "jobs",
+    visibleLabels: ["載入任務中…"],
+    state: {
+      route: "jobs",
+      loading: true,
+      empty: false,
+      openCurrentTrip: false,
+    },
+  },
+  {
+    path: "jobs/",
+    visibleLabels: ["此篩選條件下沒有任務"],
+    state: {
+      route: "jobs",
+      loading: false,
+      empty: true,
+      openCurrentTrip: false,
+    },
+  },
+  {
+    path: "trip",
+    visibleLabels: ["開啟目前行程"],
+    state: {
+      route: "trip",
+      loading: false,
+      empty: false,
+      openCurrentTrip: true,
+    },
+  },
+  { path: "onboarding", state: { route: "onboarding" } },
+  { path: "", state: { route: "index" } },
+  { path: "unexpected-sensitive-path", state: { route: "other" } },
+  {
+    path: "trip?credential=fixture#private",
+    state: { route: "trip", queryPresent: true },
+  },
+  { path: "jobs", closed: true, state: { route: "jobs", closed: true } },
+  { path: "trip", uiProbeFails: true, state: { route: "trip" } },
+])("records bounded state for the actual B page: %o", async (scenario) => {
+  const result = await exercise({ role: "B", phase: "finish", ...scenario });
+  expect(result.error).toBe(result.primary);
+  const attachment = result.attachments.find(
+    (item) => item.name === "driver-failure-state",
+  );
+  expect(attachment?.contentType).toBe("application/json");
+  expect(JSON.parse(String(attachment?.body))).toEqual({
+    closed: false,
+    queryPresent: false,
+    loading: null,
+    empty: null,
+    openCurrentTrip: null,
+    ...scenario.state,
+  });
+  expect(String(attachment?.body)).not.toMatch(
+    /fixture|private|sensitive|https/,
+  );
 });

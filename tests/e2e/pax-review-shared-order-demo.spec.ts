@@ -745,12 +745,49 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
     // Only these post-registration Driver pages are safe to capture. Never
     // record onboarding, invitation fields, session storage or HTTP bodies.
     const { page: failedDriver, base: failedDriverBase } = activeDriver;
-    if (
-      [`${failedDriverBase}/jobs`, `${failedDriverBase}/trip`].includes(
-        failedDriver.url(),
-      ) &&
-      !failedDriver.isClosed()
-    ) {
+    const closed = failedDriver.isClosed();
+    // A redirect outside jobs/trip used to leave no evidence at all. Project
+    // only fixed route names, never the actual URL, query or page contents.
+    const failedUrl = new URL(failedDriver.url());
+    const driverBaseUrl = new URL(failedDriverBase);
+    const route = ["jobs", "trip", "onboarding", ""].find(
+      (name) =>
+        failedUrl.origin === driverBaseUrl.origin &&
+        failedUrl.pathname.replace(/\/$/, "") ===
+          `${driverBaseUrl.pathname.replace(/\/$/, "")}/${name}`.replace(
+            /\/$/,
+            "",
+          ),
+    );
+    const workspace = route === "jobs" || route === "trip";
+    const queryPresent = Boolean(failedUrl.search || failedUrl.hash);
+    const visible = async (label: string) =>
+      workspace && !closed && !queryPresent
+        ? failedDriver
+            .getByText(label, { exact: true })
+            .first()
+            .isVisible()
+            .catch(() => null)
+        : null;
+    const [loading, empty, openCurrentTrip] = await Promise.all([
+      visible("載入任務中…"),
+      visible("此篩選條件下沒有任務"),
+      visible("開啟目前行程"),
+    ]);
+    await info
+      .attach("driver-failure-state", {
+        body: JSON.stringify({
+          route: route === "" ? "index" : (route ?? "other"),
+          closed,
+          queryPresent,
+          loading,
+          empty,
+          openCurrentTrip,
+        }),
+        contentType: "application/json",
+      })
+      .catch(() => undefined);
+    if (workspace && !queryPresent && !closed) {
       const screenshot = await failedDriver
         .screenshot({ fullPage: true, timeout: 5000 })
         .catch(() => null);
