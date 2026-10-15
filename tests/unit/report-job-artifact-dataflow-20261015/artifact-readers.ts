@@ -69,6 +69,14 @@ export async function assertArtifactRecords(
         for (const value of [...columns, ...values.flat()].filter(Boolean)) {
           expect(compact).toContain(value.replace(/\s/g, ""));
         }
+        const idColumn = columns.indexOf("orderId");
+        if (idColumn >= 0) {
+          for (const row of values) {
+            expect(
+              compact.split(row[idColumn]!.replace(/\s/g, "")).length - 1,
+            ).toBe(1);
+          }
+        }
         expect(text).not.toContain("No data");
       } else {
         expect(text).toContain("No data");

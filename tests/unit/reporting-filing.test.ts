@@ -464,6 +464,20 @@ describe("reporting and filing service", () => {
         rowCount: job.partnerRevenueRows?.length,
         byteLength: artifact.buffer.byteLength,
       });
+      const trip = reportingFilingService.createReportJob({
+        jobType: "trip_summary",
+        format,
+        filters: { from: "2020-01-01" },
+      });
+      await flushReportingQueue();
+      const tripJob = reportingFilingService.getReportJob(trip.jobId);
+      expect(tripJob.rows?.length).toBeGreaterThan(0);
+      expect(tripJob.partnerRevenueRows).toEqual([]);
+      await assertArtifactRecords(
+        await reportingFilingService.renderReportArtifact(trip.jobId),
+        format,
+        tripJob.rows ?? [],
+      );
     },
   );
 

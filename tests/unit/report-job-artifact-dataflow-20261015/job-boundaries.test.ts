@@ -54,7 +54,10 @@ describe("report job record routing boundaries", () => {
         "revenue_summary",
         "daily_dispatch_record",
       ] as const) {
-        const filters = { from: "2026-10-15", orderSource: "ops_console" };
+        const filters = {
+          serviceDateFrom: "2026-10-15",
+          orderSource: "ops_console",
+        };
         const accepted = service.createReportJob({ jobType, format, filters });
         await tick();
         const job = service.getReportJob(accepted.jobId, undefined, ops);
@@ -84,7 +87,7 @@ describe("report job record routing boundaries", () => {
         ).toMatchObject({ rowCount: rows.length });
       }
       expect(provider).toHaveBeenCalledWith({
-        from: "2026-10-15",
+        serviceDateFrom: "2026-10-15",
         orderSource: "ops_console",
       });
     },
@@ -191,7 +194,7 @@ describe("report job record routing boundaries", () => {
     );
     for (const identity of [
       { ...tenant, tenantId: "tenant-b" },
-      { ...tenant, scopes: [] },
+      { ...tenant, scopes: ["unrelated:read"] },
       { ...tenant, actorType: "tenant_user" },
     ]) {
       expect(() =>
