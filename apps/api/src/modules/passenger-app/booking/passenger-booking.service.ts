@@ -24,7 +24,9 @@ export class PassengerBookingService {
     private readonly multiTaxiService: MultiTaxiService,
     private readonly fareRepository: PassengerFareRepository,
     private readonly accountRepository: PassengerAccountRepository,
-    @Optional() private readonly complaintService: ComplaintService | undefined,
+    @Optional()
+    @Inject(ComplaintService)
+    private readonly complaintService: ComplaintService | undefined,
     @Inject(PassengerPushDevicesService)
     private readonly pushDevices: PassengerPushDevicesService,
   ) {}

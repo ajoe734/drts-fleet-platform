@@ -1,5 +1,6 @@
 import { PassengerRidePage } from "../../../components/ride/passenger-ride-page";
 import { notFound } from "next/navigation";
+import { ReviewRideControls } from "../../../components/review-demo/ride-controls";
 
 export default async function RideDetailPage({
   params,
@@ -12,11 +13,14 @@ export default async function RideDetailPage({
   if (!id) return notFound();
 
   return (
-    <PassengerRidePage
-      token={id}
-      searchParams={await searchParams}
-      kind="ride"
-      authMode="id"
-    />
+    <>
+      <ReviewRideControls orderId={id} />
+      <PassengerRidePage
+        token={id}
+        searchParams={await searchParams}
+        kind="ride"
+        authMode="id"
+      />
+    </>
   );
 }

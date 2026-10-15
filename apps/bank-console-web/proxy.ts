@@ -4,6 +4,21 @@ import {
   BANK_CONSOLE_SESSION_COOKIE,
 } from "./lib/session";
 
+import {
+  TENANT_SESSION_COOKIE_NAME,
+  TENANT_CSRF_COOKIE_NAME,
+  TENANT_OIDC_STATE_COOKIE_NAME,
+} from "@drts/tenant-auth/constants";
+
+const MANAGED_AUTH_PATHS = new Set([
+  "/api/auth/tenant/login",
+  "/api/auth/tenant/callback",
+  "/api/auth/callback",
+  "/api/auth/session",
+  "/api/auth/logout",
+  "/api/auth/logout-all",
+]);
+
 const LOGIN_PATH = "/login";
 const LOGIN_API_PATH = "/api/auth/login";
 const SIGNED_OUT_COOKIE = "drts_bank_console_signed_out";
@@ -33,6 +48,23 @@ function setSignedOut(response: NextResponse) {
     expires: new Date(0),
     maxAge: 0,
   });
+  // Local sign-out also removes managed tenant authority. Durable revocation
+  // remains the existing CSRF-protected POST logout caller in the account UI.
+  for (const name of [
+    TENANT_SESSION_COOKIE_NAME,
+    TENANT_CSRF_COOKIE_NAME,
+    TENANT_OIDC_STATE_COOKIE_NAME,
+  ]) {
+    response.cookies.set(name, "", {
+      ...signedOutCookieOptions,
+      // Match tenant-auth/session:getOidcStateCookieOptions. Cookie deletion
+      // must use the original path even when sign-out is a page navigation.
+      path: name === TENANT_OIDC_STATE_COOKIE_NAME ? "/api/auth" : "/",
+      httpOnly: name !== TENANT_CSRF_COOKIE_NAME,
+      expires: new Date(0),
+      maxAge: 0,
+    });
+  }
   return withNoStore(response);
 }
 
@@ -88,11 +120,14 @@ export function proxy(request: NextRequest) {
 
   const hasSessionCookie =
     Boolean(request.cookies.get(BANK_CONSOLE_SESSION_COOKIE)?.value) ||
-    Boolean(request.cookies.get(BANK_CONSOLE_ROLE_COOKIE)?.value);
+    Boolean(request.cookies.get(BANK_CONSOLE_ROLE_COOKIE)?.value) ||
+    Boolean(request.cookies.get(TENANT_SESSION_COOKIE_NAME)?.value);
 
   // A signed-out browser must still be able to submit the login form. The
   // handler clears the signed-out marker and issues the new session cookies.
-  if (isLoginApiRequest) {
+  // Routing only: the managed handlers / users BFF verify authority themselves.
+  // A display signed-out marker must never intercept their state/CSRF boundary.
+  if (isLoginApiRequest || MANAGED_AUTH_PATHS.has(nextUrl.pathname)) {
     return withNoStore(NextResponse.next());
   }
 

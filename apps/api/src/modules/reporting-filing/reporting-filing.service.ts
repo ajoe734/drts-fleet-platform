@@ -344,35 +344,25 @@ export class ReportingFilingService
     ReportOutputFormat,
     {
       contentType: string;
-      render: (job: StoredReportJob) => Buffer | Promise<Buffer>;
+      render: (
+        job: StoredReportJob,
+        records: readonly Record<string, unknown>[],
+      ) => Buffer | Promise<Buffer>;
     } | null
   > = {
     csv: {
       contentType: "text/csv; charset=utf-8",
-      render: (job) =>
-        Buffer.from(
-          recordsToCsv(
-            (job.rows as unknown as Record<string, unknown>[]) ?? [],
-          ),
-          "utf8",
-        ),
+      render: (_job, records) => Buffer.from(recordsToCsv(records), "utf8"),
     },
     xlsx: {
       contentType:
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      render: (job) =>
-        recordsToXlsx(
-          (job.rows as unknown as Record<string, unknown>[]) ?? [],
-          job.jobType,
-        ),
+      render: (job, records) => recordsToXlsx(records, job.jobType),
     },
     pdf: {
       contentType: "application/pdf",
-      render: (job) =>
-        recordsToPdf(
-          (job.rows as unknown as Record<string, unknown>[]) ?? [],
-          `${job.jobType} — ${job.jobId}`,
-        ),
+      render: (job, records) =>
+        recordsToPdf(records, `${job.jobType} — ${job.jobId}`),
     },
     zip: null,
   };
@@ -965,7 +955,12 @@ export class ReportingFilingService
       );
     }
 
-    const rendered = renderer.render(job);
+    // Revenue has a public collection of its own; export those already-masked
+    // records without changing JSON readback or the completion manifest payload.
+    const records = (
+      job.jobType === "revenue_summary" ? job.partnerRevenueRows : job.rows
+    ).map((row) => ({ ...row }));
+    const rendered = renderer.render(job, records);
     if (Buffer.isBuffer(rendered)) {
       this.recordArtifactAccessAudit(
         {
@@ -976,7 +971,7 @@ export class ReportingFilingService
             jobId: job.jobId,
             jobType: job.jobType,
             format: job.format,
-            rowCount: job.rows.length,
+            rowCount: records.length,
             byteLength: rendered.byteLength,
             tenantId: normalizedTenantScopeId,
           },
@@ -1005,7 +1000,7 @@ export class ReportingFilingService
             jobId: job.jobId,
             jobType: job.jobType,
             format: job.format,
-            rowCount: job.rows.length,
+            rowCount: records.length,
             byteLength: buffer.byteLength,
             tenantId: normalizedTenantScopeId,
           },

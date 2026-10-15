@@ -339,7 +339,7 @@ describe("ReportingFilingService sensitive-data governance", () => {
       "req-filing-open-governance-001",
     );
 
-    auditNotificationService.placeEvidenceLegalHold(
+    await auditNotificationService.placeEvidenceLegalHold(
       {
         family: "report_artifact",
         subjectId: reportDetail.artifact!.artifactId,
@@ -356,7 +356,7 @@ describe("ReportingFilingService sensitive-data governance", () => {
         tenantId: null,
       },
     );
-    auditNotificationService.registerEvidenceDeletionException(
+    await auditNotificationService.registerEvidenceDeletionException(
       {
         family: "filing_package",
         subjectId: filingDetail.packageId,

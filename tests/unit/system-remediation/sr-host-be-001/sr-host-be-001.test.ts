@@ -571,9 +571,7 @@ describe("SR-HOST-BE-001: Host Restricted Read Model & Vehicle Access Authorizat
         status: mapComplaintStatus("resolved"),
         reportedAt: "2026-08-02T14:30:00.000Z",
         resolvedAt: "2026-08-03T10:00:00.000Z",
-        resolutionSummary: extractResolutionSummary({
-          closingNote: "Air conditioning filter cleaned and re-calibrated.",
-        }),
+        resolutionSummary: extractResolutionSummary("resolved_with_corrective_action"),
       });
 
       repository.seedCaseItem({
@@ -593,13 +591,54 @@ describe("SR-HOST-BE-001: Host Restricted Read Model & Vehicle Access Authorizat
       expect(result.items[0]!.category).toBe("vehicle_condition");
       expect(result.items[0]!.status).toBe("resolved");
       expect(result.items[0]!.resolutionSummary).toBe(
-        "Air conditioning filter cleaned and re-calibrated.",
+        "已處理 · 已採取改善措施 Resolved — corrective action taken",
       );
 
       expect(result.items[1]!.category).toBe("accident");
       expect(result.items[1]!.status).toBe("investigating");
       expect(result.items[1]!.resolvedAt).toBeNull();
       expect(result.items[1]!.resolutionSummary).toBeNull();
+    });
+
+    // C012-F4-PRIVATE-CLOSING-NOTE-AS-REDACTED-CONCLUSION: the real
+    // repository->mapper chain (configured-DB row -> `rec.record` JSONB ->
+    // `extractResolutionSummary`) must project the canonical `resolutionCode`
+    // only. A `closingNote` can lawfully contain the reporter's name/phone
+    // (ComplaintService only validates it is non-blank, never that it's PII
+    // free) and must never reach the Host envelope, even when present on the
+    // underlying canonical record alongside a valid resolutionCode.
+    it("Host cases chain never surfaces a private freeform closingNote, even when it carries reporter PII", async () => {
+      const privateClosingNote =
+        "Reporter Chen Wei-Ming (0912-345-678) confirmed the AC was fixed.";
+      const dbRepository = new HostViewRepository({
+        isEnabled: () => true,
+        query: async () => ({
+          rows: [
+            {
+              case_no: "case_pii_001",
+              status: "resolved",
+              created_at: "2026-08-02T14:30:00.000Z",
+              updated_at: "2026-08-03T10:00:00.000Z",
+              record: {
+                relatedVehicleId: VEHICLE_A1,
+                category: "vehicle_condition",
+                closingNote: privateClosingNote,
+                resolutionCode: "resolved_with_apology",
+              },
+            },
+          ],
+        }),
+      } as unknown as ConstructorParameters<typeof HostViewRepository>[0]);
+
+      const cases = await dbRepository.listCasesByVehicle(VEHICLE_A1);
+      expect(cases).toHaveLength(1);
+      expect(cases[0]!.resolutionSummary).not.toBeNull();
+      expect(cases[0]!.resolutionSummary).not.toContain("Chen Wei-Ming");
+      expect(cases[0]!.resolutionSummary).not.toContain("0912-345-678");
+      expect(cases[0]!.resolutionSummary).not.toContain(privateClosingNote);
+      expect(cases[0]!.resolutionSummary).toBe(
+        "已處理 · 致歉 Resolved — apology issued",
+      );
     });
 
     it("Case mapper helpers categorize complaints safely without leaking PII", () => {
@@ -612,13 +651,87 @@ describe("SR-HOST-BE-001: Host Restricted Read Model & Vehicle Access Authorizat
       expect(mapComplaintStatus("closed")).toBe("closed");
       expect(mapComplaintStatus("new")).toBe("open");
 
-      expect(
-        extractResolutionSummary({ closingNote: "Resolved with refund", resolutionCode: "resolved_with_refund" }),
-      ).toBe("Resolved with refund");
-      expect(
-        extractResolutionSummary({ closingNote: null, resolutionCode: "resolved_no_fault" }),
-      ).toBe("resolved_no_fault");
+      expect(extractResolutionSummary("resolved_with_refund")).toBe(
+        "已處理 · 退款 Resolved — refund issued",
+      );
+      expect(extractResolutionSummary("resolved_no_fault")).toBe(
+        "已處理 · 無過失 Resolved — no fault found",
+      );
+      // Unknown-but-present codes still get a readable, canonical-derived
+      // label rather than silently vanishing.
+      expect(extractResolutionSummary("resolved_new_future_code")).toBe(
+        "New Future Code",
+      );
       expect(extractResolutionSummary(null)).toBeNull();
+      expect(extractResolutionSummary(undefined)).toBeNull();
+      expect(extractResolutionSummary("")).toBeNull();
+    });
+  });
+
+  // ==========================================================================
+  // Suite 8.5: Configured Authority Failure Propagation (C012-F3)
+  // ==========================================================================
+  describe("Suite 8.5: Configured Authority Failure Propagation (C012-F3-CONFIGURED-AUTHORITY-FAILURE-AS-EMPTY)", () => {
+    function createRejectingDbRepository(): HostViewRepository {
+      return new HostViewRepository({
+        isEnabled: () => true,
+        query: async () => {
+          throw new Error("connection terminated unexpectedly");
+        },
+      } as unknown as ConstructorParameters<typeof HostViewRepository>[0]);
+    }
+
+    it("listVehiclesByOwner throws HOST_AUTHORITY_UNAVAILABLE (503) instead of a fabricated empty list", async () => {
+      const dbRepository = createRejectingDbRepository();
+      let caught: ApiRequestError | undefined;
+      try {
+        await dbRepository.listVehiclesByOwner(HOST_A);
+      } catch (error) {
+        caught = error as ApiRequestError;
+      }
+      expect(caught).toBeInstanceOf(ApiRequestError);
+      expect(caught!.getStatus()).toBe(503);
+      expect(caught!.code).toBe(HOST_ERROR_CODES.AUTHORITY_UNAVAILABLE);
+    });
+
+    it("getVehicleByIdAndOwner throws 503, never a false HOST_VEHICLE_NOT_FOUND 404, when the configured ownership query itself fails", async () => {
+      const dbRepository = createRejectingDbRepository();
+      let caught: ApiRequestError | undefined;
+      try {
+        await dbRepository.getVehicleByIdAndOwner(VEHICLE_A1, HOST_A);
+      } catch (error) {
+        caught = error as ApiRequestError;
+      }
+      expect(caught).toBeInstanceOf(ApiRequestError);
+      expect(caught!.getStatus()).toBe(503);
+      expect(caught!.code).toBe(HOST_ERROR_CODES.AUTHORITY_UNAVAILABLE);
+    });
+
+    it("listMaintenanceByVehicle, listTripsByVehicle, and listCasesByVehicle all throw 503 on a configured query failure", async () => {
+      const dbRepository = createRejectingDbRepository();
+      await expect(
+        dbRepository.listMaintenanceByVehicle(VEHICLE_A1),
+      ).rejects.toMatchObject({ code: HOST_ERROR_CODES.AUTHORITY_UNAVAILABLE });
+      await expect(
+        dbRepository.listTripsByVehicle(VEHICLE_A1),
+      ).rejects.toMatchObject({ code: HOST_ERROR_CODES.AUTHORITY_UNAVAILABLE });
+      await expect(
+        dbRepository.listCasesByVehicle(VEHICLE_A1),
+      ).rejects.toMatchObject({ code: HOST_ERROR_CODES.AUTHORITY_UNAVAILABLE });
+    });
+
+    it("getEarningsSummary propagates the same failure instead of a fabricated zero/pending_policy summary when the underlying trips query fails", async () => {
+      const dbRepository = createRejectingDbRepository();
+      await expect(
+        dbRepository.getEarningsSummary(VEHICLE_A1, "2026-08"),
+      ).rejects.toMatchObject({ code: HOST_ERROR_CODES.AUTHORITY_UNAVAILABLE });
+    });
+
+    it("database-disabled offline-harness memory semantics are unchanged: no DatabaseService still returns the seeded memory result, never an authority error", async () => {
+      // `repository` (from the outer beforeEach) has no DatabaseService at
+      // all, matching the original intentional "database disabled" mode.
+      const result = await repository.listVehiclesByOwner(HOST_A);
+      expect(result.map((v) => v.vehicleId)).toEqual([VEHICLE_A1, VEHICLE_A2]);
     });
   });
 

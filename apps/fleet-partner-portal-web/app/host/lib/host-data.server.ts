@@ -27,6 +27,15 @@
 // documents (host-screen-contract.md §2) — a vehicle either appears in the
 // caller's own restricted projection or it does not exist from their point
 // of view.
+//
+// C012-F2-LONG-LIST-DETAIL-FALSE404 fix: this used to request a single
+// page1/pageSize200 lookup while `HostViewService.paginate` caps pageSize at
+// 100 server-side, so an owner's vehicle beyond index 100 was never found
+// (and the real server cap doesn't line up with any client-guessed size
+// increase anyway). `loadHostVehicleDetail` now walks every authoritative
+// page the server actually reports via `pageInfo.totalPages`, scanning at
+// the server's real per-page cap, until the vehicleId is found or the
+// caller's complete owned-vehicle list is exhausted.
 
 import "server-only";
 
@@ -47,11 +56,16 @@ import {
   type HostEarningsVariant,
 } from "./host-format";
 
-// Large enough to cover realistic individual-owner fleets (a small number of
-// vehicles per host, per feature-contracts.md's ownership model) in one
-// lookup call; the list page itself still paginates with the caller-supplied
-// page/pageSize.
-const VEHICLE_LOOKUP_PAGE_SIZE = 200;
+// Matches `HostViewService.paginate`'s enforced server-side per-page cap
+// (`Math.min(100, pageSize)`); requesting more than this per page would
+// silently be truncated to 100 by the server regardless, which is exactly
+// how C012-F2 under-counted owners with >100 vehicles. The list page itself
+// still paginates independently with the caller-supplied page/pageSize.
+const DETAIL_LOOKUP_PAGE_SIZE = 100;
+// Hard ceiling on authoritative pages walked per detail lookup — purely a
+// runaway-loop guard against a malformed `pageInfo.totalPages`, never
+// expected to bind in practice (100 * 1000 = 100k owned vehicles).
+const DETAIL_LOOKUP_MAX_PAGES = 1000;
 
 // Duck-typed against ApiClientError's shape (packages/api-client/src/index.ts)
 // rather than an `instanceof` check, so this module has no runtime coupling
@@ -132,19 +146,26 @@ export async function loadHostVehicleDetail(
 ): Promise<HostVehicleDetailResult> {
   try {
     const { client } = await getServerHostClient();
-    const result = await client.listHostVehicles({
-      page: 1,
-      pageSize: VEHICLE_LOOKUP_PAGE_SIZE,
-    });
-    const vehicle = result.items.find((v) => v.vehicleId === vehicleId);
-    if (!vehicle) {
-      return {
-        ok: false,
-        accessState: "vehicle_not_found",
-        error: `Vehicle ${vehicleId} is not in the caller's owned-vehicle scope`,
-      };
+    let page = 1;
+    for (let pagesWalked = 0; pagesWalked < DETAIL_LOOKUP_MAX_PAGES; pagesWalked += 1) {
+      const result = await client.listHostVehicles({
+        page,
+        pageSize: DETAIL_LOOKUP_PAGE_SIZE,
+      });
+      const vehicle = result.items.find((v) => v.vehicleId === vehicleId);
+      if (vehicle) {
+        return { ok: true, vehicle };
+      }
+      if (page >= result.pageInfo.totalPages || result.items.length === 0) {
+        break;
+      }
+      page += 1;
     }
-    return { ok: true, vehicle };
+    return {
+      ok: false,
+      accessState: "vehicle_not_found",
+      error: `Vehicle ${vehicleId} is not in the caller's owned-vehicle scope`,
+    };
   } catch (err) {
     return {
       ok: false,

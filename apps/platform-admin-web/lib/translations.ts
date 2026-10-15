@@ -4311,6 +4311,80 @@ const en = {
   "adapterRegistry.modal.supportedActions": "Supported actions",
   "adapterRegistry.modal.noSupportedActions":
     "No adapter actions are enabled for this platform.",
+  "adapterRegistry.modal.cancel": "Cancel",
+  "adapterRegistry.refreshErrorBanner":
+    "Live credential expiry refresh failed ({message}). Showing last verified adapter snapshot.",
+  "adapterRegistry.revisionPill": "rev {revision}",
+  "adapterRegistry.expiryEvaluatedAtLabel": "Evaluated",
+  "adapterRegistry.credentialReferenceLabel": "Ref",
+  "adapterRegistry.lastMutationSummary":
+    "Audit {auditId} · rev {previousRevision} -> {newRevision} · actor {actorId} · reason: {reason}",
+  "adapterRegistry.registerModal.title": "Register governed platform adapter",
+  "adapterRegistry.registerModal.subtitle":
+    "Submit an authoritative adapter registration record. Only non-secret credential references and expiry timestamps are stored here.",
+  "adapterRegistry.registerModal.id": "Adapter ID",
+  "adapterRegistry.registerModal.idPlaceholder": "partner-fleet-01",
+  "adapterRegistry.registerModal.platformCode": "Platform code",
+  "adapterRegistry.registerModal.platformCodePlaceholder": "yoxi",
+  "adapterRegistry.registerModal.description": "Description",
+  "adapterRegistry.registerModal.descriptionPlaceholder":
+    "Partner dispatch adapter",
+  "adapterRegistry.registerModal.environment": "Environment",
+  "adapterRegistry.registerModal.rolloutStage": "Rollout stage",
+  "adapterRegistry.registerModal.adapterType": "Adapter type",
+  "adapterRegistry.registerModal.isForwarded": "Forwarder mode",
+  "adapterRegistry.registerModal.credReference":
+    "Credential reference (non-secret)",
+  "adapterRegistry.registerModal.credReferencePlaceholder":
+    "vault://platform/adapters/key-ref",
+  "adapterRegistry.registerModal.credExpiresAt":
+    "Credential expires at (ISO-8601)",
+  "adapterRegistry.registerModal.credExpiresAtPlaceholder":
+    "2026-11-15T00:00:00.000Z",
+  "adapterRegistry.registerModal.serviceBucketsPlaceholder":
+    "standard_taxi, corporate",
+  "adapterRegistry.registerModal.financeAuthorityMode":
+    "Finance authority mode",
+  "adapterRegistry.registerModal.submit": "Register adapter",
+  "adapterRegistry.registerModal.submitting": "Registering...",
+  "adapterRegistry.registerSuccess":
+    "{name} ({id}) registered at revision {revision}.",
+  "adapterRegistry.configModal.title": "Edit adapter configuration: {name}",
+  "adapterRegistry.configModal.subtitle":
+    "Updates rollout posture, dispatch policies, webhook settings, and feature flags with optimistic concurrency (expectedRevision {revision}).",
+  "adapterRegistry.configModal.featureFlags":
+    "Feature flags (key=on/off, comma-separated)",
+  "adapterRegistry.configModal.featureFlagsPlaceholder":
+    "enableInstantDispatch=on, enableDynamicEta=off",
+  "adapterRegistry.configModal.reason": "Governance reason",
+  "adapterRegistry.configModal.reasonPlaceholder":
+    "Document why this adapter configuration is being updated",
+  "adapterRegistry.configModal.submit": "Save configuration",
+  "adapterRegistry.configModal.submitting": "Saving...",
+  "adapterRegistry.configSuccess":
+    "{auditPrefix}{name} configuration updated to revision {revision}.{reasonClause}",
+  "adapterRegistry.credentialModal.title":
+    "Edit credential reference & expiry: {name}",
+  "adapterRegistry.credentialModal.subtitle":
+    "Updates non-secret credential reference metadata and server-evaluated expiry timestamp (expectedRevision {revision}).",
+  "adapterRegistry.credentialModal.nonSecretNotice":
+    "Governance boundary: This form records non-secret credential references and expiry timestamps only. It does not rotate or store external provider secret material.",
+  "adapterRegistry.credentialModal.clearExpiry":
+    "Clear credential expiry metadata (set to null / unknown)",
+  "adapterRegistry.credentialModal.submit": "Save credential metadata",
+  "adapterRegistry.credentialModal.submitting": "Saving...",
+  "adapterRegistry.credentialSuccess":
+    "{auditPrefix}{name} credential reference metadata updated to revision {revision}.{reasonClause}",
+  "adapterRegistry.validation.idRequired":
+    "Adapter ID, platform code, name, and version are required.",
+  "adapterRegistry.validation.policyNumbers":
+    "Max candidates, accept timeout, and manual fallback threshold must be positive numbers.",
+  "adapterRegistry.validation.webhookUrlRequired":
+    "Webhook URL is required when webhook is enabled.",
+  "adapterRegistry.validation.credReferenceRequired":
+    "Credential reference is required when setting credential expiry metadata.",
+  "adapterRegistry.validation.reasonRequired":
+    "Governance reason is required for this update.",
 
   // ── Common (more) ──
   "common.noValues": "No values",
@@ -5852,6 +5926,78 @@ const zh: typeof en = {
   "adapterRegistry.modal.supportedActions": "支援動作",
   "adapterRegistry.modal.noSupportedActions":
     "此平台目前沒有啟用任何轉接器動作。",
+  "adapterRegistry.modal.cancel": "取消",
+  "adapterRegistry.refreshErrorBanner":
+    "即時憑證到期狀態刷新失敗（{message}），目前顯示最後一次已驗證的轉接器快照。",
+  "adapterRegistry.revisionPill": "版本 {revision}",
+  "adapterRegistry.expiryEvaluatedAtLabel": "評估時間",
+  "adapterRegistry.credentialReferenceLabel": "憑證參照",
+  "adapterRegistry.lastMutationSummary":
+    "稽核 {auditId} · 版本 {previousRevision} -> {newRevision} · 操作者 {actorId} · 原因：{reason}",
+  "adapterRegistry.registerModal.title": "註冊受治理平台轉接器",
+  "adapterRegistry.registerModal.subtitle":
+    "送出權威轉接器註冊紀錄。此處僅儲存非機密憑證參照與到期時間戳記。",
+  "adapterRegistry.registerModal.id": "轉接器 ID",
+  "adapterRegistry.registerModal.idPlaceholder": "partner-fleet-01",
+  "adapterRegistry.registerModal.platformCode": "平台代碼",
+  "adapterRegistry.registerModal.platformCodePlaceholder": "yoxi",
+  "adapterRegistry.registerModal.description": "說明",
+  "adapterRegistry.registerModal.descriptionPlaceholder":
+    "合作車隊派遣轉接器",
+  "adapterRegistry.registerModal.environment": "環境",
+  "adapterRegistry.registerModal.rolloutStage": "部署階段",
+  "adapterRegistry.registerModal.adapterType": "轉接器類型",
+  "adapterRegistry.registerModal.isForwarded": "轉派模式",
+  "adapterRegistry.registerModal.credReference": "憑證參照（非機密）",
+  "adapterRegistry.registerModal.credReferencePlaceholder":
+    "vault://platform/adapters/key-ref",
+  "adapterRegistry.registerModal.credExpiresAt":
+    "憑證到期時間（ISO-8601）",
+  "adapterRegistry.registerModal.credExpiresAtPlaceholder":
+    "2026-11-15T00:00:00.000Z",
+  "adapterRegistry.registerModal.serviceBucketsPlaceholder":
+    "standard_taxi, corporate",
+  "adapterRegistry.registerModal.financeAuthorityMode": "財務權限模式",
+  "adapterRegistry.registerModal.submit": "註冊轉接器",
+  "adapterRegistry.registerModal.submitting": "註冊中...",
+  "adapterRegistry.registerSuccess":
+    "{name}（{id}）已完成註冊，目前版本 {revision}。",
+  "adapterRegistry.configModal.title": "編輯轉接器設定：{name}",
+  "adapterRegistry.configModal.subtitle":
+    "以樂觀鎖（expectedRevision {revision}）更新部署狀態、派遣政策、Webhook 設定與功能旗標。",
+  "adapterRegistry.configModal.featureFlags":
+    "功能旗標（key=on/off，以逗號分隔）",
+  "adapterRegistry.configModal.featureFlagsPlaceholder":
+    "enableInstantDispatch=on, enableDynamicEta=off",
+  "adapterRegistry.configModal.reason": "治理原因",
+  "adapterRegistry.configModal.reasonPlaceholder":
+    "請記錄更新此轉接器設定的治理原因",
+  "adapterRegistry.configModal.submit": "儲存設定",
+  "adapterRegistry.configModal.submitting": "儲存中...",
+  "adapterRegistry.configSuccess":
+    "{auditPrefix}{name} 設定已更新至版本 {revision}。{reasonClause}",
+  "adapterRegistry.credentialModal.title":
+    "編輯憑證參照與到期時間：{name}",
+  "adapterRegistry.credentialModal.subtitle":
+    "更新非機密憑證參照中繼資料與伺服端評估之到期時間戳記（expectedRevision {revision}）。",
+  "adapterRegistry.credentialModal.nonSecretNotice":
+    "治理邊界：此表單僅登錄非機密憑證參照與到期時間戳記，不會輪替或儲存外部供應商機密金鑰。",
+  "adapterRegistry.credentialModal.clearExpiry":
+    "清除憑證到期中繼資料（設為 null / 未知）",
+  "adapterRegistry.credentialModal.submit": "儲存憑證中繼資料",
+  "adapterRegistry.credentialModal.submitting": "儲存中...",
+  "adapterRegistry.credentialSuccess":
+    "{auditPrefix}{name} 憑證參照中繼資料已更新至版本 {revision}。{reasonClause}",
+  "adapterRegistry.validation.idRequired":
+    "轉接器 ID、平台代碼、名稱與版本皆為必填。",
+  "adapterRegistry.validation.policyNumbers":
+    "最大候選數、接受逾時與人工備援門檻必須為正數。",
+  "adapterRegistry.validation.webhookUrlRequired":
+    "啟用 Webhook 時必須填寫 Webhook 網址。",
+  "adapterRegistry.validation.credReferenceRequired":
+    "設定憑證到期中繼資料時必須填寫憑證參照。",
+  "adapterRegistry.validation.reasonRequired":
+    "此更新必須填寫治理原因。",
   // ── Users ──
   "users.title": "使用者與角色",
   "users.subtitle": "共 {count} 位人員",

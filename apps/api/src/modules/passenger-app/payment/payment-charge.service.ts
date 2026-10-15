@@ -194,6 +194,9 @@ export class PaymentChargeService {
             token,
             amountMinor: claim.amountMinor,
             currency: "TWD",
+            ...(this.runtime.provider.captureAttemptMetadata
+              ? { attemptCount: claim.attemptCount }
+              : {}),
           });
         }
       } catch {

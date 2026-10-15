@@ -7,6 +7,7 @@ import {
   mapComplaintStatus,
   mapMaintenanceStatus,
   extractResolutionSummary,
+  HostAuthorityUnavailableError,
   type HostVehicleSummary,
   type HostVehicleEarningsSummary,
   type HostVehicleMaintenanceItem,
@@ -173,9 +174,10 @@ export class HostViewRepository {
           );
         return result.rows.map((row) => this.mapProjectionRowToSummary(row));
       } catch (error) {
-        this.logger.warn(
-          `Database query failed in listVehiclesByOwner: ${(error as Error).message}. Falling back to memory.`,
+        this.logger.error(
+          `Database query failed in listVehiclesByOwner: ${(error as Error).message}.`,
         );
+        throw new HostAuthorityUnavailableError("listVehiclesByOwner", error);
       }
     }
 
@@ -218,9 +220,10 @@ export class HostViewRepository {
         }
         return this.mapProjectionRowToSummary(result.rows[0]);
       } catch (error) {
-        this.logger.warn(
-          `Database query failed in getVehicleByIdAndOwner: ${(error as Error).message}. Falling back to memory.`,
+        this.logger.error(
+          `Database query failed in getVehicleByIdAndOwner: ${(error as Error).message}.`,
         );
+        throw new HostAuthorityUnavailableError("getVehicleByIdAndOwner", error);
       }
     }
 
@@ -271,9 +274,10 @@ export class HostViewRepository {
           notesSummary: row.notes ?? null,
         }));
       } catch (error) {
-        this.logger.warn(
-          `Database query failed in listMaintenanceByVehicle: ${(error as Error).message}. Falling back to memory.`,
+        this.logger.error(
+          `Database query failed in listMaintenanceByVehicle: ${(error as Error).message}.`,
         );
+        throw new HostAuthorityUnavailableError("listMaintenanceByVehicle", error);
       }
     }
 
@@ -311,9 +315,10 @@ export class HostViewRepository {
           status: row.status,
         }));
       } catch (error) {
-        this.logger.warn(
-          `Database query failed in listTripsByVehicle: ${(error as Error).message}. Falling back to memory.`,
+        this.logger.error(
+          `Database query failed in listTripsByVehicle: ${(error as Error).message}.`,
         );
+        throw new HostAuthorityUnavailableError("listTripsByVehicle", error);
       }
     }
 
@@ -353,16 +358,16 @@ export class HostViewRepository {
               row.status === "resolved" || row.status === "closed"
                 ? row.updated_at
                 : null,
-            resolutionSummary: extractResolutionSummary({
-              closingNote: rec.closingNote as string | undefined,
-              resolutionCode: rec.resolutionCode as string | undefined,
-            }),
+            resolutionSummary: extractResolutionSummary(
+              rec.resolutionCode as string | undefined,
+            ),
           };
         });
       } catch (error) {
-        this.logger.warn(
-          `Database query failed in listCasesByVehicle: ${(error as Error).message}. Falling back to memory.`,
+        this.logger.error(
+          `Database query failed in listCasesByVehicle: ${(error as Error).message}.`,
         );
+        throw new HostAuthorityUnavailableError("listCasesByVehicle", error);
       }
     }
 

@@ -195,7 +195,10 @@ globalThis.fetch = async (url, init) => {
   if (pathname === "/api/driver/tasks") return response([task]);
   if (pathname === "/api/driver/task-views") return response([]);
   if (pathname === "/api/platform-presence") return response({ presences: [] });
-  if (pathname.startsWith("/api/orders/")) {
+  if (
+    pathname.startsWith("/api/orders/") ||
+    /^\/api\/driver\/tasks\/[^/]+\/order$/.test(pathname)
+  ) {
     if (deferredOrder) await deferredOrder;
     return response(order);
   }
