@@ -12,7 +12,7 @@ import { createJourneyProgress } from "./pax-review-shared-order/progress";
 type JourneyStep = ReturnType<typeof createJourneyProgress>["step"];
 
 const sharedDev = process.env.PAX_REVIEW_SHARED_DEV_SMOKE === "true";
-const PAX = process.env.PAX_REVIEW_PASSENGER_ORIGIN || "http://127.0.0.1:3319";
+const PAX = process.env.PAX_REVIEW_PASSENGER_ORIGIN || "http://localhost:3319";
 const OPS = process.env.PAX_REVIEW_OPS_ORIGIN || "http://127.0.0.1:3202";
 const DRIVER = sharedDev ? `${PAX}/review-driver` : "http://127.0.0.1:3101";
 const camel = (value: any): any =>
@@ -431,7 +431,25 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           `09000000${String(Number(process.env.GITHUB_RUN_ID ?? 1) % 100).padStart(2, "0")}`,
         );
       await pax.getByRole("checkbox").check();
+      const requestedOtp = pax.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname ===
+            "/api/passenger-app/review-demo/otp" &&
+          response.request().method() === "POST",
+      );
       await pax.getByRole("button", { name: "取得模擬簡訊" }).click();
+      const otpResponse = await requestedOtp;
+      let failureCode = "unclassified";
+      if (!otpResponse.ok()) {
+        const body = await otpResponse.json().catch(() => null);
+        // Report only this fixed known code; never print OTPs or raw bodies.
+        if (body?.error === "CSRF_CHECK_FAILED")
+          failureCode = "CSRF_CHECK_FAILED";
+      }
+      expect(
+        otpResponse.ok(),
+        `Review OTP status=${otpResponse.status()} code=${failureCode}`,
+      ).toBe(true);
       await pax.getByRole("button", { name: "驗證並登入演練帳戶" }).click();
       await expect(pax.getByTestId("review-passenger-id")).toBeVisible();
       expect(

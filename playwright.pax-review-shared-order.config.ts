@@ -113,14 +113,16 @@ export default defineConfig({
           timeout: 180_000,
         },
         {
+          // NextRequest normalizes loopback IPs to localhost. Use the same
+          // browser origin and bind hostname so the real BFF CSRF check agrees.
           command:
-            "pnpm --filter @drts/passenger-app-web exec next start --hostname 127.0.0.1 --port 3319",
+            "pnpm --filter @drts/passenger-app-web exec next start --hostname localhost --port 3319",
           env: {
             ...process.env,
             PAX_REVIEW_DEMO_ENABLED: "true",
             DRTS_API_URL: apiOrigin,
           },
-          url: "http://127.0.0.1:3319/review",
+          url: "http://localhost:3319/review",
           reuseExistingServer: false,
           timeout: 120_000,
         },
