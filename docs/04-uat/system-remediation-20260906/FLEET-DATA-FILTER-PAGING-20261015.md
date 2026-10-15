@@ -7,7 +7,7 @@ Owner: Codex · Reviewer: Codex2 · 2026-10-15
 ## 版本與權威來源
 
 - 原始版本／branch base：`a8d9a55dc30c6cf9d37145e4f46ac98c12e6c8b1`（dev）。
-- 實作與下列回歸的 Source 版本：`b2815fd2a7bf6af05404b0dc3da47420df884653`。
+- 實作 Source 版本：`b2815fd2a7bf6af05404b0dc3da47420df884653`；本次接續 dispatch 補跑驗證版本：`686366f993a84a851be05ed781dc538dc037bd48`（其後只有本證據文件修訂）。
 - Candidate branch：`codex/fleet-data-filter-paging-20261015`。最後文件 commit 後再對 exact HEAD 執行候選檢查；完整 candidate SHA、exit codes 與 remote head 記於 `.local/fleet-data-filter-paging-20261015/candidate-validation.json`，並由 `ai-status.sh handoff` 鎖定。文件不以自身內容推算自身 commit SHA。
 - 原 task spec：canonical root `.local/remaining-original-functional-fixes-20261015/FLEET-DATA-FILTER-PAGING-20261015.json`；原 finding：`.local/goal-continuation-20261015T0806-focused-unproved-original-Source-root/C063-C069-current-accepted-Fleet-dataflow-readonly-audit.json`。本次為首輪候選，沒有前輪退修。
 - 原需求：`source/capabilities.json` C063「總覽 KPI 與司機／車輛清單一致」及 C069「篩選 query、總數、分頁與 CSV 同條件」。
@@ -28,21 +28,21 @@ Owner: Codex · Reviewer: Codex2 · 2026-10-15
 
 ## 可重跑命令與結果
 
-證據目錄（本 task isolated worktree）：`.local/fleet-data-filter-paging-20261015/`。以下本輪啟動的命令均讀取結束結果後才交接；exact HEAD 的重跑結果另外記於 `candidate-validation.json`。
+證據目錄：本 task isolated worktree 的 `.local/fleet-data-filter-paging-20261015/`；交接前將日誌與 JSON 同步至 canonical root `/home/lupin/workspace/drts-fleet-platform/.local/fleet-data-filter-paging-20261015/`，供獨立 reviewer 讀取。前次 dispatch 引用的本機日誌已不存在，因此本次重新執行以下驗證，不以舊摘要作通過證據。以下本輪啟動的命令均讀取結束結果後才交接；執行 SHA、exit、日誌 hash 與最終 candidate 核對記於 `candidate-validation.json`。
 
 ### R1 — 同一測試在原始 Source 上失敗
 
 使用 `git archive a8d9a55dc30c6cf9d37145e4f46ac98c12e6c8b1` 解至 evidence 目錄 `baseline/`，加入同一份新 regression，連結本 worktree 的鎖定依賴後，在 baseline cwd 執行：
 
 ```bash
-pnpm exec vitest run tests/unit/fleet-data-filter-paging-20261015 --maxWorkers=1
+pnpm exec vitest run tests/unit/fleet-data-filter-paging-20261015 --maxWorkers=1 --testTimeout=30000
 ```
 
 Exit **1**：15 tests，**13 failed、2 passed**。`baseline-final-suite.log` 包含正式 mapper 的 realtime 分類錯誤、正式 page 的 45 versus 20／46 versus 21 行數差異、總覽 5/1 versus 3/3 與 live-empty 6 versus 0。失敗不是 missing dependency、fixture setup 或 timeout。兩個 pass 是原本 realtime compatibility 與 aggregate-unavailable 顯示 fallback。
 
 相同測試 SHA-256：`d488fdb1859e27663d4aa7035424b501ef6fb9f0d21577a08783f13a18db5f63`；baseline 與修正版測試 hash 一致。沒有 reset 活躍工作樹。
 
-最初隔離 worktree 的依賴連結無法 resolve React，及 harness eager imports 缺 package build 的嘗試不列為舊版重現；以本 worktree `CI=true pnpm install --frozen-lockfile`（exit 0）和受控模組邊界排除後，才取得上述行為失敗。
+本次最初的依賴 symlink 指向 canonical root，造成 React／Nest／zod／vitest 無法 resolve。修正版、App 與 baseline 的 dependency-failed 日誌分開保留，均 exit 1，不列為行為驗證。僅解除 task worktree 的依賴 symlink，再以本 worktree `CI=true pnpm install --frozen-lockfile`（exit 0）取得隔離依賴；未修改 canonical root 依賴。baseline 連結此安裝後取得上述行為失敗。
 
 ### R2 — 受影響整體回歸
 
@@ -57,7 +57,7 @@ pnpm exec vitest run \
   --maxWorkers=1 --testTimeout=30000
 ```
 
-Source 版本 exit **0**：**10 files／111 tests passed**，見 `regression-final.log`；最終 exact candidate 另行紀錄。第一輪 `--maxWorkers=2`／預設 5 秒 timeout 的結果獨立保留於 `regression.log`：exit 1，109 passed、2 timed out（新 service consumer 與既有 overview action）；沒有降低斷言，改為單 worker 和 30 秒期限重跑。窄範圍 service 2、paging 7、display 3 分別通過，見 `service-fix.log`、`paging-fix.log`、`display-fix.log`（其他案例由 `-t` 選擇而 skip，不作完整 pass）。
+本次補跑版本 exit **0**：**10 files／111 tests passed**，見 `regression-final.log`。前次逐單元窄範圍結果保留於 anchor 歷史，本次直接執行全部受影響案例，不將選擇案例的 skip 算為通過。
 
 ### R3 — App 單元測試與型別
 
@@ -67,7 +67,7 @@ pnpm --filter @drts/fleet-partner-portal-web typecheck
 pnpm typecheck:root
 ```
 
-Source 版本各 exit **0**。App：5 files／21 tests passed（`app-tests.log`）；app typegen + tsc（`typecheck-first.log`）與 root tsc（`typecheck-root.log`）通過。typegen 自動變動的 `next-env.d.ts` 已還原，不加入 scope。
+本次補跑版本各 exit **0**。App：5 files／21 tests passed（`app-tests.log`）；app typegen + tsc（`typecheck-app.log`）與 root tsc（`typecheck-root.log`）通過。typegen 自動變動的 `next-env.d.ts` 已還原，不加入 scope。
 
 ### R4 — Lint／repository checks
 
@@ -83,11 +83,11 @@ python3 tools/ci/check_test_coverage.py
 git diff --check
 ```
 
-Source 版本各 exit **0**。Lint 證據 `lint-app.log`、`lint-tests.log`；guards 無錯誤：i18n 638 files，cross-app 1839 source files，coverage 98 test files。最終 exact SHA 重跑亦存 evidence 目錄。
+本次補跑版本各 exit **0**。Lint 證據 `lint-app.log`、`lint-tests.log`；repository guards 結果與命令見 `guards-results.json`。另執行既有 commit trailers、canonical consistency 與 runtime mirror guards，各 exit **0**，分別見 `trailers.log`、`canonical.log`、`runtime-mirror.log`。
 
 ### R5 — Exact candidate／交接
 
-最後文件 commit 後，記錄 `git rev-parse HEAD`、branch、base、test hash、每個必要本機命令的 exit 與 log，再普通 non-force push，核對 remote branch head。
+最後文件 commit 後，記錄 `git rev-parse HEAD`、branch、base、test hash、每個必要本機命令的執行 SHA／exit／log hash，再普通 non-force push，核對 remote branch head。只改本證據文件時，以所有實作及測試檔的 tree blob 一致性確認前述本機結果適用；最終 SHA 再執行 diff、trailers、canonical consistency、runtime mirror guards。完整 mandatory hosted CI 仍必須驗同一最終 candidate，不以 tree 一致性取代。
 
 本次不手動建立另一條 CI／merge 路徑。依 `github_bus.py:upsert_review_pr`，machine `handoff` 到 review 才建立正常 task PR、啟動 mandatory CI；CI 可能尚未開始或 pending，均不可算綠燈。由 bus 以相同 candidate SHA 收錄 CI 和 merge，Codex2 只審鎖定候選。Owner 不呼叫 done、不代填 reviewer／Supervisor acceptance key。
 
