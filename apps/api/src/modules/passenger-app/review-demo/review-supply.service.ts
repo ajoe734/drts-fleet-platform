@@ -5,7 +5,6 @@ import { RegulatoryRegistryService } from "../../regulatory-registry/regulatory-
 import { RegulatoryRegistryRepository } from "../../regulatory-registry/regulatory-registry.repository";
 import { MultiTaxiService } from "../../multi-taxi/multi-taxi.service";
 import { MultiTaxiRepository } from "../../multi-taxi/multi-taxi.repository";
-import { ServiceProductRepository } from "../../service-product/service-product.repository";
 import { ServiceProductService } from "../../service-product/service-product.service";
 import { reviewDemoEnabled } from "./review-demo.config";
 
@@ -35,8 +34,7 @@ export class ReviewSupplyService {
     // Explicit nonproduction rehearsal configuration, not an inactive-product
     // bypass. Persist the existing reservation master and await its ACK before
     // reporting readiness. Keep the independent runtime policy guard intact.
-    const products = new ServiceProductRepository(this.database);
-    if (!products.isEnabled())
+    if (!this.database.isEnabled())
       throw new ApiRequestError(
         503,
         "review_supply_unavailable",
@@ -54,16 +52,15 @@ export class ReviewSupplyService {
         "review_supply_unavailable",
         "Reservation product is unavailable.",
       );
-    if (!product.active)
-      await products.persistChanges({
-        records: [
-          { ...product, active: true, updatedAt: new Date().toISOString() },
-        ],
+    const existing = this.products
+      .listServiceProducts()
+      .find((record) => record.serviceProductType === "taxi_reservation");
+    if (!existing)
+      await this.products.createServiceProduct({ ...product, active: true });
+    else if (!existing.active)
+      await this.products.updateServiceProduct(existing.serviceProductId, {
+        active: true,
       });
-    await this.products.prepareRuntimeProfileServiceProduct(
-      "multi_taxi_direct",
-      "taxi_reservation",
-    );
     const repository = new RegulatoryRegistryRepository(this.database);
     const taxi = new MultiTaxiRepository(this.database);
     const state = await repository.loadState();

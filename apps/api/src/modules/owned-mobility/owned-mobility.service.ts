@@ -1111,32 +1111,40 @@ export class OwnedMobilityService
     // fence,不能換入口繞過" -- the callcenter/multi-taxi entry point must not
     // be usable to create a second order for a call a voice intent already
     // owns (or has a pending AI command for).
-    if (callContext?.callId && this.voiceBookingRepository?.isEnabled()) {
-      return this.assertNoConflictingVoiceIntentForCall(
-        callContext.callId,
-        "create_multi_taxi_ride",
-      ).then(() =>
-        this.buildAndPersistMultiTaxiRide(
-          command,
-          authorization,
-          requestedPickupAt,
-          identity,
-          requestId,
-          callContext,
-          commitCreation,
-        ),
-      );
-    }
+    const create = () => {
+      if (callContext?.callId && this.voiceBookingRepository?.isEnabled()) {
+        return this.assertNoConflictingVoiceIntentForCall(
+          callContext.callId,
+          "create_multi_taxi_ride",
+        ).then(() =>
+          this.buildAndPersistMultiTaxiRide(
+            command,
+            authorization,
+            requestedPickupAt,
+            identity,
+            requestId,
+            callContext,
+            commitCreation,
+          ),
+        );
+      }
 
-    return this.buildAndPersistMultiTaxiRide(
-      command,
-      authorization,
-      requestedPickupAt,
-      identity,
-      requestId,
-      callContext,
-      commitCreation,
-    );
+      return this.buildAndPersistMultiTaxiRide(
+        command,
+        authorization,
+        requestedPickupAt,
+        identity,
+        requestId,
+        callContext,
+        commitCreation,
+      );
+    };
+    const preparing =
+      this.serviceProductService?.prepareRuntimeProfileServiceProduct(
+        "multi_taxi_direct",
+        "taxi_reservation",
+      );
+    return preparing ? preparing.then(create) : create();
   }
 
   private buildAndPersistMultiTaxiRide(

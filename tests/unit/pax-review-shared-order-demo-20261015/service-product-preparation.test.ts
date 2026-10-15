@@ -7,6 +7,7 @@ import { RegulatoryRegistryRepository } from "../../../apps/api/src/modules/regu
 import { ServiceProductRepository } from "../../../apps/api/src/modules/service-product/service-product.repository";
 import { ServiceProductService } from "../../../apps/api/src/modules/service-product/service-product.service";
 import { ReviewSupplyService } from "../../../apps/api/src/modules/passenger-app/review-demo/review-supply.service";
+import { MultiTaxiRepository } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
 import type {
   ServiceProductRecord,
   RuntimeProfileServiceProductPolicy,
@@ -367,4 +368,28 @@ describe("R18: rehearsal prepares the native reservation product before real boo
       expect(f.state.order).toBeNull();
     },
   );
+
+  it("refreshes the product at the native Owned intake while preserving inactive rejection", async () => {
+    const p = productPeers();
+    await p.b.onModuleInit();
+    await rehearsal(p).prepare();
+    const f = createProductionBookingFixture([], 20, p.b);
+    const [authorization] = await new MultiTaxiRepository(f.database).findEffectiveAuthorizations(new Date().toISOString());
+    const command = {
+      pickup: { ...f.command.origin, address: "Synthetic pickup" },
+      dropoff: { ...f.command.destination, address: "Synthetic dropoff" },
+      passenger: { passengerId: OWNER, name: "Synthetic passenger", phone: "0900000010" },
+      timingMode: "scheduled" as const,
+      requestedPickupAt: f.command.scheduledAt,
+      paymentMethodTokenRef: f.command.paymentMethodId,
+    };
+    const order = await f.owned.createMultiTaxiRide(command, authorization!);
+    expect(order.orderId).toBe(f.state.order?.orderId);
+    expect(order.serviceProductCode).toBe("taxi_reservation");
+    const product = p.b.getRuntimeServiceProductByType("taxi_reservation")!;
+    await new ServiceProductRepository(p.database as never).persistChanges({ records: [{ ...product, active: false }] });
+    const next = createProductionBookingFixture([], 20, p.b);
+    await expect(next.owned.createMultiTaxiRide(command, authorization!)).rejects.toMatchObject({ code: "SERVICE_PRODUCT_INACTIVE" });
+    expect(next.state.order).toBeNull();
+  });
 });
