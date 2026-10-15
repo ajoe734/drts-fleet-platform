@@ -18,6 +18,7 @@ CASES = [
     ("353a6453255e0e35647d243c90eae57e7740b6b0", ["named-events.test.ts", "persisted-authority.test.ts"]),
     ("8fed5b8e6f97a221cca4a1810c82a7001bd102e2", ["original-quote.test.ts", "rating-eligibility.test.ts"]),
     ("7e006a1b267c81c8f90447108153a159b441ebeb", ["original-quote.test.ts", "rating-eligibility.test.ts"]),
+    ("a6ddd370e54426d563088906f4577f91ea053722", ["mutation-authority.test.ts"]),
 ]
 MEMBERS = [
     "apps/api/src", "apps/api/package.json", "apps/passenger-app-web/lib",
