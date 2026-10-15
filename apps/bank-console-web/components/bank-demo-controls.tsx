@@ -1,6 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
+import {
+  TENANT_CSRF_COOKIE_NAME,
+  TENANT_CSRF_HEADER_NAME,
+} from "@drts/tenant-auth/constants";
 import type { ReadonlyURLSearchParams } from "next/navigation";
 import {
   BANK_DEMO_TENANTS,
@@ -11,6 +16,7 @@ import {
 } from "@/lib/demo-tenants";
 import { getBankConsoleSession } from "@/lib/session";
 import { t, type Locale } from "@/lib/translations";
+import { userManagementText } from "../app/users/translations";
 
 type QueryUpdate = {
   bank?: BankDemoTenantCode;
@@ -79,6 +85,48 @@ export function BankDemoControls({
   signedOut: boolean;
 }) {
   const session = getBankConsoleSession(bank, locale, searchParams.get("role"));
+  const [pending, setPending] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
+
+  async function endSession(switchAccount: boolean) {
+    setPending(true);
+    setLogoutError("");
+    try {
+      const entry = document.cookie
+        .split("; ")
+        .find((cookie) => cookie.startsWith(`${TENANT_CSRF_COOKIE_NAME}=`));
+      const csrf = entry
+        ? decodeURIComponent(entry.slice(TENANT_CSRF_COOKIE_NAME.length + 1))
+        : "";
+      if (csrf) {
+        const response = await fetch("/api/auth/logout", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { [TENANT_CSRF_HEADER_NAME]: csrf },
+        });
+        if (!response.ok)
+          throw new Error(userManagementText("signOutFailure", locale));
+      }
+      const target = switchAccount
+        ? csrf
+          ? `/api/auth/tenant/login?return_url=${encodeURIComponent(userManagementHref(searchParams, bank, locale))}`
+          : loginHref(searchParams, bank, locale)
+        : hrefFor(pathname, searchParams, {
+            bank: bank.code,
+            locale,
+            signedOut: "1",
+          });
+      window.location.assign(target);
+    } catch (error) {
+      setLogoutError(
+        error instanceof Error
+          ? error.message
+          : userManagementText("signOutFailure", locale),
+      );
+    } finally {
+      setPending(false);
+    }
+  }
 
   return (
     <div
@@ -170,18 +218,23 @@ export function BankDemoControls({
               >
                 {t("shell.accountManagement", locale)}
               </Link>
-              <Link
+              <button
                 className="bank-account-action"
-                href={`/login?bank=${bank.code}&locale=${locale}`}
+                type="button"
+                disabled={pending}
+                onClick={() => void endSession(true)}
               >
                 {t("shell.switchAccount", locale)}
-              </Link>
-              <a
+              </button>
+              <button
                 className="bank-account-action is-danger"
-                href={hrefFor(pathname, searchParams, { signedOut: "1" })}
+                type="button"
+                disabled={pending}
+                onClick={() => void endSession(false)}
               >
                 {t("shell.logout", locale)}
-              </a>
+              </button>
+              {logoutError && <p role="alert">{logoutError}</p>}
             </>
           )}
         </div>

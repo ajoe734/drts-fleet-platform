@@ -196,6 +196,9 @@ importers:
       "@drts/shared-types":
         specifier: workspace:*
         version: link:../../packages/shared-types
+      "@drts/tenant-auth":
+        specifier: workspace:*
+        version: link:../../packages/tenant-auth
       "@drts/ui-tokens":
         specifier: workspace:*
         version: link:../../packages/ui-tokens
