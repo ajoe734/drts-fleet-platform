@@ -579,3 +579,61 @@ remain pending; no shared-dev deployment or completion is claimed.
 | R9: final dynamic-supply proof selects a nonexistent physical column | Real hosted `dynamic-supply.hosted.test.ts:335` fails with `column "driver_id" does not exist` after the actual prepare, cross-instance registration/profile/token/work-state, booking, dispatch/candidate/assignment, native acceptance and suspension assertions. V0011 defines the task row with `record jsonb`; production `OwnedMobilityRepository.persistChanges` writes the driver's ID inside that record, not a physical `driver_id` column. | Select `record->>'driverId' AS driver_id` from the same committed row. Preserve the existing order/driver/status equality assertion and all preceding guards. No product, migration, fixture, skip, timeout or retry changes. Replacement hosted PG is pending; static schema review and local hosted skips are not a repaired PG pass. |
 | Prior R4 / R6 formal PG companions                                   | On 33fb regular CI, `persisted-roles.hosted.test.ts` and `dispatch-supply-schema.hosted.test.ts` each execute and pass without skips; integration-trunk also reports the former passed before cancellation.                                                                                                                                                                                                                                           | These establish the original source's targeted peer/ACK and supply-join repairs. They are retained as historical evidence; replacement CI must still execute them.                                                                                                                                                                      |
 | All three required acceptance keys                                   | Still pending with zero credit. New browser never executed on 33fb.                                                                                                                                                                                                                                                                                                                                                                                   | Replacement source review, same-SHA full CI/browser/PG, normal merge, immutable shared-dev delivery and new smoke remain required.                                                                                                                                                                                                      |
+
+## R10: review SMS response metadata entered the ordinary login command
+
+Codex's 2026-10-15 09:44:26 UTC review reopened candidate
+`9c784946ee129de82c7c13dde1ac16e8e3769c7b`, generation
+`b3a44382eb144cc8b43a17fbe3c03fc7`, for
+`review-otp-proof-response-spread-into-verify-command`. The same page was
+unchanged from `33fb3e1b5d2586e076807a184ab8e8c3e4f9d5cd`. Original diagnosis:
+canonical `.local/passenger-transport-bureau-review-20261015/review-demo-candidate33fb-otp-proof-request-shape-readonly-diagnosis.json`,
+SHA256 `d6838ed2acfcdfd0fb41c6cbe4a0380013cfbe32239f75ec6078e6598d850903`.
+This section extends R1–R9 and preserves their remaining verification duties.
+
+The owner independently followed `PassengerOtpService.request` →
+`ReviewDemoController.requestOtp` → `ReviewEntry` → `PassengerClient.login` →
+Passenger BFF → `PassengerOtpController.verify`. The response really includes
+`success`, `message` and `simulatedDelivery`; a TypeScript state annotation
+does not remove them. The BFF preserves the verify body and the ordinary
+parser rejects those extra fields before OTP consumption/session creation.
+
+The only product repair is in `apps/passenger-app-web/app/review/page.tsx`:
+save `{ challenge: result.data.challenge, code: result.data.code }` instead of
+the entire response. Existing OTP parsers, service contracts, guards, profile
+and consent writes, SDK, BFF cookies and hosted three-order assertions remain
+unchanged. Anchors `dc907f1fc` and `44d2f5642` preserve the regression and repair.
+
+`tests/unit/pax-review-shared-order-demo-20261015/review-login.test.tsx` renders
+the actual page and runtime provider, clicks consent/SMS/login, invokes the
+actual SDK and BFF and dispatches the serialized body to production review,
+OTP and account controllers/services. Only HTTP transport and persistence
+ports use an in-memory unit boundary; SMS uses the existing explicit review
+provider. The real response serializer, OTP challenge consumption, account
+creation, JWT signing/verification, BFF HttpOnly cookie issuance and token
+redaction run. The test also checks unknown metadata and duplicate
+provider/channel rejection, replay rejection, profile/consent persistence,
+logout cookie clearing/session revocation and a second passenger's distinct
+account/session. No localStorage account or generated token substitutes are
+used. This is socket-free component/service evidence, not HTTP-server, PG or
+browser evidence.
+
+Canonical evidence directory for this repair:
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate-9c78-otp-caller-rework/`.
+The manifest records source/log hashes, exact commands and exit codes. Node
+22.23.2, pnpm 10.33.0, Vitest 4.1.4 and TypeScript 5.9.3 are used.
+
+| Finding / acceptance                                        | Source and repair                                                                              | Before → repaired result                                                                                                                                                                                                       | Command / evidence                                                                                                                                                                                 | Remaining limits                                                                      |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| R10: response spread prevents first review login            | Actual `ReviewEntry` OTP response handler projects challenge/code; production parser unchanged | On unchanged 9c784946 product source, the new page/SDK/BFF/parser case fails with 400 where 200 is required (exit 1). The identical case after projection passes (exit 0), including actual account/session and negative cases | `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/review-login.test.tsx --maxWorkers=1 --reporter=verbose`; `before-final.log`, `after.log`                                   | Hosted actual browser login and all three journeys still required                     |
+| R1–R9 affected offline regression                           | Entire review namespace plus original OTP and account/session namespaces                       | 202 pass, 3 hosted-only skips, exit 0; counts overlap the focused case and must not be added                                                                                                                                   | `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/ tests/unit/pax-otp-20261009/ tests/unit/pax-account-session-20261009/ --maxWorkers=2 --reporter=verbose`; `regression.log` | Three skips are the original PG companions; no PG pass credit                         |
+| `pax-review-demo_real-shared-order-across-roles`            | Original persisted order/task/dispatch assertions retained                                     | Pending, zero credit                                                                                                                                                                                                           | Same-candidate hosted full CI and all three formal-schema PG companions required                                                                                                                   | In-memory account stores in this regression do not demonstrate PG or peer order reads |
+| `pax-review-demo_external-simulation-and-complete-journeys` | Original real three-order browser remains unchanged                                            | Pending, zero credit                                                                                                                                                                                                           | New candidate's genuine login, role UI, payment/rating/case/cancellation journey evidence required                                                                                                 | Unit login does not grant browser/journey credit                                      |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`    | Original hosted lane and immutable Cloud Run deployment retained                               | Pending, zero credit                                                                                                                                                                                                           | Same-SHA review/CI, normal merge, immutable publish/deploy and new shared-dev smoke required                                                                                                       | No runtime, browser, preview, PG or Compose service starts on this VM                 |
+
+The Supervisor-provided task-root `node_modules` link pointed at canonical
+dependencies with missing/broken links. The owner unlinked only that task
+symlink and completed `CI=true pnpm install --frozen-lockfile --offline
+--ignore-scripts` in this worktree (exit 0, `install.log`). No tracked package
+or lockfile change and no canonical dependency/data mutation occurred. This
+installation is tooling evidence, not product verification.
