@@ -3739,7 +3739,12 @@ export class OwnedMobilityService
         ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
       },
       execute: async () => {
-        const res = this._executeDispatchOrder(orderId, command, requestId);
+        const res = await this._executeDispatchOrder(
+          orderId,
+          command,
+          requestId,
+          options?.required === true,
+        );
         return {
           data: res,
           statusCode: 200,
@@ -3754,19 +3759,25 @@ export class OwnedMobilityService
     orderId: string,
     command: DispatchOrderCommand,
     requestId?: string,
+    awaitPersistence = false,
   ) {
     const prepared = this.prepareDispatchOrder(
       this.cloneOrder(this.requireOrder(orderId)),
       command,
       requestId,
     );
-    this.persistChanges(
+    const pending = this.persistChanges(
       {
         ...prepared.changes,
         orders: prepared.shouldPersistOrder ? prepared.changes.orders : [],
       },
       "dispatch_order",
     );
+    // HTTP dispatch must acknowledge its own job/attempt writes before another
+    // instance can consume the returned ID. Internal synchronous callers retain
+    // their original contract; unrelated workflow writes are not awaited here.
+    if (awaitPersistence && pending)
+      return pending.then(() => prepared.apply());
     return prepared.apply();
   }
 
@@ -11497,6 +11508,7 @@ export class OwnedMobilityService
         this.ownedMobilityRepository!.reportPersistenceFailure(error, context);
       },
     );
+    return pending;
   }
 
   private async persistChangesRequired(
