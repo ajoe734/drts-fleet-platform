@@ -46,7 +46,8 @@ WITH latest_governance AS (
                 a.tenant_id::text, NULLIF(a.new_value->>'tenantId', '')))))
           AND (
             (p.new_value->>'family' = 'audit_log'
-              AND p.new_value->>'subjectId' = a.audit_id::text)
+              -- Physical UUID text is canonical lowercase, including legacy payloads.
+              AND lower(p.new_value->>'subjectId') = a.audit_id::text)
             OR (p.new_value->>'family' = a.resource_type
               AND p.new_value->>'subjectId' = a.resource_id)
             OR (p.new_value->>'family' = a.new_value->>'family'
@@ -55,7 +56,7 @@ WITH latest_governance AS (
               AND p.new_value->>'manifestHash' = a.new_value->>'manifestHash')
             OR (p.resource_type = 'evidence_deletion_exception'
               AND p.new_value->>'sourceResourceType' = 'audit_log'
-              AND p.new_value->>'sourceResourceId' = a.audit_id::text)
+              AND lower(p.new_value->>'sourceResourceId') = a.audit_id::text)
             OR (p.resource_type = 'evidence_deletion_exception'
               AND p.new_value->>'sourceResourceType' = a.resource_type
               AND p.new_value->>'sourceResourceId' = a.resource_id)

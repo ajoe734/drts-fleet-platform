@@ -430,7 +430,7 @@ export class AuditNotificationService implements OnModuleInit {
       const duplicate = [...this.evidenceLegalHolds.values()].find(
         (hold) =>
           hold.family === policy.family &&
-          hold.subjectId === subjectId &&
+          this.sameEvidenceSubject(policy.family, hold.subjectId, subjectId) &&
           hold.caseNumber === caseNumber &&
           hold.status === "active",
       );
@@ -589,7 +589,11 @@ export class AuditNotificationService implements OnModuleInit {
       const duplicate = [...this.evidenceDeletionExceptions.values()].find(
         (exception) =>
           exception.family === policy.family &&
-          exception.subjectId === subjectId &&
+          this.sameEvidenceSubject(
+            policy.family,
+            exception.subjectId,
+            subjectId,
+          ) &&
           this.withEffectiveDeletionExceptionStatus(exception).status ===
             "active",
       );
@@ -728,7 +732,7 @@ export class AuditNotificationService implements OnModuleInit {
       .filter(
         (hold) =>
           hold.family === family &&
-          hold.subjectId === subjectId &&
+          this.sameEvidenceSubject(family, hold.subjectId, subjectId) &&
           (!tenantId || this.sameEvidenceTenant(hold.tenantId, tenantId)) &&
           (!manifestHash || hold.manifestHash === manifestHash) &&
           hold.status === "active",
@@ -741,7 +745,7 @@ export class AuditNotificationService implements OnModuleInit {
       .filter(
         (exception) =>
           exception.family === family &&
-          exception.subjectId === subjectId &&
+          this.sameEvidenceSubject(family, exception.subjectId, subjectId) &&
           (!tenantId ||
             this.sameEvidenceTenant(exception.tenantId, tenantId)) &&
           (!manifestHash || exception.manifestHash === manifestHash) &&
@@ -1050,6 +1054,23 @@ export class AuditNotificationService implements OnModuleInit {
   private normalizeOptional(value: string | null | undefined) {
     const normalized = value?.trim();
     return normalized ? normalized : null;
+  }
+
+  private sameEvidenceSubject(
+    family: EvidenceRetentionFamily,
+    left: string,
+    right: string,
+  ) {
+    // audit_id is PostgreSQL uuid, regardless of version. Other families and
+    // opaque subjects retain their existing case-sensitive identity semantics.
+    return (
+      left === right ||
+      (family === "audit_log" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          left,
+        ) &&
+        left.toLowerCase() === right.toLowerCase())
+    );
   }
 
   private sameEvidenceTenant(left: string | null, right: string) {

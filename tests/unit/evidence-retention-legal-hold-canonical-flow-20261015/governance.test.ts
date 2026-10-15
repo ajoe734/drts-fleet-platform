@@ -419,6 +419,29 @@ describe("C099 canonical governance ACK and unavailable authority", () => {
     }
   }
 
+  it("accepts audit-source UUID spelling through actual register ACK and preserves it in replay", async () => {
+    const f = fixture();
+    await f.service.onModuleInit();
+    const sourceResourceId = "ABCDEFAB-CDEF-4ABC-8ABC-ABCDEFABCDEF";
+    const result = await f.controller.registerEvidenceDeletionException(
+      {
+        ...exceptionCommand,
+        subjectId: "other-subject",
+        sourceResourceType: "audit_log",
+        sourceResourceId,
+      },
+      identity,
+    );
+    expect(result.data).toMatchObject({ status: "active", sourceResourceId });
+    expect(
+      f.stored.find((r) => r.resourceType === "evidence_deletion_exception")
+        ?.newValuesSummary,
+    ).toMatchObject({ sourceResourceId });
+    const restarted = new AuditNotificationService(f.repository);
+    await restarted.onModuleInit();
+    expect(restarted.listEvidenceDeletionExceptions()).toEqual([result.data]);
+  });
+
   it("failed configured trail is unavailable in lists, controller, commands and report projection; audit feed retains fallback", async () => {
     const f = fixture();
     await f.service.onModuleInit();
