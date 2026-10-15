@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { createDriverBearerClient } from "@drts/api-client";
+import { createDriverBearerClient } from "../../../packages/api-client/src";
 import {
   GET,
   POST,
@@ -21,13 +21,19 @@ it("the real SDK and mounted Driver BFF carry the task order read without substi
     if (target.hostname === "metadata.google.internal")
       return new Response("synthetic-google-service-proof");
     if (target.origin === "https://pax.test") {
-      return GET(new NextRequest(target, init), {
-        params: Promise.resolve({
-          path: target.pathname
-            .slice("/api/review-driver-api/".length)
-            .split("/"),
+      return GET(
+        new NextRequest(target, {
+          method: "GET",
+          headers: new Headers(init?.headers),
         }),
-      });
+        {
+          params: Promise.resolve({
+            path: target.pathname
+              .slice("/api/review-driver-api/".length)
+              .split("/"),
+          }),
+        },
+      );
     }
     expect(target.origin).toBe("https://api-test.a.run.app");
     paths.push(target.pathname);
