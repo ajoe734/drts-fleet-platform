@@ -708,3 +708,38 @@ that transport value with `new Headers(init?.headers)`. Both tooling failures
 remain recorded, without product failure/pass credit. Existing review
 controller constructor callers were adapted only to remove its moved supply
 dependency; their original ownership assertions remain intact.
+
+### R10–R12 replacement-source verification closeout
+
+All owner-started checks have finished and their results were read:
+
+- `closeout-regression.log`: **203 pass / 3 original hosted PG skips**,
+  exit 0, across the full review namespace plus original OTP and Passenger
+  account/session namespaces. Both actual UI callers pass along with their
+  original positive and negative paths. Counts overlap prior focused runs.
+- `auth-bootstrap-after.log`: **101 pass**, exit 0, for the unchanged original
+  API auth-controller assertions with their corrected external row fixture.
+- `two-ui-immutable-before-final.log`: **2 expected failures**, exit 1, using
+  the final UI regressions against the immutable old source. The failures
+  remain the actual Ops route 401 and Passenger OTP command 400; no import or
+  dependency failure is counted as reproduction.
+- `closeout-root-typecheck.log`, `closeout-api-build.log`,
+  `two-ui-tests-typecheck-final.log`, `closeout-lint.log`, final format and
+  diff checks: exit 0. Earlier Passenger route generation/typecheck also
+  passed; its page source is unchanged since that check except for the
+  already verified OTP projection. No API/product runtime is started by the
+  TypeScript build.
+
+The final repair changes only the Passenger OTP proof projection, the Ops
+prepare route/controller registration and caller, its minimal constructor
+test adaptations, and the original API test fixture's external row boundary.
+The original browser steps, three UUID assertions, formal PG schema/repository
+companions, service business rules, authorization policy/guards, workflow
+gates, timeouts and deployment configuration remain unchanged. The final
+canonical evidence manifest identifies the exact normally pushed candidate,
+all nine source hashes and the original plus replacement-check logs.
+
+Replacement same-SHA source review/full CI, actual three-role browser and
+formal PG runs, normal merge, immutable shared-dev deployment and new smoke
+remain outstanding. Neither original PG greens nor socket-free UI/service
+passes satisfy the three required acceptance keys by themselves.
