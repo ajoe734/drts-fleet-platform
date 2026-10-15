@@ -5,7 +5,7 @@ Owner: Codex · Reviewer: Codex2
 Status: **Source checkpoint; incomplete, no candidate handoff or acceptance claim.**
 
 Base: `6dfff99fcc8f54d10fc18c1f19c5bcfabeb57add`. Tested source checkpoint:
-`9d70dae0d6ea7ca95e041ecc63f3733fc4df12a3`. Branch:
+`5e87cf5dd0eb0d7fb7f92708eb14d33c0d084053`. Branch:
 `codex/fleet-portal-verified-principal-canonical-caller-flow-20261015`.
 Later documentation commits do not replace that tested source identity.
 
@@ -73,6 +73,68 @@ control-plane-auth was then built to resolve its stale declaration output.
 The final API typecheck result is recorded in the closeout update below. A
 failed attempted Vitest `--include` invocation was a CLI option error, not a
 product regression; the retained config above is the corrected executed probe.
+
+## Resumed dispatch: actual caller reproduction (2026-10-15 18:12 UTC)
+
+At source checkpoint `5e87cf5dd0eb0d7fb7f92708eb14d33c0d084053`, the new
+`caller-boundaries.test.ts` imports the actual React driver/vehicle create
+forms, `CaseReplyComposer`, document request/upload helpers and middleware.
+It submits the real form handlers and the editable reply button, then runs
+their emitted request headers through the unchanged middleware with the
+existing session/CSRF cookies. Navigation and the browser fetch/cookie
+boundary are adapted; UI components, enabled/disabled controls, request
+construction and middleware are not mocked. The document probe invokes the
+actual request/content/confirm helpers; its later steps are independent
+probes of each entry, not a claim that a rejected upload proceeds to confirm.
+
+All four reproduction tests confirm the unresolved caller defect: no CSRF
+header is sent, middleware returns 403 before proxy/backend invocation, and
+form/reply navigation does not report success. These four **negative defect
+reproductions are not fixed-after or successful browser acceptance**. Once
+the three caller leaves receive scope coordination, update these assertions
+to require the existing CSRF header and successful middleware→proxy flow.
+The two existing explicit middleware contract probes remain intact.
+
+| Finding / acceptance                                             | Source evidence                                                                                                                                             | This dispatch result                                                                                                     | Unresolved repair boundary                                     |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| F3 / `fleet-portal_original-mounted-flow-and-denial-regressions` | Actual NewDriverSubmissionForm / NewVehicleSubmissionForm → apiRequest; CaseReplyComposer.handleSubmit; fleetDocumentRequest / putFleetDocument; middleware | Four socket-free caller defect reproductions pass by observing the actual 403. No fixed-after claim.                     | Scope leaves 1–3 below; retain middleware and backend guards.  |
+| F1/F2/F4 / all other required keys                               | Actual production server/proxy/controller/guard/session tests at the source checkpoint above                                                                | Original 32 tests still pass; immutable-base replay still has five meaningful failures and one legacy-factory trap pass. | Scope leaves 4–7 below; no candidate handoff while unresolved. |
+
+Fresh commands and completed results, Node `v22.23.2`, Vitest `4.1.4`:
+
+| Command                                                                                                                                                                                                                 | Exit / result                                                                                                                                                       | Local evidence                  |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `pnpm exec vitest run -c tests/unit/fleet-portal-verified-principal-canonical-caller-flow-20261015/vitest.config.ts`                                                                                                    | 0; 5 files, 36 passed, including the four unresolved-caller rejection reproductions                                                                                 | `resume-caller-tests-final.log` |
+| `pnpm exec tsc -p tests/unit/fleet-portal-verified-principal-canonical-caller-flow-20261015/tsconfig.json --noEmit`                                                                                                     | 0; scoped paths include the actual Fleet UI imports                                                                                                                 | `resume-caller-types-final.log` |
+| `pnpm exec eslint tests/unit/fleet-portal-verified-principal-canonical-caller-flow-20261015 --max-warnings=0`                                                                                                           | 0                                                                                                                                                                   | `resume-lint.log`               |
+| `pnpm exec vitest run -c tests/unit/fleet-portal-verified-principal-canonical-caller-flow-20261015/before.vitest.config.ts tests/unit/fleet-portal-verified-principal-canonical-caller-flow-20261015/principal.test.ts` | 1, expected original defects: 5 failed / 1 passed against immutable base `6dfff99fcc8f54d10fc18c1f19c5bcfabeb57add`                                                 | `resume-before.log`             |
+| `pnpm exec vitest run -c tests/unit/fleet-portal-verified-principal-canonical-caller-flow-20261015/retained.vitest.config.ts`                                                                                           | 1; 32 passed / 2 assertion failures, plus 2 suite-load errors. Same four test leaves 4–7 below.                                                                     | `resume-retained.log`           |
+| `pnpm --filter @drts/api typecheck`                                                                                                                                                                                     | 2; 310 diagnostics, including stale contract types (`ops_observer`, `mail_delivery`, driver invitation binding) and missing control-plane-auth exports. Not a pass. | `resume-api-typecheck.log`      |
+
+Logs for this resumed dispatch are under this assigned worker's
+`.local/fleet-portal-principal/`. The historical log names in the earlier table
+were not available in this dispatch, so the fresh results above are the
+inspectable evidence for this checkpoint. Initial new UI typecheck lacked the
+Fleet alias; adding it to the owned task tsconfig produced the final exit 0.
+The first caller run also had two probe-only alert expectations fail; those
+were replaced with completed-form/no-navigation assertions, and the full
+suite was rerun to the final result above.
+
+The API package's `node_modules/@drts/contracts` and
+`node_modules/@drts/control-plane-auth` symlinks resolve to canonical-root
+packages outside this isolated worktree. Their declaration output does not
+match this task's checked-out source; rebuilding task-local outputs would
+not change those resolved paths. This explains the observed resolution
+boundary, not an API typecheck pass or authorization to edit canonical-root
+source. The source-mapped task typecheck above passes independently.
+
+The branch was fetched and has no existing PR at this dispatch. The previous
+published anchor was `38a25260e77ad051c4f9e6b3490c82afc6d1690e`; preserve its
+history. The new source checkpoint is an anchor, not a review candidate.
+Supervisor coordination is required by `AI_COLLABORATION_GUIDE.md` §0.7 for
+the exact seven additional leaves below; the current task scopes still do
+not authorize those edits. No human permission, new issuer, scope grant,
+middleware relaxation or provider/VM action is requested.
 
 ## Exact remaining repair boundary (Supervisor scope coordination)
 
