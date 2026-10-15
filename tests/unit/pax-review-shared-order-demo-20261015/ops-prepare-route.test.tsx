@@ -97,7 +97,7 @@ it("the real Ops prepare button/BFF reaches a realm-admitted controller without 
           return bff[method](
             new NextRequest(`https://ops.example${url}`, {
               method,
-            headers: new Headers(init?.headers),
+              headers: new Headers(init?.headers),
               ...(init?.body ? { body: init.body } : {}),
             }),
             {
