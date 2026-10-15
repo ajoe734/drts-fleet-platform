@@ -16,6 +16,8 @@ const { act, create } = appRequire("react-test-renderer");
 const ts = require("typescript");
 const [scenario, sourceRef] = process.argv.slice(2);
 const completionCase = scenario.startsWith("completion-");
+const homeCase = scenario.startsWith("completion-home");
+const forwardedHome = scenario === "completion-home-forwarded";
 const reloadCase =
   /^(reload|empty|malformed|unreadable)-(web|native)-(jobs|trip)$/.exec(
     scenario,
@@ -116,14 +118,22 @@ for (const ext of [".ts", ".tsx"])
     const screenRef = process.env.PAX_REVIEW_DRIVER_SCREEN_SOURCE_REF;
     const relative = path.relative(root, filename);
     const source =
-      screenRef && /^apps\/driver-app\/app\/(jobs|trip)\.tsx$/.test(relative)
+      screenRef &&
+      /^apps\/driver-app\/app\/(index|jobs|trip)\.tsx$/.test(relative)
         ? require("node:child_process").execFileSync(
             "git",
             ["show", `${screenRef}:${relative}`],
             { cwd: root, encoding: "utf8" },
           )
         : fs.readFileSync(filename, "utf8");
-    compile(m, filename, source);
+    compile(
+      m,
+      filename,
+      source +
+        (relative === "apps/driver-app/app/index.tsx"
+          ? "\nexport { loadWorkspaceData as __testLoadWorkspaceData };\n"
+          : ""),
+    );
   };
 const originalLoad = Module._load;
 Module._load = function (request, parent, isMain) {
@@ -190,7 +200,12 @@ let task = {
   taskId: "fixture-driver-task-a",
   orderId,
   driverId: "pax-review-driver-a",
-  status: completionCase ? "on_trip" : "pending_acceptance",
+  status:
+    scenario === "completion-home-completed"
+      ? "completed"
+      : completionCase
+        ? "on_trip"
+        : "pending_acceptance",
   startedAt: completionCase
     ? new Date(Date.now() - 60_000).toISOString()
     : null,
@@ -215,12 +230,15 @@ let replyListener = null;
 let renderer;
 const commands = [];
 const stages = [];
+const reads = [];
 const response = (data) => Response.json({ success: true, data });
 globalThis.fetch = async (url, init = {}) => {
   assert.equal(new URL(url).origin, "https://example.invalid");
   const pathname = new URL(url).pathname;
+  reads.push(pathname);
   if (pathname === "/api/auth/driver/device/register")
     return response({
+      driver_id: task.driverId,
       access_token: "synthetic-device-token",
       refresh_token: "synthetic-refresh-token",
       driver: { driver_id: task.driverId },
@@ -234,7 +252,12 @@ globalThis.fetch = async (url, init = {}) => {
     "Bearer synthetic-device-token",
   );
   if (pathname.endsWith("/enabled")) return response({ enabled: true });
-  if (pathname === "/api/driver/task-views")
+  if (pathname === "/api/driver/task-views") {
+    if (scenario === "completion-home-fallback")
+      return Response.json(
+        { error: { code: "FIXTURE_UNAVAILABLE" } },
+        { status: 503 },
+      );
     return response({
       items:
         scenario === "missing-job"
@@ -243,12 +266,15 @@ globalThis.fetch = async (url, init = {}) => {
               {
                 task_id: task.taskId,
                 order_id: orderId,
-                source_platform: "drts",
-                order_domain: "owned",
+                source_platform: forwardedHome ? "uber" : "drts",
+                order_domain: forwardedHome ? "forwarded" : "owned",
                 platform_display_name: "DRTS",
                 local_status: task.status,
                 native_status: null,
-                driver_action_state: "action_required",
+                driver_action_state:
+                  scenario === "completion-home-completed"
+                    ? "completed"
+                    : "action_required",
                 allowed_actions: ["accept", "reject"],
                 requires_manual_fallback: false,
                 requires_reauth: false,
@@ -258,13 +284,23 @@ globalThis.fetch = async (url, init = {}) => {
               },
             ],
     });
+  }
   if (pathname === "/api/driver/tasks") return response({ items: [task] });
   if (pathname === `/api/orders/${orderId}`)
-    return completionCase
+    return completionCase && !forwardedHome
       ? Response.json({ error: { code: "AUTH_REALM_DENIED" } }, { status: 403 })
       : response(order);
   if (pathname === `/api/driver/tasks/${task.taskId}/order`) {
-    if (scenario === "completion-unavailable")
+    if (scenario === "completion-home-refused")
+      return Response.json(
+        { error: { code: "DRIVER_IDENTITY_MISMATCH" } },
+        { status: 403 },
+      );
+    if (
+      ["completion-unavailable", "completion-home-unavailable"].includes(
+        scenario,
+      )
+    )
       return Response.json(
         { error: { code: "FIXTURE_DATABASE_UNAVAILABLE" } },
         { status: 503 },
@@ -289,6 +325,9 @@ globalThis.fetch = async (url, init = {}) => {
     );
   }
   if (pathname === "/api/platform-presence") return response({ presences: [] });
+  if (homeCase && pathname === "/api/notifications")
+    return response({ items: [] });
+  if (homeCase && pathname === "/api/shifts") return response({ items: [] });
   if (pathname === `/api/driver/tasks/${task.taskId}/accept`) {
     commands.push({ path: pathname, body: JSON.parse(init.body) });
     const status = scenario === "accept-refused" ? 409 : 201;
@@ -404,6 +443,61 @@ async function run() {
   let api = require(apiPath);
   if (!reloadCase || reloadCase[1] === "reload")
     await api.registerDriverDevice("synthetic-registration-code");
+  if (homeCase) {
+    const home = require(path.join(app, "app/index.tsx"));
+    const result = await home.__testLoadWorkspaceData();
+    const orderReads = reads.filter(
+      (pathname) =>
+        pathname === `/api/orders/${orderId}` || pathname.endsWith("/order"),
+    );
+    const report = {
+      scenario,
+      actualFunction: "Home.loadWorkspaceData",
+      actualSDK: true,
+      taskId: result.taskViews[0]?.taskId,
+      orderId: result.taskViews[0]?.orderId,
+      orderMapKeys: Object.keys(result.orderMap),
+      taskLoadError: result.taskLoadError,
+      orderReads,
+      upstreamHTTP: "fixture; no runtime acceptance credit",
+    };
+    console.log(JSON.stringify(report));
+    assert.equal(report.taskId, task.taskId);
+    assert.equal(report.orderId, orderId);
+    assert.equal(result.taskLoadError, null);
+    assert.equal(
+      result.taskFallbackMode,
+      scenario === "completion-home-fallback",
+    );
+    if (
+      ["completion-home-refused", "completion-home-unavailable"].includes(
+        scenario,
+      )
+    ) {
+      assert.deepEqual(
+        result.orderMap,
+        {},
+        "Refused reads must omit order facts",
+      );
+    } else {
+      assert.deepEqual(
+        result.orderMap[orderId]?.quotedFare,
+        order.quotedFare,
+        "R26-Home: assigned task must retain its authoritative order fare context",
+      );
+    }
+    assert.deepEqual(
+      orderReads,
+      [
+        forwardedHome
+          ? `/api/orders/${orderId}`
+          : `/api/driver/tasks/${task.taskId}/order`,
+      ],
+      "Owned reads use the task ID; forwarded summaries retain their existing reader; refusal never falls back to the general route",
+    );
+    assert.equal(commands.length, 0);
+    return;
+  }
   if (completionCase) {
     try {
       if (scenario === "completion-jobs") {
