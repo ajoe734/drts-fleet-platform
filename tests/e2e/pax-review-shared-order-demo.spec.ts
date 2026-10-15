@@ -9,6 +9,7 @@ import { readFile } from "node:fs/promises";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
 import { bookingResponseDiagnostic } from "./pax-review-shared-order/booking-diagnostic";
+import { dispatchResponseDiagnostic } from "./pax-review-shared-order/dispatch-diagnostic";
 
 type JourneyStep = ReturnType<typeof createJourneyProgress>["step"];
 
@@ -195,7 +196,10 @@ async function assign(
     })
     .click();
   const result = await response;
-  expect(result.status()).toBeLessThan(300);
+  expect(
+    result.status(),
+    await dispatchResponseDiagnostic(result, reassign),
+  ).toBeLessThan(300);
   return camel(await result.json()).data;
 }
 
