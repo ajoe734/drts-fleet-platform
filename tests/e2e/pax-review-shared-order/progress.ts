@@ -42,6 +42,9 @@ export function createJourneyProgress(file: string) {
       if (
         path !== "/api/passenger-app/auth/otp/verify" &&
         path !== "/api/passenger-app/me" &&
+        !/^\/api\/passenger-app\/(?:settings|fares|quotes|payment-methods)$/.test(
+          path,
+        ) &&
         !/\/(?:rides|orders|dispatch|driver\/(?:tasks|task-views)|review-demo)(?:\/|$)|\/auth\/driver\/device\/(?:invite|register)$/.test(
           path,
         )

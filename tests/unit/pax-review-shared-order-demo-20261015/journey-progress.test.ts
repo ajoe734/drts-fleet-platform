@@ -42,6 +42,10 @@ test("the real hosted journal persists an unfinished phase and safe response fac
       ["POST", "/api/passenger-app/auth/otp/verify", 201],
       ["GET", "/api/passenger-app/me", 200],
       ["PATCH", "/api/passenger-app/me", 400],
+      ["GET", "/api/passenger-app/settings", 200],
+      ["GET", "/api/passenger-app/fares", 200],
+      ["POST", "/api/passenger-app/quotes", 201],
+      ["GET", "/api/passenger-app/payment-methods", 200],
     ] as const) {
       progress.response(
         "pax",

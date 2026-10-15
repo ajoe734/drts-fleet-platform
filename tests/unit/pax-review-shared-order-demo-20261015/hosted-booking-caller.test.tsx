@@ -36,6 +36,7 @@ function PageContext({ children }: { children: ReactNode }) {
     <AppRouterContext.Provider
       value={{
         ...navigation,
+        bfcacheId: "synthetic-booking-navigation",
         replace: vi.fn(),
         back: vi.fn(),
         forward: vi.fn(),
@@ -78,26 +79,26 @@ function hostedBook() {
   const source = ts.transpileModule(declaration.getText(file), {
     compilerOptions: { target: ts.ScriptTarget.ES2022 },
   }).outputText;
-  const assertion = (value: unknown) => ({
-    ...expect(value),
-    toBeVisible: async () => {
-      await waitFor(() =>
-        expect((value as DomLocator).element()).not.toBeNull(),
-      );
-    },
-    toHaveURL: async (pattern: RegExp) => {
-      await waitFor(() =>
-        expect(navigation.push).toHaveBeenCalledWith(
-          expect.stringMatching(pattern),
-        ),
-      );
-    },
-    toHaveText: async (text: string) => {
-      await waitFor(() =>
-        expect((value as DomLocator).element()?.textContent).toBe(text),
-      );
-    },
-  });
+  const assertion = (value: unknown) =>
+    Object.assign(expect(value), {
+      toBeVisible: async () => {
+        await waitFor(() =>
+          expect((value as DomLocator).element()).not.toBeNull(),
+        );
+      },
+      toHaveURL: async (pattern: RegExp) => {
+        await waitFor(() =>
+          expect(navigation.push).toHaveBeenCalledWith(
+            expect.stringMatching(pattern),
+          ),
+        );
+      },
+      toHaveText: async (text: string) => {
+        await waitFor(() =>
+          expect((value as DomLocator).element()?.textContent).toBe(text),
+        );
+      },
+    });
   return new Function("expect", "PAX", "camel", `${source}; return book;`)(
     assertion,
     "https://ride.example.test",
@@ -184,6 +185,14 @@ it.each([false, true])(
               {
                 paymentMethodId: method,
                 last4: "0042",
+                cardType: "SIM",
+                expiryMonth: "12",
+                expiryYear: "2099",
+                isDefault: false,
+              },
+              {
+                paymentMethodId: "synthetic-other-default-method",
+                last4: "0043",
                 cardType: "SIM",
                 expiryMonth: "12",
                 expiryYear: "2099",

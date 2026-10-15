@@ -103,20 +103,18 @@ async function book(
 ) {
   await page.goto(`${PAX}/`);
   const ack = page.getByRole("button", { name: "我已閱讀並同意", exact: true });
-  await expect(
-    page.getByText("建立乘車需求", { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText("建立乘車需求", { exact: true })).toBeVisible();
   // AuthScreen's P5Header renders the title as text. Settings load separately;
   // wait for the actual disclosure or form before deciding whether to agree.
   await expect(
-    ack.or(page.getByLabel("上車地點", { exact: true })),
+    ack.or(page.getByLabel("示範上車地點", { exact: true })),
   ).toBeVisible();
   if (await ack.isVisible()) await ack.click();
   await page
-    .getByLabel("上車地點", { exact: true })
+    .getByLabel("示範上車地點", { exact: true })
     .selectOption("review-banqiao");
   await page
-    .getByLabel("下車地點", { exact: true })
+    .getByLabel("示範下車地點", { exact: true })
     .selectOption("review-city-hall");
   // The review runtime explicitly selects the existing one-minute lead
   // configuration. Keep enough real margin for quote/confirmation and wait
@@ -127,16 +125,13 @@ async function book(
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
   });
   await page.getByLabel("預約時間", { exact: true }).fill(localTime);
-  // Select the newly bound owned method through the existing radio control.
-  const choice = page.locator(`input[value="${paymentMethodId}"]`);
-  if (await choice.count()) await choice.check();
-  else {
-    const radios = page.getByRole("radio");
-    await expect(radios.last()).toBeVisible();
-    await radios.last().check();
-  }
   await page.getByRole("button", { name: "試算車資", exact: true }).click();
   await expect(page.getByText(/NT\$ (85|105)/).first()).toBeVisible();
+  // The existing confirmation sheet owns payment selection. Require the
+  // newly bound method itself; selecting another card would change B's PSP case.
+  const choice = page.locator(`input[value="${paymentMethodId}"]`);
+  await expect(choice).toBeVisible();
+  await choice.check();
   await page.getByRole("checkbox", { name: "我已確認費用與優惠說明" }).check();
   const created = page.waitForResponse(
     (r) =>
