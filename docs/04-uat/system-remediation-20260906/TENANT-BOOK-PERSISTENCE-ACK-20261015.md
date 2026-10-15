@@ -68,7 +68,18 @@ Final scoped test command (run with cwd `apps/api`, required by the existing das
 pnpm exec vitest run --config ../../tests/unit/tenant-book-persistence-ack-20261015/vitest.config.ts
 ```
 
-The scoped config overrides the include array and selects exactly the existing API tenant-partner service unit file and this task's regression file. Running the service file from repo root previously yielded one fixture path failure (84 passed, 1 failed, exit 1); rerunning from its expected API cwd passes all 85.
+At the initial implementation checkpoint, the scoped config overrides the include array and selects exactly the existing API tenant-partner service unit file and this task's regression file. Running the service file from repo root previously yielded one fixture path failure (84 passed, 1 failed, exit 1); rerunning from its expected API cwd passes all 85.
+
+## Resumed dispatch verification (2026-10-15)
+
+- The release CLI's task slice still excludes the 2 production and 9 test caller files listed above. The immutable task spec also retains that original allowlist. Scope coordination remains unresolved; no excluded file was changed and no candidate was handed off.
+- After `git fetch origin` (exit 0), local and remote task heads both resolved to `edc6b29731a5875189e3a035072dda0424c75cd5`; `origin/dev` was `a64749b436f2d9ca96c69c80f918e663fa6e8755`. `gh pr list --head codex/tenant-book-persistence-ack-20261015 --state all --json number,url,state,headRefOid,statusCheckRollup` exited 0 with `[]`. Published history was preserved without synchronization or rewriting.
+- Re-read the direct call search and the two production sites. In `seedTenantGovernance`, the map at line 287 must await all callback results and the `upsertCostCenter` at line 306 before dereferencing `created` or recording seed success. In `createReferralPassengerBooking`, the fallback `upsertPassenger` at line 13893 must be awaited before booking proceeds. These are the same outstanding caller repairs, not new product scope.
+- Verification checkpoint `59444217b3d492bd28c1e99474567fddfacee270` adds only the existing `tenant-partner.controller.test.ts` and `tenant-partner.repository.test.ts` paths to this task's explicit Vitest include list. It retains the service and persistence regression files, avoids broad discovery, and does not start servers.
+- The first expanded test command exited 1 before collecting tests because `@nestjs/common`/`jsonwebtoken` were unavailable. The initial ESLint command exited 2 because `@eslint/js` was unavailable. These are dependency setup failures. The worktree's dependency links had again been pointed outside the worktree; the existing `ensure-local-node-modules.py --root "$PWD" repair` command exited 0 and reported a local `.pnpm` store. No dependency manifests were changed.
+- After repair, the same scoped command from `apps/api` exited **0: 4 files, 115 tests passed** (71 service, 23 controller, 7 repository, 14 task regression). `pnpm exec eslint tests/unit/tenant-book-persistence-ack-20261015/vitest.config.ts --max-warnings=0` exited 0. Both processes finished and their results were read.
+- Canonical machine-specific evidence: `/home/lupin/workspace/drts-fleet-platform/.local/tenant-book-persistence-ack-20261015/59444217b/` contains `impacted-unit.log` (initial setup failure), `deps-repair.log`, `impacted-unit-repaired.log` and `lint-repaired.log`.
+- These checks add existing controller/guard and repository regression evidence to the original acceptance table. They do not resolve the excluded caller adaptations, the previously recorded API/root typecheck failures, exact-candidate CI, independent review, protected merge or acceptance. All original outstanding limits remain in force.
 
 ## Checks and honest limits
 
