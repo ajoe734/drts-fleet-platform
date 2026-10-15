@@ -7,17 +7,20 @@
 > applying a net diff. It must NOT be merged. That whole incident — and every
 > subsequent branch-naming/trailer/ancestry problem it produced — is superseded
 > by the clean 2026-10-14 dev-continuation merge documented in **Section 11**.
-> Sections 1-10 are preserved verbatim (merging the `94195322681e`-reviewed
-> text and the equivalent `bca5cc068a4c`-cached text, which are
-> content-identical in body and differ only in heading/warning wording) for
-> audit; do not act on their "pending" framing or their draft Supervisor
-> commands — those are stale. Read **Sections 11-16** for the current state.
+> Sections 1-10's body text is preserved verbatim from commit
+> `94195322681ede1962659216f1c624c0ec164a0e`, and that body is byte-identical
+> to the equivalent body text in the separate, never-reviewed sibling commit
+> `bca5cc068a4cfd1ffbfff3d9db82274ad2bb6631` — **but their respective §0.7
+> sections are NOT identical**, are no longer merged into one, and are each
+> preserved separately below bound to its own commit SHA (§0.7a, §0.7b),
+> marked historical/superseded. Do not act on the "pending" framing of
+> §1-§10/§0.7a/§0.7b or their draft Supervisor commands — those are stale.
+> Read **Sections 11-16** for the current state.
 
 Owner: Claude · Reviewer: Codex2 · 2026-10-15
 
-## 0.7 Acceptance Evidence Itemized — current round (supersedes the itemized
-table below from the `94195322681e`/`bca5cc068a4c` round, which is kept for
-audit directly underneath it)
+## 0.7 Acceptance Evidence Itemized — current round (supersedes §0.7a/§0.7b
+below, which are both kept for audit)
 
 Executed this round with Git 2.43.0, Python 3.12.3, gh 2.100.0, no bypass
 env vars. Prior-round commands in this subsection are re-cited for lineage,
@@ -82,7 +85,56 @@ for any canonical change):**
 
 ---
 
-## 0.7 Acceptance Evidence Itemized (H3) — prior round, preserved for audit
+## 0.7a Acceptance Evidence Itemized — as originally written in candidate `94195322681ede1962659216f1c624c0ec164a0e` (HISTORICAL/SUPERSEDED, preserved verbatim)
+
+> [!WARNING]
+> This is the exact §0.7 text as it existed in the reviewed candidate
+> `94195322681ede1962659216f1c624c0ec164a0e` (sha256 of the whole artifact at
+> that commit: `70f79a022779590a7f379b99e1d8224536ff931dd83747caafb5d6b56ed3811a`).
+> Codex2's reopen of this exact candidate (2026-10-10T13:56:06Z, candidate
+> generation `dd837ff747524a61a4d95c1917995bd5`) found it insufficient — only
+> a 4-bullet summary, not a per-finding ledger with reproducible base/head
+> commands, exit codes, and tool versions. It also contains a factual error,
+> preserved below unedited rather than corrected in place: the H1 bullet
+> claims "The current helper candidate consists of 1 commit", but the actual
+> PR range for this candidate was 2 commits
+> (`3f9e9a3b503b4fa13f2224a01184ecc9e814a4a1` and
+> `94195322681ede1962659216f1c624c0ec164a0e` itself) — the same error the
+> 2026-10-10T13:56:06Z reopen flagged (it noted the formal checker's
+> `--base` defaults to `origin/main`, not the PR's actual base, as the
+> related footgun in this round's one checker command, §10 line 340 in this
+> candidate's own numbering).
+
+- **R1 (Reverted invalid #2529 approach)**: PR #2529 used an exact copy of an old tree, destructively reverting `dev` changes in 4 operational cleanup files (`.github/workflows/dev-owned-operational-fixture-cleanup.yml`, `docs/04-uat/dev-owned-operational-fixture-cleanup-20261009.md`, `operations/verification/cleanup-owned-operational-fixtures.py`, `tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py`) and a voice test (`tests/unit/audit-voice-application-wiring-20261003/trusted-turn-composition.test.ts`). This helper candidate abandons that destructive approach; there is now 0 diff in these files compared to `dev`.
+- **H1 (Commit Compliance)**: The prior helper candidate (`fdc24d7150ea96f59681fc6c23fa5b49f825707d`, Codex2 review 2026-10-10T13:39:39Z) failed `check_commit_trailers.py` with exit code 1 due to 3 offending commits. The current helper candidate consists of 1 commit and passes `check_commit_trailers.py` with exit 0.
+- **H2 (Helper Scope Constraint)**: The old helper incorrectly modified 30 files (+5449/-55) and opened PR #2539. PR #2539 is now closed. This new helper correctly limits its scope to a single support artifact without touching the product codebase.
+- **H3 (Traceability)**: This document now fully documents the review source (Codex2 review 2026-10-10T13:45:49Z, candidate generation `1c95c0924d1c47bf8f816c41dcbc6c7a`), adjacent SHAs (`fdc24d` to `3f9e9a`), published identity (`LLM-Agent: Gemini2`), and clearly details the ongoing parent routing contamination.
+
+---
+
+## 0.7b Acceptance Evidence Itemized (H3) — as recorded in commit `bca5cc068a4cfd1ffbfff3d9db82274ad2bb6631` (HISTORICAL, preserved for audit)
+
+> [!WARNING]
+> This §0.7 text comes from a **different, sibling commit** —
+> `bca5cc068a4cfd1ffbfff3d9db82274ad2bb6631` (sha256 of the whole artifact at
+> that commit: `452acb9ac7b3f2bb07ca8bb27324b456d11152882668cdfa3f806af256f48204`),
+> subject "record detailed traceability and concrete safe next", trailers
+> `LLM-Agent: Gemini2` / `Task-ID: PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR`
+> / `Reviewer: Codex2`, committed 2026-10-10T14:00:07Z on branch
+> `gemini2/pax-web-ride-ui-20261009-unblock-history-repair` (commit chain
+> `0875806698c0` → `3b8ba136e4aa` (13:40:09Z, "sync with dev") →
+> `b49b1b02735b` (13:49:34Z, "resolve H3/H4 finding gaps") →
+> `bca5cc068a4c`). This is a **parallel/concurrent attempt, not a descendant
+> of `94195322681e`**: `git merge-base bca5cc068a4cfd1ffbfff3d9db82274ad2bb6631
+> 94195322681ede1962659216f1c624c0ec164a0e` → `0875806698c022674217a3aee12bd89cb5fce27b`,
+> the common `dev` base both chains forked from independently. No
+> `worker_outcomes` entry in this task's canonical record ever recorded a
+> `handoff`/review of this SHA as a candidate — it survives only as a commit
+> on its own branch, one minute before this task's status became `blocked`
+> (14:01:15Z). It is preserved here, distinct from §0.7a, because its §0.7
+> content was reused verbatim as the basis for the current round's §0.7
+> above, and because a prior round of this file wrongly presented it as the
+> *same text* as §0.7a (it is not — see the diff between §0.7a and §0.7b).
 
 Below is the verifiable evidence for the 4 Acceptance Criteria of this helper task, executed using Git 2.43.0, Python 3.12.3, and gh 2.100.0 without bypasses.
 
@@ -570,9 +622,10 @@ Per `AI_COLLABORATION_GUIDE.md` §0.7 and the Codex2 reopen of
 `5e4cfd4c54dcd35384298c90385f856821bafe2f` (`generation fc5562ed9db440919e776b27c2eb387f`,
 PR #2705, 2026-10-15T20:40:09Z), the previous round replaced 347 lines of
 traceable history with a 141-line fresh summary, losing the per-finding/
-per-acceptance evidence trail. This section restores it without deleting the
-`94195322681e`/`bca5cc068a4c` text above (§0.7 prior round, §1-§10) and adds
-the current round.
+per-acceptance evidence trail. This section restores it, together with the
+§1-§10 body and the §0.7a/§0.7b split above (two genuinely different §0.7
+texts, from two different commits, no longer merged into one — see the
+top-of-file warning), and adds the current round.
 
 | Round (candidate / generation) | R1 (old #2529 whole-tree revert) | H1 (commit-trailer graph/gate) | H2 (helper PR scope) | H3 (traceability) | H4 (parent-metadata safety) |
 | --- | --- | --- | --- | --- | --- |
@@ -580,10 +633,12 @@ the current round.
 | `1ad9f340583c` / PR #2529 (`46d1ef3a2c`, gen `12b92e9206da`) | **FAIL** — reviewer R1 2026-10-10T13:13:16Z: same tree as `96102377a` applied onto newer `dev` tip, silently deleting 4 cleanup files (+0/-312, +0/-96, +0/-1822, +0/-1228) and reverting voice test (895/1199 lines touched). `git diff --numstat d36ca2f807b70cb94564c023bfe07b02dc70abde 1ad9f340583c137322f5ec5f246d06622fb0e8df -- <5 files>` confirmed this. | PASS — `check_commit_trailers.py --base d36ca2f807b70cb94564c023bfe07b02dc70abde --head 1ad9f340583c137322f5ec5f246d06622fb0e8df` → exit 0, 1 commit OK | n/a (this round's own PR) | n/a | n/a |
 | `fdc24d7150ea` / PR #2539 (gen `40a6f5e1b1`) | FIXED — reviewer confirmed abandonment of #2529's whole-tree approach | **FAIL** — reviewer H1 2026-10-10T13:39:39Z: `ours` merge kept 2nd-parent ancestry; `check_commit_trailers.py --base 0875806698c022674217a3aee12bd89cb5fce27b --head fdc24d7150ea96f59681fc6c23fa5b49f825707d` → exit 1, 3 non-compliant (`46df5aad681e`, `bfc9701f7a84`, `42bc39e0cedc`) | **FAIL** — H2: PR had 30 files (+5449/-55) incl. product code and an unrelated sidecar; `git diff --stat db8c36e13f6b3754a75ce4e843d55deb2e4386c5 fdc24d7150ea96f59681fc6c23fa5b49f825707d` confirmed | n/a | n/a |
 | `3f9e9a3b503b` / PR #2541 (gen `1c95c0924d`) | retained (not re-broken) | FIXED — same checker, `--base 0875806698c022674217a3aee12bd89cb5fce27b --head 3f9e9a3b503b4fa13f2224a01184ecc9e814a4a1` → exit 0 | FIXED — PR #2541 is 1 file only | **FAIL** — reviewer H3 2026-10-10T13:47:38Z: reinstated 301-line report but omitted the new H1/H2/graph evidence and adjacent-SHA lineage | **FAIL** — reviewer H4: `resolved_parent_status` still `in_progress` with stale v2 text, parent worktree snapshot `94307fe0287658dea4074db6c1ddeba399d2a462` re-confirmed still contaminated (5 non-compliant commits) |
-| `94195322681e` / PR #2541 updated (gen `dd837ff747`) | retained | retained | retained | **FAIL (2nd round)** — reviewer H3 2026-10-10T13:56:06Z: itemized `0.7` section added (see above) but still missing exact base/head-per-finding ledger, adjacent-generation chain, and the `default --base origin/main` footgun in the checker's CLI | **FAIL (2nd round)** — H4: `resolved_parent_next` metadata still the stale v2 text; live parent snapshot `7a92e5e05ca9eea86ba882280a4c714e90f1f0c2` (child of `94307fe`) still fails the same 6-commit non-compliance set |
+| `94195322681e` / PR #2541 updated (gen `dd837ff747`) | retained | retained | retained | **FAIL (2nd round)** — reviewer H3 2026-10-10T13:56:06Z: this candidate's own §0.7 (preserved verbatim as **§0.7a** above) was only a 4-bullet summary — not the per-finding ledger with reproducible base/head commands/exit/version — and mis-stated itself as "1 commit" when the PR range was 2. (The more detailed per-item evidence table now shown as **§0.7b** is *not* from this commit — it is from the separate sibling commit `bca5cc068a4c`, below.) | **FAIL (2nd round)** — H4: `resolved_parent_next` metadata still the stale v2 text; live parent snapshot `7a92e5e05ca9eea86ba882280a4c714e90f1f0c2` (child of `94307fe`) still fails the same 6-commit non-compliance set |
+| `bca5cc068a4c` (sibling branch `gemini2/pax-web-ride-ui-20261009-unblock-history-repair`, chain `0875806698c0`→`3b8ba136e4aa`→`b49b1b02735b`→`bca5cc068a4c`; never handed off) | retained | retained (commit itself passes `check_commit_trailers.py`, not independently re-run as a candidate) | retained | N/A as a reviewed round — no `worker_outcomes` entry ever recorded a `handoff`/review of this SHA. Its §0.7 (preserved as **§0.7b** above) is the detailed 4-item evidence table that a later round (`5e4cfd4c54dc` below, and this round) reused; forked from the same `0875806698c0` base as `94195322681e` but is not its ancestor or descendant (`git merge-base bca5cc068a4c 94195322681e` → `0875806698c0`). Preserved here only for provenance, not as a credited/failed review round. | N/A |
 | `0660ce29d219` (separate dev-continuation branch, gen `cb96c18f8f`) | **MOOT** — different branch entirely, built from current `dev`, not from any `96102377a`-derived tree; no `ours` merges in its history | **MOOT/PASS** — reviewer-approved, CI green | **MOOT/PASS** | — (this branch belongs to the *parent* task's own lifecycle, not this helper; its evidence lives in `PAX-WEB-RIDE-UI-20261009`'s own `worker_outcomes`, not here) | — |
 | `5e4cfd4c54dc` / PR #2705 (gen `fc5562ed9d`) | credited correctly (confirmed §0.7 current round) | credited correctly | credited correctly | **FAIL (3rd round)** — reviewer H3 2026-10-15T20:40:09Z: 347→141 line rewrite (`git diff --numstat 94195322681ede1962659216f1c624c0ec164a0e 5e4cfd4c54dcd35384298c90385f856821bafe2f -- <artifact>` → +134/-340) deleted the `94195322681e`/`bca5` evidence entirely; stale generation id left on line 6 | **FAIL** — reviewer H4 2026-10-15T20:40:09Z: artifact wrongly claimed `resolved_parent_*` was still pending and offered a destructive replacement command (see §15) |
-| this round (current artifact fix) | credited, unchanged | credited, unchanged | credited, unchanged | **Fixed** — this section restores the full `94195322681e`/`bca5` text (§0.7 prior round, §1-§10) rather than deleting it, and extends the ledger through this row | **Fixed** — see §15: the correct, already-live binding is quoted verbatim instead of describing it as missing |
+| `81ccb3bf0` / PR #2705 (gen `2b5376b957`) | credited correctly | credited correctly | credited correctly | **FAIL (4th round)** — reviewer H3 2026-10-15T20:58:37Z: restored §1-§10 and the detailed evidence table, but collapsed `94195322681e`'s own §0.7 and `bca5cc068a4c`'s distinct §0.7 into one "content-identical" claim, silently discarding `94195322681e`'s actual (shorter, erroring) §0.7 text — exactly what this row flagged above. | credited correctly (§15 withdrawal of the destructive replacement command stands) |
+| this round (current artifact fix) | credited, unchanged | credited, unchanged | credited, unchanged | **Fixed** — splits the single merged §0.7 back into **§0.7a** (`94195322681e`'s own, short, erroring text, verbatim) and **§0.7b** (`bca5cc068a4c`'s detailed table, verbatim), each bound to its real commit SHA/sha256/trailers/branch and marked historical; corrects this table's own prior mis-attribution of §0.7b's content to the `94195322681e` round (the row above, and the top-of-file warning). | unchanged — see §15: the correct, already-live binding is quoted verbatim instead of describing it as missing |
 
 Four original acceptance criteria, current-round cross-walk (fresh evidence
 cited inline in §11-§13/§15, not re-derived here):
