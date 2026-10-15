@@ -797,3 +797,79 @@ attempting it.
   this round, not re-derived or rewritten); on this helper's merge,
   `apply_unblock_parent_resolution` will propagate that already-correct,
   already-safe binding to the parent. No further write is outstanding.
+
+## 17. Root cause of this helper's own stuck `ci_status=failure` (not history, not the parent) — fixed by re-handoff, not by waiting
+
+Three prior rounds this session (`claude-20261015T230605Z-ec721e73` 23:10:49Z,
+`claude-20261015T232831Z-a271f3ac` 23:31:11Z, and the probe before this
+section) treated this helper's own stored `ci_status: "failure"` as "a stale
+GitHub-bus snapshot that will refresh on the bus's next automatic poll."
+That framing was wrong: it is not a timing issue, it is a structural
+dead-end in this VM's installed orchestrator release
+(`/home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-02057752bf15/tools/development-orchestrator`),
+confirmed by reading the actual code this round (no behavior change made to
+it — read-only citation):
+
+- `github_bus.py` `reconcile_candidate_lifecycle()` line 970:
+  `if task.get("status") not in {"review", "integrating"}: continue` — the
+  bus only re-observes GitHub CI/merge state for tasks in those two
+  statuses. Any other status is permanently skipped, not just deferred.
+- `bin/ai_status.py` `command_approve()` line 2314 sets `status="integrating"`
+  on reviewer approval (confirmed: this fired at `2026-10-15T21:49:59Z` per
+  `candidate_approved` in `ai-activity-log.jsonl`).
+- `bin/ai_status.py` `command_reconcile_candidate()` line 2380:
+  `elif ci_status in {"failure", "merge_conflict", "closed"}:
+  task["status"] = "in_progress"` — when the bus's next poll observes one of
+  those three CI states, it flips status away from `"integrating"` to
+  `"in_progress"` (not back to `"review"`), **without** calling
+  `clear_candidate_evidence()`, so `candidate_sha`/`reviewed_sha`/`ci_sha`/
+  `ci_status`/`pr_url` are all left populated exactly as they were — which is
+  why this round's `ai-status.sh show` still displays a fully-populated,
+  internally-consistent-looking approved candidate alongside `ci_status:
+  "failure"`, inviting the "it'll self-heal" misreading of the previous three
+  rounds.
+- `ai-activity-log.jsonl` confirms the exact moment this happened:
+  `candidate_reconciled Supervisor` at `2026-10-15T22:13:38Z` — the last
+  `candidate_reconciled`/`candidate_approved`/`candidate_invalidated` entry
+  for this task since. At `22:13:38Z`, CI run `38811980395` ("CI") had not
+  yet finished (it completed only at `22:36:28Z`; run `38811980431`
+  ("CI (integration trunk)") had already finished at `22:07:41Z`). GitHub's
+  check-run history for this exact SHA, re-queried fresh this round
+  (`gh api repos/ajoe734/drts-fleet-platform/commits/a742faa7215ffca4b40942497f7582cbd3d516fc/check-runs
+  --paginate --jq '.check_runs[] | select(.conclusion != "success" and
+  .conclusion != "skipped" and .conclusion != "neutral")'` → empty, exit 0),
+  shows **zero** check-runs with any non-success/non-skipped conclusion at
+  any point in their current history — i.e. whatever reported `FAILURE` /
+  `CANCELLED` / `TIMED_OUT` / `ACTION_REQUIRED` / `STARTUP_FAILURE` to
+  `candidate_ci_status()` (`github_bus.py` line 884) at `22:13:38Z` was
+  transient and is no longer visible in GitHub's current API response for
+  this SHA (consistent with a flaky job that GitHub Actions retried to a
+  clean conclusion, not a real defect in the candidate). Because that one
+  bad read landed while status was still `"integrating"`, it got latched as
+  permanent, un-pollable machine truth instead of being superseded by the
+  next poll.
+- Net effect, independently re-verified four times this session at
+  `21:49:59Z`/`23:10:49Z`/`23:31:11Z`/and fresh again this round (`gh pr
+  checks 2705` → all 30 checks `pass`/`skipping`, zero `fail`/`cancelled`;
+  `gh run list --commit a742faa7215ffca4b40942497f7582cbd3d516fc` → both
+  runs `conclusion: success`; `gh pr view 2705` →
+  `state: OPEN, mergeStateStatus: CLEAN, mergeable: MERGEABLE, headRefOid`
+  matches the candidate exactly): the real GitHub state for this exact SHA
+  has been fully green since `22:36:28Z`. The stored `ci_status: "failure"`
+  was never going to change no matter how long an owner waited, because
+  `status: "in_progress"` permanently excludes this task from
+  `reconcile_candidate_lifecycle()`'s polling set.
+
+**Fix applied this round:** not a code change (out of `write_scopes`, and
+not needed — the mechanism above is a reasonable, if sharp-edged, safety
+behavior: it only ever misfires on a transient CI read, and self-corrects on
+the *next* handoff). The correct, available repair is to re-enter the normal
+lifecycle: this section's own addition to this file is handed off, on the
+same branch/PR #2705, as a fresh candidate to Codex2. A fresh `handoff`
+unconditionally sets `status="review"` (`command_handoff`, `bin/ai_status.py`
+line 2170) regardless of prior status, which puts the task back inside
+`reconcile_candidate_lifecycle()`'s poll set; the bus's very next poll will
+read GitHub's current (already fully green) state and record
+`ci_status="success"` correctly, instead of the transient `"failure"` from
+`22:13:38Z`. See the `CANDIDATE_SHA`/`CANDIDATE_BRANCH` handoff that
+accompanies this round's commit for the exact new SHA.
