@@ -6,6 +6,7 @@ import type {
   DriverSosAlertRenderObservation,
   DriverSosAttachmentRecord,
   DriverSosAttachmentType,
+  DriverSosEventRecord,
   DriverSosTimelineEntry,
   DriverSosUrgentAlertOutboxRecord,
 } from "@drts/contracts";
@@ -354,6 +355,52 @@ export class DriverSosVerificationRepository {
         alertToOpsLatencyMs: Number(row.alert_to_ops_latency_ms),
         duplicate,
       };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async persistDutyAcknowledgement(
+    event: DriverSosEventRecord,
+    timeline: DriverSosTimelineEntry,
+  ) {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `
+          UPDATE safety.driver_sos_events
+          SET status = $2,
+              duty_ack_snapshot = $3::jsonb,
+              updated_at = $4
+          WHERE sos_event_id = $1
+        `,
+        [
+          event.sosEventId,
+          event.status,
+          JSON.stringify(event.dutyAcknowledgement),
+          event.updatedAt,
+        ],
+      );
+      await this.appendTimelineWith(client, timeline);
+      await client.query(
+        `
+          UPDATE safety.driver_sos_urgent_alert_outbox
+          SET status = 'delivered',
+              delivered_at = COALESCE(delivered_at, $2)
+          WHERE sos_event_id = $1
+            AND status <> 'failed'
+        `,
+        [event.sosEventId, event.updatedAt],
+      );
+      await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
