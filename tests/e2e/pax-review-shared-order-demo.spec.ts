@@ -334,10 +334,12 @@ async function finish(
       await expect
         .poll(
           async () => {
-            const [hours, minutes, seconds] = (await duration.innerText())
-              .split(":")
-              .map(Number);
-            return hours * 3600 + minutes * 60 + seconds;
+            const [hours, minutes, seconds] = (
+              await duration.innerText()
+            ).split(":");
+            return (
+              Number(hours) * 3600 + Number(minutes) * 60 + Number(seconds)
+            );
           },
           { timeout: 30_000, intervals: [1000] },
         )
