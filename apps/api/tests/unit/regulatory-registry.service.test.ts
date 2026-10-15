@@ -35,6 +35,7 @@ function createService(
       query: async () => ({ rows: [] }),
     } as never),
   );
+  const driverRows = new Map<string, unknown>();
   const regulatoryRegistryRepository = {
     isEnabled: vi.fn(() => false),
     persistChanges: vi.fn().mockResolvedValue(undefined),
@@ -45,6 +46,9 @@ function createService(
     findLatestDriverHeartbeatEvent: vi.fn(),
     findDriverHeartbeatEventByRecordedAt: vi.fn(),
     listLatestDriverLocations: vi.fn().mockResolvedValue([]),
+    lockDriver: vi.fn(async (driverId: string) =>
+      structuredClone(driverRows.get(driverId) ?? null),
+    ),
     loadState: vi.fn().mockResolvedValue({
       vehicles: [],
       drivers: [],
@@ -64,6 +68,8 @@ function createService(
       ? enabledRegistryRepository()
       : (regulatoryRegistryRepository as never),
   );
+  for (const driver of service.listDrivers())
+    driverRows.set(driver.driverId, structuredClone(driver));
 
   return {
     service,

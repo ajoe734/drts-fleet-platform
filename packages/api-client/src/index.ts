@@ -1209,6 +1209,12 @@ export class ApiClient {
     return this.get<OwnedOrderRecord>(`/api/orders/${id}`);
   }
 
+  async getDriverTaskOrder(taskId: string): Promise<OwnedOrderRecord> {
+    return this.get<OwnedOrderRecord>(
+      `/api/driver/tasks/${encodeURIComponent(taskId)}/order`,
+    );
+  }
+
   async getOrderDispatchTrace(
     orderId: string,
   ): Promise<DispatchTraceLogRecord[]> {
@@ -5382,3 +5388,4 @@ export * from "./system-remediation";
 export * from "./remittance-proof";
 export * from "./platform-adapter-registry";
 export { ApiClient as DrtsApiClient };
+export { PAX_REVIEW_STOPS, PAX_REVIEW_TRACK } from "./review-demo";

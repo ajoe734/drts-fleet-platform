@@ -15,3 +15,5 @@ export * from "./ride/native-presentation.js";
 export * from "./native/ride-stream.js";
 export * from "./native/receipt-download.js";
 export * from "./native/push-lifecycle.js";
+export { renderPassengerReviewRecord } from "./review-demo.js";
+export type { PassengerReviewRecord } from "./review-demo.js";

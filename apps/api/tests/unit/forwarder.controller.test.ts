@@ -70,9 +70,9 @@ describe("ForwarderController", () => {
     });
   });
 
-  it("scopes the unified driver task view list to the bootstrap driver identity", () => {
+  it("scopes the unified driver task view list to the bootstrap driver identity", async () => {
     const forwarderService = {
-      listDriverTaskViews: vi.fn(() => [
+      listDriverTaskViewsForRead: vi.fn(() => [
         {
           taskId: "task-001",
           orderId: "task-001",
@@ -82,13 +82,13 @@ describe("ForwarderController", () => {
     };
     const controller = new ForwarderController(forwarderService as never);
 
-    const response = controller.listDriverTaskViews(
+    const response = await controller.listDriverTaskViews(
       driverIdentity("driver-001"),
       undefined,
       "req-driver-task-views-001",
     );
 
-    expect(forwarderService.listDriverTaskViews).toHaveBeenCalledWith(
+    expect(forwarderService.listDriverTaskViewsForRead).toHaveBeenCalledWith(
       "driver-001",
     );
     expect(response).toEqual({
@@ -108,32 +108,32 @@ describe("ForwarderController", () => {
     });
   });
 
-  it("falls back to the driverId query param when the caller is not a driver bootstrap identity", () => {
+  it("falls back to the driverId query param when the caller is not a driver bootstrap identity", async () => {
     const forwarderService = {
-      listDriverTaskViews: vi.fn(() => []),
+      listDriverTaskViewsForRead: vi.fn(() => []),
     };
     const controller = new ForwarderController(forwarderService as never);
 
-    controller.listDriverTaskViews(
+    await controller.listDriverTaskViews(
       opsIdentity(),
       "driver-supervised-002",
       "req-ops-list-001",
     );
 
-    expect(forwarderService.listDriverTaskViews).toHaveBeenCalledWith(
+    expect(forwarderService.listDriverTaskViewsForRead).toHaveBeenCalledWith(
       "driver-supervised-002",
     );
   });
 
-  it("rejects unauthenticated calls with no driverId query", () => {
+  it("rejects unauthenticated calls with no driverId query", async () => {
     const forwarderService = {
-      listDriverTaskViews: vi.fn(),
+      listDriverTaskViewsForRead: vi.fn(),
     };
     const controller = new ForwarderController(forwarderService as never);
 
-    expect(() =>
+    await expect(
       controller.listDriverTaskViews(null, undefined, "req-anon-001"),
-    ).toThrow(
+    ).rejects.toThrow(
       expect.objectContaining({
         response: expect.objectContaining({
           error: expect.objectContaining({
@@ -142,45 +142,45 @@ describe("ForwarderController", () => {
         }),
       }),
     );
-    expect(forwarderService.listDriverTaskViews).not.toHaveBeenCalled();
+    expect(forwarderService.listDriverTaskViewsForRead).not.toHaveBeenCalled();
   });
 
-  it("scopes detail lookups to the bootstrap driver identity", () => {
+  it("scopes detail lookups to the bootstrap driver identity", async () => {
     const forwarderService = {
-      getDriverTaskView: vi.fn(() => ({
+      getDriverTaskViewForRead: vi.fn(() => ({
         taskId: "FWD-detail-001",
         orderDomain: "forwarded",
       })),
     };
     const controller = new ForwarderController(forwarderService as never);
 
-    controller.getDriverTaskView(
+    await controller.getDriverTaskView(
       "FWD-detail-001",
       driverIdentity("driver-detail-001"),
       undefined,
       "req-driver-detail-001",
     );
 
-    expect(forwarderService.getDriverTaskView).toHaveBeenCalledWith(
+    expect(forwarderService.getDriverTaskViewForRead).toHaveBeenCalledWith(
       "driver-detail-001",
       "FWD-detail-001",
     );
   });
 
-  it("rejects detail lookups when no driver identity or query is supplied", () => {
+  it("rejects detail lookups when no driver identity or query is supplied", async () => {
     const forwarderService = {
-      getDriverTaskView: vi.fn(),
+      getDriverTaskViewForRead: vi.fn(),
     };
     const controller = new ForwarderController(forwarderService as never);
 
-    expect(() =>
+    await expect(
       controller.getDriverTaskView(
         "FWD-detail-002",
         null,
         undefined,
         "req-anon-detail-001",
       ),
-    ).toThrow(
+    ).rejects.toThrow(
       expect.objectContaining({
         response: expect.objectContaining({
           error: expect.objectContaining({
@@ -189,7 +189,7 @@ describe("ForwarderController", () => {
         }),
       }),
     );
-    expect(forwarderService.getDriverTaskView).not.toHaveBeenCalled();
+    expect(forwarderService.getDriverTaskViewForRead).not.toHaveBeenCalled();
   });
 
   it("wraps driver-safe forwarded accept responses and scopes them to the bootstrap driver identity", async () => {
