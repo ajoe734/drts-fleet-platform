@@ -167,9 +167,7 @@ describe("SR-QA-TENANT-001 — users & invites (C006/C008)", () => {
     expect(revoked.revokedAt).not.toBeNull();
 
     // READ BACK #1: identity repository record itself is marked revoked.
-    expect(
-      identityRepository.listInvitations()[0]?.revokedAt,
-    ).not.toBeNull();
+    expect(identityRepository.listInvitations()[0]?.revokedAt).not.toBeNull();
 
     // READ BACK #2: the raw token that was actually delivered to the user
     // (captured by the delivery stub, exactly as a real mail transport would
@@ -182,8 +180,9 @@ describe("SR-QA-TENANT-001 — users & invites (C006/C008)", () => {
 
     // The user must still be in "invited" state, not silently activated.
     expect(
-      service.listTenantUsers(TENANT_ID).find((u) => u.userId === created.userId)
-        ?.status,
+      service
+        .listTenantUsers(TENANT_ID)
+        .find((u) => u.userId === created.userId)?.status,
     ).toBe("invited");
   });
 
@@ -229,9 +228,9 @@ describe("SR-QA-TENANT-001 — addresses & passengers, including their relations
       service.getAddressMasterRecord(TENANT_ID, address.addressId)
         .ownerPassengerId,
     ).toBe(passenger.passengerId);
-    expect(
-      service.listAddresses(TENANT_ID).map((a) => a.addressId),
-    ).toContain(address.addressId);
+    expect(service.listAddresses(TENANT_ID).map((a) => a.addressId)).toContain(
+      address.addressId,
+    );
     expect(
       service.listPassengers(TENANT_ID).map((p) => p.passengerId),
     ).toContain(passenger.passengerId);
@@ -275,9 +274,9 @@ describe("SR-QA-TENANT-001 — cost centres directory (C027)", () => {
     } as never);
     // Codes are normalized (uppercased) by the service.
     expect(created.code).toBe("CC-DIRECTORY-01");
-    expect(
-      service.listCostCenters(TENANT_ID).map((c) => c.code),
-    ).toContain("CC-DIRECTORY-01");
+    expect(service.listCostCenters(TENANT_ID).map((c) => c.code)).toContain(
+      "CC-DIRECTORY-01",
+    );
 
     await service.disableCostCenter(TENANT_ID, {
       code: "cc-directory-01",
@@ -328,7 +327,10 @@ describe("SR-QA-TENANT-001 — approval rules directory (C028 用車規則)", ()
     const reordered = service.reorderApprovalRules(TENANT_ID, {
       orderedRuleIds: [ruleB.ruleId, ruleA.ruleId],
     } as never);
-    expect(reordered.map((r) => r.ruleId)).toEqual([ruleB.ruleId, ruleA.ruleId]);
+    expect(reordered.map((r) => r.ruleId)).toEqual([
+      ruleB.ruleId,
+      ruleA.ruleId,
+    ]);
     // READ BACK: priority values on independent re-fetch reflect the new order.
     const rereadB = service.getApprovalRule(TENANT_ID, ruleB.ruleId);
     const rereadA = service.getApprovalRule(TENANT_ID, ruleA.ruleId);
@@ -411,7 +413,9 @@ describe("SR-QA-TENANT-001 — SLA profile (C028)", () => {
     // A different tenant's (seeded) SLA profile must be unaffected by the
     // write above (seed default is completionThresholdMin: 90, not 60).
     expect(service.getSlaProfile(TENANT_ID).tenantId).toBe(TENANT_ID);
-    expect(service.getSlaProfile(TENANT_ID).completionThresholdMin).not.toBe(60);
+    expect(service.getSlaProfile(TENANT_ID).completionThresholdMin).not.toBe(
+      60,
+    );
   });
 
   it("negative: recalculating SLA bookings without a reason is rejected (validation, not a silent no-op)", () => {
@@ -470,12 +474,12 @@ describe("SR-QA-TENANT-001 — feature flags with tenant scoping (C109; gap: no 
 });
 
 describe("SR-QA-TENANT-001 — tenant lifecycle (C102 平臺管理員 | 租戶生命週期與跨租戶治理)", () => {
-  it("creates a platform tenant, then updates its settings and status, with each write visible on independent re-read", () => {
+  it("creates a platform tenant, then updates its settings and status, with each write visible on independent re-read", async () => {
     const auditService = new AuditNotificationService();
     const service = new TenantsService(auditService);
 
     // WRITE #1: create.
-    const created = service.create({
+    const created = await service.create({
       name: "QA Regression Tenant",
       code: `qa_regression_${Date.now()}`,
     } as never);
@@ -488,14 +492,16 @@ describe("SR-QA-TENANT-001 — tenant lifecycle (C102 平臺管理員 | 租戶�
     });
 
     // WRITE #2: settings update.
-    service.updateSettings(created.id, { name: "QA Regression Tenant (Renamed)" } as never);
+    await service.updateSettings(created.id, {
+      name: "QA Regression Tenant (Renamed)",
+    } as never);
     expect(service.get(created.id).name).toBe("QA Regression Tenant (Renamed)");
 
     // WRITE #3: lifecycle status transition.
-    service.setStatus(created.id, "paused");
+    await service.setStatus(created.id, "paused");
     expect(service.get(created.id).status).toBe("paused");
 
-    service.setStatus(created.id, "active");
+    await service.setStatus(created.id, "active");
     expect(service.get(created.id).status).toBe("active");
 
     // READ BACK: list() includes the tenant with its latest state.
@@ -504,20 +510,24 @@ describe("SR-QA-TENANT-001 — tenant lifecycle (C102 平臺管理員 | 租戶�
     );
   });
 
-  it("negative: creating a tenant with a code that already exists is rejected (TENANT_CODE_CONFLICT)", () => {
+  it("negative: creating a tenant with a code that already exists is rejected (TENANT_CODE_CONFLICT)", async () => {
     const service = new TenantsService(new AuditNotificationService());
     const code = `qa_conflict_${Date.now()}`;
-    service.create({ name: "First", code } as never);
+    await service.create({ name: "First", code } as never);
 
     expect(
-      codeOf(() => service.create({ name: "Second", code } as never)),
+      await asyncCodeOf(() =>
+        service.create({ name: "Second", code } as never),
+      ),
     ).toBe("TENANT_CODE_CONFLICT");
   });
 
-  it("negative: transitioning the status of an unknown tenant is rejected instead of creating a phantom record (TENANT_NOT_FOUND)", () => {
+  it("negative: transitioning the status of an unknown tenant is rejected instead of creating a phantom record (TENANT_NOT_FOUND)", async () => {
     const service = new TenantsService(new AuditNotificationService());
     expect(
-      codeOf(() => service.setStatus("tenant-does-not-exist", "paused")),
+      await asyncCodeOf(() =>
+        service.setStatus("tenant-does-not-exist", "paused"),
+      ),
     ).toBe("TENANT_NOT_FOUND");
   });
 });

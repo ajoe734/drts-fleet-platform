@@ -146,12 +146,17 @@ export class TenantsService implements OnModuleInit {
       );
 
       if (persistedState.platformTenants.length === 0) {
-        this.persistChanges(
-          {
-            platformTenants: this.list(),
-          },
-          "module init bootstrap",
-        );
+        try {
+          await this.persistChanges(
+            {
+              platformTenants: this.list(),
+            },
+            "module init bootstrap",
+          );
+        } catch {
+          // Persistence failure is already reported by persistChanges;
+          // preserve non-fatal startup semantics.
+        }
         return;
       }
 
@@ -160,13 +165,18 @@ export class TenantsService implements OnModuleInit {
         this.tenants.set(tenant.id, this.cloneTenant(tenant));
       }
       if (isStrictAuthEnvironment() && deletedPlatformTenantIds.length > 0) {
-        this.persistChanges(
-          {
-            platformTenants: this.list(),
-            deletedPlatformTenantIds,
-          },
-          "module init strict auth sanitize",
-        );
+        try {
+          await this.persistChanges(
+            {
+              platformTenants: this.list(),
+              deletedPlatformTenantIds,
+            },
+            "module init strict auth sanitize",
+          );
+        } catch {
+          // Persistence failure is already reported by persistChanges;
+          // preserve non-fatal startup semantics.
+        }
       }
     } catch (error) {
       this.platformAdminRepository.reportPersistenceFailure(
@@ -186,10 +196,10 @@ export class TenantsService implements OnModuleInit {
     return this.cloneTenant(this.requireTenant(tenantId));
   }
 
-  create(
+  async create(
     input: CreatePlatformTenantCommand,
     requestId?: string,
-  ): TenantSummary {
+  ): Promise<TenantSummary> {
     const name = this.requireNonBlank(input.name, "name");
     const code = this.normalizeCode(input.code);
     this.assertCodeAvailable(code);
@@ -217,14 +227,14 @@ export class TenantsService implements OnModuleInit {
       updatedAt: now,
     };
 
-    this.tenants.set(created.id, this.cloneTenant(created));
-    this.logger.log(`Created tenant ${created.id} (${created.code})`);
-    this.persistChanges(
+    await this.persistChanges(
       {
         platformTenants: [this.cloneTenant(created)],
       },
       "create tenant",
     );
+    this.tenants.set(created.id, this.cloneTenant(created));
+    this.logger.log(`Created tenant ${created.id} (${created.code})`);
     this.recordAudit(
       {
         actorId: null,
@@ -248,13 +258,14 @@ export class TenantsService implements OnModuleInit {
     return this.cloneTenant(created);
   }
 
-  updateSettings(
+  async updateSettings(
     tenantId: string,
     command: UpdatePlatformTenantSettingsCommand,
     requestId?: string,
-  ): TenantSummary {
-    const tenant = this.requireTenant(tenantId);
-    const before = this.cloneTenant(tenant);
+  ): Promise<TenantSummary> {
+    const current = this.requireTenant(tenantId);
+    const before = this.cloneTenant(current);
+    const tenant = this.cloneTenant(current);
 
     if (typeof command.name === "string") {
       tenant.name = this.requireNonBlank(command.name, "name");
@@ -267,12 +278,13 @@ export class TenantsService implements OnModuleInit {
     }
     tenant.updatedAt = new Date().toISOString();
 
-    this.persistChanges(
+    await this.persistChanges(
       {
         platformTenants: [this.cloneTenant(tenant)],
       },
       "update tenant settings",
     );
+    this.tenants.set(tenant.id, this.cloneTenant(tenant));
     this.recordAudit(
       {
         actorId: null,
@@ -299,13 +311,14 @@ export class TenantsService implements OnModuleInit {
     return this.cloneTenant(tenant);
   }
 
-  updateOnboarding(
+  async updateOnboarding(
     tenantId: string,
     command: UpdatePlatformTenantOnboardingCommand,
     requestId?: string,
-  ): TenantSummary {
-    const tenant = this.requireTenant(tenantId);
-    const before = this.cloneTenant(tenant);
+  ): Promise<TenantSummary> {
+    const current = this.requireTenant(tenantId);
+    const before = this.cloneTenant(current);
+    const tenant = this.cloneTenant(current);
 
     if (command.billingBaseline) {
       tenant.bootstrapDefaults.billingBaseline = {
@@ -416,12 +429,13 @@ export class TenantsService implements OnModuleInit {
     }
 
     tenant.updatedAt = new Date().toISOString();
-    this.persistChanges(
+    await this.persistChanges(
       {
         platformTenants: [this.cloneTenant(tenant)],
       },
       "update tenant onboarding",
     );
+    this.tenants.set(tenant.id, this.cloneTenant(tenant));
     this.recordAudit(
       {
         actorId: null,
@@ -448,12 +462,13 @@ export class TenantsService implements OnModuleInit {
     return this.cloneTenant(tenant);
   }
 
-  inviteRole(
+  async inviteRole(
     tenantId: string,
     command: InviteTenantRoleCommand,
     requestId?: string,
-  ): TenantSummary {
-    const tenant = this.requireTenant(tenantId);
+  ): Promise<TenantSummary> {
+    const current = this.requireTenant(tenantId);
+    const tenant = this.cloneTenant(current);
     const roleCode = this.requireNonBlank(command.roleCode, "roleCode");
     const role = tenant.bootstrapDefaults.roleDefaults.find(
       (r) => r.roleCode === roleCode,
@@ -471,10 +486,11 @@ export class TenantsService implements OnModuleInit {
     role.invitedAt = now;
     tenant.updatedAt = now;
 
-    this.persistChanges(
+    await this.persistChanges(
       { platformTenants: [this.cloneTenant(tenant)] },
       "invite tenant role",
     );
+    this.tenants.set(tenant.id, this.cloneTenant(tenant));
     this.recordAudit(
       {
         actorId: null,
@@ -496,12 +512,13 @@ export class TenantsService implements OnModuleInit {
     return this.cloneTenant(tenant);
   }
 
-  acknowledgeRole(
+  async acknowledgeRole(
     tenantId: string,
     command: AcknowledgeTenantRoleCommand,
     requestId?: string,
-  ): TenantSummary {
-    const tenant = this.requireTenant(tenantId);
+  ): Promise<TenantSummary> {
+    const current = this.requireTenant(tenantId);
+    const tenant = this.cloneTenant(current);
     const roleCode = this.requireNonBlank(command.roleCode, "roleCode");
     const role = tenant.bootstrapDefaults.roleDefaults.find(
       (r) => r.roleCode === roleCode,
@@ -527,10 +544,11 @@ export class TenantsService implements OnModuleInit {
     role.acknowledgedAt = now;
     tenant.updatedAt = now;
 
-    this.persistChanges(
+    await this.persistChanges(
       { platformTenants: [this.cloneTenant(tenant)] },
       "acknowledge tenant role",
     );
+    this.tenants.set(tenant.id, this.cloneTenant(tenant));
     this.recordAudit(
       {
         actorId: null,
@@ -548,20 +566,25 @@ export class TenantsService implements OnModuleInit {
     return this.cloneTenant(tenant);
   }
 
-  setRollbackHold(tenantId: string, requestId?: string): TenantSummary {
-    const tenant = this.requireTenant(tenantId);
-    const oldStatus = tenant.status;
+  async setRollbackHold(
+    tenantId: string,
+    requestId?: string,
+  ): Promise<TenantSummary> {
+    const current = this.requireTenant(tenantId);
+    const oldStatus = current.status;
+    const tenant = this.cloneTenant(current);
     const now = new Date().toISOString();
 
     tenant.status = "rollback_hold";
     tenant.rollout.productionStatus = "blocked";
     tenant.updatedAt = now;
 
-    this.logger.log(`Tenant ${tenantId} placed in rollback_hold`);
-    this.persistChanges(
+    await this.persistChanges(
       { platformTenants: [this.cloneTenant(tenant)] },
       "set tenant rollback hold",
     );
+    this.tenants.set(tenant.id, this.cloneTenant(tenant));
+    this.logger.log(`Tenant ${tenantId} placed in rollback_hold`);
     this.recordAudit(
       {
         actorId: null,
@@ -583,17 +606,17 @@ export class TenantsService implements OnModuleInit {
     return this.cloneTenant(tenant);
   }
 
-  setRolloutStage(
+  async setRolloutStage(
     tenantId: string,
     command: SetPlatformTenantRolloutStageCommand,
     requestId?: string,
-  ): TenantSummary {
-    const tenant = this.requireTenant(tenantId);
-    const oldRollout = { ...tenant.rollout };
+  ): Promise<TenantSummary> {
+    const current = this.requireTenant(tenantId);
+    const oldRollout = { ...current.rollout };
     const nextStage = this.normalizeRolloutStage(command.stage);
 
     try {
-      this.enforcePromotionGates(tenant, nextStage);
+      this.enforcePromotionGates(current, nextStage);
     } catch (error) {
       // A blocked promotion is a governance event: audit the rejected attempt
       // (with the gate's error code) so the control-plane audit trail is complete.
@@ -610,11 +633,11 @@ export class TenantsService implements OnModuleInit {
           moduleName: "platform-admin",
           actionName: "reject_platform_tenant_rollout",
           resourceType: "platform_tenant",
-          resourceId: tenant.id,
+          resourceId: current.id,
           newValuesSummary: {
             attemptedStage: nextStage,
             currentStage: oldRollout.stage,
-            status: tenant.status,
+            status: current.status,
             errorCode,
           },
         },
@@ -623,6 +646,7 @@ export class TenantsService implements OnModuleInit {
       throw error;
     }
 
+    const tenant = this.cloneTenant(current);
     tenant.rollout.stage = nextStage;
     tenant.rollout.lastPromotedAt = new Date().toISOString();
     tenant.rollout.notes = this.coalesceNullableText(
@@ -644,12 +668,13 @@ export class TenantsService implements OnModuleInit {
     }
 
     tenant.updatedAt = new Date().toISOString();
-    this.persistChanges(
+    await this.persistChanges(
       {
         platformTenants: [this.cloneTenant(tenant)],
       },
       "set tenant rollout stage",
     );
+    this.tenants.set(tenant.id, this.cloneTenant(tenant));
     this.recordAudit(
       {
         actorId: null,
@@ -668,22 +693,24 @@ export class TenantsService implements OnModuleInit {
     return this.cloneTenant(tenant);
   }
 
-  setStatus(
+  async setStatus(
     tenantId: string,
     newStatus: "active" | "paused" | "rollback_hold",
     requestId?: string,
-  ): TenantSummary {
-    const tenant = this.requireTenant(tenantId);
-    const oldStatus = tenant.status;
+  ): Promise<TenantSummary> {
+    const current = this.requireTenant(tenantId);
+    const oldStatus = current.status;
+    const tenant = this.cloneTenant(current);
     tenant.status = newStatus;
     tenant.updatedAt = new Date().toISOString();
-    this.logger.log(`Tenant ${tenantId} status set to ${newStatus}`);
-    this.persistChanges(
+    await this.persistChanges(
       {
         platformTenants: [this.cloneTenant(tenant)],
       },
       "set tenant status",
     );
+    this.tenants.set(tenant.id, this.cloneTenant(tenant));
+    this.logger.log(`Tenant ${tenantId} status set to ${newStatus}`);
     this.recordAudit(
       {
         actorId: null,
@@ -827,9 +854,7 @@ export class TenantsService implements OnModuleInit {
     keyOf: (value: T) => string,
   ) {
     const sanitizedKeys = new Set(sanitized.map(keyOf));
-    return original
-      .map(keyOf)
-      .filter((key) => !sanitizedKeys.has(key));
+    return original.map(keyOf).filter((key) => !sanitizedKeys.has(key));
   }
 
   private buildTenantId(code: string) {
@@ -1118,19 +1143,20 @@ export class TenantsService implements OnModuleInit {
     };
   }
 
-  private persistChanges(
+  private async persistChanges(
     changes: PersistPlatformAdminChanges,
     context: string,
-  ) {
+  ): Promise<void> {
     if (!this.platformAdminRepository) {
       return;
     }
 
-    void this.platformAdminRepository
-      .persistChanges(changes)
-      .catch((error) =>
-        this.platformAdminRepository?.reportPersistenceFailure(error, context),
-      );
+    try {
+      await this.platformAdminRepository.persistChanges(changes);
+    } catch (error) {
+      this.platformAdminRepository.reportPersistenceFailure(error, context);
+      throw error;
+    }
   }
 
   private recordAudit(
