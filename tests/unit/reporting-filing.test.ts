@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
+import { assertArtifactRecords } from "./report-job-artifact-dataflow-20261015/artifact-readers";
 
 import {
   IMPLEMENTED_REPORT_JOB_TYPES,
@@ -353,7 +354,7 @@ describe("reporting and filing service", () => {
     ).toBe(true);
   });
 
-  it("exports partner benefit revenue rows for airport-transfer review", async () => {
+  it.each(["csv", "xlsx", "pdf"] as const)("exports partner benefit revenue rows for airport-transfer review (%s)", async (format) => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
     const verification = await tenantPartnerService.verifyPartnerEligibility({
@@ -416,8 +417,7 @@ describe("reporting and filing service", () => {
 
     const accepted = reportingFilingService.createReportJob({
       jobType: "revenue_summary",
-      // Was "xlsx", which has no renderer and is now rejected at creation.
-      format: "csv",
+      format,
     });
 
     await flushReportingQueue();
@@ -438,6 +438,13 @@ describe("reporting and filing service", () => {
         businessDispatchSubtype: "credit_card_airport_transfer",
       }),
     ]);
+    expect(job.rows).toEqual([]);
+    expect(job.partnerRevenueRows?.[0]?.amount).toEqual(created.quotedFare);
+    const artifact = await reportingFilingService.renderReportArtifact(accepted.jobId);
+    await assertArtifactRecords(artifact, format, job.partnerRevenueRows ?? []);
+    expect(artifact.fileName).toBe(`revenue_summary-${accepted.jobId}.${format}`);
+    const downloadAudit = auditService.listAuditLogs().find((entry) => entry.actionName === "download_report_artifact");
+    expect(downloadAudit?.newValuesSummary).toMatchObject({ rowCount: job.partnerRevenueRows?.length, byteLength: artifact.buffer.byteLength });
   });
 
   it("rehydrates queued reporting state and writes completed jobs through the repository", async () => {
