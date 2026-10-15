@@ -219,3 +219,96 @@ same API check exits 2 with exactly two TS2307 diagnostics for `nodemailer` and
 service. No shared dependency files were changed. This remains a failed broad
 check for the known missing dependency, not a full typecheck pass. Root broad
 typecheck was not rerun; its earlier failures and limits remain above.
+
+## Reopened C100-F1: audit subject/source UUID representation (2026-10-15)
+
+Codex2 reopened exact candidate `a22dd45dfda1af34176a973e8f3cd7281450c6d3`
+at `2026-10-15T13:37:36Z`. This trigger is distinct from the preceding tenant
+findings: the production place/register handlers accept uppercase UUID subjects
+and audit-source references unchanged, but the archival SELECT compared them
+case-sensitively against physical `audit_id::text`. The actual controller subject
+projection likewise returned false for the lowercase spelling. Both preceding
+physical-tenant and UUID-tenant matrices remain in the full passing run below.
+
+Formal V0009 defines `admin.audit_logs.audit_id uuid`, while `resource_id` is
+opaque text and governance payloads reside in JSONB `new_value`. The actual
+controller → service → `AuditLogRepository.append` chain trims subject/source
+inputs and preserves their spelling in the acknowledged JSON payload. Therefore
+existing persisted uppercase payloads must be supported without rewriting them.
+The latest complete reviewer repro and repair boundary are preserved by this
+section and the original task's reopen history.
+
+Repair scope:
+
+- SQL now folds the protection reference only in the two comparisons to the
+  physical audit UUID: `family = audit_log` subject and deletion-exception
+  `sourceResourceType = audit_log` source. Equality with canonical physical UUID
+  text constrains the match to that UUID; opaque resource comparisons remain
+  exact. No write normalization or payload rewrite is required.
+- `sameEvidenceSubject` gives UUID subjects of `audit_log` canonical case
+  equality in subject readback and duplicate checks, including persisted replay.
+  Its UUID syntax accepts all version nibbles because the formal UUID column
+  does not impose the tenant repository's version-1–5 normalization rule.
+  Opaque subjects and all other families retain exact case-sensitive equality.
+  The tenant helper, physical tenant precedence and NULL fallback are unchanged.
+- ACK staging, authority failure/unknown behavior, release/resolution/expiry,
+  manifest matching, retention periods, archive verification/exact IDs,
+  fail-on-error, privileged-role/session-flag and V0080 rails remain intact.
+
+Reproduction anchor: `2381e067e` (new tests, unchanged production code).
+Repair/check version: `be84449ce` (service, SQL and source-command regression).
+The final immutable candidate is the subsequent documentation closeout head;
+its full SHA/branch and local/remote/PR equality are recorded in this worktree's
+`.local/evidence-retention-20261015/uuid-reference/candidate.json` and canonical
+handoff for PR [#2667](https://github.com/ajoe734/drts-fleet-platform/pull/2667).
+Anchors are not review candidates.
+
+| Finding / required acceptance suffix (`evidence-retention_`)                                        | Actual source / repair                                                                                                                                | Before → fixed result                                                                                                                                                                                                                                                                                             | Commands, exits and evidence                                                                                                                                                                                                            | Limits / pending work                                                                                                                                                                                                                       |
+| --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C100-F1 audit UUID subject/source; `legal-hold-exception-exact-archive-set-and-honest-SQL-result`   | SQL physical audit UUID subject/source comparisons; six actual-shell matrices in `archival.test.ts`                                                   | Old uppercase hold, exception-subject and audit-source each exit 0, select/archive/delete both protected UUIDs; lowercase controls preserve them. Fixed both spellings retain both UUIDs and select/archive only the four lawful IDs                                                                              | Extracted old command below: Vitest exit 1, 3 shell failures; `before-extracted-trace.jsonl`. Fixed root exit 0, 21/21 archival tests; `root-trace.jsonl` records actual SQL, exits, stdout/stderr, selected, archive and remaining IDs | Actual SELECT uses documented SQLite dialect projection over V0009 columns; casts/clock projected and COPY/transaction/client transport controlled. No live PG/parser/lock/role/delete/restore claim                                        |
+| UUID subject command/readback; `four-governance-commands-canonical-ACK-and-rejected-state-readback` | `sameEvidenceSubject`, place/register duplicate checks, `getEvidenceSubjectGovernance`; real controller/repository ACK + restart tests                | Old place/register accept v4/v7 uppercase UUIDs but canonical lowercase readback is false (4 failures). Fixed both spellings protected before/after replay and duplicate rejected. Opaque and other-family controls remain distinct. Actual audit-source register ACK and persisted replay preserve its reference | Extracted old service at original module ID: exit 1 with 4 handler failures. Fixed root exit 0. Original deferred/rejected four-command and concurrency cases retained                                                                  | Only DB query transport controlled; no socket. Production handlers, repository serialization and replay are exercised                                                                                                                       |
+| `authoritative-governance-unknown-empty-noDB-and-original-access-boundaries`                        | Existing failed-load/recovery, ordinary-feed fallback, empty/noDB, role/reason/expiry, tenant/manifest/family/access tests and impacted API consumers | Root 63/63 and API 28/28 pass, retaining original C099 five/C100 four and both prior tenant repair matrices                                                                                                                                                                                                       | Full commands below; `root.log`, `api.log`, both exit 0                                                                                                                                                                                 | Source-only coverage, no new live access/export/download credit                                                                                                                                                                             |
+| `actual-production-before-fixed-after-and-original-regressions`                                     | Same final fixtures, actual old production service/script extracted without resetting branch                                                          | Initial unchanged-code run: 7 failed / 12 passed / 29 unselected. Independent extracted run: same 7 failed / 13 passed / 29 unselected (adds audit-source ACK control). Fixed full regressions green                                                                                                              | `before.log`, `before-extracted-rerun.log`, `root.log`, `api.log`; scoped eslint, Prettier, `bash -n`, diff check exit 0. API broad typecheck after declaration builds exits 0                                                          | Initial extracted config used a wrong relative import (`before-extracted.log`); startup error is excluded from reproduction credit. Initial API broad check had 306 stale dependency declaration diagnostics; not a product failure or pass |
+| `exact-candidate-review-CI-and-protected-merge`                                                     | Final closeout commit, plain push, exact PR/local/remote identity and owner handoff                                                                   | Pending new Codex2 exact-SHA review, mandatory same-candidate CI, protected merge and own-key acceptance                                                                                                                                                                                                          | Final identity in `uuid-reference/candidate.json` and canonical handoff                                                                                                                                                                 | Prior candidate/anchor CI gives no new-candidate credit; owner does not call done                                                                                                                                                           |
+
+New fixture boundaries include valid v4/v7 physical audit UUIDs, both spellings,
+other audit UUIDs, true cross-tenant exclusions, exact/different-case opaque
+subjects/resources and UUID-looking opaque IDs in `report_artifact`. The six
+shell cases assert exact selected/archive/source IDs, not just receipt counts.
+In old uppercase traces the target `abcdefab-cdef-4abc-8abc-abcdefabcdef` is
+selected, archived and absent from source; all six fixed traces retain it. The
+second protected UUID differs only in its version nibble (`7abc`). Real
+place/register commands also prove stored uppercase payloads replay unchanged;
+the actual audit-source command test observes its ACK payload and restart list.
+
+Reproducible commands from the assigned task worktree:
+
+```bash
+# Unchanged production bytes, without moving/resetting the active branch.
+git archive a22dd45dfda1af34176a973e8f3cd7281450c6d3 operations/database/audit-log-retention-archival.sh operations/database/db-common.sh operations/database/audit-log-retention-governance.sql apps/api/src/modules/audit-notification/audit-notification.service.ts | tar -x -C .local/evidence-retention-20261015/uuid-reference/reopened-source
+RETENTION_SCRIPT="$PWD/.local/evidence-retention-20261015/uuid-reference/reopened-source/operations/database/audit-log-retention-archival.sh" RETENTION_TRACE="$PWD/.local/evidence-retention-20261015/uuid-reference/before-extracted-trace.jsonl" pnpm exec vitest run --config .local/evidence-retention-20261015/uuid-reference/vitest.before.config.ts tests/unit/evidence-retention-legal-hold-canonical-flow-20261015 -t 'UUID subject identity|UUID audit reference|accepts audit-source'
+# Fixed full checks, no old-source overrides.
+RETENTION_TRACE="$PWD/.local/evidence-retention-20261015/uuid-reference/root-trace.jsonl" pnpm exec vitest run tests/unit/evidence-retention-legal-hold-canonical-flow-20261015 tests/unit/audit-notification.test.ts tests/unit/system-remediation/sr-qa-reports-001/c099-evidence-governance-controlled-export.test.ts tests/unit/system-remediation/sr-qa-reports-001/c100-audit-immutability-retention-boundary.test.ts
+pnpm --dir apps/api exec vitest run tests/unit/audit-notification.service.test.ts tests/unit/reporting-filing.service.test.ts tests/unit/regulatory-reporting.service.test.ts tests/unit/multi-taxi-controlled-export.test.ts tests/unit/evidence-governance.test.ts
+pnpm exec tsc -p packages/contracts/tsconfig.json
+pnpm exec tsc -p packages/control-plane-auth/tsconfig.json
+pnpm --dir apps/api exec tsc -p tsconfig.json --noEmit
+```
+
+The local before-service Vite config loads unchanged extracted service bytes at
+its original production module ID, preserving relative imports and the actual
+controller/repository. No repaired business logic is copied into a test double.
+Both task-worktree declaration builds and the subsequent API broad typecheck
+finished with exit 0 (`contracts-build.log`, `auth-build.log`,
+`api-typecheck-built.log`). Initial API typecheck exit 2 (`api-typecheck.log`)
+used stale shared declaration output; it is superseded for this revision by the
+successful post-build check. Root broad typecheck was not rerun; its previous
+failures remain historical limits above.
+
+All checks launched for this revision finished and their results were read.
+New diagnostics, before-service config, extracted source hashes and command
+exits are indexed under this worktree's
+`.local/evidence-retention-20261015/uuid-reference/evidence-index.json`.
+No product/preview/browser/DB server, deployment, cloud operation, live
+archive/delete or restore ran. The original Source-only and lifecycle boundaries
+remain in force.
