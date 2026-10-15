@@ -57,6 +57,9 @@ function setSignedOut(response: NextResponse) {
   ]) {
     response.cookies.set(name, "", {
       ...signedOutCookieOptions,
+      // Match tenant-auth/session:getOidcStateCookieOptions. Cookie deletion
+      // must use the original path even when sign-out is a page navigation.
+      path: name === TENANT_OIDC_STATE_COOKIE_NAME ? "/api/auth" : "/",
       httpOnly: name !== TENANT_CSRF_COOKIE_NAME,
       expires: new Date(0),
       maxAge: 0,
