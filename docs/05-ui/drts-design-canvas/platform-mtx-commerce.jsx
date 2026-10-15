@@ -177,7 +177,7 @@ function P5C_Cert({ theme:th }) {
             { k:'訂單 / 行程', v:'ZX-240720-0186', mono:true }, { k:'車牌', v:'BKR-2208', mono:true },
             { k:'上車 / 下車', v:'14:32 / 15:07 +08', mono:true }, { k:'時間 / 里程', v:'35 分 · 6,420 m', mono:true },
             { k:'車資 / 通行費', v:'NT$ 355 / NT$ 0', mono:true }, { k:'路線摘要', v:'松仁路 → 南京東路二段' },
-            { k:'客服 / 申訴電話', v:'0800-090-000 · 1999', mono:true }, { k:'簽發 / 版本', v:'07-20 15:08 · v2', mono:true },
+            { k:'客服 / 申訴電話', v:'02-2944-0985 · 1999', mono:true }, { k:'簽發 / 版本', v:'07-20 15:08 · v2', mono:true },
           ]}/>
           <div style={{ display:'flex', gap:8, marginTop:12 }}>
             <Btn theme={th} variant="primary" icon="eye">開啟 HTML</Btn><Btn theme={th} icon="download">開啟 PDF</Btn>
