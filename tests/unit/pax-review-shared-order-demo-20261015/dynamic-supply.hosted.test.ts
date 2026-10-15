@@ -4,6 +4,8 @@ import { DatabaseService } from "../../../apps/api/src/common/db/database.servic
 import { JwtAuthService } from "../../../apps/api/src/common/auth/jwt-auth.service";
 import { OpsDispatchEventsService } from "../../../apps/api/src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { ServiceProductService } from "../../../apps/api/src/modules/service-product/service-product.service";
+import { ServiceProductRepository } from "../../../apps/api/src/modules/service-product/service-product.repository";
 import { DriverDeviceSessionRepository } from "../../../apps/api/src/modules/auth/driver-device-session.repository";
 import { DriverDeviceSessionService } from "../../../apps/api/src/modules/auth/driver-device-session.service";
 import { DriverProfileRepository } from "../../../apps/api/src/modules/driver-profile/driver-profile.repository";
@@ -64,6 +66,10 @@ describe.skipIf(!hostedPaymentEnabled)(
 
     function makePeer(database: DatabaseService) {
       const audit = new AuditNotificationService();
+      const products = new ServiceProductService(
+        audit,
+        new ServiceProductRepository(database),
+      );
       const profiles = new DriverProfileService(
         audit,
         new DriverProfileRepository(database),
@@ -90,8 +96,11 @@ describe.skipIf(!hostedPaymentEnabled)(
         events,
         undefined,
         new OwnedMobilityRepository(database, taxiStore),
+        undefined,
+        undefined,
+        products,
       );
-      const multi = new MultiTaxiService(owned, taxiStore, undefined, audit);
+      const multi = new MultiTaxiService(owned, taxiStore, products, audit);
       const jwt = new JwtAuthService(
         new IdentityRepository(database),
         undefined,
@@ -115,6 +124,7 @@ describe.skipIf(!hostedPaymentEnabled)(
       );
       return {
         database,
+        products,
         profiles,
         registryStore,
         registry,
@@ -144,6 +154,7 @@ describe.skipIf(!hostedPaymentEnabled)(
         exclusivities: a.registry.listExclusivities(),
       });
       for (const peer of peers) {
+        await peer.products.onModuleInit();
         await peer.profiles.onModuleInit();
         await peer.registry.onModuleInit();
         await peer.owned.onModuleInit();
@@ -160,6 +171,7 @@ describe.skipIf(!hostedPaymentEnabled)(
         h.database,
         a.registry,
         a.multi,
+        a.products,
       ).prepare();
       vi.stubEnv(
         "MULTI_TAXI_DEFAULT_AUTHORIZATION_ID",

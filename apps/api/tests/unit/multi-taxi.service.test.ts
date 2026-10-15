@@ -164,6 +164,7 @@ describe("MultiTaxiService operating authority", () => {
     });
     const { service } = createService({
       serviceProductService: {
+        prepareRuntimeProfileServiceProduct: vi.fn(async () => {}),
         assertRuntimeProfileServiceProductActive,
       },
     });

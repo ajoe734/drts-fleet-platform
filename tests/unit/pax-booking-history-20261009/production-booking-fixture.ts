@@ -14,6 +14,7 @@ import type {
   OwnedOrderRecord,
 } from "@drts/contracts";
 import type { DatabaseService } from "../../../apps/api/src/common/db/database.service";
+import type { ServiceProductService } from "../../../apps/api/src/modules/service-product/service-product.service";
 
 export const NOW = Date.parse("2026-10-10T13:00:00Z");
 export const QUOTE_ID = "22222222-2222-4222-8222-222222222222";
@@ -36,6 +37,7 @@ export type Fault =
 export function createProductionBookingFixture(
   faults: Fault[] = [],
   leadMinutes = 20,
+  products?: ServiceProductService,
 ) {
   const state = {
     order: null as OwnedOrderRecord | null,
@@ -218,8 +220,11 @@ export function createProductionBookingFixture(
       publishOrderUpdated() {},
     } as never,
     ownedRepository,
+    undefined,
+    undefined,
+    products,
   );
-  const multi = new MultiTaxiService(owned, multiRepository);
+  const multi = new MultiTaxiService(owned, multiRepository, products);
   const account = {
     drtsPassengerId: OWNER,
     status: "active",

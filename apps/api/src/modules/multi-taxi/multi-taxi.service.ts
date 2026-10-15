@@ -455,7 +455,7 @@ export class MultiTaxiService implements OnModuleInit {
     identity: BootstrapRequestIdentity | null,
     requestId?: string,
   ) {
-    this.assertServiceProductPolicy();
+    await this.prepareServiceProductPolicy();
     this.ownedMobilityService.validateMultiTaxiRideRequest?.(command);
     const authorization = await this.resolvePersistedActiveAuthorization();
     const order = await this.ownedMobilityService.createMultiTaxiRide(
@@ -472,7 +472,7 @@ export class MultiTaxiService implements OnModuleInit {
     command: CreateCallCenterMultiTaxiRideCommand,
     requestId?: string,
   ) {
-    this.assertServiceProductPolicy();
+    await this.prepareServiceProductPolicy();
     this.ownedMobilityService.validateMultiTaxiRideRequest?.(command);
     const authorization = await this.resolvePersistedActiveAuthorization();
     const order = await this.ownedMobilityService.createMultiTaxiRide(
@@ -525,7 +525,7 @@ export class MultiTaxiService implements OnModuleInit {
       persistRide: (executor: OwnedMobilityQueryExecutor) => Promise<void>,
     ) => Promise<void>,
   ) {
-    this.assertServiceProductPolicy();
+    await this.prepareServiceProductPolicy();
     this.ownedMobilityService.validateMultiTaxiRideRequest?.(command);
     const authorization = await this.resolvePersistedActiveAuthorization();
     if (
@@ -2251,7 +2251,11 @@ export class MultiTaxiService implements OnModuleInit {
     return this.cloneAuthorization(resolved);
   }
 
-  private assertServiceProductPolicy() {
+  private async prepareServiceProductPolicy() {
+    await this.serviceProductService?.prepareRuntimeProfileServiceProduct(
+      "multi_taxi_direct",
+      "taxi_reservation",
+    );
     this.serviceProductService?.assertRuntimeProfileServiceProductActive(
       "multi_taxi_direct",
       "taxi_reservation",

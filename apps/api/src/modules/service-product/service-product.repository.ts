@@ -4,6 +4,7 @@ import { DatabaseService } from "../../common/db";
 import type {
   RuntimeProfileServiceProductPolicy,
   ServiceProductRecord,
+  ServiceProductType,
 } from "./service-product.types";
 
 type JsonRecordRow = {
@@ -23,6 +24,38 @@ export class ServiceProductRepository {
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  async findRuntimeContext(
+    runtimeProfileCode: RuntimeProfileServiceProductPolicy["runtimeProfileCode"],
+    serviceProductCode: ServiceProductType,
+  ) {
+    const [products, policies] = await Promise.all([
+      this.databaseService!.query<JsonRecordRow>(
+        `SELECT record FROM ops.phase1_service_products
+         WHERE service_product_type = $1 ORDER BY created_at DESC LIMIT 1`,
+        [serviceProductCode],
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `SELECT record FROM ops.runtime_profile_service_product_policies
+         WHERE runtime_profile_code = $1 AND service_product_code = $2`,
+        [runtimeProfileCode, serviceProductCode],
+      ),
+    ]);
+    return {
+      record: products.rows[0]
+        ? this.normalizeLoadedRecord(
+            products.rows[0].record,
+            "ops.phase1_service_products",
+          )
+        : null,
+      policy: policies.rows[0]
+        ? this.normalizeLoadedPolicy(
+            policies.rows[0].record,
+            "ops.runtime_profile_service_product_policies",
+          )
+        : null,
+    };
   }
 
   async loadState(): Promise<{

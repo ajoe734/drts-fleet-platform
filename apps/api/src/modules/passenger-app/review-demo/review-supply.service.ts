@@ -5,6 +5,8 @@ import { RegulatoryRegistryService } from "../../regulatory-registry/regulatory-
 import { RegulatoryRegistryRepository } from "../../regulatory-registry/regulatory-registry.repository";
 import { MultiTaxiService } from "../../multi-taxi/multi-taxi.service";
 import { MultiTaxiRepository } from "../../multi-taxi/multi-taxi.repository";
+import { ServiceProductRepository } from "../../service-product/service-product.repository";
+import { ServiceProductService } from "../../service-product/service-product.service";
 import { reviewDemoEnabled } from "./review-demo.config";
 
 const AUTHORIZATION_ID = "bc39e4f3-72d8-4383-bdc1-2426c1330dfa";
@@ -24,11 +26,44 @@ export class ReviewSupplyService {
     private readonly database: DatabaseService,
     private readonly registry: RegulatoryRegistryService,
     private readonly multi: MultiTaxiService,
+    private readonly products: ServiceProductService,
   ) {}
 
   async prepare() {
     if (!reviewDemoEnabled(process.env))
       throw new ApiRequestError(404, "not_found", "Rehearsal is not enabled.");
+    // Explicit nonproduction rehearsal configuration, not an inactive-product
+    // bypass. Persist the existing reservation master and await its ACK before
+    // reporting readiness. Keep the independent runtime policy guard intact.
+    const products = new ServiceProductRepository(this.database);
+    if (!products.isEnabled())
+      throw new ApiRequestError(
+        503,
+        "review_supply_unavailable",
+        "Rehearsal product storage is unavailable.",
+      );
+    const context = await products.findRuntimeContext(
+      "multi_taxi_direct",
+      "taxi_reservation",
+    );
+    const product =
+      context.record ??
+      this.products.getRuntimeServiceProductByType("taxi_reservation");
+    if (!product)
+      throw new ApiRequestError(
+        503,
+        "review_supply_unavailable",
+        "Reservation product is unavailable.",
+      );
+    await products.persistChanges({
+      records: [
+        { ...product, active: true, updatedAt: new Date().toISOString() },
+      ],
+    });
+    await this.products.prepareRuntimeProfileServiceProduct(
+      "multi_taxi_direct",
+      "taxi_reservation",
+    );
     const repository = new RegulatoryRegistryRepository(this.database);
     const taxi = new MultiTaxiRepository(this.database);
     const state = await repository.loadState();
