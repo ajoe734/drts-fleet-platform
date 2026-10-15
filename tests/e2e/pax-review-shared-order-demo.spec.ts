@@ -227,23 +227,26 @@ async function readAssignedTripAndAccept(
       driver.getByText(orderId, { exact: false }).first(),
     ).toBeVisible();
   });
-  await step("Driver submit acceptance and receive authority response", async () => {
-    // Install the response listener before the click. Consume both promises
-    // together so a failed click cannot leave a rejected listener unobserved.
-    const [response] = await Promise.all([
-      driver.waitForResponse(
-        (r) =>
-          /\/driver\/tasks\/[^/]+\/accept$/.test(r.url()) &&
-          r.request().method() === "POST",
-        { timeout: 30_000 },
-      ),
-      driver
-        .getByRole("button", { name: "接受任務", exact: true })
-        .first()
-        .click({ timeout: 30_000 }),
-    ]);
-    expect(response.status()).toBeLessThan(300);
-  });
+  await step(
+    "Driver submit acceptance and receive authority response",
+    async () => {
+      // Install the response listener before the click. Consume both promises
+      // together so a failed click cannot leave a rejected listener unobserved.
+      const [response] = await Promise.all([
+        driver.waitForResponse(
+          (r) =>
+            /\/driver\/tasks\/[^/]+\/accept$/.test(r.url()) &&
+            r.request().method() === "POST",
+          { timeout: 30_000 },
+        ),
+        driver
+          .getByRole("button", { name: "接受任務", exact: true })
+          .first()
+          .click({ timeout: 30_000 }),
+      ]);
+      expect(response.status()).toBeLessThan(300);
+    },
+  );
 }
 
 async function finish(
@@ -430,7 +433,6 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
     path: string;
     status: number;
   }[] = [];
-  let journeyFailed = false;
   const observe = (role: "pax" | "ops" | "driver", page: Page) =>
     page.on("response", (r) => {
       progress.response(role, r.request().method(), r.url(), r.status());
@@ -737,7 +739,6 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
       },
     );
   } catch (error) {
-    journeyFailed = true;
     // Only these post-registration Driver pages are safe to capture. Never
     // record onboarding, invitation fields, session storage or HTTP bodies.
     if (
@@ -755,12 +756,8 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           })
           .catch(() => undefined);
     }
+    await Promise.allSettled(contexts.map((c) => c.close()));
     throw error;
-  } finally {
-    const cleanup = await Promise.allSettled(contexts.map((c) => c.close()));
-    if (!journeyFailed) {
-      const failed = cleanup.find((result) => result.status === "rejected");
-      if (failed?.status === "rejected") throw failed.reason;
-    }
   }
+  await Promise.all(contexts.map((c) => c.close()));
 });
