@@ -273,22 +273,25 @@ export async function loadBankBookingsData(): Promise<BankBookingsData> {
       ),
       items(identity, "/api/tenant/service-programs"),
     ]);
-    const programs = rawPrograms.map((value) => {
+    const names = new Map<string, string>();
+    for (const value of rawPrograms) {
       const row = object(value);
       if (row.tenantId !== identity.tenantId) throw new ReadFailure("denied");
-      return { code: text(row.programId), label: text(row.displayName) };
-    });
-    const names = new Map(
-      programs.map((program) => [program.code, program.label]),
-    );
+      const code = text(row.programId);
+      const label = text(row.displayName);
+      // The catalog contains one row per partner entry, and several entries
+      // may share a program. Keep the first label/order, matching the producer's
+      // getTenantServiceProgram lookup, while validating every repeated row.
+      if (!names.has(code)) names.set(code, label);
+    }
+    const programs = Array.from(names, ([code, label]) => ({ code, label }));
     const bookings = rawOrders.map((value) =>
       project(order(value, identity.tenantId), names),
     );
     const detailById = new Map(
       bookings.map((booking) => [booking.orderId, booking]),
     );
-    if (detailById.size !== bookings.length || names.size !== programs.length)
-      invalid();
+    if (detailById.size !== bookings.length) invalid();
     return {
       status: "ready",
       data: {
