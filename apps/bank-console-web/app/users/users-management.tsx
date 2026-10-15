@@ -189,14 +189,16 @@ export default function UsersManagement({
           <table className="users-table">
             <thead>
               <tr>
-                {[
-                  "user",
-                  "email",
-                  "role",
-                  "status",
-                  "lastActivity",
-                  "actions",
-                ].map((key) => (
+                {(
+                  [
+                    "user",
+                    "email",
+                    "role",
+                    "status",
+                    "lastActivity",
+                    "actions",
+                  ] as const
+                ).map((key) => (
                   <th key={key}>{t(`users.table.${key}`, locale)}</th>
                 ))}
               </tr>

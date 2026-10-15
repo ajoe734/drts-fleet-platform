@@ -10,7 +10,6 @@ import type {
 } from "@drts/contracts";
 
 import { bankApiGet, bankApiGetList } from "./server-bank-api";
-import { loadBankUserDirectory } from "./bank-user-mutations";
 import type { BankUserIdentity } from "./bank-user-identity";
 export type { BankUserRow } from "./users-data";
 import {
@@ -322,10 +321,6 @@ export function deriveStatementDates(
   }
 
   return { issuedAt, dueAt };
-}
-
-function formatLastActivity(value: string) {
-  return value.slice(0, 16).replace("T", " ");
 }
 
 function mapBookingState(status: OwnedOrderRecord["status"]): BookingState {
@@ -939,6 +934,7 @@ export async function loadBankProgramsData(
 // User management reads only through the verified tenant bearer, independently
 // of the legacy demo read aggregation used by the other Bank pages.
 export async function loadBankUsersData(identity: BankUserIdentity) {
+  const { loadBankUserDirectory } = await import("./bank-user-mutations");
   return loadBankUserDirectory(identity);
 }
 
