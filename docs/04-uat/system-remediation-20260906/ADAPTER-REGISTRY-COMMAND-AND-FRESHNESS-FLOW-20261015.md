@@ -8,6 +8,7 @@
 - **Base Commit (`origin/dev`)**: `409bad360e89ec4e8e6e48c337f42295e15210d8` (R1 base: `62bd0fee263d01152d61a4bcc1eb31e1b47ebced`)
 - **Pre-Fix Anchor Commit**: `3b3d74a83ea5e40c97f24c76a62b97a2542bffd1`
 - **R1 Candidate Commit**: `4b6c42b015b40ee7f05e6fc9bfabfa4102fb3e5f` (PR #2682)
+- **R2 Implementation Commit**: `b86a4d9930e0b677c62996f12fa430320d940c94`
 - **Task Spec Ref**: `/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T1026-platform-frontier-root/ADAPTER-REGISTRY-COMMAND-AND-FRESHNESS-FLOW-20261015.task-spec.json`
 - **Audited Source Baselines**: `docs/04-uat/system-remediation-20260906/SR-ADMIN-ADAPTER-001.md`, `docs/04-uat/system-remediation-20260906/SR-QA-GOVERNANCE-001.md`
 
