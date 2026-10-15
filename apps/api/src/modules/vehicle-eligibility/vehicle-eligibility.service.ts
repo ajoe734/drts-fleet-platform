@@ -377,11 +377,9 @@ export class VehicleEligibilityService implements OnModuleInit {
       }
       this.matrix = [
         ...context.items.map((item) => this.hydrateMatrixItem(item)),
-        ...(this.matrixConfigured
-          ? this.matrix.filter(
-              (item) => !licenseTypes.includes(item.licenseType),
-            )
-          : []),
+        ...(this.matrixConfigured ? this.matrix : DEFAULT_MATRIX).filter(
+          (item) => !licenseTypes.includes(item.licenseType),
+        ),
       ];
       this.matrixConfigured = true;
       this.sortMatrix(this.matrix);

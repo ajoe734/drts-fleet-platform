@@ -14,6 +14,8 @@ import { IdentityRepository } from "../../../apps/api/src/modules/identity/ident
 import { RegulatoryRegistryController } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.controller";
 import { RegulatoryRegistryRepository } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
 import { RegulatoryRegistryService } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
+import { VehicleEligibilityService } from "../../../apps/api/src/modules/vehicle-eligibility/vehicle-eligibility.service";
+import { VehicleEligibilityRepository } from "../../../apps/api/src/modules/vehicle-eligibility/vehicle-eligibility.repository";
 import { OwnedMobilityController } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.controller";
 import { OwnedMobilityRepository } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 import { OwnedMobilityService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
@@ -82,6 +84,12 @@ describe.skipIf(!hostedPaymentEnabled)(
         registryStore,
       );
       const taxiStore = new MultiTaxiRepository(database);
+      const eligibility = new VehicleEligibilityService(
+        registry,
+        audit,
+        new VehicleEligibilityRepository(database),
+        products,
+      );
       const events = new OwnedMobilityTaskEventsService(
         new EventEmitter() as never,
         database,
@@ -97,7 +105,7 @@ describe.skipIf(!hostedPaymentEnabled)(
         undefined,
         new OwnedMobilityRepository(database, taxiStore),
         undefined,
-        undefined,
+        eligibility,
         products,
       );
       const multi = new MultiTaxiService(owned, taxiStore, products, audit);
@@ -128,6 +136,7 @@ describe.skipIf(!hostedPaymentEnabled)(
         profiles,
         registryStore,
         registry,
+        eligibility,
         events,
         owned,
         multi,
@@ -157,6 +166,7 @@ describe.skipIf(!hostedPaymentEnabled)(
         await peer.products.onModuleInit();
         await peer.profiles.onModuleInit();
         await peer.registry.onModuleInit();
+        await peer.eligibility.onModuleInit();
         await peer.owned.onModuleInit();
         await peer.multi.onModuleInit();
         await peer.sessions.onModuleInit();
@@ -175,6 +185,7 @@ describe.skipIf(!hostedPaymentEnabled)(
         a.registry,
         a.multi,
         a.products,
+        a.eligibility,
       ).prepare();
       expect(
         (

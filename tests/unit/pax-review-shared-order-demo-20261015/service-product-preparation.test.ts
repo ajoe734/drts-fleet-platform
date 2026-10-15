@@ -8,6 +8,8 @@ import { ServiceProductRepository } from "../../../apps/api/src/modules/service-
 import { ServiceProductService } from "../../../apps/api/src/modules/service-product/service-product.service";
 import { ReviewSupplyService } from "../../../apps/api/src/modules/passenger-app/review-demo/review-supply.service";
 import { MultiTaxiRepository } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
+import { VehicleEligibilityService } from "../../../apps/api/src/modules/vehicle-eligibility/vehicle-eligibility.service";
+import { VehicleEligibilityRepository } from "../../../apps/api/src/modules/vehicle-eligibility/vehicle-eligibility.repository";
 import type {
   ServiceProductRecord,
   RuntimeProfileServiceProductPolicy,
@@ -24,6 +26,7 @@ import {
 function productPeers() {
   const records = new Map<string, ServiceProductRecord>();
   const supply = new Map<string, Map<string, unknown>>();
+  const matrix = new Map<string, unknown>();
   const supplyRows = (table: string) =>
     [...(supply.get(table)?.values() ?? [])].map((record) => ({
       record: structuredClone(record),
@@ -44,7 +47,22 @@ function productPeers() {
   let writeEntered: (() => void) | undefined;
   const database = {
     isEnabled: () => true,
+    connect: async () => ({ query: database.query, release() {} }),
     query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes("INSERT INTO admin.phase1_vehicle_eligibility_matrix"))
+        matrix.set(values[0] as string, JSON.parse(values.at(-1) as string));
+      if (
+        sql
+          .trimStart()
+          .startsWith(
+            "SELECT record FROM admin.phase1_vehicle_eligibility_matrix",
+          )
+      )
+        return {
+          rows: [...matrix.values()].map((record) => ({
+            record: structuredClone(record),
+          })),
+        };
       const supplyInsert =
         /INSERT INTO ((?:reg\.phase1_registry_\w+)|ops\.phase1_driver_profiles)/.exec(
           sql,
@@ -158,6 +176,12 @@ function rehearsal(p: ReturnType<typeof productPeers>) {
     registry,
     {} as never,
     p.a,
+    new VehicleEligibilityService(
+      registry,
+      audit,
+      new VehicleEligibilityRepository(p.database as never),
+      p.a,
+    ),
   );
 }
 
