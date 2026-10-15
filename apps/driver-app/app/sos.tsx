@@ -50,6 +50,7 @@ import {
   createDriverSosAttachmentDraft,
   formatSosDescription,
   getSituationLabel,
+  isDriverSosStatusTerminal,
   loadDriverSosActiveCase,
   mapSituationToDriverSosEventType,
   markDriverSosCaseFailed,
@@ -663,13 +664,15 @@ export default function DriverSosScreen() {
 
   // Honest duty-ack readback: poll the canonical server state rather than
   // ever inferring that a duty person has been assigned from submission
-  // alone. Stops once the server reports an authoritative acknowledgment.
+  // alone. Keeps polling past acknowledgment so later investigating /
+  // resolved / closed transitions are still observed; only stops once the
+  // server reports a terminal S-3 status.
   const sosEventIdForReadback = activeCase?.receipt?.sosEventId ?? null;
-  const dutyAlreadyAcknowledged = Boolean(
-    activeCase?.dutyAcknowledgement.acknowledgedByActorId,
+  const sosReadbackIsTerminal = isDriverSosStatusTerminal(
+    activeCase?.status ?? null,
   );
   useEffect(() => {
-    if (!sosEventIdForReadback || dutyAlreadyAcknowledged) {
+    if (!sosEventIdForReadback || sosReadbackIsTerminal) {
       return;
     }
 
@@ -709,7 +712,7 @@ export default function DriverSosScreen() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [sosEventIdForReadback, dutyAlreadyAcknowledged]);
+  }, [sosEventIdForReadback, sosReadbackIsTerminal]);
 
   const syncChip = useMemo(
     () => getSyncChipModel(activeCase, browserOnline),

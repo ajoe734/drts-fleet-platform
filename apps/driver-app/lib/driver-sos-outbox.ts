@@ -6,6 +6,7 @@ import type {
   DriverSosAttachmentScanStatus,
   DriverSosLocationSnapshot,
   DriverSosSeverity,
+  DriverSosStatus,
   DriverSosSubmissionReceipt,
   PendingSosOutboxItem,
   SubmitDriverSosEventCommand,
@@ -107,6 +108,12 @@ export interface DriverSosActiveCase {
     acknowledgedAt: string | null;
     acknowledgedByActorId: string | null;
   };
+  /**
+   * Last authoritative S-3 status observed from the server (submitted,
+   * duty_alerted, acknowledged, investigating, resolved, closed, ...). Null
+   * until the first submit response or readback arrives.
+   */
+  status: DriverSosStatus | null;
   timeline: DriverSosTimelineRecord[];
 }
 
@@ -339,6 +346,7 @@ export function createDriverSosActiveCase(params: {
       acknowledgedAt: null,
       acknowledgedByActorId: null,
     },
+    status: null,
     timeline: [],
   };
 
@@ -426,6 +434,7 @@ export function markDriverSosCaseSubmitted(
     lastError: null,
     receipt: result.receipt,
     dutyAcknowledgement: { ...result.event.dutyAcknowledgement },
+    status: result.event.status,
   };
 
   nextCase = appendTimelineEntry(nextCase, {
@@ -459,11 +468,26 @@ export function markDriverSosCaseSubmitted(
   return nextCase;
 }
 
+const DRIVER_SOS_TERMINAL_STATUSES: ReadonlySet<DriverSosStatus> = new Set([
+  "resolved",
+  "closed",
+  "false_alarm_dismissed",
+]);
+
+/** Whether the server has reported a final S-3 state: no further readback
+ * polling can observe any later transition past this point. */
+export function isDriverSosStatusTerminal(
+  status: DriverSosStatus | null,
+): boolean {
+  return status !== null && DRIVER_SOS_TERMINAL_STATUSES.has(status);
+}
+
 /**
  * Applies an authoritative server readback of the own SOS event. This is
- * the only path that is allowed to report duty acknowledgment: it only
- * reflects what the server's canonical dutyAcknowledgement actually says,
- * never a locally-inferred guess.
+ * the only path that is allowed to report duty acknowledgment or any later
+ * investigating/resolved/closed progression: it only reflects what the
+ * server's canonical status/dutyAcknowledgement actually says, never a
+ * locally-inferred guess.
  */
 export function applyDriverSosDutyReadback(
   activeCase: DriverSosActiveCase,
@@ -475,36 +499,73 @@ export function applyDriverSosDutyReadback(
   const nowAcknowledged = Boolean(
     readback.dutyAcknowledgement.acknowledgedByActorId,
   );
+  const ackChanged =
+    activeCase.dutyAcknowledgement.acknowledgedByActorId !==
+      readback.dutyAcknowledgement.acknowledgedByActorId ||
+    activeCase.dutyAcknowledgement.acknowledgedAt !==
+      readback.dutyAcknowledgement.acknowledgedAt;
+  const statusChanged = activeCase.status !== readback.status;
 
-  if (previouslyAcknowledged === nowAcknowledged) {
-    return activeCase.dutyAcknowledgement.acknowledgedByActorId ===
-      readback.dutyAcknowledgement.acknowledgedByActorId &&
-      activeCase.dutyAcknowledgement.acknowledgedAt ===
-        readback.dutyAcknowledgement.acknowledgedAt
-      ? activeCase
-      : {
-          ...activeCase,
-          dutyAcknowledgement: { ...readback.dutyAcknowledgement },
-        };
+  if (!ackChanged && !statusChanged) {
+    return activeCase;
   }
 
-  const nextCase: DriverSosActiveCase = {
+  let nextCase: DriverSosActiveCase = {
     ...activeCase,
     dutyAcknowledgement: { ...readback.dutyAcknowledgement },
+    status: readback.status,
   };
 
-  if (!nowAcknowledged) {
-    return nextCase;
+  if (ackChanged && !previouslyAcknowledged && nowAcknowledged) {
+    nextCase = appendTimelineEntry(nextCase, {
+      kind: "duty_acknowledged",
+      title: "值班人員已認領",
+      detail: `值班人員已認領本次 SOS 通報，目前由 ${readback.dutyAcknowledgement.acknowledgedByActorId} 處理中。`,
+      occurredAt:
+        readback.dutyAcknowledgement.acknowledgedAt ??
+        new Date().toISOString(),
+      tone: "success",
+    });
   }
 
-  return appendTimelineEntry(nextCase, {
-    kind: "duty_acknowledged",
-    title: "值班人員已認領",
-    detail: `值班人員已認領本次 SOS 通報，目前由 ${readback.dutyAcknowledgement.acknowledgedByActorId} 處理中。`,
-    occurredAt:
-      readback.dutyAcknowledgement.acknowledgedAt ?? new Date().toISOString(),
-    tone: "success",
-  });
+  if (statusChanged) {
+    const now = new Date().toISOString();
+    if (readback.status === "duty_alerted") {
+      nextCase = appendTimelineEntry(nextCase, {
+        kind: "duty_alert_dispatched",
+        title: "已通知值班人員",
+        detail: "安全值班主控台已顯示本次 SOS 警示。",
+        occurredAt: now,
+        tone: "info",
+      });
+    } else if (readback.status === "investigating") {
+      nextCase = appendTimelineEntry(nextCase, {
+        kind: "investigation_started",
+        title: "事件調查中",
+        detail: "值班人員正在調查本次安全事件。",
+        occurredAt: now,
+        tone: "info",
+      });
+    } else if (readback.status === "resolved") {
+      nextCase = appendTimelineEntry(nextCase, {
+        kind: "resolved",
+        title: "事件已處理完成",
+        detail: "安全事件已由值班人員標記為已解決。",
+        occurredAt: now,
+        tone: "success",
+      });
+    } else if (readback.status === "closed") {
+      nextCase = appendTimelineEntry(nextCase, {
+        kind: "closed",
+        title: "事件已結案",
+        detail: "安全事件已結案歸檔。",
+        occurredAt: now,
+        tone: "neutral",
+      });
+    }
+  }
+
+  return nextCase;
 }
 
 export function applyDriverSosAttachmentSyncResult(

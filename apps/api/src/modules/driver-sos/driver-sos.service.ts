@@ -21,11 +21,13 @@ import type {
   DriverSosEventRecord,
   DriverSosEventType,
   DriverSosSeverity,
+  DriverSosStatus,
   DriverSosTimelineEntry,
   DriverSosUrgentAlertOutboxRecord,
   IncidentCategory,
   IncidentRecord,
   IncidentSeverity,
+  IncidentStatus,
   IncidentTimelineEntry,
   RecordDriverSosOpsAlertRenderedCommand,
   RecordDriverSosOpsAlertRenderedResult,
@@ -114,6 +116,10 @@ export class DriverSosService implements OnModuleInit {
   >();
   private uploadIntents = new Map<string, DriverSosUploadIntentRecord>();
   private attachments = new Map<string, DriverSosAttachmentRecord[]>();
+  /** Serializes acknowledgeDuty per sosEventId so overlapping Ops calls for
+   * the same event can never both observe "not yet acknowledged" and both
+   * attempt to claim it. */
+  private acknowledgeDutyQueues = new Map<string, Promise<unknown>>();
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
@@ -632,12 +638,36 @@ export class DriverSosService implements OnModuleInit {
           alertToOpsLatencyMs: latencyMs,
         },
       };
+
+      // An unacknowledged alert actually rendering on an Ops screen is the
+      // honest "duty_alerted" moment -- distinct from merely being queued.
+      const sosEvent = this.eventById.get(outbox.sosEventId);
+      const dutyAlertPlan =
+        sosEvent && sosEvent.status === "submitted"
+          ? {
+              event: {
+                ...sosEvent,
+                status: "duty_alerted" as const,
+                updatedAt: renderedAt,
+              },
+              timeline: this.buildVerificationTimeline(
+                sosEvent.sosEventId,
+                "duty_alert_dispatched",
+                "system",
+                "system.driver-sos",
+                renderedAt,
+                { incidentId, opsAlertRenderedAt: renderedAt },
+              ),
+            }
+          : null;
+
       const persistedObservation =
         (await this.verificationRepository?.persistAlertObservation(
           updatedOutbox,
           timeline,
           observation,
-        )) ?? observation;
+          dutyAlertPlan,
+        )) ?? { ...observation, dutyAlertApplied: Boolean(dutyAlertPlan) };
       updatedOutbox.opsAlertRenderedAt =
         persistedObservation.opsAlertRenderedAt;
       updatedOutbox.opsAlertReceiptRecordedAt =
@@ -652,9 +682,18 @@ export class DriverSosService implements OnModuleInit {
           persistedObservation.opsAlertReceiptRecordedAt,
         alertToOpsLatencyMs: persistedObservation.alertToOpsLatencyMs,
       };
+      if (!persistedObservation.duplicate) {
+        updatedOutbox.status =
+          updatedOutbox.status === "failed" ? updatedOutbox.status : "delivered";
+        updatedOutbox.deliveredAt = updatedOutbox.deliveredAt ?? renderedAt;
+      }
       this.urgentAlertOutbox.set(outbox.sosEventId, updatedOutbox);
       if (!persistedObservation.duplicate) {
         this.appendTimeline(timeline);
+        if (persistedObservation.dutyAlertApplied && dutyAlertPlan) {
+          this.replaceEvent(dutyAlertPlan.event);
+          this.appendTimeline(dutyAlertPlan.timeline);
+        }
       }
       observations.push(persistedObservation);
     }
@@ -722,12 +761,14 @@ export class DriverSosService implements OnModuleInit {
   /**
    * Canonical first-writer-wins SOS duty acknowledgment (S-3 §24.2).
    *
-   * `IncidentService.updateIncident` is the single synchronous arbiter: it
-   * already throws `INCIDENT_ASSIGNMENT_CONFLICT` with the real current
-   * `assignedTo` when a different actor got there first, and is a no-op when
-   * the same actor re-acknowledges. Reusing it (rather than a second,
-   * independent CAS on the SOS event) is what keeps the Incident handover
-   * and the DriverSosEvent duty state from diverging into two owners.
+   * Calls for the same sosEventId are serialized so a second, overlapping
+   * call can never observe the pre-acknowledgment state that the first call
+   * is still in the middle of persisting (the bug that let both calls
+   * append their own duty_acknowledged timeline entry). Within the
+   * serialized section, the SOS event's own persistence is the source of
+   * truth: only once it durably recorded an owner do we hand the Incident
+   * over to that owner, so a DB failure never leaves the Incident re-
+   * assigned while the SOS event itself still reads as unacknowledged.
    */
   async acknowledgeDuty(
     sosEventId: string,
@@ -736,61 +777,88 @@ export class DriverSosService implements OnModuleInit {
     requestId?: string,
   ): Promise<AcknowledgeDriverSosDutyResult> {
     const actorId = this.requireOpsIdentity(identity);
-    const event = this.requireEventForOps(sosEventId);
+    this.requireEventForOps(sosEventId); // fail fast for an unknown event
     const note = this.normalizeNullable(command?.note ?? null);
-    const now = new Date().toISOString();
 
-    let incident: IncidentRecord;
-    try {
-      incident = this.incidentService.updateIncident(
-        event.incidentId!,
-        { assignedTo: actorId },
-        requestId,
-        identity,
-      );
-    } catch (error) {
-      if (
-        error instanceof ApiRequestError &&
-        error.code === "INCIDENT_ASSIGNMENT_CONFLICT"
-      ) {
-        incident = this.incidentService.getIncident(event.incidentId!, identity);
-      } else {
-        throw error;
+    return this.withAcknowledgeDutyLock(sosEventId, async () => {
+      const event = this.requireEventForOps(sosEventId);
+      const existingOwner = event.dutyAcknowledgement.acknowledgedByActorId;
+      if (existingOwner) {
+        return this.buildIdempotentAcknowledgement(
+          sosEventId,
+          event,
+          existingOwner,
+          actorId,
+        );
       }
-    }
 
-    const owner = incident.assignedTo;
-    if (!owner) {
-      throw new Error(
-        `Driver SOS incident ${event.incidentId} did not resolve a duty owner.`,
-      );
-    }
-
-    const alreadyRecorded =
-      event.dutyAcknowledgement.acknowledgedByActorId === owner;
-
-    if (!alreadyRecorded) {
+      const now = new Date().toISOString();
       const timeline = this.buildVerificationTimeline(
         sosEventId,
         "duty_acknowledged",
         "ops",
-        owner,
+        actorId,
         now,
-        { incidentId: incident.incidentId, acknowledgedByActorId: owner, note },
+        { incidentId: event.incidentId, acknowledgedByActorId: actorId, note },
       );
       const updatedEvent: DriverSosEventRecord = {
         ...event,
         status: "acknowledged",
         dutyAcknowledgement: {
           acknowledgedAt: now,
-          acknowledgedByActorId: owner,
+          acknowledgedByActorId: actorId,
         },
         updatedAt: now,
       };
-      await this.verificationRepository?.persistDutyAcknowledgement(
+
+      const persisted = await this.verificationRepository?.persistDutyAcknowledgement(
         updatedEvent,
         timeline,
       );
+      const accepted = persisted?.accepted ?? true;
+      const finalOwner = accepted ? actorId : persisted!.acknowledgedByActorId;
+      const finalAcknowledgedAt = accepted ? now : persisted!.acknowledgedAt;
+
+      // Handover follows the persisted SOS-ack truth; it is never the other
+      // way around, so a losing caller still converges the Incident onto
+      // the real winner instead of leaving it unassigned.
+      try {
+        this.incidentService.updateIncident(
+          event.incidentId!,
+          { assignedTo: finalOwner },
+          requestId,
+          identity,
+        );
+      } catch (error) {
+        if (
+          !(
+            error instanceof ApiRequestError &&
+            error.code === "INCIDENT_ASSIGNMENT_CONFLICT"
+          )
+        ) {
+          throw error;
+        }
+      }
+
+      if (!accepted) {
+        const lostEvent: DriverSosEventRecord = {
+          ...event,
+          status: "acknowledged",
+          dutyAcknowledgement: {
+            acknowledgedAt: finalAcknowledgedAt,
+            acknowledgedByActorId: finalOwner,
+          },
+          updatedAt: now,
+        };
+        this.replaceEvent(lostEvent);
+        return this.buildIdempotentAcknowledgement(
+          sosEventId,
+          lostEvent,
+          finalOwner,
+          actorId,
+        );
+      }
+
       this.replaceEvent(updatedEvent);
       this.appendTimeline(timeline);
       this.markOutboxDelivered(sosEventId, now);
@@ -799,21 +867,66 @@ export class DriverSosService implements OnModuleInit {
         updatedEvent,
         identity,
         requestId,
-        { acknowledgedByActorId: owner, incidentId: incident.incidentId },
+        { acknowledgedByActorId: actorId, incidentId: event.incidentId },
       );
-    }
 
-    const finalEvent = this.requireEventForOps(sosEventId);
+      return {
+        event: this.cloneEvent(updatedEvent),
+        timeline: (this.timelines.get(sosEventId) ?? []).map((entry) =>
+          this.cloneTimeline(entry),
+        ),
+        dutyAcknowledgement: {
+          sosEventId,
+          acknowledgedByActorId: actorId,
+          acknowledgedAt: now,
+          note,
+        },
+        wonAcknowledgement: true,
+      };
+    });
+  }
+
+  /** Runs `fn` after any prior acknowledgeDuty call for `sosEventId` has
+   * fully settled (success or failure), so concurrent callers for the same
+   * event execute strictly one at a time. */
+  private withAcknowledgeDutyLock<T>(
+    sosEventId: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const previous =
+      this.acknowledgeDutyQueues.get(sosEventId) ?? Promise.resolve();
+    const run = previous.then(fn, fn);
+    this.acknowledgeDutyQueues.set(
+      sosEventId,
+      run.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return run;
+  }
+
+  private buildIdempotentAcknowledgement(
+    sosEventId: string,
+    event: DriverSosEventRecord,
+    owner: string,
+    actorId: string,
+  ): AcknowledgeDriverSosDutyResult {
+    const timeline = this.timelines.get(sosEventId) ?? [];
+    const existingAck = [...timeline]
+      .reverse()
+      .find(
+        (entry) =>
+          entry.eventType === "duty_acknowledged" && entry.actorId === owner,
+      );
     return {
-      event: this.cloneEvent(finalEvent),
-      timeline: this.timelines.get(sosEventId)?.map((entry) =>
-        this.cloneTimeline(entry),
-      ) ?? [],
+      event: this.cloneEvent(event),
+      timeline: timeline.map((entry) => this.cloneTimeline(entry)),
       dutyAcknowledgement: {
         sosEventId,
         acknowledgedByActorId: owner,
-        acknowledgedAt: finalEvent.dutyAcknowledgement.acknowledgedAt!,
-        note: alreadyRecorded ? null : note,
+        acknowledgedAt: event.dutyAcknowledgement.acknowledgedAt!,
+        note: (existingAck?.payload.note as string | null | undefined) ?? null,
       },
       wonAcknowledgement: owner === actorId,
     };
@@ -824,7 +937,10 @@ export class DriverSosService implements OnModuleInit {
     identity: BootstrapRequestIdentity | null,
   ): Promise<DriverSosEventReadback> {
     this.requireOpsIdentity(identity);
-    const event = this.requireEventForOps(sosEventId);
+    const event = await this.reconcileWithIncident(
+      this.requireEventForOps(sosEventId),
+      identity,
+    );
     return {
       event: this.cloneEvent(event),
       timeline: (this.timelines.get(sosEventId) ?? []).map((entry) =>
@@ -838,16 +954,17 @@ export class DriverSosService implements OnModuleInit {
     identity: BootstrapRequestIdentity | null,
   ): Promise<DriverSosEventReadback> {
     this.requireOpsIdentity(identity);
-    const event = this.events.find(
+    const found = this.events.find(
       (candidate) => candidate.incidentId === incidentId,
     );
-    if (!event) {
+    if (!found) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
         "DRIVER_SOS_EVENT_NOT_FOUND",
         `No driver SOS event correlates to incident ${incidentId}.`,
       );
     }
+    const event = await this.reconcileWithIncident(found, identity);
     return {
       event: this.cloneEvent(event),
       timeline: (this.timelines.get(event.sosEventId) ?? []).map((entry) =>
@@ -861,7 +978,10 @@ export class DriverSosService implements OnModuleInit {
     identity: BootstrapRequestIdentity | null,
   ): Promise<DriverSosEventReadback> {
     const driverId = this.requireDriverIdentity(identity);
-    const event = this.requireDriverEvent(sosEventId, driverId);
+    const event = await this.reconcileWithIncident(
+      this.requireDriverEvent(sosEventId, driverId),
+      identity,
+    );
     return {
       event: this.cloneEvent(event),
       timeline: (this.timelines.get(sosEventId) ?? []).map((entry) =>
@@ -903,6 +1023,107 @@ export class DriverSosService implements OnModuleInit {
         deliveredAt: outbox.deliveredAt ?? deliveredAt,
       }),
     );
+  }
+
+  /** Ranks of the forward (non-false-alarm) S-3 progression; anything not
+   * listed (local_triggered, queued_offline, false_alarm_dismissed) is not
+   * part of this monotonic readback reconciliation. */
+  private static readonly SOS_PROGRESS_RANK: Partial<
+    Record<DriverSosStatus, number>
+  > = {
+    submitted: 0,
+    duty_alerted: 1,
+    acknowledged: 2,
+    investigating: 3,
+    resolved: 4,
+    closed: 5,
+  };
+
+  private static readonly INCIDENT_TO_SOS_STATUS: Partial<
+    Record<IncidentStatus, DriverSosStatus>
+  > = {
+    investigating: "investigating",
+    resolved: "resolved",
+    closed: "closed",
+  };
+
+  /**
+   * Lazily reconciles the Incident module's own status progression onto the
+   * correlated DriverSosEvent on read. The Incident module has no knowledge
+   * of (and no push channel into) the SOS event, so each authoritative
+   * readback is the point where drift between "Incident says resolved" and
+   * "SOS event still says acknowledged" gets caught up -- exactly once per
+   * transition, never re-applied once already reconciled.
+   */
+  private async reconcileWithIncident(
+    event: DriverSosEventRecord,
+    identity: BootstrapRequestIdentity | null,
+  ): Promise<DriverSosEventRecord> {
+    if (!event.incidentId || event.status === "false_alarm_dismissed") {
+      return event;
+    }
+
+    let incident: IncidentRecord;
+    try {
+      incident = this.incidentService.getIncident(event.incidentId, identity);
+    } catch {
+      return event;
+    }
+
+    const targetStatus =
+      DriverSosService.INCIDENT_TO_SOS_STATUS[incident.status];
+    if (!targetStatus) {
+      return event;
+    }
+
+    const currentRank = DriverSosService.SOS_PROGRESS_RANK[event.status];
+    const targetRank = DriverSosService.SOS_PROGRESS_RANK[targetStatus];
+    if (
+      currentRank === undefined ||
+      targetRank === undefined ||
+      targetRank <= currentRank
+    ) {
+      return event;
+    }
+
+    const now = new Date().toISOString();
+    const rankToStatus = Object.entries(DriverSosService.SOS_PROGRESS_RANK).reduce<
+      Record<number, DriverSosStatus>
+    >((acc, [status, rank]) => {
+      acc[rank as number] = status as DriverSosStatus;
+      return acc;
+    }, {});
+    const timelineEntries: DriverSosTimelineEntry[] = [];
+    for (let rank = currentRank + 1; rank <= targetRank; rank += 1) {
+      const stepStatus = rankToStatus[rank];
+      if (stepStatus === "investigating" || stepStatus === "resolved" || stepStatus === "closed") {
+        timelineEntries.push(
+          this.buildVerificationTimeline(
+            event.sosEventId,
+            stepStatus === "investigating" ? "investigation_started" : stepStatus,
+            "system",
+            "system.incident-sync",
+            now,
+            { incidentId: event.incidentId, incidentStatus: incident.status },
+          ),
+        );
+      }
+    }
+
+    const updatedEvent: DriverSosEventRecord = {
+      ...event,
+      status: targetStatus,
+      updatedAt: now,
+    };
+    await this.verificationRepository?.persistStatusTransition(
+      updatedEvent,
+      timelineEntries,
+    );
+    this.replaceEvent(updatedEvent);
+    for (const entry of timelineEntries) {
+      this.appendTimeline(entry);
+    }
+    return updatedEvent;
   }
 
   private hydrateState(state: DriverSosRepositoryState) {
