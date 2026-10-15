@@ -1625,3 +1625,75 @@ this UAT evidence. Canonical evidence is
 
 All checks started for this handoff reached terminal results and were read.
 Old hosted CI remains bound to its own SHA; it is not evidence for this repair.
+
+## R23 — restore the Driver device session before cold-route admission
+
+Candidate `c202165cecf6cae91cf6669ecf2b3969047de46b`, generation
+`d3d835365cb94eb9a8ec273fe562b1c3`, reached A booking, dispatch and
+assign/reassign in hosted run `38762503624`, job `116518108045`. A's order UUID
+was `9c084d5b-b817-4660-8119-101dfdee80dc`; dispatch job
+`b0fe546d-8756-4fec-b23f-f0b9403ab24a` is not a proven Driver Task ID. The
+new precise failure was `Driver open current trip from jobs`: the actual
+`開啟目前行程` locator timed out after 30 seconds at spec line 222. Driver
+tasks/task-views returned 200, with no acceptance response. Artifact
+`11987555269` has ZIP/GitHub digest
+`a53b916b58e3d2013a13581781ef62f8cd29e9b926ebdf387275bf05964d4c39`.
+It contains no Driver screenshot or recorded final Driver URL. Therefore the
+source reproduction below does **not** establish that this hosted run actually
+ended on onboarding, or that its entire failure has now been resolved.
+
+The actual Jobs and Trip components read `isDriverIdentityProvisioned()` during
+their initial render and immediately returned `Redirect` when it was false.
+On document reload, the identity module starts empty; the root heartbeat's
+effect awaits `initializeDriverIdentity()` to restore the stored device session.
+Both screens could redirect before that read started. A later successful
+heartbeat/task HTTP read cannot undo the already rendered redirect. The previous
+caller probe registered the identity in the same module before rendering, so it
+did not cover this cold-document boundary.
+
+Supervisor added the exact Jobs/Trip/layout paths under the original task's R23
+scope. Only Jobs and Trip changed: each initializes readiness from the existing
+`isDriverIdentityHydrated`, awaits the existing single-flight initializer when
+needed, and keeps its loading view until the restore settles. It then uses the
+original provisioned check and task loader. Missing, malformed or unreadable
+stored identity still reaches onboarding; existing session invalidation,
+ownership, task commands and acceptance refusals remain unchanged. The layout,
+identity client, SDK, tracking and backend/accepted ACK sources are unchanged.
+
+The regression executes both **actual screen components**, Canvas controls,
+identity/storage adapter and SDK. It first obtains a valid session through the
+real registration client and a fixture HTTP response, then clears only the
+Node module instance to represent a new document with the persisted session.
+It records actual Redirect renders before simulating completion of the root's
+initializer. Web uses the production sessionStorage branch; native uses the
+production SecureStore branch. Native renderer/router/location and upstream
+HTTP are fixtures. These tests establish the source ordering defect and its
+repair, with no browser, real device/session authority, PG or business acceptance
+credit. No order or successful server acceptance is fabricated as runtime proof.
+
+| Finding / acceptance                                          | Source and change                                                                                                | Old → corrected result                                                                                                                                                 | Checks and evidence                                                                                                                                 | Remaining limitation                                                                                            |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| R23: a valid stored session redirects on cold Jobs/Trip entry | `jobs.tsx::JobsScreen`, `trip.tsx::TripScreen`; existing `initializeDriverIdentity` / `isDriverIdentityHydrated` | Immutable c202 actual screens render onboarding with `identityReads=0`; corrected Web/Native Jobs/Trip restore and display the existing assigned task without redirect | `old-c202-reload.log`: exit 1, all 16 ordering cases fail; `new-reload-caller.log`: exit 0, 20 pass including original four acceptance caller cases | The actual hosted final URL was not recorded; new hosted journey must confirm the runtime outcome               |
+| R23: preserve ordinary unprovisioned behavior                 | Same actual components; empty, malformed and storage-read-refused cases on both platforms                        | Old redirect precedes stored identity read; corrected redirect follows the attempted restore and exposes no order detail                                               | Same 16-case matrix; final affected regression includes every case                                                                                  | Fixture storage failures are not real device failures; no auth policy changed                                   |
+| Preserve prior R22/R22b and accepted product behavior         | Original full E2E spec/config, current-Driver failure hook, backend, identity and tracking retained verbatim     | Original three-order main flow, same UUID/2xx/accept assertions, 720-second case and zero retries unchanged; four caller and 12 failure-hook cases pass                | `source-invariants.json`; full affected regression: exit 0, 381 pass / 16 original skips; Driver unit suite: exit 0, 542 pass / zero skips          | Local skips remain unverified; no old CI/PG/browser result is transferred to this SHA                           |
+| `pax-review-demo_real-shared-order-across-roles`              | Original true same-order API/PG and cross-instance paths retained                                                | Pending, zero acceptance credit                                                                                                                                        | Same new candidate needs full CI and three formal-schema PG companions without skips                                                                | Socket-free fixtures cannot establish shared backend orders                                                     |
+| `pax-review-demo_external-simulation-and-complete-journeys`   | Original A/B/C, payment/retry/case/rating/cancellation/history and real business-time waits retained             | Pending, zero acceptance credit                                                                                                                                        | New exact candidate must complete all original three independent-order browser journeys                                                             | This source fix does not claim complete A or executed B/C                                                       |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`      | Existing hosted workflow and immutable combined Cloud Run delivery retained                                      | Pending, zero acceptance credit                                                                                                                                        | New exact-SHA independent review/full CI/browser, normal merge and sole immutable shared-dev deployment/fresh smoke required                        | No workflow dispatch/rerun/cancel/deploy or VM product/HTTP/PG/browser/preview/Compose/Playwright CLI performed |
+
+Executable verification source is
+`ab0f208f208cc3c17b247bc05c0d653b2b238aa0`; the handoff commit only adds this
+UAT evidence. Canonical evidence is
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidatec202-r23-cold-reload/manifest.json`.
+
+- Immutable before: `PAX_REVIEW_DRIVER_SCREEN_SOURCE_REF=c202165cecf6cae91cf6669ecf2b3969047de46b pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/driver-identity-reload.test.ts --maxWorkers=2 --reporter=verbose`, exit 1 / **16 ordering assertion failures**, with no missing-dependency or fixture failure. The loader reads the complete old screen sources with `git show`; no worktree is reset.
+- Corrected narrow probe: `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/driver-identity-reload.test.ts tests/unit/pax-review-shared-order-demo-20261015/driver-acceptance-caller.test.ts --maxWorkers=2 --reporter=verbose`, exit 0 / **20 pass**.
+- Final affected regression: `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015 tests/unit/pax-shared-order-flow-20261015 tests/unit/pax-booking-history-20261009 tests/unit/driver-completion-actual-fare-input-20261013 tests/unit/driver-app-trip-workflow.test.ts tests/unit/driver-app-trip-metrics.test.ts tests/unit/driver-app-completion-proof.test.ts --maxWorkers=2 --reporter=verbose`, exit 0 / **381 pass, 16 original environment skips**, 37 passing / six skipped files. No skip or business assertion was relaxed.
+- `pnpm --filter @drts/driver-app exec vitest run --maxWorkers=2 --reporter=dot`, exit 0 / **542 pass, zero skips**, 39 files; includes identity bootstrap/routing, token lifecycle, invalidation and task/completion rules.
+- Root `pnpm exec tsc -p tsconfig.json --noEmit` and Driver `pnpm exec tsc -p apps/driver-app/tsconfig.json --noEmit`: both exit 0. Scoped ESLint (`--max-warnings=0`), Prettier, commit trailers and `git diff --check`: exit 0.
+- Only this assigned worktree's 22 dependency symlinks were detached before `pnpm install --offline --frozen-lockfile --ignore-scripts`, exit 0. Canonical dependency directories and lockfiles were untouched. Versions: Node 22.23.2, pnpm 10.33.0, TypeScript 5.9.3, Vitest 4.1.4, Next 16.3.8, Nest 11.2.7, Driver React 19.1.0. Both old and new probes use these same frozen dependencies.
+
+The old 5bd branch and PR 2643 remain preserved. This repair continues the
+already authorized R19b recovery branch / PR 2673 in the assigned isolated cwd;
+no rebase, amend, reset, force push or canonical-root branch switch occurred.
+All checks started for this repair reached terminal results and were read.
+Hosted CI for the new handoff SHA remains pending under the original bus/collector.
