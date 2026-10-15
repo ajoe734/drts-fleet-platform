@@ -39,6 +39,7 @@ import {
   BOOTSTRAP_AUDIT_LOG,
   cloneAuditLog,
   createAuditLogRecord,
+  isUuidLike,
 } from "./audit-log.persistence";
 import {
   AuditNotificationEmailAdapter,
@@ -123,11 +124,18 @@ export class AuditNotificationService implements OnModuleInit {
     EvidenceDeletionExceptionRecord
   >();
 
+  private evidenceGovernanceAvailable = true;
+
+  // Serialize validation with ACK publication so concurrent commands cannot validate
+  // against a stale hold/exception while an earlier write is still pending.
+  private evidenceGovernanceCommands: Promise<unknown> = Promise.resolve();
+
   constructor(
     @Optional() private readonly auditLogRepository?: AuditLogRepository,
     @Optional()
     private readonly auditNotificationEmailAdapter: AuditNotificationEmailAdapter = new AuditNotificationEmailAdapter(),
   ) {
+    this.evidenceGovernanceAvailable = !this.auditLogRepository?.isEnabled?.();
     this.rebuildEvidenceGovernanceState(this.auditLogs);
   }
 
@@ -136,17 +144,29 @@ export class AuditNotificationService implements OnModuleInit {
       return;
     }
 
-    try {
-      const [recentAuditLogs, governanceTrail] = await Promise.all([
-        this.auditLogRepository.loadRecent(MAX_IN_MEMORY_AUDIT_LOGS),
-        this.auditLogRepository.loadEvidenceGovernanceTrail(),
-      ]);
-      this.auditLogs = trimAuditLogs(recentAuditLogs);
-      this.rebuildEvidenceGovernanceState(governanceTrail);
-    } catch (error) {
-      this.auditLogRepository.reportPersistenceFailure(error, "module init");
+    // Ordinary feed fallback must not turn failed governance authority into no-hold.
+    const [recent, governance] = await Promise.allSettled([
+      this.auditLogRepository.loadRecent(MAX_IN_MEMORY_AUDIT_LOGS),
+      this.auditLogRepository.loadEvidenceGovernanceTrail(),
+    ]);
+    if (recent.status === "fulfilled") {
+      this.auditLogs = trimAuditLogs(recent.value);
+    } else {
+      this.auditLogRepository.reportPersistenceFailure(
+        recent.reason,
+        "module init",
+      );
       this.auditLogs = trimAuditLogs([cloneAuditLog(BOOTSTRAP_AUDIT_LOG)]);
-      this.rebuildEvidenceGovernanceState(this.auditLogs);
+    }
+    if (governance.status === "fulfilled") {
+      this.rebuildEvidenceGovernanceState(governance.value);
+      this.evidenceGovernanceAvailable = true;
+    } else {
+      this.auditLogRepository.reportPersistenceFailure(
+        governance.reason,
+        "governance init",
+      );
+      this.evidenceGovernanceAvailable = !this.auditLogRepository.isEnabled?.();
     }
   }
 
@@ -379,6 +399,7 @@ export class AuditNotificationService implements OnModuleInit {
   }
 
   listEvidenceLegalHolds() {
+    this.assertEvidenceGovernanceAvailable();
     return [...this.evidenceLegalHolds.values()]
       .map((hold) => cloneEvidenceLegalHold(hold))
       .sort((left, right) => right.placedAt.localeCompare(left.placedAt));
@@ -389,74 +410,77 @@ export class AuditNotificationService implements OnModuleInit {
     identity: OperationalIdentity | null,
     requestId?: string,
   ) {
-    const actor = this.requireOperationalIdentity(identity);
-    const policy = getEvidenceRetentionPolicy(command.family);
-    this.assertLegalHoldPlacementAllowed(policy.family, actor);
+    return this.runEvidenceGovernanceCommand(async () => {
+      const actor = this.requireOperationalIdentity(identity);
+      this.assertEvidenceGovernanceAvailable();
+      const policy = getEvidenceRetentionPolicy(command.family);
+      this.assertLegalHoldPlacementAllowed(policy.family, actor);
 
-    const subjectId = this.requireNonBlank(command.subjectId, "subjectId");
-    const caseNumber = this.requireNonBlank(command.caseNumber, "caseNumber");
-    const reasonCode = this.requireReasonCode(
-      command.reasonCode,
-      EVIDENCE_LEGAL_HOLD_REASON_CODES,
-      "reasonCode",
-    );
-    const manifestHash = this.normalizeOptional(command.manifestHash);
-    const tenantId = this.normalizeOptional(command.tenantId);
-    const reasonNote = this.normalizeOptional(command.reasonNote);
-
-    const duplicate = [...this.evidenceLegalHolds.values()].find(
-      (hold) =>
-        hold.family === policy.family &&
-        hold.subjectId === subjectId &&
-        hold.caseNumber === caseNumber &&
-        hold.status === "active",
-    );
-    if (duplicate) {
-      throw new ApiRequestError(
-        409,
-        "EVIDENCE_LEGAL_HOLD_ALREADY_ACTIVE",
-        "An active legal hold already exists for this evidence subject and case number.",
-        {
-          family: policy.family,
-          subjectId,
-          caseNumber,
-          holdId: duplicate.holdId,
-        },
+      const subjectId = this.requireNonBlank(command.subjectId, "subjectId");
+      const caseNumber = this.requireNonBlank(command.caseNumber, "caseNumber");
+      const reasonCode = this.requireReasonCode(
+        command.reasonCode,
+        EVIDENCE_LEGAL_HOLD_REASON_CODES,
+        "reasonCode",
       );
-    }
+      const manifestHash = this.normalizeOptional(command.manifestHash);
+      const tenantId = this.normalizeOptional(command.tenantId);
+      const reasonNote = this.normalizeOptional(command.reasonNote);
 
-    const holdRecord: EvidenceLegalHoldRecord = {
-      holdId: `hold-${randomUUID()}`,
-      family: policy.family,
-      subjectId,
-      caseNumber,
-      reasonCode,
-      reasonNote,
-      tenantId,
-      manifestHash,
-      status: "active",
-      placedByActorId: actor.actorId,
-      placedByActorType: actor.actorType,
-      placedAt: new Date().toISOString(),
-      releasedByActorId: null,
-      releasedByActorType: null,
-      releasedAt: null,
-      releaseReason: null,
-    };
+      const duplicate = [...this.evidenceLegalHolds.values()].find(
+        (hold) =>
+          hold.family === policy.family &&
+          this.sameEvidenceSubject(policy.family, hold.subjectId, subjectId) &&
+          hold.caseNumber === caseNumber &&
+          hold.status === "active",
+      );
+      if (duplicate) {
+        throw new ApiRequestError(
+          409,
+          "EVIDENCE_LEGAL_HOLD_ALREADY_ACTIVE",
+          "An active legal hold already exists for this evidence subject and case number.",
+          {
+            family: policy.family,
+            subjectId,
+            caseNumber,
+            holdId: duplicate.holdId,
+          },
+        );
+      }
 
-    this.recordAuditLog({
-      actorId: actor.actorId,
-      actorType: actor.actorType as AuditLogRecord["actorType"],
-      tenantId,
-      moduleName: "audit-notification",
-      actionName: "place_evidence_legal_hold",
-      resourceType: "evidence_legal_hold",
-      resourceId: holdRecord.holdId,
-      newValuesSummary: { ...holdRecord },
-      ...(requestId !== undefined ? { requestId } : {}),
+      const holdRecord: EvidenceLegalHoldRecord = {
+        holdId: `hold-${randomUUID()}`,
+        family: policy.family,
+        subjectId,
+        caseNumber,
+        reasonCode,
+        reasonNote,
+        tenantId,
+        manifestHash,
+        status: "active",
+        placedByActorId: actor.actorId,
+        placedByActorType: actor.actorType,
+        placedAt: new Date().toISOString(),
+        releasedByActorId: null,
+        releasedByActorType: null,
+        releasedAt: null,
+        releaseReason: null,
+      };
+
+      await this.commitEvidenceGovernanceLog({
+        actorId: actor.actorId,
+        actorType: actor.actorType as AuditLogRecord["actorType"],
+        tenantId,
+        moduleName: "audit-notification",
+        actionName: "place_evidence_legal_hold",
+        resourceType: "evidence_legal_hold",
+        resourceId: holdRecord.holdId,
+        newValuesSummary: { ...holdRecord },
+        ...(requestId !== undefined ? { requestId } : {}),
+      });
+
+      return cloneEvidenceLegalHold(holdRecord);
     });
-
-    return cloneEvidenceLegalHold(holdRecord);
   }
 
   releaseEvidenceLegalHold(
@@ -465,56 +489,60 @@ export class AuditNotificationService implements OnModuleInit {
     identity: OperationalIdentity | null,
     requestId?: string,
   ) {
-    const actor = this.requireOperationalIdentity(identity);
-    const normalizedHoldId = this.requireNonBlank(holdId, "holdId");
-    const existing = this.evidenceLegalHolds.get(normalizedHoldId);
-    if (!existing) {
-      throw new ApiRequestError(
-        404,
-        "EVIDENCE_LEGAL_HOLD_NOT_FOUND",
-        "The requested evidence legal hold could not be found.",
-        { holdId: normalizedHoldId },
-      );
-    }
-    this.assertLegalHoldReleaseAllowed(existing.family, actor);
-    if (existing.status !== "active") {
-      throw new ApiRequestError(
-        409,
-        "EVIDENCE_LEGAL_HOLD_ALREADY_RELEASED",
-        "The evidence legal hold is no longer active.",
-        { holdId: normalizedHoldId, status: existing.status },
-      );
-    }
+    return this.runEvidenceGovernanceCommand(async () => {
+      const actor = this.requireOperationalIdentity(identity);
+      this.assertEvidenceGovernanceAvailable();
+      const normalizedHoldId = this.requireNonBlank(holdId, "holdId");
+      const existing = this.evidenceLegalHolds.get(normalizedHoldId);
+      if (!existing) {
+        throw new ApiRequestError(
+          404,
+          "EVIDENCE_LEGAL_HOLD_NOT_FOUND",
+          "The requested evidence legal hold could not be found.",
+          { holdId: normalizedHoldId },
+        );
+      }
+      this.assertLegalHoldReleaseAllowed(existing.family, actor);
+      if (existing.status !== "active") {
+        throw new ApiRequestError(
+          409,
+          "EVIDENCE_LEGAL_HOLD_ALREADY_RELEASED",
+          "The evidence legal hold is no longer active.",
+          { holdId: normalizedHoldId, status: existing.status },
+        );
+      }
 
-    const updated: EvidenceLegalHoldRecord = {
-      ...existing,
-      status: "released",
-      releasedByActorId: actor.actorId,
-      releasedByActorType: actor.actorType,
-      releasedAt: new Date().toISOString(),
-      releaseReason: this.requireNonBlank(
-        command.releaseReason,
-        "releaseReason",
-      ),
-    };
+      const updated: EvidenceLegalHoldRecord = {
+        ...existing,
+        status: "released",
+        releasedByActorId: actor.actorId,
+        releasedByActorType: actor.actorType,
+        releasedAt: new Date().toISOString(),
+        releaseReason: this.requireNonBlank(
+          command.releaseReason,
+          "releaseReason",
+        ),
+      };
 
-    this.recordAuditLog({
-      actorId: actor.actorId,
-      actorType: actor.actorType as AuditLogRecord["actorType"],
-      tenantId: updated.tenantId,
-      moduleName: "audit-notification",
-      actionName: "release_evidence_legal_hold",
-      resourceType: "evidence_legal_hold",
-      resourceId: updated.holdId,
-      oldValuesSummary: { ...existing },
-      newValuesSummary: { ...updated },
-      ...(requestId !== undefined ? { requestId } : {}),
+      await this.commitEvidenceGovernanceLog({
+        actorId: actor.actorId,
+        actorType: actor.actorType as AuditLogRecord["actorType"],
+        tenantId: updated.tenantId,
+        moduleName: "audit-notification",
+        actionName: "release_evidence_legal_hold",
+        resourceType: "evidence_legal_hold",
+        resourceId: updated.holdId,
+        oldValuesSummary: { ...existing },
+        newValuesSummary: { ...updated },
+        ...(requestId !== undefined ? { requestId } : {}),
+      });
+
+      return cloneEvidenceLegalHold(updated);
     });
-
-    return cloneEvidenceLegalHold(updated);
   }
 
   listEvidenceDeletionExceptions() {
+    this.assertEvidenceGovernanceAvailable();
     return [...this.evidenceDeletionExceptions.values()]
       .map((exception) =>
         cloneEvidenceDeletionException(
@@ -529,89 +557,96 @@ export class AuditNotificationService implements OnModuleInit {
     identity: OperationalIdentity | null,
     requestId?: string,
   ) {
-    const actor = this.requireOperationalIdentity(identity);
-    const policy = getEvidenceRetentionPolicy(command.family);
-    this.assertLegalHoldPlacementAllowed(policy.family, actor);
+    return this.runEvidenceGovernanceCommand(async () => {
+      const actor = this.requireOperationalIdentity(identity);
+      this.assertEvidenceGovernanceAvailable();
+      const policy = getEvidenceRetentionPolicy(command.family);
+      this.assertLegalHoldPlacementAllowed(policy.family, actor);
 
-    const subjectId = this.requireNonBlank(command.subjectId, "subjectId");
-    const sourceResourceType = this.requireNonBlank(
-      command.sourceResourceType,
-      "sourceResourceType",
-    );
-    const sourceResourceId = this.requireNonBlank(
-      command.sourceResourceId,
-      "sourceResourceId",
-    );
-    const reviewerActorId = this.requireNonBlank(
-      command.reviewerActorId,
-      "reviewerActorId",
-    );
-    const expiresAt = this.requireFutureIso(command.expiresAt, "expiresAt");
-    const reasonCode = this.requireReasonCode(
-      command.reasonCode,
-      EVIDENCE_DELETION_EXCEPTION_REASON_CODES,
-      "reasonCode",
-    );
-    const manifestHash = this.normalizeOptional(command.manifestHash);
-    const tenantId = this.normalizeOptional(command.tenantId);
-    const reasonNote = this.normalizeOptional(command.reasonNote);
-
-    const duplicate = [...this.evidenceDeletionExceptions.values()].find(
-      (exception) =>
-        exception.family === policy.family &&
-        exception.subjectId === subjectId &&
-        this.withEffectiveDeletionExceptionStatus(exception).status ===
-          "active",
-    );
-    if (duplicate) {
-      throw new ApiRequestError(
-        409,
-        "EVIDENCE_DELETION_EXCEPTION_ALREADY_ACTIVE",
-        "An active deletion exception already exists for this evidence subject.",
-        {
-          family: policy.family,
-          subjectId,
-          exceptionId: duplicate.exceptionId,
-        },
+      const subjectId = this.requireNonBlank(command.subjectId, "subjectId");
+      const sourceResourceType = this.requireNonBlank(
+        command.sourceResourceType,
+        "sourceResourceType",
       );
-    }
+      const sourceResourceId = this.requireNonBlank(
+        command.sourceResourceId,
+        "sourceResourceId",
+      );
+      const reviewerActorId = this.requireNonBlank(
+        command.reviewerActorId,
+        "reviewerActorId",
+      );
+      const expiresAt = this.requireFutureIso(command.expiresAt, "expiresAt");
+      const reasonCode = this.requireReasonCode(
+        command.reasonCode,
+        EVIDENCE_DELETION_EXCEPTION_REASON_CODES,
+        "reasonCode",
+      );
+      const manifestHash = this.normalizeOptional(command.manifestHash);
+      const tenantId = this.normalizeOptional(command.tenantId);
+      const reasonNote = this.normalizeOptional(command.reasonNote);
 
-    const exceptionRecord: EvidenceDeletionExceptionRecord = {
-      exceptionId: `delex-${randomUUID()}`,
-      family: policy.family,
-      subjectId,
-      sourceResourceType,
-      sourceResourceId,
-      reviewerActorId,
-      reviewerActorType: command.reviewerActorType ?? null,
-      expiresAt,
-      reasonCode,
-      reasonNote,
-      tenantId,
-      manifestHash,
-      status: "active",
-      requestedByActorId: actor.actorId,
-      requestedByActorType: actor.actorType,
-      requestedAt: new Date().toISOString(),
-      resolvedByActorId: null,
-      resolvedByActorType: null,
-      resolvedAt: null,
-      resolutionNote: null,
-    };
+      const duplicate = [...this.evidenceDeletionExceptions.values()].find(
+        (exception) =>
+          exception.family === policy.family &&
+          this.sameEvidenceSubject(
+            policy.family,
+            exception.subjectId,
+            subjectId,
+          ) &&
+          this.withEffectiveDeletionExceptionStatus(exception).status ===
+            "active",
+      );
+      if (duplicate) {
+        throw new ApiRequestError(
+          409,
+          "EVIDENCE_DELETION_EXCEPTION_ALREADY_ACTIVE",
+          "An active deletion exception already exists for this evidence subject.",
+          {
+            family: policy.family,
+            subjectId,
+            exceptionId: duplicate.exceptionId,
+          },
+        );
+      }
 
-    this.recordAuditLog({
-      actorId: actor.actorId,
-      actorType: actor.actorType as AuditLogRecord["actorType"],
-      tenantId,
-      moduleName: "audit-notification",
-      actionName: "register_evidence_deletion_exception",
-      resourceType: "evidence_deletion_exception",
-      resourceId: exceptionRecord.exceptionId,
-      newValuesSummary: { ...exceptionRecord },
-      ...(requestId !== undefined ? { requestId } : {}),
+      const exceptionRecord: EvidenceDeletionExceptionRecord = {
+        exceptionId: `delex-${randomUUID()}`,
+        family: policy.family,
+        subjectId,
+        sourceResourceType,
+        sourceResourceId,
+        reviewerActorId,
+        reviewerActorType: command.reviewerActorType ?? null,
+        expiresAt,
+        reasonCode,
+        reasonNote,
+        tenantId,
+        manifestHash,
+        status: "active",
+        requestedByActorId: actor.actorId,
+        requestedByActorType: actor.actorType,
+        requestedAt: new Date().toISOString(),
+        resolvedByActorId: null,
+        resolvedByActorType: null,
+        resolvedAt: null,
+        resolutionNote: null,
+      };
+
+      await this.commitEvidenceGovernanceLog({
+        actorId: actor.actorId,
+        actorType: actor.actorType as AuditLogRecord["actorType"],
+        tenantId,
+        moduleName: "audit-notification",
+        actionName: "register_evidence_deletion_exception",
+        resourceType: "evidence_deletion_exception",
+        resourceId: exceptionRecord.exceptionId,
+        newValuesSummary: { ...exceptionRecord },
+        ...(requestId !== undefined ? { requestId } : {}),
+      });
+
+      return cloneEvidenceDeletionException(exceptionRecord);
     });
-
-    return cloneEvidenceDeletionException(exceptionRecord);
   }
 
   resolveEvidenceDeletionException(
@@ -620,61 +655,66 @@ export class AuditNotificationService implements OnModuleInit {
     identity: OperationalIdentity | null,
     requestId?: string,
   ) {
-    const actor = this.requireOperationalIdentity(identity);
-    const normalizedExceptionId = this.requireNonBlank(
-      exceptionId,
-      "exceptionId",
-    );
-    const existing = this.evidenceDeletionExceptions.get(normalizedExceptionId);
-    if (!existing) {
-      throw new ApiRequestError(
-        404,
-        "EVIDENCE_DELETION_EXCEPTION_NOT_FOUND",
-        "The requested evidence deletion exception could not be found.",
-        { exceptionId: normalizedExceptionId },
+    return this.runEvidenceGovernanceCommand(async () => {
+      const actor = this.requireOperationalIdentity(identity);
+      this.assertEvidenceGovernanceAvailable();
+      const normalizedExceptionId = this.requireNonBlank(
+        exceptionId,
+        "exceptionId",
       );
-    }
-    this.assertLegalHoldPlacementAllowed(existing.family, actor);
-    const effectiveExisting =
-      this.withEffectiveDeletionExceptionStatus(existing);
-    if (effectiveExisting.status !== "active") {
-      throw new ApiRequestError(
-        409,
-        "EVIDENCE_DELETION_EXCEPTION_NOT_ACTIVE",
-        "The evidence deletion exception is no longer active.",
-        {
-          exceptionId: normalizedExceptionId,
-          status: effectiveExisting.status,
-        },
+      const existing = this.evidenceDeletionExceptions.get(
+        normalizedExceptionId,
       );
-    }
+      if (!existing) {
+        throw new ApiRequestError(
+          404,
+          "EVIDENCE_DELETION_EXCEPTION_NOT_FOUND",
+          "The requested evidence deletion exception could not be found.",
+          { exceptionId: normalizedExceptionId },
+        );
+      }
+      this.assertLegalHoldPlacementAllowed(existing.family, actor);
+      const effectiveExisting =
+        this.withEffectiveDeletionExceptionStatus(existing);
+      if (effectiveExisting.status !== "active") {
+        throw new ApiRequestError(
+          409,
+          "EVIDENCE_DELETION_EXCEPTION_NOT_ACTIVE",
+          "The evidence deletion exception is no longer active.",
+          {
+            exceptionId: normalizedExceptionId,
+            status: effectiveExisting.status,
+          },
+        );
+      }
 
-    const updated: EvidenceDeletionExceptionRecord = {
-      ...existing,
-      status: "resolved",
-      resolvedByActorId: actor.actorId,
-      resolvedByActorType: actor.actorType,
-      resolvedAt: new Date().toISOString(),
-      resolutionNote: this.requireNonBlank(
-        command.resolutionNote,
-        "resolutionNote",
-      ),
-    };
+      const updated: EvidenceDeletionExceptionRecord = {
+        ...existing,
+        status: "resolved",
+        resolvedByActorId: actor.actorId,
+        resolvedByActorType: actor.actorType,
+        resolvedAt: new Date().toISOString(),
+        resolutionNote: this.requireNonBlank(
+          command.resolutionNote,
+          "resolutionNote",
+        ),
+      };
 
-    this.recordAuditLog({
-      actorId: actor.actorId,
-      actorType: actor.actorType as AuditLogRecord["actorType"],
-      tenantId: updated.tenantId,
-      moduleName: "audit-notification",
-      actionName: "resolve_evidence_deletion_exception",
-      resourceType: "evidence_deletion_exception",
-      resourceId: updated.exceptionId,
-      oldValuesSummary: { ...effectiveExisting },
-      newValuesSummary: { ...updated },
-      ...(requestId !== undefined ? { requestId } : {}),
+      await this.commitEvidenceGovernanceLog({
+        actorId: actor.actorId,
+        actorType: actor.actorType as AuditLogRecord["actorType"],
+        tenantId: updated.tenantId,
+        moduleName: "audit-notification",
+        actionName: "resolve_evidence_deletion_exception",
+        resourceType: "evidence_deletion_exception",
+        resourceId: updated.exceptionId,
+        oldValuesSummary: { ...effectiveExisting },
+        newValuesSummary: { ...updated },
+        ...(requestId !== undefined ? { requestId } : {}),
+      });
+
+      return cloneEvidenceDeletionException(updated);
     });
-
-    return cloneEvidenceDeletionException(updated);
   }
 
   getEvidenceSubjectGovernance(
@@ -685,14 +725,15 @@ export class AuditNotificationService implements OnModuleInit {
       manifestHash?: string | null;
     },
   ): EvidenceSubjectGovernanceRecord {
+    this.assertEvidenceGovernanceAvailable();
     const tenantId = this.normalizeOptional(options?.tenantId);
     const manifestHash = this.normalizeOptional(options?.manifestHash);
     const activeLegalHolds = [...this.evidenceLegalHolds.values()]
       .filter(
         (hold) =>
           hold.family === family &&
-          hold.subjectId === subjectId &&
-          (!tenantId || hold.tenantId === tenantId) &&
+          this.sameEvidenceSubject(family, hold.subjectId, subjectId) &&
+          (!tenantId || this.sameEvidenceTenant(hold.tenantId, tenantId)) &&
           (!manifestHash || hold.manifestHash === manifestHash) &&
           hold.status === "active",
       )
@@ -704,8 +745,9 @@ export class AuditNotificationService implements OnModuleInit {
       .filter(
         (exception) =>
           exception.family === family &&
-          exception.subjectId === subjectId &&
-          (!tenantId || exception.tenantId === tenantId) &&
+          this.sameEvidenceSubject(family, exception.subjectId, subjectId) &&
+          (!tenantId ||
+            this.sameEvidenceTenant(exception.tenantId, tenantId)) &&
           (!manifestHash || exception.manifestHash === manifestHash) &&
           exception.status === "active",
       )
@@ -832,6 +874,40 @@ export class AuditNotificationService implements OnModuleInit {
       this.persistAuditLog(auditLog);
     }
     return auditLog;
+  }
+
+  private assertEvidenceGovernanceAvailable() {
+    if (!this.evidenceGovernanceAvailable) {
+      throw new ApiRequestError(
+        503,
+        "EVIDENCE_GOVERNANCE_UNAVAILABLE",
+        "The authoritative evidence governance trail is unavailable.",
+        undefined,
+        true,
+      );
+    }
+  }
+
+  private runEvidenceGovernanceCommand<T>(
+    command: () => Promise<T>,
+  ): Promise<T> {
+    const result = this.evidenceGovernanceCommands.then(command);
+    this.evidenceGovernanceCommands = result.catch(() => undefined);
+    return result;
+  }
+
+  private async commitEvidenceGovernanceLog(
+    input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId"> & {
+      requestId?: string;
+    },
+  ) {
+    const auditLog = createAuditLogRecord(input);
+    if (this.auditLogRepository?.isEnabled()) {
+      await this.auditLogRepository.append(auditLog);
+    }
+    // These are canonical projections of an acknowledged event, never optimistic state.
+    this.auditLogs = trimAuditLogs([auditLog, ...this.auditLogs]);
+    this.applyEvidenceGovernanceLog(auditLog);
   }
 
   private rebuildEvidenceGovernanceState(trail: AuditLogRecord[]) {
@@ -978,6 +1054,32 @@ export class AuditNotificationService implements OnModuleInit {
   private normalizeOptional(value: string | null | undefined) {
     const normalized = value?.trim();
     return normalized ? normalized : null;
+  }
+
+  private sameEvidenceSubject(
+    family: EvidenceRetentionFamily,
+    left: string,
+    right: string,
+  ) {
+    // audit_id is PostgreSQL uuid, regardless of version. Other families and
+    // opaque subjects retain their existing case-sensitive identity semantics.
+    return (
+      left === right ||
+      (family === "audit_log" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          left,
+        ) &&
+        left.toLowerCase() === right.toLowerCase())
+    );
+  }
+
+  private sameEvidenceTenant(left: string | null, right: string) {
+    return (
+      left === right ||
+      (isUuidLike(left) &&
+        isUuidLike(right) &&
+        left.toLowerCase() === right.toLowerCase())
+    );
   }
 
   private requireFutureIso(value: string, field: string) {
