@@ -101,7 +101,7 @@ export class ForwarderController {
   @Get("driver/task-views")
   @RequireRealms("system", "driver")
   @RequireScopes("dispatch:read")
-  listDriverTaskViews(
+  async listDriverTaskViews(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Query("driverId") requestedDriverId?: string,
     @Headers("x-request-id") requestId?: string,
@@ -109,7 +109,7 @@ export class ForwarderController {
     const driverId = this.resolveDriverId(identity, requestedDriverId);
     return toApiSuccessEnvelope(
       {
-        items: this.forwarderService.listDriverTaskViews(driverId),
+        items: await this.forwarderService.listDriverTaskViewsForRead(driverId),
       },
       requestId,
     );
@@ -118,7 +118,7 @@ export class ForwarderController {
   @Get("driver/task-views/:taskId")
   @RequireRealms("system", "driver")
   @RequireScopes("dispatch:read")
-  getDriverTaskView(
+  async getDriverTaskView(
     @Param("taskId") taskId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Query("driverId") requestedDriverId?: string,
@@ -126,7 +126,7 @@ export class ForwarderController {
   ) {
     const driverId = this.resolveDriverId(identity, requestedDriverId);
     return toApiSuccessEnvelope(
-      this.forwarderService.getDriverTaskView(driverId, taskId),
+      await this.forwarderService.getDriverTaskViewForRead(driverId, taskId),
       requestId,
     );
   }

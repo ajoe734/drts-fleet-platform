@@ -66,9 +66,23 @@ function createHarness(options?: {
     ),
     cancelOwnedOrder: vi.fn(() => ({ ...order })),
   };
+  const authorizations = new Map<
+    string,
+    ReturnType<MultiTaxiService["createAuthorization"]>
+  >();
   const repository = options?.repository
     ? {
-        persistAuthorization: vi.fn(async () => undefined),
+        isEnabled: () => true,
+        persistAuthorization: vi.fn(
+          async (
+            record: ReturnType<MultiTaxiService["createAuthorization"]>,
+          ) => {
+            authorizations.set(record.authorizationId, structuredClone(record));
+          },
+        ),
+        findEffectiveAuthorizations: vi.fn(async () => [
+          ...authorizations.values(),
+        ]),
         persistRideAccessToken: vi.fn(async () => undefined),
         findRideAccessTokenByDigest: vi.fn(async () => null),
         findPassengerRating: vi.fn(async () => null),
