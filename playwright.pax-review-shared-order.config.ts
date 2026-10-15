@@ -1,11 +1,12 @@
 import { defineConfig } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const simulation = JSON.parse(
   readFileSync(
-    new URL(
-      "./apps/api/src/modules/passenger-app/review-demo/simulation-profile.json",
-      import.meta.url,
+    resolve(
+      __dirname,
+      "apps/api/src/modules/passenger-app/review-demo/simulation-profile.json",
     ),
     "utf8",
   ),

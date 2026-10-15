@@ -465,3 +465,33 @@ The original hosted R3 HTTP/PG assertions, R4 formal-schema and dynamic-supply
 companions, R6 peer assignment and R5 unchanged demo browser must still pass
 for the replacement candidate. All three required acceptance keys remain
 pending until their original lifecycle evidence is recorded.
+
+## Candidate 33fb hosted follow-up: R8 configuration module format
+
+Source review approved candidate
+`33fb3e1b5d2586e076807a184ab8e8c3e4f9d5cd`, generation
+`68670d3680534e9cbd6411043fa5bbc9`, at 2026-10-15 09:17:28 UTC. Its own
+integration job `116342719706` passed, as did cross-surface job
+`116342719775`. These results do not grant the three acceptance keys.
+
+Hosted UI job `116342719770` in run `38711016527` passed the original
+offline Passenger browser (1 test) and Driver producer/storage cases (3 tests),
+then failed before executing the new three-role browser. Playwright reported
+`ReferenceError: exports is not defined in ES module scope` while loading
+`playwright.pax-review-shared-order.config.ts:3:23`. Its CommonJS transform
+retained `import.meta.url` from the profile path, causing Node 22 to treat the
+transformed module as ESM. The absent new browser artifact is not a test pass.
+
+| Finding / acceptance | Source and repair boundary | Before → current result | Command / evidence | Pending and limits |
+| --- | --- | --- | --- | --- |
+| R8: rehearsal configuration cannot load | `playwright.pax-review-shared-order.config.ts` reads the same simulation profile using `resolve(__dirname, ...)`, consistent with the repository's CommonJS package. All server declarations, environment values, hosted-only guard, timeouts and browser assertions are retained. | Formal Playwright `loadConfigFromFile` on unchanged 33fb reproduces the same ReferenceError, exit 1. With the path repair the same probe loads all five declared servers and checks the actual OTP/payment profile, exit 0; no server is started. | Canonical `.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate-33fb-ci-followup/`: `ui-route-e2e.log`, `load-config-only.cjs`, `config-before.log`, `config-after-hosted.log`. Command: `GITHUB_ACTIONS=true NODE_PATH="$PWD/node_modules" node <evidence-dir>/load-config-only.cjs`; Node 22.23.2 / Playwright 1.59.1. | Shared-dev selection and non-hosted rejection probes, type/lint checks and full replacement hosted CI still required. Config loading is socket-free and cannot establish browser/PG behavior. |
+| `pax-review-demo_real-shared-order-across-roles` | Original same-UUID and real PG requirements remain. | Pending; zero credit. | Original 33fb PG/root results still being collected before the next push. | New candidate must obtain its own review and CI. |
+| `pax-review-demo_external-simulation-and-complete-journeys` | Original three journeys, real internal transitions and explicit external simulation remain. | Pending; zero credit. | Original offline browser passed; the new journeys did not execute. | Three-role/browser/order evidence remains required. |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery` | Normal same-SHA review/CI/merge then immutable shared-dev delivery remain. | Pending; zero credit. | Hosted UI failure above; original unit/product-smoke jobs still running. | Preserve the original results before pushing; no merge/deploy/completion claim. |
+
+The first dependency install aborted with
+`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`, exit 1, without replacing the
+Supervisor-provided link to canonical dependencies. It is tooling evidence,
+not a product test. Subsequent checks use an isolated worktree installation;
+canonical dependencies and data are preserved. No product, browser, PG, preview
+or Compose service is started on the VM.
