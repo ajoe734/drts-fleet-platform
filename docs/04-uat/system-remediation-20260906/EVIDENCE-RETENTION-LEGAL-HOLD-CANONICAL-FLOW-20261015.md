@@ -1,6 +1,6 @@
 # EVIDENCE-RETENTION-LEGAL-HOLD-CANONICAL-FLOW-20261015
 
-Owner: Codex. Assigned independent reviewer: Codex2. Status: implementation checkpoint; no candidate handoff yet.
+Owner: Codex. Assigned independent reviewer: Codex2. Status: implementation verified for candidate handoff; independent review, mandatory CI and protected merge pending.
 
 Accepted original source: `2c36cad43376f848bd2a7edc06e27369c060c819`.
 Immutable R1 spec: `/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T1226-remaining-original-audits-root/EVIDENCE-RETENTION-LEGAL-HOLD-CANONICAL-FLOW-20261015-R1.task-spec.json`, SHA256 `83adbcf0f5041a30d896f9d3419929c15c51b34c5ebac5ad1e3af518fed87e79`.
@@ -29,24 +29,40 @@ Logs are under the assigned worktree's `.local/evidence-retention-20261015/` (ab
 
 ## Verification checkpoints
 
-Before probes ran against original production files at accepted source `2c36cad43376f848bd2a7edc06e27369c060c819`, without resetting the working tree. Their first durable test anchors are `72d4d0ee4` (governance) and `6eb0085fe` (shell). Production governance repair anchor: `3e9274b69`; archive repair anchor: `555ef9ec2`. Anchors are not review candidates. Final verification and exact candidate identity will be recorded at handoff.
+Before probes ran against original production files at accepted source `2c36cad43376f848bd2a7edc06e27369c060c819`, without resetting the working tree. Their first durable test anchors are `72d4d0ee4` (governance) and `6eb0085fe` (shell). Production governance repair anchor: `3e9274b69`; archive repair anchor: `555ef9ec2`. Anchors are not review candidates. Final verified source/test checkpoint: `3cca2b3f937a19661bfc7131787861c28ac5ab7f`; the only subsequent test change records optional shell traces. Final documentation and that trace hook are committed before handoff. The full exact candidate SHA/branch, PR, remote-head equality and evidence hashes are recorded after that commit in [candidate.json](../../../.local/evidence-retention-20261015/candidate.json) and in the canonical same-candidate handoff. This avoids embedding a commit's own SHA inside its hashed contents.
 
 - Original governance: 10 failures / 1 pass, exit 1; eight early ACK failures and two failed-load/readback failures.
 - Original archival: 7 failures / 1 pass, exit 1; protection, snapshot, SQL default-error continuation and no-op failures.
-- Expanded task regressions: 22 pass, exit 0 (`expanded-after.log`).
-- Root scoped run with original C099 five/C100 four and audit baseline: 33 pass, exit 0 (`root-after.log`, before the three expanded cases).
-- API direct governance/reporting/family tests: 9 pass, exit 0 (`direct-after.log`); old governance calls now await actual completion, with original assertions intact.
+- Expanded task regressions: 22 pass, exit 0; included in final root run below. Governance is 13 cases; archival is 9 cases with V0009 UUIDs and complete persisted governance events, also replayed through the real repository/service.
+- Final root scoped run with original C099 five/C100 four and audit baseline: 36 pass, exit 0 (`final-root-units.log`).
+- API direct governance/reporting/family tests: 9 pass, exit 0 (`final-api-units.log`); old governance calls now await actual completion, with original assertions intact.
 - Scoped eslint: exit 0 (`lint.log`).
-- Initial API typecheck used missing worktree dist declarations and stale shared-module fallback; failed exit 2. Worktree contracts/control-plane declaration build and rerun pending. Root typecheck pending. These are not reported as passes.
+- Scoped task TypeScript check: `pnpm exec tsc -p .local/evidence-retention-20261015/tsconfig.scoped.json --noEmit`, exit 0 (`scoped-typecheck.log`). The local config retains root compiler flags and adds only exact isolated nodemailer type paths.
+- Contracts and control-plane declarations built successfully in this worktree (exit 0 for both). Initial API typecheck used missing worktree dist declarations and stale shared-module fallback; that diagnostic is superseded by the isolated comparison below.
+- Full API: normal command fails exit 2 because shared dependencies lack nodemailer. Installing the lockfile's exact nodemailer/type versions under task `.local/check-deps` and using a local path overlay exposes two existing SMTP typing errors at `remote-smtp-mail.transport.ts:109/110` (exit 2). The same check against `git archive` of accepted source `2c36cad43376f848bd2a7edc06e27369c060c819` has byte-identical diagnostics after normalizing the source-root prefix (`api-diagnostics-comparison.txt`, `api-baseline-typecheck.log`, `api-isolated-typecheck.log`). No SMTP/shared dependency code changed.
+- Final `pnpm typecheck:root`: exit 2 (`final-root-typecheck.log`), including missing shared dependencies/workspace packages, differing shared SDK copies and existing tenant-auth test exports. No diagnostic points to task tests or repaired production files. This is a failed broad check, not a scoped pass promoted to global success.
+- `bash -n operations/database/audit-log-retention-archival.sh`, scoped eslint, Prettier and `git diff --check`: exit 0. All launched checks finished before handoff.
 
 ## Required acceptance mapping and lifecycle
 
-| Required key suffix (all prefixed `evidence-retention_`)                     | Evidence / state                                                                                                                                   |
-| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `four-governance-commands-canonical-ACK-and-rejected-state-readback`         | Eight actual handler/repository timing and rejection cases, restart replay; reviewer verification pending                                          |
-| `authoritative-governance-unknown-empty-noDB-and-original-access-boundaries` | Failed load/recovery/report detail, known empty/noDB, role/reason/expiry/tenant/manifest/transient-buffer refusal; original family tests preserved |
-| `legal-hold-exception-exact-archive-set-and-honest-SQL-result`               | Actual shell and actual candidate SELECT controlled tests; no PG/live credit                                                                       |
-| `actual-production-before-fixed-after-and-original-regressions`              | Original failing diagnostics and fixed outputs above; final combined checks pending                                                                |
-| `exact-candidate-review-CI-and-protected-merge`                              | Pending candidate, independent Codex2 review, same-candidate mandatory CI, protected merge and own-key acceptance. Owner does not call done        |
+| Required key suffix (all prefixed `evidence-retention_`)                     | Evidence / state                                                                                                                                                                                  |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `four-governance-commands-canonical-ACK-and-rejected-state-readback`         | Eight actual handler/repository timing and rejection cases, restart replay; reviewer verification pending                                                                                         |
+| `authoritative-governance-unknown-empty-noDB-and-original-access-boundaries` | Failed load/recovery/report detail, known empty/noDB, role/reason/expiry/tenant/manifest/transient-buffer refusal; original family tests preserved                                                |
+| `legal-hold-exception-exact-archive-set-and-honest-SQL-result`               | Actual shell and actual candidate SELECT controlled tests; no PG/live credit                                                                                                                      |
+| `actual-production-before-fixed-after-and-original-regressions`              | Original failing diagnostics and fixed outputs above; final combined checks above; broad typecheck failures explicitly retained                                                                   |
+| `exact-candidate-review-CI-and-protected-merge`                              | Canonical handoff locks candidate (local manifest linked above); pending independent Codex2 review, same-candidate mandatory CI, protected merge and own-key acceptance. Owner does not call done |
 
 No live archive/export/delete/restore, DB connection/provisioning, cloud/IAM/provider/deployment, server/browser/E2E or Docker was performed. Source work does not establish full C099/C100 live completion or whole-goal completion. Actual deployed roles, archive custody and restore rehearsal remain with existing owners. The current board's `show SR-QA-REPORTS-001` returned not found; immutable R1 explicitly adopts its original DONE credit and existing UAT records its accepted cases. This metadata discrepancy was reported through owner progress for normal Supervisor reconciliation; no task metadata was edited by hand.
+
+## Reproducible original source and exact shell observations
+
+The complete-fixture shell comparison extracts the unchanged actual script and `db-common.sh` with `git archive 2c36cad43376f848bd2a7edc06e27369c060c819` under task `.local/evidence-retention-20261015/original-source/`. `RETENTION_SCRIPT=<absolute extracted script> pnpm exec vitest run tests/unit/evidence-retention-legal-hold-canonical-flow-20261015/archival.test.ts` executes those original bytes. It fails 8/9 (exit 1, `archival-before-complete-fixtures.log`). The fixed same tests pass 9/9. The test-only selector executes the exact provided script, with no alternate product implementation.
+
+The original governance rerun uses `.local/evidence-retention-20261015/vitest.before.config.ts` to resolve the three actual audit modules from that extracted source and selects the original 11 cases (`-t 'controls actual envelope|failed configured|successful empty|recent-feed'`). Result: 10 failed / 1 passed / 2 deliberately unselected expanded cases, exit 1 (`governance-original-rerun.log`). This confirms the original findings against the final test fixture without moving/resetting the worktree.
+
+For C100-F3 the recorded controlled client stderr is `ERROR: controlled permission / trigger / transaction rejection`. Original script exits **0** and prints `Lawful retention purge completed successfully for 1 records.` The fixed script exits **3**, emits no purge success, retains the source row and its exported archive. Both contain ID `ad95d5fa-651b-486d-8923-fe1238d24a4f`; the traces contain actual command arguments/SQL, stdout, stderr, selected, remaining and archived IDs (`archival-before-trace.jsonl`, `archival-fixed-trace.jsonl`).
+
+These are socket-free controlled fault observations, not claims of an actual SQL rejection or purge against a deployed database. PostgreSQL parser, COPY, trigger and lock behavior remain unexecuted here; the candidate selection query itself runs through the documented SQLite dialect projection rather than a duplicate hold selector.
+
+Diagnostic hashes are recorded in [evidence-index.json](../../../.local/evidence-retention-20261015/evidence-index.json). Their local artifact boundary is explicit above.

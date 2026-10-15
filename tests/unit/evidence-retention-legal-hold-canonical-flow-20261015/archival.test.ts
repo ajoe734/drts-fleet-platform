@@ -250,6 +250,21 @@ function run(
       .filter(Boolean)
       .map((line) => JSON.parse(line) as ReturnType<typeof row>),
   );
+  if (process.env.RETENTION_TRACE)
+    writeFileSync(
+      process.env.RETENTION_TRACE,
+      JSON.stringify({
+        test: expect.getState().currentTestName,
+        status: result.status,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        selected: state.selected,
+        remaining: state.rows.map((row) => row.audit_id),
+        archived: archived.map((row) => row.audit_id),
+        calls,
+      }) + "\n",
+      { flag: "a" },
+    );
   return { result, state, calls, archived };
 }
 
