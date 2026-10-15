@@ -83,13 +83,22 @@ it("the real review buttons send only OTP command fields through SDK/BFF, retain
   const verified: { body: Record<string, unknown>; status: number }[] = [];
   const inboxes: Record<string, unknown>[] = [];
   const loginBodies: unknown[] = [];
+  const rejectedReceivers: string[] = [];
 
   const transport = vi.fn(
-    async (
+    async function (
+      this: unknown,
       input: string | URL | Request,
       init?: RequestInit,
-    ): Promise<Response> => {
+    ): Promise<Response> {
       const url = String(input);
+      // HTTP/platform boundary only: browser Web IDL operations reject a
+      // receiver such as PassengerClient. Arrow-function mocks hid this.
+      // https://webidl.spec.whatwg.org/#dfn-create-operation-function
+      if (this != null && this !== globalThis && this !== window) {
+        rejectedReceivers.push(url);
+        throw new TypeError("Illegal invocation");
+      }
       if (url.startsWith("/api/passenger-app/")) {
         // Exercise the actual BFF and retain only cookies it really issued.
         const headers = new Headers(init?.headers);
@@ -206,6 +215,10 @@ it("the real review buttons send only OTP command fields through SDK/BFF, retain
   }
   expect(store.sessions.size).toBe(0);
   fireEvent.click(loginButton);
+  await waitFor(() =>
+    expect(verified.length > 0 || screen.queryByRole("alert")).toBeTruthy(),
+  );
+  expect(rejectedReceivers).toEqual([]);
   await waitFor(() => expect(verified).toHaveLength(1));
   // This fails with 400 on the immutable 9c784946 page, before the repair.
   expect(verified[0]!.status).toBe(200);
