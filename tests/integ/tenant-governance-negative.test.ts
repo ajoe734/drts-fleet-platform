@@ -283,7 +283,7 @@ describe("tenant governance negative-path integration", () => {
       ownedMobilityService,
     } = createHarness();
 
-    tenantPartnerService.upsertTenantQuotaPolicy(TENANT_ID, {
+    await tenantPartnerService.upsertTenantQuotaPolicy(TENANT_ID, {
       period: "monthly",
       limit: {
         bookingCountLimit: 0,
@@ -327,7 +327,7 @@ describe("tenant governance negative-path integration", () => {
       ownedMobilityService,
     } = createHarness();
 
-    const blockRule = tenantPartnerService.upsertApprovalRule(TENANT_ID, {
+    const blockRule = await tenantPartnerService.upsertApprovalRule(TENANT_ID, {
       ruleName: "Executive block",
       priority: 10,
       conditions: [
@@ -390,7 +390,7 @@ describe("tenant governance negative-path integration", () => {
       ownedMobilityService,
     } = createHarness();
 
-    tenantPartnerService.upsertApprovalRule(TENANT_ID, {
+    await tenantPartnerService.upsertApprovalRule(TENANT_ID, {
       ruleName: "Missing approver rule",
       priority: 10,
       conditions: [
@@ -442,7 +442,7 @@ describe("tenant governance negative-path integration", () => {
       ownedMobilityService,
     } = createHarness();
 
-    tenantPartnerService.upsertApprovalRule(TENANT_ID, {
+    await tenantPartnerService.upsertApprovalRule(TENANT_ID, {
       ruleName: "Ops approval",
       priority: 10,
       conditions: [
@@ -455,7 +455,7 @@ describe("tenant governance negative-path integration", () => {
       action: "require_approval",
       approvers: [{ kind: "tenant_admin" }],
     });
-    tenantPartnerService.upsertApprovalRule(TENANT_ID, {
+    await tenantPartnerService.upsertApprovalRule(TENANT_ID, {
       ruleName: "Finance approval",
       priority: 20,
       conditions: [
@@ -528,7 +528,7 @@ describe("tenant governance negative-path integration", () => {
       ownedMobilityService,
     } = createHarness();
 
-    tenantPartnerService.upsertApprovalRule(TENANT_ID, {
+    await tenantPartnerService.upsertApprovalRule(TENANT_ID, {
       ruleName: "Finance approval",
       priority: 10,
       conditions: [
@@ -596,7 +596,7 @@ describe("tenant governance negative-path integration", () => {
       ownedMobilityService,
     } = createHarness();
 
-    tenantPartnerService.upsertApprovalRule(TENANT_ID, {
+    await tenantPartnerService.upsertApprovalRule(TENANT_ID, {
       ruleName: "Finance approval",
       priority: 10,
       conditions: [
@@ -673,7 +673,7 @@ describe("tenant governance negative-path integration", () => {
       platformTenantGovernanceService,
     } = createHarness();
 
-    tenantPartnerService.upsertApprovalRule(TENANT_ID, {
+    await tenantPartnerService.upsertApprovalRule(TENANT_ID, {
       ruleName: "Finance approval",
       priority: 10,
       conditions: [

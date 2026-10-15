@@ -84,8 +84,15 @@ function createMemoryTenantPartnerRepository(
 
   const repository: Pick<
     TenantPartnerRepository,
-    "loadState" | "persistChanges" | "reportPersistenceFailure"
+    | "loadState"
+    | "persistChanges"
+    | "persistConfigurationChanges"
+    | "isEnabled"
+    | "reportPersistenceFailure"
   > = {
+    isEnabled: () => true,
+    persistConfigurationChanges: (changes) =>
+      repository.persistChanges(changes),
     loadState: vi.fn(async () => clonePartnerState(state)),
     persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
       if (changes.notificationPreferences) {
@@ -460,7 +467,7 @@ describe("tenant partner foundation service", () => {
       new WebhookDispatchService(fetchMock),
     );
 
-    const webhook = tenantPartnerService.createWebhookEndpoint(
+    const webhook = await tenantPartnerService.createWebhookEndpoint(
       TENANT_ID,
       {
         url: "https://tenant.example.com/webhooks/drts",
@@ -543,7 +550,7 @@ describe("tenant partner foundation service", () => {
         new WebhookDispatchService(fetchMock),
       );
 
-      const webhook = tenantPartnerService.createWebhookEndpoint(
+      const webhook = await tenantPartnerService.createWebhookEndpoint(
         TENANT_ID,
         {
           url: "https://tenant.example.com/webhooks/retry",
@@ -597,7 +604,7 @@ describe("tenant partner foundation service", () => {
       new WebhookDispatchService(fetchMock),
     );
 
-    const tenantWebhook = tenantPartnerService.createWebhookEndpoint(
+    const tenantWebhook = await tenantPartnerService.createWebhookEndpoint(
       TENANT_ID,
       {
         url: "https://tenant.example.com/webhooks/completed",
@@ -605,7 +612,7 @@ describe("tenant partner foundation service", () => {
         events: ["order.completed"],
       },
     );
-    const otherWebhook = tenantPartnerService.createWebhookEndpoint(
+    const otherWebhook = await tenantPartnerService.createWebhookEndpoint(
       OTHER_TENANT_ID,
       {
         url: "https://other.example.com/webhooks/orders",
@@ -669,11 +676,11 @@ describe("tenant partner foundation service", () => {
     expect(String(firstRequestInit?.body)).toContain("order.completed");
   });
 
-  it("rotates webhook secrets and records rotation history", () => {
+  it("rotates webhook secrets and records rotation history", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
-    const webhook = tenantPartnerService.createWebhookEndpoint(
+    const webhook = await tenantPartnerService.createWebhookEndpoint(
       TENANT_ID,
       {
         url: "https://tenant.example.com/webhooks/drts",
@@ -683,7 +690,7 @@ describe("tenant partner foundation service", () => {
       "webhook-create-request",
     );
 
-    const rotated = tenantPartnerService.rotateWebhookSecret(
+    const rotated = await tenantPartnerService.rotateWebhookSecret(
       TENANT_ID,
       {
         webhookId: webhook.webhookId,
@@ -707,11 +714,11 @@ describe("tenant partner foundation service", () => {
     );
   });
 
-  it("updates webhook metadata through a first-class tenant command path", () => {
+  it("updates webhook metadata through a first-class tenant command path", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
-    const webhook = tenantPartnerService.createWebhookEndpoint(
+    const webhook = await tenantPartnerService.createWebhookEndpoint(
       TENANT_ID,
       {
         url: "https://tenant.example.com/webhooks/drts",
@@ -721,7 +728,7 @@ describe("tenant partner foundation service", () => {
       "webhook-create-request",
     );
 
-    const updated = tenantPartnerService.updateWebhookEndpoint(
+    const updated = await tenantPartnerService.updateWebhookEndpoint(
       TENANT_ID,
       webhook.webhookId,
       {
@@ -850,7 +857,7 @@ describe("tenant partner foundation service", () => {
         fullName: "Other Tenant Passenger",
       },
     );
-    const otherWebhook = tenantPartnerService.createWebhookEndpoint(
+    const otherWebhook = await tenantPartnerService.createWebhookEndpoint(
       OTHER_TENANT_ID,
       {
         url: "https://other.example.com/webhooks/drts",
@@ -1072,11 +1079,14 @@ describe("tenant partner foundation service", () => {
         fullName: "Other Tenant Passenger",
       },
     );
-    const otherAddress = await tenantPartnerService.upsertAddress(OTHER_TENANT_ID, {
-      ownerPassengerId: otherPassenger.passengerId,
-      addressName: "Other Tenant HQ",
-      addressText: "台中市西屯區台灣大道 99 號",
-    });
+    const otherAddress = await tenantPartnerService.upsertAddress(
+      OTHER_TENANT_ID,
+      {
+        ownerPassengerId: otherPassenger.passengerId,
+        addressName: "Other Tenant HQ",
+        addressText: "台中市西屯區台灣大道 99 號",
+      },
+    );
 
     let passengerError: unknown;
     try {
@@ -1136,7 +1146,7 @@ describe("tenant partner foundation service", () => {
     ).toBe("Other Tenant HQ");
   });
 
-  it("rejects cross-tenant SLA update when identity tenant does not match target tenant", () => {
+  it("rejects cross-tenant SLA update when identity tenant does not match target tenant", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
@@ -1154,7 +1164,7 @@ describe("tenant partner foundation service", () => {
 
     let thrown: unknown;
     try {
-      tenantPartnerService.updateSlaProfile(
+      await tenantPartnerService.updateSlaProfile(
         OTHER_TENANT_ID,
         { waitThresholdMin: 15 },
         "admin-a",
@@ -1173,7 +1183,7 @@ describe("tenant partner foundation service", () => {
     ).toBe("TENANT_SCOPE_MISMATCH");
   });
 
-  it("rejects SLA update when threshold minutes are negative", () => {
+  it("rejects SLA update when threshold minutes are negative", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
@@ -1196,7 +1206,7 @@ describe("tenant partner foundation service", () => {
     ] as const) {
       let thrown: unknown;
       try {
-        tenantPartnerService.updateSlaProfile(
+        await tenantPartnerService.updateSlaProfile(
           TENANT_ID,
           { [field]: -1 },
           "admin-a",
@@ -1322,6 +1332,8 @@ describe("tenant partner foundation service", () => {
       keyHash: "sha256:persisted-key",
     };
     const repository = {
+      isEnabled: () => true,
+      persistConfigurationChanges: persistChanges,
       loadState: vi.fn(async () => ({
         notificationPreferences: [
           {
@@ -1431,7 +1443,7 @@ describe("tenant partner foundation service", () => {
       tenantPartnerService.listWebhookEndpoints(TENANT_ID)[0]?.webhookId,
     ).toBe("wh_persisted_001");
 
-    tenantPartnerService.updateSlaProfile(TENANT_ID, {
+    await tenantPartnerService.updateSlaProfile(TENANT_ID, {
       waitThresholdMin: 20,
     });
     await tenantPartnerService.upsertPassenger(TENANT_ID, {
