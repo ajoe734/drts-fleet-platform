@@ -913,8 +913,19 @@ export class AuditNotificationService implements OnModuleInit {
   private rebuildEvidenceGovernanceState(trail: AuditLogRecord[]) {
     this.evidenceLegalHolds.clear();
     this.evidenceDeletionExceptions.clear();
-    for (const auditLog of [...trail].sort((left, right) =>
-      left.createdAt.localeCompare(right.createdAt),
+    // Match the operational latest_governance selector: a terminal snapshot wins
+    // an equal timestamp. The four commands cannot reactivate the same entity ID.
+    // UUIDs only settle ties between snapshots of the same status, not event order.
+    const terminalRank = (log: AuditLogRecord) =>
+      log.newValuesSummary?.status === "released" ||
+      log.newValuesSummary?.status === "resolved"
+        ? 1
+        : 0;
+    for (const auditLog of [...trail].sort(
+      (left, right) =>
+        left.createdAt.localeCompare(right.createdAt) ||
+        terminalRank(left) - terminalRank(right) ||
+        left.auditId.localeCompare(right.auditId),
     )) {
       this.applyEvidenceGovernanceLog(auditLog);
     }

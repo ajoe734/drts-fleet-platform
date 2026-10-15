@@ -428,3 +428,54 @@ All preceding Source-only boundaries remain. Fresh current evidence supersedes
 neither the original failing candidates nor the missing external operational
 credit. Replacement candidate delivery is not a live archive/delete, recovery
 rehearsal, shared-dev deployment, whole-capability or whole-goal completion.
+## Reopened F-REPLAY-01: terminal events sharing a timestamp (2026-10-15)
+
+Codex2 reopened exact candidate `344cabe741243234c58a662c49835cf93fa04ebe`
+at `2026-10-15T15:11:50Z`. The production controller's acknowledged
+place/release and register/resolve pairs persisted identical `created_at` values.
+`AuditLogRepository.loadEvidenceGovernanceTrail` orders by that timestamp only;
+either tie row order is legal. `rebuildEvidenceGovernanceState` previously
+retained transport order within ties, so a restart could replace an acknowledged
+terminal snapshot with its older active snapshot. The existing operational
+`latest_governance` selector already makes released/resolved win timestamp ties.
+This is a new trigger; prior ACK, unavailable-authority, exact-set and tenant /
+subject / source UUID repairs and their original evidence remain above.
+
+The repair stays in `AuditNotificationService.rebuildEvidenceGovernanceState`:
+sort ascending timestamp, then active before terminal, then audit UUID for
+deterministic same-status snapshots, matching the operational selector. UUID
+order is not treated as causal order. The four commands never reactivate the
+same entity ID. Later timestamps retain priority. No repository query, generic
+audit caller, command ACK boundary, wire shape, migration, retention period,
+policy, authorization or operational SQL changes are needed.
+
+The new production controller/repository matrix controls only query transport
+and Date: two entity types × frozen/distinct timestamps × natural/reversed tie
+order. It checks persisted INSERT payloads and timestamp equality, acknowledged
+terminal response, pre/post-restart full subject projection and terminal record,
+and original repeated-terminal-command refusal. Query transport now observes
+the production query's ascending timestamp ordering instead of assuming
+insertion order. Four actual-shell cases additionally compare replay against
+the unmodified production SQL selection, archive identities and remaining rows
+for both tie permutations and both entity types. Active intentionally has a
+larger UUID than terminal; UUID-only sorting fails that control. Recent terminal
+history remains in source while only the lawful old target is exported/deleted
+by the controlled transport. Existing SQLite dialect projection limitations
+apply; this is not live PostgreSQL, role, trigger or deletion evidence.
+
+Fresh logs live under this assigned worktree's
+`.local/evidence-retention-20261015/terminal-replay/`. Older worker-local logs
+referenced above were absent in this dispatch; their existence was not assumed.
+Reproduction anchor `2695bd85d` contains only the new governance regression and
+was normally pushed. With production bytes unchanged from reviewed `344cabe74`,
+the following command exits 1: 2 failed / 6 passed / 28 deliberately unselected.
+Both failures are the frozen-clock reversed-tie cases; both natural-tie and
+distinct-time controls pass (`before.log`). After repair, the narrow command
+below exits 0: 13 passed / 48 unselected (`fixed-narrow.log`), including the
+original terminal-history case. Broader checks and exact candidate identity are
+recorded in the closeout below after completion.
+
+```bash
+pnpm exec vitest run tests/unit/evidence-retention-legal-hold-canonical-flow-20261015/governance.test.ts -t 'terminal replay'
+RETENTION_TRACE="$PWD/.local/evidence-retention-20261015/terminal-replay/fixed-narrow-trace.jsonl" pnpm exec vitest run tests/unit/evidence-retention-legal-hold-canonical-flow-20261015 -t 'terminal replay'
+```

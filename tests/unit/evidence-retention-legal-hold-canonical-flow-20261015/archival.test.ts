@@ -269,6 +269,70 @@ function run(
 }
 
 describe("C100 actual archival shell with controlled client (no PG/socket/server)", () => {
+  for (const kind of ["hold", "exception"] as const) {
+    for (const reverseTies of [false, true]) {
+      it(`terminal replay agrees with archival: ${kind}, reverse ties ${reverseTies}`, async () => {
+        const entityId = `terminal-${kind}`;
+        const resourceType =
+          kind === "hold"
+            ? "evidence_legal_hold"
+            : "evidence_deletion_exception";
+        const status = kind === "hold" ? "released" : "resolved";
+        const time = "2026-10-01T00:00:00.000Z";
+        const active =
+          kind === "hold"
+            ? hold(entityId, "terminal-target", {}, time)
+            : exception(entityId, "terminal-target", {}, time);
+        // Deliberately give active the larger UUID: UUID order is not causal order.
+        active.audit_id = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+        const terminal = row(
+          "00000000-0000-4000-8000-000000000001",
+          resourceType,
+          entityId,
+          {
+            ...active.new_value,
+            status,
+          },
+          time,
+        );
+        const history = reverseTies ? [terminal, active] : [active, terminal];
+        const data = [row("terminal-target"), ...history];
+        const before = await replay(data);
+        expect(
+          before.getEvidenceSubjectGovernance(
+            "audit_log",
+            uuid("terminal-target"),
+          ).deletionSuppressed,
+        ).toBe(false);
+        expect(
+          kind === "hold"
+            ? before.listEvidenceLegalHolds()
+            : before.listEvidenceDeletionExceptions(),
+        ).toEqual([terminal.new_value]);
+        const result = run(data);
+        expect(result.result.status, result.result.stderr).toBe(0);
+        expect(result.state.selected).toEqual([uuid("terminal-target")]);
+        expect(result.archived.map((item) => item.audit_id)).toEqual([
+          uuid("terminal-target"),
+        ]);
+        expect(result.state.rows.map((item) => item.audit_id).sort()).toEqual(
+          history.map((item) => item.audit_id).sort(),
+        );
+        const after = await replay(result.state.rows);
+        expect(
+          kind === "hold"
+            ? after.listEvidenceLegalHolds()
+            : after.listEvidenceDeletionExceptions(),
+        ).toEqual([terminal.new_value]);
+        expect(
+          after.getEvidenceSubjectGovernance(
+            "audit_log",
+            uuid("terminal-target"),
+          ).deletionSuppressed,
+        ).toBe(false);
+      });
+    }
+  }
   it("preserves old held/exception targets and active history, purging only lawful rows", () => {
     const data = [
       row("free"),
