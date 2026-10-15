@@ -285,14 +285,11 @@ function deriveComplaintActions(
         : { action: "mark_sla_breach", enabled: true, riskLevel: "low" },
     );
   } else if (record.status === "resolved") {
+    // Original backend reopen contract only accepts status === "closed"
+    // (409 COMPLAINT_NOT_CLOSED otherwise); a resolved case must go through
+    // close first.
     list.push({ action: "add_note", enabled: true, riskLevel: "low" });
     list.push({ action: "close", enabled: true, riskLevel: "medium" });
-    list.push({
-      action: "reopen",
-      enabled: true,
-      requiresReason: true,
-      riskLevel: "high",
-    });
   } else if (record.status === "closed") {
     list.push({
       action: "reopen",

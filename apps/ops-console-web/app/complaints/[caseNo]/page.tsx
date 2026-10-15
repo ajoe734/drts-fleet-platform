@@ -173,7 +173,9 @@ function deriveCaseActions(complaint: ComplaintCaseRecord): CaseAction[] {
     { action: "assign", labelEn: "Assign / reassign", labelZh: "指派 / 改派", risk: "medium", enabled: !closed },
     { action: "resolve", labelEn: "Resolve", labelZh: "結案處理", risk: "medium", enabled: open },
     { action: "close", labelEn: "Close", labelZh: "關閉案件", risk: "medium", enabled: resolved },
-    { action: "reopen", labelEn: "Reopen", labelZh: "重啟案件", risk: "high", enabled: resolved || closed, requiresReason: true },
+    // Original backend reopen contract only accepts status === "closed"
+    // (409 COMPLAINT_NOT_CLOSED otherwise); a resolved case must close first.
+    { action: "reopen", labelEn: "Reopen", labelZh: "重啟案件", risk: "high", enabled: closed, requiresReason: true },
     {
       action: "escalate",
       labelEn: "Escalate to incident",

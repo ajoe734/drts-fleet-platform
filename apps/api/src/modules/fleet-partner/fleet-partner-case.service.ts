@@ -923,8 +923,17 @@ export class FleetPartnerCaseService {
           { note: notePayload },
           requestId,
         );
-      } catch {
-        // If complaint service doesn't have the caseNo or fails, local timeline still holds authoritative record
+        await this.complaintService.awaitSettlementPersistence(
+          caseItem.caseNo,
+        );
+      } catch (error) {
+        if (error instanceof ApiRequestError && error.code === "NOT_FOUND") {
+          // ComplaintService has no record of this caseNo; the fleet-side
+          // timeline above already holds the authoritative record.
+        } else {
+          // A real canonical write failure must not be swallowed as success.
+          throw error;
+        }
       }
     }
 

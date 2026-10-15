@@ -87,6 +87,9 @@ export class ComplaintService implements OnModuleInit {
 
   private settlementMutationRevision = 0;
 
+  /** Keyed by caseNo; tracks the in-flight canonical write for every
+   * category, not only settlement_dispute, so awaitSettlementPersistence
+   * can honestly observe an ordinary case's write failure too. */
   private settlementPersistence = new Map<string, Promise<void>>();
 
   private settlementRefresh: Promise<void> | undefined;
@@ -760,6 +763,17 @@ export class ComplaintService implements OnModuleInit {
     if (complaintCase.status === "resolved") {
       return this.cloneComplaintCase(complaintCase);
     }
+    if (complaintCase.status === "closed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "COMPLAINT_ALREADY_CLOSED",
+        "A closed complaint case must be reopened before it can be resolved again.",
+        {
+          caseNo,
+          currentStatus: complaintCase.status,
+        },
+      );
+    }
 
     this.assertValidResolutionCode(
       command.resolutionCode,
@@ -1318,12 +1332,22 @@ export class ComplaintService implements OnModuleInit {
       );
     }
 
-    const settlementCaseNos = (changes.complaintCases ?? [])
-      .filter((item) => item.category === "settlement_dispute")
-      .map((item) => item.caseNo);
-    if (settlementCaseNos.length && this.complaintRepository.isEnabled()) {
-      this.settlementMutationRevision += 1;
-      const previous = settlementCaseNos.flatMap((caseNo) => {
+    // Track every affected case's write, not only settlement ones, so the
+    // existing awaitSettlementPersistence(caseNo) callers every mutation
+    // already invokes can honestly observe and propagate an ordinary
+    // canonical write failure instead of it being silently logged while the
+    // in-memory cache keeps reporting the case as saved.
+    const affectedCaseNos = [
+      ...new Set((changes.complaintCases ?? []).map((item) => item.caseNo)),
+    ];
+    if (affectedCaseNos.length && this.complaintRepository.isEnabled()) {
+      const settlementCaseNos = (changes.complaintCases ?? [])
+        .filter((item) => item.category === "settlement_dispute")
+        .map((item) => item.caseNo);
+      if (settlementCaseNos.length) {
+        this.settlementMutationRevision += 1;
+      }
+      const previous = affectedCaseNos.flatMap((caseNo) => {
         const persistence = this.settlementPersistence.get(caseNo);
         return persistence ? [persistence] : [];
       });
@@ -1333,7 +1357,7 @@ export class ComplaintService implements OnModuleInit {
           this.complaintRepository!.reportPersistenceFailure(error, context);
           throw error;
         });
-      for (const caseNo of settlementCaseNos) {
+      for (const caseNo of affectedCaseNos) {
         this.settlementPersistence.set(caseNo, persistence);
       }
       // Shared synchronous callers can start a mutation before the HTTP layer
