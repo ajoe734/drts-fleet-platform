@@ -250,9 +250,11 @@ async function finish(
     .toBe("on_trip");
   // The producer takes 8 real-time steps; no direct completion facts or fake
   // tracking authority are injected into either page or API.
-  await expect(driver.getByText(/0\.[2-9]\d km/).first()).toBeVisible({
-    timeout: 40_000,
-  });
+  await step("Driver receives live tracked distance", () =>
+    expect(driver.getByText(/0\.[2-9]\d km/).first()).toBeVisible({
+      timeout: 40_000,
+    }),
+  );
   if (stale) {
     await step(
       "Driver pause until real GPS freshness expires and resume",
@@ -260,58 +262,63 @@ async function finish(
         await driver
           .getByRole("button", { name: "暫停模擬定位", exact: true })
           .click();
+        await expect(
+          driver.getByText(/已停止；等待真 freshness 過期/),
+        ).toBeVisible();
+        await expect
+          .poll(
+            async () => {
+              const response = await ops.request.get(
+                `${OPS}/control-plane-proxy/driver/tracking-status?driverId=pax-review-driver-a`,
+              );
+              expect(response.status()).toBe(200);
+              return camel(await response.json()).data.locationFreshness;
+            },
+            { timeout: 105_000, intervals: [5000] },
+          )
+          .toBe("stale");
+        await driver
+          .getByRole("button", { name: "恢復模擬定位", exact: true })
+          .click();
       },
     );
-    await expect(
-      driver.getByText(/已停止；等待真 freshness 過期/),
-    ).toBeVisible();
-    await expect
-      .poll(
-        async () => {
-          const response = await ops.request.get(
-            `${OPS}/control-plane-proxy/driver/tracking-status?driverId=pax-review-driver-a`,
-          );
-          expect(response.status()).toBe(200);
-          return camel(await response.json()).data.locationFreshness;
-        },
-        { timeout: 105_000, intervals: [5000] },
-      )
-      .toBe("stale");
-    await driver
-      .getByRole("button", { name: "恢復模擬定位", exact: true })
-      .click();
   }
   // Explicit simulated meter facts, consistent with this sub-1.25km route
   // and the approved engine's minimum, not the old local demo tariff.
-  const bookedQuote = (await authority(pax, orderId)).bookingQuote;
-  const minimum = bookedQuote.estimatedMin as number;
-  const baseFare = bookedQuote.tariffSnapshot.baseFare as number;
-  for (const [label, value] of [
-    ["實際起步費", String(baseFare)],
-    ["實際里程費", "0"],
-    ["實際延滯費", "0"],
-    ["實際夜間加成", String(minimum - baseFare)],
-    ["實際車資總額", String(minimum)],
-  ] as const) {
-    const field = driver
-      .getByText(label, { exact: true })
-      .locator("../..")
-      .getByRole("textbox");
-    await field.fill(value);
-  }
-  await step("Driver complete with actual tracked facts", async () => {
-    const complete = driver.waitForResponse(
-      (r) =>
-        /\/driver\/tasks\/[^/]+\/complete$/.test(r.url()) &&
-        r.request().method() === "POST",
-    );
-    await driver.getByRole("button", { name: "完成行程", exact: true }).click();
-    const completed = await complete;
-    expect(completed.status()).toBeLessThan(300);
-    await expect
-      .poll(async () => (await authority(pax, orderId)).order.status)
-      .toBe("completed");
-  });
+  await step(
+    "Driver meter input and complete with actual tracked facts",
+    async () => {
+      const bookedQuote = (await authority(pax, orderId)).bookingQuote;
+      const minimum = bookedQuote.estimatedMin as number;
+      const baseFare = bookedQuote.tariffSnapshot.baseFare as number;
+      for (const [label, value] of [
+        ["實際起步費", String(baseFare)],
+        ["實際里程費", "0"],
+        ["實際延滯費", "0"],
+        ["實際夜間加成", String(minimum - baseFare)],
+        ["實際車資總額", String(minimum)],
+      ] as const) {
+        const field = driver
+          .getByText(label, { exact: true })
+          .locator("../..")
+          .getByRole("textbox");
+        await field.fill(value);
+      }
+      const complete = driver.waitForResponse(
+        (r) =>
+          /\/driver\/tasks\/[^/]+\/complete$/.test(r.url()) &&
+          r.request().method() === "POST",
+      );
+      await driver
+        .getByRole("button", { name: "完成行程", exact: true })
+        .click();
+      const completed = await complete;
+      expect(completed.status()).toBeLessThan(300);
+      await expect
+        .poll(async () => (await authority(pax, orderId)).order.status)
+        .toBe("completed");
+    },
+  );
 }
 
 async function download(pax: Page, orderId: string, info: TestInfo) {
