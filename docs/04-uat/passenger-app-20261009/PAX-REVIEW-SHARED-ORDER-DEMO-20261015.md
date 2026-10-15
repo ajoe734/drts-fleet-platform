@@ -1788,3 +1788,66 @@ Earlier checkpoints and their logs remain preserved; they are not separate
 review candidates. The final functional candidate retains the original recovery
 branch and PR 2673 with ordinary non-force pushes. New hosted CI remains pending
 under the original bus/collector; all three acceptance keys remain pending.
+
+## R26 — read completion requirements through the assigned Driver task
+
+Candidate `338c505a9e28a5ffc4a562b300b91f25de61b277` actually passed A's
+Jobs/Trip UUID, acceptance, departure, pickup arrival, start, tracked distance
+and real GPS freshness expiry/recovery in hosted run `38769921074`, job
+`116544070469`. A was order `687dc077-e4cb-4985-88d4-d51c9e20a654`, task
+`99cf67d0-d913-4736-ac4e-a1eed9d38ad8`. The next operation stalled at spec
+line 343: Playwright resolved the actual-start-fare input but reported
+`readonly` / `element is not editable` until the original 720-second case
+deadline. The journal records Driver `GET /api/orders/<same UUID>` as 403.
+There was no completion response, new payment result or completed A/B/C
+evidence. The artifact ZIP/GitHub digest agrees at
+`b002751dbc03ae04fad06464d79e14d0b4d33b12cabd0901da963e5deb64c5a2`.
+Its failure attachment says the Driver page was already closed; the default
+error-context snapshot is Passenger's on-trip page, not a Driver screenshot.
+
+`TripScreen.loadTrip` used the general Ops order reader. The unchanged guard
+refuses that reader for Driver; the catch clears `orderDetail`, making
+`completionOrder` absent and the existing `proofRequirementsUnavailable`
+condition lock both fare input and completion. Jobs used the same general
+reader for its owned task cards. Neither Driver task DTO supplies the missing
+authoritative fare and proof context.
+
+The correction adds `GET driver/tasks/:taskId/order` beside the existing task
+reader. It reuses `assertDriverTaskAccess` and `getOrderForRead(task.orderId)`;
+the existing `driver/tasks*` policy, `driver:read`, driver aliases, task ownership
+and DB miss/error behavior remain authoritative. The SDK exposes
+`getDriverTaskOrder`, and Trip/Jobs use it for owned tasks. Forwarded tasks retain
+their original order-reader branch. Completion inputs, fixed-price authority,
+proof/tracking checks and command behavior are unchanged. The formal-schema PG
+peer companion now also checks this same-order reader and foreign-driver refusal;
+that new PG assertion remains unexecuted on the VM.
+
+| Finding / acceptance                                                 | Source / change                                                                                                                         | Old → corrected evidence                                                                                                                                                                                                                                                                  | Command / result / evidence                                                                                                                            | Remaining limitation                                                                                                                                                 |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R26: Driver cannot edit actual fare after starting its assigned trip | `TripScreen.loadTrip`, `JobsScreen.loadTasks`, SDK `getDriverTaskOrder`, `OwnedMobilityController.getDriverTaskOrder`                   | Frozen 338 actual Trip/Jobs: three behavioral assertion failures; two unavailable/mismatched-order refusal controls pass. Corrected actual screens expose assigned-order fare data, preserve fixed-price no-override behavior and emit the entered metered breakdown through the real SDK | `old-final-source.log`: exit 1, 3 fail / 2 pass; corrected cases included in `final-regression.log`: exit 0, 431 pass / 16 original skips              | Native rendering/storage/location and upstream HTTP are fixtures; captured completion is deliberately refused by the fixture, not accepted as real business evidence |
+| R26: preserve existing realm/ownership/persistence behavior          | Real `BootstrapAuthGuard`, controller → service → production repository                                                                 | General order read still refuses Driver; task order read admits the existing role/scope; anonymous/partner and foreign Driver refuse; missing task/order and DB errors do not revive a warm cache                                                                                         | `driver-task-order.test.ts`; `new-narrow-final.log`: exit 0; API suite `api-scope.log`: exit 0, 56 pass / zero skips                                   | SQL responses are the external fixture boundary; these cases are not PG/runtime acceptance                                                                           |
+| R26: standalone and Passenger-mounted SDK/BFF transport              | Existing real SDK and `review-driver-api` GET handler, unchanged service-auth transport                                                 | Task ID reaches the task-scoped route, product Bearer remains separate from Google service auth, response is decoded to the existing order contract; existing refusal/disabled-path cases remain                                                                                          | `bff-final-typed.log`: exit 0, 3 pass; original Driver suite `driver-suite.log`: exit 0, 542 pass / zero skips                                         | External HTTP/Google metadata responses are fixtures; the new hosted browser must exercise both entries                                                              |
+| Preserve original fare/proof/replay regression                       | Exact scoped `trip-caller-probe.cjs` HTTP fixture recognizes the new route and retains the legacy route for its frozen original control | Initial 22 fail / 27 pass exposed the stale external fixture route; only its route recognition changed, all original assertions remain; all cases pass in the corrected affected regression                                                                                               | `fare-suite-initial.log`; `final-regression.log`, exit 0                                                                                               | Initial fixture failures are retained, not reported as product reproductions or skipped                                                                              |
+| Preserve published history after owner commit-subject error          | Original branch/PR 2673 and `d0c807dab` remain intact; replacement `recovery-r26` starts at accepted dev `431966bdf`                    | Trailer checker rejects the published `test(TASK-ID):` subject; clean replacement checker passes. All 125 task files match published `b60162afe` byte-for-byte, all 41 newer accepted trunk files remain intact                                                                           | `trailers.log`: exit 1; `recovery-trailers.log`: exit 0; `recovery-source-equivalence.json`, `recovery-trunk-preservation.json`, `recovery-scope.json` | No rebase/amend/reset/force push, checker exception or product omission; replacement requires its own review/CI                                                      |
+| `pax-review-demo_real-shared-order-across-roles`                     | Existing real PG/peer/task identity paths and new task order reader                                                                     | Pending, zero credit                                                                                                                                                                                                                                                                      | New exact candidate still requires full CI and three formal-schema PG companions with zero skips                                                       | No previous candidate PG result is transferred; local environment skips remain unverified                                                                            |
+| `pax-review-demo_external-simulation-and-complete-journeys`          | Original independent A/B/C, payment/retry/rating/case/cancellation/history and business-time waits                                      | Pending, zero credit                                                                                                                                                                                                                                                                      | Original full browser spec is byte-identical to 338; new candidate must complete every original operation                                              | 338 reached A on-trip only; no complete A or executed B/C is claimed                                                                                                 |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`             | Existing hosted CI and combined immutable Cloud Run delivery                                                                            | Pending, zero credit                                                                                                                                                                                                                                                                      | New exact-SHA review/full CI/browser, normal merge, sole immutable shared-dev deployment and fresh smoke remain necessary                              | No VM product/PG/HTTP/browser/preview/Compose/Playwright CLI or workflow dispatch/rerun/manual cancellation/deployment                                               |
+
+Canonical command/result ledger, before/after source hashes and original hosted
+archive/log receipts are under
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate338c-r26-completion-order/`.
+The replacement executable source is
+`dc84c6dd3419efcd1d35f84035dfafd56ba4a084`; subsequent source changes only add
+this UAT evidence. Before replacement, root and Driver TypeScript, API production
+build, scoped ESLint/Prettier and diff checks passed. The new-base checks are
+recorded separately and must reach terminal results before handoff.
+
+The first new probe incorrectly expected NTD instead of canonical TWD and used
+a nonterminal fixture refusal that triggered the existing replay behavior.
+The first mounted-BFF fixture omitted Google metadata, and its first TypeScript
+version used an unresolved root alias / incompatible NextRequest input type.
+Those fixture/type errors are retained in the ledger and corrected without a
+product rule exemption. They are not old-product reproductions. Dependencies
+were installed offline/frozen with scripts disabled after detaching only this
+task cwd's 22 inherited dependency symlinks; canonical dependencies and lockfiles
+were untouched. Node 22.23.2, pnpm 10.33.0, TypeScript 5.9.3, Vitest 4.1.4.
