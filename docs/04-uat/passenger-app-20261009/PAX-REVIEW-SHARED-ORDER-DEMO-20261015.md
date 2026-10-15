@@ -743,3 +743,74 @@ Replacement same-SHA source review/full CI, actual three-role browser and
 formal PG runs, normal merge, immutable shared-dev deployment and new smoke
 remain outstanding. Neither original PG greens nor socket-free UI/service
 passes satisfy the three required acceptance keys by themselves.
+
+## R13: retain cancellation evidence and give the existing journey its own job
+
+Candidate `8202fd6cd154e6c11aee5b7e4eb3301bf8be7081`, generation
+`fff1329b386e4e609bcbc1bb8f713b65`, received Codex's source approval at
+10:13:13 UTC. Both original CI workflows have now finished naturally:
+
+- Regular run `38718262317` succeeded. Product smoke job `116366360799`
+  reports root **9619 pass / 47 skip**, API **1734 pass / 0 skip** and one
+  actual pass each for all three original formal-schema PG companions.
+- Integration-trunk run `38718262400` was cancelled by its existing job
+  deadlines. Unit job `116366719848` exceeded **20 minutes**; its final
+  **9591 pass / 75 skip** output does not turn that cancelled job green.
+- UI job `116366719855` exceeded **25 minutes**. It passed the original
+  route/tenant/partner/concierge suites (**39 / 5 / 21 / 6**), original
+  Passenger offline case (**1**) and Driver producer/storage cases (**3**).
+  The new three-role case started at **10:24:44.780766 UTC** and the job was
+  cancelled at **10:36:20.531398 UTC**, before the original 720-second case
+  limit could report a failure. No new case result, order UUID or shared-order
+  artifact was produced. Starting the case is not three-order completion;
+  the missing artifact does not mean the case never started.
+
+Raw logs and GitHub annotations establish execution limits, but cannot locate
+the precise uncompleted UI operation. No product bug or product fix is inferred
+from those cancellations. The Supervisor's original task specification update
+at 10:40 UTC explicitly supersedes the earlier same-job placement assumption:
+the same existing three-order case may have its own job in `ci-integ.yml`,
+retaining the existing 25-minute limit and mandatory original aggregate.
+
+The replacement changes only execution placement and diagnosis:
+
+- `ui-route-e2e` keeps all five original browser commands and its offline-demo
+  artifact. `ui-shared-order-e2e` has the same candidate/scope conditions and
+  its own original PostGIS/migration/seed setup, real API, production PAX and
+  mounted/standalone Driver exports. It runs the original Driver checks and
+  the same one-test/three-order case. Both results are required by the existing
+  `e2e` aggregate, which remains required by `ci-integ`.
+- `createJourneyProgress` writes `safe-progress.json` before each major UI
+  operation, updates completed/failed states, and immediately records only
+  role/method/allowlisted pathname/status. It records no response body,
+  headers, origin, query/fragment, OTP, invitation code or exception text.
+  Its file is inside the existing shared-order artifact directory; a killed
+  test no longer needs teardown or reporter completion to leave its last stage.
+  The mounted Driver page is observed too. Fixed stage names also reach stdout.
+- The journal does not alter operation results or swallow exceptions. The
+  original 160 `expect` calls and their order are identical under TypeScript
+  AST normalization. Business waits, role login, UUID, history, payment, case,
+  freshness, real pickup time and all original timeouts remain intact. Product
+  source, auth policy, IAM, deployment configuration and other CI jobs are
+  unchanged in this replacement.
+
+Evidence directory, retained alongside all R1–R12 evidence:
+canonical `.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate8202-hosted-results/`.
+Its final manifest binds the normally pushed candidate, source hashes, commands,
+tool versions, historical logs and replacement results.
+
+| Finding / acceptance | Source / repair | Old result → replacement verification | Evidence / command | Remaining limits |
+| --- | --- | --- | --- | --- |
+| R13: new case has no time to finish/report within the old combined job | `ci-integ.yml::ui-shared-order-e2e`, original `e2e` aggregate; original spec plus `progress.ts::createJourneyProgress` | Actual old job cancellation with no new artifact → socket-free journal test proves the started stage and safe endpoint facts are persisted before completion, and thrown errors propagate with a failed stage | `journey-progress.test.ts`; `progress-test.log`; old `ui.log`, `unit.log`, GitHub deadline annotations | Precise old hang remains unknown. A replacement hosted run must localize it and execute all three orders; journal tests are not browser evidence |
+| Original suite and timeout preservation | Existing workflow/jobs and unchanged browser assertions | Five legacy browser commands and exactly one new case retained; both required by the original aggregate; 25-minute limits unchanged; all other jobs unchanged | `workflow-placement-proof.py` / `.json`; existing workflow timeout/scope/coverage checks, 17 tests pass; `assertion-invariance.json`, 160 original/current calls in the same order | Structural verification starts no runtime and grants no CI green |
+| `pax-review-demo_real-shared-order-across-roles` | All original production repositories and three PG companions retained | 8202 historical three PG passes retained; replacement acceptance pending, zero credit | Replacement same-SHA full CI and genuine three-role UUID/peer readback required | No PG/browser runtime is started on this VM |
+| `pax-review-demo_external-simulation-and-complete-journeys` | Original three independent journeys and external-provider disclosures retained | Pending, zero credit | Replacement hosted one-test/three-order completion, relational records and role screenshots required | No successful orders are inferred from the old `Running 1 test` line |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery` | Same existing hosted workflow and original combined shared-dev delivery task | Pending, zero credit | Same-SHA source review/full CI, normal merge, immutable combined publish/Cloud Run deployment and new shared-dev smoke required | No separate Demo-only publisher, deploy or old-release substitution |
+
+Initial root typecheck used the Supervisor's canonical dependency symlinks and
+failed with missing packages and mixed canonical/worktree private class types
+(`typecheck.log`, exit 2). This is not a product assertion result. The owner
+removed only this task worktree's 22 dependency symlinks and completed
+`CI=true pnpm install --frozen-lockfile --offline --ignore-scripts` (exit 0,
+`install.log`). Canonical dependencies, tracked manifests and lockfiles were
+not changed. Replacement checks and their final results are recorded separately.

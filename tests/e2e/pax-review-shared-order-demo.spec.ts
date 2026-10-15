@@ -41,7 +41,7 @@ async function registerDriver(
   base: string,
   step: JourneyStep,
 ) {
-  await step("Ops invite driver device", async () => {
+  const code = await step("Ops invite driver device", async () => {
     await ops
       .getByLabel("演練司機", { exact: true })
       .selectOption("pax-review-driver-a");
@@ -55,24 +55,23 @@ async function registerDriver(
     expect(response.status()).toBeLessThan(300);
     const code = camel(await response.json()).data.registrationCode;
     expect(typeof code).toBe("string");
-    await step("Driver open onboarding", () =>
-      driver.goto(`${base}/onboarding`),
+    return code;
+  });
+  await step("Driver open onboarding", () => driver.goto(`${base}/onboarding`));
+  await step("Driver submit registration code", async () => {
+    await driver.getByLabel("裝置註冊碼", { exact: true }).fill(code);
+    const registration = driver.waitForResponse(
+      (r) =>
+        r.url().endsWith("/auth/driver/device/register") &&
+        r.request().method() === "POST",
     );
-    await step("Driver submit registration code", async () => {
-      await driver.getByLabel("裝置註冊碼", { exact: true }).fill(code);
-      const registration = driver.waitForResponse(
-        (r) =>
-          r.url().endsWith("/auth/driver/device/register") &&
-          r.request().method() === "POST",
-      );
-      await driver
-        .getByRole("button", { name: "註冊此裝置", exact: true })
-        .click();
-      expect((await registration).status()).toBeLessThan(300);
-      await expect(
-        driver.getByLabel("裝置註冊碼", { exact: true }),
-      ).toHaveCount(0);
-    });
+    await driver
+      .getByRole("button", { name: "註冊此裝置", exact: true })
+      .click();
+    expect((await registration).status()).toBeLessThan(300);
+    await expect(driver.getByLabel("裝置註冊碼", { exact: true })).toHaveCount(
+      0,
+    );
   });
   await step("Driver open jobs after registration", async () => {
     await driver.getByText("任務", { exact: true }).first().click();
