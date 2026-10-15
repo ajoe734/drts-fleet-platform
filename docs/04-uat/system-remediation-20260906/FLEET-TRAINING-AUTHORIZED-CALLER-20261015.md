@@ -3,7 +3,7 @@
 - **任務識別碼 (Task ID)**：`FLEET-TRAINING-AUTHORIZED-CALLER-20261015`
 - **負責角色**：Owner: `Gemini2`；Reviewer: `Gemini`
 - **基準分支與 SHA (Base)**：`dev` @ `ed70d73a03dd224e109867c99b7d04128484a3fe`（初始探索基底 `386eaa45213cd0c67e9b9e5b3bcd9b01a3195b09`）
-- **候選分支 (Candidate Branch)**：`gemini2/fleet-training-authorized-caller-20261015-clean`（保留前次已發布分支 `gemini2/fleet-training-authorized-caller-20261015` @ `8a6671b9540bbc2a09f7359f67d8d6307ca0d47d` 不進行 rebase/amend/force-push；因 `tools/ci/git/check_commit_trailers.py` 檢核 `origin/dev..HEAD` 內每一筆非 merge commit 之 `<TASK-ID>: <summary>` 主旨格式，故自 `origin/dev` 切出乾淨候選分支並補齊主旨格式）
+- **候選分支與實作 SHA (Candidate Branch & Implementation Commit)**：`gemini2/fleet-training-authorized-caller-20261015-clean`（實作與測試 commit：`6cf10e0acb40239da4e270032dbdda4f421d24df`；保留前次已發布分支 `gemini2/fleet-training-authorized-caller-20261015` @ `8a6671b9540bbc2a09f7359f67d8d6307ca0d47d` 不進行 rebase/amend/force-push；因 `tools/ci/git/check_commit_trailers.py` 檢核 `origin/dev..HEAD` 內每一筆非 merge commit 之 `<TASK-ID>: <summary>` 主旨格式，故自 `origin/dev` 切出乾淨候選分支並補齊主旨格式）
 - **工作樹路徑 (Worker Cwd)**：`/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-fleet-training-authorized-caller-20261015`
 - **不可變規格與稽核來源**：
   - Task Spec：`/home/lupin/workspace/drts-fleet-platform/.local/remaining-original-functional-fixes-20261015/FLEET-TRAINING-AUTHORIZED-CALLER-20261015.json`
