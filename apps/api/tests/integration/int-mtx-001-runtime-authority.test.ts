@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
-import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import { MultiTaxiService } from "../../src/modules/multi-taxi/multi-taxi.service";
@@ -141,7 +140,8 @@ function createHarness() {
     }),
     persistRideAccessToken: vi.fn(
       async (token: Record<string, unknown>, digest: string) => {
-        const { accessToken: _accessToken, ...persisted } = token;
+        const persisted = { ...token };
+        delete persisted.accessToken;
         accessTokensByDigest.set(digest, structuredClone(persisted));
       },
     ),
