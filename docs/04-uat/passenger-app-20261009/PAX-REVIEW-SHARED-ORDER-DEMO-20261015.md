@@ -2253,9 +2253,12 @@ reported. That is retained as an environment failure, not a reproduction of
 R31. Only this isolated cwd's 22 generated dependency links were detached;
 `pnpm install --offline --frozen-lockfile --ignore-scripts` exited 0. The final
 root check above then passed. Canonical dependencies, manifests and lockfile
-were untouched. The existing 28/8 regression cases were run before this
+were untouched. The existing 28/8 regression cases passed both before and after
 dependency isolation with the same locked versions and executable source;
-their fixture boundaries remain as documented in R29/R30.
+the final runs are `caller-regression-final.json/log` (28 pass) and
+`driver-regression-final.json/log` (8 pass), both exit 0 with zero skips.
+These repeated counts overlap and are not additive. Their fixture boundaries
+remain as documented in R29/R30.
 
 Canonical evidence is
 `.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate-9d92-ci/manifest.json`.
