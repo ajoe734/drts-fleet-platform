@@ -2669,33 +2669,36 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       updatedAt: now,
     };
 
-    this.quotaPolicies.set(
-      this.buildQuotaPolicyKey(tenantId, costCenterCode, command.period),
-      this.cloneQuotaPolicy(record),
-    );
-    this.persistChanges(
+    const persisted = this.persistConfigurationChanges(
       {
         quotaPolicies: [this.cloneQuotaPolicy(record)],
       },
       "upsert tenant quota policy",
-    );
-    this.auditNotificationService.recordAuditLog({
-      actorId: null,
-      actorType: "system",
       tenantId,
-      moduleName: "tenant-partner",
-      actionName: "tenant.quota_policy.updated",
-      resourceType: "tenant_quota_policy",
-      resourceId: costCenterCode ?? tenantId,
-      newValuesSummary: {
-        costCenterCode,
-        period: command.period,
-        enforcementMode: record.limit.enforcementMode,
-      },
-      ...(requestId ? { requestId } : {}),
-    });
+    );
+    return this.afterPersistence(persisted, () => {
+      this.quotaPolicies.set(
+        this.buildQuotaPolicyKey(tenantId, costCenterCode, command.period),
+        this.cloneQuotaPolicy(record),
+      );
+      this.auditNotificationService.recordAuditLog({
+        actorId: null,
+        actorType: "system",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "tenant.quota_policy.updated",
+        resourceType: "tenant_quota_policy",
+        resourceId: costCenterCode ?? tenantId,
+        newValuesSummary: {
+          costCenterCode,
+          period: command.period,
+          enforcementMode: record.limit.enforcementMode,
+        },
+        ...(requestId ? { requestId } : {}),
+      });
 
-    return this.cloneQuotaPolicy(record);
+      return this.cloneQuotaPolicy(record);
+    });
   }
 
   previewBookingQuotaImpact(
@@ -2956,31 +2959,34 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       updatedAt: now,
     };
 
-    this.approvalRules = [
-      record,
-      ...this.approvalRules.filter((rule) => rule.ruleId !== record.ruleId),
-    ];
-    this.bumpApprovalRuleVersion(tenantId);
-    this.persistChanges(
+    const persisted = this.persistConfigurationChanges(
       { approvalRules: [this.cloneApprovalRule(record)] },
       "tenant approval rule upsert",
+      tenantId,
     );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: existing
-          ? "tenant.approval_rule.updated"
-          : "tenant.approval_rule.created",
-        resourceType: "tenant_approval_rule",
-        resourceId: record.ruleId,
-        newValuesSummary: this.buildApprovalRuleAuditSummary(record),
-      },
-      requestId,
-    );
-    return this.cloneApprovalRule(record);
+    return this.afterPersistence(persisted, () => {
+      this.approvalRules = [
+        record,
+        ...this.approvalRules.filter((rule) => rule.ruleId !== record.ruleId),
+      ];
+      this.bumpApprovalRuleVersion(tenantId);
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: existing
+            ? "tenant.approval_rule.updated"
+            : "tenant.approval_rule.created",
+          resourceType: "tenant_approval_rule",
+          resourceId: record.ruleId,
+          newValuesSummary: this.buildApprovalRuleAuditSummary(record),
+        },
+        requestId,
+      );
+      return this.cloneApprovalRule(record);
+    });
   }
 
   reorderApprovalRules(
@@ -3024,29 +3030,32 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       };
     });
 
-    this.approvalRules = [
-      ...this.approvalRules.filter((rule) => rule.tenantId !== tenantId),
-      ...reordered,
-    ];
-    this.bumpApprovalRuleVersion(tenantId);
-    this.persistChanges(
+    const persisted = this.persistConfigurationChanges(
       { approvalRules: reordered.map((rule) => this.cloneApprovalRule(rule)) },
       "tenant approval rule reorder",
+      tenantId,
     );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "tenant.approval_rule.reordered",
-        resourceType: "tenant_approval_rule_set",
-        resourceId: tenantId,
-        newValuesSummary: { orderedRuleIds },
-      },
-      requestId,
-    );
-    return reordered.map((rule) => this.cloneApprovalRule(rule));
+    return this.afterPersistence(persisted, () => {
+      this.approvalRules = [
+        ...this.approvalRules.filter((rule) => rule.tenantId !== tenantId),
+        ...reordered,
+      ];
+      this.bumpApprovalRuleVersion(tenantId);
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "tenant.approval_rule.reordered",
+          resourceType: "tenant_approval_rule_set",
+          resourceId: tenantId,
+          newValuesSummary: { orderedRuleIds },
+        },
+        requestId,
+      );
+      return reordered.map((rule) => this.cloneApprovalRule(rule));
+    });
   }
 
   disableApprovalRule(tenantId: string, ruleId: string, requestId?: string) {
@@ -3058,28 +3067,31 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       disabledReason: existing.disabledReason ?? "disabled_by_tenant_admin",
       updatedAt: new Date().toISOString(),
     };
-    this.approvalRules = this.approvalRules.map((rule) =>
-      rule.ruleId === ruleId ? disabled : rule,
-    );
-    this.bumpApprovalRuleVersion(tenantId);
-    this.persistChanges(
+    const persisted = this.persistConfigurationChanges(
       { approvalRules: [this.cloneApprovalRule(disabled)] },
       "tenant approval rule disable",
+      tenantId,
     );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "tenant.approval_rule.disabled",
-        resourceType: "tenant_approval_rule",
-        resourceId: ruleId,
-        newValuesSummary: this.buildApprovalRuleAuditSummary(disabled),
-      },
-      requestId,
-    );
-    return this.cloneApprovalRule(disabled);
+    return this.afterPersistence(persisted, () => {
+      this.approvalRules = this.approvalRules.map((rule) =>
+        rule.ruleId === ruleId ? disabled : rule,
+      );
+      this.bumpApprovalRuleVersion(tenantId);
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "tenant.approval_rule.disabled",
+          resourceType: "tenant_approval_rule",
+          resourceId: ruleId,
+          newValuesSummary: this.buildApprovalRuleAuditSummary(disabled),
+        },
+        requestId,
+      );
+      return this.cloneApprovalRule(disabled);
+    });
   }
 
   evaluateApprovalRules(
@@ -9825,7 +9837,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     actorId?: string,
     requestId?: string,
     identity?: IdentityContext | null,
-  ): ActionReceipt {
+  ): MaybePromise<ActionReceipt> {
     this.assertTenantMutationScope(tenantId, identity);
     for (const [field, value] of [
       ["waitThresholdMin", command.waitThresholdMin],
@@ -9855,41 +9867,44 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         command.completionThresholdMin ?? currentProfile.completionThresholdMin,
       updatedAt: new Date().toISOString(),
     };
-    this.slaProfiles.set(tenantId, this.cloneSlaProfile(slaProfile));
-    this.persistChanges(
+    const persisted = this.persistConfigurationChanges(
       {
         slaProfiles: [this.cloneSlaProfile(slaProfile)],
       },
       "update_sla_profile",
+      tenantId,
     );
+    return this.afterPersistence(persisted, () => {
+      this.slaProfiles.set(tenantId, this.cloneSlaProfile(slaProfile));
 
-    this.recordTenantAudit(
-      {
-        actorId: actorId ?? identity?.actorId ?? null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "update_sla_profile",
+      this.recordTenantAudit(
+        {
+          actorId: actorId ?? identity?.actorId ?? null,
+          actorType: "tenant_admin",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "update_sla_profile",
+          resourceType: "tenant_sla",
+          resourceId: tenantId,
+          newValuesSummary: {
+            waitThresholdMin: slaProfile.waitThresholdMin,
+            arrivalThresholdMin: slaProfile.arrivalThresholdMin,
+            completionThresholdMin: slaProfile.completionThresholdMin,
+            reason: command.reason ?? null,
+          },
+        },
+        requestId,
+      );
+
+      return {
+        actionId: randomUUID(),
+        auditId: requestId ?? randomUUID(),
         resourceType: "tenant_sla",
         resourceId: tenantId,
-        newValuesSummary: {
-          waitThresholdMin: slaProfile.waitThresholdMin,
-          arrivalThresholdMin: slaProfile.arrivalThresholdMin,
-          completionThresholdMin: slaProfile.completionThresholdMin,
-          reason: command.reason ?? null,
-        },
-      },
-      requestId,
-    );
-
-    return {
-      actionId: randomUUID(),
-      auditId: requestId ?? randomUUID(),
-      resourceType: "tenant_sla",
-      resourceId: tenantId,
-      status: "completed",
-      message: "SLA profile updated.",
-    };
+        status: "completed",
+        message: "SLA profile updated.",
+      };
+    });
   }
 
   recalculateSlaBookings(

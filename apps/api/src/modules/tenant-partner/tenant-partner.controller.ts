@@ -1408,13 +1408,13 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/quotas/policies")
-  upsertTenantQuotaPolicy(
+  async upsertTenantQuotaPolicy(
     @Body() command: UpsertTenantQuotaPolicyCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertTenantQuotaPolicy(
+      await this.tenantPartnerService.upsertTenantQuotaPolicy(
         this.requireTenantId(tenantId),
         command,
         requestId,
@@ -1491,13 +1491,13 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/approval-rules")
-  upsertApprovalRule(
+  async upsertApprovalRule(
     @Body() command: UpsertTenantApprovalRuleCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertApprovalRule(
+      await this.tenantPartnerService.upsertApprovalRule(
         this.requireTenantId(tenantId),
         command,
         requestId,
@@ -1507,14 +1507,14 @@ export class TenantPartnerController {
   }
 
   @Put("tenant/approval-rules/:ruleId")
-  updateApprovalRule(
+  async updateApprovalRule(
     @Param("ruleId") ruleId: string,
     @Body() command: UpsertTenantApprovalRuleCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertApprovalRule(
+      await this.tenantPartnerService.upsertApprovalRule(
         this.requireTenantId(tenantId),
         { ...command, ruleId },
         requestId,
@@ -1524,13 +1524,13 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/approval-rules/:ruleId/disable")
-  disableApprovalRule(
+  async disableApprovalRule(
     @Param("ruleId") ruleId: string,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.disableApprovalRule(
+      await this.tenantPartnerService.disableApprovalRule(
         this.requireTenantId(tenantId),
         ruleId,
         requestId,
@@ -1540,13 +1540,13 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/approval-rules/reorder")
-  reorderApprovalRules(
+  async reorderApprovalRules(
     @Body() command: ReorderTenantApprovalRulesCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.reorderApprovalRules(
+      await this.tenantPartnerService.reorderApprovalRules(
         this.requireTenantId(tenantId),
         command,
         requestId,
@@ -2418,7 +2418,7 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/sla")
-  updateSlaProfile(
+  async updateSlaProfile(
     @Body() command: UpdateTenantSlaProfileCommand,
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
@@ -2426,7 +2426,7 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.updateSlaProfile(
+      await this.tenantPartnerService.updateSlaProfile(
         this.requireTenantId(tenantId),
         command,
         actorId,
