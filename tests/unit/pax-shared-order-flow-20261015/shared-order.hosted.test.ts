@@ -325,7 +325,9 @@ describe.skipIf(!hostedPaymentEnabled)(
       const two = track(await bookingActor(h, h.peerDatabase()));
       const f = await bookedRide(h);
       track(f.actor);
-      await assignedRide(f.actor, f.orderId);
+      const firstAssignment = await assignedRide(f.actor, f.orderId);
+      const dispatchJobId = (await one.booking.getRide(f.owner, f.orderId))
+        .assignment!.dispatchJobId;
       // Both mounted readers predate this order and its assignment.
       const originOne = await mount(one);
       const originTwo = await mount(two);
@@ -397,6 +399,26 @@ describe.skipIf(!hostedPaymentEnabled)(
           web.some((e) => e.eventVersion < previousWeb) &&
           native.some((e) => e.eventVersion < previousNative),
         "fresh instance versions",
+      );
+      const replacement = await f.actor.owned.reassignDispatch({
+        dispatchJobId,
+        driverId: f.actor.candidate.driverId,
+        vehicleId: f.actor.candidate.vehicleId,
+        reasonCode: "qa_reconnect_reassignment",
+      });
+      expect(replacement.assignmentId).not.toBe(firstAssignment.assignmentId);
+      await waitFor(
+        () =>
+          [web, native].every((events) =>
+            events.some(
+              (event) =>
+                event.eventType === "assignment_replaced" &&
+                event.data.assignment?.assignmentId ===
+                  replacement.assignmentId &&
+                event.assignmentVersion === 2,
+            ),
+          ),
+        "persisted replacement frames",
       );
       await f.actor.multi.cancelTrustedPassengerRide(f.orderId, f.owner);
       await waitFor(

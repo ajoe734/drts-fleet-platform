@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[3]
 EVIDENCE = ROOT / ".local/pax-shared-order-flow-20261015/historical"
 CASES = [
     ("353a6453255e0e35647d243c90eae57e7740b6b0", ["named-events.test.ts", "persisted-authority.test.ts"]),
-    ("8fed5b8e6", ["original-quote.test.ts", "rating-eligibility.test.ts"]),
+    ("8fed5b8e6f97a221cca4a1810c82a7001bd102e2", ["original-quote.test.ts", "rating-eligibility.test.ts"]),
 ]
 MEMBERS = [
     "apps/api/src", "apps/api/package.json", "apps/passenger-app-web/lib",

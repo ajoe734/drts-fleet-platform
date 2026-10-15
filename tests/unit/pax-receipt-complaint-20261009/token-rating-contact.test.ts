@@ -244,7 +244,7 @@ function fixture() {
     },
   } as unknown as DatabaseService;
   const owned = {
-    getOrder: (orderId: string) => {
+    resolvePersistedOrder: async (orderId: string) => {
       expect(orderId).toBe(ORDER);
       return {
         orderId: ORDER,
@@ -253,7 +253,7 @@ function fixture() {
         passenger: { passengerId: authority.subject },
       };
     },
-    findPassengerAssignmentDisclosure: () =>
+    resolvePersistedPassengerAssignmentDisclosure: async () =>
       authority.assigned
         ? {
             assignmentId: "unit-assignment",
