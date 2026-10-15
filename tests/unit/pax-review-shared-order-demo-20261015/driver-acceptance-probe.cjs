@@ -15,6 +15,7 @@ const JSXRuntime = appRequire("react/jsx-runtime");
 const { act, create } = appRequire("react-test-renderer");
 const ts = require("typescript");
 const [scenario, sourceRef] = process.argv.slice(2);
+const completionCase = scenario.startsWith("completion-");
 const reloadCase =
   /^(reload|empty|malformed|unreadable)-(web|native)-(jobs|trip)$/.exec(
     scenario,
@@ -189,14 +190,17 @@ let task = {
   taskId: "fixture-driver-task-a",
   orderId,
   driverId: "pax-review-driver-a",
-  status: "pending_acceptance",
+  status: completionCase ? "on_trip" : "pending_acceptance",
+  startedAt: completionCase
+    ? new Date(Date.now() - 60_000).toISOString()
+    : null,
   sourcePlatform: null,
   routeProvided: false,
   waypoints: [],
 };
 const order = {
   orderId,
-  fixedPrice: false,
+  fixedPrice: scenario === "completion-fixed",
   pickup: { address: "新北板橋" },
   dropoff: { address: "新北市府" },
   passenger: { name: "演練乘客", phone: "0000000000" },
@@ -255,7 +259,35 @@ globalThis.fetch = async (url, init = {}) => {
             ],
     });
   if (pathname === "/api/driver/tasks") return response({ items: [task] });
-  if (pathname === `/api/orders/${orderId}`) return response(order);
+  if (pathname === `/api/orders/${orderId}`)
+    return completionCase
+      ? Response.json({ error: { code: "AUTH_REALM_DENIED" } }, { status: 403 })
+      : response(order);
+  if (pathname === `/api/driver/tasks/${task.taskId}/order`) {
+    if (scenario === "completion-unavailable")
+      return Response.json(
+        { error: { code: "FIXTURE_DATABASE_UNAVAILABLE" } },
+        { status: 503 },
+      );
+    return response(
+      scenario === "completion-mismatch"
+        ? { ...order, orderId: "foreign-order" }
+        : order,
+    );
+  }
+  if (pathname === `/api/driver/tasks/${task.taskId}/complete`) {
+    commands.push({ path: pathname, body: JSON.parse(init.body) });
+    // Capture the real UI/SDK command; a fixture response is not business acceptance.
+    return Response.json(
+      {
+        error: {
+          code: "PROOF_REQUIRED",
+          message: "Fixture completion refused",
+        },
+      },
+      { status: 409 },
+    );
+  }
   if (pathname === "/api/platform-presence") return response({ presences: [] });
   if (pathname === `/api/driver/tasks/${task.taskId}/accept`) {
     commands.push({ path: pathname, body: JSON.parse(init.body) });
@@ -372,6 +404,69 @@ async function run() {
   let api = require(apiPath);
   if (!reloadCase || reloadCase[1] === "reload")
     await api.registerDriverDevice("synthetic-registration-code");
+  if (completionCase) {
+    try {
+      await open("trip");
+      const inputs = () =>
+        renderer.root.findAll((node) => node.type === "TextInput");
+      if (
+        ["completion-unavailable", "completion-mismatch"].includes(scenario)
+      ) {
+        assert.ok(inputs().length >= 4);
+        assert.ok(inputs().every((node) => node.props.editable === false));
+        const complete = renderer.root.findAll(
+          (node) =>
+            node.type === "Pressable" && flatten(node).includes("完成行程"),
+        )[0];
+        assert.equal(complete.props.disabled, true);
+        assert.equal(commands.length, 0);
+      } else {
+        const values = order.fixedPrice
+          ? ["85", "0", "0", "0"]
+          : ["85", "0", "0", "20", "105"];
+        assert.equal(inputs().length, values.length);
+        for (const [index, value] of values.entries()) {
+          const field = inputs()[index];
+          assert.equal(
+            field.props.editable,
+            true,
+            "Actual fare input requires the assigned order's authoritative completion details",
+          );
+          await act(async () => field.props.onChangeText(value));
+        }
+        await click("完成行程");
+        assert.equal(commands.length, 1);
+        const command = commands[0];
+        assert.equal(command.path, `/api/driver/tasks/${task.taskId}/complete`);
+        assert.deepEqual(command.body.actualFareBreakdown, {
+          startMinor: 8500,
+          distanceMinor: 0,
+          delayMinor: 0,
+          nightMinor: order.fixedPrice ? 0 : 2000,
+        });
+        if (order.fixedPrice)
+          assert.equal(Object.hasOwn(command.body, "fare"), false);
+        else
+          assert.deepEqual(command.body.fare, {
+            currency: "TWD",
+            amountMinor: 10500,
+          });
+        assert.ok(Number.isFinite(Date.parse(command.body.completedAt)));
+      }
+      console.log(
+        JSON.stringify({
+          scenario,
+          actualScreens: true,
+          actualSDK: true,
+          commandCount: commands.length,
+          upstreamHTTP: "fixture; no runtime acceptance credit",
+        }),
+      );
+    } finally {
+      if (renderer) await act(async () => renderer.unmount());
+    }
+    return;
+  }
   if (reloadCase) {
     if (reloadCase[1] === "malformed")
       store.set("drts.driver.session", "{invalid JSON");

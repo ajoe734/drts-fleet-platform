@@ -127,6 +127,20 @@ describe.skipIf(!hostedPaymentEnabled)(
         actorType: "driver_user",
         actorId: peer.candidate.driverId,
       } as never;
+      expect(
+        (await ops.getDriverTaskOrder(assignment.taskId, identity)).data,
+      ).toMatchObject({
+        orderId: f.orderId,
+        proofRequirements: (await original.getOrder(f.orderId)).data
+          .proofRequirements,
+        fixedPrice: (await original.getOrder(f.orderId)).data.fixedPrice,
+      });
+      await expect(
+        ops.getDriverTaskOrder(assignment.taskId, {
+          ...(identity as object),
+          actorId: "foreign-driver",
+        } as never),
+      ).rejects.toMatchObject({ code: "DRIVER_IDENTITY_MISMATCH" });
       await expect(
         ops.getDriverTask(assignment.taskId, {
           ...(identity as object),

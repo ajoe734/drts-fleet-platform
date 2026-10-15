@@ -1318,13 +1318,17 @@ export default function JobsScreen() {
       const pendingCompletion = await pendingCompletionPromise;
       setQueuedCompletionTaskId(pendingCompletion?.taskId ?? null);
 
-      const uniqueOrderIds = [
-        ...new Set(fetchedTasks.map((task) => task.orderId).filter(Boolean)),
-      ];
+      const orderTasks = new Map(
+        fetchedTasks
+          .filter((task) => task.orderId)
+          .map((task) => [task.orderId, task]),
+      );
       const orderResults = await Promise.all(
-        uniqueOrderIds.map(async (orderId) => {
+        [...orderTasks].map(async ([orderId, task]) => {
           try {
-            const order = (await client.getOrder(orderId)) as OwnedOrderRecord;
+            const order = isOwnedTask(task)
+              ? await client.getDriverTaskOrder(task.taskId)
+              : await client.getOrder(orderId);
             return { orderId, order };
           } catch {
             return { orderId, order: null };

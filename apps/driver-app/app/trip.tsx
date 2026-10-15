@@ -1244,7 +1244,9 @@ export default function TripScreen() {
       }
 
       try {
-        const order = await client.getDriverTaskOrder(firstTask.taskId);
+        const order = isForwardedTask(firstTask)
+          ? await client.getOrder(firstTask.orderId)
+          : await client.getDriverTaskOrder(firstTask.taskId);
         setOrderDetail(order);
       } catch {
         setOrderDetail(null);
