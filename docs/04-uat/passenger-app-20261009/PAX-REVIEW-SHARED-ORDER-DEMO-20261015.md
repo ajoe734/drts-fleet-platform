@@ -967,3 +967,36 @@ All local checks have terminated and their results were read. The original
 469 run's remaining jobs are left to its existing collector; no rerun or
 cancellation was requested. These changes require new same-source review and
 hosted CI/browser/PG results before any of the original acceptance keys qualify.
+
+## R16 — hosted booking caller follows the actual page controls
+
+Adjacent candidate `4981eb876369967293a63cb2aecc963876267fec`, generation
+`5cf7d7ad308c4aa9af583958829ee3d9`, was source-approved by the assigned reviewer.
+Its hosted run `38732133441`, job `116413522566`, failed one browser case in
+34.7 seconds, zero skips. The safe journal now proves ordinary OTP verification
+201, account GET/PATCH 200 and the successful simulated PSP binding stage.
+The next stage, `A Passenger book`, failed at the nonexistent heading locator;
+there is no created order UUID or completed A/B/C journey. Artifact `11971113636`
+ZIP SHA256 is `58bd9de21db9c1359a8551bc70f00f03a8e76b175a91c5bb29916ac62b03629b`,
+matching GitHub's artifact digest. The journal/error context and direct job log
+are under `.local/pax-review-shared-order-demo-20261015/r16-hosted/`.
+
+The actual root is `Home` → `PaymentBookingHome` → `BookingScreen` →
+`AuthScreen`/`P5Header`. The existing title is a styled `div`, not a heading.
+`BookingScreen` first loads settings and any required fee acknowledgement,
+then displays `BookingForm`; its payment radio controls are in the subsequent
+`BookingConfirmationSheet`, after quote. The old `book()` instead requires a
+heading, samples the fee button before loading completes, and selects payment
+before quote. These are test caller mismatches; product UI and business rules
+are retained.
+
+The new socket-free regression reads/transpiles the actual `book()` declaration
+from the hosted spec and drives the real root components, SDK and BFF through a
+Testing Library DOM adapter. Only the browser driver/assertions and upstream HTTP
+are simulated. It covers both first-use and already-recorded fee acknowledgement.
+With all five relevant source hashes matching immutable 4981, both cases fail at
+the title lookup (`before.log`, exit 1), with the real title and form/disclosure
+present in DOM. An initial harness run lacked Next's router context and failed
+before exercising the caller (`before-harness-error.log`); it is not qualified
+reproduction evidence. Repair and final checks are in progress; no new candidate
+or acceptance credit is recorded at this checkpoint.

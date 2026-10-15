@@ -104,7 +104,12 @@ async function book(
   await page.goto(`${PAX}/`);
   const ack = page.getByRole("button", { name: "我已閱讀並同意", exact: true });
   await expect(
-    page.getByRole("heading", { name: "建立乘車需求" }),
+    page.getByText("建立乘車需求", { exact: true }),
+  ).toBeVisible();
+  // AuthScreen's P5Header renders the title as text. Settings load separately;
+  // wait for the actual disclosure or form before deciding whether to agree.
+  await expect(
+    ack.or(page.getByLabel("上車地點", { exact: true })),
   ).toBeVisible();
   if (await ack.isVisible()) await ack.click();
   await page
