@@ -12,8 +12,9 @@
  * guard, and why two new parallel finance-only routes are the fix instead.
  *
  * This file exercises the two new routes end to end: real-guard RBAC
- * (admits finance, rejects driver/tenant/partner/passenger and
- * billing:read-only), canonical batch/uploader attribution, a distinct
+ * (admits finance, rejects driver/tenant/partner and
+ * billing:read-only; there is no distinct "passenger" AuthRealm in this
+ * codebase to exercise), canonical batch/uploader attribution, a distinct
  * finance idempotency namespace, the unchanged scan lifecycle, and the
  * unchanged pay-with-proof gate. The driver-only route's own 19 existing
  * regressions (`sr-proof-001-remittance-proof.test.ts`) and its RBAC
@@ -70,7 +71,7 @@ function financeIdentity(actorId: string): BootstrapRequestIdentity {
     actorId,
     realm: "platform",
     tenantId: null,
-    roleFamilies: ["platform_admin"],
+    roleFamilies: ["platform"],
     roles: [],
     scopes: ["billing:read", "billing:write"],
     requestId: null,
@@ -148,7 +149,7 @@ const financeGuardIdentity: BootstrapRequestIdentity = {
   realm: "platform",
   tenantId: null,
   roles: [],
-  roleFamilies: ["platform_admin"],
+  roleFamilies: ["platform"],
   scopes: ["billing:read", "billing:write"],
   requestId: null,
 };
@@ -243,9 +244,9 @@ describe("finance remittance-proof upload RBAC through the real auth guard", () 
   );
 
   it.each(financeCreationRoutes)(
-    "rejects tenant/partner/passenger realms at %s",
+    "rejects tenant/partner realms at %s",
     async (url, handler) => {
-      for (const realm of ["tenant", "partner", "passenger"] as const) {
+      for (const realm of ["tenant", "partner"] as const) {
         await expect(
           authorize(url, handler, { ...financeGuardIdentity, realm }),
         ).rejects.toMatchObject({ code: "AUTH_REALM_DENIED" });
