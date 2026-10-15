@@ -2272,3 +2272,85 @@ actual terminal/partial/cancelled results; no second observer, workflow rerun,
 manual cancellation, VM product/preview/HTTP/PG/browser/Compose runtime or
 Playwright CLI was started. Published history and original refs are preserved
 with normal non-force pushes. All three acceptance keys remain pending.
+
+## R32 — assert the existing reservation no-supply contract (2026-10-15)
+
+Before publishing the R31 checkpoint, the original sole collector saved 9d92's
+own terminal browser result: run `38794972121`, job `116629520463`, artifact
+`12001479779`, one failed case and zero skips. The ZIP matches GitHub digest
+`eb76140b30ca002b5ff93dbd9d2657e0924fe7f95caa307fda29345fb32fe556`;
+the extracted report is byte-identical to the ZIP and has SHA256
+`52d5b43c291a873c4a6d4ba621c37bd8f8088433f791a49d10b8d0eb4de7db6e`.
+
+A order `8e609efa-c405-497e-9373-679f5247e692` completed its whole phase:
+110 seconds, 0.23 km, captured attempt 1, TWD 105, score 5 and nonformal HTML.
+B order `504a3bdc-b78e-4ea3-9070-63e48a1d4432` also completed its whole phase:
+start `19:49:00.149Z`, complete `19:49:22.332Z`, persisted 22 seconds / 0.3 km,
+first capture failed, the same payment captured on attempt 2, score 1,
+contact requested, case `PAX-04761f11-a40b-4284-b9d1-b901a4aea66a`, actual Ops
+CRM page and nonformal HTML. The original CRM PNG was viewed and shows that
+case and the same B UUID. These are old-candidate phase results, not a complete
+three-order pass or acceptance credit.
+
+C order `5b16884e-202e-425a-ab0b-7eb39ea1d369` was genuinely booked and read by
+Ops. The first failure was spec684 after supply pause / dispatch POST 201:
+the original `/no_supply|dispatch_timeout|delayed_queue/` assertion saw
+`redispatch_required` 34 times over its existing 30 seconds. Supply restoration,
+redispatch, cancellation and final history were not reached. The old report
+does not contain C's raw order/hold response or completed cancellation facts;
+those cannot be inferred from its successful HTTP statuses.
+
+The actual `OwnedMobilityService.prepareDispatchOrder` is authoritative:
+when a reservation has no eligible candidate outside its confirmation window,
+the job is `queued`, the order is `redispatch_required`, and
+`transitionReservationHold` puts it in `redispatch_queue`. Realtime no-supply
+escalation and reservation exception-hold paths are distinct existing branches.
+The unchanged original service test, `routes reservation failures into redispatch
+queue or exception_hold`, exercises both reservation outcomes. Ops renders
+`order.status` directly; no product status or supply rule needs repair.
+
+Only C's no-supply expectation changes beyond R31: require the exact existing
+`redispatch_required` state, then GET the actual same-UUID Ops order and require
+`dispatchSemantics: reservation` / `reservationHoldStatus: redispatch_queue`.
+GET the current displayed job's real candidates and require an empty list.
+The original restore/redispatch/assign/Driver cancellation/Passenger history
+sequence remains byte-identical. This replaces an incorrect scenario contract
+with specific authority and no-supply checks; it does not add another allowed
+status, modify a product guard, fabricate an order or change the clock/timeouts.
+
+| Finding / acceptance                                        | Source and change                                                                                                                          | Old result → replacement result                                                                                                                                               | Commands / exit / evidence                                                                                                                                             | Remaining limitation                                                                                                                                           |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R32: C rejects the legitimate reservation no-supply state   | Existing C assertion in the original browser spec; unchanged `prepareDispatchOrder`, `transitionReservationHold`, Ops `load`/status output | Actual 9d92 hosted case fails on `redispatch_required`; existing real service regression confirms queued reservation and exception-hold branches. New browser outcome pending | `old-browser-job.log`, `hosted-qualification.json`, original artifact/report/fact hashes; `reservation-contract.json/log`, exit 0: 1 selected pass / 39 filtered skips | Local service test uses its original unit clock and in-memory service path, not PG/browser acceptance; C hold/empty-candidate runtime readbacks remain pending |
+| R31 retained and final executable spec compiles             | Original duration correction plus the C readback calls                                                                                     | Complete root and strict scoped TypeScript pass on executable `f43865d5a7669aefb8c0b94170be064d968662a9`; ESLint passes                                                       | `root-types.json/log`, `strict-types.json/log`, `lint.json/log`, all exit 0                                                                                            | Complete workspace/hosted CI still required                                                                                                                    |
+| Preserve prior findings and affected service behavior       | Original review/shared-order suites and complete original Owned service test file                                                          | 33 passing / 4 skipped files; 224 pass / 6 original environment skips                                                                                                         | `regression.json/log`, exit 0                                                                                                                                          | Three original formal-schema PG companions and the other environment cases remain skipped on this VM; selected-case count overlaps this run                    |
+| Preserve source and evidence boundaries                     | R31/R32 exact spec blocks, original UAT/R31 prefix, immutable candidate sources and original hosted bytes                                  | Only original spec and appended UAT change; all other original spec bytes and all product/config/workflow files remain unchanged                                              | `source-verification.json`; format, source, diff and commit-trailer terminal records in manifest                                                                       | Static preservation and old A/B facts are not replacement acceptance                                                                                           |
+| `pax-review-demo_real-shared-order-across-roles`            | Existing same-UUID and formal-schema PG checks retained, C adds genuine same-order queue/candidate readbacks                               | Pending, zero credit                                                                                                                                                          | New exact-SHA full CI and all three original formal-schema PG companions without skips remain necessary                                                                | No new-candidate runtime claim                                                                                                                                 |
+| `pax-review-demo_external-simulation-and-complete-journeys` | Original three independent A/B/C orders and explicit external simulations retained                                                         | Old A/B complete phases; C newly reaches the identified assertion. Acceptance remains pending, zero credit                                                                    | Original report/progress/three actual UUIDs and relational facts preserved                                                                                             | Replacement C restoration, redispatch, cancellation and all-three refreshed history still require the original hosted case                                     |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`    | Original PR 2687 / recovery-r26, review and candidate lifecycle                                                                            | Pending, zero credit                                                                                                                                                          | New candidate's independent review/full hosted CI/browser, normal merge, sole immutable combined shared Cloud Run release and fresh smoke remain required              | No merge, deployment or shared-dev completion claim                                                                                                            |
+
+Exact affected regression command:
+`GITHUB_ACTIONS=false pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015 tests/unit/pax-shared-order-flow-20261015 tests/unit/owned-mobility.test.ts --maxWorkers=2 --reporter=dot`.
+The narrow original service command adds
+`-t 'routes reservation failures into redispatch queue or exception_hold'`
+to `pnpm exec vitest run tests/unit/owned-mobility.test.ts --maxWorkers=1 --reporter=verbose`.
+Its 39 filtered cases are not failures or PG passes; the complete file is
+included in the 224-pass regression above. Existing controlled rejection logs
+and DOM `act` warnings remain visible. The original Driver configuration's
+8/8 Worker/producer/storage pass and R31's 28/28 caller/failure-evidence pass
+are preserved in the supporting R31 manifest; their fixture limits remain.
+
+Canonical final evidence:
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate-9d92-reservation/manifest.json`.
+It records terminal commands/exits and source/evidence hashes, independently
+checks original ZIP/report/progress bytes, stores the unmodified relational
+attachments and four immutable source blobs, and verifies every hashed file
+in R31's supporting manifest. All original UAT/R31 content is preserved.
+Executable source is `f43865d5a7669aefb8c0b94170be064d968662a9`; the final
+commit adds this UAT evidence only. Node 22.23.2 / pnpm 10.33.0 / TypeScript
+5.9.3 / Vitest 4.1.4 and R31's isolated frozen dependencies are unchanged.
+All owner-started checks are terminal and read before handoff. The original
+collector retains old CI terminal/partial/cancelled results; there is no second
+observer, manual workflow dispatch/rerun/cancel, VM product/HTTP/PG/browser/
+preview/Compose runtime or Playwright CLI. Publication uses a normal non-force
+push and exact local/remote/PR-head verification. All three acceptance keys
+remain pending.
