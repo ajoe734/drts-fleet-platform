@@ -6,6 +6,7 @@ import { RegulatoryRegistryRepository } from "../../regulatory-registry/regulato
 import { MultiTaxiService } from "../../multi-taxi/multi-taxi.service";
 import { MultiTaxiRepository } from "../../multi-taxi/multi-taxi.repository";
 import { ServiceProductService } from "../../service-product/service-product.service";
+import { VehicleEligibilityService } from "../../vehicle-eligibility/vehicle-eligibility.service";
 import { reviewDemoEnabled } from "./review-demo.config";
 
 const AUTHORIZATION_ID = "bc39e4f3-72d8-4383-bdc1-2426c1330dfa";
@@ -26,6 +27,7 @@ export class ReviewSupplyService {
     private readonly registry: RegulatoryRegistryService,
     private readonly multi: MultiTaxiService,
     private readonly products: ServiceProductService,
+    private readonly eligibility: VehicleEligibilityService,
   ) {}
 
   async prepare() {
@@ -236,6 +238,25 @@ export class ReviewSupplyService {
     // Read only this service bucket; never rerun bootstrap or replace unrelated
     // orders, authorization state or in-flight commands.
     await this.registry.prepareDispatchSupply("standard_taxi");
+    await this.eligibility.enableServiceProductForSupply(
+      "taxi_reservation",
+      REVIEW_SUPPLY.map((fixture) => fixture.vehicleId),
+      {
+        actorId: "review-synthetic-source",
+        actorType: "system",
+        tenantId: null,
+      },
+    );
+    for (const fixture of REVIEW_SUPPLY)
+      this.eligibility.assertDispatchAssignmentEligible(
+        {
+          serviceBucket: "standard_taxi",
+          businessDispatchSubtype: null,
+          serviceProductCode: "taxi_reservation",
+        },
+        fixture.vehicleId,
+        fixture.driverId,
+      );
     for (const fixture of REVIEW_SUPPLY) {
       if (
         !this.registry

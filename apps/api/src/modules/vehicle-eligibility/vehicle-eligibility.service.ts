@@ -191,6 +191,7 @@ const DEFAULT_MATRIX: VehicleEligibilityMatrixRecord[] = [
     licenseType: "multi_purpose_taxi",
     supportedProducts: [
       "taxi_realtime",
+      "taxi_reservation",
       "enterprise_dispatch",
       "credit_card_airport_transfer",
       "third_party_forwarded_order",
@@ -215,7 +216,11 @@ const DEFAULT_MATRIX: VehicleEligibilityMatrixRecord[] = [
   {
     capabilityId: "seed-taxi",
     licenseType: "taxi",
-    supportedProducts: ["taxi_realtime", "third_party_forwarded_order"],
+    supportedProducts: [
+      "taxi_realtime",
+      "taxi_reservation",
+      "third_party_forwarded_order",
+    ],
     seatCount: 4,
     luggageCapacity: 2,
     airportPermit: false,
@@ -313,6 +318,7 @@ const DEFAULT_MATRIX: VehicleEligibilityMatrixRecord[] = [
 @Injectable()
 export class VehicleEligibilityService implements OnModuleInit {
   private matrix: VehicleEligibilityMatrixRecord[] = [];
+  private matrixConfigured = false;
   private readonly serviceProducts = new Map(
     SERVICE_PRODUCTS.map((entry) => [entry.serviceProduct, entry]),
   );
@@ -338,6 +344,7 @@ export class VehicleEligibilityService implements OnModuleInit {
       }
 
       this.matrix = items.map((item) => this.hydrateMatrixItem(item));
+      this.matrixConfigured = true;
       this.sortMatrix(this.matrix);
     } catch (error) {
       this.repository.reportPersistenceFailure(error, "module init");
@@ -346,6 +353,102 @@ export class VehicleEligibilityService implements OnModuleInit {
 
   listMatrix() {
     return this.getEffectiveMatrix().map((item) => this.clone(item));
+  }
+
+  /** Refresh only the license types consumed by this dispatch. A configured
+   * matrix that omits a type must reject it, rather than reuse a cached/default
+   * capability. Storage failure also propagates to the existing command.
+   */
+  prepareVehicleCapabilities(vehicleIds: readonly string[]) {
+    if (!this.repository?.isEnabled()) return;
+    const licenseTypes = [
+      ...new Set(
+        vehicleIds.flatMap((id) => {
+          const type = this.regulatoryRegistryService.getVehicleLicenseType(id);
+          return type ? [type] : [];
+        }),
+      ),
+    ];
+    return this.repository.findByLicenseTypes(licenseTypes).then((context) => {
+      if (!context.configured) {
+        this.matrix = [];
+        this.matrixConfigured = false;
+        return;
+      }
+      this.matrix = [
+        ...context.items.map((item) => this.hydrateMatrixItem(item)),
+        ...(this.matrixConfigured
+          ? this.matrix.filter(
+              (item) => !licenseTypes.includes(item.licenseType),
+            )
+          : []),
+      ];
+      this.matrixConfigured = true;
+      this.sortMatrix(this.matrix);
+    });
+  }
+
+  /** Normal capability configuration used by the explicit rehearsal supply
+   * provider. Extend the offered product only; keep all other qualification
+   * fields and restrictions. Never turn inactive/expired capability into active.
+   */
+  async enableServiceProductForSupply(
+    serviceProduct: ServiceProductType,
+    vehicleIds: readonly string[],
+    actor: AuditActor,
+  ) {
+    const definition = this.requireActiveServiceProduct(serviceProduct);
+    if (!this.repository?.isEnabled())
+      throw new ApiRequestError(
+        503,
+        "VEHICLE_ELIGIBILITY_STORAGE_UNAVAILABLE",
+        "Vehicle eligibility storage is unavailable.",
+      );
+    const types = new Set(
+      vehicleIds.flatMap((id) => {
+        const type = this.regulatoryRegistryService.getVehicleLicenseType(id);
+        return type && definition.allowedLicenseTypes.includes(type)
+          ? [type]
+          : [];
+      }),
+    );
+    const now = new Date().toISOString();
+    const next = await this.repository.amendMatrix((current) => {
+      const source = current.length ? current : DEFAULT_MATRIX;
+      return source.map((item) => {
+        const nextItem = this.clone(item);
+        if (
+          types.has(item.licenseType) &&
+          item.active &&
+          Date.parse(item.effectiveFrom) <= Date.now() &&
+          (item.effectiveUntil === null ||
+            Date.parse(item.effectiveUntil) > Date.now()) &&
+          !item.supportedProducts.includes(serviceProduct)
+        ) {
+          nextItem.supportedProducts.push(serviceProduct);
+          nextItem.updatedAt = now;
+        }
+        this.validateMatrixItem(nextItem);
+        return nextItem;
+      });
+    });
+    this.matrix = next.map((item) => this.hydrateMatrixItem(item));
+    this.matrixConfigured = next.length > 0;
+    this.sortMatrix(this.matrix);
+    this.recordAudit({
+      actorId: actor.actorId ?? null,
+      actorType: this.toAuditActorType(actor.actorType),
+      tenantId: actor.tenantId ?? null,
+      moduleName: "vehicle-eligibility",
+      actionName: "vehicle_eligibility_matrix.updated",
+      resourceType: "vehicle_eligibility_matrix",
+      resourceId: null,
+      newValuesSummary: {
+        serviceProduct,
+        licenseTypes: [...types],
+        capabilityIds: next.map((item) => item.capabilityId),
+      },
+    });
   }
 
   updateMatrix(
@@ -389,6 +492,7 @@ export class VehicleEligibilityService implements OnModuleInit {
     });
 
     this.matrix = updated;
+    this.matrixConfigured = updated.length > 0;
     this.sortMatrix(this.matrix);
     this.persist(this.matrix);
     this.recordAudit(
@@ -511,7 +615,10 @@ export class VehicleEligibilityService implements OnModuleInit {
   }
 
   assertDispatchAssignmentEligible(
-    order: Pick<OwnedOrderRecord, "serviceBucket" | "businessDispatchSubtype">,
+    order: Pick<
+      OwnedOrderRecord,
+      "serviceBucket" | "businessDispatchSubtype" | "serviceProductCode"
+    >,
     vehicleId: string,
     driverId: string,
   ) {
@@ -743,7 +850,7 @@ export class VehicleEligibilityService implements OnModuleInit {
   }
 
   private getEffectiveMatrix() {
-    const source = this.matrix.length > 0 ? this.matrix : DEFAULT_MATRIX;
+    const source = this.matrixConfigured ? this.matrix : DEFAULT_MATRIX;
     return [...source].sort((left, right) => {
       const licenseCompare = left.licenseType.localeCompare(right.licenseType);
       if (licenseCompare !== 0) {

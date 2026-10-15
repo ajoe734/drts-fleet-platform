@@ -692,6 +692,7 @@ export class OwnedMobilityService
     orderId: string,
   ): Promise<DispatchCandidate[]> {
     const order = this.requireOrder(orderId);
+    await this.prepareDispatchEligibility(order);
     return this.excludePlatformPresenceBlockedCandidates(
       this.listEligibleDispatchCandidates(order),
     );
@@ -4961,6 +4962,7 @@ export class OwnedMobilityService
   ): Promise<DispatchCandidate[]> {
     const dispatchJob = this.requireDispatchJob(dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
+    await this.prepareDispatchEligibility(order);
     const candidates = await this.listDispatchCandidatesWithEligibility(
       dispatchJob,
       order,
@@ -5412,6 +5414,7 @@ export class OwnedMobilityService
           }
           order = current.order;
           dispatchJob = currentJob;
+          await this.prepareDispatchEligibility(order, [vehicleId]);
           if (
             order.runtimeProfileCode === "multi_taxi_direct" &&
             order.operatingAuthorizationId
@@ -5586,11 +5589,15 @@ export class OwnedMobilityService
       );
     }
 
-    const eligibilityRecheckResult = this.assertAssignmentEligibilityRecheck(
-      order,
-      dispatchJob.dispatchJobId,
-      vehicleId,
-      driverId,
+    const eligibilityRecheckResult = this.afterMaybePromise(
+      this.prepareDispatchEligibility(order, [vehicleId]),
+      () =>
+        this.assertAssignmentEligibilityRecheck(
+          order,
+          dispatchJob.dispatchJobId,
+          vehicleId,
+          driverId,
+        ),
     );
     return this.afterMaybePromise(eligibilityRecheckResult, () => {
       const sandboxGateResult = this.assertSandboxDispatchGate(
@@ -10380,6 +10387,31 @@ export class OwnedMobilityService
       if (error instanceof ApiRequestError) return false;
       throw error;
     }
+  }
+
+  private prepareDispatchEligibility(
+    order: OwnedOrderRecord,
+    vehicleIds?: string[],
+  ): MaybePromise<void> {
+    const capabilities =
+      this.vehicleEligibilityService?.prepareVehicleCapabilities?.(
+        vehicleIds ??
+          this.regulatoryRegistryService
+            .listVehicles()
+            .filter((vehicle) =>
+              vehicle.supportedServiceBuckets.includes(order.serviceBucket),
+            )
+            .map((vehicle) => vehicle.vehicleId),
+      );
+    const product =
+      order.runtimeProfileCode && order.serviceProductCode
+        ? this.serviceProductService?.prepareRuntimeProfileServiceProduct?.(
+            order.runtimeProfileCode,
+            order.serviceProductCode,
+          )
+        : undefined;
+    if (capabilities || product)
+      return Promise.all([capabilities, product]).then(() => undefined);
   }
 
   private assertAssignmentEligibilityRecheck(

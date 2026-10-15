@@ -63,6 +63,7 @@ import {
 import { ReviewSupplyService } from "./review-demo/review-supply.service";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
 import { ServiceProductModule } from "../service-product/service-product.module";
+import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibility.module";
 import {
   PAYMENT_RECOVERY_NOTICE_EXPIRY,
   PAYMENT_RECOVERY_NOTICE_OUTBOX,
@@ -79,6 +80,7 @@ import {
     ComplaintModule,
     RegulatoryRegistryModule,
     ServiceProductModule,
+    VehicleEligibilityModule,
   ],
   controllers: [
     PassengerAccountController,
