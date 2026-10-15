@@ -136,6 +136,12 @@ the exact seven additional leaves below; the current task scopes still do
 not authorize those edits. No human permission, new issuer, scope grant,
 middleware relaxation or provider/VM action is requested.
 
+The release CLI rejected `blocker <task> <reason> Supervisor` with
+`Unknown agent: Supervisor`; it did not change task state. Scope coordination
+is therefore recorded using the authorized owner `progress` command, keeping
+the task `in_progress` with this concrete blocker in its machine-truth summary.
+No alternative agent identity or direct status-file edit is used.
+
 ## Exact remaining repair boundary (Supervisor scope coordination)
 
 Current assigned write scopes are the original seven leaves/directories. No
