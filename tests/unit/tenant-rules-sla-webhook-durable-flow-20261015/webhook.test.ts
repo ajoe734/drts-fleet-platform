@@ -34,6 +34,92 @@ function serviceFor(
 }
 
 describe("C112 durable commands and first in-flight restart", () => {
+  it.each(["pending", "rejected"] as const)(
+    "manual retry preparation preserves committed state before its %s ACK",
+    async (mode) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-10-15T12:00:00Z"));
+      const p = persistenceHarness();
+      const { service, audit, fetcher } = serviceFor(p.repository);
+      const endpoint = await service.createWebhookEndpoint(tenantId, command);
+      fetcher.mockResolvedValueOnce({ ok: false, status: 410 });
+      const failed = await service.sendTestWebhook(tenantId, {
+        webhookId: endpoint.webhookId,
+      });
+      const beforeEndpoint = service.listWebhookEndpoints(tenantId)[0]!;
+      const beforeDelivery = service.listWebhookDeliveries(tenantId)[0]!;
+      expect(beforeEndpoint.status).toBe("disabled");
+      expect(beforeDelivery.status).toBe("delivery_failed");
+      const auditSpy = vi.spyOn(audit, "recordAuditLog");
+      fetcher.mockClear();
+      let releaseCommit!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        releaseCommit = resolve;
+      });
+      if (mode === "pending") p.holdCommit(() => gate);
+      else p.failInsert(1);
+      const retrying = Promise.resolve(
+        service.retryWebhookDelivery(
+          tenantId,
+          endpoint.webhookId,
+          failed.deliveryId,
+          "req-manual-retry-preparation",
+          {
+            authMode: "jwt_bearer",
+            actorId: "tenant-integration-manager",
+            actorType: "tenant_admin",
+            realm: "tenant",
+            tenantId,
+            roles: ["tc_integration_mgr"],
+            roleFamilies: ["tenant"],
+            scopes: ["tenant:webhooks:write"],
+            supportedExecutionModes: [],
+          },
+        ),
+      );
+      const outcome = retrying.then(
+        (value) => ({ value, error: undefined }),
+        (error: unknown) => ({ value: undefined, error }),
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+      const pendingEndpoint = service.listWebhookEndpoints(tenantId)[0]!;
+      const pendingDelivery = service.listWebhookDeliveries(tenantId)[0]!;
+      const fetchCountBeforeAck = fetcher.mock.calls.length;
+      const preparationAuditBeforeAck = auditSpy.mock.calls.some(
+        ([entry]) => entry.actionName === "prepare_webhook_retry",
+      );
+      releaseCommit();
+      const result = await outcome;
+      p.holdCommit();
+      expect(pendingEndpoint).toEqual(beforeEndpoint);
+      expect(pendingDelivery).toEqual(beforeDelivery);
+      expect(fetchCountBeforeAck).toBe(0);
+      expect(preparationAuditBeforeAck).toBe(false);
+      if (mode === "rejected") {
+        expect(result.error).toMatchObject({ message: "SQL rejected" });
+        expect(service.listWebhookEndpoints(tenantId)[0]).toEqual(
+          beforeEndpoint,
+        );
+        expect(service.listWebhookDeliveries(tenantId)[0]).toEqual(
+          beforeDelivery,
+        );
+      } else {
+        expect(result.error).toBeUndefined();
+        expect(result.value).toMatchObject({
+          status: "delivered",
+          attempt: 2,
+        });
+      }
+      const canonical = await p.repository.loadState();
+      expect(canonical.webhookEndpoints[0]?.status).toBe(
+        service.listWebhookEndpoints(tenantId)[0]?.status,
+      );
+      expect(canonical.webhookDeliveries[0]?.status).toBe(
+        service.listWebhookDeliveries(tenantId)[0]?.status,
+      );
+    },
+  );
+
   it.each([true, false])(
     "manual retry audit describes the committed delivery outcome (persistence=%s)",
     async (enabled) => {
@@ -48,13 +134,11 @@ describe("C112 durable commands and first in-flight restart", () => {
       });
       const auditSpy = vi.spyOn(audit, "recordAuditLog");
       let releaseCommit!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        releaseCommit = resolve;
+      });
       if (enabled)
-        p.holdCommit(
-          () =>
-            new Promise<void>((resolve) => {
-              releaseCommit = resolve;
-            }),
-        );
+        p.holdCommit(() => gate);
       const retrying = service.retryWebhookDelivery(
         tenantId,
         endpoint.webhookId,
