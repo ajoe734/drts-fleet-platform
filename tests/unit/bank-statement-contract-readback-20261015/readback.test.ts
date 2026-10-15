@@ -27,7 +27,10 @@ type PageProps = {
 };
 const roles = ["bank_program_admin", "bank_finance", "bank_ops_viewer"];
 const seedId = "ctr_acme_world_elite_2026";
-const appRoot = resolve("apps/bank-console-web");
+// An immutable git-archive copy can be selected for before/fixed comparison.
+const appRoot = resolve(
+  process.env.BANK_READBACK_APP_ROOT ?? "apps/bank-console-web",
+);
 
 // Only the HTTP transport and Next request/navigation boundaries are replaced.
 // The real pages, loaders, mapper, session/role helpers and UI render on Node.
@@ -35,7 +38,7 @@ function harness(
   options: {
     statements?: StatementInput[];
     contracts?: unknown[];
-    failure?: number | "timeout";
+    failure?: number | "timeout" | undefined;
     cookieRole?: string;
   } = {},
 ) {
@@ -66,7 +69,9 @@ function harness(
   );
   vi.stubEnv("DRTS_API_URL", "https://synthetic-bank-api.invalid");
   vi.stubEnv("DRTS_API_AUTH_AUDIENCE", "");
+  vi.stubEnv("BANK_SESSION_SECRET", "synthetic-bank-readback-session-secret");
   vi.stubGlobal("fetch", fetchMock);
+  let sessionCookie: string | undefined;
   const load = createUiModuleLoader(appRoot, {
     react: React,
     "react/jsx-runtime": jsxRuntime,
@@ -81,8 +86,7 @@ function harness(
       React.createElement("a", props, children),
     "next/headers": {
       cookies: async () => ({
-        get: () =>
-          options.cookieRole ? { value: options.cookieRole } : undefined,
+        get: () => (sessionCookie ? { value: sessionCookie } : undefined),
       }),
     },
     "next/navigation": {
@@ -91,6 +95,9 @@ function harness(
       },
     },
   });
+  const { signSessionRole } = load<{
+    signSessionRole: (role: string, bank: string) => string;
+  }>(resolve(appRoot, "lib/session.ts"));
   const model = load<{
     mapStatementsFromApi: (
       items: StatementInput[],
@@ -109,10 +116,13 @@ function harness(
     load<{ default: (props: PageProps) => Promise<React.ReactElement> }>(
       resolve(appRoot, path),
     ).default;
-  const props = (role = "bank_finance", contractId = seedId): PageProps => ({
-    searchParams: Promise.resolve({ bank: "contoso", locale: "en", role }),
-    params: Promise.resolve({ period: "2026-10", contractId }),
-  });
+  const props = (role = "bank_finance", contractId = seedId): PageProps => {
+    sessionCookie = signSessionRole(options.cookieRole ?? role, "contoso");
+    return {
+      searchParams: Promise.resolve({ bank: "contoso", locale: "en", role }),
+      params: Promise.resolve({ period: "2026-10", contractId }),
+    };
+  };
   return { load, model, page, props, fetchMock };
 }
 
