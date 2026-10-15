@@ -3166,6 +3166,7 @@ export class MultiTaxiService implements OnModuleInit {
       ratingId: view.rating?.ratingId ?? null,
       paymentStatus: view.payment?.status ?? null,
       receiptId: view.receipt?.receiptId ?? null,
+      actions: view.actions,
     });
   }
 
