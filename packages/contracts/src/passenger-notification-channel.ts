@@ -67,7 +67,7 @@ export const FIRST_PARTY_NOTIFICATION_ROUTE_POLICY_VERSION =
  */
 export interface OrderFirstPartyNotificationRoute {
   orderId: string;
-  tenantId: string;
+  tenantId: string | null;
   drtsPassengerId: string;
   passengerSubjectRef: string;
   appId: string;

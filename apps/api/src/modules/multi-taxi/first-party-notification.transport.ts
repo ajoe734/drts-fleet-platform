@@ -210,6 +210,8 @@ export class FirstPartyNotificationTransport {
       );
     let context = loaded?.context ?? null;
     const route = await this.checkRelevance(request, context);
+    if (route.tenantId === null)
+      throw firstPartyFailure("configuration_blocked", context);
     if (!context) {
       const eventSequence = message.payload.eventSequence;
       const event =

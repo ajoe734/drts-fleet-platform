@@ -42,6 +42,24 @@ const EXPLICIT_PUBLIC_ROUTE_KEYS = new Set([
   "POST auth/partner/bootstrap-session",
 ]);
 
+// Original Native pre-login routes; purpose/session/OTP/provider checks remain downstream.
+const NATIVE_PASSENGER_PREAUTH_ROUTE_KEYS = new Set([
+  "GET passenger-app/auth/providers",
+  "POST passenger-app/auth/otp/request",
+  "POST passenger-app/auth/otp/verify",
+  "POST passenger-app/auth/oauth/google/start",
+  "POST passenger-app/auth/oauth/google/callback",
+  "POST passenger-app/auth/oauth/facebook/start",
+  "POST passenger-app/auth/oauth/facebook/callback",
+  "POST passenger-app/auth/oauth/line/start",
+  "POST passenger-app/auth/oauth/line/callback",
+]);
+// Existing commands authenticate their own refreshToken in the unchanged controller/service.
+const NATIVE_PASSENGER_SESSION_COMMAND_ROUTE_KEYS = new Set([
+  "POST passenger-app/auth/refresh",
+  "POST passenger-app/auth/logout",
+]);
+
 const logger = new Logger("InternalKeyMiddleware");
 
 function normalizeHeaderValue(value: HeaderValue): string {
@@ -84,6 +102,24 @@ function isExplicitPublicRequest(
 
   return EXPLICIT_PUBLIC_ROUTE_KEYS.has(
     `${method.toUpperCase()} ${normalizeRequestPath(path)}`,
+  );
+}
+
+/** Only raw Native transport; supplied credentials retain their existing verification path. */
+function isNativePassengerDirectAuthRequest(request: RequestLike): boolean {
+  const path = request.originalUrl ?? request.url;
+  if (!request.method || !path) return false;
+  const routeKey = `${request.method.toUpperCase()} ${normalizeRequestPath(path)}`;
+  if (
+    !NATIVE_PASSENGER_PREAUTH_ROUTE_KEYS.has(routeKey) &&
+    !NATIVE_PASSENGER_SESSION_COMMAND_ROUTE_KEYS.has(routeKey)
+  )
+    return false;
+  return (
+    !extractGoogleWorkloadIdentityAssertion(request.headers) &&
+    !normalizeHeaderValue(request.headers?.[INTERNAL_KEY_HEADER]) &&
+    !normalizeHeaderValue(request.headers?.[AUTHORIZATION_HEADER]) &&
+    !normalizeHeaderValue(request.headers?.[CONTROL_PLANE_AUTH_HEADER])
   );
 }
 
@@ -142,10 +178,20 @@ function isInternalKeyEnforcementDisabled(): boolean {
 export async function validateInternalKey(
   request: RequestLike,
   expectedKey: string | undefined,
-  options?: { googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter },
+  options?: {
+    googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter;
+    requireCredential?: boolean;
+  },
 ): Promise<void> {
   const rawPath = request.originalUrl ?? request.url ?? "";
   const requestMethod = request.method ?? "GET";
+
+  if (
+    options?.requireCredential !== true &&
+    isNativePassengerDirectAuthRequest(request)
+  ) {
+    return;
+  }
 
   if (
     isHealthRequest(rawPath) ||
@@ -190,6 +236,13 @@ export async function verifyGoogleAssertionOrInternalKey(
   const rawPath = request.originalUrl ?? request.url ?? "";
   const requestPath = stripQueryString(rawPath);
   const requestMethod = request.method ?? "GET";
+  if (
+    options?.requireCredential !== true &&
+    isNativePassengerDirectAuthRequest(request)
+  ) {
+    return;
+  }
+
   const strictEnvironment = Boolean(
     isStrictAuthEnvironment() || options?.requireCredential,
   );

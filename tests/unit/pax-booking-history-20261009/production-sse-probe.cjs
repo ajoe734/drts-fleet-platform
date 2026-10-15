@@ -192,6 +192,8 @@ async function runCase({
     multi,
     undefined,
     undefined,
+    undefined,
+    { resolveActiveDevices: async () => [] },
   );
   const controller = new PassengerBookingController(service, multi);
   // Supply DI instances, but let real Nest metadata discovery and GuardsConsumer
