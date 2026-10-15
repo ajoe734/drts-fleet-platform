@@ -759,7 +759,7 @@ Candidate `8202fd6cd154e6c11aee5b7e4eb3301bf8be7081`, generation
 - UI job `116366719855` exceeded **25 minutes**. It passed the original
   route/tenant/partner/concierge suites (**39 / 5 / 21 / 6**), original
   Passenger offline case (**1**) and Driver producer/storage cases (**3**).
-  The new three-role case started at **10:24:44.780766 UTC** and the job was
+  The runner announced the new case at **10:24:44.780766 UTC** and the job was
   cancelled at **10:36:20.531398 UTC**, before the original 720-second case
   limit could report a failure. No new case result, order UUID or shared-order
   artifact was produced. Starting the case is not three-order completion;
@@ -814,3 +814,16 @@ removed only this task worktree's 22 dependency symlinks and completed
 `CI=true pnpm install --frozen-lockfile --offline --ignore-scripts` (exit 0,
 `install.log`). Canonical dependencies, tracked manifests and lockfiles were
 not changed. Replacement checks and their final results are recorded separately.
+
+R13 replacement-source checks have finished: full review/OTP/account-session
+namespaces **204 pass / 3 original hosted-PG skips**, exit 0
+(`regression-final.log`); root `tsc -p tsconfig.json --noEmit` and scoped
+ESLint exit 0 after isolated dependency installation (`typecheck-final.log`,
+`lint-final.log`). The real Playwright config and suite load in both hosted
+and shared-dev modes, collecting the original one case with **zero test bodies,
+zero browsers and zero servers executed**. The configuration still declares
+five hosted servers and zero shared-dev servers, with the same 720-second case
+limit. Collection is not browser acceptance. Existing workflow checks pass
+17 tests; the separate YAML placement probe and final assertion invariance
+probe pass. Code/workflow formatting and `git diff --check` pass. All original
+acceptance keys remain pending for the replacement candidate.
