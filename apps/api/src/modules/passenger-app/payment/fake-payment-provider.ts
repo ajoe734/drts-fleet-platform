@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { reviewDemoEnabled } from "../review-demo/review-demo.config";
 import type {
   BindResult,
   CaptureCommand,
@@ -40,9 +41,13 @@ export class FakePaymentProvider implements PaymentProviderPort {
   private readonly consumedCredentials = new Set<string>();
   private readonly captures = new Map<string, Operation>();
   private readonly refunds = new Map<string, Operation>();
+  private readonly review: boolean;
+  readonly captureAttemptMetadata: boolean;
 
   constructor(env: NodeJS.ProcessEnv) {
     assertFakePaymentEnvironment(env);
+    this.review = reviewDemoEnabled(env);
+    this.captureAttemptMetadata = this.review;
   }
 
   async bind(credential: string, idempotencyKey: string): Promise<BindResult> {
@@ -60,7 +65,12 @@ export class FakePaymentProvider implements PaymentProviderPort {
       return { status: "failed", error: "invalid_credential" };
     let result: BindResult;
     if (/^synthetic_credential_[A-Za-z_-]+$/.test(credential)) {
-      if (credential === "synthetic_credential_declined") {
+      if (
+        credential.startsWith("synthetic_credential_review_retry_") &&
+        !this.review
+      ) {
+        result = { status: "failed", error: "invalid_credential" };
+      } else if (credential === "synthetic_credential_declined") {
         result = { status: "failed", error: "card_declined" };
       } else if (credential === "synthetic_credential_action_required") {
         result = {
@@ -73,7 +83,7 @@ export class FakePaymentProvider implements PaymentProviderPort {
         result = {
           status: "completed",
           card: {
-            token: `synthetic_token_${createHash("sha256").update(idempotencyKey).digest("hex")}`,
+            token: `synthetic_${credential.startsWith("synthetic_credential_review_retry_") ? "retry_" : ""}token_${createHash("sha256").update(idempotencyKey).digest("hex")}`,
             last4: "0000",
             cardType: "synthetic",
             expiryMonth: "12",
@@ -90,9 +100,21 @@ export class FakePaymentProvider implements PaymentProviderPort {
   }
 
   async capture(command: CaptureCommand): Promise<MoneyResult> {
-    if (!/^synthetic_token_[a-f0-9]{64}$/.test(command.token))
+    const retryScenario =
+      this.review && /^synthetic_retry_token_[a-f0-9]{64}$/.test(command.token);
+    if (!retryScenario && !/^synthetic_token_[a-f0-9]{64}$/.test(command.token))
       return { status: "failed", error: "invalid_method", retryable: false };
-    return this.money(this.captures, command, "capture");
+    if (
+      retryScenario &&
+      (!Number.isSafeInteger(command.attemptCount) || command.attemptCount! < 1)
+    )
+      throw new Error("Invalid synthetic capture attempt.");
+    return this.money(
+      this.captures,
+      command,
+      "capture",
+      retryScenario && command.attemptCount === 1,
+    );
   }
   async readCapture(key: string): Promise<MoneyResult> {
     return structuredClone(
@@ -133,6 +155,7 @@ export class FakePaymentProvider implements PaymentProviderPort {
     operations: Map<string, Operation>,
     command: CaptureCommand | RefundCommand,
     kind: string,
+    failCapture = false,
   ): MoneyResult {
     if (
       !command.idempotencyKey ||
@@ -142,18 +165,32 @@ export class FakePaymentProvider implements PaymentProviderPort {
     )
       throw new Error("Invalid synthetic payment operation.");
     const fingerprint = createHash("sha256")
-      .update(JSON.stringify(command))
+      .update(JSON.stringify({ ...command, attemptCount: undefined }))
       .digest("hex");
     const existing = operations.get(command.idempotencyKey);
     if (existing) {
       if (existing.fingerprint !== fingerprint)
         throw new Error("Fake payment idempotency conflict.");
-      return structuredClone(existing.result);
+      if (
+        !(
+          this.review &&
+          kind === "capture" &&
+          existing.result.status === "failed" &&
+          !failCapture
+        )
+      )
+        return structuredClone(existing.result);
     }
-    const result: MoneyResult = {
-      status: "completed",
-      providerRef: `synthetic_${kind}_${createHash("sha256").update(command.idempotencyKey).digest("hex")}`,
-    };
+    const result: MoneyResult = failCapture
+      ? {
+          status: "failed",
+          error: "unavailable",
+          retryable: true,
+        }
+      : {
+          status: "completed",
+          providerRef: `synthetic_${kind}_${createHash("sha256").update(command.idempotencyKey).digest("hex")}`,
+        };
     operations.set(command.idempotencyKey, {
       fingerprint,
       amountMinor: command.amountMinor,

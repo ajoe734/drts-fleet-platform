@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { applyUpstreamAuth } from "../../../../lib/api-upstream";
 import {
   readOAuthBinding,
   sessionFingerprint,
@@ -6,9 +7,6 @@ import {
 } from "../../../../lib/auth/bff-binding";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
-const METADATA_IDENTITY_TOKEN_URL =
-  "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
-const RUN_APP_HOST_SUFFIX = ".a.run.app";
 const REQUEST_HEADER_BLOCKLIST = new Set([
   "connection",
   "content-length",
@@ -85,6 +83,18 @@ function isAllowedPassengerPath(path: string[], method: string) {
   }
   if (method === "POST" && fullPath === "auth/mfa/verify") return true;
   if (method === "POST" && fullPath === "quotes") return true;
+  if (method === "GET" && fullPath === "review-demo/config") return true;
+  if (method === "POST" && fullPath === "review-demo/otp") return true;
+  if (
+    ["POST", "GET"].includes(method) &&
+    path.length === 4 &&
+    path[0] === "review-demo" &&
+    path[1] === "rides" &&
+    /^[0-9a-f-]{36}$/i.test(path[2] ?? "") &&
+    ((method === "POST" && path[3] === "retry-payment") ||
+      (method === "GET" && path[3] === "record"))
+  )
+    return true;
   if (method === "POST" && fullPath === "auth/refresh") return true;
   if (method === "POST" && fullPath === "auth/logout") return true;
   if (method === "GET" && fullPath === "me") return true;
@@ -170,44 +180,6 @@ function copyHeaders(source: Headers) {
     }
   });
   return headers;
-}
-
-async function mintMetadataIdentityToken(audience: string) {
-  const metadataUrl = new URL(METADATA_IDENTITY_TOKEN_URL);
-  metadataUrl.searchParams.set("audience", audience);
-  metadataUrl.searchParams.set("format", "full");
-  const response = await fetch(metadataUrl.toString(), {
-    cache: "no-store",
-    headers: { "Metadata-Flavor": "Google" },
-  });
-  if (!response.ok) {
-    throw new Error(`Metadata fetch failed: ${response.status}`);
-  }
-  return await response.text();
-}
-
-async function applyUpstreamAuth(
-  headers: Headers,
-  targetUrl: URL,
-  token?: string,
-) {
-  if (token) {
-    headers.set("authorization", `Bearer ${token}`);
-  }
-  const configuredAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
-  const audience =
-    configuredAudience ||
-    (targetUrl.hostname.endsWith(RUN_APP_HOST_SUFFIX)
-      ? targetUrl.origin
-      : null);
-  if (!audience) return;
-  const identityToken = await mintMetadataIdentityToken(audience);
-  if (identityToken) {
-    headers.set("x-serverless-authorization", `Bearer ${identityToken}`);
-    headers.set("x-drts-google-id-token", identityToken);
-  } else {
-    throw new Error("Metadata identity token fetch returned empty");
-  }
 }
 
 async function checkCSRF(request: NextRequest) {

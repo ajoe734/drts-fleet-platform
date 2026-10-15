@@ -1,4 +1,3 @@
-import { enabledRegistryRepository } from "../../../../tests/unit/registry-driver-master-durable-ack-20261014/storage-fixture";
 import { generateKeyPairSync } from "node:crypto";
 
 import { Logger } from "@nestjs/common";
@@ -19,6 +18,7 @@ import { DriverProfileService } from "../../src/modules/driver-profile/driver-pr
 import { IdentityRepository } from "../../src/modules/identity/identity.repository";
 import { MultiTaxiController } from "../../src/modules/multi-taxi/multi-taxi.controller";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
+import { RegulatoryRegistryRepository } from "../../src/modules/regulatory-registry/regulatory-registry.repository";
 import { SecurityEventsService } from "../../src/modules/security-events/security-events.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import {
@@ -55,12 +55,32 @@ function createAuthFixture() {
   const driverProfileService = new DriverProfileService(
     auditNotificationService,
   );
+  // Unit database boundary: read back this fixture's actual seeded/saved
+  // master rows through the production repository, including suspensions.
+  const driverRows = new Map<string, unknown>();
+  const registryRepository = new RegulatoryRegistryRepository({
+    isEnabled: () => true,
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes("INSERT INTO reg.phase1_registry_drivers"))
+        driverRows.set(values[0] as string, JSON.parse(values[5] as string));
+      const driver = driverRows.get(values[0] as string);
+      return {
+        rows:
+          sql.includes("SELECT record FROM reg.phase1_registry_drivers") &&
+          driver
+            ? [{ record: structuredClone(driver) }]
+            : [],
+      };
+    },
+  } as never);
   const regulatoryRegistryService = new RegulatoryRegistryService(
     new OpsDispatchEventsService(new EventEmitter2()),
     auditNotificationService,
     driverProfileService,
-    enabledRegistryRepository(),
+    registryRepository,
   );
+  for (const driver of regulatoryRegistryService.listDrivers())
+    driverRows.set(driver.driverId, structuredClone(driver));
   const tenantPartnerService = new TenantPartnerService(
     auditNotificationService,
   );

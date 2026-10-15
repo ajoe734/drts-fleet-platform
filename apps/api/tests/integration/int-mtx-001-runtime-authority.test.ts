@@ -107,6 +107,9 @@ function createHarness() {
   };
 
   const multiTaxiRepository = {
+    findEffectiveAuthorizations: vi.fn(async () =>
+      multiTaxiState.authorizations.map((record) => structuredClone(record)),
+    ),
     loadState: vi.fn(async () => ({
       authorizations: multiTaxiState.authorizations.map((record) =>
         structuredClone(record),

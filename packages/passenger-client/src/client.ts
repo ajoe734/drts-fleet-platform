@@ -116,6 +116,14 @@ export class PassengerClient implements PassengerViewModel {
     return res.account;
   }
 
+  getReviewRecord(
+    orderId: string,
+  ): Promise<import("./review-demo.js").PassengerReviewRecord> {
+    return this.request(
+      `/api/passenger-app/review-demo/rides/${encodeURIComponent(orderId)}/record`,
+    );
+  }
+
   async getProviders(): Promise<import("./types.js").AuthProvidersResponse> {
     return this.request<import("./types.js").AuthProvidersResponse>(
       "/api/passenger-app/auth/providers",

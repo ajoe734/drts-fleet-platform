@@ -9,6 +9,10 @@ export default (): ExpoConfig => {
   const iosKey = process.env.GOOGLE_MAPS_IOS_KEY?.trim();
   const requireLiveMap =
     process.env.DRTS_REQUIRE_LIVE_MAP?.trim().toLowerCase() === "true";
+  const reviewBaseUrl =
+    process.env.EXPO_PUBLIC_REVIEW_BASE_PATH === "/review-driver"
+      ? "/review-driver"
+      : "";
 
   if (requireLiveMap && (!androidKey || !iosKey)) {
     throw new Error(
@@ -18,6 +22,9 @@ export default (): ExpoConfig => {
 
   return {
     ...staticConfig,
+    ...(reviewBaseUrl
+      ? { experiments: { ...staticConfig.experiments, baseUrl: reviewBaseUrl } }
+      : {}),
     android: {
       ...staticConfig.android,
       ...(androidKey
