@@ -103,12 +103,14 @@ describe("service product service", () => {
     });
 
     await expect(
-      service.createServiceProduct({
-        serviceProductType: "enterprise_dispatch",
-        displayName: "Enterprise Dispatch 2",
-        timing: "reservation",
-        defaultBillingMode: "tenant_invoice",
-      }),
+      Promise.resolve().then(() =>
+        service.createServiceProduct({
+          serviceProductType: "enterprise_dispatch",
+          displayName: "Enterprise Dispatch 2",
+          timing: "reservation",
+          defaultBillingMode: "tenant_invoice",
+        }),
+      ),
     ).rejects.toThrow(ApiRequestError);
   });
 
@@ -116,9 +118,11 @@ describe("service product service", () => {
     const { service } = createService();
 
     await expect(
-      service.updateServiceProduct("SVP-999999", {
-        active: false,
-      }),
+      Promise.resolve().then(() =>
+        service.updateServiceProduct("SVP-999999", {
+          active: false,
+        }),
+      ),
     ).rejects.toThrow(ApiRequestError);
   });
 
@@ -126,12 +130,14 @@ describe("service product service", () => {
     const { service } = createService();
 
     await expect(
-      service.createServiceProduct({
-        serviceProductType: "travel_agency_transfer",
-        displayName: "Travel Agency Transfer",
-        timing: "scheduled_only" as any,
-        defaultBillingMode: "partner_settlement",
-      }),
+      Promise.resolve().then(() =>
+        service.createServiceProduct({
+          serviceProductType: "travel_agency_transfer",
+          displayName: "Travel Agency Transfer",
+          timing: "scheduled_only" as any,
+          defaultBillingMode: "partner_settlement",
+        }),
+      ),
     ).rejects.toThrow(ApiRequestError);
   });
 

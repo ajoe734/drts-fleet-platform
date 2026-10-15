@@ -86,24 +86,28 @@ describe("C107: 服務產品型別、資格要求、預約/即時時間、結算
 
     // 重複 ID
     await expect(
-      service.createServiceProduct({
-        serviceProductType: "enterprise_dispatch",
-        serviceProductId: "SVP-CORP-01",
-        displayName: "企業商務差旅複本",
-        timing: "realtime",
-        defaultBillingMode: "tenant_invoice",
-      }),
+      Promise.resolve().then(() =>
+        service.createServiceProduct({
+          serviceProductType: "enterprise_dispatch",
+          serviceProductId: "SVP-CORP-01",
+          displayName: "企業商務差旅複本",
+          timing: "realtime",
+          defaultBillingMode: "tenant_invoice",
+        }),
+      ),
     ).rejects.toThrowError(ApiRequestError);
 
     // 非法結算模式
     await expect(
-      service.createServiceProduct({
-        serviceProductType: "enterprise_dispatch",
-        serviceProductId: "SVP-CORP-02",
-        displayName: "非法結算測試",
-        timing: "realtime",
-        defaultBillingMode: "invalid_crypto_token" as any,
-      }),
+      Promise.resolve().then(() =>
+        service.createServiceProduct({
+          serviceProductType: "enterprise_dispatch",
+          serviceProductId: "SVP-CORP-02",
+          displayName: "非法結算測試",
+          timing: "realtime",
+          defaultBillingMode: "invalid_crypto_token" as any,
+        }),
+      ),
     ).rejects.toThrowError(ApiRequestError);
   });
 

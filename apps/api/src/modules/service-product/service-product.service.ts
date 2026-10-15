@@ -227,9 +227,9 @@ export class ServiceProductService implements OnModuleInit {
     return this.runtimePolicies.map((policy) => ({ ...policy }));
   }
 
-  async upsertRuntimeProfilePolicy(
+  upsertRuntimeProfilePolicy(
     command: UpsertRuntimeProfileServiceProductPolicyCommand,
-  ): Promise<RuntimeProfileServiceProductPolicy> {
+  ): RuntimeProfileServiceProductPolicy {
     if (
       !["ordinary_taxi", "multi_taxi_direct", "business_dispatch"].includes(
         command.runtimeProfileCode,
@@ -275,16 +275,28 @@ export class ServiceProductService implements OnModuleInit {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
-    await this.persist({ runtimePolicies: [policy] }, "upsert runtime policy");
-    this.runtimePolicies = [
-      policy,
-      ...this.runtimePolicies.filter(
-        (candidate) =>
-          candidate.runtimeProfileCode !== policy.runtimeProfileCode ||
-          candidate.serviceProductCode !== policy.serviceProductCode,
-      ),
-    ];
-    return { ...policy };
+    const commitPolicy = (): RuntimeProfileServiceProductPolicy => {
+      this.runtimePolicies = [
+        policy,
+        ...this.runtimePolicies.filter(
+          (candidate) =>
+            candidate.runtimeProfileCode !== policy.runtimeProfileCode ||
+            candidate.serviceProductCode !== policy.serviceProductCode,
+        ),
+      ];
+      return { ...policy };
+    };
+
+    if (!this.repository?.isEnabled()) {
+      return commitPolicy();
+    }
+
+    return this.persist(
+      { runtimePolicies: [policy] },
+      "upsert runtime policy",
+    ).then(() =>
+      commitPolicy(),
+    ) as unknown as RuntimeProfileServiceProductPolicy;
   }
 
   assertRuntimeProfileServiceProductActive(
@@ -332,13 +344,13 @@ export class ServiceProductService implements OnModuleInit {
     command: CreateServiceProductCommand,
     requestId: string | undefined,
     options: { captureAudit: true },
-  ): Promise<AuditedActionResult<ServiceProductRecord>>;
+  ): AuditedActionResult<ServiceProductRecord>;
   createServiceProduct(
     command: CreateServiceProductCommand,
     requestId?: string,
     options?: { captureAudit?: false },
-  ): Promise<ServiceProductRecord>;
-  async createServiceProduct(
+  ): ServiceProductRecord;
+  createServiceProduct(
     command: CreateServiceProductCommand,
     requestId?: string,
     options?: { captureAudit?: boolean },
@@ -365,7 +377,7 @@ export class ServiceProductService implements OnModuleInit {
     const defaultProofRequirements = this.normalizeProofRequirements(
       normalizedCommand.defaultProofRequirements,
     );
-    const { serviceProductId, generated } =
+    const { serviceProductId, generated, nextSequence } =
       this.resolveServiceProductId(normalizedCommand);
     this.assertUniqueServiceProduct(serviceProductId, serviceProductType);
 
@@ -389,60 +401,63 @@ export class ServiceProductService implements OnModuleInit {
     };
 
     const hydratedRecord = this.hydrateRecord(record);
-    if (generated) {
-      this.inFlightGeneratedIds.add(serviceProductId);
-    }
-    try {
-      await this.persist(
-        { records: [hydratedRecord] },
-        "create_service_product",
-      );
+    const commitCreate = () => {
       this.assertUniqueServiceProduct(
         hydratedRecord.serviceProductId,
         hydratedRecord.serviceProductType,
       );
       this.records = [hydratedRecord, ...this.records];
-      this.sequence = Math.max(
-        this.sequence,
-        this.deriveNextSequence(this.records),
-      );
-    } finally {
-      if (generated) {
-        this.inFlightGeneratedIds.delete(serviceProductId);
+      if (generated && nextSequence !== undefined) {
+        this.sequence = Math.max(this.sequence, nextSequence);
       }
-    }
 
-    const auditLog = this.recordAudit(
-      {
-        actorId: null,
-        actorType: "platform_admin",
-        tenantId: null,
-        moduleName: "service-product",
-        actionName: "create_service_product",
-        resourceType: "service_product",
-        resourceId: hydratedRecord.serviceProductId,
-        newValuesSummary: {
-          serviceProductType: hydratedRecord.serviceProductType,
-          timing: hydratedRecord.timing,
-          active: hydratedRecord.active,
-          allowedLicenseTypes: [...hydratedRecord.allowedLicenseTypes],
-          meterRequired: hydratedRecord.meterRequired,
-          fixedFareAllowed: hydratedRecord.fixedFareAllowed,
-          defaultBillingMode: hydratedRecord.defaultBillingMode,
-          defaultProofRequirements: [
-            ...hydratedRecord.defaultProofRequirements,
-          ],
+      const auditLog = this.recordAudit(
+        {
+          actorId: null,
+          actorType: "platform_admin",
+          tenantId: null,
+          moduleName: "service-product",
+          actionName: "create_service_product",
+          resourceType: "service_product",
+          resourceId: hydratedRecord.serviceProductId,
+          newValuesSummary: {
+            serviceProductType: hydratedRecord.serviceProductType,
+            timing: hydratedRecord.timing,
+            active: hydratedRecord.active,
+            allowedLicenseTypes: [...hydratedRecord.allowedLicenseTypes],
+            meterRequired: hydratedRecord.meterRequired,
+            fixedFareAllowed: hydratedRecord.fixedFareAllowed,
+            defaultBillingMode: hydratedRecord.defaultBillingMode,
+            defaultProofRequirements: [
+              ...hydratedRecord.defaultProofRequirements,
+            ],
+          },
         },
-      },
-      requestId,
-    );
+        requestId,
+      );
 
-    const snapshot = this.cloneRecord(hydratedRecord);
-    if (options?.captureAudit) {
-      return { data: snapshot, auditLog };
+      const snapshot = this.cloneRecord(hydratedRecord);
+      if (options?.captureAudit) {
+        return { data: snapshot, auditLog };
+      }
+
+      return snapshot;
+    };
+
+    if (!this.repository?.isEnabled()) {
+      return commitCreate();
     }
 
-    return snapshot;
+    if (generated) {
+      this.inFlightGeneratedIds.add(serviceProductId);
+    }
+    return this.persist({ records: [hydratedRecord] }, "create_service_product")
+      .then(() => commitCreate())
+      .finally(() => {
+        if (generated) {
+          this.inFlightGeneratedIds.delete(serviceProductId);
+        }
+      });
   }
 
   updateServiceProduct(
@@ -450,14 +465,14 @@ export class ServiceProductService implements OnModuleInit {
     command: UpdateServiceProductCommand,
     requestId: string | undefined,
     options: { captureAudit: true },
-  ): Promise<AuditedActionResult<ServiceProductRecord>>;
+  ): AuditedActionResult<ServiceProductRecord>;
   updateServiceProduct(
     serviceProductId: string,
     command: UpdateServiceProductCommand,
     requestId?: string,
     options?: { captureAudit?: false },
-  ): Promise<ServiceProductRecord>;
-  async updateServiceProduct(
+  ): ServiceProductRecord;
+  updateServiceProduct(
     serviceProductId: string,
     command: UpdateServiceProductCommand,
     requestId?: string,
@@ -513,40 +528,49 @@ export class ServiceProductService implements OnModuleInit {
       updatedAt: new Date().toISOString(),
     });
 
-    await this.persist({ records: [updated] }, "update_service_product");
-    this.records = this.records.map((candidate) =>
-      candidate.serviceProductId === record.serviceProductId
-        ? updated
-        : candidate,
-    );
-    const auditLog = this.recordAudit(
-      {
-        actorId: null,
-        actorType: "platform_admin",
-        tenantId: null,
-        moduleName: "service-product",
-        actionName: "update_service_product",
-        resourceType: "service_product",
-        resourceId: record.serviceProductId,
-        newValuesSummary: {
-          timing: updated.timing,
-          active: updated.active,
-          allowedLicenseTypes: [...updated.allowedLicenseTypes],
-          meterRequired: updated.meterRequired,
-          fixedFareAllowed: updated.fixedFareAllowed,
-          defaultBillingMode: updated.defaultBillingMode,
-          defaultProofRequirements: [...updated.defaultProofRequirements],
+    const commitUpdate = () => {
+      this.records = this.records.map((candidate) =>
+        candidate.serviceProductId === record.serviceProductId
+          ? updated
+          : candidate,
+      );
+      const auditLog = this.recordAudit(
+        {
+          actorId: null,
+          actorType: "platform_admin",
+          tenantId: null,
+          moduleName: "service-product",
+          actionName: "update_service_product",
+          resourceType: "service_product",
+          resourceId: record.serviceProductId,
+          newValuesSummary: {
+            timing: updated.timing,
+            active: updated.active,
+            allowedLicenseTypes: [...updated.allowedLicenseTypes],
+            meterRequired: updated.meterRequired,
+            fixedFareAllowed: updated.fixedFareAllowed,
+            defaultBillingMode: updated.defaultBillingMode,
+            defaultProofRequirements: [...updated.defaultProofRequirements],
+          },
         },
-      },
-      requestId,
-    );
+        requestId,
+      );
 
-    const snapshot = this.cloneRecord(updated);
-    if (options?.captureAudit) {
-      return { data: snapshot, auditLog };
+      const snapshot = this.cloneRecord(updated);
+      if (options?.captureAudit) {
+        return { data: snapshot, auditLog };
+      }
+
+      return snapshot;
+    };
+
+    if (!this.repository?.isEnabled()) {
+      return commitUpdate();
     }
 
-    return snapshot;
+    return this.persist({ records: [updated] }, "update_service_product").then(
+      () => commitUpdate(),
+    );
   }
 
   private assertUniqueServiceProduct(
@@ -628,12 +652,13 @@ export class ServiceProductService implements OnModuleInit {
   ) {
     const providedId = this.normalizeOptionalString(command.serviceProductId);
     if (providedId) {
-      return { serviceProductId: providedId, generated: false };
+      return {
+        serviceProductId: providedId,
+        generated: false,
+        nextSequence: undefined,
+      };
     }
-    let nextSeq = Math.max(
-      this.sequence,
-      this.deriveNextSequence(this.records),
-    );
+    let nextSeq = this.sequence;
     let candidateId = `SVP-${String(nextSeq).padStart(6, "0")}`;
     while (
       this.records.some((record) => record.serviceProductId === candidateId) ||
@@ -642,7 +667,11 @@ export class ServiceProductService implements OnModuleInit {
       nextSeq += 1;
       candidateId = `SVP-${String(nextSeq).padStart(6, "0")}`;
     }
-    return { serviceProductId: candidateId, generated: true };
+    return {
+      serviceProductId: candidateId,
+      generated: true,
+      nextSequence: nextSeq + 1,
+    };
   }
 
   private async persist(

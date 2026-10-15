@@ -548,29 +548,61 @@ describe("SERVICE-PRODUCT-PERSISTENCE-ACK-20261015: canonical write ACK and erro
     );
     expect(policyEnvelope.data.active).toBe(true);
 
-    // Validation errors on invalid runtime profile window and unsupported license
-    await expect(
-      Promise.resolve().then(() =>
-        memoryService.upsertRuntimeProfilePolicy({
-          runtimeProfileCode: "ordinary_taxi",
-          serviceProductCode: "taxi_realtime",
-          active: true,
-          effectiveFrom: "2027-01-01T00:00:00.000Z",
-          effectiveUntil: "2026-01-01T00:00:00.000Z",
-        }),
-      ),
-    ).rejects.toThrow(ApiRequestError);
+    // Direct synchronous no-DB service mutations return synchronously and mutate memory/audit immediately
+    const syncCreated = memoryService.createServiceProduct(
+      {
+        serviceProductId: "SVP-MEM-SYNC-01",
+        serviceProductType: "insurance_replacement_vehicle",
+        displayName: "Sync In-Memory Replacement",
+        timing: "reservation",
+        defaultBillingMode: "partner_settlement",
+      },
+      "req-mem-sync-create",
+      { captureAudit: true },
+    );
+    expect(syncCreated).not.toBeInstanceOf(Promise);
+    expect(syncCreated.data.serviceProductId).toBe("SVP-MEM-SYNC-01");
+    expect(memoryService.getServiceProduct("SVP-MEM-SYNC-01").active).toBe(
+      true,
+    );
 
-    await expect(
-      Promise.resolve().then(() =>
-        memoryService.createServiceProduct({
-          serviceProductType: "taxi_reservation",
-          displayName: "Invalid License Product",
-          timing: "reservation",
-          defaultBillingMode: "meter",
-          allowedLicenseTypes: ["helicopter" as never],
-        }),
-      ),
-    ).rejects.toThrow(ApiRequestError);
+    const syncUpdated = memoryService.updateServiceProduct(
+      "SVP-MEM-SYNC-01",
+      { active: false },
+      "req-mem-sync-update",
+    );
+    expect(syncUpdated).not.toBeInstanceOf(Promise);
+    expect(syncUpdated.active).toBe(false);
+
+    const syncPolicy = memoryService.upsertRuntimeProfilePolicy({
+      runtimeProfileCode: "business_dispatch",
+      serviceProductCode: "insurance_replacement_vehicle",
+      active: true,
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+    });
+    expect(syncPolicy).not.toBeInstanceOf(Promise);
+    expect(syncPolicy.active).toBe(true);
+
+    // Synchronous validation errors throw synchronously on invalid runtime profile window and unsupported license
+    expect(() =>
+      memoryService.upsertRuntimeProfilePolicy({
+        runtimeProfileCode: "ordinary_taxi",
+        serviceProductCode: "taxi_realtime",
+        active: true,
+        effectiveFrom: "2027-01-01T00:00:00.000Z",
+        effectiveUntil: "2026-01-01T00:00:00.000Z",
+      }),
+    ).toThrow(ApiRequestError);
+
+    expect(() =>
+      memoryService.createServiceProduct({
+        serviceProductType: "taxi_reservation",
+        displayName: "Invalid License Product",
+        timing: "reservation",
+        defaultBillingMode: "meter",
+        allowedLicenseTypes: ["helicopter" as never],
+      }),
+    ).toThrow(ApiRequestError);
   });
 });
