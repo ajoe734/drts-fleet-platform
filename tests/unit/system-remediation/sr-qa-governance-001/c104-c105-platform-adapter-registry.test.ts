@@ -82,7 +82,7 @@ describe("C104 & C105: 平台轉接器登錄、生命週期、樂觀鎖與憑證
       updatedAt: new Date().toISOString(),
     };
 
-    const registered = service.registerPlatformAdapter(newAdapter);
+    const registered = await service.registerPlatformAdapter(newAdapter);
     expect(registered.id).toBe("adapter-custom-fleet-01");
     expect(registered.name).toBe("台灣智慧計程車轉接器");
 
