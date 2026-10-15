@@ -193,8 +193,19 @@ it("mounted list pages the full filtered dataset and preserves filters on naviga
   expect(html).toContain("FORMAL-50</a>");
   expect(html).not.toContain("FORMAL-1</a>");
   expect(html).not.toContain("FORMAL-51</a>");
-  expect(html).toContain("page=3");
-  expect(html).toContain("cardholder=09");
+  const paginationHtml = html.match(
+    /<nav aria-label="Booking pages">(.*?)<\/nav>/,
+  )?.[1];
+  expect(paginationHtml).toContain("page=1");
+  expect(paginationHtml).toContain("page=3");
+  for (const filter of [
+    "program=program_1",
+    "direction=outbound",
+    "period=2026-10",
+    "cardholder=09",
+    "state=assigned",
+  ])
+    expect(paginationHtml).toContain(filter);
   const detail = renderToStaticMarkup(
     await pages.detail({
       params: Promise.resolve({ bookingId: "ord_26" }),
@@ -204,4 +215,116 @@ it("mounted list pages the full filtered dataset and preserves filters on naviga
   expect(detail).toContain("FORMAL-26");
   expect(detail).toContain("page=2");
   expect(detail).toContain("program=program_1");
+});
+
+it("only a successful canonical empty detail lookup yields not-found", async () => {
+  request.mockImplementation(async () => envelope([]));
+  await expect(
+    loadPages().detail({ params: Promise.resolve({ bookingId: "missing" }) }),
+  ).rejects.toThrow("NOT_FOUND");
+  expect(notFound).toHaveBeenCalledOnce();
+  const html = renderToStaticMarkup(
+    await loadPages().list({ searchParams: Promise.resolve({ locale: "en" }) }),
+  );
+  expect(html).not.toContain("FORMAL-");
+  expect(html).not.toContain("BK-2406");
+  expect(html).not.toContain('role="alert"');
+});
+
+it.each([401, 403, 503])(
+  "mounted detail reports HTTP %i without not-found or body leakage",
+  async (status) => {
+    request.mockImplementation(
+      async () => new Response("sensitive upstream text", { status }),
+    );
+    const html = renderToStaticMarkup(
+      await loadPages().detail({
+        params: Promise.resolve({ bookingId: "ord_1" }),
+      }),
+    );
+    expect(html).toContain('role="alert"');
+    expect(html).not.toContain("sensitive");
+    expect(notFound).not.toHaveBeenCalled();
+  },
+);
+
+it("mounted tabs retain every other filter and count the full scope before pagination", async () => {
+  request.mockImplementation(async (url: string) =>
+    envelope(
+      String(url).includes("service-programs")
+        ? []
+        : Array.from({ length: 6 }, (_, i) => ({
+            ...formalOrder(i + 1),
+            status: i < 2 ? "assigned" : "completed",
+          })),
+    ),
+  );
+  const html = renderToStaticMarkup(
+    await loadPages().list({
+      searchParams: Promise.resolve({
+        locale: "en",
+        program: "program_1",
+        direction: "outbound",
+        period: "2026-10",
+        cardholder: "09",
+        state: "assigned",
+        page: "999",
+        pageSize: "10",
+      }),
+    }),
+  );
+  expect(html).toContain('All</span><span class="users-filter-badge">6');
+  expect(html).toContain('Assigned</span><span class="users-filter-badge">2');
+  expect(html).toContain('Completed</span><span class="users-filter-badge">4');
+  expect(html).toContain("FORMAL-1</a>");
+  expect(html).toContain("FORMAL-2</a>");
+  expect(html).not.toContain("FORMAL-3</a>");
+  const tabHref = html.match(/href="([^"]*state=completed[^"]*)"/)?.[1];
+  for (const filter of [
+    "program=program_1",
+    "direction=outbound",
+    "period=2026-10",
+    "cardholder=09",
+    "pageSize=10",
+  ])
+    expect(tabHref).toContain(filter);
+  expect(tabHref).not.toContain("page=999");
+});
+
+it("display branding cannot rewrite canonical order IDs or program identifiers/labels", async () => {
+  request.mockImplementation(async (url: string) =>
+    envelope(
+      String(url).includes("service-programs")
+        ? [
+            {
+              program_id: "acme-program",
+              tenant_id: identity.tenantId,
+              display_name: "ACME canonical program",
+            },
+          ]
+        : [
+            {
+              ...formalOrder(),
+              order_id: "ord_acme_original",
+              partner_program_id: "acme-program",
+            },
+          ],
+    ),
+  );
+  const searchParams = Promise.resolve({ bank: "contoso", locale: "en" });
+  const pages = loadPages();
+  for (const html of [
+    renderToStaticMarkup(await pages.list({ searchParams })),
+    renderToStaticMarkup(
+      await pages.detail({
+        searchParams,
+        params: Promise.resolve({ bookingId: "ord_acme_original" }),
+      }),
+    ),
+  ]) {
+    expect(html).toContain("ord_acme_original");
+    expect(html).toContain("acme-program");
+    expect(html).toContain("ACME canonical program");
+    expect(html).not.toContain("ord_contoso_original");
+  }
 });

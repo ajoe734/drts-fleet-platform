@@ -14,7 +14,6 @@ import {
 } from "@/lib/demo-tenants";
 import { loadBankBookingsData } from "@/lib/bank-bookings-data";
 import { getBankConsoleSession, bankConsoleHref } from "@/lib/session";
-import { tenantDisplayText } from "@/lib/tenant-display";
 import {
   BOOKING_PAGE_SIZES,
   paginateBookingItems,
@@ -280,7 +279,7 @@ export default async function BookingsPage({
               <option value="">{t("common.all", locale)}</option>
               {bookingData.data.programs.map((program) => (
                 <option key={program.code} value={program.code}>
-                  {tenantDisplayText(program.label, tenant)}
+                  {program.label}
                 </option>
               ))}
             </select>
@@ -407,15 +406,13 @@ export default async function BookingsPage({
                   >
                     {item.orderNo}
                   </Link>
-                  <span>{tenantDisplayText(item.orderId, tenant)}</span>
+                  <span>{item.orderId}</span>
                 </div>
               </Td>
               <Td mono>{item.cardholderRefMasked}</Td>
               <Td>
                 <div className="cell-stack">
-                  <strong>
-                    {tenantDisplayText(item.programLabel, tenant)}
-                  </strong>
+                  <strong>{item.programLabel}</strong>
                   <span>{item.programCode}</span>
                 </div>
               </Td>
