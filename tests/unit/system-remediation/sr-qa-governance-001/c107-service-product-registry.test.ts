@@ -25,15 +25,16 @@ describe("C107: 服務產品型別、資格要求、預約/即時時間、結算
     expect(initialList).toEqual([]);
     expect(initialList.length).toBe(0);
 
-    const controllerEnvelope = controller.listServiceProducts("req-c107-init-list");
+    const controllerEnvelope =
+      controller.listServiceProducts("req-c107-init-list");
     expect(controllerEnvelope.data.items).toEqual([]);
     expect(controllerEnvelope.meta.requestId).toBe("req-c107-init-list");
   });
 
-  it("建立合法服務產品主檔：支援 travel_agency_transfer，核對時間模式與預設結算模式", () => {
+  it("建立合法服務產品主檔：支援 travel_agency_transfer，核對時間模式與預設結算模式", async () => {
     const { service, auditNotificationService } = createService();
 
-    const created = service.createServiceProduct(
+    const created = await service.createServiceProduct(
       {
         serviceProductType: "travel_agency_transfer",
         serviceProductId: "SVP-TRAVEL-VIP-01",
@@ -42,7 +43,11 @@ describe("C107: 服務產品型別、資格要求、預約/即時時間、結算
         timing: "reservation",
         active: true,
         defaultBillingMode: "partner_settlement",
-        defaultProofRequirements: ["guest_manifest", "agency_voucher", "guest_manifest"], // 含重複項
+        defaultProofRequirements: [
+          "guest_manifest",
+          "agency_voucher",
+          "guest_manifest",
+        ], // 含重複項
       },
       "req-c107-create-product",
       { captureAudit: true },
@@ -68,10 +73,10 @@ describe("C107: 服務產品型別、資格要求、預約/即時時間、結算
     expect(audit?.requestId).toBe("req-c107-create-product");
   });
 
-  it("輸入邊界防禦：重複的 serviceProductId 或無效的結算模式即時拒絕，拋出 ApiRequestError", () => {
+  it("輸入邊界防禦：重複的 serviceProductId 或無效的結算模式即時拒絕，拋出 ApiRequestError", async () => {
     const { service } = createService();
 
-    service.createServiceProduct({
+    await service.createServiceProduct({
       serviceProductType: "enterprise_dispatch",
       serviceProductId: "SVP-CORP-01",
       displayName: "企業商務差旅",
@@ -80,7 +85,7 @@ describe("C107: 服務產品型別、資格要求、預約/即時時間、結算
     });
 
     // 重複 ID
-    expect(() =>
+    await expect(
       service.createServiceProduct({
         serviceProductType: "enterprise_dispatch",
         serviceProductId: "SVP-CORP-01",
@@ -88,10 +93,10 @@ describe("C107: 服務產品型別、資格要求、預約/即時時間、結算
         timing: "realtime",
         defaultBillingMode: "tenant_invoice",
       }),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
 
     // 非法結算模式
-    expect(() =>
+    await expect(
       service.createServiceProduct({
         serviceProductType: "enterprise_dispatch",
         serviceProductId: "SVP-CORP-02",
@@ -99,13 +104,13 @@ describe("C107: 服務產品型別、資格要求、預約/即時時間、結算
         timing: "realtime",
         defaultBillingMode: "invalid_crypto_token" as any,
       }),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
   });
 
-  it("更新服務產品屬性：修改 displayName、啟用狀態 (active) 與結算模式，並驗證審計留痕", () => {
+  it("更新服務產品屬性：修改 displayName、啟用狀態 (active) 與結算模式，並驗證審計留痕", async () => {
     const { service, auditNotificationService } = createService();
 
-    const created = service.createServiceProduct(
+    const created = await service.createServiceProduct(
       {
         serviceProductType: "enterprise_dispatch",
         serviceProductId: "SVP-UPDATE-TEST-01",
@@ -118,7 +123,7 @@ describe("C107: 服務產品型別、資格要求、預約/即時時間、結算
       { captureAudit: true },
     );
 
-    const updated = service.updateServiceProduct(
+    const updated = await service.updateServiceProduct(
       created.data.serviceProductId,
       {
         displayName: "旗艦級企業智慧接駁",
@@ -145,10 +150,10 @@ describe("C107: 服務產品型別、資格要求、預約/即時時間、結算
     expect(updateLog?.requestId).toBe("req-c107-update");
   });
 
-  it("多端與控制器一致性：Controller 與 Service 底層 registry 查詢資料完全同構一致", () => {
+  it("多端與控制器一致性：Controller 與 Service 底層 registry 查詢資料完全同構一致", async () => {
     const { service, controller } = createService();
 
-    const receipt = controller.createServiceProduct(
+    const receipt = await controller.createServiceProduct(
       {
         serviceProductType: "taxi_realtime",
         serviceProductId: "SVP-TAXI-001",
