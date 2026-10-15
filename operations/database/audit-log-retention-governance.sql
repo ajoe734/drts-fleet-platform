@@ -49,6 +49,9 @@ WITH latest_governance AS (
             OR (NULLIF(p.new_value->>'manifestHash', '') IS NOT NULL
               AND p.new_value->>'manifestHash' = a.new_value->>'manifestHash')
             OR (p.resource_type = 'evidence_deletion_exception'
+              AND p.new_value->>'sourceResourceType' = 'audit_log'
+              AND p.new_value->>'sourceResourceId' = a.audit_id::text)
+            OR (p.resource_type = 'evidence_deletion_exception'
               AND p.new_value->>'sourceResourceType' = a.resource_type
               AND p.new_value->>'sourceResourceId' = a.resource_id)
           )

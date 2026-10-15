@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuditLogRecord } from "@drts/contracts";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { AuditController } from "../../../apps/api/src/modules/audit-notification/audit.controller";
@@ -107,6 +107,10 @@ function fixture() {
     failLoad: () => {
       loadFails = true;
     },
+    recover: () => {
+      loadFails = false;
+      recentFails = false;
+    },
     failRecent: () => {
       recentFails = true;
     },
@@ -115,6 +119,7 @@ function fixture() {
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 describe("C099 canonical governance ACK and unavailable authority", () => {
+  afterEach(() => vi.unstubAllEnvs());
   for (const operation of [
     "place",
     "release",
@@ -229,26 +234,51 @@ describe("C099 canonical governance ACK and unavailable authority", () => {
     const service = new AuditNotificationService(f.repository);
     await service.onModuleInit();
     const controller = new AuditController(service);
-    expect(() => controller.listEvidenceLegalHolds()).toThrow();
-    expect(() => controller.listEvidenceDeletionExceptions()).toThrow();
+    expect(() => controller.listEvidenceLegalHolds()).toThrowError(
+      expect.objectContaining({ code: "EVIDENCE_GOVERNANCE_UNAVAILABLE" }),
+    );
+    expect(() => controller.listEvidenceDeletionExceptions()).toThrowError(
+      expect.objectContaining({ code: "EVIDENCE_GOVERNANCE_UNAVAILABLE" }),
+    );
     expect(() =>
       controller.getEvidenceSubjectGovernance("audit_log", "old-row"),
-    ).toThrow();
+    ).toThrowError(
+      expect.objectContaining({ code: "EVIDENCE_GOVERNANCE_UNAVAILABLE" }),
+    );
     await expect(
       controller.placeEvidenceLegalHold(
         { ...holdCommand, caseNumber: "CASE-2" },
         identity,
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrowError(
+      expect.objectContaining({ code: "EVIDENCE_GOVERNANCE_UNAVAILABLE" }),
+    );
     expect(service.listAuditLogs(identity).length).toBeGreaterThan(0);
+    vi.stubEnv(
+      "CONTROLLED_DOWNLOAD_SIGNING_SECRET",
+      "socket-free-reporting-test-secret",
+    );
     const reports = new ReportingFilingService(service);
-    const job = reports.listReportJobs()[0]!;
+    const job = reports.createReportJob({
+      jobType: "revenue_summary",
+      format: "csv",
+    });
+    await tick();
+    expect(reports.listReportJobs()[0]?.artifact).toBeTruthy();
     expect(() =>
       reports.getReportJob(job.jobId, undefined, identity),
-    ).toThrow();
+    ).toThrowError(
+      expect.objectContaining({ code: "EVIDENCE_GOVERNANCE_UNAVAILABLE" }),
+    );
     expect(
       f.stored.filter((row) => row.resourceType === "evidence_legal_hold"),
     ).toHaveLength(1);
+    f.recover();
+    await service.onModuleInit();
+    expect(
+      controller.getEvidenceSubjectGovernance("audit_log", "old-row").data
+        .deletionSuppressed,
+    ).toBe(true);
   });
 
   it("successful empty, disabled repository and absent repository are known empty", async () => {
@@ -288,5 +318,144 @@ describe("C099 canonical governance ACK and unavailable authority", () => {
       service.getEvidenceSubjectGovernance("audit_log", "old-row")
         .deletionSuppressed,
     ).toBe(true);
+  });
+  it("serializes concurrent duplicates through ACK and continues after a rejected command", async () => {
+    const f = fixture();
+    await f.service.onModuleInit();
+    const gate = deferred();
+    f.setGate(gate);
+    const first = f.controller.placeEvidenceLegalHold(holdCommand, identity);
+    const duplicate = f.controller.placeEvidenceLegalHold(
+      holdCommand,
+      identity,
+    );
+    const duplicateResult = duplicate.catch((error) => error);
+    await tick();
+    expect(f.service.listEvidenceLegalHolds()).toEqual([]);
+    gate.resolve();
+    const placed = await first;
+    expect(await duplicateResult).toMatchObject({
+      code: "EVIDENCE_LEGAL_HOLD_ALREADY_ACTIVE",
+    });
+    expect(
+      f.stored.filter((row) => row.resourceType === "evidence_legal_hold"),
+    ).toHaveLength(1);
+    const rejected = deferred();
+    f.setGate(rejected);
+    const release = f.controller.releaseEvidenceLegalHold(
+      placed.data.holdId,
+      { releaseReason: "closed" },
+      identity,
+    );
+    const rejectedResult = release.catch((error) => error);
+    await tick();
+    rejected.reject(new Error("rejected release"));
+    expect(await rejectedResult).toBeInstanceOf(Error);
+    const retry = deferred();
+    retry.resolve();
+    f.setGate(retry);
+    await f.controller.releaseEvidenceLegalHold(
+      placed.data.holdId,
+      { releaseReason: "closed" },
+      identity,
+    );
+    expect(f.service.listEvidenceLegalHolds()[0]?.status).toBe("released");
+  });
+
+  it("preserves authenticated roles, reason/expiry rules, tenant/manifest projections and transient buffer refusal", async () => {
+    const service = new AuditNotificationService();
+    await expect(
+      service.placeEvidenceLegalHold(holdCommand, null),
+    ).rejects.toMatchObject({ code: "EVIDENCE_GOVERNANCE_IDENTITY_REQUIRED" });
+    await expect(
+      service.placeEvidenceLegalHold(holdCommand, {
+        ...identity,
+        actorType: "tenant_admin",
+        realm: "tenant",
+        tenantId: "tenant-a",
+      }),
+    ).rejects.toMatchObject({ code: "EVIDENCE_GOVERNANCE_FORBIDDEN" });
+    await expect(
+      service.placeEvidenceLegalHold(
+        { ...holdCommand, family: "voice_live_buffer" },
+        identity,
+      ),
+    ).rejects.toMatchObject({ code: "EVIDENCE_GOVERNANCE_FORBIDDEN" });
+    await expect(
+      service.placeEvidenceLegalHold(
+        { ...holdCommand, reasonCode: "invalid" as never },
+        identity,
+      ),
+    ).rejects.toMatchObject({
+      code: "EVIDENCE_GOVERNANCE_INVALID_REASON_CODE",
+    });
+    await expect(
+      service.registerEvidenceDeletionException(
+        { ...exceptionCommand, expiresAt: "2020-01-01T00:00:00Z" },
+        identity,
+      ),
+    ).rejects.toMatchObject({ code: "EVIDENCE_GOVERNANCE_INVALID_EXPIRY" });
+    const placed = await service.placeEvidenceLegalHold(
+      { ...holdCommand, tenantId: "tenant-a", manifestHash: "hash-a" },
+      identity,
+    );
+    expect(
+      service.getEvidenceSubjectGovernance("audit_log", "old-row", {
+        tenantId: "tenant-a",
+        manifestHash: "hash-a",
+      }).deletionSuppressed,
+    ).toBe(true);
+    expect(
+      service.getEvidenceSubjectGovernance("audit_log", "old-row", {
+        tenantId: "tenant-b",
+        manifestHash: "hash-a",
+      }).deletionSuppressed,
+    ).toBe(false);
+    expect(
+      service.getEvidenceSubjectGovernance("audit_log", "old-row", {
+        tenantId: "tenant-a",
+        manifestHash: "hash-b",
+      }).deletionSuppressed,
+    ).toBe(false);
+    await expect(
+      service.releaseEvidenceLegalHold(
+        placed.holdId,
+        { releaseReason: "closed" },
+        { ...identity, actorType: "ops_user", realm: "ops" },
+      ),
+    ).rejects.toMatchObject({ code: "EVIDENCE_GOVERNANCE_FORBIDDEN" });
+    await service.releaseEvidenceLegalHold(
+      placed.holdId,
+      { releaseReason: "closed" },
+      identity,
+    );
+    await expect(
+      service.releaseEvidenceLegalHold(
+        placed.holdId,
+        { releaseReason: "again" },
+        identity,
+      ),
+    ).rejects.toMatchObject({ code: "EVIDENCE_LEGAL_HOLD_ALREADY_RELEASED" });
+    const exception = await service.registerEvidenceDeletionException(
+      exceptionCommand,
+      identity,
+    );
+    await expect(
+      service.registerEvidenceDeletionException(exceptionCommand, identity),
+    ).rejects.toMatchObject({
+      code: "EVIDENCE_DELETION_EXCEPTION_ALREADY_ACTIVE",
+    });
+    await service.resolveEvidenceDeletionException(
+      exception.exceptionId,
+      { resolutionNote: "closed" },
+      identity,
+    );
+    await expect(
+      service.resolveEvidenceDeletionException(
+        exception.exceptionId,
+        { resolutionNote: "again" },
+        identity,
+      ),
+    ).rejects.toMatchObject({ code: "EVIDENCE_DELETION_EXCEPTION_NOT_ACTIVE" });
   });
 });

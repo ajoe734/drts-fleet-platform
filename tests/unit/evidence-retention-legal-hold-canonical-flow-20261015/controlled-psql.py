@@ -32,8 +32,6 @@ def fail(message):
     sys.exit(3 if stop_on_error else 0)
 def aged(rows, days, at=now):
     return [row for row in rows if row['created_at'] < iso(at - dt.timedelta(days=days))]
-if mode == 'sql' and 'DELETE FROM admin.audit_logs' in sql:
-    fail('permission / trigger / transaction rejection')
 match = re.search(r'CREATE TEMP TABLE audit_retention_candidates ON COMMIT DROP AS\s*(.*?);', sql, re.S)
 if match:
     # Evaluate the actual producer SELECT; no duplicate hold/exception selector.
@@ -77,6 +75,8 @@ if match:
         fail('missing exact identity purge')
     if sql.index('EXCEPT ALL') > sql.index('DELETE FROM admin.audit_logs'):
         fail('verification after deletion')
+    if mode == 'sql':
+        fail('permission / trigger / transaction rejection')
     state['rows'] = [row for row in state['rows'] if row['audit_id'] not in selected_ids]
     save()
     print(len(selected))
@@ -95,6 +95,8 @@ elif 'json_build_object' in sql:
     state['rows'].extend(state.pop('concurrent', []))
     save()
 elif 'DELETE FROM' in sql:
+    if mode == 'sql':
+        fail('permission / trigger / transaction rejection')
     purged = aged(state['rows'], days, now + dt.timedelta(seconds=2))
     state['rows'] = [row for row in state['rows'] if row not in purged]
     save()

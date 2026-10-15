@@ -294,6 +294,22 @@ describe("C100 actual archival shell with controlled client (no PG/socket/server
         .sort(),
     );
   });
+
+  it("retains UUID audit references and subjects whose physical tenant was normalized away", () => {
+    const data = [
+      row("free"),
+      { ...row("unknown-tenant"), tenant_id: null },
+      hold("h", "unknown-tenant"),
+      row("audit-reference"),
+      exception("e", "some-other-subject", {
+        sourceResourceType: "audit_log",
+        sourceResourceId: "audit-reference",
+      }),
+    ];
+    const r = run(data as ReturnType<typeof row>[]);
+    expect(r.result.status, r.result.stderr).toBe(0);
+    expect(r.archived.map((row) => row.audit_id)).toEqual(["free"]);
+  });
   for (const failure of ["sql", "write", "verify"] as const) {
     it(`${failure} failure is nonzero, retains source and cannot print purge success`, () => {
       const r = run([row("free")], { failure });
