@@ -140,16 +140,16 @@ rollback、token 或 authority 判斷。這是無 socket 最小重現，不冒�
 腳本整體 exit 0 表示四組舊產品失敗符合預期；命令、source SHA、子退出碼及完整 log 仍在
 `historical/report.json`，沒有 reset／切換活躍工作樹。
 
-| 本輪檢查                                                                          | 結果                                                 | 證據（`ci-followup/`）                                       |
-| --------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------ |
-| 前節 aggregate 原命令，包含新增 mutation-authority                                | exit 0；18 files／357 pass，另 1 file／3 hosted skip | `regression.log`、`regression.json`                          |
-| API 原 5 個 unit files＋`tests/integration/int-mtx-001-runtime-authority.test.ts` | exit 0；6 files／172 pass                            | `api-regression.log`                                         |
-| Contracts／control-plane-auth build、API typecheck                                | exit 0                                               | `build-contracts.log`、`build-auth.log`、`api-typecheck.log` |
-| Root typecheck                                                                    | exit 0                                               | `root-typecheck.log`                                         |
-| Scoped ESLint（本輪 3 個產品檔／2 個測試檔）                                      | exit 0                                               | `lint.log`                                                   |
-| Task-owned Prettier check／`git diff --check`                                     | exit 0                                               | `format.log`／closeout stdout                                |
-| Immutable 353／8fed／7e／a6 before regressions                                    | 腳本 exit 0；四組子測試產品斷言 exit 1               | `historical.log`、`../historical/report.json`                |
-| 新 SHA hosted PG／HTTP、原取消競態／token subject、review／CI／merge              | pending                                              | 同候選 lifecycle 待收錄，未記 acceptance credit              |
+| 本輪檢查                                                                                   | 結果                                                 | 證據（`ci-followup/`）                                       |
+| ------------------------------------------------------------------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------ |
+| 前節 aggregate 原命令，包含新增 mutation-authority                                         | exit 0；18 files／357 pass，另 1 file／3 hosted skip | `regression.log`、`regression.json`                          |
+| API 原 5 個 unit files＋`apps/api/tests/integration/int-mtx-001-runtime-authority.test.ts` | exit 0；6 files／172 pass                            | `api-regression.log`                                         |
+| Contracts／control-plane-auth build、API typecheck                                         | exit 0                                               | `build-contracts.log`、`build-auth.log`、`api-typecheck.log` |
+| Root typecheck                                                                             | exit 0                                               | `root-typecheck.log`                                         |
+| Scoped ESLint（本輪 3 個產品檔／2 個測試檔）                                               | exit 0                                               | `lint.log`                                                   |
+| Task-owned Prettier check／`git diff --check`                                              | exit 0                                               | `format.log`／closeout stdout                                |
+| Immutable 353／8fed／7e／a6 before regressions                                             | 腳本 exit 0；四組子測試產品斷言 exit 1               | `historical.log`、`../historical/report.json`                |
+| 新 SHA hosted PG／HTTP、原取消競態／token subject、review／CI／merge                       | pending                                              | 同候選 lifecycle 待收錄，未記 acceptance credit              |
 
 依賴 symlinks 原指向缺件的 canonical tree；僅移除本 isolated worktree 的 dependency symlinks，
 以 Node `v22.23.2`／pnpm `10.33.0` frozen-lockfile／offline／ignore-scripts 安裝成功（exit 0；
@@ -157,3 +157,23 @@ rollback、token 或 authority 判斷。這是無 socket 最小重現，不冒�
 本輪產品與 TS tests 執行版本為 `0f9c8c69c664dd9e34f9f65d9d6d62d8f29c7546`；
 後續只有 immutable archive runner／本文件，沒有再改產品。所有本輪啟動的本機檢查已結束並讀取結果。
 未部署或啟 VM 上的 API／PG／HTTP／preview／browser／Docker 服務。
+
+## 918f359b 文件退修：R3 驗收證據路徑
+
+來源為 Codex 於 2026-10-15T05:35:21Z 對候選
+`918f359b2bb87ad35d94b81c522ad4b1af8eac9a`、generation
+`9718176c226443eb9715f56ae6444e40` 的 reopen。
+原 F1–F4、R1／R2、C1／C2 及三個 acceptance keys 與前輪結果均保留。
+Reviewer 獨立確認 C1／C2 的正式呼叫路徑與最小回歸已修復；此次只有文件引用修正，
+既有產品碼、案例、API 工作目錄下的可執行命令及 CI guard 均未變更。
+
+| Finding／驗收項                                            | 原始碼依據與修改位置                                                                                                                         | 舊版重現 → 修正版結果                                                                           | 命令、退出碼、版本與證據                                                                                                                                                                                                                                                                                                                                                               | 未驗項與具體限制                                                                 |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| R3：API 相對路徑誤作 repository 引用，必跑 CI 失敗         | 本文件 C1／C2 檢查表改用 tracked `apps/api/tests/integration/int-mtx-001-runtime-authority.test.ts`；`git ls-files --error-unmatch` 核實路徑 | 舊 918f359b guard exit 1，唯一 finding 為 cited-paths；修正後同一 guard exit 0，全部 0 findings | `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`；before 為 918f359b，after 為本次僅文件修正；本輪 `.local/pax-shared-order-flow-20261015/r3-cited-path/canonical-before.log`／`canonical-after.log`。舊 hosted [Canonical consistency job](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38687306875/job/116265111148) 同項失敗 | 非產品行為修正；新候選完整 hosted CI／獨立 review／merge 待原 lifecycle 收錄     |
+| `pax-shared-order_persisted-cross-role-flow`               | 原正式 schema／repository／跨角色同 orderId、quote、peer/history 案例原樣保留                                                                | 本輪不重跑產品案例；前輪結果依原 SHA 保留                                                       | 前節 C1／C2 與 F1–F4 證據；新 SHA 以本次 handoff 為準                                                                                                                                                                                                                                                                                                                                  | pending：新候選 production-schema PG 同單流程，不沿用相鄰候選信用                |
+| `pax-shared-order_named-events-and-reconnect`              | 原 mounted HTTP、Web／Native subscriber、換 instance／取消案例原樣保留                                                                       | 本輪不重跑產品案例                                                                              | 前節 F1／F2／R2／C1 證據                                                                                                                                                                                                                                                                                                                                                               | pending：新候選 hosted HTTP frame／consumers 證據；VM 不開 listener              |
+| `pax-shared-order_payment-rating-and-candidate-validation` | 原模擬 PSP、paid／24h、token／rating／consent 原子性案例原樣保留                                                                             | 本輪 canonical guard 修復；原 scoped 結果不計新 SHA 全 CI 通過                                  | 前節 F4／R2／C2 證據；本輪 guard、格式及 diff 檢查                                                                                                                                                                                                                                                                                                                                     | pending：新候選 hosted PG／完整 CI、獨立 review 與 merge，無新增 acceptance 信用 |
+
+本輪採文件修正相稱的 canonical guard、tracked path 核對、Prettier 與 diff 檢查，
+結果均 exit 0；全部已啟動的本機檢查結束後才 handoff。
+未啟 VM 產品／PG／HTTP／browser／Docker 服務，未部署。
