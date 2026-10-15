@@ -26,7 +26,7 @@ afterEach(() => {
 // Persisted fixtures use V0009 UUID identities and complete governance records.
 const names = new Map<string, string>();
 function uuid(name: string) {
-  if (/^[0-9a-f]{8}-/.test(name)) return name;
+  if (/^[0-9a-f]{8}-/i.test(name)) return name;
   const hex = createHash("sha256").update(name).digest("hex");
   const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
   names.set(id, name);
@@ -539,6 +539,42 @@ describe("C100 actual archival shell with controlled client (no PG/socket/server
           )
           .map((row) => row.audit_id)
           .sort(),
+      );
+    });
+  }
+  for (const protection of ["hold", "exception", "audit-source"] as const) {
+    it(`${protection} preserves UUID tenant case variants without folding opaque tenant identities`, () => {
+      const tenant = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      const other = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+      const cases = [
+        { id: "uuid-physical", physical: tenant, payload: null, authority: tenant.toUpperCase(), protected: true },
+        { id: "uuid-summary-conflict", physical: tenant, payload: other, authority: tenant.toUpperCase(), protected: true },
+        { id: "uuid-other-physical", physical: other, payload: tenant, authority: tenant.toUpperCase(), protected: false },
+        { id: "uuid-null-physical", physical: null, payload: tenant.toUpperCase(), authority: tenant, protected: true },
+        { id: "uuid-null-other", physical: null, payload: other, authority: tenant.toUpperCase(), protected: false },
+        { id: "uuid-unknown", physical: null, payload: null, authority: tenant.toUpperCase(), protected: true },
+        { id: "opaque-same", physical: null, payload: "Tenant-A", authority: "Tenant-A", protected: true },
+        { id: "opaque-different-case", physical: null, payload: "tenant-a", authority: "Tenant-A", protected: false },
+        { id: "opaque-uuid-shape", physical: null, payload: "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa", authority: "AAAAAAAA-AAAA-7AAA-8AAA-AAAAAAAAAAAA", protected: false },
+      ];
+      const targets = cases.map((c) => row(c.id, undefined, undefined, c.payload ? { tenantId: c.payload } : null, undefined, c.physical));
+      const protections = cases.map((c, index) => {
+        const subject = targets[index]!.audit_id;
+        const event = protection === "hold"
+          ? hold(`case-hold-${index}`, subject)
+          : exception(`case-exception-${index}`, protection === "audit-source" ? "unrelated" : subject,
+              protection === "audit-source" ? { sourceResourceType: "audit_log", sourceResourceId: subject } : {});
+        event.tenant_id = c.physical;
+        event.new_value!.tenantId = c.authority;
+        return event;
+      });
+      const r = run([...targets, ...protections]);
+      const lawful = cases.filter((c) => !c.protected).map((c) => uuid(c.id)).sort();
+      expect(r.result.status, r.result.stderr).toBe(0);
+      expect(r.state.selected?.sort()).toEqual(lawful);
+      expect(r.archived.map((r) => r.audit_id).sort()).toEqual(lawful);
+      expect(r.state.rows.map((r) => r.audit_id).sort()).toEqual(
+        [...targets, ...protections].filter((r) => !lawful.includes(r.audit_id)).map((r) => r.audit_id).sort(),
       );
     });
   }

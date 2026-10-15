@@ -229,6 +229,32 @@ describe("C099 canonical governance ACK and unavailable authority", () => {
     }
   }
 
+  for (const operation of ["place", "register"] as const) {
+    it(`${operation} accepts UUID tenant spelling and reads the same identity after persisted replay`, async () => {
+      const f = fixture();
+      await f.service.onModuleInit();
+      const tenant = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
+      const subjectId = "11111111-1111-4111-8111-111111111111";
+      const result = operation === "place"
+        ? await f.controller.placeEvidenceLegalHold({ ...holdCommand, subjectId, tenantId: tenant }, identity)
+        : await f.controller.registerEvidenceDeletionException({ ...exceptionCommand, subjectId, tenantId: tenant }, identity);
+      expect(result.data).toMatchObject({ status: "active", tenantId: tenant, subjectId });
+      const persisted = f.stored.find((r) => r.resourceType === (operation === "place" ? "evidence_legal_hold" : "evidence_deletion_exception"))!;
+      // Observe the real repository INSERT inputs before simulating PostgreSQL's
+      // canonical UUID text at the controlled query transport read boundary.
+      expect(persisted.tenantId).toBe(tenant);
+      expect(persisted.newValuesSummary?.tenantId).toBe(tenant);
+      persisted.tenantId = tenant.toLowerCase();
+      const restarted = new AuditNotificationService(f.repository);
+      await restarted.onModuleInit();
+      for (const service of [f.service, restarted]) {
+        for (const tenantId of [tenant, tenant.toLowerCase()])
+          expect(service.getEvidenceSubjectGovernance("audit_log", subjectId, { tenantId }).deletionSuppressed).toBe(true);
+        expect(service.getEvidenceSubjectGovernance("audit_log", subjectId, { tenantId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }).deletionSuppressed).toBe(false);
+      }
+    });
+  }
+
   it("failed configured trail is unavailable in lists, controller, commands and report projection; audit feed retains fallback", async () => {
     const f = fixture();
     await f.service.onModuleInit();
