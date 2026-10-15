@@ -1034,6 +1034,15 @@ the helper from 20 to 22. Every tracked product app/package, CI/deploy workflow
 and hosted config remains unchanged. There is no timeout, clock, retry, skip,
 order-count or business-guard change.
 
+The remaining Passenger selectors in this same spec were also checked against
+their actual producers: `BookingScreen`'s quote amount/confirmation checkbox and
+button; `PaymentMethodsScreen` / `PAY_T` bind controls and unpaid notice;
+`RatingStars` / `RatingCard`'s exact 1/5-star buttons, low-score support checkbox
+and submit button; the cancellation views; history's actual `/rides/${id}` links
+and `乘客取消`; `ReviewRideControls`' order output/retry button; and
+`ReviewRecordPage`'s HTML download button. Their visible names/contracts match;
+their future A/B/C runtime behavior remains unverified by this source audit.
+
 Evidence is copied at handoff to canonical
 `.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate4981-booking-caller-rework/`.
 Node 22.23.2, pnpm 10.33.0, locked Next 16.3.8 and Vitest 4.1.4 were used.
@@ -1041,5 +1050,9 @@ Only this isolated worktree's 22 dependency symlinks were removed and replaced b
 an offline frozen installation with scripts disabled, exit 0; canonical
 dependencies and lockfiles remain unchanged. No Playwright CLI, browser, product
 HTTP/preview/server, PG or Compose runtime was started on this VM. The original
-4981 run's remaining jobs are being allowed to finish before the normal push;
-no cancellation or rerun was requested. All three acceptance keys remain pending.
+4981 browser failure is fully archived. The task-spec supplement at 12:28 UTC
+explicitly removes waiting for the remaining old-generation CI jobs: after this
+round's own checks, push normally and hand off the replacement SHA. No manual
+cancellation or rerun was requested; any concurrency-driven cancellation of old
+jobs is partial/cancelled evidence, never PASS. All three acceptance keys remain
+pending.
