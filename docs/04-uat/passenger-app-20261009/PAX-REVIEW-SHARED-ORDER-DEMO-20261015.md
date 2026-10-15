@@ -1308,3 +1308,95 @@ runtime or Playwright CLI ran. The old known-red run was naturally cancelled by
 ordinary checkpoint pushes; its original sole collector retains partial results.
 All checks started in this owner turn are terminal and their results were read.
 All three required acceptance keys remain pending.
+
+## R19a / R19b — formal wire diagnostics and preserved-history replacement
+
+**R19 assignment still fails; this replacement fixes its diagnostic and commit
+history defects. It does not claim a completed journey.** The independent
+review of `a9e751ef15e354e04c10c4a855f99f06edcdc91a`, generation
+`7f93297c98634027bb2a119c1b0c7b95`, returned the two R19a findings. Its real
+hosted run `38746031158`, job `116461579702`, subsequently failed at the first
+assign with `ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT` (raw line 2351). Preparation,
+registration, Passenger login/binding, A booking and Ops dispatch passed.
+Reassignment, Driver acceptance and B/C were not reached. The missing reason
+output is not evidence that reasons were empty. Artifact `11979951904` ZIP
+matches GitHub digest
+`41335d723cb895073ad0e82f13da67ded1ac87b1c9fe8b1a2191179553882794`;
+the raw log hash is
+`026cfdf4de95a95aaa27b312b1628804611fc760d21f419b73292cfb0a282f55`.
+The original sole collector retains the qualified receipt and remaining jobs.
+
+The actual production wire path is `ApiRequestError` → globally registered
+`SnakeCaseExceptionFilter.catch` → `deepToSnakeCase` → transparent Ops BFF.
+The diagnostic now reads `details.reason_codes`, retaining internal
+`reasonCodes` compatibility, and projects only the existing seven fixed enums.
+It also recognizes the existing `REDISPATCH_ASSIGNMENT_ALREADY_CLOSED` from
+`OwnedMobilityRepository.loadOrderCancellationForUpdate`. That guard is reached
+by both assignment commands through `createDispatchAssignment` when an active
+assignment has zero or multiple tasks. No product guard, payload, assertion,
+timeout or eligibility policy changes in this repair.
+
+The regression uses the actual exception filter with only its HTTP response
+adapter substituted. Four reconciliation cases use the actual repository guard
+with SQL row responses substituted, then the real filter and diagnostic. The
+actual Ops DOM/SDK/BFF caller now receives error fixtures serialized through the
+production `deepToSnakeCase`. Success, both commands, unknown/malformed fields
+and non-JSON refusal remain covered. These are diagnostic checks, not a PG
+execution or a reproduction of the historical eligibility root cause.
+
+| Finding / acceptance                                               | Source and repair                                                                          | Old → replacement result                                                              | Execution and evidence                                                                                             | Remaining limit                                                                                                                  |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| R19a F1: genuine HTTP eligibility reasons disappear                | `dispatch-diagnostic.ts`; actual filter/serializer and Ops caller regressions              | Immutable a9e loses known reasons; replacement retains only the fixed enums           | Two-file immutable run: 9 fail / 21 pass, exit 1; replacement focused run: 41 pass, exit 0                         | Controlled HTTP boundary; exact historical reason still unknown                                                                  |
+| R19a F2: real repository reconciliation code prints `unclassified` | Same helper; actual `loadOrderCancellationForUpdate` guard with 0/2 tasks, assign/reassign | Immutable a9e loses the code; replacement projects it and preserves the 409 rejection | Same before/after runs; product repository/filter execute without substituting their logic                         | Not evidence that this was the historical assignment cause                                                                       |
+| R19b: published 882b subject fails existing commit check           | Authorized replacement branch from accepted dev; original refs/PR preserved                | Old range exits 1 for `test(...)`; replacement range passes unchanged checker         | `recovery-proof.json`, bundle verification, original job `116460248280`; final candidate rechecks its entire range | New same-SHA hosted CI and review still required                                                                                 |
+| R19: genuine first assign fails                                    | Original Ops → Owned transaction, eligibility recheck/current driver requirements          | a9e now proves the wrapper code above, but no fixed reason is available               | Qualified original run/job/artifact above, one failed browser case / zero skips                                    | Product finding remains unresolved; correct preparation/readback only after specific reason is established, retaining all guards |
+| `pax-review-demo_real-shared-order-across-roles`                   | All original role/UUID and three formal-schema PG companions retained                      | Pending, zero acceptance credit                                                       | Original sources byte-identical to a9e except the diagnostic and two tests                                         | New exact-candidate PG execution with zero skips and full Driver/Passenger/Ops journey required                                  |
+| `pax-review-demo_external-simulation-and-complete-journeys`        | Original A/B/C, payment/support/cancellation/history and real waits retained               | Pending, zero acceptance credit                                                       | Actual hosted browser spec, booking/progress/evidence helpers unchanged                                            | Three completed independent real UUID journeys still required                                                                    |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`           | Original workflow/config and immutable Cloud Run delivery retained                         | Pending, zero acceptance credit                                                       | Replacement same-SHA review/full CI, normal merge and sole combined immutable deployment remain required           | No VM runtime, deployment, workflow rerun/cancellation or delivery claim                                                         |
+
+R19b was explicitly authorized in the original task spec. Original published
+branch `codex2/pax-review-shared-order-demo-20261015` and PR #2643 remain at
+a9e. Local original checkpoints `7828201c2` and
+`5bd1886938eeef8b3b82afda6464304772faf81a` are preserved, with a verified Git
+bundle in the evidence. Replacement branch is
+`codex2/pax-review-shared-order-demo-20261015-recovery-r19a`, based on accepted
+dev `9b343586196bfa963d170d3d5a9683b012398111`. Applying the full binary diff
+of the clean Git merge tree produced the exact same tree
+`ab4785777dcc675068c82e2bcecd653034aff5c2`, committed and normally pushed as
+`efae20f8d9a10f007703215e9efa4d21c48d7a52`. All 111 task paths are retained;
+no rebase, amend, reset, force-push, checker change or old-ref deletion occurred.
+That implementation checkpoint is the execution source; the final candidate
+adds only this UAT update. The only task-source differences from a9e are the
+helper and its two regression files. The additional accepted dev history is
+preserved separately, including its unrelated history-recovery document.
+
+Static source proof verifies all 42 accepted ServiceProduct service members and
+eight repository members, except their already-reviewed added targeted readers,
+are unchanged. Accepted Tenant/Fleet ACK ancestry and production sources, and
+Owned's accepted `createReferralPassengerBooking` method, are retained. The
+original complete browser spec and workflow/deploy/config are byte-identical
+to a9e. Prior R1–R18 evidence and limits above remain applicable as history,
+not new-candidate CI or acceptance credit.
+
+Final checks, all terminal and read, used Node 22.23.2 / pnpm 10.33.0 /
+Vitest 4.1.4 and the locked dependencies:
+
+- `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/dispatch-diagnostic.test.ts tests/unit/pax-review-shared-order-demo-20261015/hosted-dispatch-caller.test.tsx --config .local/pax-review-shared-order-demo-20261015/r19a-wire/vitest.before.config.mts --maxWorkers=2 --reporter=verbose`: **exit 1, 9 fail / 21 pass** (`before-formal-filter-repository.log`). The load hook reads only the helper from immutable a9e via `git show`; it neither resets the worktree nor replaces the product filter/repository/caller.
+- The same two files plus original booking diagnostic and journey progress, without the hook: **exit 0, 41 pass** (`focused-formal-filter-repository.log`).
+- The original full namespace plus booking-history/shared-order/payment/account-session/web-shell and service-product/accepted-ACK regressions: **exit 0, 754 pass / 22 original environment skips**, 54 passing / seven skipped files (`recovery-regression.log`, source efae). Those skips include the three formal review PG companions and original native HTTP/PG suites; no skip was added or relaxed. Counts overlap with focused checks and must not be added.
+- Root TypeScript and explicit TSX caller TypeScript: **exit 0** (`recovery-typecheck-root.log`, `recovery-typecheck-caller.log`). Scoped ESLint, Prettier, source equivalence/accepted ACK proof, verified preservation bundle and diff whitespace check: **exit 0**. Original DOM `act` warnings remain warnings.
+
+Earlier local checks are retained separately: first narrow reproduction 3 fail /
+11 pass; first immutable caller run 7 fail / 19 pass; first focused run 37 pass;
+first broad regression 750 pass / 22 original skips. They precede the stronger
+actual filter/repository cases and do not replace final results. No tooling or
+fixture failure was classified as product reproduction in this turn. Only 22
+task-worktree dependency symlinks were detached for an offline frozen install
+with scripts disabled (exit 0); canonical dependencies and lockfiles were not
+changed. No product/preview/HTTP listener, PG, browser, Playwright CLI or Compose
+runtime was started on this VM.
+
+Command logs, configuration, preservation bundle, source mapping and hash
+manifest are copied to canonical
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidatea9e-r19a-recovery/`.
+All three required acceptance keys remain pending.
