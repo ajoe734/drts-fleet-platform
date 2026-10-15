@@ -19,6 +19,7 @@ import { ReviewDemoProvider } from "../../../apps/passenger-app-web/components/r
 import { ReviewRideControls } from "../../../apps/passenger-app-web/components/review-demo/ride-controls";
 import { bookingFixture } from "../pax-web-booking-ui-20261009/fixture";
 import { apiWireResponse } from "../pax-web-shell-20261009/api-wire-fixtures";
+import { bookingResponseDiagnostic } from "../../e2e/pax-review-shared-order/booking-diagnostic";
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("next/link", () => ({ default: "a" }));
@@ -79,8 +80,8 @@ function hostedBook() {
   const source = ts.transpileModule(declaration.getText(file), {
     compilerOptions: { target: ts.ScriptTarget.ES2022 },
   }).outputText;
-  const assertion = (value: unknown) =>
-    Object.assign(expect(value), {
+  const assertion = (value: unknown, message?: string) =>
+    Object.assign(expect(value, message), {
       toBeVisible: async () => {
         await waitFor(() =>
           expect((value as DomLocator).element()).not.toBeNull(),
@@ -99,10 +100,17 @@ function hostedBook() {
         );
       },
     });
-  return new Function("expect", "PAX", "camel", `${source}; return book;`)(
+  return new Function(
+    "expect",
+    "PAX",
+    "camel",
+    "bookingResponseDiagnostic",
+    `${source}; return book;`,
+  )(
     assertion,
     "https://ride.example.test",
     (value: unknown) => value,
+    bookingResponseDiagnostic,
   ) as (page: Page, method: string) => Promise<string>;
 }
 
@@ -153,9 +161,14 @@ class DomLocator {
   }
 }
 
-it.each([false, true])(
-  "actual hosted booking caller uses genuine UI with prior fee acknowledgement=%s",
-  async (acknowledged) => {
+it.each([
+  { acknowledged: false, failure: undefined },
+  { acknowledged: true, failure: undefined },
+  { acknowledged: true, failure: "MULTI_TAXI_SERVICE_PRODUCT_NOT_ALLOWED" },
+  { acknowledged: true, failure: "MULTI_TAXI_AUTHORIZATION_UNAVAILABLE" },
+])(
+  "actual hosted booking caller: prior acknowledgement=$acknowledged, HTTP failure=$failure",
+  async ({ acknowledged, failure }) => {
     const fixture = bookingFixture();
     if (!acknowledged) delete fixture.account.feeAcknowledgementVersion;
     fixture.settings = { minLeadTimeMinutes: 1, requireSmsVerification: false };
@@ -175,7 +188,19 @@ it.each([false, true])(
       resolveCreated = resolve;
     });
     fixture.createResponder = async () =>
-      apiWireResponse({ ride: { order: { orderId: order } } });
+      failure
+        ? Response.json(
+            {
+              success: false,
+              error: {
+                code: failure,
+                message: "synthetic-private-response-message",
+                details: { token: "synthetic-private-response-token" },
+              },
+            },
+            { status: 409 },
+          )
+        : apiWireResponse({ ride: { order: { orderId: order } } });
     vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
       const url = new URL(input, "https://ride.example.test");
       if (url.origin === "https://api.example.test") {
@@ -267,7 +292,20 @@ it.each([false, true])(
         </PageContext>,
       );
     });
-    expect(await hostedBook()(page, method)).toBe(order);
+    if (failure) {
+      // Exercise the actual spec function through Home, SDK and BFF. A 409
+      // must still fail, now with only its known public code in the assertion.
+      const error = await hostedBook()(page, method).then(
+        () => null,
+        (reason: unknown) => reason,
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain(
+        `Passenger booking status=409 code=${failure}`,
+      );
+      expect((error as Error).message).not.toContain("synthetic-private");
+      expect(navigation.push).not.toHaveBeenCalled();
+    } else expect(await hostedBook()(page, method)).toBe(order);
     expect(created).toHaveLength(1);
     expect(created[0]).toMatchObject({ paymentMethodId: method });
     expect(

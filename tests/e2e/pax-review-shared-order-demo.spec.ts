@@ -8,6 +8,7 @@ import {
 import { readFile } from "node:fs/promises";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
+import { bookingResponseDiagnostic } from "./pax-review-shared-order/booking-diagnostic";
 
 type JourneyStep = ReturnType<typeof createJourneyProgress>["step"];
 
@@ -148,7 +149,10 @@ async function book(
     ).toBeVisible();
     return "";
   }
-  expect(response.status()).toBeLessThan(300);
+  expect(
+    response.status(),
+    await bookingResponseDiagnostic(response),
+  ).toBeLessThan(300);
   const id = camel(await response.json()).data.ride.order.orderId as string;
   expect(id).toMatch(/^[0-9a-f-]{36}$/);
   await expect(page).toHaveURL(new RegExp(`/rides/${id}$`));
