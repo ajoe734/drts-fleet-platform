@@ -8785,9 +8785,28 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       retryPolicySnapshot?: WebhookRetryPolicyRecord;
     },
   ): Promise<WebhookDispatchAttemptResult> {
+    this.assertConfigurationReadable(endpoint.tenantId);
     endpoint = this.cloneStoredWebhookEndpoint(
       this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId),
     );
+    // An edit can also commit after enqueue or before a process resumes its
+    // first interrupted attempt. That intent never authorizes a replacement
+    // configuration. Leave its original identity/payload/policy intact.
+    if (
+      delivery.attempt === 0 &&
+      delivery.eventType !== "tenant.webhook.test" &&
+      (endpoint.status !== "active" ||
+        !endpoint.events.includes(delivery.eventType) ||
+        (delivery.verificationFingerprint &&
+          delivery.verificationFingerprint !==
+            computeEndpointFingerprint(endpoint)))
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "WEBHOOK_CONFIGURATION_CHANGED",
+        "The current configuration does not authorize this first webhook attempt.",
+      );
+    }
     delivery = this.cloneStoredWebhookDelivery(delivery);
     const effects: Array<() => void> = [];
     const publish = () => {
@@ -15187,6 +15206,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     costCenterCode: string | null,
   ): TenantQuotaPolicyRecord {
+    // All cached-policy consumers, including preview and quota ledger helpers,
+    // must share the summary's guard after an uncertain canonical write.
+    this.assertConfigurationReadable(tenantId);
     const exact = costCenterCode
       ? this.quotaPolicies.get(
           this.buildQuotaPolicyKey(tenantId, costCenterCode, "monthly"),

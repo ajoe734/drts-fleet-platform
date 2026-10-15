@@ -46,6 +46,52 @@ function serviceFor(
 }
 
 describe("C112 durable commands and first in-flight restart", () => {
+  it("first-attempt recovery cannot send an accepted business intent to a replacement unverified URL", async () => {
+    vi.useFakeTimers();
+    const p = persistenceHarness();
+    const first = serviceFor(p.repository);
+    const endpoint = await first.service.createWebhookEndpoint(
+      tenantId,
+      command,
+    );
+    await first.service.sendTestWebhook(tenantId, {
+      webhookId: endpoint.webhookId,
+    });
+    let releaseHttp!: (result: { ok: boolean; status: number }) => void;
+    first.fetcher.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseHttp = resolve;
+        }),
+    );
+    const publishing = first.service.publishWebhookEvent(tenantId, {
+      eventType: "dispatch.assigned",
+      data: { orderId: "original-intent" },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const original = (await p.repository.loadState()).webhookDeliveries.find(
+      (item) => item.eventType === "dispatch.assigned",
+    )!;
+    await first.service.updateWebhookEndpoint(tenantId, endpoint.webhookId, {
+      url: "https://unverified.example.test/hook",
+    });
+    first.service.onModuleDestroy();
+    const second = serviceFor(p.repository);
+    await second.service.onModuleInit();
+    await vi.advanceTimersByTimeAsync(0);
+    // Drain the original HTTP command as well; it used the verified old URL.
+    releaseHttp({ ok: true, status: 204 });
+    await publishing;
+    expect(second.fetcher).not.toHaveBeenCalled();
+    expect(second.service.listWebhookEndpoints(tenantId)[0]?.status).toBe(
+      "test_pending",
+    );
+    const recovered = second.service
+      .listWebhookDeliveries(tenantId)
+      .find((item) => item.deliveryId === original.deliveryId);
+    expect(recovered).toMatchObject({ attempt: 0, status: "queued" });
+  });
+
   it.each(["url", "disabled", "removed-event", "verified"] as const)(
     "business publication reauthorizes the committed %s configuration after waiting for metadata ACK",
     async (change) => {

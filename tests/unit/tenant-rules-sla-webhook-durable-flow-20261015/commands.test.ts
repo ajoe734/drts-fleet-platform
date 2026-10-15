@@ -72,6 +72,83 @@ function harness() {
 }
 
 describe("C028 production command ACK", () => {
+  it("quota preview refuses stale policy after lost COMMIT ACK and failed SQL readback, then converges on retry", async () => {
+    const p = persistenceHarness();
+    const audit = new AuditNotificationService();
+    const service = new TenantPartnerService(audit, p.repository);
+    const controller = new TenantPartnerController(
+      service,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const query = {
+      reservationWindowStart: "2026-10-15T12:00:00.000Z",
+      estimatedAmountMinor: 100,
+      currency: "TWD",
+    };
+    const exhausted = {
+      ...quota,
+      limit: { ...quota.limit, bookingCountLimit: 0 },
+    };
+    try {
+      await service.upsertTenantQuotaPolicy(tenantId, quota);
+      expect(service.previewBookingQuotaImpact(tenantId, query)).toMatchObject({
+        combinedTriggered: "none",
+        impacts: expect.arrayContaining([
+          expect.objectContaining({ limitValue: 7, remainingBefore: 7 }),
+        ]),
+      });
+      p.loseCommitAck();
+      p.rejectReadbacks();
+      await expect(
+        service.upsertTenantQuotaPolicy(tenantId, exhausted),
+      ).rejects.toThrow("COMMIT ACK lost");
+      expect(() => service.getTenantQuotaSummary(tenantId)).toThrowError(
+        expect.objectContaining({
+          code: "TENANT_CONFIGURATION_READBACK_PENDING",
+        }),
+      );
+      expect(() =>
+        service.previewBookingQuotaImpact(tenantId, query),
+      ).toThrowError(
+        expect.objectContaining({
+          code: "TENANT_CONFIGURATION_READBACK_PENDING",
+        }),
+      );
+      expect(() =>
+        controller.previewTenantBookingQuotaImpact(query, tenantId),
+      ).toThrowError(
+        expect.objectContaining({
+          code: "TENANT_CONFIGURATION_READBACK_PENDING",
+        }),
+      );
+      // The pending guard is tenant-scoped, not a global outage.
+      expect(
+        service.previewBookingQuotaImpact("unaffected-tenant", query)
+          .combinedTriggered,
+      ).toBe("none");
+      p.rejectReadbacks(false);
+      expect(
+        (await p.repository.loadState()).quotaPolicies[0]?.limit
+          .bookingCountLimit,
+      ).toBe(0);
+      await service.upsertTenantQuotaPolicy(tenantId, exhausted);
+      expect(service.previewBookingQuotaImpact(tenantId, query)).toMatchObject({
+        combinedTriggered: "block",
+        impacts: expect.arrayContaining([
+          expect.objectContaining({ limitValue: 0, remainingBefore: 0 }),
+        ]),
+      });
+      expect(
+        service.getTenantQuotaSummary(tenantId).limit.bookingCountLimit,
+      ).toBe(0);
+    } finally {
+      service.onModuleDestroy();
+    }
+  });
+
   it("keeps uncertainty explicit when canonical readback also fails and refreshes before normal retry", async () => {
     const p = persistenceHarness();
     const service = new TenantPartnerService(

@@ -11,6 +11,7 @@ export function persistenceHarness() {
   };
   let rejectInsert: number | undefined;
   let loseCommitAck = false;
+  let rejectReadback = false;
   let beforeCommit: (() => Promise<void>) | undefined;
   const query = vi.fn(
     async (
@@ -18,6 +19,9 @@ export function persistenceHarness() {
       values: readonly unknown[] = [],
       session: Session = { insertCount: 0 },
     ) => {
+      if (rejectReadback && sql.includes("SELECT")) {
+        throw new Error("canonical readback unavailable");
+      }
       if (sql === "BEGIN") {
         session.transaction = structuredClone(records);
         session.insertCount = 0;
@@ -82,6 +86,9 @@ export function persistenceHarness() {
     },
     loseCommitAck: () => {
       loseCommitAck = true;
+    },
+    rejectReadbacks: (reject = true) => {
+      rejectReadback = reject;
     },
     holdCommit: (gate?: () => Promise<void>) => {
       beforeCommit = gate;
