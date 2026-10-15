@@ -438,6 +438,110 @@ describe("C100 actual archival shell with controlled client (no PG/socket/server
     expect(r.result.status, r.result.stderr).toBe(0);
     expect(r.archived.map((row) => label(row.audit_id))).toEqual(["free"]);
   });
+  for (const protection of ["hold", "exception", "audit-source"] as const) {
+    it(`${protection} uses physical tenant before summary payload and retains null-tenant fallback`, () => {
+      const targets = [
+        row("physical-a-payload-b", undefined, undefined, {
+          tenantId: uuid("tenant-b"),
+        }),
+        row("physical-a-no-payload"),
+        row(
+          "physical-b-payload-a",
+          undefined,
+          undefined,
+          {
+            tenantId: uuid("tenant-a"),
+          },
+          undefined,
+          "tenant-b",
+        ),
+        row(
+          "null-physical-payload-a",
+          undefined,
+          undefined,
+          {
+            tenantId: uuid("tenant-a"),
+          },
+          undefined,
+          null,
+        ),
+        row(
+          "null-physical-payload-b",
+          undefined,
+          undefined,
+          {
+            tenantId: uuid("tenant-b"),
+          },
+          undefined,
+          null,
+        ),
+        row(
+          "null-physical-no-payload",
+          undefined,
+          undefined,
+          null,
+          undefined,
+          null,
+        ),
+        row(
+          "null-physical-normalized-tenant",
+          undefined,
+          undefined,
+          {
+            tenantId: "normalized-tenant",
+          },
+          undefined,
+          null,
+        ),
+      ];
+      const protections = targets.map((target) => {
+        const id = `protection-${label(target.audit_id)}`;
+        const event =
+          protection === "hold"
+            ? hold(id, target.audit_id)
+            : exception(
+                id,
+                protection === "audit-source"
+                  ? "unrelated-subject"
+                  : target.audit_id,
+                protection === "audit-source"
+                  ? {
+                      sourceResourceType: "audit_log",
+                      sourceResourceId: target.audit_id,
+                    }
+                  : {},
+              );
+        // The repository normalizes non-UUID physical tenants to NULL while
+        // preserving the original logical tenant in the governance payload.
+        if (label(target.audit_id) === "null-physical-normalized-tenant") {
+          event.tenant_id = null;
+          event.new_value!.tenantId = "normalized-tenant";
+        }
+        return event;
+      });
+      const r = run([...targets, ...protections]);
+      expect(r.result.status, r.result.stderr).toBe(0);
+      expect(r.state.selected?.map(label).sort()).toEqual([
+        "null-physical-payload-b",
+        "physical-b-payload-a",
+      ]);
+      expect(r.archived.map((row) => label(row.audit_id)).sort()).toEqual([
+        "null-physical-payload-b",
+        "physical-b-payload-a",
+      ]);
+      expect(r.state.rows.map((row) => row.audit_id).sort()).toEqual(
+        [...targets, ...protections]
+          .filter(
+            (target) =>
+              !["null-physical-payload-b", "physical-b-payload-a"].includes(
+                label(target.audit_id),
+              ),
+          )
+          .map((row) => row.audit_id)
+          .sort(),
+      );
+    });
+  }
   for (const failure of ["sql", "write", "verify"] as const) {
     it(`${failure} failure is nonzero, retains source and cannot print purge success`, () => {
       const r = run([row("free")], { failure });

@@ -33,12 +33,12 @@ WITH latest_governance AS (
         -- Preserve the persisted authority for every active protection.
         (a.resource_type = p.resource_type AND a.resource_id = p.resource_id)
         OR (
-          -- Payload tenant is retained even when a non-UUID application tenant
-          -- was normalized to NULL in the physical audit tenant column.
+          -- Physical tenant is authoritative; an arbitrary audit summary cannot
+          -- replace it. Fall back to payload only when normalization left NULL.
           (NULLIF(p.new_value->>'tenantId', '') IS NULL
-            OR COALESCE(NULLIF(a.new_value->>'tenantId', ''), a.tenant_id::text) IS NULL
+            OR COALESCE(a.tenant_id::text, NULLIF(a.new_value->>'tenantId', '')) IS NULL
             OR p.new_value->>'tenantId' = COALESCE(
-              NULLIF(a.new_value->>'tenantId', ''), a.tenant_id::text))
+              a.tenant_id::text, NULLIF(a.new_value->>'tenantId', '')))
           AND (
             (p.new_value->>'family' = 'audit_log'
               AND p.new_value->>'subjectId' = a.audit_id::text)
