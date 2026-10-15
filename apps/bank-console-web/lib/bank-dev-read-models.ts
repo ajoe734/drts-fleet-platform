@@ -246,13 +246,13 @@ function maskSegmented(value: string | null | undefined) {
   return maskCompact(value);
 }
 
-export function getTaipeiDateString(date: Date = new Date()): string {
+export function getTaipeiDateString(date: Date | string = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Taipei",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(date);
+  }).format(typeof date === "string" ? new Date(date) : date);
 }
 
 export function formatPeriodDate(period: string, end = false) {
@@ -284,7 +284,6 @@ export function deriveStatementDates(
       },
   rawIssuedAt?: string,
   rawDueAt?: string,
-  rawGeneratedAt?: string,
 ): { issuedAt: string; dueAt: string } {
   const period =
     typeof periodOrRecord === "string"
@@ -300,11 +299,6 @@ export function deriveStatementDates(
     (typeof periodOrRecord === "object"
       ? (periodOrRecord.dueAt ?? periodOrRecord.due_at)
       : undefined);
-  const effectiveGeneratedAt =
-    rawGeneratedAt ??
-    (typeof periodOrRecord === "object"
-      ? (periodOrRecord.generatedAt ?? periodOrRecord.generated_at)
-      : undefined);
 
   // Check if there is an exact seed statement record for this period
   const seed = settlementStatements.find((s) => s.period === period);
@@ -315,12 +309,11 @@ export function deriveStatementDates(
   let issuedAt = effectiveIssuedAt || seed?.issuedAt;
   let dueAt = effectiveDueAt || seed?.dueAt;
 
+  // generatedAt is refreshed by every settlement GET, including within the
+  // same period. It is response metadata, never an immutable issue date.
+  // Retain the existing seed/month-boundary fallback and ordering guard.
   if (!issuedAt) {
-    if (effectiveGeneratedAt && effectiveGeneratedAt.slice(0, 7) === period) {
-      issuedAt = effectiveGeneratedAt;
-    } else {
-      issuedAt = immutablePeriodStart;
-    }
+    issuedAt = immutablePeriodStart;
   }
 
   if (!dueAt) {
@@ -662,12 +655,10 @@ export function mapStatementsFromApi(
       `settlement-statement-${period}`;
     const rawIssuedAt = statement.issued_at ?? statement.issuedAt;
     const rawDueAt = statement.due_at ?? statement.dueAt;
-    const rawGeneratedAt = statement.generated_at ?? statement.generatedAt;
     const { issuedAt, dueAt } = deriveStatementDates(
       period,
       rawIssuedAt,
       rawDueAt,
-      rawGeneratedAt,
     );
     const totals = statement.totals;
     const fareTotal = totals?.fare_total ?? totals?.fareTotal;
