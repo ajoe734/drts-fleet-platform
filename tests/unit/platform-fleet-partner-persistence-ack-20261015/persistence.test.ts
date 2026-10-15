@@ -158,7 +158,10 @@ const mutations = [
     table: "admin.phase1_driver_fleet_affiliations",
     expected: { driverId: "ack-driver", driverGroupId: "ack-group" },
     service: (f: Awaited<ReturnType<typeof fixture>>) =>
-      f.service.createDriverFleetAffiliation(" ack-driver ", affiliationCommand),
+      f.service.createDriverFleetAffiliation(
+        " ack-driver ",
+        affiliationCommand,
+      ),
     controller: (f: Awaited<ReturnType<typeof fixture>>) =>
       f.controller.createDriverFleetAffiliation(
         " ack-driver ",
@@ -175,7 +178,7 @@ describe.each(mutations)("canonical ACK: $name", (mutation) => {
     it(`${entry} remains pending with prior readback until the actual SQL write resolves`, async () => {
       const f = await fixture();
       const before = readback(f.service);
-      const auditBefore = f.audit.listAuditLogs();
+      const recordAudit = vi.spyOn(f.audit, "recordAuditLog");
       const gate = f.delay();
       let settled = false;
       const call = Promise.resolve()
@@ -193,7 +196,7 @@ describe.each(mutations)("canonical ACK: $name", (mutation) => {
         expect(settled).toBe(false);
         expect(readback(f.service)).toEqual(before);
         expect(readback(await f.restart())).toEqual(before);
-        expect(f.audit.listAuditLogs()).toEqual(auditBefore);
+        expect(recordAudit).not.toHaveBeenCalled();
       } finally {
         gate.resolve();
         await call;
@@ -215,7 +218,7 @@ describe.each(mutations)("canonical ACK: $name", (mutation) => {
     it(`${entry} propagates SQL rejection, retains prior readback, and allows retry`, async () => {
       const f = await fixture();
       const before = readback(f.service);
-      const auditBefore = f.audit.listAuditLogs();
+      const recordAudit = vi.spyOn(f.audit, "recordAuditLog");
       const error = new Error(`canonical ${mutation.name} rejected`);
       const gate = f.delay();
       // Observe both outcomes immediately, including the original broken path.
@@ -230,7 +233,7 @@ describe.each(mutations)("canonical ACK: $name", (mutation) => {
       expect(await call).toEqual({ reason: error });
       expect(readback(f.service)).toEqual(before);
       expect(readback(await f.restart())).toEqual(before);
-      expect(f.audit.listAuditLogs()).toEqual(auditBefore);
+      expect(recordAudit).not.toHaveBeenCalled();
 
       await mutation[entry](f);
       expect(readback(f.service)).not.toEqual(before);
