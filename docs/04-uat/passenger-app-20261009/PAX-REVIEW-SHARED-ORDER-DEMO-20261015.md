@@ -1859,3 +1859,51 @@ product rule exemption. They are not old-product reproductions. Dependencies
 were installed offline/frozen with scripts disabled after detaching only this
 task cwd's 22 inherited dependency symlinks; canonical dependencies and lockfiles
 were untouched. Node 22.23.2, pnpm 10.33.0, TypeScript 5.9.3, Vitest 4.1.4.
+
+## R26-Home — finish the existing owned-task order caller conversion
+
+The independent review rejected `d3c199f776c322cbade676868763f5da90ef8447`,
+generation `6e4174823d734e418d53fcdbde9102f6`, because the explicitly scoped
+Home caller was omitted from R26. `Home.loadWorkspaceData` still called
+`getOrder(orderId)` and caught the Driver realm refusal, leaving `orderMap`
+empty even when the assigned task and its quote existed. The active-trip fare
+then showed `車資待確認`, and completed-task fee summaries lacked the quote.
+The old Home SHA256 was
+`9e1800d343e0ec4cd0d58d49397bfbbbf3f57861fcb5d73c75e1b91cc8b816d0`.
+The original review remains at
+`.local/passenger-transport-bureau-review-20261015/codex-review-candidate-d3c199-r26/review.json`,
+SHA256 `83dcc043cd8de34825eed84bd0e0a9a654a0ac503bd345424b636b69f3beb901`.
+
+`Home.loadWorkspaceData` now retains each deduplicated order's task and uses
+the existing `isOwnedUnifiedTask` predicate to call
+`getDriverTaskOrder(task.taskId)` for owned tasks. Forwarded summaries retain
+their existing reader, and rejected order reads still omit the order facts.
+The only product change is this Home reader plus a formatting-only JSX change.
+Trip/Jobs, SDK/controller/service/repository, ordinary auth/proof/readonly/fare/
+tracking behavior, the full A/B/C browser spec and CI/deployment sources are
+unchanged from d3c199. The task remains on the existing recovery-r26 branch and
+PR 2687, preserving all earlier published refs and accepted trunk changes.
+
+The extended original caller harness exports the private Home loader only
+inside its test transpiler. It runs the unmodified production function, real
+Driver identity/client and real SDK. Native, location, storage and upstream HTTP
+are external fixtures. The registration fixture includes the production
+top-level `driver_id`; missing fixture data is not treated as a product failure.
+No PG, actual browser interaction or real business completion is claimed.
+
+| Finding / acceptance                                             | Source / change                                                                            | Old → corrected result                                                                                                                                                                                                                                                                                                                 | Command / exit / evidence                                                                                                                                                                                                                       | Unverified limitation                                                                                                                        |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| R26-Home: assigned and completed owned-task quote disappears     | `Home.loadWorkspaceData`, existing `isOwnedUnifiedTask` and `ApiClient.getDriverTaskOrder` | Same six actual-loader cases against frozen d3c199: five failures / forwarded control passes. Three owned successes lose their quote, and two refused/unavailable cases expose the wrong generic reader. Corrected Home: all six pass, including legacy fallback, completed order, forwarded preservation, 403 refusal and 503 failure | `old-home.json/log`: exit 1; `new-narrow.json/log`: exit 0, 16 pass / zero skips across Home, Trip/Jobs, guard/controller/repository and BFF. `home-facts.json/log`: exit 0, same UUID present in `orderMap` and only the task-ID reader called | Native/storage/location/HTTP fixtures; no runtime acceptance credit                                                                          |
+| Preserve R1–R26 repairs and ordinary Driver behavior             | Previous candidate's task source, original fare/proof/replay/security/identity/DI callers  | Affected regression: 437 pass / 16 original environment skips, 45 passing / six skipped files, both before and after dependency repair. Driver suite: 542 pass / zero skips, 39 files. Four API suites: 56 pass / zero skips                                                                                                           | `affected-regression.json/log`, `final-affected-regression.json/log`, `driver-suite.json/log`, `final-api-scope.json/log`; full exact commands and source hashes in each ledger entry                                                           | Six original PG/environment files remain skipped, 16 cases; skips grant no credit                                                            |
+| Preserve type/format/commit checks and isolate task dependencies | Exact same executable source `b9767234b681785a373234152cc8850c4c0b5e20`                    | Initial root TypeScript exits 2 due to inherited canonical dependency links and missing workspace packages; generated links detached only in this cwd, offline frozen install with scripts disabled exits 0. Final root/Driver TypeScript: both exit 0                                                                                 | `root-typecheck.json/log`, `dependency-links-before.json`, `dependency-install.json/log`, `final-root-typecheck.json/log`, `final-driver-typecheck.json/log`; scoped ESLint/Prettier, diff and trailers recorded separately                     | Canonical dependencies, lockfiles and source files untouched; initial environment failure retained, not reported as old-product reproduction |
+| `pax-review-demo_real-shared-order-across-roles`                 | Existing production task/order/PG paths, unchanged R26 peer companion                      | Pending, zero credit                                                                                                                                                                                                                                                                                                                   | New exact candidate still needs full CI and three formal-schema PG companion cases with zero skips                                                                                                                                              | Local fixture passes and skips do not satisfy PG acceptance                                                                                  |
+| `pax-review-demo_external-simulation-and-complete-journeys`      | Original three independent UUIDs and complete A/B/C flows                                  | Pending, zero credit                                                                                                                                                                                                                                                                                                                   | New exact candidate must complete original cross-role journeys, payments/retry/rating/case/cancellation/history and real business-time waits                                                                                                    | Earlier A on-trip evidence is partial; no full A or B/C credit transferred                                                                   |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`         | Existing hosted bus/collector and sole immutable combined Cloud Run delivery               | Pending, zero credit                                                                                                                                                                                                                                                                                                                   | New exact-SHA review/CI/browser, normal merge, shared-dev deployment and fresh smoke still required                                                                                                                                             | No VM product/HTTP/PG/browser/preview/Compose/Playwright CLI, workflow dispatch/rerun/manual cancellation or deployment                      |
+
+Canonical evidence for this repair is
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate-d3c199-r26-home/`.
+Its `manifest.json` binds the final candidate to the three executable blobs
+tested at the anchor, prior candidate source verification, command/exit/source hashes, original
+review and all terminal check logs. Node 22.23.2, pnpm 10.33.0, TypeScript 5.9.3,
+Vitest 4.1.4, Prettier 3.8.2. This section supplements every earlier finding and
+acceptance row; none is deleted or granted substitute credit.
