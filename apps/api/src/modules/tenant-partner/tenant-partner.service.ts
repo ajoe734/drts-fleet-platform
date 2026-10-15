@@ -2080,109 +2080,122 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.clonePassenger(passenger);
   }
 
-  upsertPassenger(
+  async upsertPassenger(
     tenantId: string,
     command: UpsertTenantPassengerCommand,
     requestId?: string,
   ) {
-    this.assertNonBlank(command.fullName, "fullName");
+    return this.withTenantBookWriteLock(
+      `passenger:${command.passengerId?.trim() || randomUUID()}`,
+      async () => {
+        this.assertNonBlank(command.fullName, "fullName");
 
-    const passengerId = command.passengerId?.trim() || null;
-    if (passengerId) {
-      const passengerOwnedByOtherTenant = this.passengers.some(
-        (passenger) =>
-          passenger.passengerId === passengerId &&
-          passenger.tenantId !== tenantId,
-      );
-      if (passengerOwnedByOtherTenant) {
-        throw new ApiRequestError(
-          HttpStatus.NOT_FOUND,
-          "PASSENGER_NOT_FOUND",
-          "The tenant passenger could not be found.",
-          {
-            passengerId,
-          },
-        );
-      }
-    }
-
-    const now = new Date().toISOString();
-    const existing = passengerId
-      ? (this.passengers.find(
-          (passenger) =>
-            passenger.tenantId === tenantId &&
-            passenger.passengerId === passengerId,
-        ) ?? null)
-      : null;
-
-    const passenger: TenantPassengerRecord = existing
-      ? {
-          ...existing,
-          fullName: command.fullName.trim(),
-          employeeNo: this.normalizeNullableText(
-            command.employeeNo ?? existing.employeeNo,
-          ),
-          departmentName: this.normalizeNullableText(
-            command.departmentName ?? existing.departmentName,
-          ),
-          mobile: this.normalizeNullableText(command.mobile ?? existing.mobile),
-          email: this.normalizeNullableText(command.email ?? existing.email),
-          roles: this.normalizePassengerRoles(command.roles ?? existing.roles),
-          activeFlag: command.activeFlag ?? existing.activeFlag,
-          metadata: {
-            ...existing.metadata,
-            ...(command.metadata ?? {}),
-          },
-          updatedAt: now,
+        const passengerId = command.passengerId?.trim() || null;
+        if (passengerId) {
+          const passengerOwnedByOtherTenant = this.passengers.some(
+            (passenger) =>
+              passenger.passengerId === passengerId &&
+              passenger.tenantId !== tenantId,
+          );
+          if (passengerOwnedByOtherTenant) {
+            throw new ApiRequestError(
+              HttpStatus.NOT_FOUND,
+              "PASSENGER_NOT_FOUND",
+              "The tenant passenger could not be found.",
+              {
+                passengerId,
+              },
+            );
+          }
         }
-      : {
-          passengerId: passengerId || `passenger_${randomUUID()}`,
+
+        const now = new Date().toISOString();
+        const existing = passengerId
+          ? (this.passengers.find(
+              (passenger) =>
+                passenger.tenantId === tenantId &&
+                passenger.passengerId === passengerId,
+            ) ?? null)
+          : null;
+
+        const passenger: TenantPassengerRecord = existing
+          ? {
+              ...existing,
+              fullName: command.fullName.trim(),
+              employeeNo: this.normalizeNullableText(
+                command.employeeNo ?? existing.employeeNo,
+              ),
+              departmentName: this.normalizeNullableText(
+                command.departmentName ?? existing.departmentName,
+              ),
+              mobile: this.normalizeNullableText(
+                command.mobile ?? existing.mobile,
+              ),
+              email: this.normalizeNullableText(
+                command.email ?? existing.email,
+              ),
+              roles: this.normalizePassengerRoles(
+                command.roles ?? existing.roles,
+              ),
+              activeFlag: command.activeFlag ?? existing.activeFlag,
+              metadata: {
+                ...existing.metadata,
+                ...(command.metadata ?? {}),
+              },
+              updatedAt: now,
+            }
+          : {
+              passengerId: passengerId || `passenger_${randomUUID()}`,
+              tenantId,
+              fullName: command.fullName.trim(),
+              employeeNo: this.normalizeNullableText(command.employeeNo),
+              departmentName: this.normalizeNullableText(
+                command.departmentName,
+              ),
+              mobile: this.normalizeNullableText(command.mobile),
+              email: this.normalizeNullableText(command.email),
+              roles: this.normalizePassengerRoles(command.roles),
+              activeFlag: command.activeFlag ?? true,
+              metadata: {
+                ...(command.metadata ?? {}),
+              },
+              createdAt: now,
+              updatedAt: now,
+            };
+        passenger.qualityIssues = this.buildPassengerQualityIssues(
           tenantId,
-          fullName: command.fullName.trim(),
-          employeeNo: this.normalizeNullableText(command.employeeNo),
-          departmentName: this.normalizeNullableText(command.departmentName),
-          mobile: this.normalizeNullableText(command.mobile),
-          email: this.normalizeNullableText(command.email),
-          roles: this.normalizePassengerRoles(command.roles),
-          activeFlag: command.activeFlag ?? true,
-          metadata: {
-            ...(command.metadata ?? {}),
+          passenger,
+        );
+
+        await this.persistChangesRequired(
+          {
+            passengers: [this.clonePassenger(passenger)],
           },
-          createdAt: now,
-          updatedAt: now,
-        };
-    passenger.qualityIssues = this.buildPassengerQualityIssues(
-      tenantId,
-      passenger,
-    );
+          "upsert_passenger",
+        );
+        this.passengers = [
+          this.clonePassenger(passenger),
+          ...this.passengers.filter(
+            (candidate) => candidate.passengerId !== passenger.passengerId,
+          ),
+        ];
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: "upsert_passenger",
+            resourceType: "tenant_passenger",
+            resourceId: passenger.passengerId,
+            newValuesSummary: this.buildPassengerAuditSummary(passenger),
+          },
+          requestId,
+        );
 
-    this.passengers = [
-      this.clonePassenger(passenger),
-      ...this.passengers.filter(
-        (candidate) => candidate.passengerId !== passenger.passengerId,
-      ),
-    ];
-    this.persistChanges(
-      {
-        passengers: [this.clonePassenger(passenger)],
+        return this.clonePassenger(passenger);
       },
-      "upsert_passenger",
     );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "upsert_passenger",
-        resourceType: "tenant_passenger",
-        resourceId: passenger.passengerId,
-        newValuesSummary: this.buildPassengerAuditSummary(passenger),
-      },
-      requestId,
-    );
-
-    return this.clonePassenger(passenger);
   }
 
   listAddresses(tenantId: string) {
@@ -2232,143 +2245,152 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.cloneAddress(address);
   }
 
-  upsertAddress(
+  async upsertAddress(
     tenantId: string,
     command: UpsertTenantAddressCommand,
     requestId?: string,
   ) {
-    this.assertNonBlank(command.addressName, "addressName");
-    this.assertNonBlank(command.addressText, "addressText");
+    return this.withTenantBookWriteLock(
+      `address:${command.addressId?.trim() || randomUUID()}`,
+      async () => {
+        this.assertNonBlank(command.addressName, "addressName");
+        this.assertNonBlank(command.addressText, "addressText");
 
-    const addressId = command.addressId?.trim() || null;
-    if (addressId) {
-      const addressOwnedByOtherTenant = this.addresses.some(
-        (address) =>
-          address.addressId === addressId && address.tenantId !== tenantId,
-      );
-      if (addressOwnedByOtherTenant) {
-        throw new ApiRequestError(
-          HttpStatus.NOT_FOUND,
-          "ADDRESS_NOT_FOUND",
-          "The tenant address could not be found.",
-          {
-            addressId,
-          },
-        );
-      }
-    }
-
-    const ownerPassengerId = command.ownerPassengerId ?? null;
-    if (
-      ownerPassengerId !== null &&
-      !this.passengers.some(
-        (passenger) =>
-          passenger.tenantId === tenantId &&
-          passenger.passengerId === ownerPassengerId,
-      )
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "PASSENGER_NOT_FOUND",
-        "The owner passenger could not be found.",
-        {
-          ownerPassengerId,
-        },
-      );
-    }
-
-    const now = new Date().toISOString();
-    const existing = addressId
-      ? (this.addresses.find(
-          (address) =>
-            address.tenantId === tenantId && address.addressId === addressId,
-        ) ?? null)
-      : null;
-    const normalizedTags = this.normalizeAddressTags(
-      command.tags ?? existing?.tags,
-    );
-    const sensitiveFlag =
-      (command.sensitiveFlag ?? existing?.sensitiveFlag ?? false) ||
-      normalizedTags.includes("sensitive");
-    if (sensitiveFlag && !normalizedTags.includes("sensitive")) {
-      normalizedTags.push("sensitive");
-    }
-    const lat = command.lat ?? existing?.lat ?? null;
-    const lng = command.lng ?? existing?.lng ?? null;
-    const normalizedAddressText = this.normalizeAddressText(
-      command.addressText,
-    );
-    const maskedAddressText =
-      maskAddress(command.addressText) ??
-      `${command.addressText.trim().slice(0, 3)}...`;
-    const geocodeSource = this.resolveAddressGeocodeSource(
-      command.geocodeSource ?? existing?.geocodeSource,
-      lat,
-      lng,
-    );
-
-    const address: TenantAddressRecord = existing
-      ? {
-          ...existing,
-          ownerPassengerId,
-          addressName: command.addressName.trim(),
-          addressText: command.addressText.trim(),
-          normalizedAddressText,
-          maskedAddressText,
-          sensitiveFlag,
-          geocodeSource,
-          lat,
-          lng,
-          tags: normalizedTags,
-          activeFlag: command.activeFlag ?? existing.activeFlag,
-          updatedAt: now,
+        const addressId = command.addressId?.trim() || null;
+        if (addressId) {
+          const addressOwnedByOtherTenant = this.addresses.some(
+            (address) =>
+              address.addressId === addressId && address.tenantId !== tenantId,
+          );
+          if (addressOwnedByOtherTenant) {
+            throw new ApiRequestError(
+              HttpStatus.NOT_FOUND,
+              "ADDRESS_NOT_FOUND",
+              "The tenant address could not be found.",
+              {
+                addressId,
+              },
+            );
+          }
         }
-      : {
-          addressId: addressId || `address_${randomUUID()}`,
-          tenantId,
-          ownerPassengerId,
-          addressName: command.addressName.trim(),
-          addressText: command.addressText.trim(),
-          normalizedAddressText,
-          maskedAddressText,
-          sensitiveFlag,
-          geocodeSource,
+
+        const ownerPassengerId = command.ownerPassengerId ?? null;
+        if (
+          ownerPassengerId !== null &&
+          !this.passengers.some(
+            (passenger) =>
+              passenger.tenantId === tenantId &&
+              passenger.passengerId === ownerPassengerId,
+          )
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.NOT_FOUND,
+            "PASSENGER_NOT_FOUND",
+            "The owner passenger could not be found.",
+            {
+              ownerPassengerId,
+            },
+          );
+        }
+
+        const now = new Date().toISOString();
+        const existing = addressId
+          ? (this.addresses.find(
+              (address) =>
+                address.tenantId === tenantId &&
+                address.addressId === addressId,
+            ) ?? null)
+          : null;
+        const normalizedTags = this.normalizeAddressTags(
+          command.tags ?? existing?.tags,
+        );
+        const sensitiveFlag =
+          (command.sensitiveFlag ?? existing?.sensitiveFlag ?? false) ||
+          normalizedTags.includes("sensitive");
+        if (sensitiveFlag && !normalizedTags.includes("sensitive")) {
+          normalizedTags.push("sensitive");
+        }
+        const lat = command.lat ?? existing?.lat ?? null;
+        const lng = command.lng ?? existing?.lng ?? null;
+        const normalizedAddressText = this.normalizeAddressText(
+          command.addressText,
+        );
+        const maskedAddressText =
+          maskAddress(command.addressText) ??
+          `${command.addressText.trim().slice(0, 3)}...`;
+        const geocodeSource = this.resolveAddressGeocodeSource(
+          command.geocodeSource ?? existing?.geocodeSource,
           lat,
           lng,
-          tags: normalizedTags,
-          activeFlag: command.activeFlag ?? true,
-          createdAt: now,
-          updatedAt: now,
-        };
-    address.qualityIssues = this.buildAddressQualityIssues(tenantId, address);
+        );
 
-    this.addresses = [
-      this.cloneAddress(address),
-      ...this.addresses.filter(
-        (candidate) => candidate.addressId !== address.addressId,
-      ),
-    ];
-    this.persistChanges(
-      {
-        addresses: [this.cloneAddress(address)],
-      },
-      "upsert_address",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "upsert_address",
-        resourceType: "tenant_address",
-        resourceId: address.addressId,
-        newValuesSummary: this.buildAddressAuditSummary(address),
-      },
-      requestId,
-    );
+        const address: TenantAddressRecord = existing
+          ? {
+              ...existing,
+              ownerPassengerId,
+              addressName: command.addressName.trim(),
+              addressText: command.addressText.trim(),
+              normalizedAddressText,
+              maskedAddressText,
+              sensitiveFlag,
+              geocodeSource,
+              lat,
+              lng,
+              tags: normalizedTags,
+              activeFlag: command.activeFlag ?? existing.activeFlag,
+              updatedAt: now,
+            }
+          : {
+              addressId: addressId || `address_${randomUUID()}`,
+              tenantId,
+              ownerPassengerId,
+              addressName: command.addressName.trim(),
+              addressText: command.addressText.trim(),
+              normalizedAddressText,
+              maskedAddressText,
+              sensitiveFlag,
+              geocodeSource,
+              lat,
+              lng,
+              tags: normalizedTags,
+              activeFlag: command.activeFlag ?? true,
+              createdAt: now,
+              updatedAt: now,
+            };
+        address.qualityIssues = this.buildAddressQualityIssues(
+          tenantId,
+          address,
+        );
 
-    return this.cloneAddress(address);
+        await this.persistChangesRequired(
+          {
+            addresses: [this.cloneAddress(address)],
+          },
+          "upsert_address",
+        );
+        this.addresses = [
+          this.cloneAddress(address),
+          ...this.addresses.filter(
+            (candidate) => candidate.addressId !== address.addressId,
+          ),
+        ];
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: "upsert_address",
+            resourceType: "tenant_address",
+            resourceId: address.addressId,
+            newValuesSummary: this.buildAddressAuditSummary(address),
+          },
+          requestId,
+        );
+
+        return this.cloneAddress(address);
+      },
+    );
   }
 
   listCostCenters(tenantId: string, query: ListTenantCostCentersQuery = {}) {
@@ -4246,186 +4268,205 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return JSON.parse(JSON.stringify(order)) as OwnedOrderRecord;
   }
 
-  upsertCostCenter(
+  async upsertCostCenter(
     tenantId: string,
     command: UpsertTenantCostCenterCommand,
     requestId?: string,
   ) {
-    this.assertNonBlank(command.code, "code");
-    this.assertNonBlank(command.name, "name");
-
-    const code = this.normalizeCostCenterCode(command.code);
-    const existing = this.costCenters.find(
-      (candidate) => candidate.tenantId === tenantId && candidate.code === code,
-    );
-
-    const hasOwnerUserId = Object.prototype.hasOwnProperty.call(
-      command,
-      "ownerUserId",
-    );
-    const hasOwnerName = Object.prototype.hasOwnProperty.call(
-      command,
-      "ownerName",
-    );
-    const normalizedOwnerUserId = hasOwnerUserId
-      ? this.normalizeNullableText(command.ownerUserId)
-      : (existing?.ownerUserId ?? null);
-    const ownerUser =
-      normalizedOwnerUserId === null
-        ? null
-        : this.requireTenantUser(tenantId, normalizedOwnerUserId);
-    const ownerName = hasOwnerName
-      ? this.normalizeNullableText(command.ownerName)
-      : hasOwnerUserId
-        ? (ownerUser?.displayName ?? null)
-        : (existing?.ownerName ?? null);
-
-    const now = new Date().toISOString();
-    const activeFlag = command.activeFlag ?? existing?.activeFlag ?? true;
-    const disabledAt = activeFlag ? null : (existing?.disabledAt ?? now);
-    const disabledReason = activeFlag
-      ? null
-      : (existing?.disabledReason ?? "disabled_via_upsert");
-
-    const costCenter: TenantCostCenterRecord = existing
-      ? {
-          ...existing,
-          code,
-          name: command.name.trim(),
-          description: this.normalizeNullableText(
-            command.description ?? existing.description,
-          ),
-          ownerUserId: normalizedOwnerUserId,
-          ownerName,
-          activeFlag,
-          disabledAt,
-          disabledReason,
-          updatedAt: now,
-        }
-      : {
-          tenantId,
-          code,
-          name: command.name.trim(),
-          description: this.normalizeNullableText(command.description),
-          ownerUserId: normalizedOwnerUserId,
-          ownerName,
-          activeFlag,
-          disabledAt,
-          disabledReason,
-          createdAt: now,
-          updatedAt: now,
-        };
-
-    this.costCenters = [
-      this.cloneCostCenter(costCenter),
-      ...this.costCenters.filter(
-        (candidate) =>
-          !(
-            candidate.tenantId === tenantId &&
-            candidate.code === costCenter.code
-          ),
-      ),
-    ];
-    this.persistChanges(
-      {
-        costCenters: [this.cloneCostCenter(costCenter)],
-      },
-      "upsert_cost_center",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
+    return this.withTenantBookWriteLock(
+      JSON.stringify([
+        "costCenter",
         tenantId,
-        moduleName: "tenant-partner",
-        actionName: "upsert_cost_center",
-        resourceType: "tenant_cost_center",
-        resourceId: costCenter.code,
-        newValuesSummary: this.buildCostCenterAuditSummary(costCenter),
-      },
-      requestId,
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: existing
-          ? "tenant.cost_center.updated"
-          : "tenant.cost_center.created",
-        resourceType: "tenant_cost_center",
-        resourceId: costCenter.code,
-        newValuesSummary: this.buildCostCenterAuditSummary(costCenter),
-      },
-      requestId,
-    );
+        this.normalizeCostCenterCode(command.code),
+      ]),
+      async () => {
+        this.assertNonBlank(command.code, "code");
+        this.assertNonBlank(command.name, "name");
 
-    return this.cloneCostCenter(costCenter);
+        const code = this.normalizeCostCenterCode(command.code);
+        const existing = this.costCenters.find(
+          (candidate) =>
+            candidate.tenantId === tenantId && candidate.code === code,
+        );
+
+        const hasOwnerUserId = Object.prototype.hasOwnProperty.call(
+          command,
+          "ownerUserId",
+        );
+        const hasOwnerName = Object.prototype.hasOwnProperty.call(
+          command,
+          "ownerName",
+        );
+        const normalizedOwnerUserId = hasOwnerUserId
+          ? this.normalizeNullableText(command.ownerUserId)
+          : (existing?.ownerUserId ?? null);
+        const ownerUser =
+          normalizedOwnerUserId === null
+            ? null
+            : this.requireTenantUser(tenantId, normalizedOwnerUserId);
+        const ownerName = hasOwnerName
+          ? this.normalizeNullableText(command.ownerName)
+          : hasOwnerUserId
+            ? (ownerUser?.displayName ?? null)
+            : (existing?.ownerName ?? null);
+
+        const now = new Date().toISOString();
+        const activeFlag = command.activeFlag ?? existing?.activeFlag ?? true;
+        const disabledAt = activeFlag ? null : (existing?.disabledAt ?? now);
+        const disabledReason = activeFlag
+          ? null
+          : (existing?.disabledReason ?? "disabled_via_upsert");
+
+        const costCenter: TenantCostCenterRecord = existing
+          ? {
+              ...existing,
+              code,
+              name: command.name.trim(),
+              description: this.normalizeNullableText(
+                command.description ?? existing.description,
+              ),
+              ownerUserId: normalizedOwnerUserId,
+              ownerName,
+              activeFlag,
+              disabledAt,
+              disabledReason,
+              updatedAt: now,
+            }
+          : {
+              tenantId,
+              code,
+              name: command.name.trim(),
+              description: this.normalizeNullableText(command.description),
+              ownerUserId: normalizedOwnerUserId,
+              ownerName,
+              activeFlag,
+              disabledAt,
+              disabledReason,
+              createdAt: now,
+              updatedAt: now,
+            };
+
+        await this.persistChangesRequired(
+          {
+            costCenters: [this.cloneCostCenter(costCenter)],
+          },
+          "upsert_cost_center",
+        );
+        this.costCenters = [
+          this.cloneCostCenter(costCenter),
+          ...this.costCenters.filter(
+            (candidate) =>
+              !(
+                candidate.tenantId === tenantId &&
+                candidate.code === costCenter.code
+              ),
+          ),
+        ];
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: "upsert_cost_center",
+            resourceType: "tenant_cost_center",
+            resourceId: costCenter.code,
+            newValuesSummary: this.buildCostCenterAuditSummary(costCenter),
+          },
+          requestId,
+        );
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: existing
+              ? "tenant.cost_center.updated"
+              : "tenant.cost_center.created",
+            resourceType: "tenant_cost_center",
+            resourceId: costCenter.code,
+            newValuesSummary: this.buildCostCenterAuditSummary(costCenter),
+          },
+          requestId,
+        );
+
+        return this.cloneCostCenter(costCenter);
+      },
+    );
   }
 
-  disableCostCenter(
+  async disableCostCenter(
     tenantId: string,
     command: DisableTenantCostCenterCommand,
     requestId?: string,
   ) {
-    this.assertNonBlank(command.code, "code");
-    const existing = this.getCostCenter(tenantId, command.code);
-    const now = new Date().toISOString();
-    const costCenter: TenantCostCenterRecord = {
-      ...existing,
-      activeFlag: false,
-      disabledAt: now,
-      disabledReason:
-        this.normalizeNullableText(command.reason) ??
-        "disabled_by_tenant_admin",
-      updatedAt: now,
-    };
+    return this.withTenantBookWriteLock(
+      JSON.stringify([
+        "costCenter",
+        tenantId,
+        this.normalizeCostCenterCode(command.code),
+      ]),
+      async () => {
+        this.assertNonBlank(command.code, "code");
+        const existing = this.getCostCenter(tenantId, command.code);
+        const now = new Date().toISOString();
+        const costCenter: TenantCostCenterRecord = {
+          ...existing,
+          activeFlag: false,
+          disabledAt: now,
+          disabledReason:
+            this.normalizeNullableText(command.reason) ??
+            "disabled_by_tenant_admin",
+          updatedAt: now,
+        };
 
-    this.costCenters = [
-      this.cloneCostCenter(costCenter),
-      ...this.costCenters.filter(
-        (candidate) =>
-          !(
-            candidate.tenantId === tenantId &&
-            candidate.code === costCenter.code
+        await this.persistChangesRequired(
+          {
+            costCenters: [this.cloneCostCenter(costCenter)],
+          },
+          "disable_cost_center",
+        );
+        this.costCenters = [
+          this.cloneCostCenter(costCenter),
+          ...this.costCenters.filter(
+            (candidate) =>
+              !(
+                candidate.tenantId === tenantId &&
+                candidate.code === costCenter.code
+              ),
           ),
-      ),
-    ];
-    this.persistChanges(
-      {
-        costCenters: [this.cloneCostCenter(costCenter)],
-      },
-      "disable_cost_center",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "disable_cost_center",
-        resourceType: "tenant_cost_center",
-        resourceId: costCenter.code,
-        newValuesSummary: this.buildCostCenterAuditSummary(costCenter),
-      },
-      requestId,
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "tenant.cost_center.disabled",
-        resourceType: "tenant_cost_center",
-        resourceId: costCenter.code,
-        newValuesSummary: this.buildCostCenterAuditSummary(costCenter),
-      },
-      requestId,
-    );
+        ];
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: "disable_cost_center",
+            resourceType: "tenant_cost_center",
+            resourceId: costCenter.code,
+            newValuesSummary: this.buildCostCenterAuditSummary(costCenter),
+          },
+          requestId,
+        );
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: "tenant.cost_center.disabled",
+            resourceType: "tenant_cost_center",
+            resourceId: costCenter.code,
+            newValuesSummary: this.buildCostCenterAuditSummary(costCenter),
+          },
+          requestId,
+        );
 
-    return this.cloneCostCenter(costCenter);
+        return this.cloneCostCenter(costCenter);
+      },
+    );
   }
 
   validateBookingCostCenter(
@@ -15852,6 +15893,25 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             ),
           ),
       );
+    }
+  }
+
+  private readonly tenantBookWriteLocks = new Map<string, Promise<unknown>>();
+
+  /** Keep local ownership checks and read-model publication in write order. */
+  private async withTenantBookWriteLock<T>(
+    key: string,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.tenantBookWriteLocks.get(key) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(work);
+    this.tenantBookWriteLocks.set(key, current);
+    try {
+      return await current;
+    } finally {
+      if (this.tenantBookWriteLocks.get(key) === current) {
+        this.tenantBookWriteLocks.delete(key);
+      }
     }
   }
 
