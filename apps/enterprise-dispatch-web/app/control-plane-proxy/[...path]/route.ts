@@ -2,12 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   ENTERPRISE_TENANT_SESSION_COOKIE,
   verifyEnterpriseTenantSession,
-} from "@/lib/enterprise-session.server";
+} from "../../../lib/enterprise-session.server";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
-const DEFAULT_ENTERPRISE_DISPATCH_TENANT_ID =
-  "10000000-0000-0000-0000-000000000201";
-const DEFAULT_ENTERPRISE_DISPATCH_ACTOR_ID = "enterprise-dispatch-web";
 const METADATA_IDENTITY_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
 const RUN_APP_HOST_SUFFIX = ".a.run.app";
@@ -17,6 +14,7 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
   "cookie",
   "host",
   "transfer-encoding",
+  "x-drts-authorization",
   "x-drts-internal-key",
   "x-drts-google-id-token",
   "x-actor-id",
@@ -26,6 +24,9 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
   "x-forwarded-host",
   "x-forwarded-port",
   "x-forwarded-proto",
+  "x-partner-entry-slug",
+  "x-partner-id",
+  "x-partner-program-id",
   "x-realm",
   "x-role-families",
   "x-roles",
@@ -99,20 +100,6 @@ function buildTargetUrl(request: NextRequest, path: string[]) {
   return targetUrl;
 }
 
-function resolveEnterpriseTenantId(): string {
-  return (
-    process.env.DRTS_ENTERPRISE_DISPATCH_TENANT_ID?.trim() ||
-    DEFAULT_ENTERPRISE_DISPATCH_TENANT_ID
-  );
-}
-
-function resolveEnterpriseActorId(): string {
-  return (
-    process.env.DRTS_ENTERPRISE_DISPATCH_ACTOR_ID?.trim() ||
-    DEFAULT_ENTERPRISE_DISPATCH_ACTOR_ID
-  );
-}
-
 function isGoogleOrCloudRunIdToken(token: string): boolean {
   try {
     const parts = token.split(".");
@@ -148,24 +135,22 @@ function isCloudRunIngressAuthorization(headerValue: string): boolean {
 
 function copyRequestHeaders(request: NextRequest, path: string[]) {
   const headers = new Headers();
+  const tenantBookingPath = isTenantBookingPath(path);
 
   request.headers.forEach((value, key) => {
     const lowerKey = key.toLowerCase();
     if (REQUEST_HEADER_BLOCKLIST.has(lowerKey)) {
       return;
     }
-    if (lowerKey === "authorization" && isCloudRunIngressAuthorization(value)) {
-      return;
+    if (lowerKey === "authorization") {
+      if (tenantBookingPath || isCloudRunIngressAuthorization(value)) {
+        return;
+      }
     }
     headers.set(key, value);
   });
 
-  if (isTenantBookingPath(path)) {
-    headers.set("x-realm", "tenant");
-    headers.set("x-actor-type", "tenant_admin");
-    headers.set("x-actor-id", resolveEnterpriseActorId());
-    headers.set("x-tenant-id", resolveEnterpriseTenantId());
-  } else {
+  if (!tenantBookingPath) {
     headers.set("x-realm", "enterprise_dispatch");
   }
 
@@ -211,6 +196,13 @@ async function mintMetadataIdentityToken(
 }
 
 async function applyUpstreamAuth(headers: Headers, targetUrl: URL) {
+  if (
+    headers.has("x-serverless-authorization") &&
+    headers.has("x-drts-google-id-token")
+  ) {
+    return;
+  }
+
   const protectedAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
   if (protectedAudience) {
     const metadataToken = await mintMetadataIdentityToken(protectedAudience);
@@ -249,7 +241,7 @@ async function forward(
 
   const targetUrl = buildTargetUrl(request, path);
   const headers = copyRequestHeaders(request, path);
-  if (method === "GET" && isTenantBookingPath(path)) {
+  if (isTenantBookingPath(path)) {
     const verified = await verifyEnterpriseTenantSession(
       request.cookies.get(ENTERPRISE_TENANT_SESSION_COOKIE)?.value,
       resolveTargetOrigin(),
@@ -267,11 +259,32 @@ async function forward(
         { status: 403 },
       );
     }
-    for (const name of ["x-realm", "x-actor-type", "x-actor-id"])
+    const requiredScope =
+      method === "GET" || method === "HEAD" ? "tenant:read" : "tenant:write";
+    if (
+      verified.session.scopes &&
+      !verified.session.scopes.includes(requiredScope)
+    ) {
+      return NextResponse.json(
+        { error: "AUTH_SCOPE_DENIED", requiredScope },
+        { status: 403 },
+      );
+    }
+    for (const name of [
+      "x-realm",
+      "x-actor-type",
+      "x-actor-id",
+      "x-drts-authorization",
+    ]) {
       headers.delete(name);
-    headers.delete("x-drts-authorization");
+    }
     headers.set("authorization", `Bearer ${verified.session.accessToken}`);
     headers.set("x-tenant-id", verified.session.tenantId);
+    if (verified.session.upstreamHeaders) {
+      for (const [k, v] of Object.entries(verified.session.upstreamHeaders)) {
+        headers.set(k, v);
+      }
+    }
   }
   await applyUpstreamAuth(headers, targetUrl);
 
@@ -320,6 +333,13 @@ export async function POST(
 }
 
 export async function PUT(
+  request: NextRequest,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  return forward(request, context);
+}
+
+export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
 ) {

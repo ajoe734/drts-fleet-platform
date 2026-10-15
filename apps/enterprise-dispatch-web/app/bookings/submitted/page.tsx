@@ -1,4 +1,7 @@
+import { cookies } from "next/headers";
 import Link from "next/link";
+import type { BookingRecord } from "@drts/contracts";
+import { EnterpriseGatePage } from "../../../components/enterprise-state-page";
 import {
   EBtnContent,
   ECard,
@@ -6,11 +9,19 @@ import {
   EPill,
   ERow,
   entBtnStyle,
-} from "@/components/ent-kit";
-import { getEnterpriseBookingDraft } from "@/lib/enterprise-fixtures";
-import { enterpriseTheme as t } from "@/lib/enterprise-theme";
-import { getServerLocale } from "@/lib/server-locale";
-import { type TranslationKey, t as translate } from "@/lib/translations";
+} from "../../../components/ent-kit";
+import {
+  classifyEnterpriseBookingFetchError,
+  getEnterpriseDispatchTenantClient,
+  type EnterpriseBookingFetchErrorState,
+} from "../../../lib/api-client";
+import {
+  ENTERPRISE_TENANT_SESSION_COOKIE,
+  verifyEnterpriseTenantSession,
+} from "../../../lib/enterprise-session.server";
+import { enterpriseTheme as t } from "../../../lib/enterprise-theme";
+import { getServerLocale } from "../../../lib/server-locale";
+import { type TranslationKey, t as translate } from "../../../lib/translations";
 
 type SubmittedSearchParams = Record<string, string | string[] | undefined>;
 
@@ -26,19 +37,85 @@ export default async function SubmittedBookingPage({
   const locale = await getServerLocale();
   const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
     translate(key, params, locale);
-  const draft = getEnterpriseBookingDraft(locale);
+
+  const cookieStore = await cookies();
+  const verified = await verifyEnterpriseTenantSession(
+    cookieStore.get(ENTERPRISE_TENANT_SESSION_COOKIE)?.value,
+  );
+  if (!verified.session) {
+    return (
+      <EnterpriseGatePage
+        kind={verified.status === 503 ? "degraded" : "auth-required"}
+      />
+    );
+  }
+
   const resolvedSearchParams = (await searchParams) ?? {};
-  const bookingId = firstParam(resolvedSearchParams.bookingId);
-  const orderId = firstParam(resolvedSearchParams.orderId);
-  const status = firstParam(resolvedSearchParams.status) ?? "accepted";
-  const source = firstParam(resolvedSearchParams.source);
-  const hasBackendProof = Boolean(bookingId && orderId);
-  const refreshHref = hasBackendProof
+  const requestedBookingId = firstParam(resolvedSearchParams.bookingId)?.trim();
+
+  let booking: BookingRecord | null = null;
+  let lookupErrorState: "missing-id" | EnterpriseBookingFetchErrorState | null =
+    requestedBookingId ? null : "missing-id";
+
+  if (requestedBookingId) {
+    try {
+      const fetched = await getEnterpriseDispatchTenantClient(
+        verified.session,
+      ).getBooking(requestedBookingId);
+      if (
+        fetched &&
+        typeof fetched.bookingId === "string" &&
+        fetched.bookingId.trim().length > 0 &&
+        typeof fetched.orderId === "string" &&
+        fetched.orderId.trim().length > 0 &&
+        (!fetched.tenantId || fetched.tenantId === verified.session.tenantId)
+      ) {
+        booking = fetched;
+      } else {
+        lookupErrorState = "not-found";
+      }
+    } catch (error) {
+      const statusCode =
+        error && typeof error === "object"
+          ? (error as { statusCode?: unknown }).statusCode
+          : undefined;
+      if (statusCode === 401) {
+        return <EnterpriseGatePage kind="auth-required" />;
+      }
+      if (statusCode === 403 || statusCode === 404) {
+        lookupErrorState = "not-found";
+      } else {
+        lookupErrorState = classifyEnterpriseBookingFetchError(error);
+      }
+    }
+  }
+
+  const hasBackendProof = Boolean(
+    booking && booking.bookingId && booking.orderId,
+  );
+  const canonicalStatus = booking
+    ? (booking.orderStatus ?? booking.status)
+    : lookupErrorState === "not-found"
+      ? "not_found"
+      : lookupErrorState === "missing-id"
+        ? "missing_booking_id"
+        : (lookupErrorState ?? "unavailable");
+  const canonicalSource = booking
+    ? (booking.businessDispatchSubtype ?? booking.serviceBucket)
+    : "backend response required";
+  const passengerSummary = booking
+    ? `${booking.passenger.name} · ${booking.bookedBy?.name ?? booking.passenger.name}`
+    : "—";
+  const contactSummary = booking
+    ? (booking.onsiteContact?.phone ?? booking.passenger.phone ?? "—")
+    : "—";
+  const costCenterSummary = booking ? (booking.costCenter?.trim() || "—") : "—";
+  const notesSummary = booking ? (booking.notes?.trim() || "—") : "—";
+
+  const effectiveBookingId = booking?.bookingId ?? requestedBookingId;
+  const refreshHref = effectiveBookingId
     ? `/bookings/submitted?${new URLSearchParams({
-        bookingId: bookingId!,
-        orderId: orderId!,
-        status,
-        ...(source ? { source } : {}),
+        bookingId: effectiveBookingId,
       }).toString()}`
     : "/bookings/submitted";
 
@@ -62,7 +139,11 @@ export default async function SubmittedBookingPage({
             <EIcon name={hasBackendProof ? "check" : "shield"} size={30} />
           </div>
           <h1 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 6px" }}>
-            {tr("submitted.title")}
+            {hasBackendProof
+              ? tr("submitted.title")
+              : lookupErrorState === "not-found"
+                ? tr("bookingLifecycle.detail.notFound.title")
+                : tr("submitted.pending")}
           </h1>
           <div
             style={{
@@ -84,7 +165,7 @@ export default async function SubmittedBookingPage({
                   opacity: 0.7,
                 }}
               >
-                {status}
+                {canonicalStatus}
               </span>
             </EPill>
           </div>
@@ -104,6 +185,9 @@ export default async function SubmittedBookingPage({
         </div>
         <div
           data-testid="enterprise-booking-submission-proof"
+          data-submission-state={
+            hasBackendProof ? "verified" : (lookupErrorState ?? "unverified")
+          }
           style={{
             marginTop: 18,
             background: t.surfaceLo,
@@ -115,36 +199,75 @@ export default async function SubmittedBookingPage({
           <ERow
             t={t}
             k={tr("submitted.summary.bookingId")}
-            v={bookingId ?? tr("submitted.summary.missingBackend")}
-            mono={Boolean(bookingId)}
+            v={
+              booking
+                ? booking.bookingId
+                : tr("submitted.summary.missingBackend")
+            }
+            mono={Boolean(booking)}
           />
           <ERow
             t={t}
             k={tr("submitted.summary.orderId")}
-            v={orderId ?? tr("submitted.summary.missingBackend")}
-            mono={Boolean(orderId)}
+            v={
+              booking ? booking.orderId : tr("submitted.summary.missingBackend")
+            }
+            mono={Boolean(booking)}
           />
-          <ERow t={t} k={tr("submitted.summary.status")} v={status} mono />
+          <ERow
+            t={t}
+            k={tr("submitted.summary.status")}
+            v={canonicalStatus}
+            mono
+          />
           <ERow
             t={t}
             k={tr("submitted.summary.source")}
-            v={source ?? "backend response required"}
-            mono={Boolean(source)}
+            v={canonicalSource}
+            mono={Boolean(booking)}
           />
           <ERow
             t={t}
             k={tr("review.card.summary")}
-            v={`${draft.passenger} · ${draft.bookedBy}`}
+            v={passengerSummary}
           />
-          <ERow t={t} k={tr("new.field.costCenter")} v="CC-PRD-07" mono />
+          <ERow
+            t={t}
+            k={tr("review.summary.contact")}
+            v={contactSummary}
+            mono={Boolean(booking)}
+          />
+          <ERow
+            t={t}
+            k={tr("new.field.costCenter")}
+            v={costCenterSummary}
+            mono={Boolean(booking)}
+          />
+          <ERow
+            t={t}
+            k={tr("new.field.notes")}
+            v={notesSummary}
+          />
           <ERow
             t={t}
             k={tr("submitted.summary.estimatedResult")}
             v={
-              <EPill t={t} tone={hasBackendProof ? "success" : "warn"} dot>
-                {hasBackendProof
-                  ? tr("submitted.summary.backendProof")
-                  : tr("submitted.pending")}
+              <EPill
+                t={t}
+                tone={
+                  !hasBackendProof
+                    ? "warn"
+                    : booking?.approvalState === "pending"
+                      ? "warn"
+                      : "success"
+                }
+                dot
+              >
+                {!hasBackendProof
+                  ? tr("submitted.pending")
+                  : booking?.approvalState === "pending"
+                    ? `${tr("submitted.summary.backendProof")} · ${tr("submitted.pending")}`
+                    : tr("submitted.summary.backendProof")}
               </EPill>
             }
             last
@@ -153,12 +276,18 @@ export default async function SubmittedBookingPage({
         <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
           <Link
             href={refreshHref}
+            data-testid="enterprise-submitted-refresh"
             style={entBtnStyle(t, { variant: "default", block: true })}
           >
             <EBtnContent icon="refresh">{tr("submitted.refresh")}</EBtnContent>
           </Link>
           <Link
-            href={bookingId ? `/bookings/${encodeURIComponent(bookingId)}` : "/bookings"}
+            href={
+              booking
+                ? `/bookings/${encodeURIComponent(booking.bookingId)}`
+                : "/bookings"
+            }
+            data-testid="enterprise-submitted-bookings-link"
             style={entBtnStyle(t, { variant: "primary", block: true })}
           >
             <EBtnContent iconR="arrow">{tr("submitted.bookings")}</EBtnContent>
