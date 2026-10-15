@@ -363,9 +363,14 @@ export class PlatformAdminController {
     @Res({ passthrough: true }) response: PassthroughResponseLike,
     @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
     if (!this.idempotencyService) {
-      const data = this.platformAdminService.registerPlatformAdapter(adapter);
+      const data = await this.platformAdminService.registerPlatformAdapter(
+        adapter,
+        requestId,
+        identity?.actorId ?? null,
+      );
       return toApiSuccessEnvelope(data, requestId);
     }
     const result = await this.idempotencyService.execute({
@@ -374,7 +379,11 @@ export class PlatformAdminController {
       requestPath: "platform-admin/adapters",
       payload: adapter,
       execute: async () => ({
-        data: this.platformAdminService.registerPlatformAdapter(adapter),
+        data: await this.platformAdminService.registerPlatformAdapter(
+          adapter,
+          requestId,
+          identity?.actorId ?? null,
+        ),
         statusCode: 201,
       }),
     });
