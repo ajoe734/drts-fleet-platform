@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { IdentityContext } from "@drts/contracts";
 import { JwtAuthService } from "../../../apps/api/src/common/auth/jwt-auth.service";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { TenantPartnerController } from "../../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
@@ -76,7 +77,7 @@ describe("F3 SLA authorization before canonical recovery", () => {
         const tokenA = signedIdentity(h.jwt, tenantA);
         const identityA = h.jwt.toRequestIdentity(
           (await h.jwt.verifyAccessToken(tokenA))!,
-        );
+        ) as IdentityContext;
         expect(identityA?.tenantId).toBe(tenantA);
         const serviceSpy = vi.spyOn(h.service, "updateSlaProfile");
         // Promise.then also captures the original synchronous service denial.
@@ -149,7 +150,9 @@ describe("F3 SLA authorization before canonical recovery", () => {
               { waitThresholdMin: 40 },
               undefined,
               undefined,
-              h.jwt.toRequestIdentity((await h.jwt.verifyAccessToken(token))!),
+              h.jwt.toRequestIdentity(
+                (await h.jwt.verifyAccessToken(token))!,
+              ) as IdentityContext,
             );
           expect(
             h.p.query.mock.calls.some(([sql]) => sql.includes("SELECT")),
