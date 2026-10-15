@@ -1,7 +1,9 @@
 # BANK-USER-MANAGEMENT-FLOW-20261015 — preserved-history recovery
 
-Helper: `BANK-USER-MANAGEMENT-FLOW-20261015-UNBLOCK-HISTORY-REPAIR`  
-Owner / reviewer: Codex / Codex2  
+Helper: `BANK-USER-MANAGEMENT-FLOW-20261015-UNBLOCK-HISTORY-REPAIR`
+
+Owner / reviewer: Codex / Codex2
+
 Audit date: 2026-10-15 UTC
 
 ## Result and authority
