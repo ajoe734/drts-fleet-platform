@@ -101,7 +101,11 @@ it("the real review buttons send only OTP command fields through SDK/BFF, retain
         );
         const method = (init?.method ?? "GET") as "GET" | "POST" | "PATCH";
         const response = await bff[method](
-          new NextRequest(`https://pax.example${url}`, { ...init, headers }),
+          new NextRequest(`https://pax.example${url}`, {
+            method,
+            headers,
+            ...(init?.body ? { body: init.body } : {}),
+          }),
           {
             params: Promise.resolve({
               path: url.slice("/api/passenger-app/".length).split("/"),

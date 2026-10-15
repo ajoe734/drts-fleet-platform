@@ -637,3 +637,22 @@ symlink and completed `CI=true pnpm install --frozen-lockfile --offline
 --ignore-scripts` in this worktree (exit 0, `install.log`). No tracked package
 or lockfile change and no canonical dependency/data mutation occurred. This
 installation is tooling evidence, not product verification.
+
+The final regression is also rerun against the immutable 9c784946 page using
+`vitest.before.config.ts` in the evidence directory. Its Vite load hook obtains
+that exact page with `git show 9c784946ee129de82c7c13dde1ac16e8e3769c7b:<path>`;
+all real imports and the current regression remain in place. Command:
+`pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/review-login.test.tsx --config .local/pax-review-shared-order-demo-20261015/otp-caller-rework/vitest.before.config.ts --maxWorkers=1 --reporter=verbose`.
+It reproduces the same 400 assertion failure, exit 1
+(`immutable-before.log`), without editing/resetting the active product tree.
+
+Root typecheck, Passenger `next typegen && tsc --noEmit`, scoped ESLint and
+format checks pass. Because the root tsconfig does not include `.tsx` tests,
+the owner also explicitly includes this new regression in the temporary
+`tsconfig.review-login.json`. Its initial run found only a test transport
+`RequestInit.signal` type mismatch (exit 2, `login-typecheck.log`); specifying
+the method/headers/body passed to `NextRequest` fixes it without changing
+product behavior or assertions. The final explicit test typecheck passes
+(exit 0, `login-typecheck-final.log`). `regression-final.log` records the final
+combined regression after that adaptation. Earlier failed probes remain
+recorded rather than counted as passes.
