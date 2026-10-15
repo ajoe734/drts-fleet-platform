@@ -131,15 +131,15 @@ describe("tenant governance negative-path integration", () => {
     vi.useRealTimers();
   });
 
-  it("surfaces rollout gate authority instead of deriving governance risk from stage", () => {
+  it("surfaces rollout gate authority instead of deriving governance risk from stage", async () => {
     const { tenantsService, platformTenantGovernanceService } = createHarness();
 
-    const created = tenantsService.create({
+    const created = await tenantsService.create({
       name: "Blocked Rollout Tenant",
       code: "blocked_rollout",
     });
 
-    tenantsService.updateOnboarding(created.id, {
+    await tenantsService.updateOnboarding(created.id, {
       rollout: {
         sandboxStatus: "blocked",
         notes: "Sandbox evidence is incomplete.",
@@ -155,7 +155,7 @@ describe("tenant governance negative-path integration", () => {
     expect(blockedRow?.tenantRolloutGateStatus).toBe("blocked");
     expect(blockedRow?.alertFlags).toContain("blocked_rollout_gate");
 
-    tenantsService.setRollbackHold(created.id);
+    await tenantsService.setRollbackHold(created.id);
 
     const heldRow = platformTenantGovernanceService
       .listSummary()

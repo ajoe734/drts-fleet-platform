@@ -241,19 +241,23 @@ export async function seedTenantUatFixtures(): Promise<TenantUatFixtures> {
     };
 
     const tenants = appCtx.get(TenantsService) as {
-      create(command: { name: string; code: string }): { id: string };
+      create(command: { name: string; code: string }): Promise<{ id: string }>;
     };
     const db = appCtx.get(DatabaseService) as {
       query(sql: string, parameters: unknown[]): Promise<{ rows: unknown[] }>;
     };
-    const tenantA = tenants.create({
-      name: "QA Tenant A",
-      code: `qa-a-${randomUUID()}`,
-    }).id;
-    const tenantB = tenants.create({
-      name: "QA Tenant B",
-      code: `qa-b-${randomUUID()}`,
-    }).id;
+    const tenantA = (
+      await tenants.create({
+        name: "QA Tenant A",
+        code: `qa-a-${randomUUID()}`,
+      })
+    ).id;
+    const tenantB = (
+      await tenants.create({
+        name: "QA Tenant B",
+        code: `qa-b-${randomUUID()}`,
+      })
+    ).id;
     // Await actual persisted resources before starting the separate HTTP server.
     for (const tenant of [tenantA, tenantB]) {
       let durable = false;
