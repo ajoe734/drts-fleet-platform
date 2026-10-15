@@ -9602,6 +9602,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     // Passenger deliveries are owned exclusively by the consumer outbox, including after restart/manual retry.
     if (delivery.eventType.startsWith("passenger.")) return;
     await this.dispatchWebhookAttempt(endpoint, delivery, delivery.rawBody);
+    // Dispatch publishes a staged delivery only after its durable outcome ACK.
+    // The pre-dispatch object still describes the queued attempt.
+    const committedDelivery =
+      this.webhookDeliveries.find((item) => item.deliveryId === deliveryId) ??
+      delivery;
 
     this.recordTenantAudit(
       {
@@ -9617,20 +9622,16 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         newValuesSummary: {
           webhookId: endpoint.webhookId,
           eventType: delivery.eventType,
-          status: delivery.status,
-          attempt: delivery.attempt,
-          httpStatus: delivery.httpStatus,
-          nextAttemptAt: delivery.nextAttemptAt,
+          status: committedDelivery.status,
+          attempt: committedDelivery.attempt,
+          httpStatus: committedDelivery.httpStatus,
+          nextAttemptAt: committedDelivery.nextAttemptAt,
         },
       },
       requestId,
     );
 
-    return this.toDeliveryResponse(
-      this.webhookDeliveries.find((item) => item.deliveryId === deliveryId) ??
-        delivery,
-      identity,
-    );
+    return this.toDeliveryResponse(committedDelivery, identity);
   }
 
   listWebhookDeliveries(

@@ -34,6 +34,78 @@ function serviceFor(
 }
 
 describe("C112 durable commands and first in-flight restart", () => {
+  it.each([true, false])(
+    "manual retry audit describes the committed delivery outcome (persistence=%s)",
+    async (enabled) => {
+      const p = persistenceHarness();
+      const { service, audit, fetcher } = serviceFor(
+        enabled ? p.repository : undefined,
+      );
+      const endpoint = await service.createWebhookEndpoint(tenantId, command);
+      fetcher.mockResolvedValueOnce({ ok: false, status: 410 });
+      const failed = await service.sendTestWebhook(tenantId, {
+        webhookId: endpoint.webhookId,
+      });
+      const auditSpy = vi.spyOn(audit, "recordAuditLog");
+      let releaseCommit!: () => void;
+      if (enabled)
+        p.holdCommit(
+          () =>
+            new Promise<void>((resolve) => {
+              releaseCommit = resolve;
+            }),
+        );
+      const retrying = service.retryWebhookDelivery(
+        tenantId,
+        endpoint.webhookId,
+        failed.deliveryId,
+        "req-manual-retry-audit",
+        {
+          actorId: "tenant-integration-manager",
+          actorType: "tenant_admin",
+          realm: "tenant",
+          tenantId,
+          roles: ["tc_integration_mgr"],
+          scopes: ["tenant:webhooks:write"],
+        },
+      );
+      if (enabled) {
+        await new Promise((resolve) => setImmediate(resolve));
+        try {
+          expect(
+            auditSpy.mock.calls.some(
+              ([entry]) => entry.actionName === "retry_webhook_delivery",
+            ),
+          ).toBe(false);
+        } finally {
+          releaseCommit();
+        }
+      }
+      const retried = await retrying;
+      expect(retried).toMatchObject({
+        status: "delivered",
+        attempt: 2,
+        httpStatus: 204,
+        nextAttemptAt: null,
+      });
+      const retryAudit = auditSpy.mock.calls.find(
+        ([entry]) => entry.actionName === "retry_webhook_delivery",
+      )?.[0];
+      expect(retryAudit?.newValuesSummary).toMatchObject({
+        status: "delivered",
+        attempt: 2,
+        httpStatus: 204,
+        nextAttemptAt: null,
+      });
+      if (enabled)
+        expect(
+          (await p.repository.loadState()).webhookDeliveries.find(
+            (item) => item.deliveryId === failed.deliveryId,
+          ),
+        ).toMatchObject({ status: "delivered", attempt: 2, httpStatus: 204 });
+    },
+  );
+
   it.each(["test", "publish"] as const)(
     "%s preparation waits for the pending metadata ACK",
     async (kind) => {
