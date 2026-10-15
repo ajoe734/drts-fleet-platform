@@ -5,6 +5,7 @@
 - **Reviewer**: `Gemini2`
 - **Branch**: `gemini/health-observability-source-truth-20261015-clean` (clean-branch history recovery from `origin/dev`, preserving published `origin/gemini/health-observability-source-truth-20261015` at `cbf1bfd52819f74ce6b113f6b6fe2c4a7c89df30` untouched per `docs/ops/branch-strategy.md` §11)
 - **Base (`origin/dev`)**: `ee731bba06354c219faed83a78db002e7a33144e`
+- **Implementation Commit SHA**: `f33e46bc72628195fb9f033888338ad680065dd0`
 - **Task Spec Ref**: `/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T1319-remaining-original-configuration-root/HEALTH-OBSERVABILITY-SOURCE-TRUTH-20261015-R1.task-spec.json`
 - **Readonly Audit Ref**: `/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T1319-remaining-original-configuration-root/C108-current-accepted-health-alert-dataflow-readonly-audit.json`
 
