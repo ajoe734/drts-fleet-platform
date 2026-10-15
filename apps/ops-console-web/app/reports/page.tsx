@@ -51,10 +51,12 @@ import {
   type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
-import { getOpsClient } from "@/lib/api-client";
-import { useTranslation } from "@/lib/i18n";
-import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
-import { t as translate, type Locale } from "@/lib/translations";
+import { getOpsClient } from "../../lib/api-client";
+import { useTranslation } from "../../lib/i18n";
+import { formatOpsCodeLabel, getOpsLabel } from "../../lib/localized-labels";
+import { t as translate, type Locale } from "../../lib/translations";
+
+import { artifactDownloadUrl } from "../../lib/report-artifact-url";
 
 type ReportsTab = "jobs" | "operational" | "packages" | "schedules";
 
@@ -375,22 +377,6 @@ function isExpired(value: string | null | undefined) {
 
 function artifactExpired(job: Pick<ReportJobRecord, "status" | "artifact">) {
   return job.status === "expired" || isExpired(job.artifact?.expiresAt);
-}
-
-function artifactDownloadUrl(
-  artifact: ReportJobRecord["artifact"] | null | undefined,
-) {
-  if (!artifact || typeof artifact !== "object") {
-    return null;
-  }
-
-  // `downloadMetadata.downloadUrl` is the signed governance reference and points
-  // at a host that does not resolve. `artifact.downloadUrl` addresses the route
-  // that streams the file. This link is for a person to click, so it takes the
-  // one that serves bytes.
-  return typeof artifact.downloadUrl === "string" && artifact.downloadUrl
-    ? artifact.downloadUrl
-    : null;
 }
 
 function jobDownloadDescriptor(
