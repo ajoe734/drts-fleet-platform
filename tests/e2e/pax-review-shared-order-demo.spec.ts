@@ -684,8 +684,29 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         await ops.getByRole("button", { name: "暫停演練供給" }).click();
         await createDispatch(ops, cancelled);
         await expect(ops.getByTestId("ops-review-order-status")).toHaveText(
-          /no_supply|dispatch_timeout|delayed_queue/,
+          "redispatch_required",
         );
+        // This is a reservation outside its confirmation window. The real
+        // no-supply branch queues it for redispatch rather than escalating a
+        // realtime order. Verify that authority and the empty candidate list.
+        const queued = await ops.request.get(
+          `${OPS}/control-plane-proxy/orders/${cancelled}`,
+        );
+        expect(queued.status()).toBe(200);
+        expect(camel(await queued.json()).data).toMatchObject({
+          orderId: cancelled,
+          status: "redispatch_required",
+          dispatchSemantics: "reservation",
+          reservationHoldStatus: "redispatch_queue",
+        });
+        const queuedJob = await ops
+          .getByTestId("ops-review-job-id")
+          .innerText();
+        const noCandidates = await ops.request.get(
+          `${OPS}/control-plane-proxy/dispatch/tasks/${queuedJob}/candidates`,
+        );
+        expect(noCandidates.status()).toBe(200);
+        expect(camel(await noCandidates.json()).data.items).toEqual([]);
         await ops.getByRole("button", { name: "恢復演練供給" }).click();
         await ops.getByRole("button", { name: "依原流程重新派遣" }).click();
         const cancelledAssignment = await assign(ops);
