@@ -121,7 +121,10 @@ export default function ReviewEntry() {
                       );
                       if (!response.ok) throw new Error("otp_unavailable");
                       const result = await response.json();
-                      setProof(result.data);
+                      setProof({
+                        challenge: result.data.challenge,
+                        code: result.data.code,
+                      });
                     })
                   }
                 >
