@@ -873,6 +873,18 @@ export function resolveRouteAuthPolicy(
   }
 
   if (
+    /^ops\/driver-sos\/by-incident\/[^/]+$/.test(routePath) &&
+    upperMethod === "GET"
+  ) {
+    return {
+      routeKey: "ops:driver-sos:get-by-incident",
+      requiredScopes: ["incident:read"],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Ops canonical SOS event readback by incident id",
+    };
+  }
+
+  if (
     routePath === "ops/driver-sos/metrics/alert-latency" &&
     upperMethod === "GET"
   ) {

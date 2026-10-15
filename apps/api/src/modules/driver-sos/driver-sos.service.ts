@@ -833,6 +833,29 @@ export class DriverSosService implements OnModuleInit {
     };
   }
 
+  async getEventByIncidentIdForOps(
+    incidentId: string,
+    identity: BootstrapRequestIdentity | null,
+  ): Promise<DriverSosEventReadback> {
+    this.requireOpsIdentity(identity);
+    const event = this.events.find(
+      (candidate) => candidate.incidentId === incidentId,
+    );
+    if (!event) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "DRIVER_SOS_EVENT_NOT_FOUND",
+        `No driver SOS event correlates to incident ${incidentId}.`,
+      );
+    }
+    return {
+      event: this.cloneEvent(event),
+      timeline: (this.timelines.get(event.sosEventId) ?? []).map((entry) =>
+        this.cloneTimeline(entry),
+      ),
+    };
+  }
+
   async getOwnEventForDriver(
     sosEventId: string,
     identity: BootstrapRequestIdentity | null,

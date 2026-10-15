@@ -9,6 +9,7 @@ vi.mock("expo-secure-store", () => ({
 import {
   buildDriverSosSubmitCommand,
   applyDriverSosAttachmentSyncResult,
+  applyDriverSosDutyReadback,
   createDriverSosActiveCase,
   formatSosDescription,
   getSituationLabel,
@@ -283,5 +284,123 @@ describe("driver-sos-outbox", () => {
         expect(entry.detail.toLowerCase()).not.toContain(phrase);
       }
     }
+  });
+
+  describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015: honest duty-ack state", () => {
+    function buildSubmittedCase() {
+      const activeCase = createDriverSosActiveCase({
+        eventType: "traffic_accident",
+        description: "",
+        attachments: [],
+        originalTriggeredAt: "2026-07-20T09:00:00.000Z",
+        offlineAtTrigger: false,
+        location: null,
+        orderId: null,
+        taskId: null,
+      });
+
+      return markDriverSosCaseSubmitted(activeCase, {
+        event: {
+          sosEventId: "sos-event-duty-1",
+          clientEventId: activeCase.clientEventId,
+          eventNo: "SOS-20260720-001",
+          incidentId: "inc_0214",
+          driverId: "driver-1",
+          vehicleId: null,
+          plateNo: null,
+          orderId: null,
+          taskId: null,
+          status: "submitted",
+          eventType: "traffic_accident",
+          severity: "major",
+          description: null,
+          location: null,
+          originalTriggeredAt: "2026-07-20T09:00:00.000Z",
+          serverReceivedAt: "2026-07-20T09:00:05.000Z",
+          fleetReportConfirmedAt: "2026-07-20T09:00:05.000Z",
+          offlineAtTrigger: false,
+          falseAlarm: {
+            dismissed: false,
+            dismissedAt: null,
+            dismissedByDriverId: null,
+            note: null,
+          },
+          dutyAcknowledgement: {
+            acknowledgedAt: null,
+            acknowledgedByActorId: null,
+          },
+          createdAt: "2026-07-20T09:00:05.000Z",
+          updatedAt: "2026-07-20T09:00:05.000Z",
+        },
+        receipt: {
+          sosEventId: "sos-event-duty-1",
+          incidentId: "inc_0214",
+          clientEventId: activeCase.clientEventId,
+          eventNo: "SOS-20260720-001",
+          duplicate: false,
+          serverReceivedAt: "2026-07-20T09:00:05.000Z",
+          fleetReportConfirmedAt: "2026-07-20T09:00:05.000Z",
+        },
+      });
+    }
+
+    it("never claims a duty person has already been assigned at submission time", () => {
+      const submitted = buildSubmittedCase();
+
+      expect(submitted.dutyAcknowledgement.acknowledgedByActorId).toBeNull();
+      for (const entry of submitted.timeline) {
+        expect(entry.detail).not.toContain("指派");
+        expect(entry.detail).not.toContain("已認領");
+      }
+    });
+
+    it("applies an authoritative duty-ack readback exactly once, appending one timeline entry", () => {
+      const submitted = buildSubmittedCase();
+
+      const acknowledged = applyDriverSosDutyReadback(submitted, {
+        status: "acknowledged",
+        dutyAcknowledgement: {
+          acknowledgedAt: "2026-07-20T09:02:00.000Z",
+          acknowledgedByActorId: "ops-duty-01",
+        },
+      });
+
+      expect(acknowledged.dutyAcknowledgement.acknowledgedByActorId).toBe(
+        "ops-duty-01",
+      );
+      expect(
+        acknowledged.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
+      ).toHaveLength(1);
+
+      // Re-applying the same readback must stay idempotent (no duplicate entry).
+      const reapplied = applyDriverSosDutyReadback(acknowledged, {
+        status: "acknowledged",
+        dutyAcknowledgement: {
+          acknowledgedAt: "2026-07-20T09:02:00.000Z",
+          acknowledgedByActorId: "ops-duty-01",
+        },
+      });
+
+      expect(
+        reapplied.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
+      ).toHaveLength(1);
+    });
+
+    it("leaves the active case untouched while the readback still reports pending duty", () => {
+      const submitted = buildSubmittedCase();
+
+      const stillPending = applyDriverSosDutyReadback(submitted, {
+        status: "submitted",
+        dutyAcknowledgement: {
+          acknowledgedAt: null,
+          acknowledgedByActorId: null,
+        },
+      });
+
+      expect(stillPending.dutyAcknowledgement.acknowledgedByActorId).toBeNull();
+      expect(
+        stillPending.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
+      ).toHaveLength(0);
+    });
   });
 });

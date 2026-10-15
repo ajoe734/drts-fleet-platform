@@ -432,6 +432,17 @@ describe("C047: SOS Duty Lifecycle, Deduplication, Alert Receipt & Latency Metri
           (entry) => entry.eventType === "duty_acknowledged",
         ),
       ).toHaveLength(1);
+
+      // Ops consoles only hold the Incident id; the by-incident lookup must
+      // resolve to the same canonical SOS event and acknowledgment.
+      const byIncident = await driverSosService.getEventByIncidentIdForOps(
+        sos.receipt.incidentId,
+        opsIdentity,
+      );
+      expect(byIncident.event.sosEventId).toBe(sos.event.sosEventId);
+      expect(byIncident.event.dutyAcknowledgement.acknowledgedByActorId).toBe(
+        "ops-readback-01",
+      );
     });
 
     it("rejects duty acknowledgment from a non-ops realm with 403", async () => {

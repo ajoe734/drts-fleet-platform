@@ -16,6 +16,7 @@ import {
   type ConfirmDriverSosAttachmentUploadResult,
   type CreateDriverSosAttachmentUploadIntentResult,
   type DriverSosAttachmentRecord,
+  type DriverSosEventRecord,
   PLATFORM_CODE_REGISTRY,
   type DriverTaskRecord,
   type DriverSosLocationSnapshot,
@@ -43,6 +44,7 @@ import {
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import {
   applyDriverSosAttachmentSyncResult,
+  applyDriverSosDutyReadback,
   buildDriverSosSubmitCommand,
   createDriverSosActiveCase,
   createDriverSosAttachmentDraft,
@@ -658,6 +660,56 @@ export default function DriverSosScreen() {
 
     void syncActiveCase(activeCase, false);
   }, [activeCase, browserOnline]);
+
+  // Honest duty-ack readback: poll the canonical server state rather than
+  // ever inferring that a duty person has been assigned from submission
+  // alone. Stops once the server reports an authoritative acknowledgment.
+  const sosEventIdForReadback = activeCase?.receipt?.sosEventId ?? null;
+  const dutyAlreadyAcknowledged = Boolean(
+    activeCase?.dutyAcknowledgement.acknowledgedByActorId,
+  );
+  useEffect(() => {
+    if (!sosEventIdForReadback || dutyAlreadyAcknowledged) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function pollDutyReadback() {
+      try {
+        const readback = await getDriverClient().get<{
+          event: Pick<DriverSosEventRecord, "status" | "dutyAcknowledgement">;
+        }>(`/api/driver/sos-events/${encodeURIComponent(sosEventIdForReadback!)}`);
+        if (cancelled) {
+          return;
+        }
+        let nextCase: DriverSosActiveCase | null = null;
+        setActiveCase((current) => {
+          if (!current) {
+            return current;
+          }
+          nextCase = applyDriverSosDutyReadback(current, readback.event);
+          return nextCase;
+        });
+        if (nextCase) {
+          await saveDriverSosActiveCase(nextCase);
+        }
+      } catch {
+        // Best-effort background readback; local outbox state is unaffected
+        // and the next poll (or manual retry) will try again.
+      }
+    }
+
+    void pollDutyReadback();
+    const timer = setInterval(() => {
+      void pollDutyReadback();
+    }, 20_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [sosEventIdForReadback, dutyAlreadyAcknowledged]);
 
   const syncChip = useMemo(
     () => getSyncChipModel(activeCase, browserOnline),
@@ -1275,9 +1327,24 @@ export default function DriverSosScreen() {
             subtitle={`狀態 · ${activeCase.syncState === "submitted" || activeCase.syncState === "complete" ? "已送達" : activeCase.syncState === "attachment_pending" ? "附件處理中" : activeCase.syncState === "sending" ? "送出中" : "待補送"}`}
             actions={
               activeCase.receipt ? (
-                <Pill theme={THEME} tone="success" dot>
-                  事件編號 {activeCase.receipt.incidentId}
-                </Pill>
+                <>
+                  <Pill theme={THEME} tone="success" dot>
+                    事件編號 {activeCase.receipt.incidentId}
+                  </Pill>
+                  <Pill
+                    theme={THEME}
+                    tone={
+                      activeCase.dutyAcknowledgement.acknowledgedByActorId
+                        ? "success"
+                        : "warn"
+                    }
+                    dot
+                  >
+                    {activeCase.dutyAcknowledgement.acknowledgedByActorId
+                      ? `值班已認領 · ${activeCase.dutyAcknowledgement.acknowledgedByActorId}`
+                      : "等待值班認領"}
+                  </Pill>
+                </>
               ) : null
             }
           >
