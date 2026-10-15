@@ -74,4 +74,29 @@ describe("Bank actual proxy managed-session entry lifecycle", () => {
       expect(response.cookies.get(name)?.value).toBe("");
     }
   });
+  it("background prefetch never clears either display or managed authority cookies", () => {
+    const response = proxy(
+      new NextRequest("https://bank.example/users?signedOut=1", {
+        headers: {
+          cookie:
+            "drts_tenant_session=managed; drts_bank_console_session=display",
+          "sec-fetch-dest": "empty",
+        },
+      }),
+    );
+    expect(response.cookies.getAll()).toEqual([]);
+    expect(response.headers.get("cache-control")).toContain("no-store");
+  });
+  it("the existing signed-out redirect remains for ordinary pages and unrelated APIs", () => {
+    for (const path of ["/users", "/api/users", "/api/unrelated"]) {
+      const response = proxy(
+        new NextRequest(`https://bank.example${path}`, {
+          headers: { cookie: "drts_bank_console_signed_out=1" },
+        }),
+      );
+      expect(response.headers.get("location")).toBe(
+        "https://bank.example/login?signedOut=1",
+      );
+    }
+  });
 });

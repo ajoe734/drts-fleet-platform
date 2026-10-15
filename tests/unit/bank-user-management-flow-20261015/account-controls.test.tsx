@@ -100,4 +100,64 @@ describe("Existing Bank account controls consume the managed logout rail", () =>
       expect(await screen.findByRole("alert")).toBeTruthy();
     },
   );
+  it.each(["Sign out", "Switch account"])(
+    "%s awaits canonical logout before navigating and never calls it on hover",
+    async (name) => {
+      document.cookie = `${constants.TENANT_CSRF_COOKIE_NAME}=managed-csrf; path=/`;
+      let complete!: (response: Response) => void;
+      const fetcher = vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            complete = resolve;
+          }),
+      );
+      vi.stubGlobal("fetch", fetcher);
+      render(
+        React.createElement(BankDemoControls, {
+          bank,
+          locale: "en",
+          pathname: "/users",
+          searchParams: new URLSearchParams(),
+          signedOut: false,
+        }),
+      );
+      screen.getByText("Display persona").closest("details")!.open = true;
+      const navigate = vi.fn();
+      const realWindow = window;
+      vi.stubGlobal(
+        "window",
+        new Proxy(realWindow, {
+          get(target, property) {
+            return property === "location"
+              ? { assign: navigate }
+              : Reflect.get(target, property, target);
+          },
+        }),
+      );
+      const button = screen.getByRole("button", { name });
+      fireEvent.mouseOver(button);
+      expect(fetcher).not.toHaveBeenCalled();
+      fireEvent.click(button);
+      expect(fetcher).toHaveBeenCalledExactlyOnceWith(
+        "/api/auth/logout",
+        expect.objectContaining({ method: "POST" }),
+      );
+      expect(navigate).not.toHaveBeenCalled();
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+      complete(Response.json({ success: true }));
+      await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1));
+      if (name === "Switch account") {
+        const url = new URL(navigate.mock.calls[0]![0], "https://bank.example");
+        expect(url.pathname).toBe("/api/auth/tenant/login");
+        expect(url.searchParams.has("tenant_id")).toBe(false);
+        expect(url.searchParams.get("return_url")).toBe(
+          "/users?bank=acme&locale=en",
+        );
+      } else {
+        expect(navigate).toHaveBeenCalledWith(
+          "/users?bank=acme&locale=en&signedOut=1",
+        );
+      }
+    },
+  );
 });
