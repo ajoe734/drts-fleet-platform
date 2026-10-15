@@ -50,6 +50,7 @@ function createHarness(options?: {
   };
   const assignment = options?.assigned
     ? {
+        isEnabled: () => false,
         assignmentId: "assignment-001",
         assignmentVersion: options?.assignmentVersion ?? 1,
         driver: { driverId: "driver-001" },

@@ -227,6 +227,10 @@ export class OwnedMobilityRepository {
     return this.isEnabled();
   }
 
+  findBookedPassengerQuote(order: OwnedOrderRecord) {
+    return this.multiTaxiRepository.findBookedPassengerQuote(order);
+  }
+
   async findOrderById(orderId: string): Promise<OwnedOrderRecord | null> {
     if (!this.isEnabled()) {
       return null;

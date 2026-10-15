@@ -89,6 +89,7 @@ import type {
   OwnedOrderRecord,
   PartnerChannelEntryRecord,
   PassengerDispatchDisclosureSnapshot,
+  PassengerBookingFareDisclosure,
   PassengerProfile,
   QueueCheckInCommand,
   QueueCheckOutCommand,
@@ -2371,14 +2372,6 @@ export class OwnedMobilityService
     const snapshot =
       await this.ownedMobilityRepository.findCurrentPassengerAssignmentDisclosure(
         orderId,
-      );
-    this.passengerDisclosureSnapshots =
-      this.passengerDisclosureSnapshots.filter(
-        (candidate) => candidate.orderId !== orderId,
-      );
-    if (snapshot)
-      this.passengerDisclosureSnapshots.unshift(
-        this.clonePassengerDisclosureSnapshot(snapshot),
       );
     return snapshot ? this.clonePassengerDisclosureSnapshot(snapshot) : null;
   }
@@ -10725,87 +10718,100 @@ export class OwnedMobilityService
       ).length + 1;
     const routeSnapshotId = randomUUID();
     const quoteSnapshotId = randomUUID();
-    const routeFare = this.buildFareQuoteSnapshot(
-      order,
-      routeSnapshotId,
-      quoteSnapshotId,
-      now,
+    const registrationEffectiveUntil = credential.effectiveUntil;
+    const ratingDisplayState = ratingSummary.displayState;
+    return this.afterMaybePromise(
+      this.ownedMobilityRepository?.isEnabled()
+        ? this.ownedMobilityRepository.findBookedPassengerQuote(order)
+        : null,
+      (bookingQuote) => {
+        const routeFare = this.buildFareQuoteSnapshot(
+          order,
+          routeSnapshotId,
+          quoteSnapshotId,
+          now,
+          bookingQuote,
+        );
+        if (!this.isResolvedRouteFareSnapshot(routeFare)) {
+          return this.recordFareQuoteAnomalyAndFail(
+            "route_unresolved",
+            routeFare,
+          );
+        }
+        const anomalyReason = this.resolveFareQuoteAnomalyReason(order);
+        if (anomalyReason) {
+          return this.recordFareQuoteAnomalyAndFail(anomalyReason, routeFare);
+        }
+        const snapshot: PassengerDispatchDisclosureSnapshot = {
+          snapshotId: randomUUID(),
+          runtimeProfileCode: "multi_taxi_direct",
+          orderId: order.orderId,
+          bookingId: order.bookingId,
+          dispatchJobId: dispatchJob.dispatchJobId,
+          assignmentId: assignment.assignmentId,
+          assignmentVersion,
+          vehicle: {
+            vehicleId,
+            make: disclosure.make,
+            model: disclosure.model,
+            plateNo: vehicle.plateNo,
+            modelYear: disclosure.modelYear,
+            doorCount: disclosure.doorCount,
+            color: disclosure.color,
+            profileVersion: disclosure.version,
+          },
+          driver: {
+            driverId,
+            displayName: driver?.name ?? null,
+            registrationMaskedDisplay: credential.maskedDisplay,
+            registrationStatus: "verified_active",
+            registrationEffectiveUntil,
+            credentialVersion: credential.version,
+          },
+          rating: {
+            displayState: ratingDisplayState,
+            averageRating: ratingSummary.averageRating,
+            ratingCount: ratingSummary.ratingCount,
+            aggregateVersion: ratingSummary.aggregateVersion,
+          },
+          eta: {
+            minutes: order.etaSnapshot?.etaMinutes ?? null,
+            calculatedAt: order.etaSnapshot?.calculatedAt ?? null,
+            locationFreshness: "missing",
+          },
+          routeFare,
+          createdAt: now,
+          supersededAt: null,
+        };
+        // Must match the passenger-authority derivation: a phone-only passenger is
+        // peppered and hashed, never stored as a raw number on an outbox row.
+        const passengerSubjectRef = resolvePassengerSubjectRef(order.passenger);
+        const outbox: ConsumerNotificationOutboxRecord = {
+          outboxId: randomUUID(),
+          orderId: order.orderId,
+          passengerSubjectRef,
+          eventType:
+            assignmentVersion > 1
+              ? "assignment_replaced"
+              : "assignment_disclosure_ready",
+          assignmentVersion,
+          payload: {
+            snapshotId: snapshot.snapshotId,
+            assignmentId: assignment.assignmentId,
+          },
+          status: "pending",
+          attemptCount: 0,
+          nextAttemptAt: now,
+          createdAt: now,
+          deliveredAt: null,
+        };
+        const authority = {
+          passengerDisclosureSnapshot: snapshot,
+          consumerNotificationOutbox: outbox,
+        };
+        return authority;
+      },
     );
-    if (!this.isResolvedRouteFareSnapshot(routeFare)) {
-      return this.recordFareQuoteAnomalyAndFail("route_unresolved", routeFare);
-    }
-    const anomalyReason = this.resolveFareQuoteAnomalyReason(order);
-    if (anomalyReason) {
-      return this.recordFareQuoteAnomalyAndFail(anomalyReason, routeFare);
-    }
-    const snapshot: PassengerDispatchDisclosureSnapshot = {
-      snapshotId: randomUUID(),
-      runtimeProfileCode: "multi_taxi_direct",
-      orderId: order.orderId,
-      bookingId: order.bookingId,
-      dispatchJobId: dispatchJob.dispatchJobId,
-      assignmentId: assignment.assignmentId,
-      assignmentVersion,
-      vehicle: {
-        vehicleId,
-        make: disclosure.make,
-        model: disclosure.model,
-        plateNo: vehicle.plateNo,
-        modelYear: disclosure.modelYear,
-        doorCount: disclosure.doorCount,
-        color: disclosure.color,
-        profileVersion: disclosure.version,
-      },
-      driver: {
-        driverId,
-        displayName: driver?.name ?? null,
-        registrationMaskedDisplay: credential.maskedDisplay,
-        registrationStatus: "verified_active",
-        registrationEffectiveUntil: credential.effectiveUntil,
-        credentialVersion: credential.version,
-      },
-      rating: {
-        displayState: ratingSummary.displayState,
-        averageRating: ratingSummary.averageRating,
-        ratingCount: ratingSummary.ratingCount,
-        aggregateVersion: ratingSummary.aggregateVersion,
-      },
-      eta: {
-        minutes: order.etaSnapshot?.etaMinutes ?? null,
-        calculatedAt: order.etaSnapshot?.calculatedAt ?? null,
-        locationFreshness: "missing",
-      },
-      routeFare,
-      createdAt: now,
-      supersededAt: null,
-    };
-    // Must match the passenger-authority derivation: a phone-only passenger is
-    // peppered and hashed, never stored as a raw number on an outbox row.
-    const passengerSubjectRef = resolvePassengerSubjectRef(order.passenger);
-    const outbox: ConsumerNotificationOutboxRecord = {
-      outboxId: randomUUID(),
-      orderId: order.orderId,
-      passengerSubjectRef,
-      eventType:
-        assignmentVersion > 1
-          ? "assignment_replaced"
-          : "assignment_disclosure_ready",
-      assignmentVersion,
-      payload: {
-        snapshotId: snapshot.snapshotId,
-        assignmentId: assignment.assignmentId,
-      },
-      status: "pending",
-      attemptCount: 0,
-      nextAttemptAt: now,
-      createdAt: now,
-      deliveredAt: null,
-    };
-    const authority = {
-      passengerDisclosureSnapshot: snapshot,
-      consumerNotificationOutbox: outbox,
-    };
-    return authority;
   }
 
   private buildFareQuoteSnapshot(
@@ -10813,6 +10819,7 @@ export class OwnedMobilityService
     routeSnapshotId: string,
     quoteSnapshotId: string,
     generatedAt: string,
+    bookingQuote?: PassengerBookingFareDisclosure | null,
   ): FareQuoteAnomalySnapshot {
     const fareMinor = order.quotedFare?.amountMinor ?? null;
     const buildAddress = (
@@ -10857,6 +10864,21 @@ export class OwnedMobilityService
         "Fare changes require passenger disclosure and confirmation.",
       passengerConfirmedAt: null,
       generatedAt,
+      ...(bookingQuote
+        ? {
+            routeSnapshotId: bookingQuote.fareSnapshotId,
+            quoteSnapshotId: bookingQuote.fareSnapshotId,
+            estimatedDistanceMeters: bookingQuote.route.distanceMeters,
+            estimatedDurationSeconds: bookingQuote.route.durationSeconds,
+            encodedPolyline: bookingQuote.route.encodedPolyline,
+            estimatedFareMinor: bookingQuote.estimatedMin,
+            payableFareMinor: null,
+            farePolicyVersion: bookingQuote.fareVersion,
+            passengerConfirmedAt: bookingQuote.passengerConfirmedAt,
+            generatedAt: bookingQuote.createdAt,
+            bookingQuote,
+          }
+        : {}),
     };
   }
 

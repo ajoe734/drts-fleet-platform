@@ -594,6 +594,19 @@ export class MultiTaxiService implements OnModuleInit {
       this.repository?.findPassengerPayment(order.orderId) ?? null,
       this.repository?.findElectronicReceipt(order.orderId) ?? null,
     ]);
+    const bookingQuote =
+      assignment?.routeFare?.bookingQuote ??
+      (this.repository?.isEnabled()
+        ? await this.repository.findBookedPassengerQuote(order)
+        : null);
+    const ratingWindow =
+      order.status === "completed" && assignment && this.repository?.isEnabled()
+        ? await this.repository.findPassengerRatingWindow(
+            order.orderId,
+            assignment.assignmentId,
+            assignment.driver.driverId,
+          )
+        : null;
 
     return {
       order: {
@@ -606,15 +619,20 @@ export class MultiTaxiService implements OnModuleInit {
         dropoff: structuredClone(order.dropoff),
         cancelableUntil: order.cancelableUntil,
         cancelledAt: order.cancelledAt,
-        completedAt: order.status === "completed" ? order.updatedAt : null,
+        completedAt: ratingWindow?.completedAt ?? null,
       },
       assignment,
+      ...(bookingQuote ? { bookingQuote } : {}),
       rating,
       payment: payment ?? null,
       receipt: receipt ?? null,
       actions: {
         canCancel: this.isPassengerCancelable(order),
-        canRate: order.status === "completed" && rating === null,
+        canRate:
+          order.status === "completed" &&
+          rating === null &&
+          payment?.status === "captured" &&
+          ratingWindow?.withinWindow === true,
         canContact:
           assignment !== null &&
           !["completed", "cancelled"].includes(order.status),
@@ -710,6 +728,26 @@ export class MultiTaxiService implements OnModuleInit {
     if (existing) {
       this.assertIdempotentRating(existing, score, tags, comment);
       if (!accountHook) return existing;
+    }
+    if (!existing && this.repository?.isEnabled()) {
+      const window = await this.repository.findPassengerRatingWindow(
+        order.orderId,
+        assignment.assignmentId,
+        assignment.driver.driverId,
+      );
+      if (!window.withinWindow)
+        throw new ApiRequestError(
+          409,
+          "PASSENGER_RATING_WINDOW_CLOSED",
+          "Ratings require an actual completion within 24 hours.",
+        );
+      const payment = await this.repository.findPassengerPayment(order.orderId);
+      if (payment?.status !== "captured")
+        throw new ApiRequestError(
+          409,
+          "PASSENGER_RATING_PAYMENT_REQUIRED",
+          "The completed trip must be paid.",
+        );
     }
 
     const now = new Date().toISOString();
@@ -2523,13 +2561,14 @@ export class MultiTaxiService implements OnModuleInit {
     passengerSubjectRef: string,
   ) {
     const key = this.ratingKey(orderId, passengerSubjectRef);
-    const rating =
-      this.ratingsByPassengerOrder.get(key) ??
-      (await this.repository?.findPassengerRating(
-        orderId,
-        passengerSubjectRef,
-      )) ??
-      null;
+    const rating = this.repository?.isEnabled()
+      ? await this.repository.findPassengerRating(orderId, passengerSubjectRef)
+      : (this.ratingsByPassengerOrder.get(key) ??
+        (await this.repository?.findPassengerRating(
+          orderId,
+          passengerSubjectRef,
+        )) ??
+        null);
     if (rating) {
       this.ratingsByPassengerOrder.set(key, rating);
       this.ratingsById.set(rating.ratingId, rating);
