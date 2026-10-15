@@ -201,9 +201,9 @@ export class ReviewSupplyService {
           effectiveUntil: end,
         });
     }
-    // Existing public hydration paths load the newly persisted external facts.
-    await this.registry.onModuleInit();
-    await this.multi.onModuleInit();
+    // Read only this service bucket; never rerun bootstrap or replace unrelated
+    // orders, authorization state or in-flight commands.
+    await this.registry.prepareDispatchSupply("standard_taxi");
     for (const fixture of REVIEW_SUPPLY) {
       if (
         !this.registry

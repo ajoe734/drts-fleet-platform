@@ -993,6 +993,7 @@ export class JwtAuthService {
         return false;
       }
       try {
+        await this.regulatoryRegistryService?.prepareDriverAuthority?.(payload.sub);
         this.regulatoryRegistryService?.assertDriverAuthEligible(payload.sub);
       } catch {
         return false;

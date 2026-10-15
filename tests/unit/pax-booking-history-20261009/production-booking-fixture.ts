@@ -70,6 +70,25 @@ export function createProductionBookingFixture(
   ) => {
     const text = sql.trim().replace(/\s+/g, " ");
     calls.push({ sql: text, values, transactional });
+    if (text.includes("FROM reg.multi_taxi_operating_authorizations"))
+      return {
+        rows: [
+          {
+            authorization_id: "11111111-1111-4111-8111-111111111111",
+            operator_id: "operator-unit",
+            authority_code: "TEST",
+            business_plan_version: "test",
+            status: "approved",
+            service_area_codes: ["TPE"],
+            active_fare_version_id: "test",
+            effective_from: "2026-01-01T00:00:00Z",
+            effective_until: "2027-01-01T00:00:00Z",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        rowCount: 1,
+      };
     if (text === "BEGIN") pending = structuredClone(state);
     if (text === "COMMIT") {
       if (faults.includes("commit")) throw new Error("injected commit failure");
@@ -201,19 +220,6 @@ export function createProductionBookingFixture(
     ownedRepository,
   );
   const multi = new MultiTaxiService(owned, multiRepository);
-  (multi as unknown as { authorizations: unknown[] }).authorizations = [
-    {
-      authorizationId: "11111111-1111-4111-8111-111111111111",
-      operatorId: "operator-unit",
-      authorityCode: "TEST",
-      businessPlanVersion: "test",
-      status: "approved",
-      serviceAreaCodes: ["TPE"],
-      activeFareVersionId: "test",
-      effectiveFrom: "2026-01-01T00:00:00Z",
-      effectiveUntil: "2027-01-01T00:00:00Z",
-    },
-  ];
   const account = {
     drtsPassengerId: OWNER,
     status: "active",

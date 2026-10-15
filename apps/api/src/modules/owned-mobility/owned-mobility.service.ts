@@ -1055,14 +1055,7 @@ export class OwnedMobilityService
     return this.cloneOrder(order);
   }
 
-  createMultiTaxiRide(
-    command: CreateMultiTaxiRideCommand,
-    authorization: MultiTaxiOperatingAuthorizationRecord,
-    identity?: BootstrapRequestIdentity | null,
-    requestId?: string,
-    callContext?: MultiTaxiCallContext,
-    commitCreation?: MultiTaxiCreationCommit,
-  ): MaybePromise<OwnedOrderRecord> {
+  validateMultiTaxiRideRequest(command: CreateMultiTaxiRideCommand) {
     this.assertNoCanonicalMultiTaxiContextOverrides(command);
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
@@ -1094,6 +1087,18 @@ export class OwnedMobilityService
         );
       }
     }
+    return requestedPickupAt;
+  }
+
+  createMultiTaxiRide(
+    command: CreateMultiTaxiRideCommand,
+    authorization: MultiTaxiOperatingAuthorizationRecord,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    callContext?: MultiTaxiCallContext,
+    commitCreation?: MultiTaxiCreationCommit,
+  ): MaybePromise<OwnedOrderRecord> {
+    const requestedPickupAt = this.validateMultiTaxiRideRequest(command);
     if (callContext && !callContext.callId?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -2359,6 +2364,9 @@ export class OwnedMobilityService
       );
     }
     const orderId = context.orders[0]!.orderId;
+    await this.regulatoryRegistryService.prepareDispatchSupply?.(
+      context.orders[0]!.serviceBucket,
+    );
     const replace = <T extends { orderId: string }>(
       current: T[],
       committed: T[],

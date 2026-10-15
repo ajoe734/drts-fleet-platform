@@ -870,6 +870,84 @@ export class RegulatoryRegistryService
     return this.supplyPairs.map((pair) => ({ ...pair }));
   }
 
+  async prepareDriverAuthority(driverId: string) {
+    const repository = this.regulatoryRegistryRepository;
+    if (!repository?.isEnabled()) return;
+    await this.driverMasterWrites.get(driverId);
+    const driver = await repository.lockDriver(driverId);
+    this.drivers = this.drivers.filter((d) => d.driverId !== driverId);
+    if (driver) this.drivers.unshift(driver);
+    // Missing/error never falls back to the startup snapshot.
+    this.requireDriver(driverId);
+  }
+
+  async prepareDispatchSupply(serviceBucket: Phase1ServiceBucket) {
+    const repository = this.regulatoryRegistryRepository;
+    if (!repository?.isEnabled()) return;
+    await Promise.all(this.driverMasterWrites.values());
+    const { state, locations } =
+      await repository.findDispatchSupplyContext(serviceBucket);
+    const vehicleIds = new Set([
+      ...this.vehicles
+        .filter((v) => v.supportedServiceBuckets.includes(serviceBucket))
+        .map((v) => v.vehicleId),
+      ...state.vehicles.map((v) => v.vehicleId),
+    ]);
+    const driverIds = new Set([
+      ...this.supplyPairs
+        .filter((p) => vehicleIds.has(p.vehicleId))
+        .map((p) => p.driverId),
+      ...state.drivers.map((d) => d.driverId),
+    ]);
+    const vehicles = <T extends { vehicleId: string }>(
+      current: T[],
+      committed: T[],
+    ) => [...committed, ...current.filter((r) => !vehicleIds.has(r.vehicleId))];
+    const drivers = <T extends { driverId: string }>(
+      current: T[],
+      committed: T[],
+    ) => [...committed, ...current.filter((r) => !driverIds.has(r.driverId))];
+    this.vehicles = vehicles(
+      this.vehicles,
+      state.vehicles.map((v) => this.hydrateVehicleRecord(v)),
+    );
+    this.drivers = drivers(this.drivers, state.drivers);
+    this.supplyPairs = vehicles(this.supplyPairs, state.supplyPairs);
+    this.contracts = vehicles(
+      this.contracts,
+      state.contracts.map((c) => this.hydrateContract(c)),
+    );
+    this.policies = vehicles(
+      this.policies,
+      state.policies.map((p) => this.hydratePolicy(p)),
+    );
+    this.exclusivities = vehicles(
+      this.exclusivities,
+      state.exclusivities.map((e) => this.hydrateExclusivity(e)),
+    );
+    this.disclosureProfiles = vehicles(
+      this.disclosureProfiles,
+      state.disclosureProfiles,
+    );
+    this.driverCredentials = drivers(
+      this.driverCredentials,
+      state.driverCredentials,
+    );
+    for (const driverId of driverIds)
+      this.latestDriverLocations.delete(driverId);
+    for (const location of locations) this.applyLatestDriverLocation(location);
+  }
+
+  async updateDriverWorkStateFromPersistence(
+    driverId: string,
+    command: UpdateDriverWorkStateCommand,
+  ) {
+    await this.prepareDriverAuthority(driverId);
+    const { updated, save } = this.setDriverWorkState(driverId, command);
+    await save;
+    return updated;
+  }
+
   listLatestDriverLocations() {
     return Array.from(this.latestDriverLocations.values()).map((location) =>
       this.cloneDriverLocation(location),
@@ -1471,6 +1549,7 @@ export class RegulatoryRegistryService
     this.assertOptionalNonNegativeNumber(command.accuracyM, "accuracyM");
     const recordedAt = this.normalizeHeartbeatRecordedAt(command.recordedAt);
 
+    await this.prepareDriverAuthority(driverId);
     this.requireDriver(driverId);
 
     const locationRepository = this.getLocationRepository();
@@ -1549,6 +1628,8 @@ export class RegulatoryRegistryService
   private async recordBatchHeartbeatItem(
     item: DriverLocationHeartbeatEnvelope,
   ): Promise<DriverLocationHeartbeatAck> {
+    if (typeof item?.driverId === "string")
+      await this.prepareDriverAuthority(item.driverId.trim());
     const heartbeat = this.normalizeHeartbeatEnvelope(item);
 
     const locationRepository = this.getLocationRepository();
@@ -2357,6 +2438,13 @@ export class RegulatoryRegistryService
     driverId: string,
     command: UpdateDriverWorkStateCommand,
   ) {
+    return this.setDriverWorkState(driverId, command).updated;
+  }
+
+  private setDriverWorkState(
+    driverId: string,
+    command: UpdateDriverWorkStateCommand,
+  ) {
     const driver = this.requireDriver(driverId);
     driver.workState = command.workState;
     driver.updatedAt = new Date().toISOString();
@@ -2368,8 +2456,9 @@ export class RegulatoryRegistryService
     };
     this.driverWorkStateChanges.set(driverId, local);
     const repository = this.regulatoryRegistryRepository;
+    let save: Promise<void> | undefined;
     if (repository) {
-      void this.enqueueDriverMasterWrite(driverId, async () => {
+      save = this.enqueueDriverMasterWrite(driverId, async () => {
         // Keep the inherited synchronous local effect and best-effort error
         // policy; defer only storage, using the last committed master fields.
         const committed = this.stageDriverMaster(driverId);
@@ -2381,11 +2470,12 @@ export class RegulatoryRegistryService
         await repository.persistChanges({
           drivers: [this.cloneDriver(snapshot)],
         });
-      }).catch((error: unknown) => {
+      });
+      void save.catch((error: unknown) => {
         repository.reportPersistenceFailure(error, "update_driver_work_state");
       });
     }
-    return this.cloneDriver(updated);
+    return { updated: this.cloneDriver(updated), save };
   }
 
   getEligibleCandidates(

@@ -249,6 +249,45 @@ Original reviewer Codex returned this candidate (generation
 individual evidence and the replacement candidate are reviewed. Evidence for
 this round is under `.local/pax-review-shared-order-demo-20261015/ci-rework-356ed9c/`.
 
+R1 checkpoint `a7b6d52ff8d73d399cb8809090236f2bca79d271` was normally pushed.
+Both actual app typechecks completed with exit 0 (`r1-ops-typecheck.log`,
+`r1-passenger-typecheck.log`). This is an anchor, not the replacement candidate.
+
+R2 checkpoint: the unchanged session-registration regression against the old
+`356ed9c` production module now fails at the actual registry `requireDriver`
+assertion; current production session/registry/profile code passes all 3 new
+cases, including suspension and missing/error authority. The historical module
+is relocated by import paths only; initial missing-Nest imports were tooling,
+not reproduction. `r2-session-reproduction.json` and `r2-session-old.log` record
+the corrected product reproduction; `r2-session-current.log` records the new
+3-pass result. External database query responses retain actual production
+INSERT payloads; the existing disconnected invitation store is used. Neither
+result claims PostgreSQL or browser acceptance.
+
+The targeted registry reader reuses `lockDriver(driverId)` without a client
+(a read without `FOR UPDATE`). Dispatch supply reads one service-bucket MVCC
+snapshot of the original registry/qualification/location tables. The public
+Owned async preparation loads this before the unchanged command and lock
+paths. Booking reads current effective authorizations through the existing
+repository mapper, then uses the original ambiguity/default/window selection.
+The original request/address/time validation was extracted into one shared
+Owned function, so invalid schedules still fail before storage reads; the
+48 original booking-access cases remain unchanged. Ops work-state keeps its
+synchronous internal setter and adds an HTTP facade that awaits the actual
+existing master-write promise, including rejection. Driver registration/JWT
+checks load their target driver before the original eligibility assertion, and
+registration loads the target profile before its original binding writer.
+
+Current narrow results: API typecheck exit 0 after building the existing
+workspace dependency; original API registry/multi-taxi suites 64 pass
+(`r2-api-regression.log`); booking timing plus new session cases 51 pass
+(`r2-timing-regression.log`). The earlier combined 177-pass/1-failure result
+exposed the pre-storage timing expectation and was repaired by shared
+validation, without weakening its assertion. Full affected regression and the
+new two-preinitialized-instance real prepare/invite/register/dispatch PG case
+remain pending. The old `356ed9c` hosted browser job was cancelled by GitHub
+concurrency on the R1 push; its partial logs are retained and are not passes.
+
 | Finding / acceptance                                      | Source and repair boundary                                                                                                                                                                                                                                                                                                                                                                  | Before → after                                                                                                                                | Commands / evidence                                                                                                                                       | Pending and limits                                                                                                                                                      |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | R1: new rehearsal copy blocks i18n CI                     | Passenger review pages, payment scenario selector and review components use the new typed `components/review-demo/translations.ts`; Ops `/review` uses its scoped `translations.ts` and the existing `useTranslation` locale. Original zh text, accessible names and business requests are retained.                                                                                        | Exact old candidate: 84 violations, exit 1. Current source: 646 files, 11 apps, 81 existing exemptions, exit 0. No guard or baseline changes. | `pnpm run i18n:guard`; hosted run `38702985278`, job `116316041211`; `i18n-hosted.log`, `i18n-before-installed.log`, `i18n-after.log`.                    | Replacement hosted CI/browser pending. Initial local missing-TypeScript failure was tooling only; isolated frozen dependencies restored before the actual reproduction. |

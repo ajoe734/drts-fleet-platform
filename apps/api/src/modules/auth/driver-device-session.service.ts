@@ -289,7 +289,8 @@ export class DriverDeviceSessionService implements OnModuleInit {
     }
 
     const driverId = invitation.driverId;
-    this.assertDriverAuthEligible(driverId);
+    await this.assertDriverAuthEligible(driverId);
+    await this.driverProfileService.prepareProfileAuthority?.(driverId);
 
     const oldBindingId = await this.revokeActiveBindingForDevice(
       deviceId,
@@ -536,7 +537,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
     }
 
     try {
-      this.assertDriverAuthEligible(binding.driverId);
+      await this.assertDriverAuthEligible(binding.driverId);
     } catch (authError) {
       await this.revokeBindingAndFamily(
         binding.bindingId,
@@ -756,7 +757,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
     }
 
     if (driverId) {
-      this.assertDriverAuthEligible(driverId);
+      await this.assertDriverAuthEligible(driverId);
     }
   }
 
@@ -1072,7 +1073,8 @@ export class DriverDeviceSessionService implements OnModuleInit {
     };
   }
 
-  private assertDriverAuthEligible(driverId: string) {
+  private async assertDriverAuthEligible(driverId: string) {
+    await this.regulatoryRegistryService?.prepareDriverAuthority?.(driverId);
     this.regulatoryRegistryService?.assertDriverAuthEligible(driverId);
   }
 

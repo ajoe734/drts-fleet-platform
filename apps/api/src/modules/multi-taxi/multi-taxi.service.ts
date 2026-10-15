@@ -456,7 +456,8 @@ export class MultiTaxiService implements OnModuleInit {
     requestId?: string,
   ) {
     this.assertServiceProductPolicy();
-    const authorization = this.resolveActiveAuthorization();
+    this.ownedMobilityService.validateMultiTaxiRideRequest?.(command);
+    const authorization = await this.resolvePersistedActiveAuthorization();
     const order = await this.ownedMobilityService.createMultiTaxiRide(
       command,
       authorization,
@@ -472,7 +473,8 @@ export class MultiTaxiService implements OnModuleInit {
     requestId?: string,
   ) {
     this.assertServiceProductPolicy();
-    const authorization = this.resolveActiveAuthorization();
+    this.ownedMobilityService.validateMultiTaxiRideRequest?.(command);
+    const authorization = await this.resolvePersistedActiveAuthorization();
     const order = await this.ownedMobilityService.createMultiTaxiRide(
       command,
       authorization,
@@ -524,7 +526,8 @@ export class MultiTaxiService implements OnModuleInit {
     ) => Promise<void>,
   ) {
     this.assertServiceProductPolicy();
-    const authorization = this.resolveActiveAuthorization();
+    this.ownedMobilityService.validateMultiTaxiRideRequest?.(command);
+    const authorization = await this.resolvePersistedActiveAuthorization();
     if (
       !commitBooking ||
       command.passenger.passengerId !== passengerSubjectRef
@@ -2205,11 +2208,20 @@ export class MultiTaxiService implements OnModuleInit {
     );
   }
 
-  private resolveActiveAuthorization() {
+  private async resolvePersistedActiveAuthorization() {
+    if (!this.repository?.isEnabled()) return this.resolveActiveAuthorization();
+    return this.resolveActiveAuthorization(
+      await this.repository.findEffectiveAuthorizations(
+        new Date().toISOString(),
+      ),
+    );
+  }
+
+  private resolveActiveAuthorization(authorizations = this.authorizations) {
     const now = Date.now();
     const defaultAuthorizationId =
       process.env.MULTI_TAXI_DEFAULT_AUTHORIZATION_ID?.trim() || null;
-    const active = this.authorizations.filter(
+    const active = authorizations.filter(
       (authorization) =>
         authorization.status === "approved" &&
         Date.parse(authorization.effectiveFrom) <= now &&
