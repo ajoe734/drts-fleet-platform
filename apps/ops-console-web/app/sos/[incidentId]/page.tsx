@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ApiClientError } from "@drts/api-client";
 import type {
   DriverRegistryRecord,
+  DriverSosEventRecord,
   IdentityContext,
   IncidentRecord,
   IncidentTimelineEntry,
+  SosDutyAcknowledgement,
   VehicleRegistryRecord,
 } from "@drts/contracts";
 import {
@@ -179,36 +180,32 @@ export default function SosDetailPage() {
 
     try {
       const client = getOpsClient();
-      await client.patch(`/api/incidents/${incidentId}`, {
-        body: {
-          assignedTo: currentActorId,
-        },
-      });
+      const { event } = await client.get<{ event: DriverSosEventRecord }>(
+        `/api/ops/driver-sos/by-incident/${encodeURIComponent(incidentId)}`,
+      );
+      const ack = await client.post<{
+        dutyAcknowledgement: SosDutyAcknowledgement;
+        wonAcknowledgement: boolean;
+      }>(
+        `/api/ops/driver-sos/${encodeURIComponent(event.sosEventId)}/duty-ack`,
+        { body: {} },
+      );
 
-      setNotice({
-        tone: "success",
-        title: "已確認接手",
-        body: `${currentActorLabel} 已取得此 SOS 事件的處理權。`,
-      });
-      await fetchData();
-    } catch (error) {
-      if (
-        error instanceof ApiClientError &&
-        error.code === "INCIDENT_ASSIGNMENT_CONFLICT"
-      ) {
-        const winner =
-          typeof error.details?.existingAssignment === "string"
-            ? error.details.existingAssignment
-            : "其他值班人員";
+      if (ack.wonAcknowledgement) {
+        setNotice({
+          tone: "success",
+          title: "已確認接手",
+          body: `${currentActorLabel} 已取得此 SOS 事件的處理權。`,
+        });
+      } else {
         setNotice({
           tone: "warn",
           title: "First-writer-wins",
-          body: `${winner} 已先確認此事件，畫面已同步最新處理權。`,
+          body: `${formatSosActorLabel(ack.dutyAcknowledgement.acknowledgedByActorId)} 已先確認此事件，畫面已同步最新處理權。`,
         });
-        await fetchData();
-        return;
       }
-
+      await fetchData();
+    } catch (error) {
       console.error("Failed to acknowledge SOS incident", error);
       setNotice({
         tone: "danger",

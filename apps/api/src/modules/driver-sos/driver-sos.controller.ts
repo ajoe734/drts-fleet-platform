@@ -92,7 +92,6 @@ export class DriverSosController {
   }
 
   @Get(":sosEventId")
-  @RequireScopes("incident:read")
   async getOwnSosEvent(
     @Param("sosEventId") sosEventId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,

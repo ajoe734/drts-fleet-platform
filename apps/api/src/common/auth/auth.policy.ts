@@ -833,9 +833,10 @@ export function resolveRouteAuthPolicy(
   ) {
     return {
       routeKey: "driver:sos-events:get",
-      requiredScopes: ["incident:read"],
+      requiredScopes: ["incident:write"],
       allowedRealms: baseAllowedRealms("driver"),
-      description: "Driver own SOS event canonical readback",
+      description:
+        "Driver own SOS event canonical readback (incident:write per IAM catalogue: driver realm has no incident:read grant)",
     };
   }
 
