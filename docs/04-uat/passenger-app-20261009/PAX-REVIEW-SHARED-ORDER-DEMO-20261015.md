@@ -1577,3 +1577,51 @@ pre-install successful probes are retained without final-source credit. Final
 required local checks all reached terminal results and were read; hosted CI for
 the handoff candidate remains pending. No product/preview/HTTP/PG/browser server,
 Playwright CLI or Compose ran on this VM.
+
+## R22b — capture the Driver Page used by the current journey
+
+Review of `094eb3893d974598cf9bf6d804d43e556ba44d28`, generation
+`4c6d1c0d8ca34576a2c8c6fc4e3d0d77`, identified a concrete diagnostic defect:
+B passes `mountedDriver` and the Passenger `/review-driver` base to registration
+and completion, but the catch used A's outer `driver` and `DRIVER` base. With A
+still on its completed trip, a B failure captured A instead of B. This finding
+is separate from the still-unknown hosted A timeout recorded under R22 above.
+
+The spec now retains the current Driver Page and its actual base. A starts with
+the original Driver entry; B selects its mounted Page before registration; C
+selects A's Page again before its Driver navigation. The existing failure hook
+uses that pair for its exact jobs/trip URL check and screenshot. The original
+image-only attachment, five-second capture limit, exclusion of onboarding/query
+URLs, no-placeholder behavior, primary-error preservation and successful-journey
+cleanup failure propagation remain. No new DOM, response-body or credential
+capture was added.
+
+The regression extracts and executes the **complete actual E2E callback** from
+the requested source, including context creation, role selection, catch,
+attachment and cleanup. Page/HTTP boundaries, journey helpers and unrelated
+steps are fixtures so controlled registration/completion failures can reach the
+real hook. Thus the test validates the hook's Page selection and error handling;
+its byte buffers are fixture screenshots, not real browser images or completed
+business journeys. It does not reproduce the unknown hosted timeout cause.
+
+| Finding / acceptance                                            | Source and change                                                                                                       | Old → corrected result                                                                                                                       | Checks and evidence                                                                                         | Remaining limitation                                                                                      |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| R22b: B registration/navigation/acceptance failure captures A   | Spec `activeDriver`, actual B `registerDriver`/`finish` call sites and failure catch; `driver-failure-evidence.test.ts` | Immutable 094 callback: 8 failures / 4 passes, including actual capture A instead of expected B; corrected callback: all 12 cases pass       | `old-094-hook-frozen.log`, exit 1; `new-hook.log`, exit 0; final regression includes all 12 cases           | Actual hosted A/B screenshots still require the real browser lane                                         |
+| R22b: evidence/cleanup errors must preserve the primary failure | Actual callback catch and success cleanup                                                                               | A/B jobs/trip, B onboarding/query/closed Page, screenshot/attachment/cleanup refusal and successful-journey cleanup refusal checked          | Same regression; no substitute A image or placeholder when B has no eligible image                          | Browser lifecycle is a fixture boundary, not runtime acceptance                                           |
+| Preserve R22 diagnosis and all previous repairs                 | All 11 spec helpers, complete three-order try block excluding only the two active-Page assignments                      | Helper ASTs and original journey operations/assertions unchanged from 094; all product/accepted ACK/workflow/deploy/config sources unchanged | `check-source-invariants.cjs` / `source-invariants.json`, exit 0                                            | Original R22 unknown hosted failure remains unresolved; no product fix claimed                            |
+| `pax-review-demo_real-shared-order-across-roles`                | Existing real same-UUID journeys and formal PG companions retained                                                      | Pending, zero credit                                                                                                                         | New candidate independent review/full CI and three formal-schema PG companions without skips required       | Fixture hook tests cannot establish live shared orders                                                    |
+| `pax-review-demo_external-simulation-and-complete-journeys`     | Original three orders, payment/case/rating/cancellation/history, 720-second case and zero retries retained              | Pending, zero credit                                                                                                                         | Final local affected regression: 297 pass / 16 original environment skips; 32 passing and six skipped files | Full real A/B/C journeys remain required                                                                  |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`        | Existing hosted workflow and combined immutable Cloud Run delivery retained                                             | Pending, zero credit                                                                                                                         | New same-SHA full CI/browser, normal merge and sole immutable shared-dev delivery/fresh smoke required      | No VM product/HTTP/PG/browser/preview/Compose or Playwright CLI; no workflow dispatch/rerun/cancel/deploy |
+
+Executable verification source is
+`e81d1456860c6c84d093806439b4364dd5b87cfb`; the handoff commit adds only
+this UAT evidence. Canonical evidence is
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate094-r22b-active-driver/manifest.json`.
+
+- Old: `PAX_REVIEW_FAILURE_SOURCE_REF=094eb3893d974598cf9bf6d804d43e556ba44d28 pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/driver-failure-evidence.test.ts --maxWorkers=2 --reporter=verbose`, exit 1 / **8 fail, 4 pass**. It reads the old callback with `git show`, without resetting any worktree. Failures are Page-selection assertions, not missing fixtures/dependencies.
+- Final: `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015 tests/unit/pax-shared-order-flow-20261015 tests/unit/pax-booking-history-20261009 --maxWorkers=2 --reporter=verbose`, exit 0 / **297 pass, 16 original environment skips**. The previous four real Driver caller probes also pass. No skip or business assertion was changed.
+- Final root `pnpm exec tsc -p tsconfig.json --noEmit`, scoped ESLint (`--max-warnings=0`), Prettier, commit trailers and `git diff --check` pass. The first typecheck found a possibly undefined Page in the new fixture; `typecheck.log` retains exit 2, and the fixture now explicitly rejects an unexpected extra context. `typecheck-final.log` is exit 0.
+- Node 22.23.2, pnpm 10.33.0, TypeScript 5.9.3, Vitest 4.1.4, Next 16.3.8 and Nest 11.2.7. After the shared dependency links lost a formatting tool, only this worktree's 22 symlinks were detached. Offline frozen installation with scripts disabled passed; canonical dependencies, sources and lockfiles were untouched. The immutable old comparison was repeated under these same frozen dependencies.
+
+All checks started for this handoff reached terminal results and were read.
+Old hosted CI remains bound to its own SHA; it is not evidence for this repair.
