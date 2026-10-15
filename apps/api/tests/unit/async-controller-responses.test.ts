@@ -6,7 +6,7 @@ import type { BillingSettlementService } from "../../src/modules/billing-settlem
 import { OwnedMobilityController } from "../../src/modules/owned-mobility/owned-mobility.controller";
 import type { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import { TenantPartnerController } from "../../src/modules/tenant-partner/tenant-partner.controller";
-import type { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
+import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 
 const tenant = {
   realm: "tenant",
@@ -57,6 +57,8 @@ const cases = [
     create: (serviceCall: ReturnType<typeof vi.fn>) => {
       const controller = new TenantPartnerController(
         {
+          assertTenantAccessScope:
+            TenantPartnerService.prototype.assertTenantAccessScope,
           retryWebhookDelivery: serviceCall,
         } as unknown as TenantPartnerService,
         undefined as never,
