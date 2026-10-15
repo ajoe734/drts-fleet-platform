@@ -50,9 +50,15 @@ import { createRequire } from "node:module";
 import * as jwt from "jsonwebtoken";
 
 import { toApiErrorEnvelope } from "../../../apps/api/src/common/api-envelope";
-import type { AuthenticatedRequestLike } from "../../../apps/api/src/common/auth/auth.types";
+import type {
+  AuthenticatedRequestLike,
+  BootstrapRequestIdentity,
+} from "../../../apps/api/src/common/auth/auth.types";
 import { BootstrapAuthGuard } from "../../../apps/api/src/common/auth/bootstrap-auth.guard";
-import { JwtAuthService } from "../../../apps/api/src/common/auth/jwt-auth.service";
+import {
+  JwtAuthService,
+  type IssueSessionTokenOptions,
+} from "../../../apps/api/src/common/auth/jwt-auth.service";
 
 const apiRequire = createRequire(
   new URL("../../../apps/api/package.json", import.meta.url),
@@ -69,7 +75,7 @@ const { HttpException } = apiRequire("@nestjs/common") as {
     getResponse(): string | object;
   };
 };
-type ExecutionContext = unknown;
+type ExecutionContext = any;
 import {
   HostViewController,
   HostViewRepository,
@@ -84,6 +90,18 @@ import {
   loadHostVehicles,
 } from "../../../apps/fleet-partner-portal-web/app/host/lib/host-data.server";
 
+// BootstrapAuthGuard attaches a realm="partner" identity for every request
+// this harness exercises (enforced by @RequireRealms("partner") on
+// HostViewController), which is always a BootstrapRequestIdentity; the
+// broader RequestIdentity union on AuthenticatedRequestLike also admits
+// PassengerRequestIdentity for unrelated passenger-app routes not exercised
+// here.
+function asHostIdentity(
+  identity: AuthenticatedRequestLike["identity"],
+): BootstrapRequestIdentity | null {
+  return identity ? (identity as BootstrapRequestIdentity) : null;
+}
+
 function setRequestContext(
   headersInit?: Record<string, string>,
   cookiesInit?: Record<string, string>,
@@ -95,7 +113,7 @@ function setRequestContext(
 async function mintHostSessionToken(
   jwtAuthService: JwtAuthService,
   partnerId: string,
-  overrides?: { expiresIn?: string },
+  overrides?: Pick<IssueSessionTokenOptions, "expiresIn">,
 ): Promise<string> {
   const issued = await jwtAuthService.issueSessionToken({
     authMode: "jwt_bearer",
@@ -219,7 +237,7 @@ describe("HOST-OWNED-VIEW-AUTH-AND-AUTHORITY-FLOW-20261015: real credential cons
         if (pathname === "/api/host/vehicles") {
           handler = () =>
             controller.listVehicles(
-              requestLike.identity ?? null,
+              asHostIdentity(requestLike.identity),
               Number(parsedUrl.searchParams.get("page")) || undefined,
               Number(parsedUrl.searchParams.get("pageSize")) || undefined,
               headerRecord["x-request-id"],
@@ -242,7 +260,7 @@ describe("HOST-OWNED-VIEW-AUTH-AND-AUTHORITY-FLOW-20261015: real credential cons
             handler = () =>
               controller.getEarnings(
                 vehicleId,
-                requestLike.identity ?? null,
+                asHostIdentity(requestLike.identity),
                 parsedUrl.searchParams.get("month") ?? undefined,
                 headerRecord["x-request-id"],
               );
@@ -251,7 +269,7 @@ describe("HOST-OWNED-VIEW-AUTH-AND-AUTHORITY-FLOW-20261015: real credential cons
             handler = () =>
               controller.listMaintenance(
                 vehicleId,
-                requestLike.identity ?? null,
+                asHostIdentity(requestLike.identity),
                 Number(parsedUrl.searchParams.get("page")) || undefined,
                 Number(parsedUrl.searchParams.get("pageSize")) || undefined,
                 headerRecord["x-request-id"],
@@ -261,7 +279,7 @@ describe("HOST-OWNED-VIEW-AUTH-AND-AUTHORITY-FLOW-20261015: real credential cons
             handler = () =>
               controller.listTrips(
                 vehicleId,
-                requestLike.identity ?? null,
+                asHostIdentity(requestLike.identity),
                 Number(parsedUrl.searchParams.get("page")) || undefined,
                 Number(parsedUrl.searchParams.get("pageSize")) || undefined,
                 headerRecord["x-request-id"],
@@ -271,7 +289,7 @@ describe("HOST-OWNED-VIEW-AUTH-AND-AUTHORITY-FLOW-20261015: real credential cons
             handler = () =>
               controller.listCases(
                 vehicleId,
-                requestLike.identity ?? null,
+                asHostIdentity(requestLike.identity),
                 Number(parsedUrl.searchParams.get("page")) || undefined,
                 Number(parsedUrl.searchParams.get("pageSize")) || undefined,
                 headerRecord["x-request-id"],
