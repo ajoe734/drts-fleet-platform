@@ -13,6 +13,9 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { AuditLogRepository } from "../../../apps/api/src/modules/audit-notification/audit-log.repository";
 
 const repo = path.resolve(__dirname, "../../..");
 const temp: string[] = [];
@@ -20,19 +23,91 @@ afterEach(() => {
   for (const dir of temp.splice(0))
     rmSync(dir, { recursive: true, force: true });
 });
+// Persisted fixtures use V0009 UUID identities and complete governance records.
+const names = new Map<string, string>();
+function uuid(name: string) {
+  if (/^[0-9a-f]{8}-/.test(name)) return name;
+  const hex = createHash("sha256").update(name).digest("hex");
+  const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+  names.set(id, name);
+  return id;
+}
+const label = (id: string) => names.get(id) ?? id;
 function row(
   id: string,
   resourceType = "audit_test",
   resourceId = id,
   value: Record<string, unknown> | null = null,
   createdAt = "2020-01-01T00:00:00.000Z",
-  tenantId = "tenant-a",
+  tenantId: string | null = "tenant-a",
 ) {
+  if (value && resourceType.startsWith("evidence_")) {
+    const common = {
+      family: "audit_log",
+      tenantId: "tenant-a",
+      manifestHash: null,
+      reasonNote: null,
+      ...value,
+    };
+    value =
+      resourceType === "evidence_legal_hold"
+        ? {
+            holdId: resourceId,
+            caseNumber: "CASE-1",
+            reasonCode: "regulatory_inquiry",
+            status: "active",
+            placedByActorId: "admin",
+            placedByActorType: "platform_admin",
+            placedAt: "2020-01-01T00:00:00.000Z",
+            releasedByActorId: null,
+            releasedByActorType: null,
+            releasedAt: null,
+            releaseReason: null,
+            ...common,
+          }
+        : {
+            exceptionId: resourceId,
+            sourceResourceType: "regulator_packet",
+            sourceResourceId: `packet-${resourceId}`,
+            expiresAt: "2099-01-01T00:00:00.000Z",
+            reasonCode: "regulatory_request",
+            reviewerActorId: "admin",
+            reviewerActorType: "platform_admin",
+            status: "active",
+            requestedByActorId: "admin",
+            requestedByActorType: "platform_admin",
+            requestedAt: "2020-01-01T00:00:00.000Z",
+            resolvedByActorId: null,
+            resolvedByActorType: null,
+            resolvedAt: null,
+            resolutionNote: null,
+            ...common,
+          };
+    if (value.tenantId) value.tenantId = uuid(value.tenantId as string);
+    if (value.family === "audit_log")
+      value.subjectId = uuid(value.subjectId as string);
+    if (value.sourceResourceType === "audit_log")
+      value.sourceResourceId = uuid(value.sourceResourceId as string);
+    if (value.status === "released")
+      Object.assign(value, {
+        releasedByActorId: "admin",
+        releasedByActorType: "platform_admin",
+        releasedAt: createdAt,
+        releaseReason: "closed",
+      });
+    if (value.status === "resolved")
+      Object.assign(value, {
+        resolvedByActorId: "admin",
+        resolvedByActorType: "platform_admin",
+        resolvedAt: createdAt,
+        resolutionNote: "closed",
+      });
+  }
   return {
-    audit_id: id,
+    audit_id: uuid(id),
     actor_id: null,
     actor_type: "system",
-    tenant_id: tenantId,
+    tenant_id: tenantId ? uuid(tenantId) : null,
     module_name: "test",
     action_name: "test",
     resource_type: resourceType,
@@ -91,6 +166,17 @@ function exception(
     time,
   );
 }
+async function replay(rows: ReturnType<typeof row>[]) {
+  const repository = new AuditLogRepository({
+    isEnabled: () => true,
+    query: async (sql: string) => ({
+      rows: sql.includes("INSERT INTO") ? [] : rows,
+    }),
+  } as never);
+  const service = new AuditNotificationService(repository);
+  await service.onModuleInit();
+  return service;
+}
 function run(
   rows: ReturnType<typeof row>[],
   options: {
@@ -115,7 +201,8 @@ function run(
   const result = spawnSync(
     "bash",
     [
-      path.join(repo, "operations/database/audit-log-retention-archival.sh"),
+      process.env.RETENTION_SCRIPT ??
+        path.join(repo, "operations/database/audit-log-retention-archival.sh"),
       options.dry ? "--dry-run" : "--apply",
       "--export-dir",
       archiveDir,
@@ -178,11 +265,11 @@ describe("C100 actual archival shell with controlled client (no PG/socket/server
     ];
     const r = run(data);
     expect(r.result.status, r.result.stderr).toBe(0);
-    expect(r.archived.map((row) => row.audit_id)).toEqual(["free"]);
-    expect(r.state.rows.map((row) => row.audit_id).sort()).toEqual(
+    expect(r.archived.map((row) => label(row.audit_id))).toEqual(["free"]);
+    expect(r.state.rows.map((row) => label(row.audit_id)).sort()).toEqual(
       data
-        .filter((row) => row.audit_id !== "free")
-        .map((row) => row.audit_id)
+        .filter((row) => label(row.audit_id) !== "free")
+        .map((row) => label(row.audit_id))
         .sort(),
     );
   });
@@ -196,8 +283,8 @@ describe("C100 actual archival shell with controlled client (no PG/socket/server
     );
     const r = run([row("free"), boundary], { concurrent: [row("late")] });
     expect(r.result.status, r.result.stderr).toBe(0);
-    expect(r.archived.map((row) => row.audit_id)).toEqual(["free"]);
-    expect(r.state.rows.map((row) => row.audit_id).sort()).toEqual([
+    expect(r.archived.map((row) => label(row.audit_id))).toEqual(["free"]);
+    expect(r.state.rows.map((row) => label(row.audit_id)).sort()).toEqual([
       "boundary",
       "late",
     ]);
@@ -206,7 +293,7 @@ describe("C100 actual archival shell with controlled client (no PG/socket/server
       r.calls[0]!.sql.indexOf("CREATE TEMP TABLE audit_retention_candidates"),
     );
   });
-  it("obeys tenant, subject, manifest, release/resolution/expiry and terminal replay history", () => {
+  it("obeys tenant, subject, manifest, release/resolution/expiry and terminal replay history", async () => {
     const data = [
       row("held-by-subject", "report_artifact", "artifact", {
         manifestHash: "manifest-a",
@@ -273,12 +360,38 @@ describe("C100 actual archival shell with controlled client (no PG/socket/server
         "2026-10-01T00:00:00.000Z",
       ),
     ];
+    const before = await replay(data);
+    expect(
+      before.getEvidenceSubjectGovernance("report_artifact", "artifact")
+        .deletionSuppressed,
+    ).toBe(true);
+    for (const subject of [
+      "released",
+      "expired",
+      "resolved",
+      "recent-release-target",
+    ])
+      expect(
+        before.getEvidenceSubjectGovernance("audit_log", uuid(subject))
+          .deletionSuppressed,
+      ).toBe(false);
     const r = run(data);
     expect(r.result.status, r.result.stderr).toBe(0);
-    expect(r.state.rows.map((row) => row.audit_id).sort()).toEqual(
+    const after = await replay(r.state.rows);
+    expect(
+      after.getEvidenceSubjectGovernance("report_artifact", "artifact")
+        .deletionSuppressed,
+    ).toBe(true);
+    expect(
+      after.getEvidenceSubjectGovernance(
+        "audit_log",
+        uuid("recent-release-target"),
+      ).deletionSuppressed,
+    ).toBe(false);
+    expect(r.state.rows.map((row) => label(row.audit_id)).sort()).toEqual(
       ["held-by-subject", "held-by-manifest", "h1", "h3", "h3-release"].sort(),
     );
-    expect(r.archived.map((row) => row.audit_id).sort()).toEqual(
+    expect(r.archived.map((row) => label(row.audit_id)).sort()).toEqual(
       data
         .filter(
           (row) =>
@@ -288,9 +401,9 @@ describe("C100 actual archival shell with controlled client (no PG/socket/server
               "h1",
               "h3",
               "h3-release",
-            ].includes(row.audit_id),
+            ].includes(label(row.audit_id)),
         )
-        .map((row) => row.audit_id)
+        .map((row) => label(row.audit_id))
         .sort(),
     );
   });
@@ -308,13 +421,13 @@ describe("C100 actual archival shell with controlled client (no PG/socket/server
     ];
     const r = run(data as ReturnType<typeof row>[]);
     expect(r.result.status, r.result.stderr).toBe(0);
-    expect(r.archived.map((row) => row.audit_id)).toEqual(["free"]);
+    expect(r.archived.map((row) => label(row.audit_id))).toEqual(["free"]);
   });
   for (const failure of ["sql", "write", "verify"] as const) {
     it(`${failure} failure is nonzero, retains source and cannot print purge success`, () => {
       const r = run([row("free")], { failure });
       expect(r.result.status).not.toBe(0);
-      expect(r.state.rows.map((row) => row.audit_id)).toEqual(["free"]);
+      expect(r.state.rows.map((row) => label(row.audit_id))).toEqual(["free"]);
       expect(r.result.stdout).not.toContain("purge completed successfully");
       expect(
         r.calls.every((call) => call.args.includes("ON_ERROR_STOP=1")),
@@ -324,7 +437,7 @@ describe("C100 actual archival shell with controlled client (no PG/socket/server
   it("archive directory open failure occurs before deletion", () => {
     const r = run([row("free")], { outputFile: true });
     expect(r.result.status).not.toBe(0);
-    expect(r.state.rows.map((row) => row.audit_id)).toEqual(["free"]);
+    expect(r.state.rows.map((row) => label(row.audit_id))).toEqual(["free"]);
     expect(r.calls.every((call) => !call.sql.includes("DELETE FROM"))).toBe(
       true,
     );

@@ -1,17 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AuditLogRecord } from "@drts/contracts";
+import type { AuditLogRecord, IdentityContext } from "@drts/contracts";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { AuditController } from "../../../apps/api/src/modules/audit-notification/audit.controller";
 import { AuditLogRepository } from "../../../apps/api/src/modules/audit-notification/audit-log.repository";
 import { ReportingFilingService } from "../../../apps/api/src/modules/reporting-filing/reporting-filing.service";
 
 const identity = {
+  authMode: "jwt_bearer",
+  roleFamilies: ["platform"],
+  roles: ["platform_admin"],
+  supportedExecutionModes: [],
   actorId: "admin",
   actorType: "platform_admin" as const,
   realm: "platform" as const,
   scopes: ["audit:read", "reports:read"],
   tenantId: null,
-};
+} satisfies IdentityContext;
 const holdCommand = {
   family: "audit_log" as const,
   subjectId: "old-row",
