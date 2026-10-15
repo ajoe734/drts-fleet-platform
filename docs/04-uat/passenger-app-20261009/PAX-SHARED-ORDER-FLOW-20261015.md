@@ -145,12 +145,15 @@ rollback、token 或 authority 判斷。這是無 socket 最小重現，不冒�
 | 前節 aggregate 原命令，包含新增 mutation-authority                                | exit 0；18 files／357 pass，另 1 file／3 hosted skip | `regression.log`、`regression.json`                          |
 | API 原 5 個 unit files＋`tests/integration/int-mtx-001-runtime-authority.test.ts` | exit 0；6 files／172 pass                            | `api-regression.log`                                         |
 | Contracts／control-plane-auth build、API typecheck                                | exit 0                                               | `build-contracts.log`、`build-auth.log`、`api-typecheck.log` |
-| Root typecheck                                                                    | 執行中，交接前須讀取最終結果                         | `root-typecheck.log`                                         |
+| Root typecheck                                                                    | exit 0                                               | `root-typecheck.log`                                         |
 | Scoped ESLint（本輪 3 個產品檔／2 個測試檔）                                      | exit 0                                               | `lint.log`                                                   |
+| Task-owned Prettier check／`git diff --check`                                     | exit 0                                               | `format.log`／closeout stdout                                |
 | Immutable 353／8fed／7e／a6 before regressions                                    | 腳本 exit 0；四組子測試產品斷言 exit 1               | `historical.log`、`../historical/report.json`                |
 | 新 SHA hosted PG／HTTP、原取消競態／token subject、review／CI／merge              | pending                                              | 同候選 lifecycle 待收錄，未記 acceptance credit              |
 
 依賴 symlinks 原指向缺件的 canonical tree；僅移除本 isolated worktree 的 dependency symlinks，
 以 Node `v22.23.2`／pnpm `10.33.0` frozen-lockfile／offline／ignore-scripts 安裝成功（exit 0；
 `dependencies.log`），無 lockfile／canonical source／canonical dependencies 修改。
+本輪產品與 TS tests 執行版本為 `0f9c8c69c664dd9e34f9f65d9d6d62d8f29c7546`；
+後續只有 immutable archive runner／本文件，沒有再改產品。所有本輪啟動的本機檢查已結束並讀取結果。
 未部署或啟 VM 上的 API／PG／HTTP／preview／browser／Docker 服務。
