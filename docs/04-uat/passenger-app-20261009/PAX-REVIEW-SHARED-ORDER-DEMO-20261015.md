@@ -2059,3 +2059,87 @@ All owner-started checks are terminal and read before handoff. Hosted checks for
 the final candidate follow the existing lifecycle; review, merge and all three
 required acceptance keys remain pending. No product/preview/HTTP/PG/browser/
 Compose runtime or Playwright CLI was started on this VM.
+
+## R29 — allow the mounted Driver's existing SQLite Worker to start (2026-10-15)
+
+Candidate `f5c1427ad8c93bffa9b62b6b1d9e7fca07ff90d3`, generation
+`818c93b0ddb4411d843172e670a1a6c6`, actually passed the complete A phase in
+run `38786657434`, job `116603333920`: order
+`1b3566e3-6b82-4d83-8cbe-21ba3c01d5b4`, same-role/PG facts, strict chronology,
+completion, captured payment, score 5 and the nonformal HTML document. B order
+`8d8a631d-4557-4cae-b456-bb7892540fd7`, task
+`8b2ad1cc-b386-4dbd-9fd0-35ff9abb9f3a`, reached accept/depart/arrived/start
+with 201 responses, then failed spec292's original 40-second live-distance
+assertion. Its actual screenshot shows the right UUIDs, a fresh supply fix at
+the pickup point, and the simulator still waiting for acceptance at coordinate
+1/9. B completion/payment retry/low-rating case and C were not reached.
+This is partial hosted evidence, not an A/B/C pass.
+
+The mounted page already sends COOP/COEP headers. Locked Expo 54.0.37's
+`unstable_createWorker` wraps the SQLite Worker in a Blob when
+`crossOriginIsolated` is true. The Passenger CSP lacked `worker-src`, leaving
+that Blob subject to its ordinary script policy. The actual
+`applyHeartbeatTracking` awaits offline-queue initialization before setting
+its active task. This is a concrete configuration/caller integration defect
+compatible with the observed B state; the old cloud artifact did not capture
+the Worker console error, so this is not a claim about its unique runtime cause.
+
+Only `apps/passenger-app-web/next.config.ts` changes product behavior. The
+ordinary CSP is reused verbatim; the existing `/review-driver/:path*` rule now
+follows it and adds `worker-src 'self' blob:` for that mount. Existing
+cross-origin isolation remains. API/BFF authorization, device identity,
+heartbeat/SQLite queue, producer, tracking clock, metrics, proof/completion
+guards and all A/B/C browser actions/assertions are unchanged. The source-only
+late-bootstrap race noted by the Supervisor is not established as this run's
+writer and is not changed speculatively.
+
+The new socket-free case calls the real Next custom-route loader and production
+header resolver, the locked Expo Worker factory, and the real
+`syncDriverLocationHeartbeat`/producer/subscribers/distance accumulator.
+Only browser CSP/Worker construction and offline persistence are external
+fixtures: successful Worker creation permits that fixture's initialization;
+there is no real SQLite database, browser, native GPS, HTTP listener or PG.
+With immutable f5c1 configuration the actual heartbeat call rejects at
+`applyHeartbeatTracking:562` with `SecurityError`; four ordinary-path controls
+pass. With the repaired configuration it becomes active, emits task-bound
+on-trip queue drafts and accumulates between 0.2 and 0.5 km over the producer's
+24-second fake-timer unit interval. No product/browser clock is changed.
+
+| Finding / acceptance                                        | Source and change                                                                                         | Old result → replacement result                                                                                                                     | Commands / exit / evidence                                                                                   | Remaining limitation                                                                                         |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| R29: mounted Driver cannot initialize its existing Worker   | `next.config.ts: headers`; actual Expo factory and heartbeat caller in `driver-mounted-producer.spec.tsx` | Immutable f5c1 configuration: 1 failure at actual heartbeat call / 4 controls pass. Repaired source: 5/5 pass                                       | `before-f5c-qualified.log`, exit 1; `driver-focused-final.log`, exit 0                                       | Browser CSP/Worker enforcement and persistence are fixtures; original cloud console cause remains unrecorded |
+| Preserve ordinary Passenger behavior and existing tracking  | Real Next header precedence/path matching; original producer/storage cases                                | Ordinary `/`, `/rides/order-id`, `/review`, `/review-driver-other/trip` retain the original policy and reject Blob workers; all 8 Driver cases pass | Original Driver Vitest config, 3 files / 8 pass / zero skips                                                 | Does not prove native/background GPS or durable SQLite/PG operation                                          |
+| Preserve prior findings and full journeys                   | Original product callers, whole browser spec/config, evidence SQL and workflows unchanged                 | 184 pass / 6 original environment skips; source/artifact verification passes                                                                        | `root-regression.log`, exit 0; `source-verification.json/log`, exit 0                                        | Original three PG companions and existing environment cases remain skipped on this VM                        |
+| `pax-review-demo_real-shared-order-across-roles`            | Original formal-schema PG and same-UUID assertions retained                                               | Pending, zero credit                                                                                                                                | New same-candidate full CI, three PG cases without skips and cross-role readback required                    | Prior A facts do not establish new-candidate B/C success                                                     |
+| `pax-review-demo_external-simulation-and-complete-journeys` | Original complete A/B/C flows and all time/distance/payment/rating/history assertions retained            | Pending, zero credit                                                                                                                                | Original 40-second distance wait, 720-second case and zero retries unchanged                                 | New actual B completion/payment retry/low-rating case and C remain required                                  |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`    | Existing candidate lifecycle and sole immutable combined Cloud Run delivery retained                      | Pending, zero credit                                                                                                                                | Exact-SHA review/full CI/browser, normal merge, authorized shared-dev release and fresh smoke still required | No local runtime, manual workflow dispatch/rerun/cancellation or deployment claim                            |
+
+Executable source corresponds to `2c1f51e0401ad60fc6c303931d43905815dceae8`;
+the final candidate adds only this UAT evidence. Exact terminal checks:
+
+- `PAX_REVIEW_MOUNT_CONFIG_SOURCE_REF=f5c1427ad8c93bffa9b62b6b1d9e7fca07ff90d3 pnpm exec vitest run --config tests/unit/pax-review-shared-order-demo-20261015/driver-vitest.config.ts tests/unit/pax-review-shared-order-demo-20261015/driver-mounted-producer.spec.tsx --maxWorkers=1 --reporter=verbose`: exit 1, the genuine Worker-policy rejection above and four passing controls. The source hook only reads the immutable config with `git show`; no worktree reset.
+- `pnpm exec vitest run --config tests/unit/pax-review-shared-order-demo-20261015/driver-vitest.config.ts --maxWorkers=2 --reporter=verbose`: exit 0, 3 files / 8 pass / zero skips, including original pause/freshness-gap and Web/native storage checks.
+- `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015 tests/unit/pax-shared-order-flow-20261015 --maxWorkers=2 --reporter=dot`: exit 0, 32 passing / four skipped files; 184 pass / six original environment skips. Existing DOM `act` warnings and controlled rejection logs remain visible.
+- Root TypeScript, Passenger-app TypeScript and the original Driver-test TypeScript project: exit 0. Scoped ESLint/Prettier, final UAT format, source/artifact verification, diff and task-commit trailers: exit 0.
+
+Initial fixture attempts lacked VM `process`, Next build ID, the absent-middleware
+shape or `onMatchHeaders`; they failed before the target behavior and are
+retained as fixture errors. The first correctly configured before/after runs
+spent their five-second case limit on cold dynamic imports. Moving the real
+heartbeat import to module setup resolved that fixture timing issue; no timeout
+was increased. Only `before-f5c-qualified.log` is the old-version reproduction;
+only `driver-focused-final.log` is the final replacement result.
+
+Canonical evidence:
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate-f5c-mounted-worker/`.
+Its manifest records terminal commands/exits, source/evidence hashes, the seven
+diagnosed immutable source blobs and six original hosted inputs. The original
+artifact ZIP matches GitHub digest
+`1cc0952cb098177a1941219d96995a2adf88bad3cdcad7c6c0bc62ec71816c4b`;
+its report bytes were independently checked. The actual B image was viewed.
+All earlier UAT content is preserved verbatim. Node 22.23.2, pnpm 10.33.0,
+TypeScript 5.9.3 and Vitest 4.1.4 were used. Only this isolated cwd's 22 generated
+dependency symlinks were detached before the offline/frozen/scripts-disabled
+install, exit 0; canonical dependencies and lockfiles were untouched. Published
+history remains on recovery-r26 / PR 2687 with ordinary pushes. Every owner-started
+check is terminal and read; all three acceptance keys remain pending.
