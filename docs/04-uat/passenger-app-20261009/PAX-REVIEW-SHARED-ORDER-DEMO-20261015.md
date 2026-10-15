@@ -1056,3 +1056,76 @@ round's own checks, push normally and hand off the replacement SHA. No manual
 cancellation or rerun was requested; any concurrency-driven cancellation of old
 jobs is partial/cancelled evidence, never PASS. All three acceptance keys remain
 pending.
+
+## R17 — preserve the failed booking and obtain a safe public error code
+
+The adjacent candidate is `f4a9485d31e63dd3dfbef65468d0add80e53a3ec`,
+generation `4ddbb80c573544fbab9244d3265538b0`. Its actual hosted run
+`38735390758`, job `116424495438`, failed one case after 20.992 seconds,
+with zero skips. Ops/Driver bootstrap, Passenger login/account, card binding
+and the actual booking form reached quote HTTP 201, then ride HTTP 409.
+No A/B/C UUID was obtained. The archived receipt SHA256 is
+`1c1f5b12e3711e5f87fe81334ec08a5f034ddb241eb16564edadec6fb556331e`;
+artifact `11973631880` ZIP/GitHub digest is
+`35685f5b20ad4b6c641f80479655475a1c3f87f474df0022916f4092698373a8`.
+Both and the raw job log were independently hashed again this round.
+
+**The original HTTP 409 remains unresolved.** That execution did not retain
+its error code, body or failure screen. Reading the actual caller through
+`BookingScreen.submit`, `PassengerBookingClient.createRide`, the BFF,
+`PassengerBookingController.createRide`, `PassengerBookingService.createRide`,
+the transactional booking repository, MultiTaxi/Owned creation and existing
+service-product/authorization/payment guards has not established which guard
+rejected that request. `source-read-boundary.json` binds these inspected
+sources to the old candidate. No business rule or product source was changed
+on the strength of an unobserved cause.
+
+This replacement is a **diagnostic candidate**, as allowed by the task-spec
+R17 supplement. The original `status < 300` assertion now supplies a message
+from `bookingResponseDiagnostic`: HTTP status and a literal public code from
+a finite allowlist of existing booking/BFF errors. All other response values,
+including unknown code strings, become `unclassified`; messages, details,
+headers, URLs, raw bodies and parse exceptions are never printed. Success
+responses are not parsed by the diagnostic. The message enters the existing
+hosted failure report; no new collector, workflow, timeout or runtime is added.
+
+| Finding / acceptance                                        | Source and change                                                                                                    | Old result → replacement result                                                                                                                                                                               | Commands / execution / evidence                                                                                                                                                                                                                                                                                                                                    | Remaining limit                                                                                                                                     |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R17: ride HTTP 409 has no locatable error code              | Actual hosted `book()` success assertion; new `tests/e2e/pax-review-shared-order/booking-diagnostic.ts`              | Same actual caller with controlled upstream 409 fails in both versions. Old immutable f4 lacks the diagnostic and fails two new message assertions; replacement retains rejection and reports each fixed code | `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/hosted-booking-caller.test.tsx --config .local/pax-review-shared-order-demo-20261015/r17-booking-diagnostic/vitest.before.config.mts --maxWorkers=2 --reporter=verbose`: exit 1, 2 assertion failures / 2 pass (`immutable-before.log`); replacement focused command below: 15 pass, exit 0 | This reproduces the diagnostic gap, **not** the historical booking rejection. The two controlled codes are not attributed to the old hosted request |
+| R17: prevent diagnostic response disclosure                 | Actual diagnostic boundary, exercised through genuine Home/SDK/BFF plus malformed/unknown/non-JSON/success responses | Fixed public codes only; unknown values stay unclassified; original HTTP assertion and no-navigation behavior preserved                                                                                       | `booking-diagnostic.test.ts`, `hosted-booking-caller.test.tsx`, `journey-progress.test.ts` focused run, exit 0, 15 pass (`focused.log`)                                                                                                                                                                                                                            | HTTP and DOM driver are fixtures; no Chromium or PG ran here                                                                                        |
+| `pax-review-demo_real-shared-order-across-roles`            | Original three roles, order creation and UUID assertions retained                                                    | Pending, zero credit                                                                                                                                                                                          | Replacement same-SHA hosted browser and existing PG companions required                                                                                                                                                                                                                                                                                            | Original 409 root cause still needs actual hosted code/runtime evidence and, if indicated, a product repair                                         |
+| `pax-review-demo_external-simulation-and-complete-journeys` | Original A/B/C, payment, cancellation, history, support and real business waits retained                             | Pending, zero credit                                                                                                                                                                                          | Original complete journey remains mandatory                                                                                                                                                                                                                                                                                                                        | No completed order is claimed from this diagnostic regression                                                                                       |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`    | Existing review/full CI/merge and combined immutable Cloud Run delivery retained                                     | Pending, zero credit                                                                                                                                                                                          | New fixed SHA needs its own reviewer/full hosted results; normal merge and original shared-dev delivery/smoke follow                                                                                                                                                                                                                                               | No rerun of known-red f4, separate deployment or VM runtime                                                                                         |
+
+The focused command was `pnpm exec vitest run
+tests/unit/pax-review-shared-order-demo-20261015/booking-diagnostic.test.ts
+tests/unit/pax-review-shared-order-demo-20261015/hosted-booking-caller.test.tsx
+tests/unit/pax-review-shared-order-demo-20261015/journey-progress.test.ts
+--maxWorkers=2 --reporter=verbose`. The affected review / booking / payment /
+account-session / web-shell regression completed **436 pass / 3 original
+hosted-PG skips**, exit 0 (`regression.log`). Root and explicit caller TSX
+typechecks and scoped ESLint completed with exit 0. React `act` warnings in the
+DOM navigation adapter remain warnings, not browser evidence. All started
+checks finished and their results were read before handoff.
+
+`source-invariants.cjs` / `.json` compare the complete spec AST against f4:
+after removing exactly one diagnostic import and one assertion message,
+every original operation and assertion is identical. All tracked apps/packages,
+CI/deploy workflows, hosted config, relational evidence and safe-progress
+helpers are unchanged. No booking guard, successful-status expectation,
+unpaid rejection assertion, order count, clock or wait is weakened.
+
+Evidence is copied at handoff to canonical
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidatef4-booking-diagnostic/`.
+Execution source is anchor `6f024142b5dd52538041491b6fdd61e2e84c13bf`;
+subsequent source changes are this UAT prose only. Node 22.23.2, pnpm 10.33.0,
+locked Next 16.3.8 and Vitest 4.1.4 were used. Only this task worktree's 22
+dependency symlinks were replaced by an offline frozen installation with scripts
+disabled, exit 0; canonical dependencies and lockfiles were preserved.
+No Playwright CLI, browser, product/preview/HTTP server, PG or Compose ran on
+this VM. Same-source hosted execution is the concrete missing condition for
+locating R17; source review must keep that finding open. Per the existing
+delivery supplement, the new fixed diagnostic candidate can be pushed without
+waiting for the known-red generation's remaining CI. Its sole collector records
+any natural cancellation as partial/cancelled, never PASS. All three acceptance
+keys remain pending.
