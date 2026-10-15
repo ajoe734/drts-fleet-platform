@@ -432,7 +432,7 @@ export class RegulatoryRegistryRepository {
       `WITH vehicles AS MATERIALIZED (
          SELECT v.vehicle_id, v.record, c.license_class
          FROM reg.phase1_registry_vehicles v
-         LEFT JOIN reg.vehicles c USING (vehicle_id)
+         LEFT JOIN reg.vehicles c ON c.vehicle_id::text = v.vehicle_id
          WHERE v.record->'supportedServiceBuckets' ? $1
        ), pairs AS MATERIALIZED (
          SELECT p.* FROM reg.phase1_registry_supply_pairs p

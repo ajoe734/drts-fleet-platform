@@ -345,3 +345,27 @@ with an isolated frozen/offline install. Canonical dependencies were not edited.
 | R3: UV cancellation token-failure path         | The `uv-exec-006` token-failure substitute lacked the same reader, so `createRide` rejected before initial workflow persistence. Store and return its actual authorization writes; keep all delayed-write, no-early-cancel/read, error-code and durable cancellation assertions.                                                                                 | Hosted original case: writes length remains 0; repair awaiting hosted execution.                                                                                                     | `integration-job116330597027.log`, failure at original line 2544.                                                                                                                                                                                                                                                           | Requires real PostgreSQL. It was not run on this VM.                                                                                   |
 | Cross-surface dispatch 500, separately tracked | `findDispatchSupplyContext` joins `reg.phase1_registry_vehicles.vehicle_id` (V0012 `varchar`) to `reg.vehicles.vehicle_id` (V0004 `uuid`) through `USING`. The new query must preserve textual snapshot IDs and normalized license metadata without casting synthetic IDs to UUID.                                                                               | Hosted cross-surface job `116330597072`: 15 scenarios pass / 7 fail, including dispatch HTTP 500. The type mismatch is precise static evidence; no local PG reproduction is claimed. | `cross-surface-job116330597072.log`; formal migrations V0004 / V0012 and production repository method.                                                                                                                                                                                                                      | Repair and formal-schema hosted regression pending.                                                                                    |
 | All three required acceptance keys             | Original requirements remain unchanged.                                                                                                                                                                                                                                                                                                                          | Pending; zero acceptance credit.                                                                                                                                                     | Original candidate's remaining hosted jobs are being collected before the next ordinary push.                                                                                                                                                                                                                               | Independent new-candidate review/CI, true PG and browser journeys, merge, immutable shared-dev delivery and new smoke remain required. |
+
+### R4: formal schema compatibility of the targeted supply query
+
+The repair changes only `RegulatoryRegistryRepository.findDispatchSupplyContext`:
+`reg.vehicles c ON c.vehicle_id::text = v.vehicle_id` compares the canonical
+UUID as text to the existing runtime key. This follows `loadState`'s string-key
+association and preserves synthetic text IDs. It does not cast arbitrary
+runtime IDs to UUID, change a migration, skip failed reads or fall back to cache.
+
+The new `dispatch-supply-schema.hosted.test.ts` uses the existing isolated
+PostgreSQL harness and all official migrations. It inserts data into the real
+normalized table, writes both a textual vehicle and a UUID vehicle through the
+production snapshot repository, then calls the actual targeted reader. It
+checks both vehicles, normalized license metadata fallback, the correct
+pair/driver context and exclusion of another service bucket. No reader or
+schema is substituted. The old query is statically incompatible with V0004 /
+V0012, but dynamic old/new PG results are still pending.
+
+The original same-order dynamic-supply and persisted-role PG companions remain
+unchanged. The socket-free namespace run completed with 15 passes / 3 hosted
+skips, exit 0 (`review-namespace-after.log`); those skips are not PG passes.
+All three required acceptance keys remain pending with zero credit. The full
+old-candidate hosted unit/browser results will be retained before ordinary push;
+the next candidate must obtain fresh same-SHA checks and review.
