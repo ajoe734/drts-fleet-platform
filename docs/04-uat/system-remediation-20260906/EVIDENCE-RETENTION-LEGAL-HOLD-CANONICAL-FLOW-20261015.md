@@ -204,6 +204,18 @@ copying repaired business logic into a test double.
 
 Diagnostic files and SHA-256 hashes are under this worktree's
 `.local/evidence-retention-20261015/uuid-tenant/evidence-index.json`. All launched
-checks must finish and be read before handoff. No product, browser, preview or
+checks finished and their results were read before handoff. No product, browser, preview or
 DB server, cloud operation, deployment, live archive/delete or restore ran.
 Source-only evidence does not close the live operational or full-goal boundary.
+
+API TypeScript check for this revision: `pnpm --dir apps/api exec tsc -p tsconfig.json --noEmit`
+exits 2 (`api-typecheck.log`), initially with missing worktree declarations and
+stale shared dependency types. After successful task-worktree declaration builds
+(`pnpm exec tsc -p packages/contracts/tsconfig.json` and
+`pnpm exec tsc -p packages/control-plane-auth/tsconfig.json`, both exit 0), the
+same API check exits 2 with exactly two TS2307 diagnostics for `nodemailer` and
+`nodemailer/lib/smtp-transport` in `remote-smtp-mail.transport.ts:1/2`
+(`api-typecheck-built.log`). No diagnostic targets this revision's production
+service. No shared dependency files were changed. This remains a failed broad
+check for the known missing dependency, not a full typecheck pass. Root broad
+typecheck was not rerun; its earlier failures and limits remain above.
