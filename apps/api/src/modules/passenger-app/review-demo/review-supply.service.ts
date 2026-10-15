@@ -42,12 +42,11 @@ export class ReviewSupplyService {
         "review_supply_unavailable",
         "Rehearsal product storage is unavailable.",
       );
-    const context = await products.findRuntimeContext(
+    await this.products.prepareRuntimeProfileServiceProduct(
       "multi_taxi_direct",
       "taxi_reservation",
     );
     const product =
-      context.record ??
       this.products.getRuntimeServiceProductByType("taxi_reservation");
     if (!product)
       throw new ApiRequestError(
@@ -55,11 +54,12 @@ export class ReviewSupplyService {
         "review_supply_unavailable",
         "Reservation product is unavailable.",
       );
-    await products.persistChanges({
-      records: [
-        { ...product, active: true, updatedAt: new Date().toISOString() },
-      ],
-    });
+    if (!product.active)
+      await products.persistChanges({
+        records: [
+          { ...product, active: true, updatedAt: new Date().toISOString() },
+        ],
+      });
     await this.products.prepareRuntimeProfileServiceProduct(
       "multi_taxi_direct",
       "taxi_reservation",

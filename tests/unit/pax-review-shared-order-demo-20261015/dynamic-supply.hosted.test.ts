@@ -167,12 +167,27 @@ describe.skipIf(!hostedPaymentEnabled)(
           .listDrivers()
           .some((d) => d.driverId === REVIEW_SUPPLY[0]!.driverId),
       ).toBe(false);
+      expect(
+        b.products.getRuntimeServiceProductByType("taxi_reservation")?.active,
+      ).toBe(false);
       const prepared = await new ReviewSupplyService(
         h.database,
         a.registry,
         a.multi,
         a.products,
       ).prepare();
+      expect(
+        (
+          await new ServiceProductRepository(h.database).findRuntimeContext(
+            "multi_taxi_direct",
+            "taxi_reservation",
+          )
+        ).record?.active,
+      ).toBe(true);
+      // B existed before A's prepare and still has its original snapshot.
+      expect(
+        b.products.getRuntimeServiceProductByType("taxi_reservation")?.active,
+      ).toBe(false);
       vi.stubEnv(
         "MULTI_TAXI_DEFAULT_AUTHORIZATION_ID",
         prepared.authorizationId,
@@ -268,6 +283,9 @@ describe.skipIf(!hostedPaymentEnabled)(
         passengerConfirmedAt: new Date().toISOString(),
       });
       const id = created.ride.order.orderId;
+      expect(
+        b.products.getRuntimeServiceProductByType("taxi_reservation")?.active,
+      ).toBe(true);
       expect((await a.ops.getOrder(id)).data.orderId).toBe(id);
       const job = (
         await a.ops.dispatchOrder(

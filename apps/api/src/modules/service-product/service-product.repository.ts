@@ -30,6 +30,8 @@ export class ServiceProductRepository {
     runtimeProfileCode: RuntimeProfileServiceProductPolicy["runtimeProfileCode"],
     serviceProductCode: ServiceProductType,
   ) {
+    if (!this.isEnabled())
+      throw new Error("Runtime product lookup requires a database.");
     const [products, policies] = await Promise.all([
       this.databaseService!.query<JsonRecordRow>(
         `SELECT record FROM ops.phase1_service_products
