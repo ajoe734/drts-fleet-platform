@@ -7,6 +7,7 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { PoolClient, QueryResultRow } from "pg";
 import { ApiRequestError } from "../../common/api-envelope";
 import { resolvePassengerSubjectRef } from "../../common/sensitive-data-policy";
+import { PassengerFareRepository } from "../passenger-app/fare/passenger-fare.repository";
 
 export interface PassengerAccountRatingHook {
   execute(
@@ -32,6 +33,7 @@ import type {
   PartnerNotificationRetryDisposition,
   PassengerNotificationFailureReason,
   PassengerPaymentStatus,
+  PassengerBookingFareDisclosure,
   PassengerRatingModerationAuditRecord,
   PassengerRatingReviewListItem,
   PassengerPushDeliveryOutcome,
@@ -1856,16 +1858,7 @@ export class MultiTaxiRepository {
                AND status = 'completed' AND record->>'driverId' = $3 FOR SHARE`,
             [rating.orderId, rating.tripId, rating.driverId],
           );
-          const completedAt = Date.parse(task.rows[0]?.completed_at ?? "");
-          const databaseNow = new Date(
-            task.rows[0]?.database_now ?? NaN,
-          ).getTime();
-          if (
-            !Number.isFinite(completedAt) ||
-            !Number.isFinite(databaseNow) ||
-            completedAt > databaseNow ||
-            databaseNow - completedAt > 24 * 60 * 60 * 1000
-          ) {
+          if (!this.passengerRatingWindow(task.rows[0]).withinWindow) {
             throw new ApiRequestError(
               409,
               "PASSENGER_RATING_WINDOW_CLOSED",
@@ -2108,6 +2101,89 @@ export class MultiTaxiRepository {
     } finally {
       client.release();
     }
+  }
+
+  private passengerRatingWindow(row?: {
+    completed_at: string | null;
+    database_now: Date | string;
+  }) {
+    const completedAt = Date.parse(row?.completed_at ?? "");
+    const databaseNow = new Date(row?.database_now ?? NaN).getTime();
+    return {
+      completedAt: Number.isFinite(completedAt)
+        ? new Date(completedAt).toISOString()
+        : null,
+      withinWindow:
+        Number.isFinite(completedAt) &&
+        Number.isFinite(databaseNow) &&
+        completedAt <= databaseNow &&
+        databaseNow - completedAt <= 24 * 60 * 60 * 1000,
+    };
+  }
+
+  async findPassengerRatingWindow(
+    orderId: string,
+    assignmentId: string,
+    driverId: string,
+  ) {
+    if (!this.isEnabled()) return this.passengerRatingWindow();
+    const result = await this.databaseService!.query<{
+      completed_at: string | null;
+      database_now: Date | string;
+    }>(
+      `SELECT record->>'completedAt' AS completed_at, clock_timestamp() AS database_now
+       FROM ops.phase1_driver_tasks WHERE order_id = $1 AND assignment_id = $2
+         AND status = 'completed' AND record->>'driverId' = $3`,
+      [orderId, assignmentId, driverId],
+    );
+    return this.passengerRatingWindow(result.rows[0]);
+  }
+
+  async findBookedPassengerQuote(
+    order: OwnedOrderRecord,
+  ): Promise<PassengerBookingFareDisclosure | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<{
+      fare_snapshot_id: string;
+      drts_passenger_id: string;
+      passenger_confirmed_at: Date | string;
+    }>(
+      `SELECT fare_snapshot_id, drts_passenger_id, passenger_confirmed_at
+       FROM passenger.booking_histories WHERE order_id = $1`,
+      [order.orderId],
+    );
+    const booking = result.rows[0];
+    if (!booking) return null; // Legacy rides have no first-party booking.
+    const snapshot =
+      booking.drts_passenger_id === order.passenger.passengerId
+        ? await new PassengerFareRepository(
+            this.databaseService!,
+          ).findOwnedSnapshot(
+            booking.fare_snapshot_id,
+            booking.drts_passenger_id,
+          )
+        : null;
+    if (!snapshot)
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_BOOKING_QUOTE_UNAVAILABLE",
+        "The original booking quote is unavailable.",
+      );
+    // Booking validated ownership, route, schedule and expiry before committing
+    // this reference. Historical disclosure must not reprice or expire it.
+    return {
+      fareSnapshotId: snapshot.fareSnapshotId,
+      fareVersion: snapshot.fareVersion,
+      estimatedMin: snapshot.estimatedMin,
+      estimatedMax: snapshot.estimatedMax,
+      route: structuredClone(snapshot.route),
+      tariffSnapshot: { ...snapshot.tariffSnapshot },
+      breakdown: { ...snapshot.breakdown },
+      passengerConfirmedAt: new Date(
+        booking.passenger_confirmed_at,
+      ).toISOString(),
+      createdAt: snapshot.createdAt,
+    };
   }
 
   async findPassengerPayment(orderId: string) {

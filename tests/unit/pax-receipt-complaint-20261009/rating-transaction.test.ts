@@ -14,6 +14,8 @@ import { ComplaintRepository } from "../../../apps/api/src/modules/complaint/com
 import { ComplaintService } from "../../../apps/api/src/modules/complaint/complaint.service";
 import { MultiTaxiRepository } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
 import { MultiTaxiService } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
+import { OwnedMobilityService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
+import { OwnedMobilityRepository } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 import { PassengerBookingController } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.controller";
 import { PassengerBookingService } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.service";
 import {
@@ -68,17 +70,9 @@ async function fixture() {
   const created = await booked.service.createRide(PASSENGER, booked.command);
   const orderId = created.ride.order.orderId;
   booked.state.order!.status = "completed";
-  // Completion/disclosure is the external producer boundary for this rating unit.
-  const orders = booked.owned as unknown as {
-    orders: (typeof booked.state.order)[];
-    passengerDisclosureSnapshots: unknown[];
-  };
-  // The real service uses order snapshots; update the captured in-memory order by its existing update source in this fixture.
-  const ownedState = booked.owned as unknown as {
-    orders: NonNullable<typeof booked.state.order>[];
-  };
-  ownedState.orders[0]!.status = "completed";
-  orders.passengerDisclosureSnapshots = [
+  // Completion/disclosure is the SQL response boundary for this unit. No
+  // private cache edits: the production repositories read these captured rows.
+  const disclosures = [
     {
       orderId,
       assignmentId: "assignment-unit",
@@ -139,6 +133,23 @@ async function fixture() {
         throw new Error("lost commit reply");
     }
     const target = transaction ? pending! : state;
+    if (text.startsWith("SELECT record FROM ops.phase1_owned_orders"))
+      return {
+        rows: [
+          { record: { ...booked.state.order, status: access.durableStatus } },
+        ],
+      };
+    if (text.includes("FROM ops.passenger_dispatch_disclosure_snapshots"))
+      return { rows: disclosures.map((record) => ({ record })) };
+    if (
+      text.includes("FROM billing.multi_taxi_passenger_payments") &&
+      text.startsWith("SELECT status")
+    )
+      return {
+        rows: access.paid
+          ? [{ status: "captured", amount_minor: 125, currency: "TWD" }]
+          : [],
+      };
     const fail = (fault: Fault) => {
       if (access.fault === fault) throw new Error(`${fault} failure`);
     };
@@ -253,7 +264,17 @@ async function fixture() {
     },
   } as unknown as DatabaseService;
   const repository = new MultiTaxiRepository(database);
-  const multi = new MultiTaxiService(booked.owned, repository);
+  const owned = new OwnedMobilityService(
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    undefined,
+    new OwnedMobilityRepository(database, repository),
+  );
+  // Preserve the original warm-cache/storage-loss scenario via a lawful read.
+  await owned.resolvePersistedOrder(orderId);
+  const multi = new MultiTaxiService(owned, repository);
   const complaintRepository = new ComplaintRepository(database);
   const audit = new AuditNotificationService(new AuditLogRepository(database));
   const complaint = new ComplaintService(audit, complaintRepository);
@@ -277,7 +298,7 @@ async function fixture() {
     contactRequested: true,
   };
   return {
-    booked,
+    booked: { ...booked, owned },
     orderId,
     state,
     access,

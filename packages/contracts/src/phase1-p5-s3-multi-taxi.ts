@@ -21,6 +21,7 @@ import type {
   AddressPayload,
   ControlledDownloadRecord,
   DriverDeclaredSurnameSnapshot,
+  GeoRouteResponse,
   MoneyAmount,
   OwnedOrderStatus,
   PassengerProfile,
@@ -414,6 +415,20 @@ export const FARE_QUOTE_ANOMALIES = [
 ] as const;
 export type FareQuoteAnomaly = (typeof FARE_QUOTE_ANOMALIES)[number];
 
+/** Original server-owned quote accepted at E19b. Whole NTD estimate range;
+ * the meter's final payable fare remains a separate completion authority. */
+export interface PassengerBookingFareDisclosure {
+  fareSnapshotId: string;
+  fareVersion: string;
+  estimatedMin: number;
+  estimatedMax: number;
+  route: GeoRouteResponse;
+  tariffSnapshot: Readonly<Record<string, unknown>>;
+  breakdown: Readonly<Record<string, unknown>>;
+  passengerConfirmedAt: string;
+  createdAt: string;
+}
+
 export interface RouteFareDisclosureSnapshot {
   routeSnapshotId: string;
   quoteSnapshotId: string;
@@ -439,6 +454,7 @@ export interface RouteFareDisclosureSnapshot {
 
   passengerConfirmedAt: string | null;
   generatedAt: string;
+  bookingQuote?: PassengerBookingFareDisclosure;
 }
 
 // ===========================================================================
@@ -539,6 +555,7 @@ export interface PassengerRideAuthorityView {
     completedAt: string | null;
   };
   assignment: PassengerDispatchDisclosureSnapshot | null;
+  bookingQuote?: PassengerBookingFareDisclosure;
   rating: PassengerTripRatingRecord | null;
   payment: {
     status: PassengerPaymentStatus;

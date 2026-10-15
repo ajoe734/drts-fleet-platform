@@ -219,6 +219,10 @@ export class NativePassengerRideStream {
         this.options.onReset?.();
       }
       this.sessionGeneration = current.generation;
+      // Versions order one live connection, not different API processes. The
+      // authority read above and epoch fence replace the previous connection.
+      this.cursor = 0;
+      this.options.onReset?.();
       // Existing captured ETA/calculatedAt is forwarded verbatim, never replaced by reconnect time.
       this.options.onRide(response.ride);
       if (!live()) return;

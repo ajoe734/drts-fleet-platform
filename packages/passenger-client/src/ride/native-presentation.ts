@@ -704,7 +704,7 @@ export function mapNativePassengerRidePresentation(
 }
 
 export interface NativePassengerRideEventState {
-  /** Keep this cursor across reconnects for this ride; reset on ride/account change. */
+  /** Reset after the authority read for a new connection or ride/account change. */
   lastEventVersion: number;
   presentation: NativePassengerRidePresentation | null;
 }

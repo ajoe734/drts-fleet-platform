@@ -176,7 +176,7 @@ export class PassengerBookingController {
         "Not a passenger",
       );
     const passengerId = (identity as PassengerRequestIdentity).drtsPassengerId;
-    await this.service.getRide(passengerId, orderId);
+    await this.service.assertRideOwner(passengerId, orderId);
     await this.multiTaxiService.cancelTrustedPassengerRide(
       orderId,
       passengerId,
