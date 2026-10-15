@@ -2206,3 +2206,66 @@ the assigned isolated cwd, reusing the already published recovery-r26 branch;
 no reset, rebase, amend or force push. All owner-started local checks are
 terminal and read; the final candidate's hosted checks are pending in the
 original lifecycle and all three acceptance keys remain pending.
+
+## R31 — compile the live-duration wait under the repository's strict options (2026-10-15)
+
+Candidate `9d92a72f04cf5c989fb46f4e70a294b51e499469`, generation
+`ea2471ad6de54e31bdbd1018bd884541`, passed source review but failed its own
+hosted root typecheck. Run `38794972121`, job `116629520150`, reports precisely
+three TS18048 errors at spec340: `hours`, `minutes` and `seconds` may be
+undefined. The root project inherits `noUncheckedIndexedAccess: true` from
+`tsconfig.base.json`; R30's scoped command omitted that option. Its previously
+reported scoped pass remains a scoped result, not proof of this root check.
+The original hosted log is preserved as `typecheck-job.log`, SHA256
+`ac943b0df9a2fad1df145a8565fe1be0115e1873a70c999957025233af34a0bf`.
+
+The existing `finish` helper now destructures the clock's string parts and
+converts each part with `Number` at the arithmetic expression. This handles
+the declared `string | undefined` input type without a non-null assertion or
+an invented default duration. The real `HH:MM:SS` locator, live ticker,
+`>20` condition, 30-second duration poll, 40-second distance wait, 720-second
+case limit, zero retries and every other original journey action/assertion
+remain unchanged. All product, SDK, API, identity, queue, clock, SQL, config
+and workflow files are byte-identical to 9d92. No new test mirrors this small
+type correction; the actual spec is checked directly with TypeScript.
+
+| Finding / acceptance                                                              | Source and change                                                                                            | Old result → replacement result                                                                                                      | Commands / exit / evidence                                                                                                              | Remaining limitation                                                                                          |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| R31: the R30 live-duration parser fails the real compiler options                 | Existing `finish` in `tests/e2e/pax-review-shared-order-demo.spec.ts`; unchanged root/base TypeScript config | Actual immutable 9d92 spec: exactly 3 TS18048 errors, exit 2. Replacement: strict scoped check and complete root project both exit 0 | `before-strict-types.log`, `strict-types.json/log`, `root-types.json/log`; executable source `84f959434d2129c404048e3fbb8ca679ef7a946f` | Root TypeScript is not the complete workspace typecheck or hosted CI                                          |
+| Preserve prior caller, failure evidence, R29 and Driver producer/storage behavior | Original 2 root caller files and original Driver test configuration                                          | 28 caller cases and 8 Driver cases pass, zero skips; ESLint passes                                                                   | `caller-regression.json/log`, `driver-regression.json/log`, `lint.json/log`, all exit 0                                                 | Existing UI/HTTP/Worker/CSP/offline persistence fixtures retain their documented limits; no browser/PG credit |
+| Preserve complete original journeys and source boundaries                         | Exact old/new spec block replacement; original UAT prefix; only spec/UAT change                              | Content/source verification passes; every other byte of the original spec remains                                                    | `source-verification.json`, `source-verification-check.json/log`; format/diff/trailer checks recorded in manifest                       | Static preservation is not runtime acceptance                                                                 |
+| `pax-review-demo_real-shared-order-across-roles`                                  | Original same-UUID and formal-schema PG assertions retained                                                  | Pending, zero credit                                                                                                                 | New fixed candidate's full CI and all three original formal-schema PG companions without skips remain required                          | Old candidate results are not new-candidate credit                                                            |
+| `pax-review-demo_external-simulation-and-complete-journeys`                       | Original complete A/B/C and explicit external simulation retained                                            | Pending, zero credit                                                                                                                 | All original duration/distance/chronology/payment/CRM/cancellation/history checks retained                                              | At 19:45 UTC the original sole collector was still collecting 9d92's browser result; no complete A/B/C claim  |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`                          | Existing PR 2687 / recovery-r26 and original lifecycle                                                       | Pending, zero credit                                                                                                                 | New exact-SHA review/full CI/browser, normal merge, sole immutable combined Cloud Run delivery and fresh smoke remain required          | No deployment or acceptance credit from this type correction                                                  |
+
+Old reproduction command, run against the actual 9d92 worktree before editing:
+`pnpm exec tsc --noEmit --strict --noUncheckedIndexedAccess --skipLibCheck --esModuleInterop --target ES2022 --module ESNext --moduleResolution Bundler --types node tests/e2e/pax-review-shared-order-demo.spec.ts playwright.pax-review-shared-order.config.ts`.
+It exited 2 with the same three errors and no missing-package/fixture errors.
+The replacement scoped command additionally includes
+`--exactOptionalPropertyTypes --isolatedModules`; exit 0. The complete root
+command is `pnpm exec tsc -p tsconfig.json --noEmit --incremental false`;
+exit 0 with the repository's actual inherited options.
+
+The first full root attempt, `root-types-before-deps.json/log`, exited 2 because
+this freshly dispatched cwd had canonical dependency symlinks: missing local
+workspace packages and distinct canonical/worktree `ApiClient` types were
+reported. That is retained as an environment failure, not a reproduction of
+R31. Only this isolated cwd's 22 generated dependency links were detached;
+`pnpm install --offline --frozen-lockfile --ignore-scripts` exited 0. The final
+root check above then passed. Canonical dependencies, manifests and lockfile
+were untouched. The existing 28/8 regression cases were run before this
+dependency isolation with the same locked versions and executable source;
+their fixture boundaries remain as documented in R29/R30.
+
+Canonical evidence is
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate-9d92-ci/manifest.json`.
+It records exact commands, terminal exits, old/new source and evidence hashes,
+dependency-link provenance and publication identity. The final commit adds only
+this UAT section to executable checkpoint `84f959434d2129c404048e3fbb8ca679ef7a946f`.
+Node 22.23.2, pnpm 10.33.0, TypeScript 5.9.3 and Vitest 4.1.4 were used.
+All owner-started local checks are terminal and read before handoff. The
+existing sole hosted collector continues to preserve the old generation's
+actual terminal/partial/cancelled results; no second observer, workflow rerun,
+manual cancellation, VM product/preview/HTTP/PG/browser/Compose runtime or
+Playwright CLI was started. Published history and original refs are preserved
+with normal non-force pushes. All three acceptance keys remain pending.
