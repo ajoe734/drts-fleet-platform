@@ -1,11 +1,11 @@
 import { createRequire } from "node:module";
 import { once } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
-import type { MessageEvent as NestMessageEvent } from "@nestjs/common";
 import type { PassengerRideSseEventEnvelope } from "@drts/contracts";
 import { subscribePassengerRideAuthority } from "../../../apps/passenger-app-web/lib/ride/passenger-live";
 import {
   NativePassengerSseParser,
+  NativePassengerRideStream,
   decodeNativePassengerRideEvent,
 } from "../../../packages/passenger-client/src/native/ride-stream";
 import {
@@ -63,7 +63,7 @@ it("first-party production cancellation emits a named Nest frame received by the
       decodeNativePassengerRideEvent(JSON.parse(frame.data), orderId),
     );
   });
-  const events: NestMessageEvent[] = [];
+  const events: { data: unknown; type?: string; retry?: number }[] = [];
   const subscription = f.multi
     .streamTrustedPassengerEvents(orderId, OWNER)
     .subscribe((event) => events.push(event));
@@ -87,5 +87,107 @@ it("first-party production cancellation emits a named Nest frame received by the
   } finally {
     subscription.unsubscribe();
     closeWeb();
+  }
+});
+
+it("Web reconnect accepts a new instance sequence and still rejects duplicates within that connection", () => {
+  vi.stubGlobal("EventSource", EventSourceTransport);
+  const received: number[] = [];
+  const close = subscribePassengerRideAuthority("same-order", (event) =>
+    received.push(event.eventVersion),
+  );
+  const es = EventSourceTransport.current;
+  const deliver = (eventVersion: number) =>
+    es.listeners.get("trip_started")!({
+      data: JSON.stringify({ eventVersion, eventType: "trip_started" }),
+    });
+  try {
+    es.onopen?.();
+    deliver(41);
+    deliver(40);
+    es.onerror?.();
+    es.onopen?.();
+    deliver(1);
+    deliver(1);
+    deliver(2);
+    expect(received).toEqual([41, 1, 2]);
+  } finally {
+    close();
+  }
+});
+
+it("Native reconnect re-reads authority, accepts a restarted instance and fences old XHR callbacks", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW);
+  const f = createProductionBookingFixture();
+  const { ride } = await f.service.createRide(OWNER, f.command);
+  const session = {
+    generation: 1,
+    tokens: { accessToken: "test", refreshToken: "test" },
+  };
+  const requests: ReturnType<typeof request>[] = [];
+  function request() {
+    return {
+      readyState: 3,
+      status: 200,
+      responseText: "",
+      onreadystatechange: null as (() => void) | null,
+      onprogress: null as (() => void) | null,
+      onload: null as (() => void) | null,
+      onerror: null as (() => void) | null,
+      onabort: null as (() => void) | null,
+      open() {},
+      setRequestHeader() {},
+      send() {},
+      abort() {},
+      getResponseHeader: () => "text/event-stream",
+    };
+  }
+  const getRide = vi.fn(async () => ({ ride }));
+  const versions: number[] = [];
+  const stream = new NativePassengerRideStream({
+    baseUrl: "https://api.example.invalid",
+    orderId: ride.order.orderId,
+    client: { getRide } as never,
+    session: { snapshot: async () => session },
+    createRequest: () => {
+      const xhr = request();
+      requests.push(xhr);
+      return xhr;
+    },
+    appState: { currentState: () => "active", subscribe: () => () => {} },
+    onRide() {},
+    onEvent: (event) => versions.push(event.eventVersion),
+    onConnection() {},
+    onError: (error) => {
+      throw error;
+    },
+  });
+  const deliver = async (xhr: ReturnType<typeof request>, version: number) => {
+    xhr.responseText += `event: trip_started\ndata: ${JSON.stringify({
+      eventId: `event-${version}`,
+      eventType: "trip_started",
+      eventVersion: version,
+      assignmentVersion: 1,
+      orderId: ride.order.orderId,
+      occurredAt: new Date(NOW).toISOString(),
+      data: ride,
+    })}\n\n`;
+    xhr.onprogress?.();
+    for (let n = 0; n < 30; n++) await Promise.resolve();
+  };
+  try {
+    await stream.start();
+    await deliver(requests[0], 41);
+    const obsolete = requests[0].onprogress;
+    await stream.reconnect();
+    expect(getRide).toHaveBeenCalledTimes(2);
+    await deliver(requests[1], 1);
+    await deliver(requests[1], 1);
+    obsolete?.();
+    await deliver(requests[1], 2);
+    expect(versions).toEqual([41, 1, 2]);
+  } finally {
+    stream.stop();
   }
 });

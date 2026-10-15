@@ -581,9 +581,9 @@ export class MultiTaxiService implements OnModuleInit {
     orderId: string,
     passengerSubjectRef: string,
   ): Promise<PassengerRideAuthorityView> {
-    const order = this.requireMultiTaxiOrder(orderId);
+    const order = await this.requireMultiTaxiOrder(orderId);
     const assignment =
-      this.ownedMobilityService.findPassengerAssignmentDisclosure(
+      await this.ownedMobilityService.resolvePersistedPassengerAssignmentDisclosure(
         order.orderId,
       );
     const rating = await this.findPassengerRating(
@@ -628,7 +628,7 @@ export class MultiTaxiService implements OnModuleInit {
     passengerSubjectRef: string,
     requestId?: string,
   ) {
-    const order = this.requireMultiTaxiOrder(orderId);
+    const order = await this.requireMultiTaxiOrder(orderId);
     if (!this.isPassengerCancelable(order)) {
       throw new ApiRequestError(
         409,
@@ -649,7 +649,7 @@ export class MultiTaxiService implements OnModuleInit {
     reason: string,
     requestId?: string,
   ) {
-    const order = this.requireMultiTaxiOrder(orderId);
+    const order = await this.requireMultiTaxiOrder(orderId);
     return this.ownedMobilityService.cancelOwnedOrder(
       order.orderId,
       { reason },
@@ -664,7 +664,7 @@ export class MultiTaxiService implements OnModuleInit {
     passengerSubjectRef: string,
     accountHook?: PassengerAccountRatingHook,
   ) {
-    const order = this.requireMultiTaxiOrder(orderId);
+    const order = await this.requireMultiTaxiOrder(orderId);
     if (
       accountHook &&
       this.resolvePassengerSubjectRef(order) !== passengerSubjectRef
@@ -689,7 +689,7 @@ export class MultiTaxiService implements OnModuleInit {
       );
     }
     const assignment =
-      this.ownedMobilityService.findPassengerAssignmentDisclosure(
+      await this.ownedMobilityService.resolvePersistedPassengerAssignmentDisclosure(
         order.orderId,
       );
     if (!assignment) {
@@ -754,7 +754,7 @@ export class MultiTaxiService implements OnModuleInit {
     orderId: string,
     passengerSubjectRef: string,
   ) {
-    const order = this.requireMultiTaxiOrder(orderId);
+    const order = await this.requireMultiTaxiOrder(orderId);
     if (this.resolvePassengerSubjectRef(order) !== passengerSubjectRef) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -877,9 +877,9 @@ export class MultiTaxiService implements OnModuleInit {
     accessToken: string,
   ): Promise<PassengerRideAuthorityView> {
     const token = await this.requireAccessToken(accessToken, "ride:read");
-    const order = this.requireMultiTaxiOrder(token.orderId);
+    const order = await this.requireMultiTaxiOrder(token.orderId);
     const assignment =
-      this.ownedMobilityService.findPassengerAssignmentDisclosure(
+      await this.ownedMobilityService.resolvePersistedPassengerAssignmentDisclosure(
         order.orderId,
       );
     const rating = await this.findPassengerRating(
@@ -931,7 +931,7 @@ export class MultiTaxiService implements OnModuleInit {
     requestId?: string,
   ) {
     const token = await this.requireAccessToken(accessToken, "ride:cancel");
-    const order = this.requireMultiTaxiOrder(token.orderId);
+    const order = await this.requireMultiTaxiOrder(token.orderId);
     return this.ownedMobilityService.cancelOwnedOrder(
       order.orderId,
       {
@@ -946,7 +946,7 @@ export class MultiTaxiService implements OnModuleInit {
     command: SubmitPassengerTripRatingCommand,
   ) {
     const token = await this.requireAccessToken(accessToken, "ride:rate");
-    const order = this.requireMultiTaxiOrder(token.orderId);
+    const order = await this.requireMultiTaxiOrder(token.orderId);
     if (this.resolvePassengerSubjectRef(order) !== token.passengerSubjectRef)
       throw this.invalidPassengerToken();
     if (order.status !== "completed") {
@@ -958,7 +958,7 @@ export class MultiTaxiService implements OnModuleInit {
       );
     }
     const assignment =
-      this.ownedMobilityService.findPassengerAssignmentDisclosure(
+      await this.ownedMobilityService.resolvePersistedPassengerAssignmentDisclosure(
         order.orderId,
       );
     if (!assignment) {
@@ -1308,9 +1308,9 @@ export class MultiTaxiService implements OnModuleInit {
     requestId?: string,
   ): Promise<PassengerRideContactOption> {
     const token = await this.requireAccessToken(accessToken, "ride:contact");
-    const order = this.requireMultiTaxiOrder(token.orderId);
+    const order = await this.requireMultiTaxiOrder(token.orderId);
     const assignment =
-      this.ownedMobilityService.findPassengerAssignmentDisclosure(
+      await this.ownedMobilityService.resolvePersistedPassengerAssignmentDisclosure(
         order.orderId,
       );
     if (!assignment || ["completed", "cancelled"].includes(order.status)) {
@@ -1938,7 +1938,7 @@ export class MultiTaxiService implements OnModuleInit {
 
   async getPassengerReceipt(accessToken: string) {
     const token = await this.requireAccessToken(accessToken, "receipt:read");
-    const order = this.requireMultiTaxiOrder(token.orderId);
+    const order = await this.requireMultiTaxiOrder(token.orderId);
     const receipt =
       (await this.repository?.findElectronicReceipt(order.orderId)) ?? null;
     if (!receipt) {
@@ -1968,7 +1968,7 @@ export class MultiTaxiService implements OnModuleInit {
       );
     }
     const token = await this.requireAccessToken(accessToken, "receipt:read");
-    const order = this.requireMultiTaxiOrder(token.orderId);
+    const order = await this.requireMultiTaxiOrder(token.orderId);
     if (
       this.resolvePassengerSubjectRef(order) !== token.passengerSubjectRef ||
       !Number.isFinite(Date.parse(token.expiresAt))
@@ -2121,8 +2121,8 @@ export class MultiTaxiService implements OnModuleInit {
 
   /**
    * Allocates the next strictly increasing sequence for an order's passenger
-   * stream. Shared across concurrent subscribers and reconnects so a consumer
-   * that keeps the highest applied version can drop anything out of order.
+   * stream within this API process. Consumers reset their watermark when a
+   * connection opens because reconnects can land on a different process.
    */
   private nextPassengerEventVersion(orderId: string) {
     const next = (this.passengerEventSequenceByOrder.get(orderId) ?? 0) + 1;
@@ -2368,8 +2368,9 @@ export class MultiTaxiService implements OnModuleInit {
       : 24 * 30;
   }
 
-  private requireMultiTaxiOrder(orderId: string) {
-    const order = this.ownedMobilityService.getOrder(orderId);
+  private async requireMultiTaxiOrder(orderId: string) {
+    const order =
+      await this.ownedMobilityService.resolvePersistedOrder(orderId);
     if (order.runtimeProfileCode !== "multi_taxi_direct") {
       throw this.invalidPassengerToken();
     }
@@ -2461,7 +2462,7 @@ export class MultiTaxiService implements OnModuleInit {
     order: OwnedOrderRecord,
   ): Promise<MultiTaxiTripOperationalAdminView> {
     const assignment =
-      this.ownedMobilityService.findPassengerAssignmentDisclosure(
+      await this.ownedMobilityService.resolvePersistedPassengerAssignmentDisclosure(
         order.orderId,
       );
     const receipt =

@@ -59,7 +59,10 @@ function createHarness(options?: {
   const ownedMobilityService = {
     createMultiTaxiRide: vi.fn(() => ({ ...order })),
     getOrder: vi.fn(() => ({ ...order })),
-    findPassengerAssignmentDisclosure: vi.fn(() => assignment),
+    resolvePersistedOrder: vi.fn(async () => ({ ...order })),
+    resolvePersistedPassengerAssignmentDisclosure: vi.fn(
+      async () => assignment,
+    ),
     cancelOwnedOrder: vi.fn(() => ({ ...order })),
   };
   const repository = options?.repository

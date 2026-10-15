@@ -2362,6 +2362,27 @@ export class OwnedMobilityService
     return snapshot ? this.clonePassengerDisclosureSnapshot(snapshot) : null;
   }
 
+  /** Passenger reads must see assignments committed by another API/worker.
+   * A durable absence also replaces a stale local disclosure. */
+  async resolvePersistedPassengerAssignmentDisclosure(orderId: string) {
+    if (!this.ownedMobilityRepository?.isEnabled()) {
+      return this.findPassengerAssignmentDisclosure(orderId);
+    }
+    const snapshot =
+      await this.ownedMobilityRepository.findCurrentPassengerAssignmentDisclosure(
+        orderId,
+      );
+    this.passengerDisclosureSnapshots =
+      this.passengerDisclosureSnapshots.filter(
+        (candidate) => candidate.orderId !== orderId,
+      );
+    if (snapshot)
+      this.passengerDisclosureSnapshots.unshift(
+        this.clonePassengerDisclosureSnapshot(snapshot),
+      );
+    return snapshot ? this.clonePassengerDisclosureSnapshot(snapshot) : null;
+  }
+
   assertTenantAccessScope(
     targetTenantId: string,
     identity?: BootstrapRequestIdentity | null,

@@ -250,6 +250,22 @@ export class OwnedMobilityRepository {
       : null;
   }
 
+  async findCurrentPassengerAssignmentDisclosure(orderId: string) {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM ops.passenger_dispatch_disclosure_snapshots
+       WHERE order_id = $1 AND superseded_at IS NULL
+       ORDER BY assignment_version DESC, created_at DESC LIMIT 1`,
+      [orderId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<PassengerDispatchDisclosureSnapshot>(
+          result.rows[0].record,
+          "ops.passenger_dispatch_disclosure_snapshots",
+        )
+      : null;
+  }
+
   async findOrderByBookingId(
     bookingId: string,
     tenantId: string,

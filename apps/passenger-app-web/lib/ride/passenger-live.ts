@@ -187,6 +187,9 @@ export function subscribePassengerRideAuthority(
   }
 
   es.onopen = () => {
+    // eventVersion is allocated by the serving API process. A new connection
+    // starts with a fresh authority snapshot and may land on a restarted peer.
+    lastVersion = -1;
     if (onStateChange) onStateChange("connected");
   };
 
