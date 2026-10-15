@@ -43,6 +43,7 @@ type Options = {
   cleanupFails?: boolean;
   visibleLabels?: string[];
   uiProbeFails?: boolean;
+  redirectDuringProbe?: boolean;
 };
 
 async function exercise(options: Options) {
@@ -65,11 +66,14 @@ async function exercise(options: Options) {
       return this.currentURL;
     },
     isClosed: () => options.closed ?? false,
-    getByText: (label: string, locatorOptions: { exact: boolean }) => {
+    getByText(label: string, locatorOptions: { exact: boolean }) {
+      const page = this;
       expect(locatorOptions.exact).toBe(true);
       return {
         first: () => ({
           isVisible: async () => {
+            if (options.redirectDuringProbe)
+              page.currentURL = new URL("onboarding", page.currentURL).href;
             if (options.uiProbeFails) throw new Error("UI probe unavailable");
             return options.visibleLabels?.includes(label) ?? false;
           },
@@ -201,6 +205,18 @@ it.each([
     );
   },
 );
+
+it("does not capture onboarding after a redirect during the fixed UI probes", async () => {
+  const result = await exercise({
+    role: "B",
+    phase: "finish",
+    path: "jobs",
+    redirectDuringProbe: true,
+  });
+  expect(result.error).toBe(result.primary);
+  expect(result.captures).toEqual([]);
+  expect(result.closedContexts).toEqual(["pax", "ops", "A", "B"]);
+});
 
 it.each([
   { path: "onboarding" },

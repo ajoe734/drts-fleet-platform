@@ -787,7 +787,12 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         contentType: "application/json",
       })
       .catch(() => undefined);
-    if (workspace && !queryPresent && !closed) {
+    if (
+      workspace &&
+      !queryPresent &&
+      !failedDriver.isClosed() &&
+      failedDriver.url() === failedUrl.href
+    ) {
       const screenshot = await failedDriver
         .screenshot({ fullPage: true, timeout: 5000 })
         .catch(() => null);
