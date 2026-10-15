@@ -4,25 +4,22 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
-  formatHealthAdapterSource,
   formatHealthMetricValue,
-  getHealthAlertRouteLabel,
-  getHealthAlertTitle,
   getHealthPageCopy,
   getHealthStatusLabel,
+  t,
 } from "@/lib/translations";
 import type {
   AdapterHealthRecord,
-  OperationalAdapterDetailRecord,
   OperationalAlertRecord,
-  OperationalObservabilitySnapshot,
 } from "@drts/contracts";
 import {
   CanvasBanner,
@@ -37,19 +34,20 @@ import {
   type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
+import {
+  beginHealthPageLoad,
+  buildPlatformHealthViewModel,
+  createInitialHealthPageState,
+  formatAlertMeasure,
+  formatAlertRoute,
+  formatAlertTitle,
+  formatValidHealthTimestamp,
+  loadPlatformHealthSources,
+  type AdapterInventoryRow,
+  type HealthPageLoadState,
+} from "./health-observability-model";
 
 type HealthTabKey = "alerts" | "dispatch" | "webhook" | "filing" | "adapters";
-
-type AdapterInventoryRow = {
-  adapter: string;
-  source: string;
-  kind: string;
-  status: AdapterHealthRecord["status"];
-  latency: string;
-  lastEvent: string;
-  orders24h: string;
-  note: string;
-} & Record<string, unknown>;
 
 const theme = buildCanvasTheme({
   surface: "platform",
@@ -149,156 +147,6 @@ const tabKeyOrder: HealthTabKey[] = [
   "adapters",
 ];
 
-const ALERT_SEVERITY_ORDER = {
-  critical: 0,
-  warning: 1,
-  healthy: 2,
-} as const;
-
-function createFallbackObservabilitySnapshot(
-  referenceDate = new Date(),
-): OperationalObservabilitySnapshot {
-  return {
-    generatedAt: referenceDate.toISOString(),
-    alerts: [],
-    dispatch: {
-      activeOrders: 0,
-      queueDepth: 0,
-      laggedOrders: 0,
-      redispatchOrders: 0,
-      exceptionHoldOrders: 0,
-      dispatchFailedOrders: 0,
-      oldestReadyOrderLagMinutes: null,
-    },
-    recording: {
-      phoneOrders: 0,
-      linkedOrders: 0,
-      pendingOrders: 0,
-      pendingCallSessions: 0,
-      missingRecordingLinks: 0,
-      oldestPendingLagMinutes: null,
-      linkedRatioPercent: 0,
-    },
-    driverState: {
-      totalDrivers: 0,
-      availableDrivers: 0,
-      dispatchEligibleDrivers: 0,
-      offlineDrivers: 0,
-      staleLocationDrivers: 0,
-      missingLocationDrivers: 0,
-      oldestLocationLagMinutes: null,
-    },
-    webhook: {
-      totalEndpoints: 0,
-      activeEndpoints: 0,
-      disabledEndpoints: 0,
-      queuedDeliveries: 0,
-      failedDeliveriesLastHour: 0,
-      oldestQueuedDeliveryLagMinutes: null,
-    },
-    eligibility: {
-      totalReviewQueue: 0,
-      manualReviewQueue: 0,
-      manualFallbackQueue: 0,
-      ineligibleQueue: 0,
-      recentFailureCount24h: 0,
-    },
-    reporting: {
-      queuedJobs: 0,
-      failedJobs: 0,
-      dispatchRecordingIndexQueuedJobs: 0,
-    },
-    adapters: {
-      totalAdapters: 0,
-      healthyAdapters: 0,
-      degradedAdapters: 0,
-      downAdapters: 0,
-    },
-    forwarderOps: {
-      totalForwardedOrders: 0,
-      syncFailedOrders: 0,
-      acceptPendingOrders: 0,
-      manualFallbackQueue: 0,
-      reconciliationQueue: 0,
-      oldestSyncFailedLagMinutes: null,
-      oldestAcceptPendingLagMinutes: null,
-      oldestManualFallbackLagMinutes: null,
-      oldestReconciliationLagMinutes: null,
-    },
-    mapGeofence: {
-      providerHealth: {
-        status: "unknown",
-        provider: null,
-        mode: null,
-        failClosed: false,
-        lastCheckedAt: null,
-        quota: {
-          dailyLimit: null,
-          minuteLimit: null,
-          dailyUsed: null,
-          minuteUsed: null,
-          usagePercent: null,
-          status: "unknown",
-          warningThresholdPercent: null,
-          criticalThresholdPercent: null,
-          policy: null,
-        },
-      },
-      geo: {
-        providerOutageCount: 0,
-        addressAmbiguityCount: 0,
-        coordinateLessAttemptCount: 0,
-        manualOverrideCount: 0,
-        resolvedAddressCount: 0,
-        requests: {
-          total: 0,
-          successful: 0,
-          providerErrorCount: 0,
-          successRatePercent: null,
-          byOperation: {
-            search: 0,
-            resolve: 0,
-            reverse: 0,
-          },
-          byResult: {
-            resolved: 0,
-            manualOverride: 0,
-            addressAmbiguity: 0,
-            coordinateLessAttempt: 0,
-            providerOutage: 0,
-          },
-        },
-        latencyMs: {
-          count: 0,
-          average: null,
-          max: null,
-          p95: null,
-        },
-      },
-      serviceArea: {
-        evaluations: 0,
-        serviceableCount: 0,
-        manualReviewCount: 0,
-        policyDenialCount: 0,
-        outOfAreaCount: 0,
-        coordinateLessAttemptCount: 0,
-      },
-      governance: {
-        geometryMutationCount: 0,
-        serviceAreaPublishedCount: 0,
-        serviceAreaRetiredCount: 0,
-        stopPolicyPublishedCount: 0,
-        stopPolicyRetiredCount: 0,
-        manualOverrideCount: 0,
-      },
-      lastEventAt: null,
-    },
-    adapterDetails: [],
-    phase2SandboxKpiDashboard: null,
-    roleViews: [],
-  };
-}
-
 function alertTone(
   state: OperationalAlertRecord["state"] | AdapterHealthRecord["status"],
 ): CanvasTone {
@@ -316,33 +164,6 @@ function alertTone(
   }
 }
 
-function formatAlertMeasure(
-  locale: "en" | "zh",
-  alert: OperationalAlertRecord,
-): string {
-  return formatHealthMetricValue(
-    locale,
-    alert.measuredValue,
-    alert.thresholds.unit,
-  );
-}
-
-function formatAlertTitle(
-  locale: "en" | "zh",
-  key: OperationalAlertRecord["key"],
-): string {
-  return getHealthAlertTitle(locale, key);
-}
-
-function formatAlertRoute(
-  locale: "en" | "zh",
-  routes: OperationalAlertRecord["routes"],
-): string {
-  return routes
-    .map((route) => getHealthAlertRouteLabel(locale, route))
-    .join(" · ");
-}
-
 function buildAlertHref(alert: OperationalAlertRecord): string {
   switch (alert.key) {
     case "driver_state_lag":
@@ -352,31 +173,6 @@ function buildAlertHref(alert: OperationalAlertRecord): string {
     default:
       return "/health";
   }
-}
-
-function mergeAdapterDetails(
-  adapterDetails: OperationalAdapterDetailRecord[],
-  fallbackAdapters: AdapterHealthRecord[],
-): OperationalAdapterDetailRecord[] {
-  if (adapterDetails.length > 0) {
-    return adapterDetails;
-  }
-
-  return fallbackAdapters.map((adapter) => ({
-    platformCode: adapter.platformCode,
-    status: adapter.status,
-    reason: adapter.reason,
-    credentialStatus: adapter.credentialStatus,
-    authStatus: adapter.authStatus,
-    webhookStatus: adapter.webhookStatus,
-    rateLimitStatus: adapter.rateLimitStatus,
-    capabilitySummary: adapter.capabilitySummary,
-    lastCheckedAt: adapter.lastCheckedAt,
-    lastError: adapter.lastError,
-    lastWebhookReceivedAt: adapter.lastWebhookReceivedAt,
-    lastRateLimitAt: adapter.lastRateLimitAt,
-    lastAuthFailureAt: adapter.lastAuthFailureAt,
-  }));
 }
 
 function buildCanvasTabs(
@@ -397,36 +193,29 @@ function buildCanvasTabs(
 export default function HealthPage() {
   const { locale } = useTranslation();
   const client = usePlatformAdminClient();
-  const [adapters, setAdapters] = useState<AdapterHealthRecord[]>([]);
-  const [observability, setObservability] =
-    useState<OperationalObservabilitySnapshot>(
-      createFallbackObservabilitySnapshot(),
-    );
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadState, setLoadState] = useState<HealthPageLoadState>(() =>
+    createInitialHealthPageState(),
+  );
+  const stateRef = useRef<HealthPageLoadState>(loadState);
+  const [isRefreshing, setIsRefreshing] = useState(true);
 
   const copy = useMemo(() => getHealthPageCopy(locale), [locale]);
 
   const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+    setIsRefreshing(true);
+    const loadingState = beginHealthPageLoad(stateRef.current);
+    stateRef.current = loadingState;
+    setLoadState(loadingState);
 
     try {
-      const [adapterData, operationalData] = await Promise.all([
-        client.getForwarderAdaptersHealth() as Promise<AdapterHealthRecord[]>,
-        client.getOperationalObservability(),
-      ]);
-
-      setAdapters(adapterData);
-      setObservability(operationalData);
-    } catch (caughtError: unknown) {
-      setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : String(caughtError),
+      const nextState = await loadPlatformHealthSources(
+        client,
+        stateRef.current,
       );
+      stateRef.current = nextState;
+      setLoadState(nextState);
     } finally {
-      setLoading(false);
+      setIsRefreshing(false);
     }
   }, [client]);
 
@@ -434,74 +223,10 @@ export default function HealthPage() {
     void loadData();
   }, [loadData]);
 
-  const platformAlertKeys = useMemo(
-    () =>
-      new Set(
-        observability.roleViews.find(
-          (view: OperationalObservabilitySnapshot["roleViews"][number]) =>
-            view.route === "platform",
-        )?.alertKeys ?? [],
-      ),
-    [observability.roleViews],
+  const viewModel = useMemo(
+    () => buildPlatformHealthViewModel(loadState, locale),
+    [loadState, locale],
   );
-
-  const platformAlerts = useMemo(
-    () =>
-      observability.alerts
-        .filter(
-          (alert: OperationalAlertRecord) =>
-            platformAlertKeys.has(alert.key) ||
-            alert.routes.includes("platform"),
-        )
-        .sort(
-          (left: OperationalAlertRecord, right: OperationalAlertRecord) =>
-            ALERT_SEVERITY_ORDER[left.state] -
-            ALERT_SEVERITY_ORDER[right.state],
-        ),
-    [observability.alerts, platformAlertKeys],
-  );
-
-  const activeAlerts = useMemo(
-    () =>
-      platformAlerts.filter(
-        (alert: OperationalAlertRecord) => alert.state !== "healthy",
-      ),
-    [platformAlerts],
-  );
-
-  const adapterRows = useMemo<AdapterInventoryRow[]>(() => {
-    const merged = mergeAdapterDetails(observability.adapterDetails, adapters);
-    const fallbackOrders =
-      merged.length > 0
-        ? Math.floor(
-            observability.forwarderOps.totalForwardedOrders / merged.length,
-          )
-        : 0;
-
-    return merged.map((adapter) => ({
-      adapter: adapter.platformCode,
-      source: formatHealthAdapterSource(locale, adapter.platformCode),
-      kind: adapter.capabilitySummary.mode.toUpperCase(),
-      status: adapter.status,
-      latency: "—",
-      lastEvent: formatDateTime(
-        adapter.lastWebhookReceivedAt ??
-          adapter.lastRateLimitAt ??
-          adapter.lastAuthFailureAt ??
-          adapter.lastCheckedAt,
-      ),
-      orders24h:
-        fallbackOrders > 0
-          ? formatHealthMetricValue(locale, fallbackOrders, "count")
-          : "—",
-      note: adapter.lastError ?? getHealthStatusLabel(locale, adapter.reason),
-    }));
-  }, [
-    adapters,
-    locale,
-    observability.adapterDetails,
-    observability.forwarderOps.totalForwardedOrders,
-  ]);
 
   const adapterColumns = useMemo<CanvasTableColumn<AdapterInventoryRow>[]>(
     () => [
@@ -546,121 +271,26 @@ export default function HealthPage() {
   );
 
   const tabNodes = useMemo(
-    () => buildCanvasTabs(activeAlerts.length, copy),
-    [activeAlerts.length, copy],
+    () => buildCanvasTabs(viewModel.activeAlerts.length, copy),
+    [viewModel.activeAlerts.length, copy],
   );
 
-  const dispatchSummary = [
-    {
-      label: copy.summary.dispatch.queueDepth,
-      value: formatHealthMetricValue(
-        locale,
-        observability.dispatch.queueDepth,
-        "count",
-      ),
-    },
-    {
-      label: copy.summary.dispatch.redispatchOrders,
-      value: formatHealthMetricValue(
-        locale,
-        observability.dispatch.redispatchOrders,
-        "count",
-      ),
-    },
-    {
-      label: copy.summary.dispatch.exceptionHolds,
-      value: formatHealthMetricValue(
-        locale,
-        observability.dispatch.exceptionHoldOrders,
-        "count",
-      ),
-    },
-    {
-      label: copy.summary.dispatch.failedOrders,
-      value: formatHealthMetricValue(
-        locale,
-        observability.dispatch.dispatchFailedOrders,
-        "count",
-      ),
-    },
-  ];
-
-  const webhookSummary = [
-    {
-      label: copy.summary.webhook.activeEndpoints,
-      value: formatHealthMetricValue(
-        locale,
-        observability.webhook.activeEndpoints,
-        "count",
-      ),
-    },
-    {
-      label: copy.summary.webhook.disabledEndpoints,
-      value: formatHealthMetricValue(
-        locale,
-        observability.webhook.disabledEndpoints,
-        "count",
-      ),
-    },
-    {
-      label: copy.summary.webhook.queuedDeliveries,
-      value: formatHealthMetricValue(
-        locale,
-        observability.webhook.queuedDeliveries,
-        "count",
-      ),
-    },
-    {
-      label: copy.summary.webhook.oldestQueuedLag,
-      value: formatHealthMetricValue(
-        locale,
-        observability.webhook.oldestQueuedDeliveryLagMinutes,
-        "minutes",
-      ),
-    },
-  ];
-
-  const filingSummary = [
-    {
-      label: copy.summary.filing.reportingQueuedJobs,
-      value: formatHealthMetricValue(
-        locale,
-        observability.reporting.queuedJobs,
-        "count",
-      ),
-    },
-    {
-      label: copy.summary.filing.recordingBacklog,
-      value: formatHealthMetricValue(
-        locale,
-        observability.recording.pendingOrders,
-        "count",
-      ),
-    },
-    {
-      label: copy.summary.filing.manualReviewQueue,
-      value: formatHealthMetricValue(
-        locale,
-        observability.eligibility.manualReviewQueue,
-        "count",
-      ),
-    },
-    {
-      label: copy.summary.filing.eligibilityFailures24h,
-      value: formatHealthMetricValue(
-        locale,
-        observability.eligibility.recentFailureCount24h,
-        "count",
-      ),
-    },
-  ];
+  const pageSubtitle = useMemo(() => {
+    if (!viewModel.sourceGeneratedAt) {
+      return copy.subtitle;
+    }
+    const formattedSource = formatValidHealthTimestamp(
+      viewModel.sourceGeneratedAt,
+    );
+    return `${copy.subtitle} · ${t("health.lastRefresh", locale, { time: formattedSource })}`;
+  }, [copy.subtitle, locale, viewModel.sourceGeneratedAt]);
 
   return (
     <>
       <CanvasPageHeader
         theme={theme}
         title={copy.title}
-        subtitle={copy.subtitle}
+        subtitle={pageSubtitle}
         tabs={tabKeyOrder.map((key) => tabNodes[key])}
         activeTab={tabNodes.alerts}
         actions={
@@ -668,7 +298,7 @@ export default function HealthPage() {
             theme={theme}
             icon="refresh"
             onClick={() => void loadData()}
-            disabled={loading}
+            disabled={isRefreshing}
           >
             {copy.refresh}
           </CanvasBtn>
@@ -676,91 +306,80 @@ export default function HealthPage() {
       />
 
       <div style={bodyStyle}>
-        {error ? (
+        {viewModel.banner ? (
           <CanvasBanner
             theme={theme}
-            tone="danger"
-            title={copy.refreshError}
-            body={error}
+            tone={viewModel.banner.tone}
+            title={viewModel.banner.title}
+            body={viewModel.banner.body}
           />
         ) : null}
 
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={theme}
-            label={copy.kpis.dispatch.label}
-            value={formatHealthMetricValue(
-              locale,
-              observability.dispatch.oldestReadyOrderLagMinutes,
-              "minutes",
-            )}
-            delta={
-              observability.dispatch.oldestReadyOrderLagMinutes != null
-                ? "watch"
-                : "ok"
-            }
-            deltaTone={
-              observability.dispatch.oldestReadyOrderLagMinutes != null
-                ? "down"
-                : "up"
-            }
-            sub={copy.kpis.dispatch.sub(observability.dispatch.laggedOrders)}
+            label={viewModel.kpis.dispatch.label}
+            value={viewModel.kpis.dispatch.value}
+            {...(viewModel.kpis.dispatch.delta !== undefined
+              ? { delta: viewModel.kpis.dispatch.delta }
+              : {})}
+            deltaTone={viewModel.kpis.dispatch.deltaTone}
+            sub={viewModel.kpis.dispatch.sub}
           />
           <CanvasKPI
             theme={theme}
-            label={copy.kpis.webhook.label}
-            value={formatHealthMetricValue(
-              locale,
-              observability.webhook.queuedDeliveries,
-              "count",
-            )}
-            delta={
-              observability.webhook.failedDeliveriesLastHour > 0
-                ? `↑ ${observability.webhook.failedDeliveriesLastHour}`
-                : "ok"
-            }
-            deltaTone={
-              observability.webhook.failedDeliveriesLastHour > 0 ? "down" : "up"
-            }
-            sub={copy.kpis.webhook.sub(
-              observability.webhook.failedDeliveriesLastHour,
-            )}
+            label={viewModel.kpis.webhook.label}
+            value={viewModel.kpis.webhook.value}
+            {...(viewModel.kpis.webhook.delta !== undefined
+              ? { delta: viewModel.kpis.webhook.delta }
+              : {})}
+            deltaTone={viewModel.kpis.webhook.deltaTone}
+            sub={viewModel.kpis.webhook.sub}
           />
           <CanvasKPI
             theme={theme}
-            label={copy.kpis.eligibility.label}
-            value={formatHealthMetricValue(
-              locale,
-              observability.eligibility.totalReviewQueue,
-              "count",
-            )}
-            sub={copy.kpis.eligibility.sub(
-              observability.eligibility.manualReviewQueue,
-            )}
+            label={viewModel.kpis.eligibility.label}
+            value={viewModel.kpis.eligibility.value}
+            {...(viewModel.kpis.eligibility.delta !== undefined
+              ? { delta: viewModel.kpis.eligibility.delta }
+              : {})}
+            deltaTone={viewModel.kpis.eligibility.deltaTone}
+            sub={viewModel.kpis.eligibility.sub}
           />
           <CanvasKPI
             theme={theme}
-            label={copy.kpis.reporting.label}
-            value={formatHealthMetricValue(
-              locale,
-              observability.reporting.failedJobs,
-              "count",
-            )}
-            delta={observability.reporting.failedJobs > 0 ? "attention" : "ok"}
-            deltaTone={observability.reporting.failedJobs > 0 ? "down" : "up"}
-            sub={copy.kpis.reporting.sub(observability.reporting.queuedJobs)}
+            label={viewModel.kpis.reporting.label}
+            value={viewModel.kpis.reporting.value}
+            {...(viewModel.kpis.reporting.delta !== undefined
+              ? { delta: viewModel.kpis.reporting.delta }
+              : {})}
+            deltaTone={viewModel.kpis.reporting.deltaTone}
+            sub={viewModel.kpis.reporting.sub}
           />
         </div>
 
         <div style={detailGridStyle}>
-          <CanvasCard theme={theme} title={copy.alertsTitle}>
-            {loading ? (
-              <div style={emptyStateStyle}>{copy.loadingAlerts}</div>
-            ) : activeAlerts.length === 0 ? (
-              <div style={emptyStateStyle}>{copy.alertsEmpty}</div>
+          <CanvasCard
+            theme={theme}
+            title={copy.alertsTitle}
+            {...(viewModel.observabilityStatus === "stale" &&
+            viewModel.sourceGeneratedAt
+              ? {
+                  actions: (
+                    <CanvasPill theme={theme} tone="warn" dot>
+                      {`${getHealthStatusLabel(locale, "stale")} · ${formatValidHealthTimestamp(viewModel.sourceGeneratedAt)}`}
+                    </CanvasPill>
+                  ),
+                }
+              : {})}
+          >
+            {viewModel.alertsEmptyState.kind !== "none" ? (
+              <div style={emptyStateStyle}>
+                {viewModel.alertsEmptyState.message}
+              </div>
             ) : (
               <div style={listStyle}>
-                {activeAlerts.map(
+                {viewModel.activeAlerts.map(
                   (alert: OperationalAlertRecord, index: number) => {
                     const measured = formatAlertMeasure(locale, alert);
                     const threshold = formatHealthMetricValue(
@@ -774,7 +393,7 @@ export default function HealthPage() {
                         style={{
                           ...listRowStyle(theme),
                           borderBottom:
-                            index === activeAlerts.length - 1
+                            index === viewModel.activeAlerts.length - 1
                               ? "none"
                               : `1px solid ${theme.border}`,
                         }}
@@ -798,7 +417,10 @@ export default function HealthPage() {
                           </div>
                         </div>
                         <span style={monoMutedStyle}>
-                          {formatDateTime(alert.observedAt)}
+                          {formatValidHealthTimestamp(
+                            alert.observedAt,
+                            getHealthStatusLabel(locale, "unknown"),
+                          )}
                         </span>
                         <CanvasBtn
                           theme={theme}
@@ -825,17 +447,17 @@ export default function HealthPage() {
             subtitle={copy.dispatchEmpty}
           >
             <div style={summaryListStyle}>
-              {dispatchSummary.map((item, index) => (
+              {viewModel.dispatchSummary.map((item, index) => (
                 <div
                   key={item.label}
                   style={{
                     ...summaryRowStyle(theme),
                     borderBottom:
-                      index === dispatchSummary.length - 1
+                      index === viewModel.dispatchSummary.length - 1
                         ? "none"
                         : `1px solid ${theme.border}`,
                     paddingBottom:
-                      index === dispatchSummary.length - 1 ? 0 : 10,
+                      index === viewModel.dispatchSummary.length - 1 ? 0 : 10,
                   }}
                 >
                   <span>{item.label}</span>
@@ -853,16 +475,17 @@ export default function HealthPage() {
             subtitle={copy.webhookEmpty}
           >
             <div style={summaryListStyle}>
-              {webhookSummary.map((item, index) => (
+              {viewModel.webhookSummary.map((item, index) => (
                 <div
                   key={item.label}
                   style={{
                     ...summaryRowStyle(theme),
                     borderBottom:
-                      index === webhookSummary.length - 1
+                      index === viewModel.webhookSummary.length - 1
                         ? "none"
                         : `1px solid ${theme.border}`,
-                    paddingBottom: index === webhookSummary.length - 1 ? 0 : 10,
+                    paddingBottom:
+                      index === viewModel.webhookSummary.length - 1 ? 0 : 10,
                   }}
                 >
                   <span>{item.label}</span>
@@ -878,16 +501,17 @@ export default function HealthPage() {
             subtitle={copy.filingEmpty}
           >
             <div style={summaryListStyle}>
-              {filingSummary.map((item, index) => (
+              {viewModel.filingSummary.map((item, index) => (
                 <div
                   key={item.label}
                   style={{
                     ...summaryRowStyle(theme),
                     borderBottom:
-                      index === filingSummary.length - 1
+                      index === viewModel.filingSummary.length - 1
                         ? "none"
                         : `1px solid ${theme.border}`,
-                    paddingBottom: index === filingSummary.length - 1 ? 0 : 10,
+                    paddingBottom:
+                      index === viewModel.filingSummary.length - 1 ? 0 : 10,
                   }}
                 >
                   <span>{item.label}</span>
@@ -900,19 +524,19 @@ export default function HealthPage() {
 
         <CanvasCard
           theme={theme}
-          title={`${copy.adaptersTitle} · ${copy.adapterEntries(adapterRows.length)}`}
+          title={`${copy.adaptersTitle} · ${copy.adapterEntries(viewModel.adapterRows.length)}`}
           subtitle={copy.metricsNote}
           padding={0}
         >
-          {loading ? (
-            <div style={emptyStateStyle}>{copy.loadingAdapters}</div>
-          ) : adapterRows.length === 0 ? (
-            <div style={emptyStateStyle}>{copy.adaptersEmpty}</div>
+          {viewModel.adaptersEmptyState.kind !== "none" ? (
+            <div style={emptyStateStyle}>
+              {viewModel.adaptersEmptyState.message}
+            </div>
           ) : (
             <CanvasTable
               theme={theme}
               columns={adapterColumns}
-              rows={adapterRows}
+              rows={viewModel.adapterRows}
             />
           )}
         </CanvasCard>
