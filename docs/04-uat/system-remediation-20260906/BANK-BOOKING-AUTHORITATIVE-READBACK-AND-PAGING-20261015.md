@@ -76,3 +76,28 @@ Owner: Codex · Reviewer: Codex2 · 2026-10-15 UTC
 - R-F：R-E 同命令，僅 config 改用 `.local/bank-bookings-r1/original-vitest.config.mts`，將精確 translation alias 優先於 `@` prefix，轉至只轉出真實 `t` 的 adapter，隔離既有 alias-only mock。首次 harness alias 順序不正確仍為 121 PASS／2 FAIL（`original-regressions-isolated-alias.log`）；更正設定後 exit 0，7 files／123 PASS（`original-regressions-isolated-alias-final.log`）。沒有變動產品或原測試內容。
 - `pnpm --filter @drts/bank-console-web exec tsc --noEmit --incremental false` → raw exit 2（只有既有 tenant-auth missing modules，`typecheck-raw.log`），修復 worker links 後 exit 0（`typecheck-local-links.log`）。未起 Next listener 或執行 typegen。
 - `pnpm --filter @drts/bank-console-web lint` → exit 0（`lint.log`）；變更 TS prettier、`git diff --check`、`python3 tools/ci/check_test_coverage.py` → exit 0。所有本輪啟動的檢查完成後才記錄 closeout；沒有將背景工作算 PASS。
+
+## 2026-10-15 R2 scope grant 後續修復與重新交接
+
+保留上方原候選 `aac4f0b18d9b4b9258d5c0b744542c077420f8da` 的完整 R1/R2 finding 與歷史結果；本節更新目前修復狀態。Supervisor 的 canonical task 及 R2 task-spec 已授權第八個 path `apps/bank-console-web/lib/translations.ts`，限 en/zh 的 `bookings.pagination.pageSize/label/previous/next` 八值，並完成 Receipt holder 精確範圍協調。此授權不新增產品驗收 credit，也沒有 Receipt DONE 前置條件。
+
+原 owner 在 `e02771336c48d4c12f8e29e69ea3753c66a459ae` checkpoint 上續做；產品修正 anchor 為 `efffff0c414c4ba9a2f68d570aed38686aa00b1b`，已普通 non-force push。`app/bookings/page.tsx` 僅把原四個文案 ternary 換為既有 `t` lookup，翻譯值與原文案完全相同。內容核對確認刪除新增的八行後，翻譯檔與 e027 checkpoint 逐 byte 相同；所有其他 keys、format、imports/exports 及 Receipt-owned hunks 均保留。未新增 checker exemption、未改 R1 reader 或原回歸 assertions。
+
+| Finding／required acceptance | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、版本與證據 | 未驗項與限制 |
+| --- | --- | --- | --- | --- |
+| R2／mandatory i18n CI | mounted `app/bookings/page.tsx` 四處 pagination copy → `lib/translations.ts` 八個值 | e027 上 guard exit 1，精確四處 locale-ternary-copy；efffff0c4 上同 guard exit 0，652 files／81 existing exemptions | 下方 S-A；保留舊 hosted run `38776274780`／job `116565000088` FAILURE，不改寫歷史 | 新 final SHA hosted mandatory CI 仍待 lifecycle 收錄，local guard 不代替 hosted CI |
+| R1／`bank-bookings_verified-principal-and-formal-wire-readback` | 原 `loadBankBookingsData`／正式 producer-backed multiplicity／mounted identity 與 wire cases | 本輪未改 reader；完整 app 111 PASS，含兩個合法 catalog 正向與重複列 tenant/field 拒絕案例 | S-B，受測產品版本 efffff0c4；R1 舊版重現沿用原 R-A，不重造缺陷 | identity／HTTP doubles 邊界同原 artifact；真實 IdP/API 未驗 |
+| `bank-bookings_large-list-filter-pagination-and-detail` | 原 mounted list/detail、canonical filter/paging | S-B 保留 137→68、mounted 61 筆第二頁、原 6→2、tabs counts、返回 filters 與 canonical labels；英文 pagination accessible label 仍通過 | S-B exit 0；本輪只移動文案位置，未改分頁契約或 limits | 無 browser／shared-dev runtime credit |
+| `bank-bookings_original-role-PII-denial-outage-and-no-seed-regressions` | 原 app reader/pages 及 SR-BANK-001/002、Bank users、statement-contract 原 tests | S-B 111 PASS。S-C raw 121 PASS／2 原 translation mock-export FAIL；S-D 隔離 alias-only stub 後 123 PASS | S-B/C/D；raw failure 與 harness pass 分列，不變更原 assertions 或授權政策 | 真實 session、PG、HTML/browser runtime、完整 C030 未驗 |
+| `bank-bookings_exact-candidate-independent-review-ci-merge` | 原 branch、PR #2688、release CLI handoff | R1/R2 本機修復與檢查已完成；final SHA 為本節文件 commit 後 handoff 鎖定的完整 SHA，產品與 efffff0c4 相同 | owner 核對 local HEAD／remote branch／PR head 相同後 handoff Codex2；不呼叫 done | Pending：新 exact-SHA 獨立 review、mandatory CI、protected merge 與四項 required acceptance；anchor 綠燈不是 final candidate 證據 |
+
+本輪命令與日誌均在此 worker `.local/bank-bookings-r2/`，以下已啟動的檢查全部結束並讀取結果：
+
+- S-A：`node tools/ci/i18n-guard.mjs`，修改前 exit 1（`i18n-before.log`），修改後 exit 0（`i18n-after.log`）。使用既有 guard，不新增低風險文案的鏡像測試。
+- S-B：`pnpm --filter @drts/bank-console-web test`，raw exit 1，102 PASS／proxy suite 缺少 dangling `@drts/tenant-auth/constants`（`app-tests-raw.log`）；只重建此 worker ignored app/node_modules links 後 exit 0，6 files／111 PASS（`app-tests-final.log`）。未修改 canonical root、lockfile 或任何 test/source dependency。
+- S-C：原 D/R-E 的完整原 suite 命令不變，exit 1，121 PASS／2 既有 translations mock-export FAIL（`original-regressions-raw.log`）。
+- S-D：S-C 僅將 config 換為 `.local/bank-bookings-r2/original-vitest.config.mts`，精確 `@/lib/translations` alias 優先於原 `@` prefix，指向只轉出真實 `t` 的 `translation-adapter.ts`；exit 0，7 files／123 PASS（`original-regressions-isolated-alias.log`）。相對 import 的真實 translations 仍實際執行；原 mock/assertions 與產品不變。
+- `pnpm --filter @drts/bank-console-web exec tsc --noEmit --incremental false`：raw exit 1，僅既有 tenant-auth missing modules（`typecheck-raw.log`）；上述 worker link 修復後 exit 0，無 diagnostics（`typecheck-final.log`）。沒有啟動 listener 或 typegen。
+- `pnpm --filter @drts/bank-console-web lint` exit 0（`lint.log`）；變更 TS/TSX `pnpm exec prettier --check` exit 0（`format.log`）；`git diff --check`、`python3 tools/ci/check_test_coverage.py`、`python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` exit 0。
+
+沒有啟動 VM product／preview／browser／PG／Docker runtime，沒有 cloud、IAM、Operator、provider、部署或 merge 動作。`.local` 僅為機器證據；完整最終候選 SHA、branch 及 PR URL 以同次 canonical handoff 為準，所有外部驗收仍 pending。
