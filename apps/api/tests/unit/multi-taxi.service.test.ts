@@ -32,8 +32,11 @@ function createService(options?: {
   const ownedMobilityService = {
     createMultiTaxiRide: vi.fn(() => ({ ...order })),
     getOrder: vi.fn(() => ({ ...order })),
+    resolvePersistedOrder: vi.fn(async () => ({ ...order })),
     listOrders: vi.fn(() => [{ ...order }]),
-    findPassengerAssignmentDisclosure: vi.fn(() => options?.assignment ?? null),
+    resolvePersistedPassengerAssignmentDisclosure: vi.fn(
+      async () => options?.assignment ?? null,
+    ),
     cancelOwnedOrder: vi.fn(async (_orderId, command) => {
       order.status = "cancelled";
       order.cancelledAt = "2026-07-23T00:01:00.000Z";
@@ -367,39 +370,43 @@ describe("MultiTaxiService passenger ride authority", () => {
     });
   });
 
-  it.each([false, true])("fails closed when passenger tokens cannot be persisted (cancellation failure: %s)", async (cancellationFails) => {
-    vi.stubEnv("NODE_ENV", "production");
-    const { service, ownedMobilityService } = createService();
-    if (cancellationFails) ownedMobilityService.cancelOwnedOrder.mockRejectedValueOnce(
-      new Error("compensating cancellation failed"),
-    );
-    createAndActivateAuthorization(service);
+  it.each([false, true])(
+    "fails closed when passenger tokens cannot be persisted (cancellation failure: %s)",
+    async (cancellationFails) => {
+      vi.stubEnv("NODE_ENV", "production");
+      const { service, ownedMobilityService } = createService();
+      if (cancellationFails)
+        ownedMobilityService.cancelOwnedOrder.mockRejectedValueOnce(
+          new Error("compensating cancellation failed"),
+        );
+      createAndActivateAuthorization(service);
 
-    await expect(
-      service.createRide(
-        {
-          pickup: { address: "台北車站" },
-          dropoff: { address: "松山機場" },
-          passenger: { name: "測試乘客", phone: "0911222333" },
-          requestedPickupAt: new Date().toISOString(),
-          timingMode: "on_demand",
-          paymentMethodTokenRef: null,
+      await expect(
+        service.createRide(
+          {
+            pickup: { address: "台北車站" },
+            dropoff: { address: "松山機場" },
+            passenger: { name: "測試乘客", phone: "0911222333" },
+            requestedPickupAt: new Date().toISOString(),
+            timingMode: "on_demand",
+            paymentMethodTokenRef: null,
+          },
+          null,
+          "req-production-token",
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          error: { code: "PASSENGER_ACCESS_TOKEN_PERSISTENCE_FAILED" },
         },
-        null,
+      });
+      expect(ownedMobilityService.cancelOwnedOrder).toHaveBeenCalledWith(
+        "order-001",
+        { reason: "passenger_access_token_persistence_failed" },
         "req-production-token",
-      ),
-    ).rejects.toMatchObject({
-      response: {
-        error: { code: "PASSENGER_ACCESS_TOKEN_PERSISTENCE_FAILED" },
-      },
-    });
-    expect(ownedMobilityService.cancelOwnedOrder).toHaveBeenCalledWith(
-      "order-001",
-      { reason: "passenger_access_token_persistence_failed" },
-      "req-production-token",
-      { systemBypassCancelableCheck: true },
-    );
-  });
+        { systemBypassCancelableCheck: true },
+      );
+    },
+  );
 
   it("allows token-scoped passenger cancellation through the owned order spine", async () => {
     const { service, ownedMobilityService } = createService();
