@@ -2464,7 +2464,7 @@ export class TenantPartnerController {
   ) {
     return toApiSuccessEnvelope(
       await this.tenantPartnerService.updateSlaProfile(
-        this.requireTenantId(tenantId),
+        this.requireTenantId(tenantId, identity),
         command,
         actorId,
         requestId,

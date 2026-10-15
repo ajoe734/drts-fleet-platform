@@ -10109,8 +10109,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
     identity?: IdentityContext | null,
   ): MaybePromise<ActionReceipt> {
+    this.assertTenantMutationScope(tenantId, identity);
     return this.runConfigurationCommand(tenantId, () => {
-      this.assertTenantMutationScope(tenantId, identity);
       for (const [field, value] of [
         ["waitThresholdMin", command.waitThresholdMin],
         ["arrivalThresholdMin", command.arrivalThresholdMin],
