@@ -117,7 +117,7 @@ upload/scan, false-alarm, render-receipt dedup/latency) are untouched.
   paths.
 - Repo root: `npx vitest run tests/security/iam-route-inventory.test.ts
   tests/security/iam-route-map-negative.test.ts tests/security/iam-driver-authz-enforcement.test.ts`
-  → 48 passed; this is the check that caught and forced the
+  → 32 passed; this is the check that caught and forced the
   `incident:write`-not-`incident:read` fix on the driver readback route.
 - `apps/api`: `npx tsc -p tsconfig.json --noEmit` — no new diagnostics touch
   `driver-sos/*` or `auth.policy.ts` (pre-existing unrelated failures in
@@ -125,12 +125,10 @@ upload/scan, false-alarm, render-receipt dedup/latency) are untouched.
   `@drts/contracts` dist drift, not from this change).
 - `apps/driver-app`: `npx vitest run tests/unit/driver-sos-outbox.test.ts
   tests/unit/driver-sos-end-to-end-platform.test.ts tests/unit/driver-sos-no-os-dialer.test.ts`
-  → 11 passed, including 3 new cases (no premature assignment claim at
+  → 14 passed, including 3 new cases (no premature assignment claim at
   submission, one-shot readback timeline application, no-op while still
-  pending). Full app suite `npx vitest run` → 544/545 passed; the one failure
-  (`driver-location-heartbeat.test.ts`, a 5s timeout) is an unrelated
-  pre-existing timing flake, reproduced in isolation as a pass.
-  `npx tsc --noEmit` — clean.
+  pending). Full app suite `npx vitest run` → 545/545 passed (no flake on
+  this re-run). `npx tsc --noEmit` — clean.
 - `apps/ops-console-web`: `npx tsc --noEmit` clean for both edited pages;
   `npx vitest run tests/unit/sos-view-model.test.ts` → 3 passed (unchanged
   view-model, confirming the pages' display logic needed no changes).
