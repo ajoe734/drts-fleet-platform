@@ -26,10 +26,10 @@ describe("driver settings service", () => {
     expect(settings.preferredAreas).toEqual([]);
   });
 
-  it("updates driver settings", () => {
+  it("updates driver settings", async () => {
     const { auditService, service } = createService();
 
-    const updated = service.updateSettings("driver-001", {
+    const updated = await service.updateSettings("driver-001", {
       language: "zh-TW",
       notificationsEnabled: false,
       autoAcceptEnabled: true,
@@ -49,10 +49,10 @@ describe("driver settings service", () => {
     );
   });
 
-  it("persists updated settings across calls", () => {
+  it("persists updated settings across calls", async () => {
     const { service } = createService();
 
-    service.updateSettings("driver-002", {
+    await service.updateSettings("driver-002", {
       language: "ja",
       maxAcceptRadius: 20,
     });
@@ -62,26 +62,26 @@ describe("driver settings service", () => {
     expect(retrieved.maxAcceptRadius).toBe(20);
   });
 
-  it("lists all driver settings", () => {
+  it("lists all driver settings", async () => {
     const { service } = createService();
 
-    service.updateSettings("driver-a", { language: "en" });
-    service.updateSettings("driver-b", { language: "ko" });
+    await service.updateSettings("driver-a", { language: "en" });
+    await service.updateSettings("driver-b", { language: "ko" });
 
     const all = service.listAll();
     expect(all.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("partially updates only provided fields", () => {
+  it("partially updates only provided fields", async () => {
     const { service } = createService();
 
-    service.updateSettings("driver-partial", {
+    await service.updateSettings("driver-partial", {
       language: "fr",
       notificationsEnabled: true,
       autoAcceptEnabled: false,
     });
 
-    service.updateSettings("driver-partial", {
+    await service.updateSettings("driver-partial", {
       language: "de",
     });
 

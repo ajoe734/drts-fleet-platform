@@ -65,9 +65,10 @@ export class DriverSettingsRepository {
   }
 
   private parseRecord<T>(record: unknown, source: string): T {
-    if (!record || typeof record !== "object") {
+    const parsed = typeof record === "string" ? JSON.parse(record) : record;
+    if (!parsed || typeof parsed !== "object") {
       throw new Error(`Invalid persisted record loaded from ${source}`);
     }
-    return record as T;
+    return parsed as T;
   }
 }
