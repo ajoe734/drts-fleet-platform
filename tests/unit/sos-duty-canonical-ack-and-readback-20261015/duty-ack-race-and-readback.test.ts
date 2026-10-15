@@ -167,7 +167,7 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015: genuinely concurrent dut
     // Only once both calls are queued do we release the held write.
     deferred.resolve({
       accepted: true,
-      acknowledgedByActorId: actorA.actorId,
+      acknowledgedByActorId: actorA.actorId as string,
       acknowledgedAt: new Date().toISOString(),
     });
 
