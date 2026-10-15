@@ -23,6 +23,7 @@ import type {
   UpdateStopPolicyCommand,
 } from "@drts/contracts";
 import * as apiClientPkg from "../../../packages/api-client/src/index";
+import * as contractsPkg from "../../../packages/contracts/src/index";
 import * as canvasPkg from "../../../packages/ui-web/src/index";
 import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
 import { SnakeCaseExceptionFilter } from "../../../apps/api/src/common/snake-case.exception-filter";
@@ -122,6 +123,7 @@ const appRoot = resolve("apps/platform-admin-web");
 const load = createUiModuleLoader(appRoot, {
   react: React,
   "react/jsx-runtime": jsxRuntime,
+  "@drts/contracts": contractsPkg,
   "@drts/ui-web": {
     ...canvasPkg,
     GeometryEditor: StableGeometryEditor,
