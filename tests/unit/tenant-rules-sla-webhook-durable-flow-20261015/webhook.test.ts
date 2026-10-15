@@ -79,10 +79,14 @@ describe("C112 durable commands and first in-flight restart", () => {
     const second = serviceFor(p.repository);
     await second.service.onModuleInit();
     await vi.advanceTimersByTimeAsync(0);
+    const afterRecovery = (
+      await p.repository.loadState()
+    ).webhookDeliveries.find((item) => item.deliveryId === original.deliveryId);
     // Drain the original HTTP command as well; it used the verified old URL.
     releaseHttp({ ok: true, status: 204 });
     await publishing;
     expect(second.fetcher).not.toHaveBeenCalled();
+    expect(afterRecovery).toEqual(original);
     expect(second.service.listWebhookEndpoints(tenantId)[0]?.status).toBe(
       "test_pending",
     );
