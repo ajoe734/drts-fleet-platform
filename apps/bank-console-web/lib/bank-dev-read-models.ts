@@ -246,13 +246,13 @@ function maskSegmented(value: string | null | undefined) {
   return maskCompact(value);
 }
 
-export function getTaipeiDateString(date: Date = new Date()): string {
+export function getTaipeiDateString(date: Date | string = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Taipei",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(date);
+  }).format(typeof date === "string" ? new Date(date) : date);
 }
 
 export function formatPeriodDate(period: string, end = false) {
@@ -284,7 +284,6 @@ export function deriveStatementDates(
       },
   rawIssuedAt?: string,
   rawDueAt?: string,
-  rawGeneratedAt?: string,
 ): { issuedAt: string; dueAt: string } {
   const period =
     typeof periodOrRecord === "string"
@@ -300,11 +299,6 @@ export function deriveStatementDates(
     (typeof periodOrRecord === "object"
       ? (periodOrRecord.dueAt ?? periodOrRecord.due_at)
       : undefined);
-  const effectiveGeneratedAt =
-    rawGeneratedAt ??
-    (typeof periodOrRecord === "object"
-      ? (periodOrRecord.generatedAt ?? periodOrRecord.generated_at)
-      : undefined);
 
   // Check if there is an exact seed statement record for this period
   const seed = settlementStatements.find((s) => s.period === period);
@@ -315,12 +309,11 @@ export function deriveStatementDates(
   let issuedAt = effectiveIssuedAt || seed?.issuedAt;
   let dueAt = effectiveDueAt || seed?.dueAt;
 
+  // generatedAt is refreshed by every settlement GET, including within the
+  // same period. It is response metadata, never an immutable issue date.
+  // Retain the existing seed/month-boundary fallback and ordering guard.
   if (!issuedAt) {
-    if (effectiveGeneratedAt && effectiveGeneratedAt.slice(0, 7) === period) {
-      issuedAt = effectiveGeneratedAt;
-    } else {
-      issuedAt = immutablePeriodStart;
-    }
+    issuedAt = immutablePeriodStart;
   }
 
   if (!dueAt) {
@@ -562,6 +555,26 @@ function mapAuditEntity(record: AuditLogRecord) {
   };
 }
 
+// The scoped contract endpoint uses snake_case JSON (including nested records).
+// Normalize keys only at this read boundary; keep values such as SLA metric
+// enums, nulls and zero measurements intact and accept existing camelCase data.
+function normalizeContractKeys(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(normalizeContractKeys);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [
+        key.replace(/_([a-z])/g, (_match, letter: string) =>
+          letter.toUpperCase(),
+        ),
+        normalizeContractKeys(nested),
+      ]),
+    );
+  }
+  return value;
+}
+
 async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
   const actorId = `bank-console:${tenantId}:${role}`;
   const [
@@ -588,11 +601,7 @@ async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
       tenantId,
       actorId,
     ),
-    bankApiGetList<IssuerContractStatusRecord>(
-      "api/tenant/contracts",
-      tenantId,
-      actorId,
-    ),
+    bankApiGetList<unknown>("api/tenant/contracts", tenantId, actorId),
     bankApiGetList<ApiSettlementStatementRecord>(
       "api/tenant/settlement-statements",
       tenantId,
@@ -621,7 +630,12 @@ async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
   const usage = usageResult.status === "fulfilled" ? usageResult.value : [];
   const orders = ordersResult.status === "fulfilled" ? ordersResult.value : [];
   const contracts =
-    contractsResult.status === "fulfilled" ? contractsResult.value : [];
+    contractsResult.status === "fulfilled"
+      ? contractsResult.value.map(
+          (record) =>
+            normalizeContractKeys(record) as IssuerContractStatusRecord,
+        )
+      : [];
   const statements =
     statementsResult.status === "fulfilled" ? statementsResult.value : [];
   const rawUsers = usersResult.status === "fulfilled" ? usersResult.value : [];
@@ -662,12 +676,10 @@ export function mapStatementsFromApi(
       `settlement-statement-${period}`;
     const rawIssuedAt = statement.issued_at ?? statement.issuedAt;
     const rawDueAt = statement.due_at ?? statement.dueAt;
-    const rawGeneratedAt = statement.generated_at ?? statement.generatedAt;
     const { issuedAt, dueAt } = deriveStatementDates(
       period,
       rawIssuedAt,
       rawDueAt,
-      rawGeneratedAt,
     );
     const totals = statement.totals;
     const fareTotal = totals?.fare_total ?? totals?.fareTotal;

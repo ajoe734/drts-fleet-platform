@@ -15,7 +15,6 @@ import {
   formatPercent,
   formatPeriod,
   formatSignedPercent,
-  getContractRecord,
   metricDelta,
   metricValue,
 } from "@/lib/contracts-data";
@@ -38,8 +37,11 @@ export default async function ContractDetailPage({
     locale,
     resolvedSearchParams.role,
   );
-  const contractData = await loadBankContractsData(tenant.tenantId, session.role);
-  let contract =
+  const contractData = await loadBankContractsData(
+    tenant.tenantId,
+    session.role,
+  );
+  const contract =
     contractData.data.contracts.find(
       (item) =>
         item.contractId === contractId ||
@@ -47,10 +49,8 @@ export default async function ContractDetailPage({
         item.programCode.toLowerCase() === contractId.toLowerCase(),
     ) ?? null;
 
-  if (!contract) {
-    contract = getContractRecord(contractId) ?? null;
-  }
-
+  // Only the tenant-scoped response authorizes a detail record. A denied,
+  // missing or unavailable response must not reveal a static demo contract.
   if (!contract) {
     notFound();
   }
