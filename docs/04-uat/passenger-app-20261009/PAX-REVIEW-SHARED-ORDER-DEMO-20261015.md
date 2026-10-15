@@ -1511,3 +1511,69 @@ PG, browser, Playwright CLI or Compose runtime ran on this VM. All locally
 started required checks are read to completion before handoff. New hosted CI
 may remain pending at handoff under the original candidate lifecycle; none of
 the three acceptance keys receives credit from these local checks.
+
+## R22 — locate the pending Driver UI operation without guessing its cause
+
+The original collector's `review-demo-candidate53bc-hosted-results/actual-new-browser-first-failure-qualified-results.json`
+records candidate `53bc89e2f041b494d7ec3e928828a3b0becc1843`, generation
+`878d0fd3242546eb9754a6116cbffd99`, run `38754769793`, job
+`116491803543`. A booking, dispatch, assignment and reassignment passed;
+A order UUID is `5e3d1a04-67f6-4946-a7f7-81f23ef40636` and its dispatch job
+is `eb4be28d-7390-401e-aac6-d17eead712b2`. The latter is not a proven Driver
+Task ID. `Driver read assigned trip and accept` then exhausted the original
+720-second case limit. The artifact has Driver tasks/task-views HTTP 200,
+no acceptance response, no Driver screenshot and no completed order facts.
+That does not prove which await failed or whether an acceptance request was
+sent. The later `browserContext.close: Test ended` is a cleanup error.
+
+This candidate addresses the missing diagnosis. It does **not** claim a fix
+for the still-unlocated hosted Driver failure. The actual Driver Jobs/Trip,
+Canvas controls, identity client and SDK were inspected and exercised without
+a server: a legitimate pending-task response produces the existing open-trip
+control, the same order UUID, and the genuine SDK acceptance command. This
+rules out changing those labels on the strength of an old summary. Native
+rendering, routing, storage/location and upstream HTTP are fixture boundaries
+in this contract check; it does not exercise browser loading, hit testing,
+CORS, the live API or PG and cannot establish hosted acceptance.
+
+`readAssignedTripAndAccept` now leaves separate persisted progress for navigation,
+opening the trip, verifying its UUID and submitting/receiving acceptance.
+Individual navigation/click/response waits are bounded at 30 seconds; the
+original 12-minute case, zero retries, selectors, POST method/path and successful
+HTTP assertion remain. The listener is installed before the actual click and
+both promises are observed together. On failure, the spec attempts a screenshot
+only when the Driver URL is exactly its post-registration jobs/trip route;
+failed screenshot capture creates no placeholder. It closes all contexts while
+preserving the original failure. On successful journeys a cleanup failure still
+fails the test. No credentials, request bodies, headers or storage are added to
+the journal; onboarding is never captured by this failure hook.
+
+| Finding / acceptance                                              | Actual source and change                                                                                                            | Before → after                                                                                                                                         | Command, exit, source and evidence                                                                                                                                                                                                   | Remaining limitation                                                                                                                                    |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R22: hosted Driver operation remains unknown                      | Actual Jobs/Trip → Driver identity client → SDK tasks/task-views/accept; original hosted receipt above                              | 53bc: A assign/reassign pass, Driver stage times out; replacement hosted result **pending**                                                            | Original collector receipt and artifact `11983839261`, ZIP/GitHub digest `d38b05cfcd607b9ae2b877eeb9fa2805f8bb585db2f69ba082d9e1696737fcd37`                                                                                         | Still unresolved until the new exact candidate's real browser result identifies/completes the operation; no runtime fix claimed                         |
+| R22: one aggregate stage hid the pending operation                | Spec `readAssignedTripAndAccept`, original `createJourneyProgress`; actual Jobs/Trip/Canvas/client/SDK contract probe               | Immutable old caller: four diagnosis assertions fail; corrected caller: all four cases pass, including missing job, failed navigation and HTTP refusal | `old-caller-diagnosis.log`, exit 1 / four expected diagnosis failures; `regression-final.log`, exit 0 / 285 pass, 16 original environment skips, 31 passing and six skipped files; source `6b83e94df4232a0556848ccc26ff3874d99433bf` | This reproduces inadequate diagnosis using controlled HTTP/browser failures, **not** the unknown hosted timeout cause; refused commands remain failures |
+| R22: cleanup obscured primary failure and no Driver image existed | Spec failure catch and context cleanup                                                                                              | Earlier cleanup error retained in old receipt; source now preserves the primary error and attempts only an eligible Driver image                       | Scoped ESLint/Prettier and root TypeScript, each exit 0; source review of the failure hook                                                                                                                                           | Actual failed-browser image capture remains unexecuted on this VM                                                                                       |
+| Preserve previous findings and complete journeys                  | Main browser try block, booking/assignment helpers, remaining finish actions/business waits; product/accepted ACK sources           | Identical AST for the complete main three-order block and unchanged helpers; all product sources unchanged from 53bc                                   | `check-source-invariants.cjs` / `source-invariants.json`, exit 0; CI/deploy/config git blobs unchanged                                                                                                                               | Prior source/hosted evidence retains its original SHA; no old green result is credited to this candidate                                                |
+| `pax-review-demo_real-shared-order-across-roles`                  | Original same-UUID UI and formal PG companions retained                                                                             | Pending, zero credit                                                                                                                                   | New exact-candidate full CI and three formal-schema PG companions without skips still required                                                                                                                                       | No live Driver acceptance/complete journey established by local fixtures                                                                                |
+| `pax-review-demo_external-simulation-and-complete-journeys`       | Original external simulation, three independent orders, payment/case/rating/cancellation/history and actual business waits retained | Pending, zero credit                                                                                                                                   | Entire original main three-order block and remaining finish actions preserved                                                                                                                                                        | A completion and B/C runtime execution still required                                                                                                   |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`          | Original hosted workflow/config and combined immutable Cloud Run delivery retained                                                  | Pending, zero credit                                                                                                                                   | New exact-candidate independent review/full CI/browser, normal merge, sole immutable shared-dev deployment and fresh smoke still required                                                                                            | No deployment, browser run, workflow dispatch/rerun/cancellation or VM runtime was performed here                                                       |
+
+All final executable checks used source
+`6b83e94df4232a0556848ccc26ff3874d99433bf`; the handoff commit only appends
+this evidence. Canonical evidence is under
+`.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate53bc-r22-driver-diagnosis/manifest.json`.
+Commands:
+
+- Immutable-before: `PAX_REVIEW_DRIVER_CALLER_SOURCE_REF=53bc89e2f041b494d7ec3e928828a3b0becc1843 pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/driver-acceptance-caller.test.ts --maxWorkers=2 --reporter=verbose`, exit 1 / four diagnosis assertions fail. The probe reads the actual old acceptance phase through `git show`; it never resets the worktree or substitutes core UI/SDK functions. Positive old operation succeeds before its missing-substage assertion fails; negative fixtures preserve the original generic stage rather than identify their failed operation.
+- Final regression: `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015 tests/unit/pax-shared-order-flow-20261015 tests/unit/pax-booking-history-20261009 --maxWorkers=2 --reporter=verbose`, exit 0 / **285 pass, 16 original environment skips**. The four new caller cases pass. PG/native HTTP suites remain skipped under their original environment checks, with no new skip or relaxed assertion.
+- `pnpm exec tsc -p tsconfig.json --noEmit`, exit 0. Scoped ESLint (`--max-warnings=0`) and Prettier check for the three executable changed files both exit 0. Node 22.23.2, pnpm 10.33.0, Vitest 4.1.4 and the candidate's frozen dependencies were used. Only this isolated worktree's 22 dependency symlinks were detached before offline frozen installation with scripts disabled (exit 0); canonical dependencies and lockfiles were untouched.
+
+The initial native-renderer probe omitted `proofRequirements` from its HTTP
+fixture and failed; `caller-first.log` preserves that fixture error without
+product-reproduction credit. It was corrected before the immutable old/new
+comparison. The first cleanup implementation failed ESLint's `no-unsafe-finally`;
+the committed replacement closes contexts outside a throwing finally. Earlier
+pre-install successful probes are retained without final-source credit. Final
+required local checks all reached terminal results and were read; hosted CI for
+the handoff candidate remains pending. No product/preview/HTTP/PG/browser server,
+Playwright CLI or Compose ran on this VM.
