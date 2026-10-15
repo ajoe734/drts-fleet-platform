@@ -1,6 +1,6 @@
 import {
+  ApiClient,
   createTenantClient,
-  type ApiClient,
   type RequestOptions,
 } from "@drts/api-client";
 import type {
@@ -22,6 +22,7 @@ import {
   summarizeBookingGates,
   type EnterpriseDispatchBookingFixture,
 } from "./dispatch-fixture-adapter";
+import type { EnterpriseTenantSession } from "./enterprise-session.server";
 import { getRuntimeApiBaseUrl } from "./runtime-config";
 import { ENTERPRISE_DISPATCH_TENANT_API_GAP_MAP } from "./tenant-api-gap-map";
 
@@ -166,17 +167,67 @@ export function createEnterpriseDispatchTenantClient(
   );
 }
 
+export function createEnterpriseDispatchSessionClient(
+  session: EnterpriseTenantSession,
+  baseUrl = getRuntimeApiBaseUrl(),
+) {
+  const trimmedTenantId = session.tenantId.trim();
+  const trimmedToken = session.accessToken.trim();
+  return new EnterpriseDispatchTenantClient(
+    new ApiClient({
+      baseUrl,
+      defaultHeaders: {
+        ...(session.upstreamHeaders ?? {}),
+        ...(trimmedToken ? { Authorization: `Bearer ${trimmedToken}` } : {}),
+        ...(trimmedTenantId ? { "x-tenant-id": trimmedTenantId } : {}),
+      },
+    }),
+  );
+}
+
+export type EnterpriseDispatchSessionOptions = {
+  accessToken?: string;
+  upstreamHeaders?: Record<string, string>;
+};
+
 const clientCache = new Map<string, EnterpriseDispatchTenantClient>();
 
-export function getEnterpriseDispatchTenantClient(tenantId: string) {
+export function getEnterpriseDispatchTenantClient(
+  tenantOrSession: string | EnterpriseTenantSession,
+  sessionOptions?: EnterpriseDispatchSessionOptions,
+) {
   const baseUrl = getRuntimeApiBaseUrl();
-  const cacheKey = `${baseUrl}::${tenantId}`;
+  if (typeof tenantOrSession !== "string") {
+    return createEnterpriseDispatchSessionClient(tenantOrSession, baseUrl);
+  }
+
+  const trimmedTenantId = tenantOrSession.trim();
+  const accessToken = sessionOptions?.accessToken?.trim();
+  if (accessToken) {
+    return createEnterpriseDispatchSessionClient(
+      {
+        tenantId: trimmedTenantId,
+        accessToken,
+        ...(sessionOptions?.upstreamHeaders
+          ? { upstreamHeaders: sessionOptions.upstreamHeaders }
+          : {}),
+      },
+      baseUrl,
+    );
+  }
+
+  const cacheKey = `${baseUrl}::${trimmedTenantId}`;
   const cached = clientCache.get(cacheKey);
   if (cached) {
     return cached;
   }
 
-  const client = createEnterpriseDispatchTenantClient(baseUrl, tenantId);
+  const client = new EnterpriseDispatchTenantClient(
+    new ApiClient({
+      baseUrl,
+      defaultHeaders: trimmedTenantId ? { "x-tenant-id": trimmedTenantId } : {},
+    }),
+  );
   clientCache.set(cacheKey, client);
   return client;
 }

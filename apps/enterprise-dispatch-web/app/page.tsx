@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
-import { EnterpriseGatePage } from "@/components/enterprise-state-page";
+import { EnterpriseGatePage } from "../components/enterprise-state-page";
 import {
   EBtnContent,
   ECard,
@@ -8,27 +8,27 @@ import {
   EKpi,
   EPill,
   entBtnStyle,
-} from "@/components/ent-kit";
-import { EntParty, EntRoute } from "@/components/ent-screen-bits";
+} from "../components/ent-kit";
+import { EntParty, EntRoute } from "../components/ent-screen-bits";
 import {
   classifyEnterpriseDashboardFetchError,
   formatEnterpriseBookingTime,
   getEnterpriseDispatchTenantClient,
   getEnterpriseOrderStatusTone,
   selectActiveEnterpriseTrip,
-} from "@/lib/api-client";
+} from "../lib/api-client";
 import {
   ENTERPRISE_TENANT_SESSION_COOKIE,
   verifyEnterpriseTenantSession,
-} from "@/lib/enterprise-session.server";
+} from "../lib/enterprise-session.server";
 import {
   getEnterpriseTenant,
   getEnterpriseUser,
   getPolicyNotes,
-} from "@/lib/enterprise-fixtures";
-import { enterpriseTheme as t } from "@/lib/enterprise-theme";
-import { getServerLocale } from "@/lib/server-locale";
-import { type TranslationKey, t as translate } from "@/lib/translations";
+} from "../lib/enterprise-fixtures";
+import { enterpriseTheme as t } from "../lib/enterprise-theme";
+import { getServerLocale } from "../lib/server-locale";
+import { type TranslationKey, t as translate } from "../lib/translations";
 import type { TenantDashboardSummary } from "@drts/contracts";
 
 const POLICY_ICONS = ["bolt", "building", "clock"] as const;
@@ -49,7 +49,7 @@ export default async function HomePage() {
   let summary: TenantDashboardSummary | null = null;
   try {
     summary = await getEnterpriseDispatchTenantClient(
-      verified.session.tenantId,
+      verified.session,
     ).getDashboardSummary();
   } catch (error) {
     return <EnterpriseGatePage kind={classifyEnterpriseDashboardFetchError(error)} />;
