@@ -410,8 +410,8 @@ export class AuditNotificationService implements OnModuleInit {
     requestId?: string,
   ) {
     return this.runEvidenceGovernanceCommand(async () => {
-      this.assertEvidenceGovernanceAvailable();
       const actor = this.requireOperationalIdentity(identity);
+      this.assertEvidenceGovernanceAvailable();
       const policy = getEvidenceRetentionPolicy(command.family);
       this.assertLegalHoldPlacementAllowed(policy.family, actor);
 
@@ -489,8 +489,8 @@ export class AuditNotificationService implements OnModuleInit {
     requestId?: string,
   ) {
     return this.runEvidenceGovernanceCommand(async () => {
-      this.assertEvidenceGovernanceAvailable();
       const actor = this.requireOperationalIdentity(identity);
+      this.assertEvidenceGovernanceAvailable();
       const normalizedHoldId = this.requireNonBlank(holdId, "holdId");
       const existing = this.evidenceLegalHolds.get(normalizedHoldId);
       if (!existing) {
@@ -557,8 +557,8 @@ export class AuditNotificationService implements OnModuleInit {
     requestId?: string,
   ) {
     return this.runEvidenceGovernanceCommand(async () => {
-      this.assertEvidenceGovernanceAvailable();
       const actor = this.requireOperationalIdentity(identity);
+      this.assertEvidenceGovernanceAvailable();
       const policy = getEvidenceRetentionPolicy(command.family);
       this.assertLegalHoldPlacementAllowed(policy.family, actor);
 
@@ -651,8 +651,8 @@ export class AuditNotificationService implements OnModuleInit {
     requestId?: string,
   ) {
     return this.runEvidenceGovernanceCommand(async () => {
-      this.assertEvidenceGovernanceAvailable();
       const actor = this.requireOperationalIdentity(identity);
+      this.assertEvidenceGovernanceAvailable();
       const normalizedExceptionId = this.requireNonBlank(
         exceptionId,
         "exceptionId",
