@@ -890,3 +890,56 @@ source checks only: the replacement candidate's full hosted CI, three PG
 companions, all three real UI journeys, review/merge and immutable combined
 shared-dev delivery remain pending, with no acceptance credit borrowed from
 cacbf or earlier candidates.
+
+## R15 — native fetch receiver in the real review callers
+
+The adjacent candidate is `469ff83fb96272cb04cd353c278996e7b1598f13`,
+generation `061672f6c0744164a0b5015b89622bc7`, PR #2643. Its new hosted
+browser run `38726751853`, job `116400119099`, really failed in 34.398 seconds
+with zero skips: Ops supply/invite and Driver bootstrap passed, review OTP
+returned 201, and the Passenger account output did not appear after clicking
+login. No A/B/C order was created. The original artifact `11969949181` ZIP
+has SHA256 `7c817cff6c5260189f32481f44c07486a3fffd3054b618a7ab2df5119cd68618`.
+Its error-context and safe journal were read; neither records the subsequent
+verify/account HTTP result or a JavaScript exception. The old browser's
+underlying exception/status remains unobserved.
+
+The actual call path is `ReviewEntry` → `PassengerClient.login/request` →
+Passenger BFF → strict `PassengerOtpController.verify` → ordinary OTP/account
+services, followed by real profile/consent updates and account readback.
+The review page supplies native `fetch` directly as `fetchFn`. The SDK calls
+`this.fetchFn(...)`, making the SDK object the platform operation's receiver.
+The review record page supplies the same unbound function. Other live Passenger
+callers already pass the `passengerFetch` wrapper, which calls `fetch` normally.
+The [Fetch method](https://fetch.spec.whatwg.org/#fetch-method) is a global
+interface operation; [Web IDL operation invocation](https://webidl.spec.whatwg.org/#dfn-create-operation-function)
+checks its receiver. Node/arrow-function HTTP mocks did not enforce this browser
+boundary, which explains why the earlier unit case could miss this source defect.
+
+The bounded product repair supplies `(url, init) => fetch(url, init)` in the
+review entry and record page. Both continue to use live HTTP, the same SDK,
+BFF and API contracts. Neither wrapper chooses local demo transport. OTP
+projection, consent/profile writes, session cookies, account ownership and all
+business guards remain unchanged. The test journal additionally permits only
+the exact verify and account endpoint paths, retaining role/method/path/status
+without bodies, query strings, credentials, OTPs or exception text.
+
+| Finding / acceptance                                                  | Source / repair                                                                                                  | Old result → replacement result                                                                                                                                                                                                                 | Command / evidence                                                                                                                                                                                                                                                                      | Remaining limits                                                                                                                                                                                 |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R15: native fetch receives the SDK object during genuine review login | `app/review/page.tsx`; unchanged production `PassengerClient.request`, BFF, OTP/account controllers and services | On unchanged 469 product files, the real page/button regression fails with rejected `/me` and `/auth/otp/verify` invocations, exit 1. With the wrapper, genuine login/profile/consent, replay refusal, logout and second-account isolation pass | `review-login.test.tsx`; `before-source-binding.json`, `before-login.log`, `after-focused.log`                                                                                                                                                                                          | Native receiver behavior and HTTP/persistence are simulated unit boundaries. This is not actual Chromium execution or proof of the uncaptured historical exception                               |
+| Same receiver defect in the record entry                              | `app/review/records/[id]/page.tsx`, real component and SDK                                                       | Untouched 469 record caller fails the receiver assertion, exit 1; wrapper renders the returned record and download control                                                                                                                      | `review-record-fetch.test.tsx`; `before-record-qualified.log`, `after-focused.log`                                                                                                                                                                                                      | HTTP record fixture only; no ownership, PG or completed-journey credit. Initial `before-record.log` failed because the test omitted async React `act`; it is not qualified reproduction evidence |
+| Missing verify/account failure localization                           | `tests/e2e/pax-review-shared-order/progress.ts` and original journal regression                                  | All three focused cases pass, exit 0; verify 201, account GET 200 and PATCH 400 are retained without URL secrets                                                                                                                                | `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/review-login.test.tsx tests/unit/pax-review-shared-order-demo-20261015/review-record-fetch.test.tsx tests/unit/pax-review-shared-order-demo-20261015/journey-progress.test.ts --maxWorkers=2 --reporter=verbose` | New same-source hosted execution still required; original browser assertions and waits unchanged                                                                                                 |
+| `pax-review-demo_real-shared-order-across-roles`                      | Original formal PG companions and UUID/peer assertions retained                                                  | Pending, zero new acceptance credit                                                                                                                                                                                                             | Replacement candidate full CI, three PG companions and three-role browser                                                                                                                                                                                                               | VM runtime/PG/browser prohibited                                                                                                                                                                 |
+| `pax-review-demo_external-simulation-and-complete-journeys`           | Original complete A/B/C journeys retained                                                                        | Pending, zero credit                                                                                                                                                                                                                            | Replacement hosted three-order evidence                                                                                                                                                                                                                                                 | Unit transport success does not establish journey completion                                                                                                                                     |
+| `pax-review-demo_hosted-browser-and-shared-dev-delivery`              | Existing workflow and combined immutable Cloud Run delivery retained                                             | Pending, zero credit                                                                                                                                                                                                                            | Same-SHA review/full CI, normal merge, combined immutable publish/deploy and fresh shared-dev smoke                                                                                                                                                                                     | No old-browser rerun, separate deployment or historical PASS substitution                                                                                                                        |
+
+Evidence is recorded in worktree
+`.local/pax-review-shared-order-demo-20261015/r15-login/` and copied at handoff
+to canonical `.local/passenger-transport-bureau-review-20261015/codex2-owner-evidence/candidate469-native-fetch-rework/`.
+`before-source-binding.json` verifies all four relevant product source hashes
+against immutable 469 before repair. Tests use Node 22.23.2, pnpm 10.33.0,
+locked Next 16.3.8 and Vitest 4.1.4. Only this worktree's 22 restored canonical
+dependency symlinks were unlinked, followed by offline frozen installation with
+scripts disabled, exit 0; canonical dependencies and tracked lockfiles remain
+unchanged. No product server, browser, Playwright CLI, PG or Compose was started.
+Affected regression/type/lint/format results will be appended after completion.

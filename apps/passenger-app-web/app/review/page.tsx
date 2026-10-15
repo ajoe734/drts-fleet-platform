@@ -10,7 +10,10 @@ import {
   useReviewOpsUrl,
 } from "../../components/review-demo/review-context";
 
-const client = new PassengerClient({ baseUrl: "", fetchFn: fetch });
+const client = new PassengerClient({
+  baseUrl: "",
+  fetchFn: (url, init) => fetch(url, init),
+});
 
 export default function ReviewEntry() {
   const enabled = useReviewDemo();

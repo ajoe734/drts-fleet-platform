@@ -21,7 +21,10 @@ export default function ReviewRecordPage({
   useEffect(() => {
     let active = true;
     if (enabled)
-      void new PassengerClient({ baseUrl: "", fetchFn: fetch })
+      void new PassengerClient({
+        baseUrl: "",
+        fetchFn: (url, init) => fetch(url, init),
+      })
         .getReviewRecord(id)
         .then((result) => {
           if (active) setRecord(result);

@@ -85,96 +85,94 @@ it("the real review buttons send only OTP command fields through SDK/BFF, retain
   const loginBodies: unknown[] = [];
   const rejectedReceivers: string[] = [];
 
-  const transport = vi.fn(
-    async function (
-      this: unknown,
-      input: string | URL | Request,
-      init?: RequestInit,
-    ): Promise<Response> {
-      const url = String(input);
-      // HTTP/platform boundary only: browser Web IDL operations reject a
-      // receiver such as PassengerClient. Arrow-function mocks hid this.
-      // https://webidl.spec.whatwg.org/#dfn-create-operation-function
-      if (this != null && this !== globalThis && this !== window) {
-        rejectedReceivers.push(url);
-        throw new TypeError("Illegal invocation");
-      }
-      if (url.startsWith("/api/passenger-app/")) {
-        // Exercise the actual BFF and retain only cookies it really issued.
-        const headers = new Headers(init?.headers);
-        headers.set("origin", "https://pax.example");
-        headers.set(
-          "cookie",
-          [...cookies].map(([key, value]) => `${key}=${value}`).join("; "),
-        );
-        const method = (init?.method ?? "GET") as "GET" | "POST" | "PATCH";
-        const response = await bff[method](
-          new NextRequest(`https://pax.example${url}`, {
-            method,
-            headers,
-            ...(init?.body ? { body: init.body } : {}),
+  const transport = vi.fn(async function (
+    this: unknown,
+    input: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> {
+    const url = String(input);
+    // HTTP/platform boundary only: browser Web IDL operations reject a
+    // receiver such as PassengerClient. Arrow-function mocks hid this.
+    // https://webidl.spec.whatwg.org/#dfn-create-operation-function
+    if (this != null && this !== globalThis && this !== window) {
+      rejectedReceivers.push(url);
+      throw new TypeError("Illegal invocation");
+    }
+    if (url.startsWith("/api/passenger-app/")) {
+      // Exercise the actual BFF and retain only cookies it really issued.
+      const headers = new Headers(init?.headers);
+      headers.set("origin", "https://pax.example");
+      headers.set(
+        "cookie",
+        [...cookies].map(([key, value]) => `${key}=${value}`).join("; "),
+      );
+      const method = (init?.method ?? "GET") as "GET" | "POST" | "PATCH";
+      const response = await bff[method](
+        new NextRequest(`https://pax.example${url}`, {
+          method,
+          headers,
+          ...(init?.body ? { body: init.body } : {}),
+        }),
+        {
+          params: Promise.resolve({
+            path: url.slice("/api/passenger-app/".length).split("/"),
           }),
-          {
-            params: Promise.resolve({
-              path: url.slice("/api/passenger-app/".length).split("/"),
-            }),
-          },
-        );
-        for (const cookie of response.cookies.getAll()) {
-          if (cookie.value) cookies.set(cookie.name, cookie.value);
-          else cookies.delete(cookie.name);
-        }
-        if (url.endsWith("auth/otp/verify")) {
-          verified.push({
-            body: JSON.parse(String(init?.body)),
-            status: response.status,
-          });
-          loginBodies.push(await response.clone().json());
-          const session = response.cookies.get("pax_session");
-          if (response.ok) expect(session?.httpOnly).toBe(true);
-        }
-        return response;
+        },
+      );
+      for (const cookie of response.cookies.getAll()) {
+        if (cookie.value) cookies.set(cookie.name, cookie.value);
+        else cookies.delete(cookie.name);
       }
-      // Socket-free HTTP boundary; dispatch to production controllers and use
-      // the same response serializer as Nest. Never synthesize a session/token.
-      expect(new URL(url).origin).toBe("https://api.example");
-      const path = new URL(url).pathname;
-      const body = init?.body
-        ? JSON.parse(
-            typeof init.body === "string"
-              ? init.body
-              : new TextDecoder().decode(init.body as ArrayBuffer),
-          )
-        : undefined;
-      const token = new Headers(init?.headers)
-        .get("authorization")
-        ?.replace(/^Bearer /, "");
-      const identity = token ? jwt.verify(token) : null;
-      try {
-        let result: unknown;
-        if (path.endsWith("review-demo/config")) result = review.config();
-        else if (path.endsWith("review-demo/otp")) {
-          result = await review.requestOtp(body, request);
-          inboxes.push((result as { data: Record<string, unknown> }).data);
-        } else if (path.endsWith("auth/otp/verify"))
-          result = await otpController.verify(body, identity, request);
-        else if (path.endsWith("auth/logout"))
-          result = await accountController.logout(body);
-        else if (path.endsWith("/me"))
-          result =
-            init?.method === "PATCH"
-              ? await accountController.update(identity, body)
-              : await accountController.me(identity);
-        else throw new Error(`Unexpected API path: ${path}`);
-        return Response.json(deepToSnakeCase(result));
-      } catch (error) {
-        if (!(error instanceof ApiRequestError)) throw error;
-        return Response.json(error.getResponse(), {
-          status: error.getStatus(),
+      if (url.endsWith("auth/otp/verify")) {
+        verified.push({
+          body: JSON.parse(String(init?.body)),
+          status: response.status,
         });
+        loginBodies.push(await response.clone().json());
+        const session = response.cookies.get("pax_session");
+        if (response.ok) expect(session?.httpOnly).toBe(true);
       }
-    },
-  );
+      return response;
+    }
+    // Socket-free HTTP boundary; dispatch to production controllers and use
+    // the same response serializer as Nest. Never synthesize a session/token.
+    expect(new URL(url).origin).toBe("https://api.example");
+    const path = new URL(url).pathname;
+    const body = init?.body
+      ? JSON.parse(
+          typeof init.body === "string"
+            ? init.body
+            : new TextDecoder().decode(init.body as ArrayBuffer),
+        )
+      : undefined;
+    const token = new Headers(init?.headers)
+      .get("authorization")
+      ?.replace(/^Bearer /, "");
+    const identity = token ? jwt.verify(token) : null;
+    try {
+      let result: unknown;
+      if (path.endsWith("review-demo/config")) result = review.config();
+      else if (path.endsWith("review-demo/otp")) {
+        result = await review.requestOtp(body, request);
+        inboxes.push((result as { data: Record<string, unknown> }).data);
+      } else if (path.endsWith("auth/otp/verify"))
+        result = await otpController.verify(body, identity, request);
+      else if (path.endsWith("auth/logout"))
+        result = await accountController.logout(body);
+      else if (path.endsWith("/me"))
+        result =
+          init?.method === "PATCH"
+            ? await accountController.update(identity, body)
+            : await accountController.me(identity);
+      else throw new Error(`Unexpected API path: ${path}`);
+      return Response.json(deepToSnakeCase(result));
+    } catch (error) {
+      if (!(error instanceof ApiRequestError)) throw error;
+      return Response.json(error.getResponse(), {
+        status: error.getStatus(),
+      });
+    }
+  });
   vi.stubGlobal("fetch", transport);
   // The production page captures fetch when constructing its real SDK client.
   const { default: ReviewEntry } =

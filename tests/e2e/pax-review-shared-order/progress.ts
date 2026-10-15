@@ -40,6 +40,8 @@ export function createJourneyProgress(file: string) {
     response(role: Role, method: string, url: string, status: number) {
       const path = new URL(url).pathname;
       if (
+        path !== "/api/passenger-app/auth/otp/verify" &&
+        path !== "/api/passenger-app/me" &&
         !/\/(?:rides|orders|dispatch|driver\/(?:tasks|task-views)|review-demo)(?:\/|$)|\/auth\/driver\/device\/(?:invite|register)$/.test(
           path,
         )

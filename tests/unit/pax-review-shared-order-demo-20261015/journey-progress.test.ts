@@ -38,6 +38,24 @@ test("the real hosted journal persists an unfinished phase and safe response fac
       expect(read().stages[0].state).toBe("started");
     });
     expect(read().stages[0].state).toBe("passed");
+    for (const [method, path, status] of [
+      ["POST", "/api/passenger-app/auth/otp/verify", 201],
+      ["GET", "/api/passenger-app/me", 200],
+      ["PATCH", "/api/passenger-app/me", 400],
+    ] as const) {
+      progress.response(
+        "pax",
+        method,
+        `https://pax.invalid${path}?code=secret&challenge=secret`,
+        status,
+      );
+      expect(read().responses.at(-1)).toEqual({
+        role: "pax",
+        method,
+        path,
+        status,
+      });
+    }
     const failure = new Error("credential-secret");
     await expect(
       progress.step("Driver registration", async () => {
