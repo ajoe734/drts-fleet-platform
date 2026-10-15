@@ -24,7 +24,11 @@ import { PassengerRideEventsGuard } from "../../../apps/api/src/modules/passenge
 import { MultiTaxiService } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
 import { PassengerClient } from "../../../packages/passenger-client/src/client";
 import { NativePassengerRideStream } from "../../../packages/passenger-client/src/native/ride-stream";
-import { subscribePassengerRideAuthority } from "../../../apps/passenger-app-web/lib/ride/passenger-live";
+import {
+  mapPassengerRideAuthorityToFixture,
+  subscribePassengerRideAuthority,
+} from "../../../apps/passenger-app-web/lib/ride/passenger-live";
+import { mapNativePassengerRideAuthorityToFixture } from "../../../packages/passenger-client/src/ride/native-presentation";
 import {
   accountSigningFixture,
   hostedPaymentEnabled,
@@ -204,8 +208,17 @@ describe.skipIf(!hostedPaymentEnabled)(
         passengerConfirmedAt: original.passengerConfirmedAt,
         farePolicyVersion: original.fareVersion,
         bookingQuote: original,
+        estimatedFareMinor: original.estimatedMin * 100,
         payableFareMinor: null,
       });
+      const estimateText = `預估 NT$ ${original.estimatedMin.toLocaleString("zh-TW")}`;
+      expect(
+        mapPassengerRideAuthorityToFixture(assigned, f.orderId).routeFareText,
+      ).toBe(estimateText);
+      expect(
+        mapNativePassengerRideAuthorityToFixture(assigned, f.orderId)
+          .routeFareText,
+      ).toBe(estimateText);
       const driver = track(await bookingActor(h, h.peerDatabase()));
       const now = new Date().toISOString();
       await driver.owned.acceptDriverTask(assignment.taskId, {

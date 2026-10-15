@@ -1,4 +1,16 @@
 import { afterEach, expect, it, vi } from "vitest";
+import type {
+  DispatchAssignmentRecord,
+  DispatchJobRecord,
+  DriverRatingSummary,
+  OwnedOrderRecord,
+  PassengerDispatchDisclosureSnapshot,
+} from "@drts/contracts";
+import { OwnedMobilityService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
+import { OwnedMobilityRepository } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
+import { MultiTaxiRepository } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
+import { mapPassengerRideAuthorityToFixture } from "../../../apps/passenger-app-web/lib/ride/passenger-live";
+import { mapNativePassengerRideAuthorityToFixture } from "../../../packages/passenger-client/src/ride/native-presentation";
 import {
   createProductionBookingFixture,
   NOW,
@@ -7,6 +19,63 @@ import {
 } from "../pax-booking-history-20261009/production-booking-fixture";
 
 afterEach(() => vi.useRealTimers());
+
+async function assignmentDisclosure(
+  f: ReturnType<typeof createProductionBookingFixture>,
+  order: OwnedOrderRecord,
+) {
+  // Only registry and SQL response ports are synthetic. Invoke the production
+  // assignment disclosure builder, including its original-quote repository read.
+  // Full dispatch/assignment transactions are covered by the hosted companion.
+  const registry = {
+    getVehiclePassengerDisclosureProfile: () => ({ status: "complete" }),
+    getDriverPublicRegistrationCredential: () => ({
+      status: "verified_active",
+      effectiveUntil: "2027-01-01T00:00:00Z",
+    }),
+    listVehicles: () => [{ vehicleId: "unit-vehicle" }],
+    listDrivers: () => [{ driverId: "unit-driver" }],
+  };
+  const owned = new OwnedMobilityService(
+    registry as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    undefined,
+    new OwnedMobilityRepository(
+      f.database,
+      new MultiTaxiRepository(f.database),
+    ),
+  );
+  const builder = owned as unknown as {
+    buildPassengerAssignmentAuthority(
+      order: OwnedOrderRecord,
+      job: DispatchJobRecord,
+      assignment: DispatchAssignmentRecord,
+      vehicleId: string,
+      driverId: string,
+      now: string,
+      rating: DriverRatingSummary,
+    ): Promise<{
+      passengerDisclosureSnapshot: PassengerDispatchDisclosureSnapshot;
+    }>;
+  };
+  return (
+    await builder.buildPassengerAssignmentAuthority(
+      order,
+      { dispatchJobId: "unit-dispatch" } as DispatchJobRecord,
+      { assignmentId: "unit-assignment" } as DispatchAssignmentRecord,
+      "unit-vehicle",
+      "unit-driver",
+      new Date(NOW).toISOString(),
+      {
+        displayState: "new_driver",
+        averageRating: null,
+        ratingCount: 0,
+      } as DriverRatingSummary,
+    )
+  ).passengerDisclosureSnapshot;
+}
 
 it("booking authority retains the server-owned original estimate, route, tariff and E19b confirmation instead of a new quote", async () => {
   vi.useFakeTimers();
@@ -81,4 +150,46 @@ it("booking authority retains the server-owned original estimate, route, tariff 
     "bookingQuote",
     (created.ride as unknown as { bookingQuote: unknown }).bookingQuote,
   );
+  const assignment = await assignmentDisclosure(f, f.state.order!);
+  const view = { ...readback, assignment };
+  // This fixture's estimate comes from production estimateFare and the existing
+  // synthetic tariff: whole TWD 90–140 must reach both actual presentation mappers.
+  expect([f.snapshot.estimatedMin, f.snapshot.estimatedMax]).toEqual([90, 140]);
+  expect(mapPassengerRideAuthorityToFixture(view, "unit").routeFareText).toBe(
+    "預估 NT$ 90",
+  );
+  expect(
+    mapNativePassengerRideAuthorityToFixture(view, "unit").routeFareText,
+  ).toBe("預估 NT$ 90");
+  expect(assignment.routeFare).toMatchObject({
+    quoteSnapshotId: QUOTE_ID,
+    routeSnapshotId: QUOTE_ID,
+    estimatedFareMinor: 9000,
+    payableFareMinor: null,
+    bookingQuote: (created.ride as unknown as { bookingQuote: unknown })
+      .bookingQuote,
+  });
+});
+
+it("legacy quotedFare is already in minor units and keeps its payable amount", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW);
+  const f = createProductionBookingFixture();
+  const { ride } = await f.service.createRide(OWNER, f.command);
+  const assignment = await assignmentDisclosure(f, {
+    ...f.state.order!,
+    quotedFare: { amountMinor: 9000, currency: "NTD" },
+  });
+  expect(assignment.routeFare).toMatchObject({
+    estimatedFareMinor: 9000,
+    payableFareMinor: 9000,
+  });
+  expect(assignment.routeFare.bookingQuote).toBeUndefined();
+  const view = { ...ride, assignment };
+  expect(mapPassengerRideAuthorityToFixture(view, "unit").routeFareText).toBe(
+    "應付 NT$ 90",
+  );
+  expect(
+    mapNativePassengerRideAuthorityToFixture(view, "unit").routeFareText,
+  ).toBe("應付 NT$ 90");
 });

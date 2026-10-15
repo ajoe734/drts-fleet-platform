@@ -10871,7 +10871,8 @@ export class OwnedMobilityService
             estimatedDistanceMeters: bookingQuote.route.distanceMeters,
             estimatedDurationSeconds: bookingQuote.route.durationSeconds,
             encodedPolyline: bookingQuote.route.encodedPolyline,
-            estimatedFareMinor: bookingQuote.estimatedMin,
+            // Booking estimates are whole TWD; disclosure consumers use minor units.
+            estimatedFareMinor: bookingQuote.estimatedMin * 100,
             payableFareMinor: null,
             farePolicyVersion: bookingQuote.fareVersion,
             passengerConfirmedAt: bookingQuote.passengerConfirmedAt,
