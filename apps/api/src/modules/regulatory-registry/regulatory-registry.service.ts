@@ -884,7 +884,11 @@ export class RegulatoryRegistryService
   async prepareDispatchSupply(serviceBucket: Phase1ServiceBucket) {
     const repository = this.regulatoryRegistryRepository;
     if (!repository?.isEnabled()) return;
-    await Promise.all(this.driverMasterWrites.values());
+    await Promise.all(
+      this.drivers
+        .filter((d) => d.supportedServiceBuckets.includes(serviceBucket))
+        .map((d) => this.driverMasterWrites.get(d.driverId)),
+    );
     const { state, locations } =
       await repository.findDispatchSupplyContext(serviceBucket);
     const vehicleIds = new Set([
@@ -1628,9 +1632,7 @@ export class RegulatoryRegistryService
   private async recordBatchHeartbeatItem(
     item: DriverLocationHeartbeatEnvelope,
   ): Promise<DriverLocationHeartbeatAck> {
-    if (typeof item?.driverId === "string")
-      await this.prepareDriverAuthority(item.driverId.trim());
-    const heartbeat = this.normalizeHeartbeatEnvelope(item);
+    const heartbeat = await this.normalizeHeartbeatEnvelope(item);
 
     const locationRepository = this.getLocationRepository();
     const persistedResult =
@@ -1696,6 +1698,7 @@ export class RegulatoryRegistryService
     // assertNonBlank guard returns a clean 400 FIELD_REQUIRED instead.
     const normalizedDriverId = (driverId ?? "").trim();
     this.assertNonBlank(normalizedDriverId, "driverId");
+    await this.prepareDriverAuthority(normalizedDriverId);
     this.requireDriver(normalizedDriverId);
 
     const currentLocation =
@@ -1737,9 +1740,9 @@ export class RegulatoryRegistryService
     };
   }
 
-  private normalizeHeartbeatEnvelope(
+  private async normalizeHeartbeatEnvelope(
     item: DriverLocationHeartbeatEnvelope,
-  ): DriverLocationHeartbeatEnvelope {
+  ): Promise<DriverLocationHeartbeatEnvelope> {
     const eventId = item.eventId.trim();
     const deviceId = item.deviceId.trim();
     const driverId = item.driverId.trim();
@@ -1777,6 +1780,7 @@ export class RegulatoryRegistryService
       "unknown",
     ]);
 
+    await this.prepareDriverAuthority(driverId);
     this.requireDriver(driverId);
 
     return {
@@ -1798,6 +1802,7 @@ export class RegulatoryRegistryService
     this.assertNonBlank(driverId, "driverId");
     this.assertCoordinate(destLat, "destLat", -90, 90);
     this.assertCoordinate(destLng, "destLng", -180, 180);
+    await this.prepareDriverAuthority(driverId.trim());
     this.requireDriver(driverId);
 
     const driverLocation = await this.resolveLatestDriverLocation(

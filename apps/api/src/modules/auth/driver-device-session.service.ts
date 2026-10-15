@@ -186,6 +186,9 @@ export class DriverDeviceSessionService implements OnModuleInit {
         // same as the manual revoke() path: binding.status can already read
         // "revoked" here from an earlier attempt that failed after mutating
         // it but before this profile sync ran, so that flag cannot gate it.
+        await this.driverProfileService.prepareProfileAuthority?.(
+          binding.driverId,
+        );
         this.driverProfileService.recordDeviceBindingRevocation(
           binding.driverId,
           invitation.boundBindingId,
@@ -573,6 +576,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
     }
     this.bindingsById.set(binding.bindingId, binding);
 
+    await this.driverProfileService.prepareProfileAuthority?.(binding.driverId);
     this.driverProfileService.recordDeviceBindingRefresh(
       binding.driverId,
       binding.bindingId,
@@ -652,6 +656,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
       "MANUAL_REVOKE",
     );
 
+    await this.driverProfileService.prepareProfileAuthority?.(binding.driverId);
     this.driverProfileService.recordDeviceBindingRevocation(
       binding.driverId,
       binding.bindingId,
@@ -916,6 +921,9 @@ export class DriverDeviceSessionService implements OnModuleInit {
       reasonCode,
     );
 
+    await this.driverProfileService.prepareProfileAuthority?.(
+      existing.driverId,
+    );
     this.driverProfileService.recordDeviceBindingRevocation(
       existing.driverId,
       existing.bindingId,

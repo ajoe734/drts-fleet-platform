@@ -29,11 +29,14 @@ function peers() {
   const drivers = new Map<string, unknown>();
   const profiles = new Map<string, unknown>();
   let readError: Error | undefined;
+  let writeError: Error | undefined;
   const database = {
     isEnabled: () => true,
     query: async (sql: string, values: unknown[] = []) => {
-      if (sql.includes("INSERT INTO reg.phase1_registry_drivers"))
+      if (sql.includes("INSERT INTO reg.phase1_registry_drivers")) {
+        if (writeError) throw writeError;
         drivers.set(values[0] as string, JSON.parse(values[5] as string));
+      }
       if (sql.includes("INSERT INTO ops.phase1_driver_profiles"))
         profiles.set(values[0] as string, JSON.parse(values[2] as string));
       if (sql.trimStart().startsWith("SELECT record")) {
@@ -76,6 +79,9 @@ function peers() {
     profiles,
     failReads: (error: Error) => {
       readError = error;
+    },
+    failWrites: (error: Error) => {
+      writeError = error;
     },
   };
 }
@@ -155,5 +161,23 @@ describe("dynamic persisted driver authority across preexisting consumers", () =
     await expect(
       p.b.registry.prepareDriverAuthority("pax-review-peer-driver"),
     ).rejects.toBe(failure);
+  });
+
+  it("awaits the real work-state save and propagates its failure instead of acknowledging the settled queue", async () => {
+    const p = peers();
+    await create(p);
+    const id = "pax-review-peer-driver";
+    await p.b.registry.updateDriverWorkStateFromPersistence(id, {
+      workState: "available",
+    });
+    expect(p.drivers.get(id)).toMatchObject({ workState: "available" });
+    const failure = new Error("work-state write rejected");
+    p.failWrites(failure);
+    await expect(
+      p.b.registry.updateDriverWorkStateFromPersistence(id, {
+        workState: "offline",
+      }),
+    ).rejects.toBe(failure);
+    expect(p.drivers.get(id)).toMatchObject({ workState: "available" });
   });
 });
