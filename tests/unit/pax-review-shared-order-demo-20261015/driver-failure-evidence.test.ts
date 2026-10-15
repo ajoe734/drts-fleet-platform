@@ -80,6 +80,7 @@ async function exercise(options: Options) {
   const browser = {
     newContext: async () => {
       const page = pages[nextPage++];
+      if (!page) throw new Error("Unexpected extra browser context");
       return {
         newPage: async () => page,
         close: async () => {
