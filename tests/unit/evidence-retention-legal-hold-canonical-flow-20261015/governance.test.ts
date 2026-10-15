@@ -42,7 +42,7 @@ function deferred() {
 }
 // Only the DB transport is controlled: production repository serialization, service,
 // controller envelopes and restart replay all execute normally, without sockets.
-function fixture() {
+function fixture(reverseTies = false) {
   const stored: AuditLogRecord[] = [];
   let gate: ReturnType<typeof deferred> | undefined;
   let loadFails = false;
@@ -79,6 +79,14 @@ function fixture() {
         .filter(
           (row) => !governance || row.resourceType.startsWith("evidence_"),
         )
+        .sort((left, right) => {
+          const time = left.createdAt.localeCompare(right.createdAt);
+          if (!governance) return -time;
+          return (
+            time ||
+            (reverseTies ? stored.indexOf(right) - stored.indexOf(left) : 0)
+          );
+        })
         .map((row) => ({
           audit_id: row.auditId,
           actor_id: row.actorId,
@@ -123,7 +131,92 @@ function fixture() {
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 describe("C099 canonical governance ACK and unavailable authority", () => {
-  afterEach(() => vi.unstubAllEnvs());
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.useRealTimers();
+  });
+  for (const operation of ["hold", "exception"] as const) {
+    for (const clock of ["frozen", "distinct"] as const) {
+      for (const reverseTies of [false, true]) {
+        it(`terminal replay ${operation}: ${clock} clock, reverse ties ${reverseTies}`, async () => {
+          vi.useFakeTimers({ toFake: ["Date"] });
+          vi.setSystemTime(new Date("2026-10-15T12:00:00.000Z"));
+          const f = fixture(reverseTies);
+          await f.service.onModuleInit();
+          const active =
+            operation === "hold"
+              ? await f.controller.placeEvidenceLegalHold(holdCommand, identity)
+              : await f.controller.registerEvidenceDeletionException(
+                  exceptionCommand,
+                  identity,
+                );
+          if (clock === "distinct")
+            vi.setSystemTime(new Date("2026-10-15T12:00:01.000Z"));
+          const terminal =
+            operation === "hold"
+              ? await f.controller.releaseEvidenceLegalHold(
+                  (active.data as { holdId: string }).holdId,
+                  { releaseReason: "closed" },
+                  identity,
+                )
+              : await f.controller.resolveEvidenceDeletionException(
+                  (active.data as { exceptionId: string }).exceptionId,
+                  { resolutionNote: "closed" },
+                  identity,
+                );
+          const expectedStatus = operation === "hold" ? "released" : "resolved";
+          expect(terminal.data.status).toBe(expectedStatus);
+          const events = f.stored.filter((row) =>
+            row.resourceType.startsWith("evidence_"),
+          );
+          expect(events).toHaveLength(2);
+          expect(events[0]!.createdAt === events[1]!.createdAt).toBe(
+            clock === "frozen",
+          );
+          expect(events.map((row) => row.newValuesSummary?.status)).toEqual([
+            "active",
+            expectedStatus,
+          ]);
+          const before = f.controller.getEvidenceSubjectGovernance(
+            "audit_log",
+            "old-row",
+          ).data;
+          expect(before.deletionSuppressed).toBe(false);
+          const restarted = new AuditNotificationService(f.repository);
+          await restarted.onModuleInit();
+          const controller = new AuditController(restarted);
+          expect(
+            controller.getEvidenceSubjectGovernance("audit_log", "old-row")
+              .data,
+          ).toEqual(before);
+          expect(
+            operation === "hold"
+              ? restarted.listEvidenceLegalHolds()
+              : restarted.listEvidenceDeletionExceptions(),
+          ).toEqual([terminal.data]);
+          // The acknowledged terminal state must still enforce the original repeat-command refusal.
+          const repeated =
+            operation === "hold"
+              ? controller.releaseEvidenceLegalHold(
+                  (terminal.data as { holdId: string }).holdId,
+                  { releaseReason: "again" },
+                  identity,
+                )
+              : controller.resolveEvidenceDeletionException(
+                  (terminal.data as { exceptionId: string }).exceptionId,
+                  { resolutionNote: "again" },
+                  identity,
+                );
+          await expect(repeated).rejects.toMatchObject({
+            code:
+              operation === "hold"
+                ? "EVIDENCE_LEGAL_HOLD_ALREADY_RELEASED"
+                : "EVIDENCE_DELETION_EXCEPTION_NOT_ACTIVE",
+          });
+        });
+      }
+    }
+  }
   for (const operation of [
     "place",
     "release",
