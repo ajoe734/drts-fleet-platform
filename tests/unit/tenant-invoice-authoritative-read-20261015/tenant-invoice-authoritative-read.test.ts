@@ -2,18 +2,18 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { TenantBillingProfile } from "@drts/contracts";
+import type { BootstrapRequestIdentity } from "../../../apps/api/src/common/auth";
 import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
 import type { DatabaseService } from "../../../apps/api/src/common/db";
 import { InMemoryDocumentArtifactStore } from "../../../apps/api/src/common/document-artifacts";
-import type { BootstrapRequestIdentity } from "../../../apps/api/src/modules/iam-audit/iam-audit.types";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementController } from "../../../apps/api/src/modules/billing-settlement/billing-settlement.controller";
-import { BillingSettlementRepository } from "../../../apps/api/src/modules/billing-settlement/billing-settlement.repository";
+import {
+  BillingSettlementRepository,
+  type StoredTenantInvoiceRecord,
+} from "../../../apps/api/src/modules/billing-settlement/billing-settlement.repository";
 import type { BillingSettlementService as BillingSettlementServiceType } from "../../../apps/api/src/modules/billing-settlement/billing-settlement.service";
-import type {
-  StoredTenantInvoiceRecord,
-  TenantBillingProfile,
-} from "../../../apps/api/src/modules/billing-settlement/billing-settlement.types";
 import { ControlledDownloadController } from "../../../apps/api/src/modules/controlled-download/controlled-download.controller";
 import type { OwnedMobilityTripCompletedEvent } from "../../../apps/api/src/modules/owned-mobility/owned-mobility-events";
 
@@ -29,8 +29,8 @@ type CanonicalTripRowFixture = {
   completedAt: string;
   amountMinor: number;
   currency?: string;
-  orderSource?: "portal" | "api" | "phone" | "external_platform";
-  serviceBucket?: "business_dispatch" | "multi_taxi";
+  orderSource?: "portal" | "api" | "phone";
+  serviceBucket?: "business_dispatch";
   businessDispatchSubtype?:
     | "enterprise_dispatch"
     | "credit_card_airport_transfer"
@@ -303,6 +303,10 @@ async function createAuthoritativeReadHarness(options?: {
     "reportPersistenceFailure",
   );
   const auditNotificationService = new AuditNotificationService();
+  const recordAuditLogSpy = vi.spyOn(
+    auditNotificationService,
+    "recordAuditLog",
+  );
   const artifactStore = new InMemoryDocumentArtifactStore();
   const artifactPutSpy = vi.spyOn(artifactStore, "put");
 
@@ -324,6 +328,7 @@ async function createAuthoritativeReadHarness(options?: {
     repository,
     reportPersistenceFailureSpy,
     auditNotificationService,
+    recordAuditLogSpy,
     artifactStore,
     artifactPutSpy,
     service,
@@ -423,8 +428,9 @@ describe("TENANT-INVOICE-AUTHORITATIVE-READ-20261015: authoritative tenant invoi
           .filter((item) => item.title === "Tenant invoice generated"),
       ).toEqual([]);
       expect(
-        harness.auditNotificationService
-          .listAuditLogs({ actionName: "generate_tenant_invoice" }),
+        harness.recordAuditLogSpy.mock.calls.filter(
+          ([entry]) => entry.actionName === "generate_tenant_invoice",
+        ),
       ).toEqual([]);
 
       // Local in-memory cache is preserved, not cleared on read failure.
@@ -456,12 +462,15 @@ describe("TENANT-INVOICE-AUTHORITATIVE-READ-20261015: authoritative tenant invoi
       });
 
       const financeIdentity: BootstrapRequestIdentity = {
+        authMode: "bootstrap_headers",
         actorId: "actor-tenant-finance-001",
-        actorType: "tenant_user",
+        actorType: "tenant_admin",
         realm: "tenant",
         tenantId: demoTenantId,
+        roleFamilies: ["tenant"],
         roles: ["tenant_finance"],
         scopes: ["tenant:billing:read", "tenant:billing:write"],
+        requestId: "req-c077-seed-refuse",
       };
 
       await expect(

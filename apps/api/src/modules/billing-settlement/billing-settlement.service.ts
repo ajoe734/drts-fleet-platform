@@ -1354,6 +1354,7 @@ export class BillingSettlementService implements OnModuleInit {
         command.tenantId,
         command.periodStart,
         command.periodEnd,
+        { requireAuthoritativeRead: true },
       )
     ).filter((trip) => trip.eligibleForTenantInvoice);
 
@@ -3568,6 +3569,7 @@ export class BillingSettlementService implements OnModuleInit {
     tenantId: string,
     periodStart: string,
     periodEnd: string,
+    options?: { requireAuthoritativeRead?: boolean },
   ) {
     const seededTrips = this.listSeedSettlementTripsInPeriod(
       tenantId,
@@ -3578,6 +3580,7 @@ export class BillingSettlementService implements OnModuleInit {
       tenantId,
       periodStart,
       periodEnd,
+      options,
     );
     const tripMap = new Map<string, BillingSettlementTripRecord>();
 
@@ -3626,6 +3629,7 @@ export class BillingSettlementService implements OnModuleInit {
     tenantId: string,
     periodStart: string,
     periodEnd: string,
+    options?: { requireAuthoritativeRead?: boolean },
   ) {
     const liveTripMap = new Map<string, LiveSettlementTripRecord>();
     for (const trip of this.listInMemoryLiveSettlementTripsInPeriod(
@@ -3660,6 +3664,23 @@ export class BillingSettlementService implements OnModuleInit {
         error,
         "list_live_completed_tenant_trips",
       );
+      if (options?.requireAuthoritativeRead) {
+        if (error instanceof ApiRequestError) {
+          throw error;
+        }
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "TENANT_INVOICE_TRIP_READ_UNAVAILABLE",
+          `Authoritative completed-trip query for tenant invoice failed: ${detail}`,
+          {
+            tenantId,
+            periodStart,
+            periodEnd,
+          },
+          true,
+        );
+      }
       return [...liveTripMap.values()].map((trip) =>
         this.mapLiveTripToSettlementSnapshot(trip),
       );
