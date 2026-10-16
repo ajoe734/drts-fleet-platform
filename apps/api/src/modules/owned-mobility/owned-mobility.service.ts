@@ -148,7 +148,10 @@ import {
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { resolvePassengerSubjectRef } from "../../common/sensitive-data-policy";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
-import { CallcenterService } from "../callcenter/callcenter.service";
+import {
+  CallcenterService,
+  type PhoneSessionWrite,
+} from "../callcenter/callcenter.service";
 import { FareAnomalyService } from "../product-rule/fare-anomaly.service";
 import {
   OwnedMobilityRepository,
@@ -230,6 +233,7 @@ type CallRecordingAttachmentEvent = {
   endedAt: string | null;
   agentId: string | null;
   requestId?: string;
+  write?: PhoneSessionWrite;
 };
 
 export type OwnedMobilityReportingSnapshot = {
@@ -251,6 +255,7 @@ type CallRecordingStateChangeEvent = {
   endedAt: string | null;
   agentId: string | null;
   requestId?: string;
+  write?: PhoneSessionWrite;
 };
 
 type MaybePromise<T> = T | Promise<T>;
@@ -1444,7 +1449,7 @@ export class OwnedMobilityService
     command: CreateCallCenterOrderCommand,
     requestId: string | undefined,
     identity: BootstrapRequestIdentity | null | undefined,
-  ): OwnedOrderRecord {
+  ): MaybePromise<OwnedOrderRecord> {
     const bookingRequirements =
       command.bookingRequirements === undefined
         ? undefined
@@ -1548,72 +1553,184 @@ export class OwnedMobilityService
       },
       requestId,
     );
-    this.orders = [this.stampServiceProductCode(order), ...this.orders];
-    const session = this.callcenterService.linkOrderToCallSession({
-      callId: command.callId,
-      callType: "booking",
-      callerPhone: command.passenger?.phone,
-      agentId: command.agentId,
-      linkedOrderId: order.orderId,
-      recordingId,
-    });
-
-    if (session.recordingId) {
-      order.recordingId = session.recordingId;
-      order.status = "ready_for_dispatch";
-      order.complianceFlags = order.complianceFlags.filter(
-        (flag) => flag !== "recording_pending",
+    Object.assign(order, this.stampServiceProductCode(order));
+    const completeCreation = () => {
+      // A link listener can refine the staged recording state. Its commit
+      // hook publishes that exact final row before this creation hook runs.
+      const committed = this.orders.find(
+        (current) => current.orderId === order.orderId,
       );
-      this.addComplianceFlag(order, "recording_bound");
-      order.updatedAt = now;
-    } else {
-      order.status = "recording_pending";
-      this.addComplianceFlag(order, "recording_pending");
-      order.updatedAt = now;
-    }
-
-    const traceLog = this.appendTrace(
-      order.orderId,
-      "callcenter.order_created",
+      if (committed) Object.assign(order, committed);
+      this.orders = [
+        this.cloneOrder(order),
+        ...this.orders.filter((current) => current.orderId !== order.orderId),
+      ];
+      this.recordAudit(
+        {
+          // SD §7.5: "actor 從 authenticated identity 注入,不能採 body.agentId" --
+          // command.agentId is retained only as descriptive call-session
+          // metadata (who staffed the call, used for spatial-audit/trace
+          // attribution above); the actor of record for this mutation is the
+          // authenticated caller when one is available.
+          actorId: identity?.actorId?.trim() || command.agentId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "callcenter",
+          actionName: "create_phone_order",
+          resourceType: "order",
+          resourceId: order.orderId,
+          newValuesSummary: {
+            callId: command.callId,
+            recordingId: order.recordingId,
+            status: order.status,
+          },
+        },
+        requestId,
+      );
+      void this.opsDispatchEventsService?.publishOrderCreated(
+        this.cloneOrder(order),
+        requestId,
+      );
+      return this.cloneOrder(order);
+    };
+    let traceLog: DispatchTraceLogRecord;
+    const linked = this.callcenterService.withPhoneOrderSession(
       {
         callId: command.callId,
-        recordingId: order.recordingId,
-        recordingPending: order.status === "recording_pending",
+        callType: "booking",
+        callerPhone: command.passenger?.phone,
+        agentId: command.agentId,
+        linkedOrderId: order.orderId,
+        recordingId,
+      },
+      (session, write) => {
+        order.complianceFlags = order.complianceFlags.filter(
+          (flag) =>
+            flag !== "recording_bound" &&
+            flag !== "recording_pending" &&
+            flag !== "recording_missing",
+        );
+        if (session.recordingId) {
+          order.recordingId = session.recordingId;
+          order.status = "ready_for_dispatch";
+          this.addComplianceFlag(order, "recording_bound");
+        } else {
+          order.status = "recording_pending";
+          this.addComplianceFlag(
+            order,
+            session.recordingState === "missing"
+              ? "recording_missing"
+              : "recording_pending",
+          );
+        }
+        traceLog = this.buildPhoneTrace(
+          order.orderId,
+          "callcenter.order_created",
+          {
+            callId: command.callId,
+            recordingId: order.recordingId,
+            recordingPending: order.status === "recording_pending",
+          },
+        );
+        const changes = { orders: [order], dispatchTraceLogs: [traceLog] };
+        if (write && this.ownedMobilityRepository?.isEnabled()) {
+          return this.ownedMobilityRepository.persistOrderWorkflow(
+            write.executor,
+            changes,
+          );
+        }
+        if (this.ownedMobilityRepository)
+          return this.persistChangesRequired(
+            changes,
+            "create_call_center_order",
+          );
+        return undefined;
       },
     );
-    this.persistChanges(
-      {
-        orders: [order],
-        dispatchTraceLogs: [traceLog],
-      },
-      "create_call_center_order",
-    );
-    this.recordAudit(
-      {
-        // SD §7.5: "actor 從 authenticated identity 注入,不能採 body.agentId" --
-        // command.agentId is retained only as descriptive call-session
-        // metadata (who staffed the call, used for spatial-audit/trace
-        // attribution above); the actor of record for this mutation is the
-        // authenticated caller when one is available.
-        actorId: identity?.actorId?.trim() || command.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "create_phone_order",
-        resourceType: "order",
-        resourceId: order.orderId,
-        newValuesSummary: {
-          callId: command.callId,
-          recordingId: order.recordingId,
-          status: order.status,
-        },
-      },
-      requestId,
-    );
-    void this.opsDispatchEventsService?.publishOrderCreated(
+    return this.afterMaybePromise(linked, () => {
+      this.dispatchTraceLogs = [traceLog!, ...this.dispatchTraceLogs];
+      return completeCreation();
+    });
+  }
+
+  private buildPhoneTrace(
+    orderId: string,
+    eventType: string,
+    details: Record<string, unknown>,
+  ): DispatchTraceLogRecord {
+    return {
+      traceId: randomUUID(),
+      orderId,
+      eventType,
+      message: eventType,
+      details,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  private publishPhoneRecordingUpdate(
+    order: OwnedOrderRecord,
+    traceLog: DispatchTraceLogRecord,
+    audit?: () => void,
+  ) {
+    this.orders = [
       this.cloneOrder(order),
-      requestId,
+      ...this.orders.filter((current) => current.orderId !== order.orderId),
+    ];
+    this.dispatchTraceLogs = [traceLog, ...this.dispatchTraceLogs];
+    audit?.();
+  }
+
+  private commitPhoneRecordingUpdate(
+    order: OwnedOrderRecord,
+    traceLog: DispatchTraceLogRecord,
+    write?: PhoneSessionWrite,
+    audit?: () => void,
+  ): void | Promise<void> {
+    const finish = () =>
+      this.publishPhoneRecordingUpdate(order, traceLog, audit);
+    const changes = { orders: [order], dispatchTraceLogs: [traceLog] };
+    if (write && this.ownedMobilityRepository?.isEnabled()) {
+      return this.ownedMobilityRepository
+        .persistOrderWorkflow(write.executor, changes)
+        .then(() => {
+          write.afterCommit.push(finish);
+        });
+    }
+    if (this.ownedMobilityRepository)
+      return this.persistChangesRequired(
+        changes,
+        "phone_recording_update",
+      ).then(finish);
+    finish();
+  }
+
+  private async readPhoneRecordingOrder(
+    write: PhoneSessionWrite,
+    orderId: string,
+  ) {
+    const result = await write.executor.query<{ record: OwnedOrderRecord }>(
+      "SELECT record FROM ops.phase1_owned_orders WHERE order_id = $1",
+      [orderId],
     );
+    const order = result.rows[0]?.record;
+    if (!order)
+      throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order was not found.");
+    // Phone recording writers share the order row lock with dispatch writers.
+    // Voice mutations retain their own authoritative transaction/lock order.
+    if (!order.voiceIntentId && this.ownedMobilityRepository?.isEnabled()) {
+      const locked = await this.ownedMobilityRepository.findOrderForUpdate(
+        write.executor,
+        orderId,
+      );
+      if (!locked)
+        throw new ApiRequestError(
+          404,
+          "ORDER_NOT_FOUND",
+          "Order was not found.",
+        );
+      return this.cloneOrder(locked.order);
+    }
     return this.cloneOrder(order);
   }
 
@@ -2071,13 +2188,23 @@ export class OwnedMobilityService
   }
 
   handleCallRecordingAttached(event: CallRecordingAttachmentEvent) {
-    const order = this.orders.find((candidateOrder) => {
-      return candidateOrder.callId === event.callId;
-    });
-    if (!order) {
-      return;
+    const orderId = event.write?.session?.linkedOrderId;
+    if (event.write && orderId) {
+      return this.readPhoneRecordingOrder(event.write, orderId).then((order) =>
+        this.applyCallRecordingAttached(order, event),
+      );
     }
+    const current = this.orders.find(
+      (candidate) => candidate.callId === event.callId,
+    );
+    if (!current) return;
+    return this.applyCallRecordingAttached(this.cloneOrder(current), event);
+  }
 
+  private applyCallRecordingAttached(
+    order: OwnedOrderRecord,
+    event: CallRecordingAttachmentEvent,
+  ): void | Promise<void> {
     // Legacy callbacks contain no immutable manifest version or verified
     // checkpoint. They cannot establish or replace voice evidence, nor open
     // its dispatch gate. Final recording evidence has its own journal path.
@@ -2097,6 +2224,13 @@ export class OwnedMobilityService
       return;
     }
 
+    if (
+      order.recordingId === event.recordingId &&
+      order.complianceFlags.includes("recording_bound") &&
+      order.status !== "recording_pending"
+    )
+      return;
+
     const now = new Date().toISOString();
     order.recordingId = event.recordingId;
     order.updatedAt = now;
@@ -2110,7 +2244,7 @@ export class OwnedMobilityService
       ];
     }
 
-    const traceLog = this.appendTrace(
+    const traceLog = this.buildPhoneTrace(
       order.orderId,
       "callcenter.recording_bound",
       {
@@ -2122,30 +2256,25 @@ export class OwnedMobilityService
         endedAt: event.endedAt,
       },
     );
-    this.persistChanges(
-      {
-        orders: [order],
-        dispatchTraceLogs: [traceLog],
-      },
-      "bind_call_recording",
-    );
-    this.recordAudit(
-      {
-        actorId: event.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "bind_recording_to_phone_order",
-        resourceType: "order",
-        resourceId: order.orderId,
-        newValuesSummary: {
-          callId: event.callId,
-          recordingId: event.recordingId,
-          status: order.status,
+    return this.commitPhoneRecordingUpdate(order, traceLog, event.write, () => {
+      this.recordAudit(
+        {
+          actorId: event.agentId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "callcenter",
+          actionName: "bind_recording_to_phone_order",
+          resourceType: "order",
+          resourceId: order.orderId,
+          newValuesSummary: {
+            callId: event.callId,
+            recordingId: event.recordingId,
+            status: order.status,
+          },
         },
-      },
-      event.requestId,
-    );
+        event.requestId,
+      );
+    });
   }
 
   /**
@@ -2161,13 +2290,23 @@ export class OwnedMobilityService
   handleCallRecordingStateChanged(
     event: CallRecordingStateChangeEvent,
   ): void | Promise<void> {
-    const order = this.orders.find((candidateOrder) => {
-      return candidateOrder.orderId === event.linkedOrderId;
-    });
-    if (!order) {
-      return;
+    if (event.write) {
+      return this.readPhoneRecordingOrder(
+        event.write,
+        event.linkedOrderId,
+      ).then((order) => this.applyCallRecordingStateChanged(order, event));
     }
+    const current = this.orders.find(
+      (candidate) => candidate.orderId === event.linkedOrderId,
+    );
+    if (!current) return;
+    return this.applyCallRecordingStateChanged(this.cloneOrder(current), event);
+  }
 
+  private applyCallRecordingStateChanged(
+    order: OwnedOrderRecord,
+    event: CallRecordingStateChangeEvent,
+  ): void | Promise<void> {
     if (order.voiceIntentId) {
       // Losing the durable repository must not fall through to the legacy
       // in-memory writer and erase established voice evidence/order progress.
@@ -2181,6 +2320,8 @@ export class OwnedMobilityService
       // await completion; existing fire-and-forget callers (the
       // synchronous callcenter listener wiring) simply ignore the return
       // value, and the internal .catch means this never rejects.
+      if (event.write)
+        return this.handleVoiceCallRecordingStateChanged(order, event);
       return this.handleVoiceCallRecordingStateChanged(order, event).catch(
         (error) => {
           this.logger.warn(
@@ -2213,7 +2354,7 @@ export class OwnedMobilityService
         : "recording_pending",
     ];
 
-    const traceLog = this.appendTrace(
+    const traceLog = this.buildPhoneTrace(
       order.orderId,
       "callcenter.recording_state_changed",
       {
@@ -2222,13 +2363,7 @@ export class OwnedMobilityService
         linkedOrderId: event.linkedOrderId,
       },
     );
-    this.persistChanges(
-      {
-        orders: [order],
-        dispatchTraceLogs: [traceLog],
-      },
-      "sync_call_recording_state",
-    );
+    return this.commitPhoneRecordingUpdate(order, traceLog, event.write);
   }
 
   private static readonly PRE_DISPATCH_RECORDING_GATE_STATUSES = new Set<

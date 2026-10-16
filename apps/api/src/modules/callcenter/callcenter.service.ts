@@ -28,8 +28,19 @@ import { AuditNotificationService } from "../audit-notification/audit-notificati
 import { VoiceBookingRepository } from "../voice-booking/voice-booking.repository";
 import { VoiceCallbackService } from "../voice-booking/voice-callback.service";
 import { resolveVoiceOrderFence } from "../voice-booking/voice-order-fence";
-import { CallcenterRepository } from "./callcenter.repository";
+import {
+  CallcenterRepository,
+  type CallcenterQueryExecutor,
+} from "./callcenter.repository";
 import { VoiceHandoffQueueService } from "./voice-handoff-queue.service";
+
+export type PhoneSessionWrite = {
+  executor: CallcenterQueryExecutor;
+  current: CallSessionRecord | null;
+  afterCommit: Array<() => void>;
+  notify: Array<() => void | Promise<void>>;
+  session?: CallSessionRecord;
+};
 
 type RecordingAttachmentEvent = {
   callId: string;
@@ -40,6 +51,7 @@ type RecordingAttachmentEvent = {
   endedAt: string | null;
   agentId: string | null;
   requestId?: string;
+  write?: PhoneSessionWrite;
 };
 
 type RecordingStateChangeEvent = {
@@ -53,6 +65,7 @@ type RecordingStateChangeEvent = {
   endedAt: string | null;
   agentId: string | null;
   requestId?: string;
+  write?: PhoneSessionWrite;
 };
 
 type PhoneOrderSessionInput = {
@@ -100,19 +113,21 @@ export class CallcenterService implements OnModuleInit {
   private callSessions: CallSessionRecord[] = [];
 
   private readonly recordingAttachmentListeners: Array<
-    (event: RecordingAttachmentEvent) => void
+    (event: RecordingAttachmentEvent) => void | Promise<void>
   > = [];
 
   private readonly recordingStateChangeListeners: Array<
-    (event: RecordingStateChangeEvent) => void
+    (event: RecordingStateChangeEvent) => void | Promise<void>
   > = [];
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional() private readonly callcenterRepository?: CallcenterRepository,
-    @Optional() private readonly voiceBookingRepository?: VoiceBookingRepository,
+    @Optional()
+    private readonly voiceBookingRepository?: VoiceBookingRepository,
     @Optional() private readonly voiceCallbackService?: VoiceCallbackService,
-    @Optional() private readonly voiceHandoffQueueService?: VoiceHandoffQueueService,
+    @Optional()
+    private readonly voiceHandoffQueueService?: VoiceHandoffQueueService,
   ) {}
 
   async onModuleInit() {
@@ -136,18 +151,224 @@ export class CallcenterService implements OnModuleInit {
   }
 
   registerRecordingAttachmentListener(
-    listener: (event: RecordingAttachmentEvent) => void,
+    listener: (event: RecordingAttachmentEvent) => void | Promise<void>,
   ) {
     this.recordingAttachmentListeners.push(listener);
   }
 
   registerRecordingStateChangeListener(
-    listener: (event: RecordingStateChangeEvent) => void,
+    listener: (event: RecordingStateChangeEvent) => void | Promise<void>,
   ) {
     this.recordingStateChangeListeners.push(listener);
   }
 
-  openCallSession(command: OpenCallSessionCommand, requestId?: string) {
+  async getCallSessionForRead(
+    callId: string,
+    requestId?: string,
+    identity?: (EvidenceAccessIdentity & { roles?: string[] }) | null,
+  ) {
+    if (!this.callcenterRepository?.isEnabled())
+      return this.getCallSession(callId, requestId, identity);
+    const session = await this.callcenterRepository.findSession(callId);
+    if (!session)
+      throw new ApiRequestError(
+        404,
+        "CALL_SESSION_NOT_FOUND",
+        "Call session was not found.",
+      );
+    return this.getCallSession(callId, requestId, identity, session);
+  }
+
+  openCallSessionForWrite(command: OpenCallSessionCommand, requestId?: string) {
+    return this.runPhoneSessionWrite(null, (write) => {
+      if (!write) return this.openCallSession(command, requestId);
+      // A cold peer must not upsert its first local sequence over an existing
+      // call and erase that call's committed order/recording linkage.
+      return this.callcenterRepository!.lockCall(
+        "session-sequence",
+        write.executor,
+      )
+        .then(() => this.callcenterRepository!.loadSessions(write.executor))
+        .then((sessions) => {
+          this.callSequence = Math.max(
+            this.callSequence,
+            this.deriveNextCallSequence(sessions),
+          );
+          return this.openCallSession(command, requestId, write);
+        });
+    });
+  }
+
+  attachRecordingCallbackForWrite(
+    callId: string,
+    command: AttachCallRecordingCommand,
+    requestId?: string,
+  ) {
+    return this.runPhoneSessionWrite(callId, (write) =>
+      this.attachRecordingCallback(callId, command, requestId, write),
+    );
+  }
+
+  upsertExternalSessionForWrite(
+    input: ExternalCallSessionInput,
+    requestId?: string,
+  ) {
+    return this.runPhoneSessionWrite(input.callId.trim(), (write) =>
+      this.upsertExternalSession(input, requestId, write),
+    );
+  }
+
+  closeCallSessionForWrite(
+    callId: string,
+    command: CloseCallSessionCommand = {},
+    requestId?: string,
+  ) {
+    return this.runPhoneSessionWrite(callId, (write) =>
+      this.closeCallSession(callId, command, requestId, write),
+    );
+  }
+
+  markRecordingPendingForWrite(
+    callId: string,
+    command: RecordingPendingCommand = {},
+    requestId?: string,
+  ) {
+    return this.runPhoneSessionWrite(callId, (write) =>
+      this.markRecordingPending(callId, command, requestId, write),
+    );
+  }
+
+  markRecordingFailedForWrite(
+    callId: string,
+    command: RecordingFailedCommand = {},
+    requestId?: string,
+  ) {
+    return this.runPhoneSessionWrite(callId, (write) =>
+      this.markRecordingFailed(callId, command, requestId, write),
+    );
+  }
+
+  withPhoneOrderSession<T>(
+    input: PhoneOrderSessionInput,
+    persistOrder: (
+      session: CallSessionRecord,
+      write?: PhoneSessionWrite,
+    ) => T | Promise<T>,
+  ) {
+    return this.runPhoneSessionWrite(input.callId, (write) =>
+      persistOrder(this.linkOrderToCallSession(input, write), write),
+    );
+  }
+
+  private runPhoneSessionWrite<T>(
+    callId: string | null,
+    mutate: (write?: PhoneSessionWrite) => T | Promise<T>,
+  ): T | Promise<T> {
+    const repository = this.callcenterRepository;
+    if (!repository?.isEnabled()) return mutate();
+    const afterCommit: Array<() => void> = [];
+    return repository
+      .withTransaction(async (executor) => {
+        if (callId) await repository.lockCall(callId, executor);
+        const write: PhoneSessionWrite = {
+          executor,
+          current: callId
+            ? await repository.findSession(callId, executor)
+            : null,
+          afterCommit,
+          notify: [],
+        };
+        const result = await mutate(write);
+        if (write.session)
+          await repository.upsertSession(
+            this.cloneSession(write.session),
+            executor,
+          );
+        for (const notify of write.notify) await notify();
+        return result;
+      })
+      .then((result) => {
+        for (const finish of afterCommit) finish();
+        return result;
+      });
+  }
+
+  private requireWriteSession(callId: string, write: PhoneSessionWrite) {
+    if (!write.current)
+      throw new ApiRequestError(
+        404,
+        "CALL_SESSION_NOT_FOUND",
+        "Call session was not found.",
+      );
+    return write.current;
+  }
+
+  private finishPhoneSessionMutation(
+    session: CallSessionRecord,
+    write: PhoneSessionWrite | undefined,
+    context: string,
+    audit: () => void,
+    notify: () => void | Promise<void>,
+  ) {
+    const publish = () => {
+      this.callSessions = [
+        this.cloneSession(session),
+        ...this.callSessions.filter(
+          (current) => current.callId !== session.callId,
+        ),
+      ];
+      audit();
+    };
+    if (write) {
+      write.session = this.cloneSession(session);
+      write.afterCommit.push(publish);
+      write.notify.push(notify);
+    } else {
+      publish();
+      this.persistSessions([session], context);
+      const pending = notify();
+      if (pending)
+        void pending.catch((error) =>
+          this.callcenterRepository?.reportPersistenceFailure(error, context),
+        );
+    }
+    return this.cloneSession(session);
+  }
+
+  private runRecordingListeners<T>(
+    listeners: Array<(event: T) => void | Promise<void>>,
+    event: T,
+  ) {
+    let pending: void | Promise<void> = undefined;
+    for (const listener of listeners) {
+      if (pending) pending = pending.then(() => listener(event));
+      else pending = listener(event);
+    }
+    return pending;
+  }
+
+  private notifyRecordingAttachment(
+    event: RecordingAttachmentEvent,
+    session: CallSessionRecord,
+    requestId?: string,
+    write?: PhoneSessionWrite,
+  ) {
+    const attached = this.runRecordingListeners(
+      this.recordingAttachmentListeners,
+      { ...event, ...(write ? { write } : {}) },
+    );
+    return attached
+      ? attached.then(() =>
+          this.notifyRecordingStateChange(session, requestId, write),
+        )
+      : this.notifyRecordingStateChange(session, requestId, write);
+  }
+
+  openCallSession(
+    command: OpenCallSessionCommand,
+    requestId?: string,
+    write?: PhoneSessionWrite,
+  ) {
     this.assertCallerPhone(command.callerPhone);
 
     const now = new Date().toISOString();
@@ -175,30 +396,38 @@ export class CallcenterService implements OnModuleInit {
       flags: ["recording_pending"],
     };
 
-    this.callSessions = [session, ...this.callSessions];
-    this.persistSessions([session], "open_call_session");
-    this.recordAudit(
-      {
-        actorId: command.agentId ?? null,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "open_call_session",
-        resourceType: "call_session",
-        resourceId: session.callId,
-        newValuesSummary: {
-          callType: session.callType,
-          callerPhone: session.callerPhone,
-          status: session.status,
-        },
+    return this.finishPhoneSessionMutation(
+      session,
+      write,
+      "open_call_session",
+      () => {
+        this.recordAudit(
+          {
+            actorId: command.agentId ?? null,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "callcenter",
+            actionName: "open_call_session",
+            resourceType: "call_session",
+            resourceId: session.callId,
+            newValuesSummary: {
+              callType: session.callType,
+              callerPhone: session.callerPhone,
+              status: session.status,
+            },
+          },
+          requestId,
+        );
       },
-      requestId,
+      () => undefined,
     );
-
-    return this.cloneSession(session);
   }
 
-  upsertExternalSession(input: ExternalCallSessionInput, requestId?: string) {
+  upsertExternalSession(
+    input: ExternalCallSessionInput,
+    requestId?: string,
+    write?: PhoneSessionWrite,
+  ) {
     const callId = input.callId.trim();
     if (!callId) {
       throw new ApiRequestError(
@@ -211,9 +440,10 @@ export class CallcenterService implements OnModuleInit {
     const now = new Date().toISOString();
     const startedAt = input.startedAt ?? now;
     const endedAt = input.endedAt ?? null;
-    const existingSession = this.callSessions.find(
-      (session) => session.callId === callId,
-    );
+    const current = write
+      ? write.current
+      : this.callSessions.find((session) => session.callId === callId);
+    const existingSession = current ? this.cloneSession(current) : null;
 
     if (!existingSession) {
       const session: CallSessionRecord = {
@@ -237,26 +467,30 @@ export class CallcenterService implements OnModuleInit {
         recordingState: "pending",
         flags: endedAt ? ["closed"] : ["recording_pending"],
       };
-      this.callSessions = [session, ...this.callSessions];
-      this.persistSessions([session], "upsert_external_call_session");
-      this.recordAudit(
-        {
-          actorId: session.agentId,
-          actorType: "system",
-          tenantId: null,
-          moduleName: "callcenter",
-          actionName: "upsert_external_call_session",
-          resourceType: "call_session",
-          resourceId: session.callId,
-          newValuesSummary: {
-            callType: session.callType,
-            callerPhone: session.callerPhone,
-            status: session.status,
-          },
-        },
-        requestId,
+      return this.finishPhoneSessionMutation(
+        session,
+        write,
+        "upsert_external_call_session",
+        () =>
+          this.recordAudit(
+            {
+              actorId: session.agentId,
+              actorType: "system",
+              tenantId: null,
+              moduleName: "callcenter",
+              actionName: "upsert_external_call_session",
+              resourceType: "call_session",
+              resourceId: session.callId,
+              newValuesSummary: {
+                callType: session.callType,
+                callerPhone: session.callerPhone,
+                status: session.status,
+              },
+            },
+            requestId,
+          ),
+        () => undefined,
       );
-      return this.cloneSession(session);
     }
 
     existingSession.callType = input.callType ?? existingSession.callType;
@@ -273,16 +507,22 @@ export class CallcenterService implements OnModuleInit {
       this.removeFlag(existingSession, "recording_missing");
       this.addFlag(existingSession, "recording_pending");
     }
-    this.persistSessions([existingSession], "upsert_external_call_session");
-    return this.cloneSession(existingSession);
+    return this.finishPhoneSessionMutation(
+      existingSession,
+      write,
+      "upsert_external_call_session",
+      () => undefined,
+      () => undefined,
+    );
   }
 
   getCallSession(
     callId: string,
     requestId?: string,
     identity?: (EvidenceAccessIdentity & { roles?: string[] }) | null,
+    persistedSession?: CallSessionRecord,
   ) {
-    const rawSession = this.requireSession(callId);
+    const rawSession = persistedSession ?? this.requireSession(callId);
     if (
       identity?.tenantId &&
       (rawSession as any).brandId &&
@@ -450,8 +690,11 @@ export class CallcenterService implements OnModuleInit {
     callId: string,
     command: CloseCallSessionCommand = {},
     requestId?: string,
+    write?: PhoneSessionWrite,
   ) {
-    const session = this.requireSession(callId);
+    const session = write
+      ? this.cloneSession(this.requireWriteSession(callId, write))
+      : this.requireSession(callId);
     const endedAt =
       command.endedAt ?? session.endedAt ?? new Date().toISOString();
     session.status = "closed";
@@ -460,28 +703,31 @@ export class CallcenterService implements OnModuleInit {
     if (session.linkedOrderId && !session.recordingId) {
       this.syncRecordingFlagsWithoutAttachment(session);
     }
-    this.persistSessions([session], "close_call_session");
-    this.enqueueFinalizeRecordingWorkItem(session);
-    this.notifyRecordingStateChange(session, requestId);
-
-    this.recordAudit(
-      {
-        actorId: session.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "close_call_session",
-        resourceType: "call_session",
-        resourceId: session.callId,
-        newValuesSummary: {
-          status: session.status,
-          endedAt: session.endedAt,
-        },
+    return this.finishPhoneSessionMutation(
+      session,
+      write,
+      "close_call_session",
+      () => {
+        this.enqueueFinalizeRecordingWorkItem(session);
+        this.recordAudit(
+          {
+            actorId: session.agentId,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "callcenter",
+            actionName: "close_call_session",
+            resourceType: "call_session",
+            resourceId: session.callId,
+            newValuesSummary: {
+              status: session.status,
+              endedAt: session.endedAt,
+            },
+          },
+          requestId,
+        );
       },
-      requestId,
+      () => this.notifyRecordingStateChange(session, requestId, write),
     );
-
-    return this.cloneSession(session);
   }
 
   quoteEta(callId: string, command: QuoteCallEtaCommand, requestId?: string) {
@@ -528,15 +774,19 @@ export class CallcenterService implements OnModuleInit {
 
     // Ensures the session exists before any DB round trip (matches prior
     // synchronous NOT_FOUND behavior).
-    this.requireSession(callId);
+    if (!this.callcenterRepository?.isEnabled()) this.requireSession(callId);
 
     if (this.voiceBookingRepository?.isEnabled()) {
       return this.assertLinkOrderVoiceFence(callId, orderId).then(() =>
-        this.applyOrderLinkToSession(callId, orderId, requestId),
+        this.runPhoneSessionWrite(callId, (write) =>
+          this.applyOrderLinkToSession(callId, orderId, requestId, write),
+        ),
       );
     }
 
-    return this.applyOrderLinkToSession(callId, orderId, requestId);
+    return this.runPhoneSessionWrite(callId, (write) =>
+      this.applyOrderLinkToSession(callId, orderId, requestId, write),
+    );
   }
 
   /**
@@ -578,8 +828,18 @@ export class CallcenterService implements OnModuleInit {
     callId: string,
     orderId: string,
     requestId?: string,
-  ): CallSessionRecord {
-    const session = this.requireSession(callId);
+    write?: PhoneSessionWrite,
+  ) {
+    const session = write
+      ? this.cloneSession(this.requireWriteSession(callId, write))
+      : this.requireSession(callId);
+    if (session.linkedOrderId && session.linkedOrderId !== orderId) {
+      throw new ApiRequestError(
+        409,
+        "VOICE_ORDER_ALREADY_LINKED",
+        "Call is already linked to a different order.",
+      );
+    }
     session.linkedOrderId = orderId;
     if (!session.recordingId) {
       this.syncRecordingFlagsWithoutAttachment(session);
@@ -591,32 +851,37 @@ export class CallcenterService implements OnModuleInit {
         updatedAt: new Date().toISOString(),
       };
     }
-    this.persistSessions([session], "link_call_order");
-    this.notifyRecordingStateChange(session, requestId);
 
-    this.recordAudit(
-      {
-        actorId: session.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "link_call_order",
-        resourceType: "call_session",
-        resourceId: session.callId,
-        newValuesSummary: {
-          linkedOrderId: session.linkedOrderId,
-        },
+    return this.finishPhoneSessionMutation(
+      session,
+      write,
+      "link_call_order",
+      () => {
+        this.recordAudit(
+          {
+            actorId: session.agentId,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "callcenter",
+            actionName: "link_call_order",
+            resourceType: "call_session",
+            resourceId: session.callId,
+            newValuesSummary: {
+              linkedOrderId: session.linkedOrderId,
+            },
+          },
+          requestId,
+        );
       },
-      requestId,
+      () => this.notifyRecordingStateChange(session, requestId, write),
     );
-
-    return this.cloneSession(session);
   }
 
   attachRecordingCallback(
     callId: string,
     command: AttachCallRecordingCommand,
     requestId?: string,
+    write?: PhoneSessionWrite,
   ) {
     if (!command.recordingId.trim()) {
       throw new ApiRequestError(
@@ -626,7 +891,9 @@ export class CallcenterService implements OnModuleInit {
       );
     }
 
-    const session = this.requireSession(callId);
+    const session = write
+      ? this.cloneSession(this.requireWriteSession(callId, write))
+      : this.requireSession(callId);
     const nextRecordingId = command.recordingId.trim();
     const nextProviderRecordingRef =
       command.providerRecordingRef?.trim() || null;
@@ -641,7 +908,7 @@ export class CallcenterService implements OnModuleInit {
       session.endedAt === nextEndedAt &&
       session.flags.includes("recording_bound");
 
-    if (recordingAlreadyBound) {
+    if (recordingAlreadyBound && !write) {
       return this.cloneSession(session);
     }
 
@@ -654,7 +921,6 @@ export class CallcenterService implements OnModuleInit {
     this.removeFlag(session, "recording_pending");
     this.removeFlag(session, "recording_missing");
     this.addFlag(session, "recording_bound");
-    this.persistSessions([session], "attach_recording_callback");
 
     const event: RecordingAttachmentEvent = {
       callId: session.callId,
@@ -669,39 +935,44 @@ export class CallcenterService implements OnModuleInit {
       event.requestId = requestId;
     }
 
-    for (const listener of this.recordingAttachmentListeners) {
-      listener(event);
-    }
-    this.notifyRecordingStateChange(session, requestId);
-
-    this.recordAudit(
-      {
-        actorId: command.agentId ?? session.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "attach_recording_callback",
-        resourceType: "call_session",
-        resourceId: session.callId,
-        newValuesSummary: {
-          recordingId: session.recordingId,
-          providerRecordingRef: session.providerRecordingRef,
-          recordingUrl: session.recordingUrl,
-          status: session.status,
-        },
+    return this.finishPhoneSessionMutation(
+      session,
+      write,
+      "attach_recording_callback",
+      () => {
+        if (!recordingAlreadyBound)
+          this.recordAudit(
+            {
+              actorId: command.agentId ?? session.agentId,
+              actorType: "ops_user",
+              tenantId: null,
+              moduleName: "callcenter",
+              actionName: "attach_recording_callback",
+              resourceType: "call_session",
+              resourceId: session.callId,
+              newValuesSummary: {
+                recordingId: session.recordingId,
+                providerRecordingRef: session.providerRecordingRef,
+                recordingUrl: session.recordingUrl,
+                status: session.status,
+              },
+            },
+            requestId,
+          );
       },
-      requestId,
+      () => this.notifyRecordingAttachment(event, session, requestId, write),
     );
-
-    return this.cloneSession(session);
   }
 
   markRecordingPending(
     callId: string,
     command: RecordingPendingCommand = {},
     requestId?: string,
+    write?: PhoneSessionWrite,
   ) {
-    const session = this.requireSession(callId);
+    const session = write
+      ? this.cloneSession(this.requireWriteSession(callId, write))
+      : this.requireSession(callId);
     session.agentId = command.agentId?.trim() || session.agentId;
     if (command.startedAt) {
       session.startedAt = command.startedAt;
@@ -718,36 +989,44 @@ export class CallcenterService implements OnModuleInit {
     this.removeFlag(session, "recording_missing");
     this.addFlag(session, "recording_pending_callback");
     this.addFlag(session, "recording_pending");
-    this.persistSessions([session], "mark_recording_pending");
-    this.enqueueFinalizeRecordingWorkItem(session);
-    this.notifyRecordingStateChange(session, requestId);
 
-    this.recordAudit(
-      {
-        actorId: session.agentId,
-        actorType: "system",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "mark_recording_pending",
-        resourceType: "call_session",
-        resourceId: session.callId,
-        newValuesSummary: {
-          status: session.status,
-          endedAt: session.endedAt,
-        },
+    return this.finishPhoneSessionMutation(
+      session,
+      write,
+      "mark_recording_pending",
+      () => {
+        this.recordAudit(
+          {
+            actorId: session.agentId,
+            actorType: "system",
+            tenantId: null,
+            moduleName: "callcenter",
+            actionName: "mark_recording_pending",
+            resourceType: "call_session",
+            resourceId: session.callId,
+            newValuesSummary: {
+              status: session.status,
+              endedAt: session.endedAt,
+            },
+          },
+          requestId,
+        );
+
+        this.enqueueFinalizeRecordingWorkItem(session);
       },
-      requestId,
+      () => this.notifyRecordingStateChange(session, requestId, write),
     );
-
-    return this.cloneSession(session);
   }
 
   markRecordingFailed(
     callId: string,
     command: RecordingFailedCommand = {},
     requestId?: string,
+    write?: PhoneSessionWrite,
   ) {
-    const session = this.requireSession(callId);
+    const session = write
+      ? this.cloneSession(this.requireWriteSession(callId, write))
+      : this.requireSession(callId);
     session.agentId = command.agentId?.trim() || session.agentId;
     if (command.startedAt) {
       session.startedAt = command.startedAt;
@@ -763,27 +1042,31 @@ export class CallcenterService implements OnModuleInit {
     this.removeFlag(session, "recording_pending_callback");
     this.removeFlag(session, "recording_pending");
     this.addFlag(session, "recording_missing");
-    this.persistSessions([session], "mark_recording_failed");
-    this.notifyRecordingStateChange(session, requestId);
 
-    this.recordAudit(
-      {
-        actorId: session.agentId,
-        actorType: "system",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "mark_recording_failed",
-        resourceType: "call_session",
-        resourceId: session.callId,
-        newValuesSummary: {
-          status: session.status,
-          endedAt: session.endedAt,
-        },
+    return this.finishPhoneSessionMutation(
+      session,
+      write,
+      "mark_recording_failed",
+      () => {
+        this.recordAudit(
+          {
+            actorId: session.agentId,
+            actorType: "system",
+            tenantId: null,
+            moduleName: "callcenter",
+            actionName: "mark_recording_failed",
+            resourceType: "call_session",
+            resourceId: session.callId,
+            newValuesSummary: {
+              status: session.status,
+              endedAt: session.endedAt,
+            },
+          },
+          requestId,
+        );
       },
-      requestId,
+      () => this.notifyRecordingStateChange(session, requestId, write),
     );
-
-    return this.cloneSession(session);
   }
 
   listCallbackTasks() {
@@ -1185,14 +1468,28 @@ export class CallcenterService implements OnModuleInit {
     return this.cloneSession(session);
   }
 
-  linkOrderToCallSession(input: PhoneOrderSessionInput) {
+  linkOrderToCallSession(
+    input: PhoneOrderSessionInput,
+    write?: PhoneSessionWrite,
+  ) {
     const now = new Date().toISOString();
     const recordingId = input.recordingId?.trim() || null;
     const providerRecordingRef = input.providerRecordingRef?.trim() || null;
     const recordingUrl = input.recordingUrl?.trim() || null;
-    const existingSession = this.callSessions.find(
-      (session) => session.callId === input.callId,
-    );
+    const current = write
+      ? write.current
+      : this.callSessions.find((session) => session.callId === input.callId);
+    if (
+      current?.linkedOrderId &&
+      current.linkedOrderId !== input.linkedOrderId
+    ) {
+      throw new ApiRequestError(
+        409,
+        "VOICE_ORDER_ALREADY_LINKED",
+        "Call is already linked to a different order.",
+      );
+    }
+    const existingSession = current ? this.cloneSession(current) : null;
 
     if (!existingSession) {
       const session: CallSessionRecord = {
@@ -1216,10 +1513,13 @@ export class CallcenterService implements OnModuleInit {
         recordingState: recordingId ? "ready" : "pending",
         flags: recordingId ? ["recording_bound"] : ["recording_pending"],
       };
-      this.callSessions = [session, ...this.callSessions];
-      this.persistSessions([session], "link_order_to_call_session");
-      this.notifyRecordingStateChange(session);
-      return this.cloneSession(session);
+      return this.finishPhoneSessionMutation(
+        session,
+        write,
+        "link_order_to_call_session",
+        () => undefined,
+        () => this.notifyRecordingStateChange(session, undefined, write),
+      );
     }
 
     existingSession.callType = input.callType;
@@ -1252,10 +1552,13 @@ export class CallcenterService implements OnModuleInit {
       };
     }
 
-    this.persistSessions([existingSession], "link_order_to_call_session");
-    this.notifyRecordingStateChange(existingSession);
-
-    return this.cloneSession(existingSession);
+    return this.finishPhoneSessionMutation(
+      existingSession,
+      write,
+      "link_order_to_call_session",
+      () => undefined,
+      () => this.notifyRecordingStateChange(existingSession, undefined, write),
+    );
   }
 
   linkCaseToCallSession(callId: string, caseNo: string, requestId?: string) {
@@ -1510,6 +1813,7 @@ export class CallcenterService implements OnModuleInit {
   private notifyRecordingStateChange(
     session: CallSessionRecord,
     requestId?: string,
+    write?: PhoneSessionWrite,
   ) {
     if (!session.linkedOrderId) {
       return;
@@ -1526,11 +1830,13 @@ export class CallcenterService implements OnModuleInit {
       endedAt: session.endedAt,
       agentId: session.agentId,
       ...(requestId ? { requestId } : {}),
+      ...(write ? { write } : {}),
     };
 
-    for (const listener of this.recordingStateChangeListeners) {
-      listener(event);
-    }
+    return this.runRecordingListeners(
+      this.recordingStateChangeListeners,
+      event,
+    );
   }
 
   private cloneCallbackTask<T extends CallbackTaskRecord>(callbackTask: T): T {

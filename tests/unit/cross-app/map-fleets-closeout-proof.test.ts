@@ -1,3 +1,4 @@
+import { CallcenterService } from "../../../apps/api/src/modules/callcenter/callcenter.service";
 import { proofArtifactPath } from "./proof-artifacts";
 import { createRequire } from "node:module";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -112,32 +113,14 @@ function createOwnedMobilityService() {
     withTransaction: async <T>(work: (tx: unknown) => Promise<T>) => work({}),
     reportPersistenceFailure: vi.fn(),
   };
-  const callcenterService = {
-    registerRecordingAttachmentListener: vi.fn(),
-    registerRecordingStateChangeListener: vi.fn(),
-    linkOrderToCallSession: vi.fn(
-      ({
-        callId,
-        callType,
-        callerPhone,
-        agentId,
-        linkedOrderId,
-        recordingId,
-      }) => ({
-        callId,
-        callType,
-        callerPhone,
-        agentId,
-        linkedOrderId,
-        recordingId: recordingId ?? null,
-      }),
-    ),
-  };
+  const callcenterService = new CallcenterService(
+    auditNotificationService as never,
+  );
 
   const service = new OwnedMobilityService(
     regulatoryRegistryService as never,
     auditNotificationService as never,
-    callcenterService as never,
+    callcenterService,
     new OwnedMobilityTaskEventsService(new EventEmitter2()),
     new OpsDispatchEventsService(new EventEmitter2()),
     repository as never,
