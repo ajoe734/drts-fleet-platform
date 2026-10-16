@@ -290,10 +290,9 @@ export class ServiceProductRepository {
       }
       throw error;
     } finally {
-      if (!commitStarted && !released) client.release();
-      // On success the connection is healthy; on uncertain COMMIT it was
-      // destroyed above before reconciliation to avoid pool-size-one deadlock.
-      else if (!released) client.release();
+      // Uncertain connections were destroyed before reconciliation, avoiding
+      // pool-size-one deadlock. Healthy connections can now return to the pool.
+      if (!released) client.release();
     }
   }
 

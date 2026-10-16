@@ -137,6 +137,7 @@ describe("current canonical products through existing runtime consumers", () => 
     eligibility.updateMatrix({ items: matrix }, actor);
     const order = {
       serviceBucket: "standard_taxi" as const,
+      businessDispatchSubtype: null,
       serviceProductCode: "taxi_reservation" as const,
     };
     await b.service.prepareRuntimeProfileServiceProduct(

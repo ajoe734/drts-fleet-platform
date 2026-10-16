@@ -60,58 +60,92 @@ describe("C107 canonical controller/service/repository (controlled SQL, not PG)"
     },
   );
 
-  it("F2c: simultaneous generated IDs preserve both acknowledged types and existing numeric/explicit IDs", async () => {
-    const db = new ProductSqlBoundary();
-    const a = productInstance(db),
-      b = productInstance(db);
-    await Promise.all([a.service.onModuleInit(), b.service.onModuleInit()]);
-    const receipts = await Promise.all([
-      a.controller.createServiceProduct(
-        enterprise(),
-        "req-generated-enterprise",
-      ),
-      b.controller.createServiceProduct(
-        {
-          ...enterprise(),
+  it.each([false, true])(
+    "same-ID/different-type creates cannot overwrite an ACK, cross-instance=%s",
+    async (cross) => {
+      const db = new ProductSqlBoundary();
+      const a = productInstance(db),
+        b = cross ? productInstance(db) : a;
+      const results = await Promise.allSettled([
+        a.controller.createServiceProduct(enterprise("EXPLICIT-ID")),
+        b.controller.createServiceProduct({
+          ...enterprise("EXPLICIT-ID"),
           serviceProductType: "taxi_realtime",
-          timing: "realtime",
-          allowedLicenseTypes: ["taxi"],
-          defaultBillingMode: "meter",
-        },
-        "req-generated-taxi",
-      ),
-    ]);
-    expect(receipts.map((r) => r.data.resourceId)).toEqual([
-      "SVP-000001",
-      "SVP-000002",
-    ]);
-    expect(db.products.size).toBe(2);
-    await expect(
-      b.controller.createServiceProduct({
-        ...enterprise("SVP-000001"),
+        }),
+      ]);
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      expect(results.filter((r) => r.status === "rejected")).toEqual([
+        expect.objectContaining({
+          reason: expect.objectContaining({ code: "CONFLICT" }),
+        }),
+      ]);
+      expect(db.products.size).toBe(1);
+      expect(db.products.get("EXPLICIT-ID")?.serviceProductType).toBe(
+        "enterprise_dispatch",
+      );
+      const restart = productInstance(db);
+      await restart.service.onModuleInit();
+      expect(await restart.service.getServiceProduct("EXPLICIT-ID")).toEqual(
+        db.products.get("EXPLICIT-ID"),
+      );
+    },
+  );
+
+  it.each([false, true])(
+    "F2c: simultaneous generated IDs preserve both acknowledged types and existing numeric/explicit IDs, cross-instance=%s",
+    async (cross) => {
+      const db = new ProductSqlBoundary();
+      const a = productInstance(db),
+        b = cross ? productInstance(db) : a;
+      await Promise.all([a.service.onModuleInit(), b.service.onModuleInit()]);
+      const receipts = await Promise.all([
+        a.controller.createServiceProduct(
+          enterprise(),
+          "req-generated-enterprise",
+        ),
+        b.controller.createServiceProduct(
+          {
+            ...enterprise(),
+            serviceProductType: "taxi_realtime",
+            timing: "realtime",
+            allowedLicenseTypes: ["taxi"],
+            defaultBillingMode: "meter",
+          },
+          "req-generated-taxi",
+        ),
+      ]);
+      expect(receipts.map((r) => r.data.resourceId)).toEqual([
+        "SVP-000001",
+        "SVP-000002",
+      ]);
+      expect(db.products.size).toBe(2);
+      await expect(
+        b.controller.createServiceProduct({
+          ...enterprise("SVP-000001"),
+          serviceProductType: "travel_agency_transfer",
+        }),
+      ).rejects.toMatchObject({
+        response: { error: { message: "Service product ID already exists." } },
+      });
+      expect(db.products.get("SVP-000001")?.serviceProductType).toBe(
+        "enterprise_dispatch",
+      );
+      await a.controller.createServiceProduct({
+        ...enterprise("SVP-000099"),
         serviceProductType: "travel_agency_transfer",
-      }),
-    ).rejects.toMatchObject({
-      response: { error: { message: "Service product ID already exists." } },
-    });
-    expect(db.products.get("SVP-000001")?.serviceProductType).toBe(
-      "enterprise_dispatch",
-    );
-    await a.controller.createServiceProduct({
-      ...enterprise("SVP-000099"),
-      serviceProductType: "travel_agency_transfer",
-    });
-    const next = await b.controller.createServiceProduct({
-      ...enterprise(),
-      serviceProductType: "insurance_replacement_vehicle",
-    });
-    expect(next.data.resourceId).toBe("SVP-000100");
-    const restarted = productInstance(db);
-    await restarted.service.onModuleInit();
-    expect(
-      (await restarted.controller.listServiceProducts()).data.items,
-    ).toHaveLength(4);
-  });
+      });
+      const next = await b.controller.createServiceProduct({
+        ...enterprise(),
+        serviceProductType: "insurance_replacement_vehicle",
+      });
+      expect(next.data.resourceId).toBe("SVP-000100");
+      const restarted = productInstance(db);
+      await restarted.service.onModuleInit();
+      expect(
+        (await restarted.controller.listServiceProducts()).data.items,
+      ).toHaveLength(4);
+    },
+  );
 
   it("F3: a stale name-only update preserves every committed unsupplied policy field and stable identity", async () => {
     const db = new ProductSqlBoundary();
