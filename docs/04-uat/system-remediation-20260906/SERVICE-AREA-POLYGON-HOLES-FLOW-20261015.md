@@ -300,3 +300,19 @@ All new assertions (including the hand-derived exact ring coordinates) passed on
 | `tests/unit/service-area-polygon-holes-flow-20261015/*` + `c106-service-area-governance.test.ts` | `3 files / 10 tests` passed | `pnpm exec vitest run tests/unit/service-area-polygon-holes-flow-20261015 tests/unit/system-remediation/sr-qa-governance-001/c106-service-area-governance.test.ts` (repo root) |
 
 **R3 scope summary**: modified `packages/ui-web/tests/unit/geometry-editor.test.ts` and `tests/unit/service-area-polygon-holes-flow-20261015/service-area-repository-lifecycle.test.ts` only (both test-only, additive); this document. No production file was touched in R3 — `SAH-R4` was a test-coverage/evidence gap, not a production defect. `apps/ops-console-web`, `apps/platform-admin-web`, and `packages/shared-test-fixtures` full suites and the full `apps/api` suite were **not** re-run in this round (unchanged from R2 §7.5, no files in those scopes touched); hosted CI, protected-branch merge, and independent `Codex` review happen after this candidate is handed off, same as every prior round.
+
+#### 7.6.2 Supplementary full-suite non-regression (owner, before handoff of this exact candidate)
+
+Before handing this candidate to `Codex`, the owner additionally re-ran the suites `§7.6.1` left unexercised, from this worktree, to confirm this round's test-only diff has no collateral effect outside the two touched files:
+
+| Suite | Result | Command (run from the directory shown) |
+| --- | --- | --- |
+| `packages/ui-web` `geometry-editor.test.ts` only | `1 file / 51 tests` passed | `pnpm --filter @drts/ui-web exec vitest run tests/unit/geometry-editor.test.ts` (repo root) |
+| `apps/api` full unit+integration suite | `163 passed / 13 failed` files (`1513 passed / 212 failed` tests) — all 13 failing files are the pre-existing `DATABASE_URL`-dependent integration suites (`fleet-statement-decisions`, `identity-session-db`, `identity-upsert-concurrency-db`, `jwt-session-claims`, `p5-fare-management`, `sr-partner-notify-fix-snapshot-20260927`, `stage1-uat-pg-gate`, `tenant-quota-db-concurrency`, `uv-exec-002/004/005/006`), none of which import or reference `service-area`; `tests/unit/service-area.service.test.ts` itself is `1 file / 38 tests` passed | `pnpm exec vitest run` (`apps/api`) |
+| `apps/ops-console-web` full suite | `10 files / 61 tests` passed | `pnpm --filter @drts/ops-console-web exec vitest run` (repo root) |
+| `apps/platform-admin-web` full suite | `9 files / 73 tests` passed | `pnpm --filter @drts/platform-admin-web exec vitest run` (repo root) |
+| `packages/shared-test-fixtures` full suite | `1 file / 10 tests` passed | `pnpm --filter @drts/shared-test-fixtures exec vitest run` (repo root) |
+| `packages/ui-web` typecheck | clean | `pnpm --filter @drts/ui-web exec tsc -p tsconfig.json --noEmit --incremental false` (repo root) |
+| Scoped `eslint --max-warnings=0` on both R3-touched test files | clean | `pnpm exec eslint packages/ui-web/tests/unit/geometry-editor.test.ts tests/unit/service-area-polygon-holes-flow-20261015/service-area-repository-lifecycle.test.ts --max-warnings=0` (repo root) |
+
+No VM product/dev/preview/HTTP/browser/E2E/PG/Docker servers were started for this supplementary pass; the `apps/api` `DATABASE_URL`-dependent integration failures are a pre-existing local-environment gap (no live Postgres in this worker), not a regression from this diff — confirmed by the failures being limited to files unrelated to `service-area` and asserting `DATABASE_URL` truthiness itself.
