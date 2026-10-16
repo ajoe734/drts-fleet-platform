@@ -27,7 +27,7 @@ CREDENTIAL_KEY = re.compile(
     r"(?i)((?:password|client_secret|api_key|access_token|refresh_token|"
     r"authorization|jwt_secret)\s*[=:]\s*)[^\s,;]+"
 )
-BEARER_OR_PEM = re.compile(r"-----BEGIN |(?i)\bBearer\s+\S+")
+BEARER_OR_PEM = re.compile(r"-----BEGIN |\bBearer\s+\S+", re.IGNORECASE)
 
 
 def require(condition, text):
