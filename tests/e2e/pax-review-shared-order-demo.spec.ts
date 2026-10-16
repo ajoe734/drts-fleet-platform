@@ -529,7 +529,31 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
   try {
     await step("Ops prepare real persisted rehearsal supply", async () => {
       await ops.goto(`${OPS}/review`);
+      const preparing = ops.waitForResponse(
+        (r) =>
+          new URL(r.url()).pathname.endsWith("/ops/review-demo/prepare") &&
+          r.request().method() === "POST",
+      );
       await ops.getByRole("button", { name: "準備虛構演練車司" }).click();
+      const preparedResponse = await preparing;
+      let prepareFailure = "unclassified";
+      if (!preparedResponse.ok()) {
+        const body = await preparedResponse.json().catch(() => null);
+        if (body?.error?.code === "review_supply_unavailable") {
+          const reasons: Record<string, string> = {
+            "Rehearsal product storage is unavailable.": "product-storage",
+            "Reservation product is unavailable.": "reservation-product",
+            "Established rehearsal supply templates are unavailable.":
+              "supply-templates",
+          };
+          prepareFailure =
+            reasons[body.error.message] ?? "review_supply_unavailable";
+        }
+      }
+      expect(
+        preparedResponse.ok(),
+        `Ops prepare status=${preparedResponse.status()} reason=${prepareFailure}`,
+      ).toBe(true);
       await expect(
         ops.getByText("已準備兩組合成車司；未建立訂單、派遣或付款。"),
       ).toBeVisible();

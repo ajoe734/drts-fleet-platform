@@ -83,12 +83,6 @@ export class ReviewSupplyService {
     const exclusivity = this.registry
       .listExclusivities()
       .find((v) => v.vehicleId === "veh-demo-001");
-    if (!template || !contract || !policy || !exclusivity)
-      throw new ApiRequestError(
-        503,
-        "review_supply_unavailable",
-        "Established rehearsal supply templates are unavailable.",
-      );
     const now = new Date().toISOString();
     const start = "2026-01-01T00:00:00.000Z";
     const end = "2099-01-01T00:00:00.000Z";
@@ -123,6 +117,14 @@ export class ReviewSupplyService {
         });
       }
       if (!state.vehicles.some((v) => v.vehicleId === fixture.vehicleId)) {
+        // Durable registry refresh replaces bootstrap-only seed templates.
+        // Existing rehearsal vehicles need no template to be prepared again.
+        if (!template || !contract || !policy || !exclusivity)
+          throw new ApiRequestError(
+            503,
+            "review_supply_unavailable",
+            "Established rehearsal supply templates are unavailable.",
+          );
         await repository.persistChanges({
           vehicles: [
             {
@@ -288,20 +290,17 @@ export class ReviewSupplyService {
         fixture.vehicleId,
         fixture.driverId,
       );
-    for (const fixture of REVIEW_SUPPLY) {
-      if (
-        !this.registry
-          .listLatestDriverLocations()
-          .some((location) => location.driverId === fixture.driverId)
-      )
-        await this.registry.recordDriverLocation({
-          driverId: fixture.driverId,
-          lat: 25.0142,
-          lng: 121.4636,
-          accuracyM: 5,
-          recordedAt: now,
-        });
-    }
+    // This is an explicitly simulated external GPS source. Preparing another
+    // rehearsal refreshes its ordinary persisted heartbeat, including after
+    // a restart; an existing stale location must not masquerade as ready supply.
+    for (const fixture of REVIEW_SUPPLY)
+      await this.registry.recordDriverLocation({
+        driverId: fixture.driverId,
+        lat: 25.0142,
+        lng: 121.4636,
+        accuracyM: 5,
+        recordedAt: now,
+      });
     return {
       simulated: true,
       fleetPartnerId: fleet.fleetPartnerId,
