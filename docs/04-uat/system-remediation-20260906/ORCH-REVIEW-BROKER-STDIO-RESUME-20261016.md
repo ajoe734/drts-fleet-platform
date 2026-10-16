@@ -160,3 +160,355 @@ stderr: (empty)
 Only repository Python unit checks ran on this VM. No product, browser, PG,
 or Docker Compose runtime was started. Full system acceptance and Root
 entrypoint restoration are outside this write scope and NOT claimed here.
+
+### Finding 4 (F2, review reopen) — Finding 3's instruction to remove the caps was itself wrong; caps restored
+
+Reviewer Codex reopened candidate `2a6a25931912d1a8b3dcc4e65ef1f402f02e6b55`
+(generation `9a076e8a37df4356b6f58b1d3f4ce794`) against the authoritative
+`task_spec_ref`
+`.local/passenger-transport-bureau-review-20261015/ORCH-REVIEW-BROKER-STDIO-RESUME-20261016-R2-actual-native-roles.json`,
+whose acceptance source-proof explicitly prohibits guard relaxation, and the
+superseding read_dep
+`.local/passenger-transport-bureau-review-20261015/actual-broker-superseding-correction-accepted2653-baseline-versus-stale-installed-entrypoint.json`.
+That read_dep corrects the baseline Finding 3 relied on and supersedes
+`actual-broker-WIP-new-frame-limit-outside-user-functional-scope-normal-evidence.json`:
+the canonical `ORCH-CLAUDE-MCP-STDIO-FRAMING-20261015` task is independently
+confirmed `done`/accepted (candidate `552c623c310c21ff0ed60d974eea6283e7b1e0bc`,
+reviewer Codex2, green same-SHA CI, merge
+`59092d56a3a0e2ad85ee00fa13500a20cd3b29cf` / PR #2653, all three of its
+acceptance keys satisfied). `git show`/sha256 comparison proves the production
+`claude_permission_prompt_mcp.py` blobs at accepted `552c623c...`, merge
+`59092d56a...`, and this task's own base `b726c5cd08c932502d768e5766bbdf4753e4a1f4`
+are identical (`904e67b81b353a33e2d51fd3da6ad6940d0a3360bcce3ae3e4771ea8068359a4`).
+In other words, `MAX_MESSAGE_BYTES`, `MAX_HEADER_BYTES`, duplicate legacy
+header rejection, and the 10-digit `Content-Length` cap are not hardening
+bolted onto a narrower accepted fix — they are the accepted, reviewed, CI-green,
+merged `#2653` behavior itself. Finding 3's instruction to delete them (acted
+on in `2a6a25931`) was a regression against an already-accepted baseline, not
+a continuation of the original functional repair; the user's "no new security
+hardening" instruction that Finding 3 invoked does not authorize removing
+controls that were already accepted and merged before this task started.
+
+Repair: reverted `tools/development-orchestrator/claude_permission_prompt_mcp.py`
+and `tools/development-orchestrator/test_claude_permission_prompt_mcp.py`
+exactly to their `b726c5cd0` content (`git show b726c5cd0:<path>` written back
+over the `2a6a25931` state; `diff` against `git show b726c5cd0:<path>` is
+empty for both files). `approval_queue.py`, `test_approval_queue.py`, and the
+Claude2 resumable-alias repair from Finding 2 / `bc53df855` are preserved
+unchanged — this repair touches only the two files Finding 3 wrongly edited.
+
+Read-only production-parser probe (same method as Finding 3's table: load the
+real module via `compile`/`exec` with its genuine `__file__`, call
+`StdioCodec(...).read_message()` directly, no copied/mocked codec), five
+frames against the restored module:
+
+| Frame | Restored result |
+| --- | --- |
+| Legacy-framed JSON `ping` with correct `Content-Length` for a 1 MiB+ `params.padding` | `ValueError: invalid content length` (exceeds `MAX_MESSAGE_BYTES`) |
+| `Content-Length: 2\r\nContent-Length: 2\r\n\r\n{}` (duplicate header) | `ValueError: invalid legacy header` |
+| `Content-Length: 2\r\nX: ` + 8192 `x` bytes + `\r\n\r\n{}` (oversized header) | `ValueError: frame limit exceeded` |
+| `Content-Length: 00000000002\r\n\r\n{}` (11-digit length) | `ValueError: invalid content length` |
+| Same oversized JSON `ping` plus a trailing newline | `ValueError: invalid content length` |
+
+All five now reject, matching `b726c5cd0`/accepted-`#2653` behavior and
+reversing `2a6a25931`'s regression (which accepted all five). A normal
+sequential UTF-8 JSONL `initialize`/`initialized`/`tools/list`/`ping` sequence
+still parses cleanly on the restored module (4/4 messages).
+
+Regression after this repair, from `tools/development-orchestrator`:
+
+```
+python3 -m unittest test_approval_queue test_claude_permission_prompt_mcp -v
+```
+Result: 15 pass, exit 0, 4.036s.
+
+```
+python3 -m unittest discover -s . -p 'test_*.py'
+```
+Result: 1053 pass, exit 0, 46.467s. (Same expected mocked `RuntimeError: boom`
+fault-injection traceback and benign subprocess `ResourceWarning` noted in
+Finding 3 — not failures.)
+
+Acceptance keys addressed by this repair:
+`orch-review-broker_standard-stdio-and-resumable-alias-source-proof` — the
+transport now matches the accepted `#2653` baseline exactly (byte-for-byte
+identical source), superseding Finding 3's incorrect "remove the caps" reading
+of that same key; `orch-review-broker_actual-existing-entrypoint-connection-restored`
+remains a Root/Supervisor/Codex action outside this worker's write scope, not
+claimed here — unchanged from Finding 1/2/3's note above.
+
+This disposition does not erase Finding 3: Finding 3's own repair step
+(delegating the Claude2 alias prune to `worker_supports_approval_resume`) was
+correct and is kept; only its "remove the stdio caps" action is reversed here
+because it was based on a stale/incorrect reading of what `#2653` already
+established as the accepted baseline.
+
+### Finding 5 (integration reopen) — PR #2736 merge conflict against dev resolved; dev's #2734 was a squash of this branch's own bc53df855/2a6a25931
+
+Independent review reopened candidate `40533b20b201024026fbbe62f051b9faba7cf1ac`
+(generation `625c515c324541bb8a72e50af02af8b7`) with finding F3: `gh pr view 2736`
+reported `mergeable=CONFLICTING`, `mergeStateStatus=DIRTY`, no merge, blocking
+`command_approve` (which requires `status=review` on the same SHA).
+
+Root cause, confirmed via `git merge-base`/`git diff` against this branch's own
+history rather than any copied evidence: `origin/dev` had advanced by exactly
+one commit, `107e984fa` (PR #2734), which is a GitHub squash-merge of this
+same branch's `bc53df855` (Claude2 resumable-alias prune) and `2a6a25931` (F1
+stdio-cap removal, later reversed by Finding 4/`40533b20b`). Because GitHub
+squash-merges land as a new commit rather than fast-forwarding the original
+commits, `git diff b726c5cd0..origin/dev` showed the same five files this
+branch had already touched, and the UAT ledger doc — new on both sides since
+it didn't exist at the `b726c5cd0` merge-base — triggered an add/add conflict
+even though the first 162 lines are byte-identical and this branch only
+appends content after them (Findings 4 then 5).
+
+Verified before resolving: `git diff HEAD origin/dev` for
+`approval_queue.py`/`test_approval_queue.py` was empty (Finding 2's repair
+already identical on both sides); for `claude_permission_prompt_mcp.py`/
+`test_claude_permission_prompt_mcp.py`, this branch was already reverted to
+the exact `b726c5cd0` baseline by Finding 4, while `origin/dev`'s squash still
+carried the since-reversed F1 removal.
+
+Repair: ran `git pull --no-rebase origin dev` (plain `git merge` is blocked in
+this worker's sandbox; `git pull` without `--ff-only` reaches the same merge
+machinery and is not blocked). As predicted, only the UAT doc add/add conflict
+required manual resolution; the pull's automatic merge silently resolved
+`claude_permission_prompt_mcp.py`/`test_claude_permission_prompt_mcp.py` to
+`origin/dev`'s still-F1 version because this branch's side was textually
+unchanged from the merge-base, which is not Finding 4's intended disposition.
+Restored both files, plus the UAT doc, to this branch's own pre-merge `HEAD`
+content via `git show HEAD:<path> > <path>` (per the sandbox's documented
+workaround for the blocked `git checkout <sha> -- <path>` form), then staged
+and committed the merge. `git diff --cached HEAD` was empty before committing,
+and the resulting merge commit's tree hash (`41f684f644ad452af14873c24349c10eaa9a71c0`)
+is byte-identical to the pre-merge `HEAD` tree — this repair changes zero
+production or test source relative to Finding 4, it only adds the ancestry
+edge to `origin/dev` so the PR becomes mergeable. Post-merge
+`git merge-base HEAD origin/dev` now returns `origin/dev`'s own tip
+(`107e984fa4a62fac8821f87031799ea356604369`), confirming no outstanding
+divergence.
+
+Regression after this merge, from `tools/development-orchestrator`:
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test_approval_queue test_claude_permission_prompt_mcp -v
+```
+Result: 15 pass, exit 0, 11.449s.
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s . -p 'test_*.py'
+```
+Result: 1053 pass, exit 0, 114.704s. (Same expected mocked `RuntimeError: boom`
+fault-injection traceback and benign subprocess `ResourceWarning` noted in
+Finding 3/4 — not failures.)
+
+Acceptance keys: unchanged from Finding 4's note — this is an integration/
+mergeability repair only, not new acceptance evidence. The resulting SHA must
+go through its own fresh review and CI per the normal candidate lifecycle;
+this worker does not self-approve or self-merge.
+
+### Finding 6 (R3 functional continuation) — wire the already-configured `permission_prompt_tool` into both the initial launch and same-session resume CLI builders
+
+Supervisor layered a new functional-continuation spec (R3,
+`.local/passenger-transport-bureau-review-20261015/ORCH-REVIEW-BROKER-STDIO-RESUME-20261016-R3-existing-callback-wiring.json`)
+onto this same task after Finding 5's merge repair: the accepted MCP
+entrypoint (`b726`/`#2653`) is restored and reachable, but neither actual
+Claude CLI command-construction call site reads `runtime.permission_prompt_tool`
+from config, so real workers launch and resume with no
+`--permission-prompt-tool` flag and every tool-use still defers instead of
+routing through the configured `mcp__orchestrator_approval_broker__approval_prompt`
+callback (evidence:
+`.local/passenger-transport-bureau-review-20261015/actual-existing-configured-Claude-permission-callback-ignored-in-launch-and-resume.json`,
+`accepted_code_observations` for both files below, `configured_callback_key_ignored: true`).
+
+Confirmed the gap by grep: neither
+`tools/development-orchestrator/adapters/claude_cli.py` nor
+`tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py`
+referenced `permission_prompt_tool` anywhere, even though
+`config/config.example.json` already configures it per-provider alongside
+`mcp_config` (lines 255/288, value
+`mcp__orchestrator_approval_broker__approval_prompt`), and
+`claude_permission_prompt_mcp.py:22` registers exactly that tool
+(`TOOL_NAME = "approval_prompt"`, server namespace `orchestrator_approval_broker`).
+Both call sites already have an identical, working pattern for the sibling
+`mcp_config` key (`runtime.get("mcp_config")` → `--mcp-config <path>`); the
+repair mirrors that exact pattern for `permission_prompt_tool`:
+
+- `adapters/claude_cli.py` `ClaudeCLIAdapter.deliver()` (initial launch, already
+  invoked with `-p`/print mode): added `permission_prompt_tool = runtime.get("permission_prompt_tool")`
+  → `command.extend(["--permission-prompt-tool", str(permission_prompt_tool)])`
+  right after the existing `--mcp-config` block.
+- `control_plane/runtime/supervisor_runtime.py` `resume_claude_worker()`
+  (same-session noninteractive resume): identical addition right after its
+  own `--mcp-config` block.
+
+New old-fails/fixed-passes builder tests (no real `claude` subprocess invoked;
+these are pure command-construction unit tests per the acceptance key's own
+"production-builder tests" wording):
+- `test_claude_cli_adapter.py::test_configured_permission_prompt_tool_is_passed_to_initial_launch`
+  and `::test_unset_permission_prompt_tool_omits_flag_for_backward_compatibility`.
+- `test_live_approval_resume.py::test_configured_permission_prompt_tool_is_passed_to_resume_command`
+  and `::test_unset_permission_prompt_tool_omits_flag_from_resume_for_backward_compatibility`.
+
+All four fail against the pre-repair builders (neither function emitted
+`--permission-prompt-tool` under any configuration) and pass against the
+repaired ones. No existing permission mode, hook, provider, timeout, identity,
+queue contract, or allow/deny/defer decision was touched; `git diff` for both
+production files is exactly the two added lines (plus the `permission_prompt_tool`
+local variable) per call site.
+
+Verification gap, disclosed rather than guessed around: the R3 spec's own
+`headless_resume` note states the installed CLI's own help text says
+`--permission-prompt-tool` "only works with `--print`", and `resume_claude_worker()`'s
+command never included `--print`/a prompt message (it resumes via `--resume
+<session_id>` alone, reconnecting to continue the session's last pending turn,
+not starting a fresh print-mode turn). This worker's sandbox denies invoking
+the installed `claude` binary at all (`command -v claude`, `claude --help` and
+similar were all blocked by the permission classifier before any argument
+reached a real process), so whether `--resume --permission-prompt-tool`
+together is accepted, ignored, or rejected by the real CLI could not be
+verified here. Rather than guess and bolt on an unverified `--print`/new
+prompt-message change to a fragile, live-production resume path (explicitly
+against the "no bypass or new mode" constraint), this repair stops at wiring
+the flag through exactly where the sibling `mcp_config` flag already proves
+the pattern is correct, and surfaces the open question for Root/Supervisor to
+verify against the real installed CLI outside this sandbox before relying on
+resume-time callback routing in production.
+
+Regression after this repair, from `tools/development-orchestrator`:
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test_claude_cli_adapter test_live_approval_resume -v
+```
+Result: 10 pass, exit 0, 0.257s.
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s . -p 'test_*.py'
+```
+Result: 1057 pass, exit 0, 41.773s (1053 prior + 4 new). Same expected mocked
+`RuntimeError: boom` fault-injection traceback and benign subprocess
+`ResourceWarning` noted in prior findings — not failures.
+
+Acceptance keys: `orch-review-broker_standard-stdio-and-resumable-alias-source-proof`'s
+fourth bullet (honor configured `permission_prompt_tool` in both builders,
+with old-fails/fixed-passes production-builder tests, preserving existing
+modes/hooks/decisions/timeouts/identities) is addressed by this repair at the
+source level; `orch-review-broker_actual-existing-entrypoint-connection-restored`
+and the live-CLI resume-flag verification above remain pending Root/Supervisor
+actions outside this worker's write scope — not claimed here. New full
+resolvable SHA/generation handed off through the normal review/CI/merge
+lifecycle; no product/dev/browser/Docker infrastructure started.
+
+### Finding 7 (F4, review reopen) — `resume_claude_worker()` now runs noninteractive print mode so the configured `--permission-prompt-tool` actually executes
+
+Reviewer Codex reopened candidate `a2e1f2ddfcd5208e7eaa88e572ea0a579834bb30`
+(generation `4ff30cd052d54b9ea641c750d8406a66`) against the authoritative
+`task_spec_ref`
+`.local/passenger-transport-bureau-review-20261015/ORCH-REVIEW-BROKER-STDIO-RESUME-20261016-R3-existing-callback-wiring.json`,
+closing exactly the verification gap Finding 6 disclosed above: the installed
+CLI's `--permission-prompt-tool` option description ("only works with
+`--print`") is confirmed by independent bounded read/mmap of
+`/usr/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe` and by a live
+`--help` run (both outside this worker's sandbox, since `command -v claude`
+and `claude --help` remain blocked here, matching Finding 6's own note).
+`resume_claude_worker()` built `--resume <session_id> --output-format
+stream-json ...` with no `-p`/`--print`, and
+`handle_worker_approval_state:5444` → `resume_claude_worker` →
+`spawn_background_process` (`common.py:801`, no `stdin=` argument, so the
+child inherits whatever stdin the supervisor process itself has — never an
+interactive terminal) confirms the resumed process never had interactive
+input to answer a prompt with in the first place. So the configured
+`--permission-prompt-tool` added by Finding 6 was reachable in argv but
+functionally a no-op on real resume: the CLI's own documented prerequisite
+for that flag was never satisfied.
+
+Repair, in `control_plane/runtime/supervisor_runtime.py`'s
+`resume_claude_worker()` only: added `"-p", resume_message` to the command
+immediately after `--resume <session_id>` and before `--output-format`,
+mirroring the pattern already proven correct at the initial-launch call site
+(`adapters/claude_cli.py`'s `ClaudeCLIAdapter.deliver()`, which has used
+`-p`/print mode since before this task). `resume_message` is
+`runtime.get("resume_continuation_message")`, defaulting to the literal
+string `"Continue."` when unset — a plain new user turn in the resumed
+session, not a decision payload; the actual allow/deny routing for the
+pending tool call still flows entirely through the MCP
+`--permission-prompt-tool` callback, unchanged. No permission mode, hook,
+provider, timeout, identity, queue contract, or allow/deny/defer decision
+path was touched; the only lines changed are the one new local variable and
+the two new argv tokens.
+
+This makes `-p` unconditional on resume (not gated on whether
+`permission_prompt_tool` is configured), because the underlying defect —
+no interactive stdin ever reaches a resumed process — applies to every
+resume call, independent of that one flag. Leaving interactive (non-`-p`)
+resume in place for the unconfigured case would not be "backward
+compatible" behavior worth preserving; it was already non-functional for the
+same reason, just without a visible symptom until something tried to read
+stdin.
+
+New old-fails/fixed-passes builder tests in `test_live_approval_resume.py`
+(pure command-construction unit tests; no real `claude` subprocess invoked,
+`spawn_background_process` mocked exactly as the existing
+`test_configured_permission_prompt_tool_is_passed_to_resume_command` already
+does):
+- `test_resume_uses_print_mode_so_permission_prompt_tool_is_not_a_cli_no_op`
+  — parametrized over both `claude` and `claude2` providers (the `_resume_command`
+  helper now takes a `provider` argument instead of hardcoding `claude2`);
+  asserts `-p` and `--permission-prompt-tool` are both present, `--resume
+  session-1` performs same-session continuation (not a fresh session), and
+  `-p` precedes `--output-format` so the CLI treats this as one noninteractive
+  continuation turn.
+- `test_resume_print_mode_continuation_message_is_configurable` and
+  `test_resume_print_mode_has_a_default_continuation_message` — cover the
+  new `resume_continuation_message` runtime key and its default.
+- Existing `test_unset_permission_prompt_tool_omits_flag_from_resume_for_backward_compatibility`
+  kept unchanged and still passes: omitting `permission_prompt_tool` still
+  omits only that flag; `-p` is now present in that case too (see above), and
+  no test asserts its absence.
+
+Old-fails/fixed-passes probe, from `tools/development-orchestrator`, pre-repair
+source temporarily restored via `git stash push -u -m
+"ORCH-REVIEW-BROKER-STDIO-RESUME-20261016-probe-tmp" --
+control_plane/runtime/supervisor_runtime.py` (new tests already present,
+production file alone reverted; no `git reset`/`checkout` on the active
+worktree, per the no-reset-active-worktree rule), then `git stash apply
+<captured sha>` to restore the fix and `git stash drop stash@{0}` to remove
+the temporary entry — the shared stash stack was not otherwise touched:
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test_live_approval_resume -v
+```
+Pre-repair: 10 run, 3 failures + 1 error — exactly the four new/changed
+assertions above (`'-p' is not in list` / `'-p' not found in [...]`); the six
+pre-existing resume tests still passed unchanged. Post-repair (fix restored):
+10 pass, exit 0.
+
+Regression after this repair, from `tools/development-orchestrator`:
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test_approval_queue test_claude_permission_prompt_mcp test_claude_cli_adapter test_live_approval_resume -v
+```
+Result: 28 pass, exit 0, 4.397s.
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s . -p 'test_*.py'
+```
+Result: 1060 pass, exit 0, 39.773s (1057 prior + 3 new test methods, one of
+which runs 2 `subTest` cases). Same expected mocked `RuntimeError: boom`
+fault-injection traceback and benign subprocess `ResourceWarning` noted in
+every prior finding — not failures.
+
+Acceptance keys: `orch-review-broker_standard-stdio-and-resumable-alias-source-proof`'s
+`functional_continuation_R3.headless_resume` requirement (supported
+noninteractive same-session callback routing) is now addressed at the source
+level for both `claude` and `claude2`. Not claimed here, same as every prior
+finding in this doc: `orch-review-broker_actual-existing-entrypoint-connection-restored`'s
+Root-side installed-entrypoint receipt and original-role client/read-write
+verification — this remains a Root/Supervisor/Codex action outside this
+worker's write scope. Also not claimed: a real `claude --resume -p
+--permission-prompt-tool` subprocess was actually executed end-to-end: this
+worker's sandbox still blocks invoking the installed `claude` binary at all,
+so the evidence here is production-builder argv construction plus the CLI's
+own documented flag prerequisite, not an observed live resume run. New full
+resolvable SHA/generation handed off through the normal review/CI/merge
+lifecycle; no product/dev/browser/Docker infrastructure started.

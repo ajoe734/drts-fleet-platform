@@ -5020,10 +5020,13 @@ def resume_claude_worker(
     cli = command_exists(runtime.get("cli") or "claude")
     if not cli:
         return None
+    resume_message = str(runtime.get("resume_continuation_message") or "Continue.")
     command = [
         runtime.get("cli") or cli,
         "--resume",
         str(session_id),
+        "-p",
+        resume_message,
         "--output-format",
         runtime.get("output_format", "stream-json"),
     ]
@@ -5049,6 +5052,9 @@ def resume_claude_worker(
     mcp_config = runtime.get("mcp_config")
     if mcp_config:
         command.extend(["--mcp-config", str(config_path(config, "claude_mcp_config"))])
+    permission_prompt_tool = runtime.get("permission_prompt_tool")
+    if permission_prompt_tool:
+        command.extend(["--permission-prompt-tool", str(permission_prompt_tool)])
     log_path = config_path(config, "state_file").parent / "logs" / f"{new_runtime_id(f'{provider_key}-resume')}.log"
     env = os.environ.copy()
     runtime_overrides = runtime_env_overrides(runtime)
