@@ -185,4 +185,46 @@ provider responses explicitly identified. No validator is replaced or weakened.
 
 All local evidence below is in this assigned worktree's
 `.local/pax-receipt-e04-capture-20261015/`. Commands run with Node 22 / pnpm
-10.33.0 / Vitest 4.1.4; exact local results and hosted status follow below.
+10.33.0 / Vitest 4.1.4 (Node `v22.23.2`); exact local results and hosted status
+follow below.
+
+| Check                                                                                                                              | Result                                                                                                                           | Evidence                                                                                                                                                                                                                                                                                                                      |
+| ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm --filter @drts/contracts build` then `pnpm --filter @drts/control-plane-auth build` then `pnpm --filter @drts/api typecheck` | Exit 0 for the complete sequential command, shell session `83365`                                                                | Worker tool transcript; completed and read before handoff                                                                                                                                                                                                                                                                     |
+| `pnpm exec tsc -p tests/unit/pax-receipt-e04-capture-20261015/tsconfig.json --noEmit`                                              | Exit 0; includes E04 tests, imported production paths/harness and the changed three-journey browser spec                         | `scoped-typecheck.log` (empty success output)                                                                                                                                                                                                                                                                                 |
+| `git diff --name-only b726c5cd0 -- '*.ts' '*.tsx'` piped to `pnpm exec eslint --max-warnings=0`                                    | Exit 0                                                                                                                           | `eslint.log` (empty success output)                                                                                                                                                                                                                                                                                           |
+| Changed TS/TSX/MD/JSON paths piped to `pnpm exec prettier --check`; `git diff --check`                                             | Exit 0 after formatting the new before-source loader                                                                             | Worker shell session `42042`; earlier formatting-only failure was corrected                                                                                                                                                                                                                                                   |
+| `pnpm typecheck:root`                                                                                                              | **Exit 2**, 75 diagnostics; not a full-root pass                                                                                 | `root-typecheck.log`: unresolved `@drts/tenant-auth` / `@drts/passenger-client` workspace dependencies, and canonical-vs-worktree private `ApiClient` type identities among the errors. Root `node_modules` and API dependencies are canonical symlinks in this worker. No change to these unrelated source files is proposed |
+| Initial expanded regression                                                                                                        | **Exit 1**, 501 passed / 1 failed / 5 hosted cases skipped                                                                       | `regression.log`, `regression.json`. Unchanged `review-context.test.tsx` expected its explicit `apps/passenger-app-web/node_modules/next/navigation` mock path, which was missing here; isolated rerun reproduced the same failure (`review-context-isolated.log`)                                                            |
+| Restore only the ignored local Next dependency link and rerun Review Context                                                       | Exit 0, 3 passed                                                                                                                 | `ln -s ../../node_modules apps/passenger-app-web/node_modules`; `pnpm exec vitest run tests/unit/pax-review-shared-order-demo-20261015/review-context.test.tsx`; `review-context-linked.log`. No tracked source/test change                                                                                                   |
+| Entire expanded regression after restoring dependency link, source `691d4e9aef362bbf41c836fdcf5b34946f69b0bf`                      | **Exit 0**, 41 files passed / 4 hosted files skipped; **502 tests passed / 5 hosted tests skipped**, no failures, 121.76 seconds | `regression-linked.log`, `regression-linked.json`; all started checks have ended and their results have been read                                                                                                                                                                                                             |
+
+The expanded regression command (also rerun after restoring that dependency
+link) is:
+
+```sh
+pnpm exec vitest run \
+  tests/unit/pax-receipt-e04-capture-20261015 \
+  tests/unit/pax-receipt-complaint-20261009 \
+  tests/unit/pax-review-shared-order-demo-20261015 \
+  tests/unit/owned-mobility.test.ts \
+  tests/unit/fleet-partner.service.test.ts \
+  tests/unit/fleet-partner.repository.test.ts \
+  tests/unit/regulatory-registry.test.ts \
+  tests/unit/platform-fleet-partner-persistence-ack-20261015/persistence.test.ts \
+  tests/unit/driver-completion-actual-fare-input-20261013/actual-fare.test.ts \
+  --reporter=default --reporter=json \
+  --outputFile.json=.local/pax-receipt-e04-capture-20261015/regression-linked.json
+```
+
+Hosted PG/HTTP/browser checks and shared-dev smoke are **not executed on this
+VM**. The PR candidate must receive its own complete hosted checks, independent
+review and normal merge. Neither required acceptance key is satisfied by local
+fixtures, a preparation anchor or a historical candidate/deployment.
+
+Durable machine evidence is also copied to the canonical local artifact folder:
+`/home/lupin/workspace/drts-fleet-platform/.local/passenger-transport-bureau-review-20261015/e04-codex-owner-20261016/source-691d4e9ae/`.
+Its `SHA256SUMS` identifies the logs/reports; `candidate.json` records the final
+pushed candidate, PR and source/evidence identity. The final candidate adds this
+check ledger to the already verified source. Review/CI/merge and both acceptance
+keys must bind to the final full candidate SHA recorded by the handoff CLI.
