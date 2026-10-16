@@ -266,3 +266,20 @@ All checks launched in this dispatch completed and were read:
 
 These are progress checkpoints only. Retain the original task and reviewer, and
 resume production repair after Supervisor records the precise additional scope.
+
+### 2026-10-16 00:26 UTC scope-gated recheck
+
+At clean published checkpoint `21056c9cca703196049e3c43e2c50d05e50ad3d7`,
+the release CLI still reports the same eight scopes and excludes
+`apps/api/src/modules/identity/identity.controller.ts`. Re-ran the exact minimal
+controller/repository command above: Vitest 4.1.4, exit 1, **4 PASS / 1 FAIL**;
+only HTTP string `"true"` fails with expected `revoked`, received `undefined`.
+The command completed and its output was read. Log:
+`.local/platform-session-csrf/resume-20261016-query-reproduction.log`, SHA-256
+`6ff492f55c716a1099bc96d8481422c8c5e600a3317c7aa2b6a0e0ccc8fd9774`.
+Local HEAD and the remote execution branch were identical; no product source
+changed and `git diff --check` passed. This recheck confirms the existing repair
+boundary; it adds no passing readback, candidate or acceptance credit. Ordinary
+Supervisor conflict check and the exact controller scope grant remain necessary
+before the original owner can perform the documented normalization and full
+regression. No runtime was started.
