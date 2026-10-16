@@ -402,19 +402,19 @@ modules and original tests are retained with original Codex lineage. Full patch,
 per-hunk identifiers and accepted/old blob identities are recorded in
 `.local/platform-session-csrf-r6/per-hunk-lineage.v1.json`.
 
-| Path / original hunk | Current behavior → retained necessary repair |
-| --- | --- |
-| Proxy `forward`, import + revoke-family branch | No CSRF check → same-origin signed proof before auth/fetch, only original revoke family |
-| IAM client import + `revokeSession` options | No proof acquisition → await local proof and attach header; direct bearer unchanged |
-| New browser helper, all lines | No supplier → fail-closed GET, no retry, same-origin credentials/referrer |
-| New server helper, all lines | No verifier → random token, constant-time equality, signed host/origin binding, approved Origin/Referer semantics |
-| New GET route, all lines | No route → no-store proof, secure host cookie, fail-closed supply |
-| Controller `listAdminSessions`, query type + effectiveQuery | HTTP string loses revoked row → only boolean true or exact HTTP true opts in |
-| r05 import/cleanup + two revoke fixtures/assertions | Original outcomes preserved with explicit proof transport |
-| Boundary test, all cases | Retain every original lawful/denial/transport control |
-| Mounted test, all cases | Retain actual component chain, canonical selected-session/refresh-family readback, 403-stop and failure truth |
-| Query test, all 14 cases | Retain original minimal production controller/repository regression |
-| UAT, historical body + current section | Preserve old evidence as dated history and append fresh results; no transfer of old CI/review credit |
+| Path / original hunk                                        | Current behavior → retained necessary repair                                                                      |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Proxy `forward`, import + revoke-family branch              | No CSRF check → same-origin signed proof before auth/fetch, only original revoke family                           |
+| IAM client import + `revokeSession` options                 | No proof acquisition → await local proof and attach header; direct bearer unchanged                               |
+| New browser helper, all lines                               | No supplier → fail-closed GET, no retry, same-origin credentials/referrer                                         |
+| New server helper, all lines                                | No verifier → random token, constant-time equality, signed host/origin binding, approved Origin/Referer semantics |
+| New GET route, all lines                                    | No route → no-store proof, secure host cookie, fail-closed supply                                                 |
+| Controller `listAdminSessions`, query type + effectiveQuery | HTTP string loses revoked row → only boolean true or exact HTTP true opts in                                      |
+| r05 import/cleanup + two revoke fixtures/assertions         | Original outcomes preserved with explicit proof transport                                                         |
+| Boundary test, all cases                                    | Retain every original lawful/denial/transport control                                                             |
+| Mounted test, all cases                                     | Retain actual component chain, canonical selected-session/refresh-family readback, 403-stop and failure truth     |
+| Query test, all 14 cases                                    | Retain original minimal production controller/repository regression                                               |
+| UAT, historical body + current section                      | Preserve old evidence as dated history and append fresh results; no transfer of old CI/review credit              |
 
 Before production edits, `pnpm exec vitest run
  tests/unit/platform-session-revocation-browser-csrf-flow-20261015` invoked real
@@ -429,3 +429,24 @@ repair; original refs remain preserved.
 Current machine-specific logs, preflight and complete per-hunk ledger live under
 this assigned worktree's `.local/platform-session-csrf-r6/`. Fresh full checks,
 exact candidate lock and external gates are pending at this checkpoint.
+
+### R6 additional compatibility finding and check history
+
+At production checkpoint `a9560779f047045ef1bf3a408e3917b5140faaae`, the
+original app-local `tests/unit/iam-security-ui.test.ts` found that attaching an
+empty headers object changed the direct API caller's request options shape:
+3 PASS / 1 FAIL, exit 1 (`app-iam-regression.log`). This is an additional
+compatibility finding, not a reason to weaken the old assertion. The scoped
+`revokeSession` fix awaits the same supplier and includes headers only when
+nonempty. Direct bearer requests retain the original options shape; local BFF
+proof failures still stop before POST. The unchanged app test rerun passes 4/4,
+exit 0 (`app-iam-fixed.log`). This is a new small R6 hunk beyond retained a967.
+
+The first full 178-case run at a956 completed with 177 PASS / 1 FAIL, exit 1
+(`full.log`): the mounted lawful case exceeded its existing 5000ms timeout while
+seven checks were launched concurrently. The earlier scoped 52-case run passed
+that exact assertion. Preserve this failure; no assertion or timeout was changed.
+A fresh full run after the compatibility fix and with fewer parallel checks is
+required before handoff. Initial API typecheck also failed on absent worktree-local
+contracts/control-plane dist declarations and stale canonical dependency types;
+normal local build prerequisites and rerun are recorded separately.

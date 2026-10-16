@@ -65,13 +65,14 @@ export class PlatformAdminIamClient {
     sessionId: string;
     session: MaskedSessionSummary | null;
   }> {
+    const headers = await identitySessionCsrfHeaders(this.client.baseUrl);
     return this.client.post<{
       revoked: boolean;
       sessionId: string;
       session: MaskedSessionSummary | null;
     }>(`/identity/sessions/${encodeURIComponent(sessionId)}/revoke`, {
       body: command,
-      headers: await identitySessionCsrfHeaders(this.client.baseUrl),
+      ...(Object.keys(headers).length ? { headers } : {}),
     });
   }
 
