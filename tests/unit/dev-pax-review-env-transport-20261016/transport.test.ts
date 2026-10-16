@@ -41,14 +41,17 @@ function runScalar(block: string) {
 }
 function render(script: string, outputs: Record<string, string>) {
   return script.replace(/\$\{\{\s*(.*?)\s*\}\}/g, (_, key: string) => {
-    if (!(key in outputs))
+    const value = outputs[key];
+    if (value === undefined)
       throw new Error(`Missing expression fixture: ${key}`);
-    return outputs[key];
+    return value;
   });
 }
 function flag(args: string[], name: string) {
   expect(args.filter((arg) => arg === name)).toHaveLength(1);
-  return args[args.indexOf(name) + 1];
+  const value = args[args.indexOf(name) + 1];
+  if (value === undefined) throw new Error(`Missing flag value: ${name}`);
+  return value;
 }
 // Fixture decoder for the workflow's explicit ^@^ CLI format, not a substitute
 // for gcloud validation. Keep '=' inside base64 values and ',' inside JSON/CSV.
@@ -173,7 +176,14 @@ if (args[0] === 'run' && args[1] === 'services' && args[2] === 'describe') {
     env.GITHUB_OUTPUT = path.join(directory, outputName);
     const result = spawnSync(
       "bash",
-      ["--noprofile", "--norc", "-euo", "pipefail", "-c", render(script, outputs)],
+      [
+        "--noprofile",
+        "--norc",
+        "-euo",
+        "pipefail",
+        "-c",
+        render(script, outputs),
+      ],
       { cwd: directory, env, encoding: "utf8", timeout: 10000 },
     );
     expect(result.error).toBeUndefined();
@@ -198,19 +208,21 @@ if (args[0] === 'run' && args[1] === 'services' && args[2] === 'describe') {
   const deploy = step("Deploy — api");
   if (!options.old) {
     // Use the actual step.env binding rather than silently injecting a fix.
-    const binding = deploy.match(/^          API_ENV_VARS: (.*)$/m)?.[1];
+    const binding = deploy.match(/^ {10}API_ENV_VARS: (.*)$/m)?.[1];
     expect(binding).toBeDefined();
     env.API_ENV_VARS = render(binding!, outputs);
   }
   execute(options.old ? oldRun : runScalar(deploy), "deploy-output");
   const args: string[] = JSON.parse(readFileSync(env.ARGV_CAPTURE!, "utf8"));
   const transported = flag(args, "--set-env-vars");
+  const mounts = outputs["steps.passenger_secrets.outputs.api"];
+  if (mounts === undefined) throw new Error("Missing passenger mount output");
   return {
     payload,
     transported,
     env: decodeEnv(transported),
     args,
-    mounts: outputs["steps.passenger_secrets.outputs.api"],
+    mounts,
   };
 }
 
@@ -231,8 +243,7 @@ describe("actual Deploy Dev Bash → argv → original payment readers", () => {
     expect(() => paymentRuntimeFromEnv(old.env)).toThrow(
       "Payment token encryption configuration or envelope is invalid.",
     );
-    const fixed = transport();
-    const runtime = paymentRuntimeFromEnv(fixed.env);
+    const runtime = paymentRuntimeFromEnv(decodeEnv(old.payload));
     // Isolate capture-policy failure after the old keyring startup failure.
     expect(() => paymentCapturePolicyFromEnv(old.env, runtime)).toThrow(
       "payment_capture_configuration_invalid",
