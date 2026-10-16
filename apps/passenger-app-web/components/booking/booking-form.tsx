@@ -21,6 +21,7 @@ import { CurrentLocationButton } from "./current-location-button";
 export interface BookingDraft {
   origin: AddressPayload | null;
   destination: AddressPayload | null;
+  reviewAddressMode?: "fixed" | "standard";
   /** Always datetime-local, never a UTC ISO value passed into that control. */
   localTime: string;
 }
@@ -76,6 +77,8 @@ export function BookingForm({
     };
   }, [client, router]);
   if (demo === null) return <p>{DEMO_T.addressLoading}</p>;
+  const fixedAddresses =
+    demo || (review && draft.reviewAddressMode !== "standard");
   function demoAddress(field: "origin" | "destination") {
     const addresses = review ? PAX_REVIEW_STOPS : DEMO_ADDRESSES;
     return (
@@ -112,8 +115,39 @@ export function BookingForm({
   }
   return (
     <>
+      {review && (
+        <P5Card title={T.reviewAddressMode}>
+          <label>
+            {T.reviewAddressMode}
+            <select
+              aria-label={T.reviewAddressMode}
+              style={inputStyle}
+              value={draft.reviewAddressMode ?? "fixed"}
+              disabled={busy}
+              onChange={(event) => {
+                const reviewAddressMode = event.target.value;
+                if (
+                  reviewAddressMode !== "fixed" &&
+                  reviewAddressMode !== "standard"
+                )
+                  return;
+                onChange({
+                  ...draft,
+                  origin: null,
+                  destination: null,
+                  reviewAddressMode,
+                });
+              }}
+            >
+              <option value="fixed">{T.reviewFixedAddresses}</option>
+              <option value="standard">{T.reviewStandardAddresses}</option>
+            </select>
+          </label>
+          <p>{T.reviewAddressNotice}</p>
+        </P5Card>
+      )}
       <P5Card title={T.pickup}>
-        {demo || review ? (
+        {fixedAddresses ? (
           demoAddress("origin")
         ) : (
           <>
@@ -142,7 +176,7 @@ export function BookingForm({
         )}
       </P5Card>
       <P5Card title={T.dropoff}>
-        {demo || review ? (
+        {fixedAddresses ? (
           demoAddress("destination")
         ) : (
           <AddressMapPicker

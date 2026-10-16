@@ -1,6 +1,7 @@
 import { expect, test, type BrowserContext } from "@playwright/test";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
+import { standardAddressJourney } from "./pax-review-shared-order/standard-address-journey";
 import {
   OPS,
   PAX,
@@ -19,7 +20,7 @@ import {
   assertCompletedFacts,
 } from "./pax-review-shared-order/additional-journey";
 
-test("additional real orders cover booking prerequisites, accepted cancellation and low rating without contact", async ({
+test("additional real orders cover booking prerequisites, accepted cancellation, no-contact rating and standard geolocation", async ({
   browser,
 }, info) => {
   const progress = createJourneyProgress(info.outputPath("safe-progress.json"));
@@ -312,6 +313,14 @@ test("additional real orders cover booking prerequisites, accepted cancellation 
           expect(row.complaint_case_no).toBeNull();
         }
       },
+    );
+    await standardAddressJourney(
+      pax,
+      ops,
+      method,
+      [cancelled, completed],
+      step,
+      info,
     );
   } finally {
     await Promise.allSettled(contexts.map((context) => context.close()));
