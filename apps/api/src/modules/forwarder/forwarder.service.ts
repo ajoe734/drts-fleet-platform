@@ -416,11 +416,11 @@ export class ForwarderService implements OnModuleInit {
         throw error;
       }
 
-      return this.buildForwardedDriverActionResponse(
-        "accept",
-        "accept_pending",
-        this.requireOrder(taskId),
-      );
+      // Re-read the canonical order instead of assuming our relay call won:
+      // a newer native sync/reconciliation outcome, or a competing accept,
+      // may have resolved this order to something other than accept_pending
+      // while the relay call above was in flight.
+      forwardedOrder = this.requireOrder(taskId);
     }
 
     if (forwardedOrder.acceptedDriverId !== driverId) {
@@ -645,6 +645,18 @@ export class ForwarderService implements OnModuleInit {
         throw new Error(adapterResult.detail ?? "adapter did not acknowledge");
       }
     } catch (error) {
+      if (forwardedOrder.status !== "broadcasted") {
+        // A newer authoritative outcome (native sync/reconciliation, or a
+        // competing accept that already claimed the order) landed while this
+        // relay call was awaiting the adapter. That outcome is canonical;
+        // this local relay failure is moot and must not reconstruct
+        // sync_failed over it.
+        return {
+          status: forwardedOrder.status,
+          acceptedDriverId: forwardedOrder.acceptedDriverId,
+        };
+      }
+
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       this.markSyncFailed(
@@ -671,6 +683,16 @@ export class ForwarderService implements OnModuleInit {
         },
         true,
       );
+    }
+
+    if (forwardedOrder.status !== "broadcasted") {
+      // Same race as above, but the adapter call itself succeeded (late
+      // success): a newer native/competing outcome already landed during
+      // the await and must survive instead of being overwritten below.
+      return {
+        status: forwardedOrder.status,
+        acceptedDriverId: forwardedOrder.acceptedDriverId,
+      };
     }
 
     forwardedOrder.status = "accept_pending";
