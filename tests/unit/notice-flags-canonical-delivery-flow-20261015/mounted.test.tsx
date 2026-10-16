@@ -151,6 +151,13 @@ describe("mounted production forms and observers through local typed transport",
     expect(
       within(second.container).queryByText("Mounted lifecycle"),
     ).toBeNull();
+    fireEvent.click(
+      within(first.container).getByRole("button", { name: copy.history }),
+    );
+    expect(
+      within(first.container).getByText("drivers: scheduled"),
+    ).toBeTruthy();
+    expect(first.container.textContent).not.toMatch(/delivered [13] \/ [13]/i);
     first.unmount();
     second.unmount();
   });
@@ -385,7 +392,10 @@ describe("mounted production forms and observers through local typed transport",
     const view = render(<NativeBanner />);
     await waitFor(() => expect(screen.getByText("Driver scoped")).toBeTruthy());
     fireEvent.click(
-      screen.getAllByRole("button", { name: "標示已讀" }).at(-1)!,
+      within(screen.getByText("Driver scoped").parentElement!).getByRole(
+        "button",
+        { name: "標示已讀" },
+      ),
     );
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "已讀" })).toBeTruthy(),
@@ -439,7 +449,9 @@ describe("mounted production forms and observers through local typed transport",
       );
       expect(screen.queryByText("Other audience")).toBeNull();
       fireEvent.click(
-        screen.getAllByRole("button", { name: "Mark as read" }).at(-1)!,
+        within(
+          screen.getByText("Selected banner").closest("article")!,
+        ).getByRole("button", { name: "Mark as read" }),
       );
       await waitFor(() =>
         expect(screen.getByRole("button", { name: "Read" })).toBeTruthy(),

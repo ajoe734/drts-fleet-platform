@@ -42,12 +42,13 @@ export function sourceModuleLoader(
       },
     }).outputText;
     const actualRequire = createRequire(path);
+    const moduleDirectory = dirname(path);
     function requireSource(id: string): unknown {
       if (Object.hasOwn(mocks, id)) return mocks[id];
       if (id.endsWith(".css")) return {};
       if (id.startsWith("@/"))
         return load(resolve("apps/platform-admin-web", id.slice(2)));
-      if (id.startsWith(".")) return load(resolve(dirname(path), id));
+      if (id.startsWith(".")) return load(resolve(moduleDirectory, id));
       return actualRequire(id);
     }
     new Function("require", "module", "exports", output)(

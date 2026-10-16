@@ -135,7 +135,7 @@ export function requireFlagAck(
 }
 
 export async function postNoticeFlagsWithStepUp<T>(
-  client: ApiClient,
+  client: Pick<ApiClient, "post">,
   path: string,
   body: unknown,
 ): Promise<T> {

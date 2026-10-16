@@ -334,22 +334,17 @@ export default function NoticesPage() {
         severity: notice.severity,
         targets: audienceTargets(notice.targetAudience, locale),
         delivery:
-          notice.status === "resolved"
-            ? notice.downlistedReason === "expired"
-              ? locale === "zh"
-                ? "已到期下架"
-                : "Expired"
-              : copy.archived
-            : notice.outcomes?.length
-              ? notice.outcomes
-                  .map(
-                    (o) =>
-                      `${o.audience}: ${o.state}${o.notificationId ? ` (${o.notificationId})` : ""}`,
-                  )
-                  .join(" · ")
-              : locale === "zh"
-                ? "狀態未知"
-                : "Unknown",
+          `${notice.status === "resolved" ? `${notice.downlistedReason === "expired" ? (locale === "zh" ? "已到期下架" : "Expired") : copy.archived} · ` : ""}` +
+          (notice.outcomes?.length
+            ? notice.outcomes
+                .map(
+                  (o) =>
+                    `${o.audience}: ${o.state}${o.notificationId ? ` (${o.notificationId})` : ""}`,
+                )
+                .join(" · ")
+            : locale === "zh"
+              ? "狀態未知"
+              : "Unknown"),
         broadcastAt: formatDateTime(
           notice.scheduledAt ?? notice.updatedAt ?? notice.createdAt,
         ),
