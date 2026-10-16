@@ -53,10 +53,24 @@ pnpm exec vitest run \
 
 Machine-specific results are under
 `/home/lupin/workspace/drts-fleet-platform/.local/passenger-transport-bureau-review-20261015/codex-env-transport-20261016/`:
-`vitest.log`, `vitest-results.json`, `typecheck.log`.
+`vitest-final.log`, `vitest-final-results.json`, `typecheck-final.log`,
+`typecheck-scoped-final.log`, `tsconfig.scoped.json`.
 The recorded broad run also passed JSON/default reporter flags to save that
-report. Root typecheck and final lint/format results are recorded below before
-handoff.
+report. Final executable code was checked at
+`5b90ca48a` (the final candidate adds this verification record only).
+
+- Final broad regression: exit 0, 6 files / 89 tests passed, no skips.
+- Scoped typecheck of the committed regression and imported production readers:
+  `pnpm exec tsc -p <evidence-directory>/tsconfig.scoped.json --noEmit`, exit 0.
+  This config extends the repository root config and includes the new test.
+- `pnpm typecheck:root`: exit 2. The final log has 75 diagnostics outside this
+  task's changed paths: missing local workspace resolutions for
+  `@drts/tenant-auth` and `@drts/passenger-client`, their downstream exports,
+  duplicate canonical/worktree `ApiClient` types, and existing caller type
+  errors. No diagnostic remains in the new test. Full hosted CI is pending;
+  this is not a repository-wide typecheck pass.
+- ESLint for `transport.test.ts` and Prettier for the workflow, test and UAT:
+  exit 0. `git diff --check`: exit 0.
 
 Harness setup observations (not product regression passes): the initial fixture
 omitted the workflow's workload identity env defaults and failed under Bash
@@ -66,6 +80,9 @@ because the negative control unnecessarily ran a second full pipeline; it now
 uses its intact pre-transport payload to isolate the original capture reader.
 No product or test timeout was increased. Lint's counted-space regex and
 formatting findings were corrected before final checks.
+The first root/scoped typecheck also identified five strict indexed-access
+diagnostics in the new fixture. Explicit undefined checks corrected them;
+the final scoped typecheck and broad regression were then rerun and passed.
 
 ## External mock and historical source qualification
 
