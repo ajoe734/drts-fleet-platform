@@ -29,6 +29,11 @@ on:
         required: false
         default: ""
         type: string
+      failed_api_revision:
+        description: "Read-only startup log readback for one fixed failed API revision (drts-dev-api-00092-9j6)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -96,6 +101,52 @@ jobs:
           path: .artifacts/dev-readonly-metadata/snapshot.json
           if-no-files-found: error
           retention-days: 30
+
+  readonly-api-startup-readback:
+    if: github.event_name == 'workflow_dispatch' && inputs.failed_api_revision == 'drts-dev-api-00092-9j6'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+    steps:
+      - name: Validate immutable definition and target before authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_DEFINITION_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
+          [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify actual checkout before authentication
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_DEFINITION_SHA"
+      - name: Authenticate existing deploy identity for read-only startup readback
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Read failed API revision startup diagnostics
+        run: >-
+          python3 operations/verification/read-dev-api-startup-log.py
+          --output .artifacts/dev-api-startup-readback/snapshot.json
+      - name: Preserve startup readback or concrete query failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-api-startup-readback-${{ github.run_id }}
+          path: .artifacts/dev-api-startup-readback/snapshot.json
+          if-no-files-found: error
+          retention-days: 14
 
   # Owner checkpoints are intentionally cheap. A review candidate is the first
   # immutable SHA that may start the full integration gate.
