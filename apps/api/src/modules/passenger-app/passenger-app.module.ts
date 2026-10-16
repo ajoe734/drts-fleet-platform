@@ -61,6 +61,8 @@ import {
   ReviewDemoOpsController,
 } from "./review-demo/review-demo.controller";
 import { ReviewSupplyService } from "./review-demo/review-supply.service";
+import { FleetPartnerModule } from "../fleet-partner/fleet-partner.module";
+import { DriverProfileModule } from "../driver-profile/driver-profile.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
 import { ServiceProductModule } from "../service-product/service-product.module";
 import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibility.module";
@@ -81,6 +83,8 @@ import {
     RegulatoryRegistryModule,
     ServiceProductModule,
     VehicleEligibilityModule,
+    FleetPartnerModule,
+    DriverProfileModule,
   ],
   controllers: [
     PassengerAccountController,

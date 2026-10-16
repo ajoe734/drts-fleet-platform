@@ -185,6 +185,28 @@ export class FleetPartnerService implements OnModuleInit {
     return this.cloneFleetPartner(this.requireFleetPartner(fleetPartnerId));
   }
 
+  async findFleetPartnerForMultiTaxiOperator(operatorId: string) {
+    const partners = this.fleetPartnerRepository?.isEnabled()
+      ? await this.fleetPartnerRepository.findReceiptOperatorFleets(operatorId)
+      : this.fleetPartners.filter((partner) =>
+          partner.multiTaxiOperatorIds?.includes(operatorId),
+        );
+    if (partners.length > 1)
+      throw this.badRequest(
+        "AMBIGUOUS_OPERATOR_MAPPING",
+        "Multiple Fleet masters identify this operator.",
+      );
+    if (!partners[0]) return null;
+    const partner = this.cloneFleetPartner(partners[0]);
+    this.fleetPartners = [
+      partner,
+      ...this.fleetPartners.filter(
+        (p) => p.fleetPartnerId !== partner.fleetPartnerId,
+      ),
+    ];
+    return this.cloneFleetPartner(partner);
+  }
+
   async createFleetPartner(command: CreateFleetPartnerCommand) {
     this.assertNonBlank(command.legalName, "legalName");
     this.assertNonBlank(command.displayName, "displayName");
