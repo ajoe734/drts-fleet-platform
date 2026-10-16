@@ -1,3 +1,4 @@
+import { CallcenterService } from "../../../apps/api/src/modules/callcenter/callcenter.service";
 import type {
   ConsumerNotificationOutboxRecord,
   DriverTaskRecord,
@@ -152,7 +153,7 @@ function harness() {
   const service = new OwnedMobilityService(
     {} as never,
     audit,
-    { linkOrderToCallSession: vi.fn(() => ({ recordingId: null })) } as never,
+    new CallcenterService(audit),
     { publishTaskUpdated: vi.fn() } as never,
     { publishOrderCreated: publish } as never,
     repository,
