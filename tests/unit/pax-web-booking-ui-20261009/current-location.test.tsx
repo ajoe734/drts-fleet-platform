@@ -11,7 +11,9 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useLayoutEffect, useRef } from "react";
 import { BookingScreen } from "../../../apps/passenger-app-web/components/booking/booking-screen";
+import { CurrentLocationButton } from "../../../apps/passenger-app-web/components/booking/current-location-button";
 import { bookingFixture, selection } from "./fixture";
 
 const appRequire = createRequire(
@@ -90,6 +92,37 @@ const reverseCalls = () =>
   f.calls.filter((c) => c.path.endsWith("/geo/reverse"));
 
 describe("passenger current location through the real BookingScreen, client and BFF", () => {
+  it("keeps the first request active when clicked before initial passive effects", async () => {
+    const reverse = vi.fn();
+    function FirstPaintClick() {
+      const container = useRef<HTMLDivElement>(null);
+      useLayoutEffect(() => {
+        container.current!.querySelector("button")!.click();
+      }, []);
+      return (
+        <div ref={container}>
+          <CurrentLocationButton
+            value={null}
+            disabled={false}
+            reverse={reverse}
+            onSelect={vi.fn()}
+          />
+        </div>
+      );
+    }
+    render(<FirstPaintClick />);
+    expect(getCurrentPosition).toHaveBeenCalledOnce();
+    act(() => failure?.({ code: 1 } as GeolocationPositionError));
+    expect(
+      (
+        await screen.findByText(
+          "未允許使用目前位置，您仍可搜尋或手動選擇上車地點。",
+        )
+      ).getAttribute("role"),
+    ).toBe("alert");
+    expect(reverse).not.toHaveBeenCalled();
+  });
+
   it("requests only on click, reverses real device coordinates, then quotes and books the selected pickup", async () => {
     await open();
     expect(getCurrentPosition).not.toHaveBeenCalled();
