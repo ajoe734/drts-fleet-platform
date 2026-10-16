@@ -227,3 +227,81 @@ Unit passed. The earlier summary link's job `116600445139` is skipped
 All local checks are socket-free. No product/dev/preview/browser/HTTP/PG/Docker
 server or cloud/IAM/provider/worker control/deployment was started. The separate
 unit-budget/coverage task is not duplicated or made a new Academy gate.
+
+## 6. R3 accepted upstream CI repair integration (2026-10-16)
+
+Owner remains Codex; independent reviewer remains Claude2. Section 5 is the
+implementation matrix; sections 1–5, old candidates, reviews and failed runs
+remain dated evidence. This continuation changes only this UAT artifact after
+an ordinary upstream merge, under the current R3 task specification and the
+same four write scopes, six acceptance clauses and four acceptance keys.
+
+### Fresh preflight and preserved history
+
+- At 02:21–02:22 UTC, fetched `origin` in the assigned isolated worker worktree.
+  Canonical `ai-status.sh show` confirmed owner/reviewer, `in_progress`, the
+  four original scopes, candidate `fc938e05828486641fe1e3c3c9c22ba8120a3064`
+  and generation `c04c71c94cc2488db616b4813e940e89`. Local HEAD, remote task
+  branch and open [PR #2717](https://github.com/ajoe734/drts-fleet-platform/pull/2717)
+  head all matched that SHA. Its check runs were terminal and PR reviews empty;
+  no pending CI or review was displaced. The R3 dispatch expressly authorizes
+  this upstream integration after the shared repair's acceptance.
+- The old same-SHA [integration run 38831296515](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38831296515)
+  succeeded, including unit/typecheck/build/integration and `ci-integ`.
+  The old [regular Product smoke job 116750933685](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38831296474/job/116750933685)
+  was cancelled after exceeding its 25-minute budget; regular `Smoke acceptance`
+  failed. Retrieved job metadata, annotations and raw log confirm Academy's
+  8 mounted tests passed and root unit had 10074 passed / 47 skipped across
+  742 passed / 8 skipped files, duration 1116.57s. API unit began at 01:12:53
+  and was cancelled at 01:13:54. This is distinct from the earlier historical
+  Git loader defect repaired in R2. Neither old run is new-candidate evidence.
+- Accepted `origin/dev` was `b726c5cd08c932502d768e5766bbdf4753e4a1f4`,
+  containing the independently reviewed shared CI repair merge
+  `c5080728448504bf45b9059a4831ed72ba40da93`. Executed `git merge origin/dev`
+  with the task subject and required trailers; no conflicts or manual hunks.
+  Merge checkpoint `1b5429971a37d6426961c2e13182d8b96d0c33a6` has parents
+  `fc938e05828486641fe1e3c3c9c22ba8120a3064` and
+  `b726c5cd08c932502d768e5766bbdf4753e4a1f4`. All published commits remain
+  ancestors; no rebase, reset, stash, cherry-pick or force push occurred.
+- Both CI workflows and all three partition/coverage tools are byte-identical
+  to accepted `origin/dev`. Their adoption is ordinary upstream integration,
+  not Academy-owned workflow implementation. All intervening accepted work is
+  retained. `git diff --name-only origin/dev HEAD` remains within the original
+  four Academy scopes (including the test directory's two fixture leaves).
+
+### Source identity and new local verification
+
+`git diff --exit-code fc938e05828486641fe1e3c3c9c22ba8120a3064 HEAD --
+apps/driver-app/components/academy/module-reader.tsx
+apps/driver-app/components/academy/material-resource.ts
+tests/unit/driver-academy-actual-material-reader-20261015/` returned 0 after the
+merge: product sources, all test assertions and genuine-before fixture bytes
+are unchanged. SHA256 digests:
+
+| File | SHA256 |
+| --- | --- |
+| `module-reader.tsx` | `1abab28b974ea6bdffe8710c2c544daceeea4f1b115f43ad75acb7e764ea8f1e` |
+| `material-resource.ts` | `a906019f1f38694571a2aa7180fdb3b0ad837523220a9644810009e941a158c1` |
+| `driver-academy-actual-material-reader.test.ts` | `6d864bf22416c27cd66af06fb94052894dd521d2da00b5d941c08bcf10cbe608` |
+
+The following checks actually completed on merge checkpoint `1b5429971a37d6426961c2e13182d8b96d0c33a6`,
+Node `v22.23.2`, pnpm `10.33.0`, Vitest `4.1.4`. The subsequent closeout changes
+only this evidence document. Logs are in this worktree's `.local/academy-r3/`;
+older `.local/academy-r2/` and `.local/academy-ci-followup-20261016/` logs were
+not present at this wakeup, so old hosted job evidence was fetched again rather
+than claimed locally available.
+
+| Finding / acceptance | Real source behavior retained and rerun | Command / result / evidence | Outstanding limits |
+| --- | --- | --- | --- |
+| `C059-F1`, R2 historical loader repair | Mount the complete digest-checked genuine original fixture: dead video glyph, two distinct SOPs and two distinct articles show canned bodies and no open call. Mount the current reader to exercise its real action handlers. | Section 5's full affected regression command rerun: `pnpm exec vitest run tests/unit/driver-academy-actual-material-reader-20261015/ tests/unit/system-remediation/sr-academy-fe-001/ tests/unit/system-remediation/sr-academy-be-001/ tests/unit/system-remediation/sr-qa-newfeatures-001/c059-driver-academy-training.test.ts tests/unit/system-remediation/sr-driver-web-001/`; exit 0, 8 files / 76 tests passed, including all 8 Academy mounted tests (`regressions.log`, 02:22:37 UTC, 9.07s). | Digest checks establish historical provenance; mounted interaction assertions establish the before/after behavior. |
+| `c059_actual_selected_material_read_or_play` | Actual `ModuleReader.handleOpenMaterial` → `openAcademyMaterialResource` → doubled RN Linking or opener uses selected video/SOP/article URL and course/module/version identity. Distinct resources switch without canned substitution. | Same fresh 76-test regression, exit 0. Source and test bytes above match the published R2 implementation. | Boundary doubles prove Source wiring only; no real provider download, video playback or inline document retrieval is established. |
+| `c059_material_unavailable_error_and_resource_switch` | Retain missing/invalid URL rejection, unavailable transport, rejected opener/error/retry, duplicate press protection, stale response discard and course/version/session reset. | Same fresh regression, exit 0; positive/rejection/switch/retry assertions unchanged. | No live OS/player/reader availability or remote-resource accessibility is claimed. |
+| `c059_existing_quiz_progress_and_web_native_regressions` | Real mounted Academy screen/detail/quiz/result/retake flow, progress refresh and existing BE scoring/expiry/qualification tests; no completion on material open. Existing C062 imports remain unchanged. | Same regression exit 0; `pnpm --filter @drts/driver-app typecheck`, `pnpm --filter @drts/driver-app lint`, `pnpm lint:root`: each exit 0 (`typecheck.log`, `lint-driver.log`, `lint-root.log`). | Android AND iOS native export/device execution, hosted/browser/PG/provider behavior were not run on this VM. Section 5's optional root test typecheck failure remains historical; no new full-root typecheck pass is claimed. |
+| `c059_material_exact_candidate_validation` | Preserve old candidate/generation/history, adopt accepted workflow fix, and submit a genuinely new candidate through the same PR. All full-task Source requirements remain required. | Each exited 0: `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`; `python3 tools/ci/check_test_coverage.py`; `node tools/ci/check-repo-classification.mjs`; `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`; `python3 tools/ci/git/check_staged_generated_files.py --range origin/dev HEAD`; `git diff --check origin/dev HEAD` (`gates.json` and individual logs). Final full SHA/branch/PR bind through the ordinary handoff receipt; this document cannot self-embed its own commit SHA. | Fresh full required CI, Claude2's independent whole-task same-SHA review, protected merge and all four own acceptance records remain pending. Old green CI/review is never transferred to the new SHA. |
+
+No local full root/API suite, runtime, server, browser/E2E, PostgreSQL, Docker,
+cloud/provider/IAM/Operator action or deployment was started. The new hosted CI
+must exercise the accepted full test manifests, coverage and partitions without
+narrowing or dropping tests; adopting that workflow does not itself prove its
+new run passed. No shared repair task acceptance, full capability or full Goal
+completion is claimed.
