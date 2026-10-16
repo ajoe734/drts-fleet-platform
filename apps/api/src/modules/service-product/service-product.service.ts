@@ -599,13 +599,15 @@ export class ServiceProductService implements OnModuleInit {
       });
     };
     const commitUpdate = (updated: ServiceProductRecord) => {
-      this.records = [
-        updated,
-        ...this.records.filter(
-          (candidate) =>
-            candidate.serviceProductId !== updated.serviceProductId,
-        ),
-      ];
+      this.records = this.records.some(
+        (candidate) => candidate.serviceProductId === updated.serviceProductId,
+      )
+        ? this.records.map((candidate) =>
+            candidate.serviceProductId === updated.serviceProductId
+              ? updated
+              : candidate,
+          )
+        : [updated, ...this.records];
       const auditLog = this.recordAudit(
         {
           actorId: null,
