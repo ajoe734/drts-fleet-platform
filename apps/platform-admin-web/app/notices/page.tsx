@@ -32,6 +32,7 @@ import type {
 
 import {
   useCanonicalRead,
+  postNoticeFlagsWithStepUp,
   localNoticeTime,
   type NoticeRecord as PlatformNoticeRecord,
   type NoticeSeverity as PlatformNoticeSeverity,
@@ -523,7 +524,7 @@ export default function NoticesPage() {
       const command: NoticeCommand = {
         scheduledAt: localNoticeTime(noticeStart),
         expiresAt: localNoticeTime(noticeExpiry),
-        reason: noticeReason.trim() || undefined,
+        reason: noticeReason.trim(),
         confirmed: noticeConfirmed,
         title: noticeTitle.trim(),
         body: noticeBody.trim(),
@@ -580,12 +581,16 @@ export default function NoticesPage() {
     setUpdatingMaintenance(true);
     setError(null);
     try {
-      await client.setMaintenanceMode({
-        enabled: maintEnabled,
-        reason: effectiveReason,
-        scheduledStart: fromDatetimeLocalValue(maintStart),
-        scheduledEnd: fromDatetimeLocalValue(maintEnd),
-      });
+      await postNoticeFlagsWithStepUp<PlatformMaintenanceModeRecord>(
+        client,
+        "/api/platform-admin/maintenance-mode",
+        {
+          enabled: maintEnabled,
+          reason: effectiveReason,
+          scheduledStart: fromDatetimeLocalValue(maintStart),
+          scheduledEnd: fromDatetimeLocalValue(maintEnd),
+        },
+      );
       setShowMaintenanceConfirm(false);
       await loadData();
     } catch (nextError: unknown) {
@@ -933,6 +938,7 @@ export default function NoticesPage() {
                       required
                     >
                       <input
+                        aria-label={copy.noticeTitle}
                         value={noticeTitle}
                         onChange={(event) => setNoticeTitle(event.target.value)}
                         style={textInputStyle}
@@ -945,6 +951,7 @@ export default function NoticesPage() {
                       required
                     >
                       <select
+                        aria-label={copy.noticeSeverity}
                         value={noticeSeverity}
                         onChange={(event) =>
                           setNoticeSeverity(
@@ -973,6 +980,7 @@ export default function NoticesPage() {
                       required
                     >
                       <select
+                        aria-label={copy.noticeAudience}
                         value={noticeAudience}
                         onChange={(event) =>
                           setNoticeAudience(
@@ -1055,6 +1063,7 @@ export default function NoticesPage() {
                   )}
                   <CanvasField theme={theme} label={copy.noticeBody} required>
                     <textarea
+                      aria-label={copy.noticeBody}
                       value={noticeBody}
                       onChange={(event) => setNoticeBody(event.target.value)}
                       style={textareaStyle}

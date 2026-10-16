@@ -1,5 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef } from "react";
+import type { ApiClient } from "@drts/api-client";
+import type { StepUpProof } from "@drts/contracts";
 import type {
   FeatureFlag,
   PlatformNoticeRecord,
@@ -130,4 +132,22 @@ export function requireFlagAck(
     );
   }
   return row;
+}
+
+export async function postNoticeFlagsWithStepUp<T>(
+  client: ApiClient,
+  path: string,
+  body: unknown,
+): Promise<T> {
+  const proof = await client.post<StepUpProof>("/api/identity/step-up-proofs", {
+    body: { method: "POST", path },
+  });
+  if (proof.required && !proof.stepUpReference)
+    throw new Error("Step-up verification is required");
+  return client.post<T>(path, {
+    body,
+    ...(proof.stepUpReference
+      ? { headers: { "x-drts-step-up-reference": proof.stepUpReference } }
+      : {}),
+  });
 }

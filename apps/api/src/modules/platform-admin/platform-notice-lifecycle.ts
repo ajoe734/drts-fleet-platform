@@ -296,6 +296,16 @@ export class PlatformNoticeLifecycle {
           );
         }
       }
+      const actual = this.notifications
+        .listNotifications()
+        .find((n) => n.notificationId === outcome!.notificationId);
+      if (actual?.readAt) {
+        outcome.readAt = actual.readAt;
+        outcome.state = "read";
+      } else if (!actual) {
+        outcome.state = "unknown";
+        outcome.error = "notification_record_missing";
+      }
       const { outcomes: _outcomes, ...record } = this.snapshot(notice);
       result.push({ ...record, outcome: { ...outcome } });
     }

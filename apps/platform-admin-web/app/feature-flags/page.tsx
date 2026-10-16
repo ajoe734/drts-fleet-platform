@@ -30,6 +30,7 @@ import {
 import {
   useCanonicalRead,
   requireFlagAck,
+  postNoticeFlagsWithStepUp,
 } from "../../lib/notice-flags-canonical-flow";
 
 type ActionIntent = "toggle" | "override";
@@ -834,17 +835,16 @@ export default function FeatureFlagsPage() {
       let ack: FeatureFlag | undefined;
       if (pendingAction.intent === "toggle") {
         if (pendingAction.tenantId) {
-          ack = await client.post<FeatureFlag>(
+          ack = await postNoticeFlagsWithStepUp<FeatureFlag>(
+            client,
             `/api/admin/flags/${encodeURIComponent(
               pendingAction.key,
             )}/tenant-overrides?tenantId=${encodeURIComponent(
               pendingAction.tenantId,
             )}`,
             {
-              body: {
-                enabled: pendingAction.nextEnabled,
-                description: pendingAction.description || undefined,
-              },
+              enabled: pendingAction.nextEnabled,
+              description: pendingAction.description || undefined,
             },
           );
         } else {
@@ -854,17 +854,16 @@ export default function FeatureFlagsPage() {
           );
         }
       } else {
-        ack = await client.post<FeatureFlag>(
+        ack = await postNoticeFlagsWithStepUp<FeatureFlag>(
+          client,
           `/api/admin/flags/${encodeURIComponent(
             pendingAction.key,
           )}/tenant-overrides?tenantId=${encodeURIComponent(
             pendingAction.tenantId,
           )}`,
           {
-            body: {
-              enabled: pendingAction.enabled,
-              description: pendingAction.description.trim() || undefined,
-            },
+            enabled: pendingAction.enabled,
+            description: pendingAction.description.trim() || undefined,
           },
         );
       }
