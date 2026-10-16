@@ -1,6 +1,6 @@
 # CALLCENTER-PHONE-ORDER-DURABLE-FLOW-20261016
 
-Owner: Codex. Reviewer: Claude2. Status: source ready for same-SHA independent review; hosted acceptance remains pending. The exact candidate SHA/branch/PR is recorded by the canonical handoff transaction.
+Owner: Codex. Reviewer: Claude2. Status: in progress after the F8 CI regression and reviewer reopen recorded below; hosted acceptance remains pending. The exact candidate SHA/branch/PR is recorded by the canonical handoff transaction.
 
 The current R3 specification is `/home/lupin/workspace/drts-fleet-platform/.local/passenger-transport-bureau-review-20261015/CALLCENTER-PHONE-ORDER-DURABLE-FLOW-20261016-R3-sandbox-ACK-scope.json`, SHA256 `6951a98fc6de6e0a39087ae523e89d01c505583dd02f5361f76f706406018364`. The R2 source scope and its original complete acceptance requirements are preserved, with the additional precise sandbox caller grant described below.
 
@@ -152,3 +152,88 @@ Final test source SHA256 values: `durable-ack.test.ts`
 `5033998b4dca810bf5d10f29c8afb515174293417421aaa177f733a1080a3717`;
 `production-services.ts`
 `df8612da046855ae096fc56e3ee9bb6f9fa4381ab11eb5500d754d9464d4963d`.
+
+## F8: existing phone-caller test doubles lack the new session entrypoint
+
+Rejected candidate: `f004d3caad9776d8d3947ef0c398c9be9252eded`, generation
+`9da4385be13c46089e8902bed4c903a9`, PR #2732. Claude2 reopened this candidate
+at `2026-10-16T04:29:42Z`: CI run `38849756131`, API job `116808991611`
+failed seven cases in four existing files with
+`TypeError: this.callcenterService.withPhoneOrderSession is not a function`.
+The canonical task slice contains the complete reviewer finding. This is the
+first review of this particular regression; the earlier ACK findings and their
+pending acceptance remain recorded above.
+
+The owner independently read the original JSON artifacts already collected by
+Root under
+`/home/lupin/workspace/drts-fleet-platform/.local/passenger-transport-bureau-review-20261015/phone-f004-hosted-results/artifacts/`:
+`run-38849756131-artifact-12024539557/api-test-results-shard-1.json` confirms
+the reviewer finding, and
+`run-38849756131-artifact-12024644672/unit-test-results-shard-4.json` identifies
+two additional affected files. No new hosted workflow or runtime was started.
+
+Actual call path:
+`OwnedMobilityController.createCallCenterOrder` (where used) →
+`OwnedMobilityService.createCallCenterOrder` →
+`buildAndPersistCallCenterOrder` →
+`CallcenterService.withPhoneOrderSession`. The production callcenter service
+implements that entrypoint. The affected fixtures inject partial object
+literals containing only the previous `linkOrderToCallSession` method and
+listener registration methods. The exception occurs before persistence or
+their original business assertions. Searching both test trees for that old
+stub together with phone creation identified exactly the eight files below;
+all eight were executed locally on the rejected candidate.
+
+| Finding / acceptance                                              | Source / correction boundary                                                                                             | Old → fixed result                                                                                                                          | Commands / execution / evidence                                                                         | Remaining limitation                                                                                                                                                                             |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| F8 missing session entrypoint in existing test doubles            | Four API fixtures and four root fixtures listed below; keep the production durable boundary and every original assertion | On `f004d3caad9776d8d3947ef0c398c9be9252eded`: 8 files, 11 cases fail with the same TypeError; 141 other cases pass. Correction not applied | Three commands below, each exit 1; Node and Vitest versions are retained in the local execution receipt | Exact fixture write scopes requested through owner `progress`; R3 currently grants none of these eight paths                                                                                     |
+| `callcenter_phone-order-and-recording_durable-ACK-full-source-CI` | F1–F8 and unchanged complete original acceptance                                                                         | Unsatisfied; full CI has a confirmed regression                                                                                             | Root's original immutable artifacts above; no scoped result substitutes for complete CI                 | Fix F8 after Supervisor scope coordination, rerun affected regression, publish a new full SHA and hand off to Claude2; same-source formal PG/full22/complete CI/protected merge remain mandatory |
+
+Requested exact additional paths, fixture hunks only:
+
+- `apps/api/tests/unit/owned-mobility.service.test.ts`
+- `apps/api/tests/unit/owned-mobility-compliance-gates.test.ts`
+- `apps/api/tests/unit/map-fleets-cross-surface-proof.test.ts`
+- `apps/api/tests/unit/map-qa-final-evidence-proof.test.ts`
+- `tests/unit/cross-app/owned-mobility-ops-map-api-closeout-proof.test.ts`
+- `tests/unit/cross-app/map-fleets-closeout-proof.test.ts`
+- `tests/unit/cross-app/owned-mobility-ops-map-closeout-proof.test.ts`
+- `tests/unit/push-referral-route-write-20261006/referral-route.test.ts`
+
+The repair must update these injected collaborators to the current callcenter
+contract, preferably using the real repository-free service where compatible
+with the fixture's purpose. It must preserve all existing business assertions
+and retain the real service/repository ACK probes. Adding a production fallback
+for an incomplete test double would conceal the fixture defect and is outside
+this correction. These eight files have not been modified while their scope
+coordination is pending; no new review candidate is claimed by this evidence
+checkpoint.
+
+All three local commands have finished:
+
+```bash
+# Task root: 2 failures / 21 passes, exit 1.
+pnpm exec vitest run \
+  tests/unit/cross-app/owned-mobility-ops-map-api-closeout-proof.test.ts \
+  tests/unit/push-referral-route-write-20261006/referral-route.test.ts
+
+# apps/api: 7 failures / 120 passes, exit 1.
+pnpm exec vitest run --config ../../vitest.config.ts --root . \
+  tests/unit/owned-mobility.service.test.ts \
+  tests/unit/owned-mobility-compliance-gates.test.ts \
+  tests/unit/map-fleets-cross-surface-proof.test.ts \
+  tests/unit/map-qa-final-evidence-proof.test.ts
+
+# Task root: 2 failures, exit 1.
+pnpm exec vitest run \
+  tests/unit/cross-app/map-fleets-closeout-proof.test.ts \
+  tests/unit/cross-app/owned-mobility-ops-map-closeout-proof.test.ts
+```
+
+Fresh local logs in the task evidence directory:
+
+| Log                              | SHA256                                                             |
+| -------------------------------- | ------------------------------------------------------------------ |
+| `f004-legacy-callers-before.log` | `e7000ff90f30edcee66b3efa71af4484bf2afc08254d4bf2865be19b79892663` |
+| `f004-api-callers-before.log`    | `fe840c5cf253db655733a25a2f59b020ffef569ccfa8562fd9c3380f04aaec7b` |
+| `f004-other-callers-before.log`  | `1371b4fa2d2a10ab37ad79eac4714d1ef3dd6362c867045c2e4bfbd08bd27be1` |
