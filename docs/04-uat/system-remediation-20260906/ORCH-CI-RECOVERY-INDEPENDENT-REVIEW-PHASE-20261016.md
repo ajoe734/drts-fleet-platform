@@ -148,9 +148,27 @@ maintainer lifecycle and are not inferred from this Source candidate.
 
 Evidence for this dispatch is recorded under canonical-root
 `.local/ci-recovery-independent-review/r2-20261016T084654Z/`.
-The 19 added recovery regressions passed on the actual R2 base (exit 0).
-The full original-before/fixed-after probes and complete affected regression
-suite are being rerun before candidate handoff. Hosted CI, independent Claude2
-review of the new SHA/generation, protected merge and both original finite
-acceptance keys remain pending. The historical results above are not substitutes
-for these new-candidate requirements.
+Implementation checkpoint `de4b44041f4fbd91dad2aebc0260a996403da128` was
+normally committed/pushed using the original checker-passing subject and trailers.
+The final handoff locks the successor PR head after this evidence update.
+
+| Finding / acceptance | R2 command, actual result and evidence | Remaining boundary |
+| --- | --- | --- |
+| All three CI-only counterexamples; first required key | `PYTHONPATH=tools/development-orchestrator python3 /home/lupin/workspace/drts-fleet-platform/.local/ci-recovery-independent-review/r2-20261016T084654Z/reproduce.py`: exit 0. Complete embedded fixture equals each sealed original task. Actual original base handler: queued/running/success each integrating/no dispatch; fixed handler: each review/Claude2, no approval. Retained regression against original code fails exactly three times on `integrating != review`, no errors. Full inputs/outputs in `before.json`, `after.json`, `before-regression.log`. | Synthetic CI controls only; no real C073 CI/acceptance credit. |
+| Existing legal reviewed paths, invalidation/repair/failure/merge/acceptance guards; second required key | `PYTHONPATH=tools/development-orchestrator python3 -m unittest test_ai_status -v`: exit 0, 57 tests (38 original + 19 new), `native.log`. All original test-class ASTs/assertions compare unchanged to the actual base. | New exact candidate still needs independent reviewer decision and external lifecycle evidence. |
+| Original dispatch, command gateway, workflow supersession and bound-PR guards | `PYTHONPATH=tools/development-orchestrator python3 -m unittest control_plane.tests.test_dispatch_policy control_plane.tests.test_task_board_commands test_github_bus -v`: exit 0, 84 tests, `policy-gateway-github.log`. | No dispatch/provider/approval policy or GitHub adapter changes. |
+| Complete native/control-plane affected regression | `PYTHONPATH=tools/development-orchestrator python3 -m unittest discover -s tools/development-orchestrator -p 'test_*.py'`: exit 0, 1,085 tests in 35.564s, final `OK` read; `full-orchestrator.log`. | Repository checks only; no VM product/runtime/server or installation proof. |
+| Syntax and patch consistency | `python3 -m py_compile tools/development-orchestrator/bin/ai_status.py tools/development-orchestrator/test_ai_status.py` and `git diff --check origin/dev...HEAD`: exit 0. Source/test hashes remain the exact saved patch hashes above. | UAT evidence update only after full test completion. |
+| Legal published successor, preserving old candidate/history and other authors | Actual commit-message checker passed both original proposed message and R2 commit range; `commit-trailers.log`. `source-and-preservation.json` records old remote head unchanged and canonical Root staged source diff SHA256 `8a8753d4aa765119e363e7156e39b3147ed03b83d76f6a374b667541ca47ba00` unchanged. | Old PR #2739 remains OPEN at old SHA. No rewrite, bypass or reuse of its integration green. |
+
+R2 artifact SHA256: `before.json` =
+`2348223e64ff4b1617ac482bf5d243c3090025cd26dabd5b61dba47c1afe8296`;
+`after.json` = `585b976c8bce291a219659b7f7391b25db542bf8bdadfc23ca59353c29e6a708`.
+`reproduce.py` is a rerunnable machine-local evidence script; tests remain
+self-contained in the tracked test file. Both probes use the actual original
+base source blob and the actual fixed source, with only environment inputs and
+append-log I/O controlled. No edited native code touched the canonical board.
+
+Hosted CI, independent Claude2 review of the new SHA/generation, protected merge
+and both original finite acceptance keys remain pending normal lifecycle.
+The historical results above do not substitute for these new-candidate gates.
