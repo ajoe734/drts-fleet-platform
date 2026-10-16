@@ -90,3 +90,89 @@ it.each([
     expect(upstream).not.toHaveBeenCalled();
   },
 );
+
+const cloudRunHost = "passenger-review-123.us-central1.run.app";
+const cloudRunOrigin = `https://${cloudRunHost}`;
+
+async function cloudRunOtp(origin: string | undefined, host = cloudRunHost) {
+  // Next standalone sees its HTTP listener URL after Cloud Run terminates TLS.
+  // Host remains the browser authority. Forwarded Host is deliberately foreign.
+  return POST(
+    new NextRequest("http://0.0.0.0:3009/api/passenger-app/review-demo/otp", {
+      method: "POST",
+      headers: {
+        host,
+        "x-forwarded-host": "foreign.example",
+        "Content-Type": "application/json",
+        ...(origin ? { origin } : {}),
+      },
+      body: JSON.stringify({ target: "0900000001" }),
+    }),
+    { params: Promise.resolve({ path: ["review-demo", "otp"] }) },
+  );
+}
+
+it("forwards genuine same-origin OTP through the Cloud Run TLS/standalone URL boundary", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("DRTS_API_URL", "https://api.example");
+  vi.stubEnv("DRTS_API_AUTH_AUDIENCE", "");
+  const upstream = vi.fn(async () =>
+    Response.json({ data: { success: true } }, { status: 201 }),
+  );
+  vi.stubGlobal("fetch", upstream);
+
+  const response = await cloudRunOtp(cloudRunOrigin);
+  expect(response.status).toBe(201);
+  expect(upstream).toHaveBeenCalledTimes(1);
+  const [url, init] = upstream.mock.calls[0] as unknown as [
+    string,
+    RequestInit,
+  ];
+  expect(url).toBe("https://api.example/api/passenger-app/review-demo/otp");
+  expect(
+    JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer)),
+  ).toEqual({
+    target: "0900000001",
+  });
+});
+
+it.each([
+  undefined,
+  "null",
+  "https://foreign.example",
+  `http://${cloudRunHost}`,
+  `${cloudRunOrigin}:444`,
+  "http://0.0.0.0:3009",
+])(
+  "still refuses an absent or different public Origin behind Cloud Run (%s)",
+  async (origin) => {
+    vi.stubEnv("NODE_ENV", "production");
+    const upstream = vi.fn();
+    vi.stubGlobal("fetch", upstream);
+    const response = await cloudRunOtp(origin);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "CSRF_CHECK_FAILED" });
+    expect(upstream).not.toHaveBeenCalled();
+  },
+);
+
+it.each(["localhost:3319", "127.0.0.1:3319"])(
+  "keeps the exact HTTP loopback authority usable for the hosted source lane (%s)",
+  async (host) => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DRTS_API_URL", "https://api.example");
+    vi.stubEnv("DRTS_API_AUTH_AUDIENCE", "");
+    const upstream = vi.fn(async () =>
+      Response.json({ data: { success: true } }, { status: 201 }),
+    );
+    vi.stubGlobal("fetch", upstream);
+    const response = await cloudRunOtp(`http://${host}`, host);
+    expect(response.status).toBe(201);
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(
+      (await cloudRunOtp(`http://${host.replace(":3319", ":3320")}`, host))
+        .status,
+    ).toBe(403);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  },
+);
