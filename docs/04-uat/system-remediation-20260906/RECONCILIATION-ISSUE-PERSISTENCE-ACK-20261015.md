@@ -1,6 +1,6 @@
 # RECONCILIATION-ISSUE-PERSISTENCE-ACK-20261015
 
-Status: implemented; preparing candidate handoff for review/CI/merge.
+Status: implemented and pushed; PR opened (https://github.com/ajoe734/drts-fleet-platform/pull/2728), awaiting review/CI/merge.
 Owner: Claude2. Reviewer: Claude. Original finding: C074-F1.
 
 ## Source and version identity
@@ -41,3 +41,14 @@ These are in-process async-contract tests, not live PostgreSQL acceptance; no VM
 - Node `v22.23.2`, pnpm `10.33.0`, Vitest `4.1.4`.
 - Evidence logs are archived under `.local/reconciliation-issue-persistence-ack-20261015/` in this isolated worktree (gitignored, machine-specific, not commit evidence).
 - No product dev/preview/browser/E2E server, Docker Compose, or cloud/IAM/Operator command was run, per the VM restriction for this dispatch. No claim is made of live PostgreSQL, HTTP, browser or hosted acceptance; those remain for the normal candidate CI/review/merge/acceptance lifecycle. Owner does not call `done` — candidate handoff only.
+
+## Independent re-verification (later wake, same candidate SHA 3d396ab1d)
+
+A later wake of this same task found the candidate already committed and pushed, matching `origin`'s head for `claude2/reconciliation-issue-persistence-ack-20261015-delivery-r2-20261016` exactly, but not yet opened as a PR and not yet handed off in machine truth. Rather than trust the prior wake's logged claims, every check in the table above was re-run from scratch in this worktree against the unchanged candidate SHA:
+
+- `npx vitest run tests/unit/reconciliation-issue-persistence-ack-20261015/reconciliation-issue-persistence-ack.test.ts`: exit 0, 10/10 passed.
+- `npx vitest run` across the same impacted-suite list (`sr-qa-finance-001/*`, `audit-artifact-durability-20261002`, `billing-settlement.repository.test.ts`, `pax-payment-core-20261009/billing-recovery-writer.test.ts`, `billing-settlement.service.test.ts`, `billing-settlement.test.ts`, `billing-settlement-statements.test.ts`): exit 0, 159/159 passed.
+- `pnpm --filter @drts/contracts build` then `pnpm --filter @drts/control-plane-auth build` then `npx tsc -p apps/api/tsconfig.json --noEmit`: all exit 0, typecheck log empty.
+- `npx eslint apps/api/src/modules/billing-settlement/billing-settlement.service.ts tests/unit/reconciliation-issue-persistence-ack-20261015 --max-warnings=0`: exit 0, no output.
+
+All four results match the originally logged evidence exactly. Opened `https://github.com/ajoe734/drts-fleet-platform/pull/2728` (base `dev`) for the already-pushed candidate. The `ai-status.sh handoff` call to record this for reviewer Claude deferred (`orchestrator_approval_broker` MCP `CONNECT_TIMEOUT`, a session-wide infrastructure outage unrelated to this task — `ai-status.sh show` still succeeds, only mutating subcommands defer); this document and the PR are the durable record until that write lands.
