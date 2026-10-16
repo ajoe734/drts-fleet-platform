@@ -202,3 +202,47 @@ source mappings exit 0 (`root-local-paths-checkpoint.log`). Standard root
 typecheck remains the separately recorded failed command. Only this evidence
 document changes after these rechecks; the incidental generated next-env import
 is again removed. No check is left running at the progress checkpoint.
+
+## 2026-10-16 resumed dispatch: minimal controller reproduction
+
+Resumed from clean, locally/remotely identical
+`eaaa18a759416785c0320fb678efd96ee0aeb895`. Fetched origin and checked the exact
+execution branch: no PR or candidate exists. The release CLI's single-task slice
+still lists the original eight write scopes, excluding the controller. This is
+ordinary Supervisor conflict/scope coordination under Collaboration Guide §0.7,
+not a request for a new user authorization. No API source was changed.
+
+Added `session-inventory-query.test.ts` at pushed anchor
+`a0ddba225300b0421b0ca488ac68fdc0d1dca0f6`. It invokes the real
+`IdentityController.listAdminSessions` and production noDB repository, creates
+two actual sessions, revokes the selected one through `revokeSession`, then
+checks both canonical statuses through the controller envelope. There is no
+mocked repository, socket, server, browser or query conversion. This is a smaller
+reproduction of the existing mounted failure, not a replacement for it.
+
+| Finding / acceptance                                                                           | Source and repair boundary                                                                                                                                   | Before / resumed checkpoint result                                                                                                                                               | Command / version / evidence                                                                                                                                                      | Remaining work                                                                                   |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| HTTP revoked-session readback; `platform-session_mounted-lawful-revoke-and-canonical-readback` | Client `listSessions` serializes `true` as a string; controller `listAdminSessions` spreads the raw query; repository `listSessions` requires boolean `true` | `a0ddba225300b0421b0ca488ac68fdc0d1dca0f6`: HTTP `"true"` FAIL; HTTP `"false"`, omission and direct boolean true/false PASS; unselected session remains active in all five cases | `pnpm exec vitest run tests/unit/platform-session-revocation-browser-csrf-flow-20261015/session-inventory-query.test.ts`; exit 1; Vitest 4.1.4; `query-reproduction-dispatch.log` | Supervisor conflict check and exact controller write-scope grant; repair and green rerun pending |
+| Same original mounted readback and proof/regression boundary                                   | Existing mounted flow and boundary suite unchanged                                                                                                           | Same anchor: 40 PASS, 2 FAIL, 42 total; the original mounted readback and its new minimal reproduction fail on the same missing revoked row                                      | `pnpm exec vitest run tests/unit/platform-session-revocation-browser-csrf-flow-20261015`; exit 1; `dispatch-scoped.log`                                                           | Neither failure is waived; no candidate, review, CI, merge or acceptance credit                  |
+
+The next repair unit is limited to the controller's existing query boundary:
+accept the runtime `includeRevoked` boolean or HTTP string, normalize only exact
+boolean `true` or string `"true"` to true, and pass the normalized existing
+contract to the unchanged repository. Preserve the false/default behavior, tenant
+filtering, read authorization and wire envelope. Do not use truthiness (the string
+`"false"` is truthy), change repository transaction/auth behavior, or substitute
+`status=revoked` in the client to evade the original includeRevoked contract.
+After the ordinary scope grant, retain both failing assertions, fix the production
+boundary, rerun the full original regression command with the task directory,
+then relevant app/root checks before any fresh exact-candidate handoff to Claude2.
+
+New logs are under this worktree's `.local/platform-session-csrf/`. Their SHA-256:
+
+- `query-reproduction-dispatch.log`:
+  `fd6224e06192e4b795746710f851300b9b3c87965d3227784877b785157acf1c`.
+- `dispatch-scoped.log`:
+  `a962e78469c551cebc5ddede444c2ee4e838110fae8e9e459955abf573d028dc`.
+
+Only the minimal regression and this evidence document change in this dispatch.
+The earlier full regression/app checks remain historical checkpoint results;
+they are not new same-candidate passes.
