@@ -1378,3 +1378,214 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R7 repair: F1 competing-i
     expect(incidentAfter.assignedTo).toBe("ops-db-winner");
   });
 });
+
+describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R8 repair: F1 a failed Incident convergence repair surfaces honestly on replay", () => {
+  it("F1: the SOS-side CAS winner's idempotent replay fails honestly while Incident convergence repair keeps failing, and recovers once it durably succeeds", async () => {
+    let convergeShouldFail = true;
+    const mockIncidentRepository = {
+      isEnabled: () => true,
+      persistChanges: async (payload: {
+        incidents: Array<{ assignedTo: string | null }>;
+      }) => {
+        if (
+          convergeShouldFail &&
+          payload.incidents.some(
+            (incident) => incident.assignedTo === "ops-db-winner",
+          )
+        ) {
+          throw new Error("repair DB unavailable");
+        }
+      },
+      reportPersistenceFailure: () => {},
+    } as unknown as IncidentRepository;
+
+    const auditService = new AuditNotificationService();
+    const incidentService = new IncidentService(
+      auditService,
+      mockIncidentRepository,
+    );
+    const mockVerificationRepository = {
+      isEnabled: () => true,
+      persistDutyAcknowledgement: async () => ({
+        accepted: false,
+        acknowledgedByActorId: "ops-db-winner",
+        acknowledgedAt: "2026-10-16T00:00:00.000Z",
+      }),
+    } as unknown as DriverSosVerificationRepository;
+    const driverSosService = new DriverSosService(
+      auditService,
+      incidentService,
+      undefined,
+      mockVerificationRepository,
+    );
+    const sos = await submitSos(
+      driverSosService,
+      "aaaaaaaa-1111-4000-8000-000000000008",
+    );
+    const localLoser = buildOpsIdentity("ops-local-loser");
+    const winner = buildOpsIdentity("ops-db-winner");
+
+    // Simulate a separate service instance's already-durable direct
+    // assignment, matching the R7 competing-instance scenario above.
+    incidentService.updateIncident(
+      sos.receipt.incidentId,
+      { assignedTo: localLoser.actorId as string },
+      undefined,
+      localLoser,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(
+      incidentService.getIncident(sos.receipt.incidentId).assignedTo,
+    ).toBe("ops-local-loser");
+
+    // This call loses the real SOS-side CAS to ops-db-winner. Its own
+    // inline convergence repair attempt fails (DB unavailable), so the
+    // Incident stays durably assigned to the loser -- a residual repair
+    // opportunity for the next replay, not this (losing) call's to fail on.
+    const ack = await driverSosService.acknowledgeDuty(
+      sos.event.sosEventId,
+      {},
+      localLoser,
+    );
+    expect(ack.wonAcknowledgement).toBe(false);
+    expect(
+      incidentService.getIncident(sos.receipt.incidentId).assignedTo,
+    ).toBe("ops-local-loser");
+
+    // The real winner's own idempotent replay must fail honestly instead of
+    // reporting wonAcknowledgement: true while the Incident durably still
+    // belongs to the loser -- the original hidden-failure defect.
+    let replayError: unknown;
+    try {
+      await driverSosService.acknowledgeDuty(sos.event.sosEventId, {}, winner);
+    } catch (error) {
+      replayError = error;
+    }
+    expect((replayError as { code?: string })?.code).toBe(
+      "INCIDENT_HANDOVER_UNAVAILABLE",
+    );
+    expect(
+      incidentService.getIncident(sos.receipt.incidentId).assignedTo,
+    ).toBe("ops-local-loser");
+
+    // Once the repair path durably succeeds, the same replay converges the
+    // Incident onto the real SOS-side winner and reports success honestly.
+    convergeShouldFail = false;
+    const recovered = await driverSosService.acknowledgeDuty(
+      sos.event.sosEventId,
+      {},
+      winner,
+    );
+    expect(recovered.wonAcknowledgement).toBe(true);
+    expect(recovered.dutyAcknowledgement.acknowledgedByActorId).toBe(
+      "ops-db-winner",
+    );
+    expect(
+      incidentService.getIncident(sos.receipt.incidentId).assignedTo,
+    ).toBe("ops-db-winner");
+  });
+});
+
+describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R8 repair: F2 a DB-level stale status transition never regresses the authoritative row", () => {
+  it("F2: a stale cross-instance reconcile that loses the repository's own rank guard does not re-apply its transition or its timeline locally", async () => {
+    let persistStatusCallCount = 0;
+    const mockVerificationRepository = {
+      isEnabled: () => true,
+      // Simulates the repository's own DB-side CAS guard already having
+      // lost to a concurrent writer that advanced the row further first --
+      // the real implementation signals this via `applied: false`.
+      persistStatusTransition: async () => {
+        persistStatusCallCount += 1;
+        return false;
+      },
+    } as unknown as DriverSosVerificationRepository;
+
+    const { driverSosService, incidentService } = setupService(
+      mockVerificationRepository,
+    );
+    const sos = await submitSos(
+      driverSosService,
+      "aaaaaaaa-2222-4000-8000-000000000009",
+    );
+    const opsIdentity = buildOpsIdentity("ops-f2-db-rank-guard");
+
+    incidentService.updateIncident(
+      sos.receipt.incidentId,
+      { status: "investigating" },
+      undefined,
+      opsIdentity,
+    );
+
+    // Readback triggers reconcileWithIncidentLocked, which now defers to
+    // the repository's own rank guard instead of trusting its own
+    // pre-write snapshot as proof the transition is new.
+    const readback = await driverSosService.getEventForOps(
+      sos.event.sosEventId,
+      opsIdentity,
+    );
+    expect(persistStatusCallCount).toBe(1);
+    // The repository reported it did not win, so this process's own cache
+    // must not have been advanced or had its timeline entries appended --
+    // otherwise a delayed/duplicate transition would double-record it.
+    expect(readback.event.status).toBe("submitted");
+    expect(
+      readback.timeline.filter(
+        (entry) => entry.eventType === "investigation_started",
+      ),
+    ).toHaveLength(0);
+  });
+});
+
+describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R8 repair: F2 duty acknowledgment never regresses a durably further-along status", () => {
+  it("F2: winning the owner-null race does not claw the cached status back down when the repository reports the row already advanced further", async () => {
+    const mockVerificationRepository = {
+      isEnabled: () => true,
+      // Simulates the repository's own DB-side rank guard having kept the
+      // row at `investigating` (a concurrent writer already durably
+      // advanced it there) even though this caller legitimately won the
+      // owner-null race and is recorded as the acknowledging actor.
+      persistDutyAcknowledgement: async (event: {
+        dutyAcknowledgement: {
+          acknowledgedByActorId: string | null;
+          acknowledgedAt: string | null;
+        };
+      }) => ({
+        accepted: true,
+        acknowledgedByActorId: event.dutyAcknowledgement.acknowledgedByActorId!,
+        acknowledgedAt: event.dutyAcknowledgement.acknowledgedAt!,
+        status: "investigating" as const,
+      }),
+    } as unknown as DriverSosVerificationRepository;
+
+    const { driverSosService } = setupService(mockVerificationRepository);
+    const sos = await submitSos(
+      driverSosService,
+      "aaaaaaaa-3333-4000-8000-00000000000a",
+    );
+    const opsIdentity = buildOpsIdentity("ops-f2-ack-rank-guard");
+
+    const ack = await driverSosService.acknowledgeDuty(
+      sos.event.sosEventId,
+      {},
+      opsIdentity,
+    );
+    expect(ack.wonAcknowledgement).toBe(true);
+    expect(ack.dutyAcknowledgement.acknowledgedByActorId).toBe(
+      opsIdentity.actorId,
+    );
+    // Before this fix, the locally-cached and returned event status was
+    // always the pre-write `nextStatus` ("acknowledged"), clawing back a
+    // durably further-along row the repository itself refused to regress.
+    expect(ack.event.status).toBe("investigating");
+
+    const readback = await driverSosService.getEventForOps(
+      sos.event.sosEventId,
+      opsIdentity,
+    );
+    expect(readback.event.status).toBe("investigating");
+    expect(readback.event.dutyAcknowledgement.acknowledgedByActorId).toBe(
+      opsIdentity.actorId,
+    );
+  });
+});

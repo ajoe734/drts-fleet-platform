@@ -572,17 +572,35 @@ export class IncidentService implements OnModuleInit {
         // entire pre-claim snapshot captured before this method's first
         // await (F5).
         const current = this.require(incidentId);
+        let revertedOwner: string | null = current.assignedTo;
         if (current.assignedTo === owner) {
-          this.replace(
-            this.decorateIncident(
-              {
-                ...current,
-                assignedTo: null,
-                updatedAt: new Date().toISOString(),
-              },
-              identity,
-            ),
-          );
+          const reverted: IncidentRecord = {
+            ...current,
+            assignedTo: null,
+            updatedAt: new Date().toISOString(),
+          };
+          this.replace(this.decorateIncident(reverted, identity));
+          revertedOwner = null;
+          if (this.incidentRepository) {
+            // The rejected claim may already have been carried into durable
+            // state by an unrelated concurrent writer that read this
+            // record's in-memory snapshot (with `owner` still set) and
+            // persisted its own full upsert before this rollback ran.
+            // Re-persist the reverted record so that leaked, never-accepted
+            // owner cannot outlive this rollback in the database -- while
+            // preserving whatever other fields (e.g. status) that
+            // concurrent writer legitimately changed (F5).
+            try {
+              await this.incidentRepository.persistChanges({
+                incidents: [this.cloneIncident(reverted)],
+              });
+            } catch (compensationError) {
+              this.incidentRepository.reportPersistenceFailure(
+                compensationError,
+                "assign_incident_owner_durable_compensate",
+              );
+            }
+          }
         }
         this.timelines.set(
           incidentId,
@@ -592,7 +610,7 @@ export class IncidentService implements OnModuleInit {
         );
         return {
           accepted: false,
-          currentOwner: current.assignedTo === owner ? null : current.assignedTo,
+          currentOwner: revertedOwner,
           wasNewClaim: false,
         };
       }

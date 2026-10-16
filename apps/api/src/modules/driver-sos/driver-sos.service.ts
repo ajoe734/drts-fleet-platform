@@ -819,12 +819,27 @@ export class DriverSosService implements OnModuleInit {
         // call's durable Incident write can have failed asynchronously
         // after this SOS event already recorded its owner, and this is the
         // only path left to repair that without ever re-claiming the event.
-        await this.repairIncidentHandover(
+        // A failed repair here must not be hidden behind a success response
+        // -- the SOS event's own owner is already durably decided, but the
+        // Incident (the cross-system arbiter every other caller reads) does
+        // not yet agree with it, so reporting success here would be exactly
+        // the "handover claimed complete while not durable" lie this call
+        // exists to prevent (F1).
+        const converged = await this.repairIncidentHandover(
           event.incidentId,
           existingOwner,
           requestId,
           identity,
         );
+        if (!converged) {
+          throw new ApiRequestError(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "INCIDENT_HANDOVER_UNAVAILABLE",
+            "Duty acknowledgment could not be durably handed over to the Incident; retry.",
+            { sosEventId, incidentId: event.incidentId },
+            true,
+          );
+        }
         return this.buildIdempotentAcknowledgement(
           sosEventId,
           event,
@@ -990,19 +1005,30 @@ export class DriverSosService implements OnModuleInit {
         );
       }
 
-      this.replaceEvent(updatedEvent);
+      // The DB write may have kept `status` ahead of `nextStatus` (a
+      // concurrent writer already durably progressed this event further --
+      // e.g. to investigating -- before this ack's owner-claim won); never
+      // claw the locally-cached status back down to what this call
+      // computed before that write (F2 progression).
+      const finalStatus = persisted?.status ?? nextStatus;
+      const committedEvent: DriverSosEventRecord =
+        finalStatus === updatedEvent.status
+          ? updatedEvent
+          : { ...updatedEvent, status: finalStatus };
+
+      this.replaceEvent(committedEvent);
       this.appendTimeline(timeline);
       this.markOutboxDelivered(sosEventId, now);
       this.recordMutationAudit(
         "acknowledge_duty",
-        updatedEvent,
+        committedEvent,
         identity,
         requestId,
         { acknowledgedByActorId: incidentOwner, incidentId: event.incidentId },
       );
 
       return {
-        event: this.cloneEvent(updatedEvent),
+        event: this.cloneEvent(committedEvent),
         timeline: (this.timelines.get(sosEventId) ?? []).map((entry) =>
           this.cloneTimeline(entry),
         ),
@@ -1037,9 +1063,9 @@ export class DriverSosService implements OnModuleInit {
     owner: string,
     requestId: string | undefined,
     identity: BootstrapRequestIdentity | null,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (!incidentId) {
-      return;
+      return true;
     }
     try {
       await this.incidentService.convergeIncidentOwnerDurable(
@@ -1048,8 +1074,15 @@ export class DriverSosService implements OnModuleInit {
         requestId,
         identity,
       );
+      return true;
     } catch {
-      // best-effort; the next replay retries.
+      // Not swallowed everywhere: callers that are themselves a replay of an
+      // already-decided SOS owner (the only ones with a truthful "retry"
+      // response available) surface this as a retryable error instead of a
+      // false success. Callers mid-way through their own fresh
+      // CAS-loss/first-write handling keep the best-effort retry-on-next-
+      // replay behavior, since they are not claiming completion themselves.
+      return false;
     }
   }
 
@@ -1395,10 +1428,23 @@ export class DriverSosService implements OnModuleInit {
       status: targetStatus,
       updatedAt: now,
     };
-    await this.verificationRepository?.persistStatusTransition(
-      updatedEvent,
-      timelineEntries,
-    );
+    const applied =
+      (await this.verificationRepository?.persistStatusTransition(
+        updatedEvent,
+        timelineEntries,
+      )) ?? true;
+    // A concurrent instance's own reconciliation (from an equally stale
+    // snapshot) may have already durably won this exact transition, or
+    // advanced the row further still, by the time this write ran -- the
+    // repository is the real arbiter via its DB-side rank guard. Applying
+    // this call's own (now-stale) snapshot and timeline entries on top of
+    // that would re-append an already-recorded transition or regress an
+    // authoritative later status (F2 progression). Leave the cache as-is;
+    // the next authoritative readback reconciles it via
+    // `preferForwardProgress`.
+    if (!applied) {
+      return event;
+    }
     this.replaceEvent(updatedEvent);
     for (const entry of timelineEntries) {
       this.appendTimeline(entry);

@@ -78,13 +78,37 @@ type AlertObservationRow = QueryResultRow & {
 
 type DutyAckRow = QueryResultRow & {
   duty_ack_snapshot: { acknowledgedByActorId: string; acknowledgedAt: string };
+  status: DriverSosEventRecord["status"];
 };
+
+/**
+ * Rank of the forward (non-false-alarm) S-3 progression, inlined as SQL so
+ * the database itself -- not just the in-process cache -- can refuse to
+ * move a `driver_sos_events.status` column backward across competing
+ * writers/instances. Must stay in sync with
+ * `DriverSosService.SOS_PROGRESS_RANK`.
+ */
+function sosStatusRankSql(expression: string): string {
+  return `
+    CASE ${expression}
+      WHEN 'submitted' THEN 0
+      WHEN 'duty_alerted' THEN 1
+      WHEN 'acknowledged' THEN 2
+      WHEN 'investigating' THEN 3
+      WHEN 'resolved' THEN 4
+      WHEN 'closed' THEN 5
+      ELSE -1
+    END
+  `;
+}
 
 export interface DriverSosDutyAcknowledgementPersistResult {
   /** False when a different writer already won at the database layer. */
   accepted: boolean;
   acknowledgedByActorId: string;
   acknowledgedAt: string;
+  /** The event's actual durable status after this write (never regressed). */
+  status: DriverSosEventRecord["status"];
 }
 
 export interface DriverSosDutyAlertDispatchPlan {
@@ -409,6 +433,13 @@ export class DriverSosVerificationRepository {
    * acknowledgment has been recorded yet, so two overlapping writers (across
    * processes, not just in-process) cannot both commit a duty_acknowledged
    * timeline entry for the same event.
+   *
+   * The `status` column is only ever advanced, never regressed: a stale
+   * caller computing `acknowledged` from an in-memory snapshot that
+   * predates a concurrent writer's own authoritative progression (e.g. the
+   * Incident module already durably advancing this event to
+   * `investigating`) must not claw the durable status back down just
+   * because it still legitimately wins the owner-null race (F2).
    */
   async persistDutyAcknowledgement(
     event: DriverSosEventRecord,
@@ -419,6 +450,7 @@ export class DriverSosVerificationRepository {
         accepted: true,
         acknowledgedByActorId: event.dutyAcknowledgement.acknowledgedByActorId!,
         acknowledgedAt: event.dutyAcknowledgement.acknowledgedAt!,
+        status: event.status,
       };
     }
 
@@ -428,12 +460,16 @@ export class DriverSosVerificationRepository {
       const claimed = await client.query<DutyAckRow>(
         `
           UPDATE safety.driver_sos_events
-          SET status = $2,
+          SET status = CASE
+                WHEN (${sosStatusRankSql("status")}) < (${sosStatusRankSql("$2::text")})
+                THEN $2
+                ELSE status
+              END,
               duty_ack_snapshot = $3::jsonb,
               updated_at = $4
           WHERE sos_event_id = $1
             AND duty_ack_snapshot->>'acknowledgedByActorId' IS NULL
-          RETURNING duty_ack_snapshot
+          RETURNING duty_ack_snapshot, status
         `,
         [
           event.sosEventId,
@@ -459,7 +495,7 @@ export class DriverSosVerificationRepository {
       } else {
         const existing = await client.query<DutyAckRow>(
           `
-            SELECT duty_ack_snapshot
+            SELECT duty_ack_snapshot, status
             FROM safety.driver_sos_events
             WHERE sos_event_id = $1
           `,
@@ -477,6 +513,7 @@ export class DriverSosVerificationRepository {
         accepted,
         acknowledgedByActorId: row.duty_ack_snapshot.acknowledgedByActorId,
         acknowledgedAt: row.duty_ack_snapshot.acknowledgedAt,
+        status: row.status,
       };
     } catch (error) {
       await client.query("ROLLBACK");
@@ -489,34 +526,47 @@ export class DriverSosVerificationRepository {
   /**
    * Reconciles the Incident module's own status progression (investigating /
    * resolved / closed) onto the correlated DriverSosEvent + timeline. The
-   * caller (service layer) only invokes this once it has already determined,
-   * from in-memory state, that the transition is new -- this just makes that
-   * single transition durable alongside its timeline entries.
+   * caller (service layer) only determines a transition is new from its own
+   * in-memory/just-reloaded snapshot, which a second, independent instance
+   * can also be computing concurrently from an equally stale snapshot --
+   * the UPDATE itself is the real arbiter: it only takes effect while the
+   * durable row is still behind the target rank, so two instances can never
+   * both append the same forward transition's timeline entries, and a
+   * delayed lower-rank write can never overwrite an already-further-along
+   * row (F2 progression). Returns whether this call's transition actually
+   * won; the caller must not apply the transition to its own in-memory
+   * state (or append its timeline entries a second time) when it did not.
    */
   async persistStatusTransition(
     event: DriverSosEventRecord,
     timelineEntries: DriverSosTimelineEntry[],
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (!this.isEnabled()) {
-      return;
+      return true;
     }
 
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      await client.query(
+      const updated = await client.query(
         `
           UPDATE safety.driver_sos_events
           SET status = $2,
               updated_at = $3
           WHERE sos_event_id = $1
+            AND (${sosStatusRankSql("status")}) < (${sosStatusRankSql("$2::text")})
+          RETURNING sos_event_id
         `,
         [event.sosEventId, event.status, event.updatedAt],
       );
-      for (const entry of timelineEntries) {
-        await this.appendTimelineWith(client, entry);
+      const applied = (updated.rowCount ?? 0) > 0;
+      if (applied) {
+        for (const entry of timelineEntries) {
+          await this.appendTimelineWith(client, entry);
+        }
       }
       await client.query("COMMIT");
+      return applied;
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
