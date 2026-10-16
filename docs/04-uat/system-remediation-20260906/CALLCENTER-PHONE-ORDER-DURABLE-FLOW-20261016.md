@@ -1,8 +1,8 @@
 # CALLCENTER-PHONE-ORDER-DURABLE-FLOW-20261016
 
-Owner: Codex. Reviewer: Claude2. Status: implementation checkpoint; no review candidate or acceptance credit yet.
+Owner: Codex. Reviewer: Claude2. Status: source ready for same-SHA independent review; hosted acceptance remains pending. The exact candidate SHA/branch/PR is recorded by the canonical handoff transaction.
 
-The current R2 specification is `/home/lupin/workspace/drts-fleet-platform/.local/passenger-transport-bureau-review-20261015/CALLCENTER-PHONE-ORDER-DURABLE-FLOW-20261016-R2-source-ready.json`, SHA256 `ebed6d2525c6a3b791533a268a2e6d1e54c19c7cf720c90293aa984fcb5a4249`.
+The current R3 specification is `/home/lupin/workspace/drts-fleet-platform/.local/passenger-transport-bureau-review-20261015/CALLCENTER-PHONE-ORDER-DURABLE-FLOW-20261016-R3-sandbox-ACK-scope.json`, SHA256 `6951a98fc6de6e0a39087ae523e89d01c505583dd02f5361f76f706406018364`. The R2 source scope and its original complete acceptance requirements are preserved, with the additional precise sandbox caller grant described below.
 
 ## Original finding and source boundaries
 
@@ -78,3 +78,77 @@ Earlier checkpoint logs were not present in this dispatch's isolated worktree.
 Fresh logs above and subsequent historical reproductions are retained under
 the same documented `.local/callcenter-phone-order-durable-flow-20261016/`
 directory. Earlier reported passes remain historical, not new-source credit.
+
+## Final source verification and handoff evidence
+
+Final implementation checkpoint: `fd1f87ca4387b0d4d9bece84797c6df981d2221d`.
+The final candidate commit only updates this evidence document; production and
+test contents match this checkpoint. No checks remain running at handoff.
+
+| Finding / acceptance                                              | Final source boundary                                                                                                              | Old → fixed result                                                                                                                                                                                                                                          | Reproducible command / exit / evidence                                                                                                                                                                             | Still pending                                                                                               |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| F1 phone order ACK                                                | `buildAndPersistCallCenterOrder`, `withPhoneOrderSession`, real repository transaction                                             | Original `bcda359776c7fcc64d478624174c93d6649932d7` actually returns, publishes and exposes memory before held SQL; final case waits, then strict read succeeds                                                                                             | Historical `vitest ... -t 'does not envelope session\|phone create waits\|recording callback waits'`: exit 1, three actual behavioral failures (`original-before.log`); final `durable-ack.test.ts`: 24/24, exit 0 | Migrated PG and actual HTTP full22                                                                          |
+| F2 open/link session ACK                                          | Controller `openCallSession`, `linkCallOrder`; `runPhoneSessionWrite`, `findSession`                                               | Original open succeeds before SQL; final rejected commit publishes no phantom session or successful mutation audit                                                                                                                                          | Same historical and final commands; `dispatch-baseline.log` separately preserves the initial audit-probe failure and its correction                                                                                | Hosted session/link evidence                                                                                |
+| F3 attachment/state propagation                                   | Controller callback and actual registered owned-order listener results; phone row uses existing repository `findOrderForUpdate`    | Original callback settles while its order write is held; final rejects failed order propagation and rolls back the session; same payload retries successfully                                                                                               | `original-before.log`; final delayed/rejected attachment and pending/failed cases in `final-scoped.log`, exit 0                                                                                                    | Formal PG rejection/read-after-ACK                                                                          |
+| F4 failure, replay, one-call-one-order                            | Real `OwnedMobilityController`, `IdempotencyService`, production repositories                                                      | Final rejects order/session/COMMIT failures without completed replay or creation event; same key retries/replays once; call cannot rebind                                                                                                                   | Final socket-free test suite, exit 0. Executor completion/failure/row storage only are simulated                                                                                                                   | Native migrated-PG failures/replay                                                                          |
+| F5 cold peer identity/target                                      | `getCallSessionForRead`, persisted sequence allocation, transaction recording target                                               | Socket-free cold peer preserves first call/order link and reads committed recording                                                                                                                                                                         | Final socket-free suite, exit 0; formal companion authored using original migration harness                                                                                                                        | Real peer PG results                                                                                        |
+| F6 sandbox alternative caller                                     | Controller awaits `SandboxWebhookAdapter.ingestForWrite`; validated plan executes durable upsert then close/recording sequentially | At `026bb5a8a03ac26d0ed3bcd338c79573f5901a71`, five old event cases actually fail early ACK; final five delay and five rejection/retry cases pass. The original synchronous `ingest` is retained for existing memory callers, and is no longer used by HTTP | `sandbox-before.log`, exit 1; `sandbox-fixed.log`, 7 files/125 pass, exit 0; final regression also passes                                                                                                          | Nine authored hosted PG cases include all five webhook events and rejected upsert; not executed on VM       |
+| F7 create-response consistency                                    | `buildAndPersistCallCenterOrder` preserves listener's committed final state and deduplicates recording flags                       | At `88689f8b9b5b1be718dbbf5fbc5ef46fd06397da`, late missing state differs between response/cache and PG, initial recording duplicates `recording_bound`; both probes fail. Final both pass                                                                  | `create-final-state-before.log`, exit 1 (2 actual failures); `create-final-state-fixed.log`, exit 0 (24 pass); retained final regression passes                                                                    | Hosted canonical response equality                                                                          |
+| `callcenter_phone-order-and-recording_durable-ACK-full-source-CI` | All preceding findings and original complete acceptance scope                                                                      | **Pending**, no acceptance credit claimed from local passes                                                                                                                                                                                                 | Exact candidate independent review, genuine same-source hosted complete CI, original E2E-003 index/report/filing/audit and all22, protected merge required                                                         | Root sole CI/full22 observer and runtime delivery authority; external CTI/media remain explicitly synthetic |
+
+Historical probes were run against a
+detached original checkout without resetting the active task worktree. The
+probe snapshot is retained as `historical-probe-fd1f87ca4.ts` (SHA256
+`3c7616bfd37d37c1927b0b2fbf2b46277afebc23c27bccf13c28430165225036`);
+the original checkout itself is no longer present. An initial detached setup
+attempt used the wrong working-directory-relative paths and exited 254 before
+running tests; it is excluded from behavioral evidence. The corrected run
+produced the three real failures in `original-before.log`.
+
+Final commands (run from the task worktree unless stated):
+
+```bash
+pnpm exec vitest run tests/unit/callcenter-phone-order-durable-flow-20261016/ \
+  tests/unit/callcenter.test.ts tests/unit/sandbox-webhook.adapter.test.ts \
+  tests/unit/owned-mobility.test.ts \
+  tests/unit/system-remediation/sr-qa-call-001/c043-callcenter-workflow.test.ts \
+  tests/unit/system-remediation/sr-qa-call-001/c044-cti-recording-callback.test.ts \
+  tests/unit/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.test.ts \
+  tests/unit/system-remediation/sr-recording-recovery-20260913/recording-recovery.test.ts \
+  tests/unit/audit-voice-runtime-20261002/media-recording-finalize-authorization.test.ts
+# exit 0: 9 files / 164 tests PASS; 1 hosted-only file / 9 cases SKIP locally.
+# These 9 skips are pending, not accepted. On GitHub they execute and missing PG fails.
+
+# From apps/api (source aliases preserved by the root config), exit 0: 8/8 PASS:
+pnpm exec vitest run --config ../../vitest.config.ts --root . tests/unit/callcenter.service.test.ts
+
+pnpm exec eslint apps/api/src/modules/callcenter/callcenter.service.ts \
+  apps/api/src/modules/callcenter/callcenter.repository.ts \
+  apps/api/src/modules/callcenter/callcenter.controller.ts \
+  apps/api/src/modules/callcenter/sandbox-webhook.adapter.ts \
+  apps/api/src/modules/owned-mobility/owned-mobility.service.ts \
+  tests/unit/callcenter-phone-order-durable-flow-20261016/ --max-warnings=0
+pnpm exec tsc -p .local/callcenter-phone-order-durable-flow-20261016/api-source.tsconfig.json --noEmit
+pnpm exec tsc -p .local/callcenter-phone-order-durable-flow-20261016/task-source.tsconfig.json --noEmit
+```
+
+Lint and both final source typechecks exit 0. Configurations are retained under
+the local evidence directory; their source aliases avoid stale shared dist
+declarations without modifying those shared files. Ordinary API typecheck
+remains the separately recorded exit 2, not a pass. Full build/typecheck/CI and
+original complete HTTP/PG acceptance remain mandatory at the candidate SHA.
+
+Local result hashes: `final-scoped.log`
+`6da176d18b828d2eebfce8dedd78cd251a58fe9985d593b226ede45d701e81ab`;
+`original-before.log`
+`bf8049f44b61fba7e4285d846725220bbbb99b0d25c5d980f9793b2e193676d8`;
+`sandbox-before.log`
+`56e52416f58475ca2ffe0af7d25a204598c3cfc2c9b77ec5d2b39857a0a56c2d`;
+`create-final-state-before.log`
+`a5e7da3bb613beb3b57d3d1f8ffe6e6709b5ac1af0b41b265c6d33b29fae253e`.
+Final test source SHA256 values: `durable-ack.test.ts`
+`3c7616bfd37d37c1927b0b2fbf2b46277afebc23c27bccf13c28430165225036`;
+`durable-postgres.hosted.test.ts`
+`5033998b4dca810bf5d10f29c8afb515174293417421aaa177f733a1080a3717`;
+`production-services.ts`
+`df8612da046855ae096fc56e3ee9bb6f9fa4381ab11eb5500d754d9464d4963d`.
