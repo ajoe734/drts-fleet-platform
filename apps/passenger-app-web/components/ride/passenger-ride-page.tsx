@@ -17,7 +17,9 @@ import { STATUS_TONES } from "@drts/ui-tokens";
 import type {
   PassengerRideFixture,
   PassengerCertificatePresentation,
+  FaresResponse,
 } from "@drts/passenger-client";
+import { passengerClient } from "../../lib/client";
 import {
   createFareQuoteAnomalyFixture,
   fetchPassengerRideAuthority,
@@ -757,6 +759,181 @@ function VehicleCard({
   );
 }
 
+// The public passenger fare API supplies whole TWD amounts, not the separate
+// dispatch fixture.fareVersion disclosure. Never fill missing publication data
+// with prices or a version from the canvas (Oct 10 G201011 decision).
+type CurrentPublicFare = FaresResponse["currentVersion"] & {
+  nightSurchargeUnit: "TWD_per_trip";
+  nightApplication: "pickup" | "any_overlap";
+};
+
+function isCurrentPublicFare(value: unknown): value is CurrentPublicFare {
+  if (!value || typeof value !== "object") return false;
+  const fare = value as Record<string, unknown>;
+  const validNumbers = (keys: string[], minimum: number) =>
+    keys.every((key) => {
+      const number = fare[key];
+      return (
+        typeof number === "number" &&
+        Number.isSafeInteger(number) &&
+        number >= minimum
+      );
+    });
+  const validTime = (time: unknown) =>
+    typeof time === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(time);
+  return (
+    typeof fare.version === "string" &&
+    fare.version.trim().length > 0 &&
+    typeof fare.effectiveAt === "string" &&
+    Number.isFinite(Date.parse(fare.effectiveAt)) &&
+    validNumbers(
+      ["baseFare", "distanceRate", "delayRate", "nightSurcharge"],
+      0,
+    ) &&
+    validNumbers(
+      [
+        "baseDistanceMeters",
+        "distanceIncrementMeters",
+        "delayIncrementSeconds",
+      ],
+      1,
+    ) &&
+    fare.nightSurchargeUnit === "TWD_per_trip" &&
+    (fare.nightApplication === "pickup" ||
+      fare.nightApplication === "any_overlap") &&
+    validTime(fare.nightSurchargeWindowStart) &&
+    validTime(fare.nightSurchargeWindowEnd)
+  );
+}
+
+function PublicFareCard() {
+  const [fare, setFare] = useState<CurrentPublicFare | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    setFare(null);
+    setFailed(false);
+    void passengerClient
+      .getFares()
+      .then(({ currentVersion }) => {
+        if (!isCurrentPublicFare(currentVersion))
+          throw new Error("invalid_fares");
+        if (active) setFare(currentVersion);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [attempt]);
+
+  if (!fare) {
+    return (
+      <Card title={t.CurrentFareTable}>
+        <div
+          role={failed ? "alert" : "status"}
+          style={{ fontSize: 12, color: passengerChrome.muted }}
+        >
+          {failed ? t.PublicFareUnavailable : t.PublicFareLoading}
+        </div>
+        {failed ? (
+          <button
+            type="button"
+            style={buttonStyle("secondary")}
+            onClick={() => setAttempt((value) => value + 1)}
+          >
+            {t.Retry}
+          </button>
+        ) : null}
+      </Card>
+    );
+  }
+  return (
+    <>
+      <Card
+        title={t.CurrentFareTable}
+        tag={
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: passengerChrome.success.fg,
+              background: passengerChrome.success.bg,
+              border: `1px solid ${passengerChrome.success.border}`,
+              padding: "2px 8px",
+              borderRadius: 999,
+            }}
+          >
+            {t.AlreadyEffective}
+          </span>
+        }
+      >
+        <div
+          style={{
+            fontSize: 11,
+            color: passengerChrome.muted,
+            marginBottom: 6,
+          }}
+        >
+          版本 {fare.version} · 生效日 {fare.effectiveAt}
+        </div>
+        {[
+          [
+            `起程運價（${fare.baseDistanceMeters / 1000} 公里）`,
+            `NT$ ${fare.baseFare}`,
+          ],
+          [
+            `續程運價（每 ${fare.distanceIncrementMeters} 公尺）`,
+            `NT$ ${fare.distanceRate}`,
+          ],
+          [
+            `延滯計時（每 ${fare.delayIncrementSeconds} 秒）`,
+            `NT$ ${fare.delayRate}`,
+          ],
+          [
+            `夜間加成（${fare.nightSurchargeWindowStart}–${fare.nightSurchargeWindowEnd}）`,
+            `每趟加 NT$ ${fare.nightSurcharge}`,
+          ],
+        ].map(([label, value], index) => (
+          <div
+            key={label}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              padding: "8px 0",
+              borderBottom:
+                index < 3 ? `1px solid ${passengerChrome.border}` : undefined,
+              fontSize: 12.5,
+            }}
+          >
+            <span style={{ color: passengerChrome.muted }}>{label}</span>
+            <b style={{ fontFamily: monoFont }}>{value}</b>
+          </div>
+        ))}
+        <div style={{ fontSize: 11, color: passengerChrome.muted }}>
+          {fare.nightApplication === "pickup"
+            ? "夜間時段以上車時間為準"
+            : "行程與夜間時段重疊時適用"}
+        </div>
+      </Card>
+      <Card title={t.FareChangeRuleTitle}>
+        <div
+          style={{
+            fontSize: 12,
+            color: passengerChrome.muted,
+            lineHeight: 1.65,
+          }}
+        >
+          {t.FareChangeRule}
+        </div>
+      </Card>
+    </>
+  );
+}
+
 function FareCard({
   fixture,
   publicMode,
@@ -764,72 +941,7 @@ function FareCard({
   fixture: PassengerRideFixture;
   publicMode?: boolean;
 }) {
-  if (publicMode && fixture.fareVersion) {
-    return (
-      <>
-        <Card
-          title={t.CurrentFareTable}
-          tag={
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                color: passengerChrome.success.fg,
-                background: passengerChrome.success.bg,
-                border: `1px solid ${passengerChrome.success.border}`,
-                padding: "2px 8px",
-                borderRadius: 999,
-              }}
-            >
-              {t.AlreadyEffective}
-            </span>
-          }
-        >
-          <div
-            style={{
-              fontSize: 11,
-              color: passengerChrome.muted,
-              marginBottom: 6,
-            }}
-          >
-            {t.VersionInfo} {fixture.fareVersion.authorityFilingRef}
-          </div>
-          {[
-            ["起程運價（1.25 公里）", "NT$ 85"],
-            ["續程運價（每 200 公尺）", "NT$ 5"],
-            ["延滯計時（每 80 秒）", "NT$ 5"],
-            ["夜間加成（23:00–06:00）", "+20%"],
-          ].map(([label, value], index) => (
-            <div
-              key={label}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                padding: "8px 0",
-                borderBottom:
-                  index < 3 ? `1px solid ${passengerChrome.border}` : undefined,
-                fontSize: 12.5,
-              }}
-            >
-              <span style={{ color: passengerChrome.muted }}>{label}</span>
-              <b style={{ fontFamily: monoFont }}>{value}</b>
-            </div>
-          ))}
-        </Card>
-        <Card title={t.FareChangeRuleTitle}>
-          <div
-            style={{
-              fontSize: 12,
-              color: passengerChrome.muted,
-              lineHeight: 1.65,
-            }}
-          >
-            {t.FareChangeRule}
-          </div>
-        </Card>
-      </>
-    );
-  }
+  if (publicMode) return <PublicFareCard />;
 
   const isAnomaly = fixture.routeFareMode === "anomaly";
   return (
@@ -2001,7 +2113,7 @@ function Actions({
             color: passengerChrome.muted,
           }}
         >
-          {t.CancelFreeBeforeAssign}
+          {t.CancelFree}
         </div>
       </ActionGroup>
     );
@@ -2191,6 +2303,17 @@ function Actions({
       >
         {fixture.actionLabel || t.CancelRide}
       </button>
+      {fixture.canCancel ? (
+        <div
+          style={{
+            textAlign: "center",
+            fontSize: 11,
+            color: passengerChrome.muted,
+          }}
+        >
+          {t.CancelFree}
+        </div>
+      ) : null}
       {fixture.cancelNote ? (
         <div
           style={{
