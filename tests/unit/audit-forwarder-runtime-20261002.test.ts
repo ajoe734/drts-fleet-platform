@@ -81,7 +81,7 @@ describe("audit-forwarder-runtime-20261002: Grab Taiwan unapproved adapter regre
     expect(snapshot?.reason).toBe("credential");
     
     // Attempting to ingest should preserve degraded state
-    const order = service.ingestExternalOrder({
+    const order = await service.ingestExternalOrder({
       platformCode: PLATFORM_CODE_GRAB_TAIWAN,
       externalOrderId: "review-no-network",
     });
@@ -91,7 +91,7 @@ describe("audit-forwarder-runtime-20261002: Grab Taiwan unapproved adapter regre
     expect(postIngest?.reason).toBe("credential");
     
     // Same external id creates same mirror id
-    const secondOrder = service.ingestExternalOrder({
+    const secondOrder = await service.ingestExternalOrder({
       platformCode: PLATFORM_CODE_GRAB_TAIWAN,
       externalOrderId: "review-no-network",
     });
@@ -213,13 +213,13 @@ describe("audit-forwarder-runtime-20261002: Grab Taiwan unapproved adapter regre
     );
     await service.onModuleInit();
     
-    service.ingestExternalOrder({
+    await service.ingestExternalOrder({
       platformCode: PLATFORM_CODE_GRAB_TAIWAN,
       externalOrderId: "test-driver-accept",
     });
     
     const order = service.listOrders()[0]!;
-    service.broadcastOrder(order.mirrorOrderId, { candidateDriverIds: ["drv-demo-001"] });
+    await service.broadcastOrder(order.mirrorOrderId, { candidateDriverIds: ["drv-demo-001"] });
     
     // Relay to provider - will throw because it fails
     await expect(service.relayDriverAccept(order.mirrorOrderId, { driverId: "drv-demo-001" })).rejects.toThrow();

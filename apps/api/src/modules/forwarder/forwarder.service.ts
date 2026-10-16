@@ -144,7 +144,10 @@ export class ForwarderService implements OnModuleInit {
     await this.seedRegisteredAdapters();
   }
 
-  ingestExternalOrder(command: IngestExternalOrderCommand, requestId?: string) {
+  async ingestExternalOrder(
+    command: IngestExternalOrderCommand,
+    requestId?: string,
+  ) {
     this.assertNonBlank(command.platformCode, "platformCode");
     this.assertNonBlank(command.externalOrderId, "externalOrderId");
 
@@ -189,10 +192,7 @@ export class ForwarderService implements OnModuleInit {
       updatedAt: now,
     };
 
-    this.forwardedOrders = [
-      this.cloneOrder(forwardedOrder),
-      ...this.forwardedOrders,
-    ];
+    this.forwardedOrders = [forwardedOrder, ...this.forwardedOrders];
     this.ownedMobilityService?.registerForwarderSource(
       forwardedOrder.mirrorOrderId,
       forwardedOrder.platformCode,
@@ -201,12 +201,14 @@ export class ForwarderService implements OnModuleInit {
       command.platformCode,
       this.buildHealthyAdapterHealthPatch(command.platformCode),
     );
-    this.persistChanges(
+    await this.persistOrFail(
+      forwardedOrder,
       {
         forwardedOrders: [this.cloneOrder(forwardedOrder)],
         adapterHealth: [{ ...adapterHealth }],
       },
       "ingest_external_order",
+      requestId,
     );
     this.recordAudit(
       {
@@ -434,12 +436,12 @@ export class ForwarderService implements OnModuleInit {
     );
   }
 
-  rejectForwardedOrder(
+  async rejectForwardedOrder(
     taskId: string,
     driverId: string,
     reason?: string | null,
     requestId?: string,
-  ): ForwardedDriverActionResponse {
+  ): Promise<ForwardedDriverActionResponse> {
     this.assertNonBlank(driverId, "driverId");
 
     const forwardedOrder = this.requireOrder(taskId);
@@ -463,11 +465,13 @@ export class ForwarderService implements OnModuleInit {
         (candidateDriverId) => candidateDriverId !== driverId,
       );
     forwardedOrder.updatedAt = new Date().toISOString();
-    this.persistChanges(
+    await this.persistOrFail(
+      forwardedOrder,
       {
         forwardedOrders: [this.cloneOrder(forwardedOrder)],
       },
       "reject_forwarded_order",
+      requestId,
     );
     this.recordAudit(
       {
@@ -496,7 +500,7 @@ export class ForwarderService implements OnModuleInit {
     );
   }
 
-  broadcastOrder(
+  async broadcastOrder(
     orderId: string,
     command: BroadcastForwardedOrderCommand,
     requestId?: string,
@@ -542,12 +546,14 @@ export class ForwarderService implements OnModuleInit {
       forwardedOrder.platformCode,
       this.buildHealthyAdapterHealthPatch(forwardedOrder.platformCode),
     );
-    this.persistChanges(
+    await this.persistOrFail(
+      forwardedOrder,
       {
         forwardedOrders: [this.cloneOrder(forwardedOrder)],
         adapterHealth: [{ ...adapterHealth }],
       },
       "broadcast_forwarded_order",
+      requestId,
     );
     this.recordAudit(
       {
@@ -604,7 +610,7 @@ export class ForwarderService implements OnModuleInit {
 
     const adapter = this.findAdapter(forwardedOrder.platformCode);
     if (!adapter) {
-      this.markSyncFailed(
+      await this.markSyncFailed(
         forwardedOrder,
         {
           errorCode: "FORWARDER_ADAPTER_UNAVAILABLE",
@@ -659,7 +665,7 @@ export class ForwarderService implements OnModuleInit {
 
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-      this.markSyncFailed(
+      await this.markSyncFailed(
         forwardedOrder,
         {
           errorCode: "FORWARDER_ACCEPT_RELAY_FAILED",
@@ -711,12 +717,15 @@ export class ForwarderService implements OnModuleInit {
         rateLimitStatus: "ok",
       }),
     );
-    this.persistChanges(
+    await this.persistOrFail(
+      forwardedOrder,
       {
         forwardedOrders: [this.cloneOrder(forwardedOrder)],
         adapterHealth: [{ ...adapterHealth }],
       },
       "relay_driver_accept",
+      requestId,
+      command.driverId,
     );
     this.recordAudit(
       {
@@ -741,17 +750,17 @@ export class ForwarderService implements OnModuleInit {
     };
   }
 
-  reportSyncFailure(
+  async reportSyncFailure(
     orderId: string,
     command: ReportForwarderSyncFailureCommand,
     requestId?: string,
   ) {
     const forwardedOrder = this.requireOrder(orderId);
-    this.markSyncFailed(forwardedOrder, command, requestId);
+    await this.markSyncFailed(forwardedOrder, command, requestId);
     return this.cloneOrder(forwardedOrder);
   }
 
-  engageManualFallback(
+  async engageManualFallback(
     orderId: string,
     command: EngageForwarderManualFallbackCommand,
     requestId?: string,
@@ -791,11 +800,13 @@ export class ForwarderService implements OnModuleInit {
       );
     }
     forwardedOrder.updatedAt = now;
-    this.persistChanges(
+    await this.persistOrFail(
+      forwardedOrder,
       {
         forwardedOrders: [this.cloneOrder(forwardedOrder)],
       },
       "engage_manual_fallback",
+      requestId,
     );
     this.recordAudit(
       {
@@ -819,7 +830,7 @@ export class ForwarderService implements OnModuleInit {
     return this.cloneOrder(forwardedOrder);
   }
 
-  syncNativeStatus(
+  async syncNativeStatus(
     orderId: string,
     command: SyncForwardedOrderStatusCommand,
     requestId?: string,
@@ -853,12 +864,14 @@ export class ForwarderService implements OnModuleInit {
       forwardedOrder.platformCode,
       this.buildHealthyAdapterHealthPatch(forwardedOrder.platformCode),
     );
-    this.persistChanges(
+    await this.persistOrFail(
+      forwardedOrder,
       {
         forwardedOrders: [this.cloneOrder(forwardedOrder)],
         adapterHealth: [{ ...adapterHealth }],
       },
       "sync_forwarded_order_status",
+      requestId,
     );
     this.recordAudit(
       {
@@ -886,7 +899,7 @@ export class ForwarderService implements OnModuleInit {
     };
   }
 
-  completeReconciliation(
+  async completeReconciliation(
     orderId: string,
     command: CompleteForwarderReconciliationCommand,
     requestId?: string,
@@ -930,12 +943,14 @@ export class ForwarderService implements OnModuleInit {
       forwardedOrder.platformCode,
       this.buildHealthyAdapterHealthPatch(forwardedOrder.platformCode),
     );
-    this.persistChanges(
+    await this.persistOrFail(
+      forwardedOrder,
       {
         forwardedOrders: [this.cloneOrder(forwardedOrder)],
         adapterHealth: [{ ...adapterHealth }],
       },
       "complete_forwarder_reconciliation",
+      requestId,
     );
     this.recordAudit(
       {
@@ -1111,12 +1126,18 @@ export class ForwarderService implements OnModuleInit {
     }
 
     if (seededHealth.length > 0) {
-      this.persistChanges(
-        {
-          adapterHealth: seededHealth,
-        },
-        "seed_forwarder_adapters",
-      );
+      try {
+        await this.persistChanges(
+          {
+            adapterHealth: seededHealth,
+          },
+          "seed_forwarder_adapters",
+        );
+      } catch {
+        // Already logged via reportPersistenceFailure inside persistChanges.
+        // Adapter-health seeding is best-effort telemetry at boot, not part
+        // of the mirror command lifecycle; it must not block module init.
+      }
     }
   }
 
@@ -1168,12 +1189,12 @@ export class ForwarderService implements OnModuleInit {
     };
   }
 
-  private markSyncFailed(
+  private async markSyncFailed(
     forwardedOrder: ForwardedOrderRecord,
     command: ReportForwarderSyncFailureCommand,
     requestId?: string,
     acceptedDriverId?: string,
-  ) {
+  ): Promise<void> {
     const failedAt = new Date().toISOString();
     const lastSyncError: ForwarderSyncErrorRecord = {
       code: command.errorCode,
@@ -1210,13 +1231,19 @@ export class ForwarderService implements OnModuleInit {
         failedAt,
       ),
     );
-    this.persistChanges(
-      {
-        forwardedOrders: [this.cloneOrder(forwardedOrder)],
-        adapterHealth: [{ ...adapterHealth }],
-      },
-      "mark_forwarder_sync_failed",
-    );
+    try {
+      await this.persistChanges(
+        {
+          forwardedOrders: [this.cloneOrder(forwardedOrder)],
+          adapterHealth: [{ ...adapterHealth }],
+        },
+        "mark_forwarder_sync_failed",
+      );
+    } catch {
+      // Already logged via reportPersistenceFailure inside persistChanges.
+      // This is already the terminal honest-failure recording path, so there
+      // is no further fallback to escalate to without inventing a fake ACK.
+    }
     this.recordAudit(
       {
         actorId: acceptedDriverId ?? null,
@@ -1593,7 +1620,11 @@ export class ForwarderService implements OnModuleInit {
           adapterHealth: [adapterHealth],
         },
         "verify_forwarder_webhook",
-      );
+      ).catch(() => {
+        // Already logged via reportPersistenceFailure inside persistChanges.
+        // Adapter-health telemetry is best-effort and must not block or
+        // reshape the webhook verification outcome itself.
+      });
       return;
     }
 
@@ -1627,7 +1658,11 @@ export class ForwarderService implements OnModuleInit {
             adapterHealth: [adapterHealth],
           },
           "verify_forwarder_webhook",
-        );
+        ).catch(() => {
+          // Already logged via reportPersistenceFailure inside
+          // persistChanges; this health telemetry write must not block or
+          // reshape the (already decided) webhook rejection below.
+        });
         throw new ApiRequestError(
           HttpStatus.UNAUTHORIZED,
           "FORWARDER_WEBHOOK_VERIFICATION_FAILED",
@@ -1661,7 +1696,11 @@ export class ForwarderService implements OnModuleInit {
           adapterHealth: [adapterHealth],
         },
         "verify_forwarder_webhook",
-      );
+      ).catch(() => {
+        // Already logged via reportPersistenceFailure inside persistChanges.
+        // Adapter-health telemetry is best-effort and must not block or
+        // reshape the already-accepted webhook verification outcome.
+      });
     } catch (error) {
       if (error instanceof ApiRequestError) {
         throw error;
@@ -1680,7 +1719,11 @@ export class ForwarderService implements OnModuleInit {
           adapterHealth: [adapterHealth],
         },
         "verify_forwarder_webhook",
-      );
+      ).catch(() => {
+        // Already logged via reportPersistenceFailure inside persistChanges;
+        // this health telemetry write must not mask the real verification
+        // error being thrown below.
+      });
       throw new ApiRequestError(
         HttpStatus.UNAUTHORIZED,
         "FORWARDER_WEBHOOK_VERIFICATION_FAILED",
@@ -2132,15 +2175,71 @@ export class ForwarderService implements OnModuleInit {
     this.auditNotificationService.recordAuditLog(auditLogInput);
   }
 
-  private persistChanges(changes: PersistForwarderChanges, context: string) {
+  /**
+   * Awaits the repository's durable ACK (a confirmed DB round-trip, or an
+   * immediate no-op in noDB mode) instead of firing persistence and moving on.
+   * Rethrows after logging so lifecycle callers can tell an unconfirmed write
+   * apart from a confirmed one and react honestly instead of publishing a
+   * success audit/HTTP response for a change that never durably landed.
+   */
+  private async persistChanges(
+    changes: PersistForwarderChanges,
+    context: string,
+  ): Promise<void> {
     if (!this.forwarderRepository) {
       return;
     }
 
-    void this.forwarderRepository
-      .persistChanges(changes)
-      .catch((error: unknown) => {
-        this.forwarderRepository!.reportPersistenceFailure(error, context);
-      });
+    try {
+      await this.forwarderRepository.persistChanges(changes);
+    } catch (error) {
+      this.forwarderRepository.reportPersistenceFailure(error, context);
+      throw error;
+    }
+  }
+
+  /**
+   * Durable-ACK gate for the forwarded mirror command lifecycle: awaits the
+   * canonical write and, if it does not land, records the honest degraded
+   * state (reusing the existing sync_failed/manual-fallback/reconciliation
+   * vocabulary rather than inventing a new provider receipt) and throws so
+   * the caller never publishes cache/audit/HTTP success for an unconfirmed
+   * write. Retrying the same command re-targets the same mirrorOrderId, so
+   * platformCode/externalOrderId/mirror identity and snapshots survive.
+   */
+  private async persistOrFail(
+    forwardedOrder: ForwardedOrderRecord,
+    changes: PersistForwarderChanges,
+    context: string,
+    requestId?: string,
+    acceptedDriverId?: string,
+  ): Promise<void> {
+    try {
+      await this.persistChanges(changes, context);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      await this.markSyncFailed(
+        forwardedOrder,
+        {
+          errorCode: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN",
+          errorMessage: `Durable persistence ACK was not received for ${context}: ${detail}`,
+          retryable: true,
+          manualFallbackReason:
+            "Local mirror write was not durably confirmed; verify canonical state via readback/reconciliation before retrying.",
+        },
+        requestId,
+        acceptedDriverId,
+      );
+      throw new ApiRequestError(
+        HttpStatus.BAD_GATEWAY,
+        "FORWARDER_PERSISTENCE_ACK_UNCERTAIN",
+        "Forwarded order mirror write was not durably acknowledged; manual readback/reconciliation is required before treating this as complete.",
+        {
+          orderId: forwardedOrder.mirrorOrderId,
+          context,
+        },
+        true,
+      );
+    }
   }
 }
