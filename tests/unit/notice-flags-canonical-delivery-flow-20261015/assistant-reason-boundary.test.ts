@@ -1,11 +1,95 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { PlatformAdminService } from "../../../apps/api/src/modules/platform-admin/platform-admin.service";
 import { PlatformAdminAssistantService } from "../../../apps/api/src/modules/platform-admin-assistant/platform-admin-assistant.service";
 import { resolvePlatformAdminAssistantAction } from "../../../apps/api/src/modules/platform-admin-assistant/platform-admin-assistant.actions";
+import type { ExecutePlatformAdminAssistantActionCommand } from "../../../apps/api/src/modules/platform-admin-assistant/platform-admin-assistant.types";
 import { principal } from "./wire-harness";
 
 describe("assistant direct caller confirmation reason boundary", () => {
+  it("typed original notice action carries maintenance schedule/expiry through the actual assistant command", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-01T00:00:00Z"));
+      const audit = new AuditNotificationService();
+      const domain = new PlatformAdminService(audit);
+      const assistant = new PlatformAdminAssistantService(
+        {} as never,
+        {} as never,
+        domain,
+        audit,
+        {} as never,
+        undefined,
+        undefined,
+        {} as never,
+      );
+      const identity = principal("platform");
+      identity.roles = ["superadmin"];
+      identity.roleFamilies = ["platform"];
+      const session = assistant.createSession(identity);
+      const command: ExecutePlatformAdminAssistantActionCommand = {
+        toolName: "action.create_platform_notice",
+        payload: {
+          title: "Typed maintenance window",
+          body: "Scheduled original in-app notice",
+          severity: "maintenance",
+          targetAudience: "tenants",
+          scheduledAt: "2026-11-01T01:00:00Z",
+          expiresAt: "2026-11-01T02:00:00Z",
+        },
+        reason: "Approved maintenance announcement",
+      };
+      const originalCount = domain.listPlatformNotices().length;
+      expect(() =>
+        assistant.executeAction(session.sessionId, identity, {
+          toolName: command.toolName,
+          payload: command.payload,
+        }),
+      ).toThrow();
+      for (const reason of [null, "", "   "]) {
+        expect(() =>
+          assistant.executeAction(session.sessionId, identity, {
+            ...command,
+            reason,
+          }),
+        ).toThrow();
+      }
+      expect(domain.listPlatformNotices()).toHaveLength(originalCount);
+      const result = assistant.executeAction(
+        session.sessionId,
+        identity,
+        command,
+        "typed-notice-window",
+      );
+      expect(result.receipt.status).toBe("completed");
+      expect(domain.listPlatformNotices()[0]).toMatchObject({
+        severity: "maintenance",
+        status: "scheduled",
+        scheduledAt: "2026-11-01T01:00:00.000Z",
+        expiresAt: "2026-11-01T02:00:00.000Z",
+        reason: command.reason,
+        storageMode: "process_memory",
+      });
+      vi.setSystemTime(new Date("2026-11-01T01:00:00Z"));
+      expect(domain.listPlatformNotices()[0]?.status).toBe("active");
+      vi.setSystemTime(new Date("2026-11-01T02:00:00Z"));
+      expect(domain.listPlatformNotices()[0]).toMatchObject({
+        status: "resolved",
+        downlistedReason: "expired",
+      });
+      expect(
+        audit
+          .listAuditLogs()
+          .find(
+            (a) =>
+              a.requestId === "typed-notice-window" &&
+              a.moduleName === "platform-admin-assistant",
+          )?.newValuesSummary,
+      ).toMatchObject({ reason: command.reason });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("existing executeAction must carry its validated confirmation reason into the canonical notice and audit", () => {
     const audit = new AuditNotificationService();
     const domain = new PlatformAdminService(audit);

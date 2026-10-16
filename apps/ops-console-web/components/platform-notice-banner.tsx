@@ -23,6 +23,7 @@ export function PlatformNoticeBanner() {
   const [pending, setPending] = useState<string | null>(null);
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
   const alive = useRef(false);
+  const readRequest = useRef<AbortController | null>(null);
   useEffect(() => {
     alive.current = true;
     let disposed = false;
@@ -61,26 +62,39 @@ export function PlatformNoticeBanner() {
       alive.current = false;
       generation++;
       active?.abort();
+      readRequest.current?.abort();
+      readRequest.current = null;
       clearInterval(timer);
       refreshRef.current = null;
     };
   }, [client]);
   const read = useCallback(
     async (notice: Notice) => {
+      if (!alive.current || readRequest.current) return;
+      const request = new AbortController();
+      readRequest.current = request;
       setPending(notice.noticeId);
       setError(null);
       try {
         const ack = await client.post<Notice["outcome"]>(
           `/api/ops/platform-notices/${encodeURIComponent(notice.noticeId)}/read`,
-          { body: { outcomeId: notice.outcome.outcomeId } },
+          {
+            body: { outcomeId: notice.outcome.outcomeId },
+            signal: request.signal,
+          },
         );
         if (!ack?.readAt || ack.outcomeId !== notice.outcome.outcomeId)
           throw new Error(t("platformNotice.readNotAcknowledged"));
-        if (alive.current) await refreshRef.current?.();
+        if (alive.current && !request.signal.aborted)
+          await refreshRef.current?.();
       } catch (e) {
-        if (alive.current) setError(e instanceof Error ? e.message : String(e));
+        if (alive.current && !request.signal.aborted)
+          setError(e instanceof Error ? e.message : String(e));
       } finally {
-        if (alive.current) setPending(null);
+        if (readRequest.current === request) {
+          readRequest.current = null;
+          if (alive.current && !request.signal.aborted) setPending(null);
+        }
       }
     },
     [client, t],

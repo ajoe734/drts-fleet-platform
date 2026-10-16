@@ -21,6 +21,7 @@ import { wireHarness, principal } from "./wire-harness";
 import { createUiModuleLoader } from "../system-remediation/sr-wire-001/ui-module-loader";
 import { t as opsTranslate } from "../../../apps/ops-console-web/lib/translations";
 import { t as tenantTranslate } from "../../../apps/tenant-console-web/lib/translations";
+import { sourceModuleLoader } from "./source-module-loader";
 
 beforeEach(() => {
   vi.stubEnv("JWT_SECRET", "notice-unit-secret-at-least-thirty-two-characters");
@@ -410,6 +411,72 @@ describe("mounted production forms and observers through local typed transport",
     expect(clearers.size).toBe(0);
     expect(h.requests.every((r) => r.path !== "/api/notifications")).toBe(true);
   });
+
+  it.each(["ops", "tenant"] as const)(
+    "mounted %s banner aborts an outstanding real read command on unmount",
+    async (realm) => {
+      const h = wireHarness();
+      const client = h.client(
+        principal(realm, "reader", realm === "tenant" ? "A" : null),
+      );
+      const bannerPath = `apps/${realm === "ops" ? "ops" : "tenant"}-console-web/components/platform-notice-banner.tsx`;
+      const translate = (key: string) =>
+        realm === "ops"
+          ? opsTranslate(key, "en")
+          : tenantTranslate(key as Parameters<typeof tenantTranslate>[0], "en");
+      const load = sourceModuleLoader(
+        {
+          react: React,
+          "react/jsx-runtime": jsxRuntime,
+          "../lib/api-client": { getOpsClient: () => client },
+          "../lib/browser-api-client": { createBrowserApiClient: () => client },
+          "../lib/i18n": {
+            useTranslation: () => ({ locale: "en", t: translate }),
+          },
+        },
+        [bannerPath],
+      );
+      const Banner = load<{ PlatformNoticeBanner: React.ComponentType }>(
+        resolve(bannerPath),
+      ).PlatformNoticeBanner;
+      h.service.createPlatformNotice({
+        title: "Pending read cleanup",
+        body: "Original consumer",
+        severity: "info",
+        targetAudience: realm === "ops" ? "ops" : "tenants",
+      });
+      const mounted = render(<Banner />);
+      await waitFor(() =>
+        expect(screen.getByText("Pending read cleanup")).toBeTruthy(),
+      );
+      const readButton = within(
+        screen.getByText("Pending read cleanup").closest("article")!,
+      ).getByRole("button", { name: "Mark as read" });
+      let release!: () => void;
+      h.setBeforeReturn(async (path) => {
+        if (path.endsWith("/read"))
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+      });
+      fireEvent.click(readButton);
+      await waitFor(() => expect(release).toBeTypeOf("function"));
+      const command = h.requests.find(
+        (r) => r.method === "POST" && r.path.endsWith("/read"),
+      )!;
+      const count = h.requests.length;
+      mounted.unmount();
+      try {
+        expect(command.signal?.aborted).toBe(true);
+      } finally {
+        await act(async () => {
+          release();
+          await Promise.resolve();
+        });
+      }
+      expect(h.requests).toHaveLength(count);
+    },
+  );
 
   it.each(["ops", "tenant"] as const)(
     "mounted %s banner shows only legal available notices, posts an actual read, polls and cleans up",
