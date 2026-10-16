@@ -19,6 +19,7 @@ import { hasTrustedMfa } from "../../common/auth/trusted-mfa.policy";
 import type { AuthActorType, AuthRealm } from "../../common/auth/auth.types";
 import { getTenantRoleScopes } from "../../common/auth/auth.constants";
 import { SecurityEventsService } from "../security-events/security-events.service";
+import { IdentityRepository } from "../identity/identity.repository";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-user-identity-link.repository";
 import {
@@ -85,6 +86,8 @@ export class OidcPkceService {
     private readonly partnerUserIdentityLinkRepo: PartnerUserIdentityLinkRepository = new PartnerUserIdentityLinkRepository(),
     @Optional()
     private readonly consumedStateRepo: ConsumedOidcStateRepository = new ConsumedOidcStateRepository(),
+    @Optional()
+    private readonly identityRepository?: IdentityRepository,
   ) {}
 
   /**
@@ -519,6 +522,35 @@ export class OidcPkceService {
 
     const scopes = getTenantRoleScopes(existingUser.roleCode);
     const scopesList = [...(scopes ?? [])];
+
+    // Bind the durable role to whatever the canonical active-grant projection
+    // says *right now* for this exact membership. A dual-approved privileged
+    // role request only ever mutates that projection (never the durable
+    // TenantUserRole), so without this lookup an active grant would silently
+    // issue a session that still carries the pre-elevation role.
+    let effectiveRoleCode = existingUser.roleCode;
+    let effectiveScopesList = scopesList;
+    let tenantPrivilegedGrantId: string | null = null;
+    const membershipId =
+      await this.identityRepository?.findMembershipIdForLegacyTenantUser(
+        existingUser.userId,
+      );
+    if (membershipId) {
+      const activeGrants =
+        (await this.identityRepository?.findActivePrivilegedGrantsForMembership(
+          membershipId,
+        )) ?? [];
+      const applicableGrant = activeGrants[0];
+      if (applicableGrant) {
+        const grantScopes = getTenantRoleScopes(applicableGrant.roleCode);
+        if (grantScopes) {
+          effectiveRoleCode = applicableGrant.roleCode;
+          effectiveScopesList = [...grantScopes];
+          tenantPrivilegedGrantId = applicableGrant.grantId;
+        }
+      }
+    }
+
     const identity: IdentityContext = {
       authMode: "jwt_bearer",
       actorType: "tenant_admin",
@@ -526,8 +558,8 @@ export class OidcPkceService {
       realm: "tenant",
       tenantId: targetTenantId,
       roleFamilies: ["tenant"],
-      roles: [existingUser.roleCode],
-      scopes: scopesList,
+      roles: [effectiveRoleCode],
+      scopes: effectiveScopesList,
       supportedExecutionModes: [
         "discussion_planning",
         "supervisor_managed_execution",
@@ -596,14 +628,15 @@ export class OidcPkceService {
       realm: "tenant" as const,
       tenantId: targetTenantId,
       roleFamilies: ["tenant" as const],
-      roles: [existingUser.roleCode],
-      scopes: scopesList,
+      roles: [effectiveRoleCode],
+      scopes: effectiveScopesList,
       tokenVersion: Date.parse(existingUser.updatedAt),
       authTime: new Date(authTime * 1000).toISOString(),
       amr,
       acr,
       policyVersion: "v1",
       requestId: meta?.requestId ?? null,
+      tenantPrivilegedGrantId,
     };
 
     let token: string;
