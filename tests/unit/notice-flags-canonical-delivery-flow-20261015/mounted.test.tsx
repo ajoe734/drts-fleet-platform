@@ -19,6 +19,8 @@ import {
 } from "../../../apps/platform-admin-web/lib/translations";
 import { wireHarness, principal } from "./wire-harness";
 import { createUiModuleLoader } from "../system-remediation/sr-wire-001/ui-module-loader";
+import { t as opsTranslate } from "../../../apps/ops-console-web/lib/translations";
+import { t as tenantTranslate } from "../../../apps/tenant-console-web/lib/translations";
 
 beforeEach(() => {
   vi.stubEnv("JWT_SECRET", "notice-unit-secret-at-least-thirty-two-characters");
@@ -424,7 +426,18 @@ describe("mounted production forms and observers through local typed transport",
         "react/jsx-runtime": jsxRuntime,
         "../lib/api-client": { getOpsClient: () => client },
         "../lib/browser-api-client": { createBrowserApiClient: () => client },
-        "../lib/i18n": { useTranslation: () => ({ locale: "en" }) },
+        "../lib/i18n": {
+          useTranslation: () => ({
+            locale: "en",
+            t: (key: string) =>
+              realm === "ops"
+                ? opsTranslate(key, "en")
+                : tenantTranslate(
+                    key as Parameters<typeof tenantTranslate>[0],
+                    "en",
+                  ),
+          }),
+        },
       });
       const Banner = load<{ PlatformNoticeBanner: React.ComponentType }>(
         resolve(root, "components/platform-notice-banner.tsx"),

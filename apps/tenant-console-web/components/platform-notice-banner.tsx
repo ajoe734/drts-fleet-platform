@@ -16,7 +16,7 @@ type Notice = {
   };
 };
 export function PlatformNoticeBanner() {
-  const { locale } = useTranslation();
+  const { t } = useTranslation();
   const client = useMemo(() => createBrowserApiClient(), []);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +75,7 @@ export function PlatformNoticeBanner() {
           { body: { outcomeId: notice.outcome.outcomeId } },
         );
         if (!ack?.readAt || ack.outcomeId !== notice.outcome.outcomeId)
-          throw new Error("Read was not acknowledged / 讀取未獲確認");
+          throw new Error(t("platformNotice.readNotAcknowledged"));
         if (alive.current) await refreshRef.current?.();
       } catch (e) {
         if (alive.current) setError(e instanceof Error ? e.message : String(e));
@@ -83,13 +83,10 @@ export function PlatformNoticeBanner() {
         if (alive.current) setPending(null);
       }
     },
-    [client],
+    [client, t],
   );
   return (
-    <section
-      aria-label={locale === "zh" ? "平台公告" : "Platform notices"}
-      aria-live="polite"
-    >
+    <section aria-label={t("platformNotice.section")} aria-live="polite">
       {error && <p role="alert">{error}</p>}
       {notices.map((n) => (
         <article
@@ -112,13 +109,11 @@ export function PlatformNoticeBanner() {
             disabled={Boolean(pending) || Boolean(n.outcome.readAt)}
             onClick={() => void read(n)}
           >
-            {n.outcome.readAt
-              ? locale === "zh"
-                ? "已讀"
-                : "Read"
-              : locale === "zh"
-                ? "標示已讀"
-                : "Mark as read"}
+            {t(
+              n.outcome.readAt
+                ? "platformNotice.read"
+                : "platformNotice.markRead",
+            )}
           </button>
         </article>
       ))}
