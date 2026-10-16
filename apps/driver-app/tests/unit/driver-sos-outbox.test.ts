@@ -13,6 +13,7 @@ import {
   createDriverSosActiveCase,
   formatSosDescription,
   getSituationLabel,
+  isDriverSosStatusTerminal,
   mapSituationToDriverSosEventType,
   markDriverSosCaseFailed,
   markDriverSosCaseSubmitted,
@@ -404,6 +405,40 @@ describe("driver-sos-outbox", () => {
       expect(
         stillPending.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
       ).toHaveLength(0);
+    });
+
+    it("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 F3: does not treat resolved as terminal, so readback can still progress to closed", () => {
+      // "resolved" is not the end of the S-3 progression -- the backend
+      // explicitly supports resolved -> closed -- so native polling must not
+      // stop here. Only closed/false_alarm_dismissed are genuine dead ends.
+      expect(isDriverSosStatusTerminal("resolved")).toBe(false);
+      expect(isDriverSosStatusTerminal("closed")).toBe(true);
+      expect(isDriverSosStatusTerminal("false_alarm_dismissed")).toBe(true);
+      expect(isDriverSosStatusTerminal("acknowledged")).toBe(false);
+
+      const submitted = buildSubmittedCase();
+      const resolved = applyDriverSosDutyReadback(submitted, {
+        status: "resolved",
+        dutyAcknowledgement: {
+          acknowledgedAt: "2026-07-20T09:02:00.000Z",
+          acknowledgedByActorId: "ops-duty-01",
+        },
+      });
+      expect(resolved.status).toBe("resolved");
+      expect(isDriverSosStatusTerminal(resolved.status)).toBe(false);
+
+      // A later authoritative readback -- including one for a case that was
+      // restored from storage while already "resolved" -- must still be
+      // able to observe the subsequent closed transition.
+      const closed = applyDriverSosDutyReadback(resolved, {
+        status: "closed",
+        dutyAcknowledgement: resolved.dutyAcknowledgement,
+      });
+      expect(closed.status).toBe("closed");
+      expect(
+        closed.timeline.filter((entry) => entry.kind === "closed"),
+      ).toHaveLength(1);
+      expect(isDriverSosStatusTerminal(closed.status)).toBe(true);
     });
   });
 });

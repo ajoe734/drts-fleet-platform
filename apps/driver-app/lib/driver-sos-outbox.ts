@@ -474,7 +474,6 @@ export function markDriverSosCaseSubmitted(
 }
 
 const DRIVER_SOS_TERMINAL_STATUSES: ReadonlySet<DriverSosStatus> = new Set([
-  "resolved",
   "closed",
   "false_alarm_dismissed",
 ]);

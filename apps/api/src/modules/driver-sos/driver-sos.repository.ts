@@ -189,6 +189,110 @@ export class DriverSosRepository {
     };
   }
 
+  /**
+   * Authoritative single-event reload: event + its full timeline + its
+   * outbox row, straight from the DB. Used after a losing duty
+   * acknowledgment (or any other cross-process write this process did not
+   * itself perform) so the local cache picks up the actual winner's
+   * timeline and outbox instead of continuing to serve this process's own
+   * stale copies.
+   */
+  async reloadEventState(sosEventId: string): Promise<{
+    event: DriverSosEventRecord;
+    timelines: DriverSosTimelineEntry[];
+    outbox: DriverSosUrgentAlertOutboxRecord | null;
+  } | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const [eventResult, timelinesResult, outboxResult] = await Promise.all([
+      this.databaseService!.query<DriverSosEventRow>(
+        `
+          SELECT
+            sos_event_id,
+            client_event_id,
+            event_no,
+            incident_id,
+            driver_id,
+            vehicle_id,
+            plate_no,
+            order_id,
+            task_id,
+            status,
+            event_type,
+            severity,
+            description,
+            location_snapshot,
+            original_triggered_at,
+            server_received_at,
+            fleet_report_confirmed_at,
+            offline_at_trigger,
+            false_alarm_snapshot,
+            duty_ack_snapshot,
+            created_at,
+            updated_at
+          FROM safety.driver_sos_events
+          WHERE sos_event_id = $1
+          LIMIT 1
+        `,
+        [sosEventId],
+      ),
+      this.databaseService!.query<DriverSosTimelineRow>(
+        `
+          SELECT
+            timeline_id,
+            sos_event_id,
+            event_type,
+            actor_type,
+            actor_id,
+            occurred_at,
+            recorded_at,
+            payload
+          FROM safety.driver_sos_timeline
+          WHERE sos_event_id = $1
+          ORDER BY occurred_at ASC, recorded_at ASC
+        `,
+        [sosEventId],
+      ),
+      this.databaseService!.query<DriverSosUrgentAlertOutboxRow>(
+        `
+          SELECT
+            outbox_id,
+            sos_event_id,
+            incident_id,
+            driver_id,
+            event_no,
+            status,
+            attempt_count,
+            next_attempt_at,
+            payload,
+            created_at,
+            delivered_at,
+            fleet_report_confirmed_at,
+            ops_alert_rendered_at,
+            ops_alert_receipt_recorded_at,
+            alert_to_ops_latency_ms
+          FROM safety.driver_sos_urgent_alert_outbox
+          WHERE sos_event_id = $1
+          LIMIT 1
+        `,
+        [sosEventId],
+      ),
+    ]);
+
+    const eventRow = eventResult.rows[0];
+    if (!eventRow) {
+      return null;
+    }
+
+    return {
+      event: this.mapEventRow(eventRow),
+      timelines: timelinesResult.rows.map((row) => this.mapTimelineRow(row)),
+      outbox: outboxResult.rows[0] ? this.mapOutboxRow(outboxResult.rows[0]) : null,
+    };
+  }
+
   async persistSubmission(
     submission: PersistDriverSosSubmission,
   ): Promise<PersistDriverSosSubmissionResult> {
