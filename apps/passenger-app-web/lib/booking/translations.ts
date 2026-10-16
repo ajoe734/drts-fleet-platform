@@ -2,6 +2,13 @@ import type { FareVersion } from "@drts/contracts";
 export const BOOK_T = {
   realmName: "乘客叫車",
   pickup: "上車地點",
+  currentLocation: "使用目前位置",
+  locating: "正在取得目前位置…",
+  locationUnsupported: "此瀏覽器無法取得目前位置，請搜尋或手動選擇上車地點。",
+  locationDenied: "未允許使用目前位置，您仍可搜尋或手動選擇上車地點。",
+  locationUnavailable: "目前無法取得位置，請重試或搜尋上車地點。",
+  locationTimeout: "取得位置逾時，請重試或搜尋上車地點。",
+  locationAddressError: "無法解析目前位置的地址，請重試或搜尋上車地點。",
   dropoff: "下車地點",
   time: "預約時間",
   book: "建立乘車需求",
