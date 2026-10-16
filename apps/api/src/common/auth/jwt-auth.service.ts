@@ -63,6 +63,7 @@ export interface JwtIdentityPayload {
   driverDeviceId?: string | null;
   driverProvisioningDriverId?: string | undefined;
   breakGlassGrantId?: string | undefined;
+  tenantPrivilegedGrantId?: string | undefined;
 }
 
 export interface IssuedJwtSessionToken {
@@ -139,6 +140,7 @@ type JwtSignIdentity = JwtSignIdentityBase & {
   driverDeviceId?: string | null;
   driverProvisioningDriverId?: string | undefined;
   breakGlassGrantId?: string | null;
+  tenantPrivilegedGrantId?: string | null;
 };
 
 export interface IssueSessionTokenOptions {
@@ -158,6 +160,7 @@ export interface IssueSessionTokenOptions {
   audience?: string[] | null;
   workloadExchangeNonceHash?: string | null;
   breakGlassGrantId?: string | null;
+  tenantPrivilegedGrantId?: string | null;
   // Already-fetched membership/role-binding updatedAt values for a workforce
   // (platform/ops) principal. When set, the signed tokenVersion is derived
   // from these plus the principal's actually-persisted updatedAt after
@@ -655,6 +658,10 @@ export class JwtAuthService {
       null;
     const breakGlassGrantId =
       options?.breakGlassGrantId ?? identity.breakGlassGrantId ?? null;
+    const tenantPrivilegedGrantId =
+      options?.tenantPrivilegedGrantId ??
+      identity.tenantPrivilegedGrantId ??
+      null;
     const subject =
       options?.subject ??
       identity.subject ??
@@ -730,6 +737,7 @@ export class JwtAuthService {
         },
         riskSummary: {
           ...(breakGlassGrantId ? { breakGlassGrantId } : {}),
+          ...(tenantPrivilegedGrantId ? { tenantPrivilegedGrantId } : {}),
           ...(workloadExchangeNonceHash
             ? {
                 workloadExchangeNonceHash,
@@ -761,6 +769,7 @@ export class JwtAuthService {
         expiresAt,
         workloadExchangeNonceHash,
         breakGlassGrantId,
+        tenantPrivilegedGrantId,
       },
       { expiresIn, jwtId: tokenId },
     );
@@ -880,6 +889,7 @@ export class JwtAuthService {
       workloadExchangeNonceHash:
         identity.workloadExchangeNonceHash ?? undefined,
       breakGlassGrantId: identity.breakGlassGrantId ?? undefined,
+      tenantPrivilegedGrantId: identity.tenantPrivilegedGrantId ?? undefined,
       drtsPassengerId: identity.drtsPassengerId ?? null,
       driverBindingId: identity.driverBindingId ?? null,
       driverDeviceId: identity.driverDeviceId ?? null,
@@ -1041,16 +1051,47 @@ export class JwtAuthService {
         return false;
       }
 
-      const currentScopes = getTenantRoleScopes(user.roleCode);
-      if (!currentScopes) {
+      if (Date.parse(user.updatedAt) !== payload.tokenVersion) {
         return false;
       }
 
-      return (
-        Date.parse(user.updatedAt) === payload.tokenVersion &&
-        payload.roles[0] === user.roleCode &&
-        arraysEqual(payload.scopes, currentScopes)
+      if (payload.roles[0] === user.roleCode) {
+        const currentScopes = getTenantRoleScopes(user.roleCode);
+        if (!currentScopes) {
+          return false;
+        }
+        return arraysEqual(payload.scopes, currentScopes);
+      }
+
+      // The session carries a role beyond the durable TenantUserRole. That is
+      // only legitimate when it is still backed, right now, by the exact
+      // active privileged-role grant that was projected at issuance -- not
+      // merely by some active grant with a matching role name.
+      if (!payload.tenantPrivilegedGrantId || !this.identityRepository) {
+        return false;
+      }
+      const membershipId =
+        await this.identityRepository.findMembershipIdForLegacyTenantUser(
+          tenantUserId,
+        );
+      if (!membershipId) {
+        return false;
+      }
+      const activeGrants =
+        await this.identityRepository.findActivePrivilegedGrantsForMembership(
+          membershipId,
+        );
+      const backingGrant = activeGrants.find(
+        (grant) => grant.grantId === payload.tenantPrivilegedGrantId,
       );
+      if (!backingGrant || backingGrant.roleCode !== payload.roles[0]) {
+        return false;
+      }
+      const elevatedScopes = getTenantRoleScopes(backingGrant.roleCode);
+      if (!elevatedScopes) {
+        return false;
+      }
+      return arraysEqual(payload.scopes, elevatedScopes);
     }
 
     if (payload.realm === "partner") {
