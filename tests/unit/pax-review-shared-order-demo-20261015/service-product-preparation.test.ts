@@ -96,6 +96,15 @@ function productPeers() {
         if (writeError) throw writeError;
         records.set(values[0] as string, JSON.parse(values[11] as string));
       }
+      if (sql.trimStart().startsWith("UPDATE ops.phase1_service_products SET")) {
+        writeEntered?.();
+        await writeGate;
+        if (writeError) throw writeError;
+        const id = values[0] as string;
+        if (!records.has(id)) return { rows: [], rowCount: 0 };
+        records.set(id, JSON.parse(values[11] as string));
+        return { rows: [], rowCount: 1 };
+      }
       if (sql.trimStart().startsWith("SELECT record")) {
         if (readError) throw readError;
         if (sql.includes("ops.phase1_service_products")) {
