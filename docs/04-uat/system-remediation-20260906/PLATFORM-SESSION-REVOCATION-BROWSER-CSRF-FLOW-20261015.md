@@ -246,3 +246,23 @@ New logs are under this worktree's `.local/platform-session-csrf/`. Their SHA-25
 Only the minimal regression and this evidence document change in this dispatch.
 The earlier full regression/app checks remain historical checkpoint results;
 they are not new same-candidate passes.
+
+All checks launched in this dispatch completed and were read:
+
+- `pnpm lint:root`: exit 0. Log `dispatch-root-lint.log`, SHA-256
+  `eb3f3067067e4f6c5871ec40fbb6cce8a0708ea9265382afcafce9c10eafffdc`.
+- `pnpm exec tsc -p .local/platform-session-csrf/root-local-paths.tsconfig.json --noEmit`:
+  exit 0 with full root includes and local source mappings. The initial attempt
+  exited 2 because this dispatch's reconstructed local overlay incorrectly mapped
+  `@drts/tenant-auth` to nonexistent `src/index.ts` (two resolution errors and a
+  downstream implicit-any error). Corrected that local-only mapping to the actual
+  package export `src/route-handlers.ts`, then reran successfully. Initial log:
+  `dispatch-root-local-paths-initial.log`; final log:
+  `dispatch-root-local-paths.log`. This does not change the historical standard
+  `pnpm typecheck:root` failure or claim that standard command passed.
+- Scoped Vitest results remain exit 1 as recorded above. `git diff --check`
+  passes; the API controller has no diff. No runtime was started and no check
+  remains running.
+
+These are progress checkpoints only. Retain the original task and reviewer, and
+resume production repair after Supervisor records the precise additional scope.
