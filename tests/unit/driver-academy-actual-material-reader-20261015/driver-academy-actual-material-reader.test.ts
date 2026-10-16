@@ -516,8 +516,7 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
       );
       expect(
         renderer.root.findAll(
-          (node) =>
-            node.type === "Pressable" && nodeText(node).includes("▶"),
+          (node) => node.type === "Pressable" && nodeText(node).includes("▶"),
         ),
       ).toHaveLength(0);
       expect(boundary.openURL).not.toHaveBeenCalled();

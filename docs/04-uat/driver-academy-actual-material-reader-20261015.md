@@ -156,3 +156,74 @@ active tasks were checked before editing and showed no overlapping active writer
 
 R2 verification and candidate identity are pending at this checkpoint. No R2
 review, CI, merge, acceptance key or hosted/native media result is claimed.
+
+### R2 finding and acceptance matrix
+
+Commands below ran in the assigned isolated Codex worktree, Node `v22.23.2`,
+pnpm `10.33.0`, Vitest `4.1.4`. The verified source checkpoint is
+`e7beb2973b9e2fb188b28d0eb0c03c6f4b714112`; subsequent closeout changes only
+format the test and add this evidence. The actual final candidate SHA/branch/PR
+is bound by the ordinary handoff receipt, not by the historical sections above.
+Local machine logs are under `.local/academy-r2/` in that worktree.
+
+| Finding / acceptance | Source and boundary | Original before → R2 result | Command, exit and evidence | Remaining verification |
+| --- | --- | --- | --- | --- |
+| `C059-F1`, genuine original material counterexample | `fixtures/module-reader.431966.original.tsx.txt` is the complete original production component. `loadHistoricalModuleReader` checks bytes, SHA256 and Git blob digest, compiles it at its original import location, and mounts it with real React hooks. | Original has no actionable video glyph and never calls opener; two SOP resources and two article resources display the same canned text. R2 keeps all original assertions and additionally checks noninteractive glyph and equal canned paragraphs. The fixed reader opens the selected resources instead. | `pnpm exec vitest run tests/unit/driver-academy-actual-material-reader-20261015/` originally passed 8/8 with full Git history (`old-harness-local.log`, exit 0). R2 mounted results: `final-empty-history.log`, exit 0, 8/8. Digest checks establish provenance; mounted interactions establish behavior. | Source-only evidence; real media playback is outside these doubles. |
+| R2 hosted lookup failure | Old `loadHistoricalModuleReader` called `git show` at runtime; now it reads tracked exact original bytes and checks commit/path/blob/hash provenance before the same compile/mount operation. Node loader/extension hooks are restored after the suite. | Controlled empty Git history reproduces the exact old fatal path message: 1 failed / 7 passed, exit 1. Same environment with R2: 8/8 pass, exit 0. No lookup catch, skip, fabricated before, weakened assertion or workflow change. | `git init --bare .local/academy-r2/empty-history.git`; `GIT_DIR="$PWD/.local/academy-r2/empty-history.git" pnpm exec vitest run tests/unit/driver-academy-actual-material-reader-20261015/`. Logs: `old-harness-empty-history.log` → `final-empty-history.log`. This controlled environment demonstrates the harness dependency; it does not identify the original hosted checkout root cause. | New exact-candidate hosted CI still required. |
+| `c059_actual_selected_material_read_or_play` | Adopted old `4d3` `ModuleReader.handleOpenMaterial` / `openAcademyMaterialResource` without changing product bytes. Actual accessible Pressable → selected URL through doubled RN Linking, with full selected course/module identity. | All original video/SOP/article open actions and distinct SOP/article resource switches pass; no generic content is rendered. Course title/code/version retained. | Affected regression command below: 8 files / 76 tests, exit 0 (`regressions.log`). | `Linking` is a socket-free boundary double. Strings returned by its test double exercise optional loaded-content rendering; real RN Linking opens an external reader/player and does not fetch inline document text. |
+| `c059_material_unavailable_error_and_resource_switch` | Same adopted URL validation, `generation` / `inFlight`, missing/unavailable, error/retry and session identity checks. | Missing/invalid URL never opens or shows canned material; rejected open and unsupported transport show error and retry succeeds; duplicate presses and stale response after selection switch are guarded; course/version switch clears session. | Same 76-test regression, exit 0; all original negative/positive assertions retained. | No real network, provider, native player or OS application availability is claimed. |
+| `c059_existing_quiz_progress_and_web_native_regressions` | Real mounted `academy.tsx` → reader → quiz/result/retake; unchanged BE domain/service/controller and C059/C062 regressions. | Material open does not submit quiz or complete course. Fail → retake → pass and record refresh pass, alongside scoring/expiry/qualification regressions. C062 imports unchanged; no new SDK/native import. | Same 76-test regression, driver-app typecheck exit 0, driver-app and root lint exit 0. | Hosted/native export/browser are not executed on this VM. Existing accepted policy and credit remain unchanged. |
+| `c059_material_exact_candidate_validation` | All changes remain in the original four scopes, including two fixture/provenance leaves in the owned unit directory. Old `6c4` / `4d3`, PR2699 and Gemini old-SHA reviews remain historical truth. | Ordinary anchor commits and non-force pushes preserve history. Full-range trailer/coverage/classification/consistency/generated-file checks pass locally. No owner approval/merge/acceptance claim. | Commands below. New same-SHA Claude2 review, required hosted CI and protected merge are pending; handoff creates a new ordinary candidate/generation. | All four own acceptance records remain pending until actual lifecycle evidence. Root-wide optional test typecheck fails as detailed below; it is not reported as passed. |
+
+### R2 checks and original CI evidence
+
+- **Affected unit/regression PASS (exit 0, 8 files / 76 tests):**
+
+  ```bash
+  pnpm exec vitest run \
+    tests/unit/driver-academy-actual-material-reader-20261015/ \
+    tests/unit/system-remediation/sr-academy-fe-001/ \
+    tests/unit/system-remediation/sr-academy-be-001/ \
+    tests/unit/system-remediation/sr-qa-newfeatures-001/c059-driver-academy-training.test.ts \
+    tests/unit/system-remediation/sr-driver-web-001/
+  ```
+
+- **Affected typecheck PASS:** `pnpm --filter @drts/driver-app typecheck`,
+  exit 0 (`typecheck.log`).
+- **Lint PASS:** `pnpm --filter @drts/driver-app lint` and `pnpm lint:root`,
+  each exit 0 (`lint-driver.log`, `lint-root.log`).
+- **Optional full root test typecheck FAIL:**
+  `pnpm exec tsc -p tsconfig.json --noEmit`, exit 2
+  (`typecheck-root.log`). Diagnostics concern other paths (e.g.
+  `apps/bank-console-web/lib/bank-user-identity.ts` unresolved
+  `@drts/tenant-auth/*`, passenger-client resolution and cross-worktree private
+  `ApiClient` identities). There is no diagnostic whose file is the owned
+  Academy test/helper/reader. This is a real failing check, not a full root pass
+  or proof that every baseline diagnostic is preexisting. No broader files are
+  modified to conceal it; required hosted typecheck remains authoritative.
+- **Local full-range gates PASS (each exit 0):**
+
+  ```bash
+  python3 tools/ci/git/check_commit_trailers.py --base 2aed20cee7c80fca77aeb326ab6c8b8377fee0dd --head HEAD
+  python3 tools/ci/check_test_coverage.py
+  node tools/ci/check-repo-classification.mjs
+  python3 tools/ci/git/check_canonical_consistency.py --ci --base 2aed20cee7c80fca77aeb326ab6c8b8377fee0dd --head HEAD
+  python3 tools/ci/git/check_staged_generated_files.py --range 2aed20cee7c80fca77aeb326ab6c8b8377fee0dd HEAD
+  git diff --check 2aed20cee7c80fca77aeb326ab6c8b8377fee0dd HEAD
+  ```
+
+The old Product smoke failure was investigated beyond its nonspecific annotation:
+[run 38786702131 / job 116601502221](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38786702131/job/116601502221).
+`gh api --allow-escape-sequences repos/ajoe734/drts-fleet-platform/actions/jobs/116601502221/logs`
+retrieved the actual log. Its `Failed Tests 1` section identifies the same
+historical `git show` lookup at lines 242/464 (1 failed, 9854 passed, 47 skipped;
+Unit exited 1 and API Unit was skipped). The saved bounded excerpt is
+`.local/academy-r2/original-product-smoke-failure-excerpt.log`, with the full log
+in `original-product-smoke-unit.log`. This establishes the identified Unit
+failure's repair boundary; it does not claim that R2's full Product smoke or API
+Unit passed. The earlier summary link's job `116600445139` is skipped
+`readonly-dev-metadata`, not the failing unit job.
+
+All local checks are socket-free. No product/dev/preview/browser/HTTP/PG/Docker
+server or cloud/IAM/provider/worker control/deployment was started. The separate
+unit-budget/coverage task is not duplicated or made a new Academy gate.
