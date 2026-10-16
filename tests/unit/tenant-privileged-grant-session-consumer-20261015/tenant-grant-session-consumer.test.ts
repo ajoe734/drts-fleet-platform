@@ -556,4 +556,193 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
     const session = await f.callback();
     expect(session.identity.roles).toEqual(["tenant_viewer"]);
   });
+
+  // R3-F4 (reviewer-reproduced): the canonical identity work above means a
+  // real tenant_admin's *authenticated* identity carries actorId=legacy
+  // TenantUserRole.userId while the governance request's targetUserId is,
+  // for a real caller, the canonical principalId (exactly what the base
+  // session above is bound to). An independent requester naming that
+  // canonical principal as the target, followed by the target itself
+  // approving with its own real (legacy-actorId) identity, must still be
+  // rejected as Separation-of-Duties self-approval -- not admitted because
+  // the two ids happen to be spelled differently for the same person.
+  it("after fix: target approving its own request under its real (legacy actorId) identity is still rejected, even though the request names the canonical principal", async () => {
+    const f = await fixture();
+
+    async function realCallbackAs(targetEmail: string, invitationToken?: string) {
+      const login = f.oidc.generateLoginParameters("tenant", {
+        redirectUri: "https://tenant.example/api/auth/tenant/callback",
+        tenantId,
+        ...(invitationToken ? { invitationToken } : {}),
+      });
+      const state = f.oidc.verifyStateToken(login.stateToken)!;
+      // All three real users here hold the durable tenant_admin role, which
+      // requires trusted MFA proof on every login regardless of any grant.
+      f.mockGoogle(
+        f.sign(state.nonce, {
+          sub: `google-user-${targetEmail}`,
+          email: targetEmail,
+          amr: ["mfa"],
+          auth_time: Math.floor(Date.now() / 1000),
+        }),
+      );
+      return f.oidc.exchangeTenantCallbackSession(
+        {
+          provider: "oidc",
+          code: "google-code",
+          state: login.state,
+          callbackUrl: state.redirectUri!,
+        },
+        { stateToken: login.stateToken },
+      );
+    }
+
+    const targetEmail = "r3f4-target@example.org";
+    const requesterEmail = "r3f4-requester@example.org";
+    const approverEmail = "r3f4-approver@example.org";
+
+    const target = await f.tenant.createTenantUser(tenantId, {
+      email: targetEmail,
+      displayName: "R3F4 Target",
+      roleCode: "tenant_admin",
+    });
+    const targetInviteToken = f.delivery.token;
+    await f.tenant.createTenantUser(tenantId, {
+      email: requesterEmail,
+      displayName: "R3F4 Requester",
+      roleCode: "tenant_admin",
+    });
+    const requesterInviteToken = f.delivery.token;
+    await f.tenant.createTenantUser(tenantId, {
+      email: approverEmail,
+      displayName: "R3F4 Genuine Approver",
+      roleCode: "tenant_admin",
+    });
+    const approverInviteToken = f.delivery.token;
+
+    // Three real, independent OIDC-authenticated identities, derived the
+    // exact same way the production @CurrentIdentity() decorator does.
+    const targetSession = await realCallbackAs(targetEmail, targetInviteToken);
+    const targetPayload = await f.signer.verifyAccessToken(targetSession.accessToken);
+    const targetIdentity = f.signer.toRequestIdentity(targetPayload!);
+
+    const requesterSession = await realCallbackAs(requesterEmail, requesterInviteToken);
+    const requesterPayload = await f.signer.verifyAccessToken(requesterSession.accessToken);
+    const requesterIdentity = f.signer.toRequestIdentity(requesterPayload!);
+
+    const approverSession = await realCallbackAs(approverEmail, approverInviteToken);
+    const approverPayload = await f.signer.verifyAccessToken(approverSession.accessToken);
+    const genuineApproverIdentity = f.signer.toRequestIdentity(approverPayload!);
+
+    const targetMembershipId = await f.repo.findMembershipIdForLegacyTenantUser(
+      target.userId,
+    );
+    expect(targetMembershipId).toBeTruthy();
+    const targetMembership = await f.repo.findMembershipById(targetMembershipId!);
+    expect(targetMembership).toBeTruthy();
+
+    // actorId (legacy) and principalId (canonical) really are different
+    // strings for the same real person here -- that is the whole bug.
+    expect(targetIdentity.actorId).toBe(target.userId);
+    expect(targetIdentity.principalId).toBe(targetMembership!.principalId);
+    expect(targetIdentity.principalId).not.toBe(target.userId);
+
+    const request = await f.governance.createRequest(
+      {
+        // A real independent requester names the target by canonical
+        // principal, exactly like the session binding this task already
+        // fixed for OIDC issuance.
+        targetUserId: targetMembership!.principalId,
+        targetMembershipId: targetMembershipId!,
+        roleCode: "tenant_finance_admin",
+        reason: "Independent request naming the canonical target principal.",
+        tenantId,
+      },
+      requesterIdentity,
+    );
+
+    let selfApprovalError: unknown;
+    try {
+      await f.governance.approveRequest(request.requestId, targetIdentity, {
+        approvalRequestId: request.requestId,
+        mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+      });
+    } catch (error) {
+      selfApprovalError = error;
+    }
+    expect((selfApprovalError as { code?: string } | undefined)?.code).toBe(
+      "IAM_SOD_VIOLATION",
+    );
+
+    // The request must still be pending and ungranted -- a rejected approve
+    // call must not have left a usable grant behind.
+    const stillPending = await f.governance.getRequest(request.requestId);
+    expect(stillPending?.status).toBe("pending");
+    const activeGrantsForTarget = await f.repo.findActivePrivilegedGrantsForMembership(
+      targetMembershipId!,
+    );
+    expect(activeGrantsForTarget).toHaveLength(0);
+
+    // The fix must not also break the legitimate case: a genuinely
+    // independent real admin can still approve the very same request.
+    const { grant } = await f.governance.approveRequest(
+      request.requestId,
+      genuineApproverIdentity,
+      {
+        approvalRequestId: request.requestId,
+        mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+      },
+    );
+    expect(grant.status).toBe("active");
+    expect(grant.roleCode).toBe("tenant_finance_admin");
+  });
+
+  // Same canonical-vs-legacy identity mismatch, exercised through
+  // rejectRequest's parallel SoD check (identical bug pattern, lower
+  // severity since it only wrongly *permits* a target/requester to reject
+  // their own request rather than granting elevated authority).
+  it("after fix: rejectRequest also recognizes the target by canonical principalId/membershipId, not only legacy actorId", async () => {
+    const f = await fixture();
+    const membershipId = (await f.repo.findMembershipIdForLegacyTenantUser(
+      f.user.userId,
+    ))!;
+    const membership = (await f.repo.findMembershipById(membershipId))!;
+
+    const requester = createGovernanceIdentity({ actorId: "usr_requester_reject_r3f4" });
+    // The target's real identity would carry a different legacy actorId
+    // from the membership/principal record, but the same canonical
+    // principalId/membershipId -- constructed directly here (not via a
+    // mocked rejectRequest/governance call; only the IdentityContext input
+    // is hand-built, exactly like the suite's existing actorId-based
+    // self-approval case above).
+    const targetAsRejector = createGovernanceIdentity({
+      actorId: "usr_target_distinct_legacy_actor_id",
+      principalId: membership.principalId,
+      membershipId,
+    });
+
+    const request = await f.governance.createRequest(
+      {
+        targetUserId: membership.principalId,
+        targetMembershipId: membershipId,
+        roleCode: "tenant_finance_admin",
+        reason: "Independent request naming the canonical target principal.",
+        tenantId,
+      },
+      requester,
+    );
+
+    let selfRejectError: unknown;
+    try {
+      await f.governance.rejectRequest(request.requestId, targetAsRejector, {
+        approvalRequestId: request.requestId,
+        mutation: { expectedVersion: request.version, reasonCode: "REJECT" },
+      });
+    } catch (error) {
+      selfRejectError = error;
+    }
+    expect((selfRejectError as { code?: string } | undefined)?.code).toBe(
+      "IAM_SOD_VIOLATION",
+    );
+  });
 });

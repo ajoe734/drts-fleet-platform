@@ -121,6 +121,33 @@ export function isPlatformTierRole(roleCode: string): boolean {
   return PLATFORM_SUPER_ADMIN_ROLES.has(roleCode.trim().toLowerCase());
 }
 
+/**
+ * Compares an authenticated identity against a stored requester/target
+ * identifier that may have been recorded in either legacy actorId form or
+ * canonical principalId form (tenant OIDC issuance now binds sessions to the
+ * canonical principal/membership, while actorId stays legacy for durable
+ * tenant lookup and revocation compatibility). A plain actorId string
+ * comparison alone lets an independent-looking legacy actorId mask the same
+ * real person, bypassing Separation of Duties.
+ */
+export function identityMatchesPrincipal(
+  identity: IdentityContext,
+  candidateId: string | null | undefined,
+  candidateMembershipId?: string | null,
+): boolean {
+  if (!candidateId) return false;
+  if (identity.actorId && identity.actorId === candidateId) return true;
+  if (identity.principalId && identity.principalId === candidateId) return true;
+  if (
+    candidateMembershipId &&
+    identity.membershipId &&
+    identity.membershipId === candidateMembershipId
+  ) {
+    return true;
+  }
+  return false;
+}
+
 const REJECTED_STEP_UP_SENTINELS = new Set([
   "INVALID_STEP_UP",
   "UNVERIFIED",
@@ -826,8 +853,15 @@ export class PrivilegedRoleGovernanceService {
 
       // 2. Separation of Duties (SoD) - Requester or target user cannot approve own grant
       if (
-        request.requesterPrincipalId === approverIdentity.actorId ||
-        request.targetUserId === approverIdentity.actorId
+        identityMatchesPrincipal(
+          approverIdentity,
+          request.requesterPrincipalId,
+        ) ||
+        identityMatchesPrincipal(
+          approverIdentity,
+          request.targetUserId,
+          request.targetMembershipId,
+        )
       ) {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
@@ -1125,8 +1159,15 @@ export class PrivilegedRoleGovernanceService {
 
       // Separation of Duties (SoD) - Requester or target user cannot reject own request
       if (
-        request.requesterPrincipalId === rejectorIdentity.actorId ||
-        request.targetUserId === rejectorIdentity.actorId
+        identityMatchesPrincipal(
+          rejectorIdentity,
+          request.requesterPrincipalId,
+        ) ||
+        identityMatchesPrincipal(
+          rejectorIdentity,
+          request.targetUserId,
+          request.targetMembershipId,
+        )
       ) {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
