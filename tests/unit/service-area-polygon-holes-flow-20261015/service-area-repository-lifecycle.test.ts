@@ -66,8 +66,8 @@ function lastInsertCall(
   query: ReturnType<typeof vi.fn>,
   table: "ops.service_area_boundaries" | "ops.stop_policies",
 ) {
-  const calls = query.mock.calls.filter(([sql]: [string]) =>
-    sql.includes(`INSERT INTO ${table}`),
+  const calls = query.mock.calls.filter((call) =>
+    (call[0] as string).includes(`INSERT INTO ${table}`),
   );
   return calls[calls.length - 1]! as [string, unknown[]];
 }

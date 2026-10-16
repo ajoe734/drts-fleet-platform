@@ -4,7 +4,7 @@ import type { ServiceAreaGeoJsonFeature } from "@drts/contracts";
 import {
   buildFeaturePolygonPaths,
   polygonStyle,
-} from "../../../apps/ops-console-web/components/google-map-base-layer";
+} from "../../components/google-map-base-layer";
 
 /**
  * `buildFeaturePolygonPaths` and `polygonStyle` are the exact ring-grouping
@@ -14,10 +14,17 @@ import {
  * here as pure-function regression coverage for that math. The effect
  * itself — mounting the real component, mocking only `@googlemaps/js-api-loader`
  * and the global `google.maps.*` constructors — is exercised in
- * `apps/ops-console-web/tests/unit/google-map-base-layer.test.ts`: that
- * package resolves `@googlemaps/js-api-loader` directly (it is one of its
- * own dependencies), while this directory (run with cwd = repo root) cannot
- * resolve that bare specifier, since it is not a root dependency.
+ * `./google-map-base-layer.test.ts`. This file lives under
+ * `apps/ops-console-web/tests/unit/` (not the task's
+ * `tests/unit/service-area-polygon-holes-flow-20261015/` directory) because
+ * the root `tsconfig.json` program (which type-checks everything under
+ * `tests/**\/*.ts`) has no `google.maps` ambient types, so importing this
+ * component there fails `tsc -p tsconfig.json --noEmit` with
+ * "Cannot find namespace 'google'" even though the pure functions imported
+ * here never touch the `google` global; `apps/ops-console-web`'s own
+ * tsconfig (checked separately by `turbo run typecheck`) has
+ * `@types/google.maps` available, matching the precedent already set by
+ * `google-map-base-layer.test.ts` living here for the same reason.
  */
 describe("GoogleMapBaseLayer polygon ring grouping (HCD-R3)", () => {
   const donutFeature: ServiceAreaGeoJsonFeature = {
