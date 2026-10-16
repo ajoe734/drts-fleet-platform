@@ -2,7 +2,7 @@
 
 Owner: Codex. Reviewer: Claude2. Status: in progress after the F8 CI regression and reviewer reopen recorded below; hosted acceptance remains pending. The exact candidate SHA/branch/PR is recorded by the canonical handoff transaction.
 
-The current R3 specification is `/home/lupin/workspace/drts-fleet-platform/.local/passenger-transport-bureau-review-20261015/CALLCENTER-PHONE-ORDER-DURABLE-FLOW-20261016-R3-sandbox-ACK-scope.json`, SHA256 `6951a98fc6de6e0a39087ae523e89d01c505583dd02f5361f76f706406018364`. The R2 source scope and its original complete acceptance requirements are preserved, with the additional precise sandbox caller grant described below.
+The current R4 specification is `/home/lupin/workspace/drts-fleet-platform/.local/passenger-transport-bureau-review-20261015/CALLCENTER-PHONE-ORDER-DURABLE-FLOW-20261016-R4-real-service-fixtures.json`, SHA256 `b97a2e8858b53ad616c567eed7ba220392c8e6eedbd5e4b7bd5cc282a447150e`. It preserves the original complete R2/R3 product and acceptance requirements and grants the eight exact fixture/caller hunks described in F8. Historical R3 evidence and the rejected candidate remain below.
 
 ## Original finding and source boundaries
 
@@ -155,6 +155,8 @@ Final test source SHA256 values: `durable-ack.test.ts`
 
 ## F8: existing phone-caller test doubles lack the new session entrypoint
 
+The following subsection records the rejected candidate and the pre-R4 scope request. The completed R4 correction and its fresh evidence follow it.
+
 Rejected candidate: `f004d3caad9776d8d3947ef0c398c9be9252eded`, generation
 `9da4385be13c46089e8902bed4c903a9`, PR #2732. Claude2 reopened this candidate
 at `2026-10-16T04:29:42Z`: CI run `38849756131`, API job `116808991611`
@@ -237,3 +239,48 @@ Fresh local logs in the task evidence directory:
 | `f004-legacy-callers-before.log` | `e7000ff90f30edcee66b3efa71af4484bf2afc08254d4bf2865be19b79892663` |
 | `f004-api-callers-before.log`    | `fe840c5cf253db655733a25a2f59b020ffef569ccfa8562fd9c3380f04aaec7b` |
 | `f004-other-callers-before.log`  | `1371b4fa2d2a10ab37ad79eac4714d1ef3dd6362c867045c2e4bfbd08bd27be1` |
+
+## R4 correction of F8
+
+Supervisor granted the eight requested fixture/caller hunks on 2026-10-16;
+no production fallback, schema change or wider shared-file lease was granted
+or added. Recoverable implementation checkpoint: `74f96e0b9` (ordinary push,
+not the review candidate). The canonical handoff records the final full SHA.
+
+Each of the eight original fixtures now constructs the production
+`CallcenterService` without a repository. Its real session linkage,
+one-call-one-order check and listener registrations are exercised, instead of
+reimplementing `withPhoneOrderSession` in a test double. The two API map proof
+fixtures retain their existing owned-order repository boundary and now await
+all seven successful phone creations before reading the resulting orders.
+Fixtures without any repository retain the supported synchronous caller path.
+The compliance fixture removes its unused recording-ID override (its only
+caller supplied null); the actual recording gate and callback assertions stay
+unchanged. Existing synthetic call IDs are already distinct within each service
+instance, so no new session seeding or identifier changes were necessary.
+
+A TypeScript AST comparison against rejected candidate
+`f004d3caad9776d8d3947ef0c398c9be9252eded` verifies that all 564 original
+`expect(...)` expression statements across these eight files are byte-for-byte
+unchanged (`r4-assertion-preservation.log`). This is a scope check; the real
+execution results below establish the behavioral regression result.
+
+| Finding / acceptance                                              | Source and correction                                                          | Old → corrected result                                                                        | Command / version / evidence                                                                                                                                                               | Remaining limitation                                                                                                                                                                                                                                |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F8 missing `withPhoneOrderSession` in partial fixtures            | Eight paths listed above, fixture construction and seven necessary awaits only | Rejected f004: 11 failed / 141 passed; R4 code checkpoint 74f96e0b9: all 152 passed, no skips | API four-file command above: exit 0, 127 passed (`r4-api-callers.log`); root four-file command below: exit 0, 25 passed (`r4-root-callers.log`); Node v22.23.2, pnpm 10.33.0, Vitest 4.1.4 | New candidate independent review and full source CI pending                                                                                                                                                                                         |
+| F1–F7 phone/session/recording ACK regression                      | Production code and existing task probes unchanged from f004                   | Fresh R4 execution: 9 files / 164 tests passed; API callcenter 8 passed                       | Original final command above with only `durable-ack.test.ts` selected from the task folder: exit 0 (`r4-durable-regression.log`); API callcenter command: exit 0 (`r4-api-callcenter.log`) | Nine formal migrated-PG cases deliberately not invoked on this VM; no skip or acceptance credit                                                                                                                                                     |
+| `callcenter_phone-order-and-recording_durable-ACK-full-source-CI` | Original full acceptance, including F1–F8                                      | Local F8 regression resolved; acceptance remains unsatisfied                                  | Fresh log hashes and execution receipt in the same local evidence directory                                                                                                                | Same new candidate: nine migrated-PG cases, all original 22 cross-surface scenarios including complete E2E003 index/report/filing/audit chain, full CI, independent Claude2 review and protected merge; Root retains external/source CI observation |
+
+```bash
+# Root fixtures, exit 0: 4 files / 25 tests.
+pnpm exec vitest run \
+  tests/unit/cross-app/owned-mobility-ops-map-api-closeout-proof.test.ts \
+  tests/unit/push-referral-route-write-20261006/referral-route.test.ts \
+  tests/unit/cross-app/map-fleets-closeout-proof.test.ts \
+  tests/unit/cross-app/owned-mobility-ops-map-closeout-proof.test.ts
+```
+
+Test-generated historical proof JSON files were copied to the local evidence
+directory and restored to their tracked bytes; no historical acceptance artifact
+is part of this source correction. No product server, browser server, Docker
+infrastructure or new hosted workflow was started by this owner.
