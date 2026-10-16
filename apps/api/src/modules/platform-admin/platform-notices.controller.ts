@@ -80,6 +80,24 @@ export class PlatformNoticesController {
   ) {
     return this.list(identity, "drivers", requestId);
   }
+
+  @Get("driver/platform-notices/notifications")
+  @RequireRealms("driver")
+  @RequireScopes("notifications:read")
+  driverNotifications(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      {
+        items: this.service.listRecipientNoticeNotifications(
+          identity,
+          "drivers",
+        ),
+      },
+      requestId,
+    );
+  }
   @Post("ops/platform-notices/:noticeId/read")
   @RequireRealms("ops")
   @RequireScopes("notifications:read")

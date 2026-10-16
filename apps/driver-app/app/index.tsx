@@ -1,3 +1,4 @@
+import { PlatformNoticeBanner } from "../components/platform-notice-banner";
 import { useEffect, useMemo, useState } from "react";
 import { Redirect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -745,7 +746,9 @@ async function loadWorkspaceData(): Promise<WorkspaceLoadResult> {
       loadTaskViews(),
       client.getPlatformPresence(),
       client.isFeatureEnabled("driver-app.shift"),
-      client.listNotifications(),
+      client.getList<NotificationRecord>(
+        "/api/driver/platform-notices/notifications",
+      ),
     ]);
 
   const next: WorkspaceLoadResult = {
@@ -2491,6 +2494,7 @@ export default function WorkspaceIndex() {
 
   return (
     <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
+      <PlatformNoticeBanner />
       <PageHeader
         title={
           <View style={styles.headerTitleStack}>
