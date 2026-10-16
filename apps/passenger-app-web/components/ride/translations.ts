@@ -21,6 +21,7 @@ export const t = {
   ThanksForRating: "感謝您的評價",
   RatingHelps: "您的意見會協助我們維持服務品質。",
   CannotContactDriver: "目前無法直接聯絡司機",
+  RetryContactDriver: "重試聯絡司機",
   ContactSupportInstead: "請改聯絡客服，我們會協助轉達。",
   ContactSupportPhone: "聯絡客服 02-2944-0985",
   SeatbeltReminder: "上車後請全程繫妥安全帶",
