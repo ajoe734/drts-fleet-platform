@@ -90,3 +90,30 @@ runner, database or Compose environment was started on this VM.
 Check results and exact published checkpoint SHA are recorded below and in
 the original task's machine-truth progress. Hosted checks have not been
 triggered for this unfinished checkpoint.
+
+### Local check results
+
+Source/test checkpoint: `b7a03c16f` (only this evidence document changes after
+that checkpoint). All commands below completed and their exit results were
+read before this checkpoint was published.
+
+| Command                                                                                                                                                         | Result                                                                   | Log under `.local/pax-receipt-e04-capture-20261015/` |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------- |
+| `pnpm exec vitest run tests/unit/pax-receipt-e04-capture-20261015/authority-readers.test.ts tests/unit/pax-receipt-complaint-20261009/receipt-download.test.ts` | Exit 0; 2 files, 42 tests passed (13 new reader cases, 29 receipt cases) | `readers-receipt-unit.log`                           |
+| `pnpm --filter @drts/contracts build`                                                                                                                           | Exit 0                                                                   | `contracts-build.log`                                |
+| `pnpm --filter @drts/control-plane-auth build`                                                                                                                  | Exit 0                                                                   | `control-plane-auth-build.log`                       |
+| `pnpm --filter @drts/api typecheck`                                                                                                                             | Exit 0 after rebuilding workspace dependencies                           | `api-typecheck.log`                                  |
+| `pnpm exec eslint <four changed production TS files> tests/unit/pax-receipt-e04-capture-20261015/authority-readers.test.ts --max-warnings=0`                    | Exit 0                                                                   | `scoped-eslint.log`                                  |
+
+The first reader run failed because the SQL profile fixture omitted
+`deviceBindings`; this was a fixture failure, not a successful defect
+reproduction. The fixture now extends the existing native profile shape.
+The initial API typecheck also failed against stale contracts declarations;
+rebuilding the two workspace packages resolved it. Neither initial failure
+is claimed as a production regression reproduction or acceptance evidence.
+
+No PG/browser/HTTP/deployment check has been run for this checkpoint. Both
+required acceptance keys remain pending. This branch must remain in owner
+progress until the Fleet scope request, full capture and required regressions
+are completed; do not hand off these preparation anchors as a finished E04
+candidate.
