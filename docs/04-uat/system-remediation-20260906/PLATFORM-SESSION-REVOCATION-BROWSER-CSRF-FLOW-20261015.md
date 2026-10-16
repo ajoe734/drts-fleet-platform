@@ -433,7 +433,7 @@ exact candidate lock and external gates are pending at this checkpoint.
 ### R6 additional compatibility finding and check history
 
 At production checkpoint `a9560779f047045ef1bf3a408e3917b5140faaae`, the
-original app-local `tests/unit/iam-security-ui.test.ts` found that attaching an
+original app-local `apps/platform-admin-web/tests/unit/iam-security-ui.test.ts` found that attaching an
 empty headers object changed the direct API caller's request options shape:
 3 PASS / 1 FAIL, exit 1 (`app-iam-regression.log`). This is an additional
 compatibility finding, not a reason to weaken the old assertion. The scoped
@@ -514,3 +514,29 @@ its generation, delivery-r2 refs and OPEN PR #2719 stay preserved. The new norma
 handoff supplies full candidate SHA, r3 branch and new PR; reviewer/CI/merge/four
 acceptance records must all bind to that new candidate. This is implementation
 handoff evidence, not a full-system/capability completion or deployment claim.
+
+### R6 hosted CI citation repair
+
+Prior candidate `4abec3dd7596aaa471eaea57c3b2653ea0ceead2` (generation
+`d8be47d0e1a3437cb308ba4fc7854c73`, PR #2729) failed the
+[Canonical consistency job](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38846932519/job/116799469035).
+The compatibility paragraph above cited the app-local IAM test as a repository-root
+path. The real test is
+`apps/platform-admin-web/tests/unit/iam-security-ui.test.ts`; only that citation
+and this evidence section change. Historical test results remain dated R6 evidence.
+
+| Finding / acceptance                                                  | Source and repair                                                            | Before → after                                                                                                                                         | Command / evidence                                                                                                                    | Remaining limits                                                                                              |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| CI cited-path failure / `platform-session_exact-candidate-validation` | R6 compatibility paragraph now uses the real repository-rooted app test path | Hosted 4abec3d exits 1 with one missing-path finding; local unchanged-candidate probe reproduces exit 1 → corrected content exits 0 with zero findings | `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`; hosted job above, `before.log`, `after.log` | New candidate independent review, matching hosted CI, protected merge and all four acceptance records pending |
+
+Durable follow-up evidence directory:
+`/home/lupin/workspace/drts-fleet-platform/.local/platform-session-csrf-owner-audits/20261016-ci-citation-repair`.
+The unchanged production/test blobs retain the R6 validation manifest above; this
+documentation correction does not substitute for new candidate lifecycle gates.
+Local verification uses the production consistency checker, existing-path lookup,
+Prettier and Git diff/commit gates. The first follow-up Prettier check exited 1
+on the new table header; formatting that header resolves it. Product tests and
+typecheck/lint are not rerun for this documentation-only change; their previous
+R6 results, including the standard root typecheck failure, remain as recorded.
+`validation.v1.json` records final commands, results and unchanged blob identities;
+`candidate-readback.v1.json` binds the new full SHA to its remote branch and PR.
