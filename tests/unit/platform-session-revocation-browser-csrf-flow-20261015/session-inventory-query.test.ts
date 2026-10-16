@@ -1,5 +1,4 @@
 import { expect, it } from "vitest";
-import type { IamSessionInventoryQuery } from "@drts/contracts";
 import type { BootstrapRequestIdentity } from "../../../apps/api/src/common/auth/auth.types";
 import { IdentityController } from "../../../apps/api/src/modules/identity/identity.controller";
 import { IdentityRepository } from "../../../apps/api/src/modules/identity/identity.repository";
@@ -23,6 +22,27 @@ it.each([
   { label: "omitted", wireValue: undefined, expectedRevoked: false },
   { label: "direct boolean true", wireValue: true, expectedRevoked: true },
   { label: "direct boolean false", wireValue: false, expectedRevoked: false },
+  { label: "empty string", wireValue: "", expectedRevoked: false },
+  { label: "uppercase true", wireValue: "TRUE", expectedRevoked: false },
+  { label: "padded true", wireValue: " true ", expectedRevoked: false },
+  { label: "invalid string", wireValue: "yes", expectedRevoked: false },
+  { label: "number", wireValue: 1, expectedRevoked: false },
+  { label: "null", wireValue: null, expectedRevoked: false },
+  {
+    label: "repeated true",
+    wireValue: ["true", "true"],
+    expectedRevoked: false,
+  },
+  {
+    label: "mixed repeated",
+    wireValue: ["false", "true"],
+    expectedRevoked: false,
+  },
+  {
+    label: "nested query",
+    wireValue: { value: "true" },
+    expectedRevoked: false,
+  },
 ])(
   "canonical inventory readback with $label",
   async ({ wireValue, expectedRevoked }) => {
@@ -58,7 +78,7 @@ it.each([
     const query = {
       actorId: "inventory-admin",
       includeRevoked: wireValue,
-    } as IamSessionInventoryQuery;
+    };
     const response = await new IdentityController(repository).listAdminSessions(
       identity,
       query,

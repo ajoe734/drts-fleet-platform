@@ -5,20 +5,13 @@ Owner: Codex. Independent reviewer: Claude2. Evidence version: v1.
 
 ## Delivery state
 
-This is an implementation checkpoint, **not a review candidate or completed
-acceptance**. App-local CSRF supply and enforcement are implemented. The mounted
-lawful flow reaches the real repository revoke, but its subsequent HTTP inventory
-read drops the revoked session. The original readback criterion remains open.
-No acceptance key, hosted CI, merge, provider, deployment or live browser success
-is claimed by this document.
-
-The original task needs ordinary Supervisor scope coordination for exactly
-`apps/api/src/modules/identity/identity.controller.ts`, symbol
-`IdentityController.listAdminSessions`: normalize the existing `includeRevoked`
-HTTP query value before passing it to the unchanged repository. The controller is
-outside the current eight write scopes; it has **not been edited**. Do not replace
-the failing readback assertion with a disappearance assertion, turn the HTTP query
-into a boolean in the harness, invent a returned session, or waive the criterion.
+R4 continuation: machine truth now includes the exact controller write scope.
+`IdentityController.listAdminSessions` normalizes only exact HTTP `"true"` or
+boolean `true` before the unchanged repository. The original mounted canonical
+readback assertion remains intact. Full validation and candidate handoff are in
+progress; no review, hosted CI, merge, provider, deployment or live browser success
+is claimed. Earlier checkpoint failures and scope holds below remain historical
+evidence, not the current scope decision.
 
 ## Source and historical lineage
 
