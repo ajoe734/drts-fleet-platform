@@ -241,6 +241,18 @@ async function submitLostItemForCompletedRide(
   await expect(
     ops.getByText(description, { exact: false }).first(),
   ).toBeVisible();
+  const timelineResponse = await ops.request.get(
+    `${OPS}/control-plane-proxy/complaints/${caseNo}/timeline`,
+  );
+  expect(timelineResponse.status()).toBe(200);
+  const timeline = camel(await timelineResponse.json()).data.items;
+  expect(timeline).toHaveLength(1);
+  expect(timeline[0].action).toBe("case_created");
+  await expect(ops.getByText("轉入合規佇列", { exact: true })).toHaveCount(0);
+  const progress = ops.getByTestId("complaint-progress");
+  await expect(progress.getByText("complete", { exact: true })).toHaveCount(1);
+  await expect(progress.getByText("current", { exact: true })).toHaveCount(1);
+  await expect(progress.getByText("upcoming", { exact: true })).toHaveCount(2);
   await info.attach("A-lost-item-case-ops", {
     body: await ops.screenshot({ fullPage: true }),
     contentType: "image/png",
@@ -256,6 +268,10 @@ async function submitLostItemForCompletedRide(
       contactConsent: true,
       content,
       lostItemDescription: description,
+      actualTimelineActions: timeline.map(
+        (entry: { action: string }) => entry.action,
+      ),
+      actualProgress: { complete: 1, current: 1, upcoming: 2 },
       scope: "Passenger real form POST, Ops real case API and actual case page",
       resolvedOrReturned: false,
     }),
