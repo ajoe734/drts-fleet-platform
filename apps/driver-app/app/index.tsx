@@ -1,5 +1,5 @@
 import { PlatformNoticeBanner } from "../components/platform-notice-banner";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Redirect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -13,7 +13,6 @@ import {
   type CrossAppResourceLink,
   type DriverTaskAction,
   type EmptyStateEnvelope,
-  type MarkNotificationsReadCommand,
   type NotificationRecord,
   PLATFORM_CODE_REGISTRY,
   type RefreshTier,
@@ -143,6 +142,16 @@ type NotificationCardModel = {
   route: WorkspaceRoute;
   iconName: keyof typeof Ionicons.glyphMap;
   persistent: boolean;
+};
+
+type WorkspaceNotice = {
+  noticeId: string;
+  outcome: {
+    outcomeId: string;
+    notificationId: string | null;
+    readAt: string | null;
+    state: string;
+  };
 };
 
 type PlatformWorkspaceRow = {
@@ -1533,6 +1542,7 @@ export default function WorkspaceIndex() {
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false);
   const [markingNotificationsRead, setMarkingNotificationsRead] =
     useState(false);
+  const notificationReadRequest = useRef<AbortController | null>(null);
   const [dismissedSosNotificationIds, setDismissedSosNotificationIds] =
     useState<string[]>([]);
 
@@ -1565,10 +1575,15 @@ export default function WorkspaceIndex() {
 
   useEffect(() => {
     const unregister = registerProtectedCacheClearHandler(() => {
+      notificationReadRequest.current?.abort();
+      notificationReadRequest.current = null;
+      setMarkingNotificationsRead(false);
       setWorkspace(INITIAL_WORKSPACE);
       setProvisioned(false);
     });
     return () => {
+      notificationReadRequest.current?.abort();
+      notificationReadRequest.current = null;
       unregister();
     };
   }, []);
@@ -2444,34 +2459,71 @@ export default function WorkspaceIndex() {
     (identityIssue ? 1 : 0);
 
   const markNotificationsRead = async (notificationIds: string[]) => {
-    const ids = notificationIds.filter(Boolean);
-    if (ids.length === 0) {
+    const ids = [...new Set(notificationIds.filter(Boolean))];
+    if (ids.length === 0 || notificationReadRequest.current) {
       return;
     }
 
+    const request = new AbortController();
+    notificationReadRequest.current = request;
     setMarkingNotificationsRead(true);
     try {
       const client = getDriverClient();
-      const command: MarkNotificationsReadCommand = {
-        notificationIds: ids,
-      };
-      await client.post("/api/notifications/read", { body: command });
-      const readAt = new Date().toISOString();
+      const notices = await client.getList<WorkspaceNotice>(
+        "/api/driver/platform-notices",
+        { signal: request.signal },
+      );
+      const selected = ids.map((id) => {
+        const notice = notices.find((n) => n.outcome.notificationId === id);
+        if (!notice)
+          throw new Error("找不到自己的公告讀取回執，請刷新後重試。");
+        return notice;
+      });
+      for (const notice of selected) {
+        if (request.signal.aborted) return;
+        const ack = await client.post<WorkspaceNotice["outcome"]>(
+          `/api/driver/platform-notices/${encodeURIComponent(notice.noticeId)}/read`,
+          {
+            body: { outcomeId: notice.outcome.outcomeId },
+            signal: request.signal,
+          },
+        );
+        if (
+          !ack?.readAt ||
+          ack.state !== "read" ||
+          ack.outcomeId !== notice.outcome.outcomeId ||
+          ack.notificationId !== notice.outcome.notificationId
+        )
+          throw new Error("通知已讀未獲確認，請重試。");
+      }
+      if (request.signal.aborted) return;
+      const notifications = await client.getList<NotificationRecord>(
+        "/api/driver/platform-notices/notifications",
+        { signal: request.signal },
+      );
+      if (request.signal.aborted) return;
+      if (
+        ids.some(
+          (id) => !notifications.find((n) => n.notificationId === id)?.readAt,
+        )
+      )
+        throw new Error("通知已讀未獲確認，請重試。");
       setWorkspace((current) => ({
         ...current,
-        notifications: current.notifications.map((notification) =>
-          ids.includes(notification.notificationId)
-            ? { ...notification, status: "read", readAt }
-            : notification,
-        ),
+        notifications,
+        notificationLoadError: null,
       }));
     } catch (error) {
+      if (request.signal.aborted) return;
       setWorkspace((current) => ({
         ...current,
         notificationLoadError: toErrorMessage(error, "通知已讀同步失敗。"),
       }));
     } finally {
-      setMarkingNotificationsRead(false);
+      if (notificationReadRequest.current === request) {
+        notificationReadRequest.current = null;
+        setMarkingNotificationsRead(false);
+      }
     }
   };
 

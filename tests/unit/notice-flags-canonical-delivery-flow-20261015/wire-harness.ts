@@ -159,6 +159,10 @@ export function wireHarness() {
         tenantId,
         new Headers(init?.headers).get("x-tenant-id") ?? undefined,
       ];
+    } else if (path === "/api/notifications/read") {
+      target = globalNotifications;
+      handler = "markNotificationsRead";
+      args = (id) => [body, id];
     } else if (path === "/api/notifications") {
       target = globalNotifications;
       handler = "listNotifications";
