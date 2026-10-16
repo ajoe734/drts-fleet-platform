@@ -104,6 +104,8 @@ class LoadedRuntimeStatusCliTests(unittest.TestCase):
             " && git push --force-with-lease origin HEAD:refs/heads/release/v1": "defer",
             " > /etc/status-proof": "defer",
             " 2>/etc/status-proof": "defer",
+            " > '/tmp/space /../../etc/status-proof'": "defer",
+            " 2>'/tmp/space /../../etc/status-proof'": "defer",
             " >> ~/.ssh/config": "defer",
             " < ~/.ssh/id_rsa": "defer",
             " <<EOF\nsudo id\nEOF": "defer",
@@ -144,6 +146,16 @@ class LoadedRuntimeStatusCliTests(unittest.TestCase):
         for entrypoint in self.forms():
             self.assertEqual(self.broker.classify_command(entrypoint + " show TEST-001"), "defer")
         self.assertEqual(self.broker.classify_command("ai-status.sh show TEST-001"), "defer")
+
+    def test_symlink_dotdot_cannot_be_lexically_collapsed_into_a_trusted_path(self) -> None:
+        nested = self.other / "bin/nested"
+        nested.mkdir()
+        for directory in (self.canonical / self.relative_bin, self.loaded / "bin"):
+            (directory / "escape").symlink_to(nested, target_is_directory=True)
+            for command in (str(directory / "escape/../ai-status.sh"),
+                            "python3 " + str(directory / "escape/../ai_status.py")):
+                with self.subTest(command=command):
+                    self.assertEqual(self.broker.classify_command(command + " show TEST-001"), "defer")
 
     def test_relative_path_is_resolved_from_real_cwd_and_legal_cd_wrapper(self) -> None:
         self.broker.set_hook_cwd(str(self.worktree))

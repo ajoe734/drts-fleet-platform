@@ -1178,9 +1178,11 @@ def _matches_status_script(path_token: str, name: str, cwd: Path) -> bool:
     if (release.parent == canonical / ".artifacts" / "releases"
             and THIS_DIR == release / "tools" / "development-orchestrator"):
         expected.append(THIS_DIR / "bin" / name)
-    candidate = Path(os.path.abspath(cwd / path_token))
+    raw_candidate = cwd / path_token
+    candidate = Path(os.path.abspath(raw_candidate))
     try:
-        return any(candidate == path and path.resolve(strict=True) == path
+        resolved_candidate = raw_candidate.resolve(strict=True)
+        return any(candidate == path and resolved_candidate == path and path.resolve(strict=True) == path
                    and path.is_file() for path in expected)
     except (OSError, RuntimeError):
         return False
@@ -1215,8 +1217,14 @@ def _is_safe_status_sync_command(shell_command: str, *, cwd: Path | None = None)
             if token == ">&":
                 if not target.isdigit():
                     return False
-            elif _writes_outside_workspace("> " + shlex.quote(str((cwd or worker_cwd()) / target))):
-                return False
+            else:
+                try:
+                    resolved = ((cwd or worker_cwd()) / target).resolve(strict=False)
+                except (OSError, RuntimeError):
+                    return False
+                if (resolved != Path("/dev/null") and not resolved.is_relative_to(Path("/tmp"))
+                        and not _paths_within_workspace([resolved])):
+                    return False
         elif token and all(char in ";&|<>" for char in token):
             return False
     operands = [part for index, part in enumerate(parts) if index not in redirect_operands]
