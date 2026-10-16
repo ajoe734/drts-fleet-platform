@@ -157,12 +157,33 @@ Independent Claude2 review source:
 The reviewer independently reran the 89 tests and identified ENV-001 in actual
 CI logs, then attempted the normal `reopen`. Its final report explicitly says
 that approval broker `CONNECT_TIMEOUT` / deferred calls prevented that
-transaction. The canonical activity log, checked on this owner dispatch,
+transaction. The canonical activity log, checked on the previous owner dispatch,
 contains no successful reviewer `reopen`; Supervisor's scope assignment and
 current `in_progress` owner dispatch are present. The owner does not impersonate
 Claude2 or claim that attempted transaction succeeded. Repair anchors preserve
-the narrow change and completed checks; formal new-candidate handoff awaits
-the original reviewer's normal lifecycle decision, as required by this brief.
+the narrow change and completed checks.
+
+The latest Root instruction at `2026-10-16T03:10:49.021352+00:00` explicitly
+supersedes only the extra scheduling requirement to wait for an old-e6d
+reviewer-reopen transaction before a new handoff. That requirement came from
+Root's earlier diagnosis, not the original specification or native CLI. The
+real failed CI has already returned this task to `in_progress`; the assigned
+Codex owner now uses normal handoff to freeze a new pushed full SHA and fresh
+generation for independent Claude2 review. No old transaction is fabricated.
+The original two full acceptance keys, new-SHA review, full own CI, protected
+merge and actual immutable API startup remain mandatory and pending.
+
+Superseding instruction under the prior evidence root:
+`api-env-transport-hosted-results/ROOT-latest-superseding-only-extra-old-e6d-reviewer-wait.json`,
+verified SHA-256
+`b6eaa3cf916a988b32f53e8192b11e84a1c1c8724b34348c7e91f04b13ad46da`.
+Before this documentation clarification, local and remote task branch heads
+both matched `f2ae88d272ca3750c614775178eff4032a579e28` and the worktree was
+clean. This follow-up changes only this UAT record. Existing Python 39/39 and
+Vitest 89/89 logs were read and retained; unchanged source checks were not
+rerun or presented as new results. The new candidate includes this clarification
+and retains the tested executable source from repair anchor
+`fb89dece6e13b8493cf03b4180ed2c98af5ce847`.
 
 Root CI diagnosis:
 `api-env-transport-hosted-results/actual-e6d-first-CI-failure-obsolete-API-env-wiring-test-scope-diagnosis.json`
