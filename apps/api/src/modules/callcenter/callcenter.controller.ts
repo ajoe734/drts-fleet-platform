@@ -94,13 +94,17 @@ export class CallcenterController {
   }
 
   @Post("sessions/:callId/close")
-  closeCallSession(
+  async closeCallSession(
     @Param("callId") callId: string,
     @Body() command: CloseCallSessionCommand = {},
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.closeCallSession(callId, command, requestId),
+      await this.callcenterService.closeCallSessionForWrite(
+        callId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }

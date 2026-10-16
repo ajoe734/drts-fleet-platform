@@ -209,6 +209,25 @@ export class CallcenterService implements OnModuleInit {
     );
   }
 
+  upsertExternalSessionForWrite(
+    input: ExternalCallSessionInput,
+    requestId?: string,
+  ) {
+    return this.runPhoneSessionWrite(input.callId.trim(), (write) =>
+      this.upsertExternalSession(input, requestId, write),
+    );
+  }
+
+  closeCallSessionForWrite(
+    callId: string,
+    command: CloseCallSessionCommand = {},
+    requestId?: string,
+  ) {
+    return this.runPhoneSessionWrite(callId, (write) =>
+      this.closeCallSession(callId, command, requestId, write),
+    );
+  }
+
   markRecordingPendingForWrite(
     callId: string,
     command: RecordingPendingCommand = {},
@@ -404,7 +423,11 @@ export class CallcenterService implements OnModuleInit {
     );
   }
 
-  upsertExternalSession(input: ExternalCallSessionInput, requestId?: string) {
+  upsertExternalSession(
+    input: ExternalCallSessionInput,
+    requestId?: string,
+    write?: PhoneSessionWrite,
+  ) {
     const callId = input.callId.trim();
     if (!callId) {
       throw new ApiRequestError(
@@ -417,9 +440,10 @@ export class CallcenterService implements OnModuleInit {
     const now = new Date().toISOString();
     const startedAt = input.startedAt ?? now;
     const endedAt = input.endedAt ?? null;
-    const existingSession = this.callSessions.find(
-      (session) => session.callId === callId,
-    );
+    const current = write
+      ? write.current
+      : this.callSessions.find((session) => session.callId === callId);
+    const existingSession = current ? this.cloneSession(current) : null;
 
     if (!existingSession) {
       const session: CallSessionRecord = {
@@ -443,26 +467,30 @@ export class CallcenterService implements OnModuleInit {
         recordingState: "pending",
         flags: endedAt ? ["closed"] : ["recording_pending"],
       };
-      this.callSessions = [session, ...this.callSessions];
-      this.persistSessions([session], "upsert_external_call_session");
-      this.recordAudit(
-        {
-          actorId: session.agentId,
-          actorType: "system",
-          tenantId: null,
-          moduleName: "callcenter",
-          actionName: "upsert_external_call_session",
-          resourceType: "call_session",
-          resourceId: session.callId,
-          newValuesSummary: {
-            callType: session.callType,
-            callerPhone: session.callerPhone,
-            status: session.status,
-          },
-        },
-        requestId,
+      return this.finishPhoneSessionMutation(
+        session,
+        write,
+        "upsert_external_call_session",
+        () =>
+          this.recordAudit(
+            {
+              actorId: session.agentId,
+              actorType: "system",
+              tenantId: null,
+              moduleName: "callcenter",
+              actionName: "upsert_external_call_session",
+              resourceType: "call_session",
+              resourceId: session.callId,
+              newValuesSummary: {
+                callType: session.callType,
+                callerPhone: session.callerPhone,
+                status: session.status,
+              },
+            },
+            requestId,
+          ),
+        () => undefined,
       );
-      return this.cloneSession(session);
     }
 
     existingSession.callType = input.callType ?? existingSession.callType;
@@ -479,8 +507,13 @@ export class CallcenterService implements OnModuleInit {
       this.removeFlag(existingSession, "recording_missing");
       this.addFlag(existingSession, "recording_pending");
     }
-    this.persistSessions([existingSession], "upsert_external_call_session");
-    return this.cloneSession(existingSession);
+    return this.finishPhoneSessionMutation(
+      existingSession,
+      write,
+      "upsert_external_call_session",
+      () => undefined,
+      () => undefined,
+    );
   }
 
   getCallSession(
@@ -657,8 +690,11 @@ export class CallcenterService implements OnModuleInit {
     callId: string,
     command: CloseCallSessionCommand = {},
     requestId?: string,
+    write?: PhoneSessionWrite,
   ) {
-    const session = this.requireSession(callId);
+    const session = write
+      ? this.cloneSession(this.requireWriteSession(callId, write))
+      : this.requireSession(callId);
     const endedAt =
       command.endedAt ?? session.endedAt ?? new Date().toISOString();
     session.status = "closed";
@@ -667,28 +703,31 @@ export class CallcenterService implements OnModuleInit {
     if (session.linkedOrderId && !session.recordingId) {
       this.syncRecordingFlagsWithoutAttachment(session);
     }
-    this.persistSessions([session], "close_call_session");
-    this.enqueueFinalizeRecordingWorkItem(session);
-    this.notifyRecordingStateChange(session, requestId);
-
-    this.recordAudit(
-      {
-        actorId: session.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "close_call_session",
-        resourceType: "call_session",
-        resourceId: session.callId,
-        newValuesSummary: {
-          status: session.status,
-          endedAt: session.endedAt,
-        },
+    return this.finishPhoneSessionMutation(
+      session,
+      write,
+      "close_call_session",
+      () => {
+        this.enqueueFinalizeRecordingWorkItem(session);
+        this.recordAudit(
+          {
+            actorId: session.agentId,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "callcenter",
+            actionName: "close_call_session",
+            resourceType: "call_session",
+            resourceId: session.callId,
+            newValuesSummary: {
+              status: session.status,
+              endedAt: session.endedAt,
+            },
+          },
+          requestId,
+        );
       },
-      requestId,
+      () => this.notifyRecordingStateChange(session, requestId, write),
     );
-
-    return this.cloneSession(session);
   }
 
   quoteEta(callId: string, command: QuoteCallEtaCommand, requestId?: string) {

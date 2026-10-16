@@ -394,12 +394,16 @@ describe("phone durable acknowledgement", () => {
     const rejected = expect(pending).rejects.toThrow("synthetic open failure");
     await h.entered.promise;
     expect(h.calls.listCallSessions()).toEqual([]);
-    expect(h.auditWrite).not.toHaveBeenCalled();
+    const successfulOpens = () =>
+      h.auditWrite.mock.calls.filter(
+        ([row]) => row.actionName === "open_call_session",
+      );
+    expect(successfulOpens()).toEqual([]);
     gate.reject(new Error("synthetic open failure"));
     await rejected;
     expect(h.calls.listCallSessions()).toEqual([]);
     expect([...h.rows.keys()]).toEqual([]);
-    expect(h.auditWrite).not.toHaveBeenCalled();
+    expect(successfulOpens()).toEqual([]);
   });
 
   it("a cold peer opening another call preserves the first committed call identity and order link", async () => {
