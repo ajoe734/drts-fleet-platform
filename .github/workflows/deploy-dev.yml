@@ -2396,8 +2396,10 @@ jobs:
           PAX_REVIEW_SHARED_DEV_SMOKE: "true"
           PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
           PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_PLATFORM_ADMIN_ORIGIN: ${{ needs.health-check.outputs.platform_admin }}
           PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
           PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          PAX_REVIEW_PLATFORM_ADMIN_ID_TOKEN: ${{ steps.id_token_platform_admin.outputs.id_token }}
         run: pnpm exec playwright test -c playwright.pax-review-shared-order.config.ts
       - name: Upload shared-dev rehearsal evidence
         if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'

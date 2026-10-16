@@ -18,6 +18,7 @@ import type {
 } from "./phase2-tesla-fsd-sandbox";
 import type { PartnerType } from "./referral-channel";
 import type {
+  ActionReceipt,
   CrossAppResourceLink,
   DriverMatchingSuppression,
   EmptyStateEnvelope,
@@ -739,6 +740,7 @@ export interface ApiSuccessEnvelope<T> {
   meta: {
     requestId: string;
     timestamp: string;
+    actionReceipt?: ActionReceipt;
   };
 }
 
