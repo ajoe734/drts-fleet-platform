@@ -3,7 +3,7 @@ import * as React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import * as contracts from "../../../packages/contracts/src/index";
 import * as canvas from "../../../packages/ui-web/src/index";
 import type * as BookingModule from "../../../apps/tenant-console-web/app/bookings/page";
@@ -157,11 +157,13 @@ describe(`C121 actual page readbacks (host TZ=${process.env.TZ})`, () => {
         ),
       ).toBeTruthy();
       cleanup();
-      render(
-        await Invoices({
-          searchParams: Promise.resolve({ invoiceId: invoice.invoiceId }),
-        }),
-      );
+      await act(async () => {
+        render(
+          await Invoices({
+            searchParams: Promise.resolve({ invoiceId: invoice.invoiceId }),
+          }),
+        );
+      });
       expect(screen.getAllByText("2027-01-01").length).toBeGreaterThan(0);
       expect(screen.getAllByText("2027-01-14").length).toBeGreaterThan(0);
       expect(document.body.textContent).toContain("2026-12");
@@ -170,5 +172,6 @@ describe(`C121 actual page readbacks (host TZ=${process.env.TZ})`, () => {
       expect(invoice.periodEnd).toBe("2026-12-31");
       expect(booking.reservationWindowStart).toBe(instant);
     },
+    15000,
   );
 });

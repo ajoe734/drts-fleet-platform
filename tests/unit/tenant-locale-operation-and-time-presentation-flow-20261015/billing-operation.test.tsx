@@ -9,6 +9,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import type { TenantBillingProfile } from "@drts/contracts";
 import { ApiClient } from "../../../packages/api-client/src/index";
@@ -171,10 +172,28 @@ describe("C121 mounted locale refresh and billing operation", () => {
     );
     await screen.findByRole("alert");
     expect(title().value).toBe(" Saved draft ");
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole("button", {
+            name: "Save billing profile",
+          }) as HTMLButtonElement
+        ).disabled,
+      ).toBe(false),
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "Save billing profile" }),
     );
     await screen.findByRole("status");
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole("button", {
+            name: "Reset changes",
+          }) as HTMLButtonElement
+        ).disabled,
+      ).toBe(false),
+    );
     expect(title().value).toBe("Saved draft");
     expect(refresh).toHaveBeenCalledOnce();
     expect(revalidate.mock.calls).toEqual([["/billing"], ["/settings"]]);
