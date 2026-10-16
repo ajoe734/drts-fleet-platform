@@ -36,7 +36,7 @@ export class ProductSqlBoundary {
   commitMode: "resolve" | "defer" | "reject-before" | "reject-after" =
     "resolve";
   pendingCommits: Pending[] = [];
-  readError?: Error;
+  readError: Error | undefined;
   private lockTail: Promise<void> = Promise.resolve();
 
   isEnabled() {
@@ -106,7 +106,7 @@ export class ProductSqlBoundary {
     }
     if (q === "ROLLBACK") {
       if (!tx) throw new Error("rollback without transaction");
-      tx.products = undefined;
+      delete tx.products;
       tx.unlock?.();
       return empty;
     }
@@ -154,8 +154,10 @@ export class ProductSqlBoundary {
       };
     }
     if (
-      q.startsWith("INSERT INTO ops.phase1_service_products (") ||
-      q.startsWith("UPDATE ops.phase1_service_products SET ")
+      q ===
+        "INSERT INTO ops.phase1_service_products ( service_product_id, service_product_type, display_name, active, timing, allowed_license_types, meter_required, fixed_fare_allowed, default_billing_mode, created_at, updated_at, record ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12::jsonb)" ||
+      q ===
+        "UPDATE ops.phase1_service_products SET service_product_type = $2, display_name = $3, active = $4, timing = $5, allowed_license_types = $6::jsonb, meter_required = $7, fixed_fare_allowed = $8, default_billing_mode = $9, created_at = $10, updated_at = $11, record = $12::jsonb WHERE service_product_id = $1"
     ) {
       expect(tx?.products).toBeDefined();
       expect(params).toHaveLength(12);
@@ -184,12 +186,8 @@ export class ProductSqlBoundary {
       });
     }
     if (
-      q.startsWith(
-        "INSERT INTO ops.runtime_profile_service_product_policies (",
-      ) &&
-      q.includes(
-        "ON CONFLICT (runtime_profile_code, service_product_code) DO UPDATE SET",
-      )
+      q ===
+      "INSERT INTO ops.runtime_profile_service_product_policies ( runtime_profile_code, service_product_code, active, effective_from, effective_until, created_at, updated_at, record ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb) ON CONFLICT (runtime_profile_code, service_product_code) DO UPDATE SET active = EXCLUDED.active, effective_from = EXCLUDED.effective_from, effective_until = EXCLUDED.effective_until, updated_at = EXCLUDED.updated_at, record = EXCLUDED.record"
     ) {
       expect(params).toHaveLength(8);
       const record = JSON.parse(
@@ -257,7 +255,7 @@ export function productInstance(
 }
 
 export const enterprise = (serviceProductId?: string) => ({
-  serviceProductId,
+  ...(serviceProductId !== undefined ? { serviceProductId } : {}),
   serviceProductType: "enterprise_dispatch" as const,
   displayName: "Enterprise",
   timing: "reservation" as const,

@@ -268,14 +268,16 @@ export class ServiceProductRepository {
       try {
         await client.query("ROLLBACK");
       } catch {
-        /* Preserve original failure. */
+        // A failed rollback must not return an open/unknown transaction to the pool.
+        client.release(true);
+        released = true;
       }
       if (commitStarted) {
         // COMMIT transport loss is not proof of rollback. Read the resolved
         // canonical identity using another connection; never retry or invent
         // a success ACK/audit from a matching row. Subsequent admin reads and
         // runtime prepare use this same authority rather than the old cache.
-        client.release(true);
+        if (!released) client.release(true);
         released = true;
         try {
           const canonical = await this.findById(resolvedId);
@@ -288,7 +290,7 @@ export class ServiceProductRepository {
       }
       throw error;
     } finally {
-      if (!commitStarted) client.release();
+      if (!commitStarted && !released) client.release();
       // On success the connection is healthy; on uncertain COMMIT it was
       // destroyed above before reconciliation to avoid pool-size-one deadlock.
       else if (!released) client.release();

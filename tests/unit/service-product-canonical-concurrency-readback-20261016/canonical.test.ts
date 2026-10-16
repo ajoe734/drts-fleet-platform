@@ -40,8 +40,14 @@ describe("C107 canonical controller/service/repository (controlled SQL, not PG)"
         ),
       ).toHaveLength(1);
       expect(
-        a.audit.listAuditLogs().filter((r) => r.moduleName === "service-product").length +
-          (b === a ? 0 : b.audit.listAuditLogs().filter((r) => r.moduleName === "service-product").length),
+        a.audit
+          .listAuditLogs()
+          .filter((r) => r.moduleName === "service-product").length +
+          (b === a
+            ? 0
+            : b.audit
+                .listAuditLogs()
+                .filter((r) => r.moduleName === "service-product").length),
       ).toBe(1);
       const restarted = productInstance(db);
       await restarted.service.onModuleInit();
@@ -85,7 +91,9 @@ describe("C107 canonical controller/service/repository (controlled SQL, not PG)"
         ...enterprise("SVP-000001"),
         serviceProductType: "travel_agency_transfer",
       }),
-    ).rejects.toMatchObject({ response: { error: { message: "Service product ID already exists." } } });
+    ).rejects.toMatchObject({
+      response: { error: { message: "Service product ID already exists." } },
+    });
     expect(db.products.get("SVP-000001")?.serviceProductType).toBe(
       "enterprise_dispatch",
     );
@@ -232,7 +240,11 @@ describe("C107 canonical controller/service/repository (controlled SQL, not PG)"
       await expect(
         a.controller.createServiceProduct(enterprise(), "req-ambiguous"),
       ).rejects.toThrow("commit_ack_lost");
-      expect(a.audit.listAuditLogs().filter((r) => r.moduleName === "service-product")).toEqual([]);
+      expect(
+        a.audit
+          .listAuditLogs()
+          .filter((r) => r.moduleName === "service-product"),
+      ).toEqual([]);
       expect(a.service.listServiceProducts()).toEqual([]);
       expect(
         db.queries.some(
@@ -252,7 +264,11 @@ describe("C107 canonical controller/service/repository (controlled SQL, not PG)"
       if (mode === "reject-after")
         await expect(
           a.controller.createServiceProduct(enterprise()),
-        ).rejects.toMatchObject({ response: { error: { message: "Service product type already exists." } } });
+        ).rejects.toMatchObject({
+          response: {
+            error: { message: "Service product type already exists." },
+          },
+        });
       else
         expect(
           (await a.controller.createServiceProduct(enterprise())).data.status,
@@ -277,7 +293,9 @@ describe("C107 canonical controller/service/repository (controlled SQL, not PG)"
     expect(settled).toBe(false);
     expect(a.service.listServiceProducts()).toEqual([]);
     expect((await b.controller.listServiceProducts()).data.items).toEqual([]);
-    expect(a.audit.listAuditLogs().filter((r) => r.moduleName === "service-product")).toEqual([]);
+    expect(
+      a.audit.listAuditLogs().filter((r) => r.moduleName === "service-product"),
+    ).toEqual([]);
     db.pendingCommits[0]!.resolve();
     await creation;
     await b.service.onModuleInit();
@@ -288,7 +306,9 @@ describe("C107 canonical controller/service/repository (controlled SQL, not PG)"
         allowedLicenseTypes: ["business_vehicle"],
       }),
     ).rejects.toThrow("commit_ack_lost");
-    expect(a.audit.listAuditLogs().filter((r) => r.moduleName === "service-product")).toHaveLength(1);
+    expect(
+      a.audit.listAuditLogs().filter((r) => r.moduleName === "service-product"),
+    ).toHaveLength(1);
     db.commitMode = "resolve";
     await b.controller.updateServiceProduct("C107-COMMIT", {
       displayName: "Later label",
@@ -309,20 +329,32 @@ describe("C107 canonical controller/service/repository (controlled SQL, not PG)"
       serviceProductId: "LEGACY-B",
     });
     const original = structuredClone([...db.products.values()]);
-    await expect(a.controller.listServiceProducts()).rejects.toMatchObject({ response: { error: { message: "Ambiguous canonical service products." } } });
+    await expect(a.controller.listServiceProducts()).rejects.toMatchObject({
+      response: { error: { message: "Ambiguous canonical service products." } },
+    });
     await expect(
       Promise.resolve(a.service.getServiceProduct("LEGACY-A")),
-    ).rejects.toMatchObject({ response: { error: { message: "Ambiguous canonical service products." } } });
+    ).rejects.toMatchObject({
+      response: { error: { message: "Ambiguous canonical service products." } },
+    });
     await expect(
       a.service.prepareRuntimeProfileServiceProduct(
         "business_dispatch",
         "enterprise_dispatch",
       ),
-    ).rejects.toMatchObject({ response: { error: { message: "Ambiguous canonical service products." } } });
-    await expect(productInstance(db).service.onModuleInit()).rejects.toMatchObject({ response: { error: { message: "Ambiguous canonical service products." } } });
+    ).rejects.toMatchObject({
+      response: { error: { message: "Ambiguous canonical service products." } },
+    });
+    await expect(
+      productInstance(db).service.onModuleInit(),
+    ).rejects.toMatchObject({
+      response: { error: { message: "Ambiguous canonical service products." } },
+    });
     await expect(
       a.controller.updateServiceProduct("LEGACY-A", { active: false }),
-    ).rejects.toMatchObject({ response: { error: { message: "Ambiguous canonical service products." } } });
+    ).rejects.toMatchObject({
+      response: { error: { message: "Ambiguous canonical service products." } },
+    });
     expect([...db.products.values()]).toEqual(original);
     db.readError = new Error("canonical_read_failed");
     await expect(a.controller.listServiceProducts()).rejects.toThrow(
@@ -350,10 +382,14 @@ describe("C107 canonical controller/service/repository (controlled SQL, not PG)"
     db.products.delete("LEGACY-B"); // Test-only fixture restoration; production never cleans up.
     await expect(
       Promise.resolve(a.service.getServiceProduct("missing")),
-    ).rejects.toMatchObject({ response: { error: { message: "Service product not found." } } });
+    ).rejects.toMatchObject({
+      response: { error: { message: "Service product not found." } },
+    });
     await expect(
       a.controller.updateServiceProduct("missing", { active: false }),
-    ).rejects.toMatchObject({ response: { error: { message: "Service product not found." } } });
+    ).rejects.toMatchObject({
+      response: { error: { message: "Service product not found." } },
+    });
     expect(() => a.service.getServiceProduct(" ")).toThrow(ApiRequestError);
   });
 });
