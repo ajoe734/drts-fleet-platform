@@ -78,10 +78,13 @@ function resolveCreatePlatformNoticeAction(
     resourceLabel: `${payload.title} · ${payload.severity} · ${payload.targetAudience}`,
     confirmLabel: payload.scheduledAt ? "Schedule notice" : "Create notice",
     cancelLabel: "Keep draft",
-    reasonLabel: "Operator note",
-    reasonPlaceholder: "Optional note for the audit trail.",
-    reasonHint:
-      "A note is optional for medium-risk notice creation and will be attached when supplied.",
+    reasonLabel: highRisk ? "Execution reason" : "Operator note",
+    reasonPlaceholder: highRisk
+      ? "Describe why this notice must be published."
+      : "Optional note for the audit trail.",
+    reasonHint: highRisk
+      ? "A non-empty reason is required and will be written to the assistant and domain audit trail."
+      : "A note is optional for medium-risk notice creation and will be attached when supplied.",
     execute(service, requestId, reason) {
       // executeAction is the existing explicit-confirmation boundary. Its
       // normalized operator reason must be carried by that caller.
