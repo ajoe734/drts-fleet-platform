@@ -1,3 +1,5 @@
+import { FleetPartnerService } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.service";
+import { FleetPartnerRepository } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.repository";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { RegulatoryRegistryService } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
@@ -181,6 +183,16 @@ function rehearsal(p: ReturnType<typeof productPeers>) {
       audit,
       new VehicleEligibilityRepository(p.database as never),
       p.a,
+    ),
+    new FleetPartnerService(
+      {} as never,
+      {} as never,
+      registry,
+      new FleetPartnerRepository(p.database as never),
+    ),
+    new DriverProfileService(
+      audit,
+      new DriverProfileRepository(p.database as never),
     ),
   );
 }

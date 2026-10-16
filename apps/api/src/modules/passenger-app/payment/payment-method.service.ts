@@ -36,6 +36,26 @@ export class PaymentMethodService {
     return { methods: await this.repository.list(passengerId) };
   }
 
+  async getReceiptDisplay(
+    passengerId: string,
+    tokenRef: unknown,
+  ): Promise<string | null> {
+    // Legacy/non-passenger orders can have no bound method. They must keep
+    // reporting missing receipt facts rather than inventing a payment label.
+    if (
+      !passengerId ||
+      typeof tokenRef !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        tokenRef,
+      )
+    )
+      return null;
+    return this.repository.findReceiptDisplay(
+      passengerId,
+      paymentMethodId(tokenRef),
+    );
+  }
+
   async bind(
     passengerId: string,
     body: unknown,

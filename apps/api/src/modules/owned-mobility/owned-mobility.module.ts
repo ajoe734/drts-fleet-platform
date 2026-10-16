@@ -6,6 +6,8 @@ import { OpsDispatchEventsModule } from "../../common/ops-dispatch-events.module
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { CallcenterModule } from "../callcenter/callcenter.module";
 import { MultiTaxiRepository } from "../multi-taxi/multi-taxi.repository";
+import { FleetPartnerRepository } from "../fleet-partner/fleet-partner.repository";
+import { RegulatoryRegistryRepository } from "../regulatory-registry/regulatory-registry.repository";
 import { ProductRuleModule } from "../product-rule/product-rule.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
 import { SandboxDispatchGateModule } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.module";
@@ -44,6 +46,8 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
   providers: [
     // Stateless DB adapter only; importing MultiTaxiModule would add a cycle.
     MultiTaxiRepository,
+    FleetPartnerRepository,
+    RegulatoryRegistryRepository,
     OwnedMobilityRepository,
     OwnedMobilityService,
     OwnedMobilityTaskEventsService,

@@ -1,3 +1,5 @@
+import { FleetPartnerService } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.service";
+import { FleetPartnerRepository } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.repository";
 import { EventEmitter } from "node:events";
 import type { VehicleEligibilityMatrixRecord } from "@drts/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -214,6 +216,16 @@ function peers() {
         {} as never,
         products,
         eligibility,
+        new FleetPartnerService(
+          {} as never,
+          {} as never,
+          registry,
+          new FleetPartnerRepository(database as never),
+        ),
+        new DriverProfileService(
+          audit,
+          new DriverProfileRepository(database as never),
+        ),
       ),
     };
   };
