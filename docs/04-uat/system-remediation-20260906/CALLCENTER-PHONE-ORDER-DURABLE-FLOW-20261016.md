@@ -284,3 +284,48 @@ Test-generated historical proof JSON files were copied to the local evidence
 directory and restored to their tracked bytes; no historical acceptance artifact
 is part of this source correction. No product server, browser server, Docker
 infrastructure or new hosted workflow was started by this owner.
+
+R4 verification checks have all finished. TypeScript 5.9.3:
+
+```bash
+# Both exit 0. Local configs retain the production strictness and use source contracts.
+pnpm exec tsc -p .local/callcenter-phone-order-durable-flow-20261016/r4-api-source.tsconfig.json --noEmit
+pnpm exec tsc -p .local/callcenter-phone-order-durable-flow-20261016/r4-task-source.tsconfig.json --noEmit
+
+# Exit 2, not credited as a pass; see limitation below.
+pnpm --filter @drts/api typecheck
+```
+
+Scoped ESLint (the original five production files and task probes, plus all
+eight R4 fixture files) exits 0. Prettier checks for the other seven R4 test
+files and this artifact exit 0. The pre-existing unrelated passenger fixture
+formatting in `owned-mobility.service.test.ts` was left untouched to respect the
+exact hunk grant; its whole-file format check is not claimed.
+
+The ordinary API typecheck uses shared `dist` declarations and reports 371
+TypeScript diagnostics, including missing `ops_observer`, `mail_delivery`,
+invitation delivery fields and voice dialogue exports. The R4 correction
+changes no production or contract source relative to f004; the source-alias
+API check passes. These are recorded as a failed ordinary check, not full CI
+credit. The first local source-alias config incorrectly inherited the API-only
+`rootDir` and exited 2 with TS6059; its separate initial log/config is retained.
+Setting `rootDir` to the worktree root fixes the local check configuration,
+without changing any source or compiler strictness; its final run exits 0.
+
+Machine-local receipt: `r4-verification.json` in the task evidence directory;
+all log hashes below correspond to the finished runs. Test code is unchanged
+from checkpoint `74f96e0b9`; subsequent commits only update this artifact.
+
+| R4 log                                | Exit | SHA256                                                             |
+| ------------------------------------- | ---- | ------------------------------------------------------------------ |
+| `r4-api-callers.log`                  | 0    | `0cf4a22b0550d93e244de4a96a8417e698393fd7dd88568936fcf382f5e1c11a` |
+| `r4-root-callers.log`                 | 0    | `51f19f02a2f1d1adc9e00d33534220ee21124c9693c972756f1c645037020819` |
+| `r4-durable-regression.log`           | 0    | `9f63b2abba3d82f955a811a95b1d4f1c5353b16da43a7c7c797b45ac8a24dfac` |
+| `r4-api-callcenter.log`               | 0    | `d8ca123731e10831be1a67f207da48c49cd8cb0245b660f986d10fef34028034` |
+| `r4-lint.log`                         | 0    | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
+| `r4-api-source-typecheck.log`         | 0    | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
+| `r4-task-source-typecheck.log`        | 0    | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
+| `r4-api-typecheck.log`                | 2    | `cd62a77969e9f0f2ed3a360a0aad39454e7d9cf42c2fc9855b147c9075e4acba` |
+| `r4-api-source-typecheck-initial.log` | 2    | `b2e95886b63a210623cd723f3292c5faca02f416a9035d7b39d8ed7e427259a3` |
+| `r4-format.log`                       | 0    | `17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20` |
+| `r4-assertion-preservation.log`       | 0    | `cd0ef334690fb9172c7fe49ee6353bba3a432c2370d7e05a846e2485c81bf908` |
