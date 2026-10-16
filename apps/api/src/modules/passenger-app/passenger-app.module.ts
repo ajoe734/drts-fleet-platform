@@ -160,6 +160,7 @@ import {
     },
   ],
   exports: [
+    PaymentMethodService,
     PaymentChargeService,
     PassengerAccountService,
     PassengerJwtService,

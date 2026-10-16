@@ -190,6 +190,10 @@ import {
 } from "./owned-mobility-events";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
 import { ServiceProductService } from "../service-product/service-product.service";
+import { FleetPartnerRepository } from "../fleet-partner/fleet-partner.repository";
+import { RegulatoryRegistryRepository } from "../regulatory-registry/regulatory-registry.repository";
+import { PaymentMethodService } from "../passenger-app/payment/payment-method.service";
+import type { CertificateE04Snapshot } from "../certificate-support/certificate-support.types";
 import type { MessageEvent } from "@nestjs/common";
 import { EMPTY, type Observable } from "rxjs";
 
@@ -594,6 +598,12 @@ export class OwnedMobilityService
     private readonly platformPresenceService?: PlatformPresenceService,
     @Optional()
     private readonly partnerUserIdentityLinkRepository?: PartnerUserIdentityLinkRepository,
+    @Optional()
+    private readonly receiptFleetRepository?: FleetPartnerRepository,
+    @Optional()
+    private readonly receiptRegistryRepository?: RegulatoryRegistryRepository,
+    @Optional()
+    private readonly receiptPaymentMethods?: PaymentMethodService,
   ) {}
 
   private _fallbackIdempotencyService?: IdempotencyService;
@@ -7168,10 +7178,8 @@ export class OwnedMobilityService
     }
 
     const actualFareBreakdown = this.captureActualFareBreakdown(order, command);
-    const driverSurnameSnapshot =
-      this.regulatoryRegistryService.getDriverDeclaredSurnameSnapshot?.(
-        task.driverId,
-      ) ?? {};
+    const receiptIdentity = await this.captureCompletionIdentity(order, task);
+    const driverSurnameSnapshot = receiptIdentity.surname ?? {};
 
     if (proof.photos.length < order.proofRequirements.minPhotoCount) {
       await this.markDriverTaskProofPending(
@@ -7241,6 +7249,11 @@ export class OwnedMobilityService
             },
             proof,
             driverSurnameSnapshot,
+            await this.captureMultiTaxiE04(
+              order,
+              actualFareBreakdown,
+              receiptIdentity,
+            ),
           )
         : null;
 
@@ -7473,10 +7486,8 @@ export class OwnedMobilityService
       order,
       params.command,
     );
-    const driverSurnameSnapshot =
-      this.regulatoryRegistryService.getDriverDeclaredSurnameSnapshot?.(
-        task.driverId,
-      ) ?? {};
+    const receiptIdentity = await this.captureCompletionIdentity(order, task);
+    const driverSurnameSnapshot = receiptIdentity.surname ?? {};
     const proofPendingError = this.buildDriverTaskProofPendingError(
       order,
       params.proof,
@@ -7552,6 +7563,11 @@ export class OwnedMobilityService
             },
             params.proof,
             driverSurnameSnapshot,
+            await this.captureMultiTaxiE04(
+              order,
+              actualFareBreakdown,
+              receiptIdentity,
+            ),
           )
         : null;
 
@@ -7810,6 +7826,72 @@ export class OwnedMobilityService
     };
   }
 
+  private async captureCompletionIdentity(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord,
+  ) {
+    if (
+      order.runtimeProfileCode === "multi_taxi_direct" &&
+      this.regulatoryRegistryService.getDriverCompletionReceiptIdentity
+    ) {
+      return this.regulatoryRegistryService.getDriverCompletionReceiptIdentity(
+        task.driverId,
+      );
+    }
+    return {
+      surname:
+        this.regulatoryRegistryService.getDriverDeclaredSurnameSnapshot?.(
+          task.driverId,
+        ) ?? null,
+      driverRegistrationMasked: null,
+    };
+  }
+
+  private async captureMultiTaxiE04(
+    order: OwnedOrderRecord,
+    actualFareBreakdown: ActualTripFareBreakdown | undefined,
+    identity: {
+      surname: DriverDeclaredSurnameSnapshot | null;
+      driverRegistrationMasked: string | null;
+    },
+  ): Promise<CertificateE04Snapshot | undefined> {
+    const operatorId = order.operatingAuthorizationId
+      ? await this.receiptRegistryRepository?.findCompletionOperatorId(
+          order.operatingAuthorizationId,
+        )
+      : null;
+    const fleetOperatorName = operatorId
+      ? await this.receiptFleetRepository?.findReceiptOperatorName(operatorId)
+      : null;
+    const paymentMethodDisplay = order.passenger.passengerId
+      ? await this.receiptPaymentMethods?.getReceiptDisplay(
+          order.passenger.passengerId,
+          order.paymentMethodTokenRef,
+        )
+      : null;
+    const driverSurname = identity.surname?.driverSurname;
+    const driverRegistrationMasked = identity.driverRegistrationMasked;
+    // Incomplete authority remains absent; the existing writer/mapper retains
+    // its missing-fields response. Never fill gaps from IDs, quotes or names.
+    if (
+      !actualFareBreakdown ||
+      !fleetOperatorName ||
+      !driverSurname ||
+      !driverRegistrationMasked ||
+      !paymentMethodDisplay ||
+      Array.from(fleetOperatorName.trim()).length > 200 ||
+      Array.from(driverSurname.trim()).length > 40
+    )
+      return undefined;
+    return {
+      fleetOperatorName,
+      driverSurname,
+      driverRegistrationMasked,
+      paymentMethodDisplay,
+      fareBreakdown: { ...actualFareBreakdown },
+    };
+  }
+
   private buildMultiTaxiCertificateEvent(
     order: OwnedOrderRecord,
     task: DriverTaskRecord,
@@ -7818,6 +7900,7 @@ export class OwnedMobilityService
       signatureId: string | null;
     },
     driverSurnameSnapshot: Partial<DriverDeclaredSurnameSnapshot> = {},
+    e04Snapshot?: CertificateE04Snapshot,
   ): OwnedMobilityMultiTaxiTripCompletedEvent {
     const fare = order.fixedPrice ? order.quotedFare : command.fare;
     const plateNo =
@@ -7856,6 +7939,7 @@ export class OwnedMobilityService
       orderId: order.orderId,
       tripId: task.taskId,
       ...driverSurnameSnapshot,
+      ...(e04Snapshot ? { e04Snapshot: structuredClone(e04Snapshot) } : {}),
       plateNo,
       pickupAt: task.startedAt,
       dropoffAt: command.completedAt,

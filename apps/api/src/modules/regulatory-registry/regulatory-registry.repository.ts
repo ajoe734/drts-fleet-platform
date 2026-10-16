@@ -262,6 +262,17 @@ export class RegulatoryRegistryRepository {
     return result.rows[0] ? this.mapDriverCredentialRow(result.rows[0]) : null;
   }
 
+  async findCompletionOperatorId(
+    authorizationId: string,
+  ): Promise<string | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<{ operator_id: string }>(
+      `SELECT operator_id FROM reg.multi_taxi_operating_authorizations WHERE authorization_id=$1`,
+      [authorizationId],
+    );
+    return result.rows[0]?.operator_id ?? null;
+  }
+
   async ensureLiveMapTestDriver() {
     return ensureLiveMapFixture(this.databaseService);
   }
