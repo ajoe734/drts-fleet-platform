@@ -167,6 +167,105 @@ async function opsRead(ops: Page, orderId: string) {
   await expect(ops.getByTestId("ops-review-order-id")).toHaveText(orderId);
 }
 
+async function readCompletedByOps(ops: Page, orderId: string) {
+  await opsRead(ops, orderId);
+  await expect(ops.getByTestId("ops-review-order-status")).toHaveText(
+    "completed",
+  );
+  const response = await ops.request.get(
+    `${OPS}/control-plane-proxy/orders/${orderId}`,
+  );
+  expect(response.status()).toBe(200);
+  expect(camel(await response.json()).data).toMatchObject({
+    orderId,
+    status: "completed",
+  });
+}
+
+async function submitLostItemForCompletedRide(
+  pax: Page,
+  ops: Page,
+  orderId: string,
+  info: TestInfo,
+) {
+  const description = "演練遺失物：藍色虛構雨傘（無真人失物）";
+  const content = "同一趟已完成行程的遺失物演練，請依原客服流程處理。";
+  await pax
+    .getByRole("button", { name: "客訴與遺失物表單", exact: true })
+    .click();
+  await pax.getByRole("combobox").selectOption("lost_item");
+  await pax.getByPlaceholder("遺失物描述", { exact: true }).fill(description);
+  await pax
+    .getByPlaceholder("請描述您的問題，如為遺失物請說明特徵...", {
+      exact: true,
+    })
+    .fill(content);
+  await pax.getByRole("checkbox", { name: /同意客服人員/ }).check();
+  const submitted = pax.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname ===
+        `/api/passenger-app/rides/${orderId}/complaints` &&
+      response.request().method() === "POST",
+  );
+  await pax.getByRole("button", { name: "確認送出", exact: true }).click();
+  const response = await submitted;
+  expect(response.status()).toBeLessThan(300);
+  const caseNo = camel(await response.json()).data.complaintId as string;
+  expect(caseNo).toMatch(/^PAX-[0-9a-f-]{36}$/);
+  await expect(
+    pax.getByText("我們已收到您的問題", { exact: true }),
+  ).toBeVisible();
+  await info.attach("A-lost-item-submitted-pax", {
+    body: await pax.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  const readback = await ops.request.get(
+    `${OPS}/control-plane-proxy/complaints/${caseNo}`,
+  );
+  expect(readback.status()).toBe(200);
+  const complaint = camel(await readback.json()).data;
+  expect(complaint).toMatchObject({
+    caseNo,
+    caseSource: "app",
+    relatedOrderId: orderId,
+    category: "lost_and_found",
+    status: "new",
+  });
+  expect(complaint.description).toContain(description);
+  expect(complaint.description).toContain(content);
+  expect(complaint.description).toContain("同意客服聯繫：是");
+  await ops.goto(`${OPS}/complaints/${caseNo}`);
+  await expect(
+    ops.locator(`a[href="/dispatch/${orderId}"]`).first(),
+  ).toBeVisible();
+  await expect(
+    ops.getByText(description, { exact: false }).first(),
+  ).toBeVisible();
+  await info.attach("A-lost-item-case-ops", {
+    body: await ops.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await info.attach("A-lost-item-same-order-case-facts", {
+    body: JSON.stringify({
+      orderId,
+      caseNo,
+      category: complaint.category,
+      caseSource: complaint.caseSource,
+      status: complaint.status,
+      relatedOrderId: complaint.relatedOrderId,
+      contactConsent: true,
+      content,
+      lostItemDescription: description,
+      scope: "Passenger real form POST, Ops real case API and actual case page",
+      resolvedOrReturned: false,
+    }),
+    contentType: "application/json",
+  });
+  await pax.getByRole("button", { name: "返回行程", exact: true }).click();
+  await ops.goto(`${OPS}/review`);
+  await readCompletedByOps(ops, orderId);
+}
+
 async function createDispatch(ops: Page, orderId: string) {
   await opsRead(ops, orderId);
   const job = ops.waitForResponse(
@@ -644,6 +743,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           .poll(async () => (await authority(pax, normal)).rating?.score)
           .toBe(5);
         await download(pax, normal, info);
+        await readCompletedByOps(ops, normal);
         const normalFacts = await recordOrderEvidence(
           normal,
           "A-completed-high-rating",
@@ -659,6 +759,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
               r.order_id === normal,
           ),
         ).toBe(true);
+        await submitLostItemForCompletedRide(pax, ops, normal, info);
       },
     );
 
@@ -685,6 +786,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           .poll(async () => (await authority(pax, retry)).payment?.status)
           .toBe("failed");
         expect((await authority(pax, retry)).actions.canRate).toBe(false);
+        await readCompletedByOps(ops, retry);
         const failedFacts = await recordOrderEvidence(
           retry,
           "B-first-capture-failed",
@@ -735,6 +837,9 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         await ops.goto(`${OPS}/complaints/${row!.complaint_case_no}`);
         await expect(
           ops.getByText(row!.complaint_case_no, { exact: false }).first(),
+        ).toBeVisible();
+        await expect(
+          ops.locator(`a[href="/dispatch/${retry}"]`).first(),
         ).toBeVisible();
         await ops.screenshot({
           path: info.outputPath("same-order-CRM-case.png"),
