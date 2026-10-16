@@ -97,13 +97,13 @@ export class AuditController {
 
   @Post("legal-holds")
   @RequireRealms("platform", "ops")
-  placeEvidenceLegalHold(
+  async placeEvidenceLegalHold(
     @Body() command: CreateEvidenceLegalHoldCommand,
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.auditNotificationService.placeEvidenceLegalHold(
+      await this.auditNotificationService.placeEvidenceLegalHold(
         command,
         identity,
         requestId,
@@ -114,14 +114,14 @@ export class AuditController {
 
   @Post("legal-holds/:holdId/release")
   @RequireRealms("platform", "ops")
-  releaseEvidenceLegalHold(
+  async releaseEvidenceLegalHold(
     @Param("holdId") holdId: string,
     @Body() command: ReleaseEvidenceLegalHoldCommand,
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.auditNotificationService.releaseEvidenceLegalHold(
+      await this.auditNotificationService.releaseEvidenceLegalHold(
         holdId,
         command,
         identity,
@@ -144,13 +144,13 @@ export class AuditController {
 
   @Post("deletion-exceptions")
   @RequireRealms("platform", "ops")
-  registerEvidenceDeletionException(
+  async registerEvidenceDeletionException(
     @Body() command: CreateEvidenceDeletionExceptionCommand,
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.auditNotificationService.registerEvidenceDeletionException(
+      await this.auditNotificationService.registerEvidenceDeletionException(
         command,
         identity,
         requestId,
@@ -161,14 +161,14 @@ export class AuditController {
 
   @Post("deletion-exceptions/:exceptionId/resolve")
   @RequireRealms("platform", "ops")
-  resolveEvidenceDeletionException(
+  async resolveEvidenceDeletionException(
     @Param("exceptionId") exceptionId: string,
     @Body() command: ResolveEvidenceDeletionExceptionCommand,
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.auditNotificationService.resolveEvidenceDeletionException(
+      await this.auditNotificationService.resolveEvidenceDeletionException(
         exceptionId,
         command,
         identity,

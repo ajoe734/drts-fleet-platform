@@ -1,12 +1,17 @@
 "use client";
 
+import "./enterprise-booking-form-accessibility.css";
 import Link from "next/link";
-import { useState, type CSSProperties } from "react";
+import {
+  useState,
+  type CSSProperties,
+  type HTMLAttributes,
+  type ReactNode,
+} from "react";
 import {
   EBanner,
   EBtnContent,
   ECard,
-  EField,
   EIcon,
   EPill,
   ERow,
@@ -27,19 +32,27 @@ import {
 import { tenantEnterpriseTheme as t } from "./theme";
 import { useTranslation } from "@/lib/i18n";
 
-type Option = { value: string; label: string; icon?: string };
+type Option = { value: string; label: string; icon?: string | undefined };
 
-function inputShellStyle(invalid?: boolean): CSSProperties {
+export function enterpriseBookingFieldId(field: string): string {
+  return `enterprise-booking-${field}`;
+}
+
+function inputShellStyle(invalid?: boolean, focused?: boolean): CSSProperties {
+  const borderColor = invalid ? t.danger : focused ? t.primary : t.line;
+  const focusRingBg = invalid ? t.dangerBg : t.primaryBg;
   return {
     display: "flex",
     alignItems: "center",
     gap: 9,
     padding: "11px 13px",
     background: t.surface,
-    border: "1px solid " + (invalid ? t.danger : t.line),
+    border: "1px solid " + borderColor,
     borderRadius: t.radiusSm,
+    boxShadow: focused ? "0 0 0 3px " + focusRingBg : "none",
     width: "100%",
     boxSizing: "border-box",
+    transition: "border-color .15s, box-shadow .15s",
   };
 }
 
@@ -47,7 +60,12 @@ function iconStyle(): CSSProperties {
   return { color: t.faint, display: "flex", flexShrink: 0 };
 }
 
-function textInputStyle(mono?: boolean): CSSProperties {
+function textInputStyle(
+  mono?: boolean,
+  focused?: boolean,
+  invalid?: boolean,
+): CSSProperties {
+  const ringColor = invalid ? t.danger : t.primary;
   return {
     flex: 1,
     minWidth: 0,
@@ -56,7 +74,18 @@ function textInputStyle(mono?: boolean): CSSProperties {
     color: t.ink,
     fontFamily: mono ? t.mono : t.sans,
     border: "none",
-    outline: "none",
+    ...(focused
+      ? {
+          outline: "2px solid " + ringColor,
+          outlineStyle: "solid",
+          outlineWidth: 2,
+          outlineColor: ringColor,
+          outlineOffset: 2,
+        }
+      : {
+          outlineStyle: "auto",
+          outlineWidth: 0,
+        }),
     background: "transparent",
     boxSizing: "border-box",
   };
@@ -76,6 +105,107 @@ function chipButtonStyle(): CSSProperties {
   };
 }
 
+function BookingField({
+  fieldId,
+  label,
+  req,
+  hint,
+  hintId,
+  error,
+  errorId,
+  full,
+  children,
+}: {
+  fieldId: string;
+  label: ReactNode;
+  req?: boolean | undefined;
+  hint?: ReactNode | undefined;
+  hintId?: string | undefined;
+  error?: ReactNode | undefined;
+  errorId?: string | undefined;
+  full?: boolean | undefined;
+  children: ReactNode;
+}) {
+  return (
+    <div style={{ marginBottom: 0, gridColumn: full ? "1 / -1" : undefined }}>
+      <label
+        id={`${fieldId}-label`}
+        htmlFor={fieldId}
+        style={{
+          display: "block",
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: t.ink2,
+          marginBottom: 6,
+        }}
+      >
+        {label}
+        {req ? (
+          <span aria-hidden="true" style={{ color: t.danger }}>
+            {" "}
+            *
+          </span>
+        ) : null}
+      </label>
+      {children}
+      {error ? (
+        <div
+          id={errorId ?? `${fieldId}-error`}
+          style={{
+            fontSize: 11.5,
+            color: t.danger,
+            marginTop: 5,
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          <EIcon name="alert" size={12} />
+          {error}
+        </div>
+      ) : null}
+      {hint && !error ? (
+        <div
+          id={hintId ?? `${fieldId}-hint`}
+          style={{ fontSize: 11.5, color: t.muted, marginTop: 5 }}
+        >
+          {hint}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function BookingGroupField({
+  labelId,
+  label,
+  full,
+  children,
+}: {
+  labelId: string;
+  label: ReactNode;
+  full?: boolean | undefined;
+  children: ReactNode;
+}) {
+  return (
+    <div style={{ marginBottom: 0, gridColumn: full ? "1 / -1" : undefined }}>
+      <div
+        id={labelId}
+        style={{
+          display: "block",
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: t.ink2,
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 function TextControl({
   value,
   onChange,
@@ -85,60 +215,99 @@ function TextControl({
   mono,
   placeholder,
   invalid,
+  required,
+  inputMode,
   id,
   "aria-describedby": ariaDescribedBy,
 }: {
   value: string;
   onChange: (value: string) => void;
-  onFocus?: () => void;
-  icon?: string;
-  type?: "text" | "date" | "time";
-  mono?: boolean;
-  placeholder?: string;
-  invalid?: boolean;
-  id?: string;
-  "aria-describedby"?: string;
+  onFocus?: (() => void) | undefined;
+  icon?: string | undefined;
+  type?: "text" | "date" | "time" | undefined;
+  mono?: boolean | undefined;
+  placeholder?: string | undefined;
+  invalid?: boolean | undefined;
+  required?: boolean | undefined;
+  inputMode?: HTMLAttributes<HTMLInputElement>["inputMode"] | undefined;
+  id?: string | undefined;
+  "aria-describedby"?: string | undefined;
 }) {
+  const [isFocused, setIsFocused] = useState(false);
+
   return (
-    <div style={inputShellStyle(invalid)}>
+    <div
+      className="ent-booking-input-shell"
+      data-focused={isFocused ? "true" : "false"}
+      data-invalid={invalid ? "true" : "false"}
+      style={inputShellStyle(invalid, isFocused)}
+    >
       {icon ? (
-        <span style={iconStyle()}>
+        <span aria-hidden="true" style={iconStyle()}>
           <EIcon name={icon} size={16} />
         </span>
       ) : null}
       <input
         id={id}
+        className="ent-booking-control"
         type={type}
         value={value}
+        required={required}
+        inputMode={inputMode}
         onChange={(event) => onChange(event.currentTarget.value)}
-        onFocus={onFocus}
+        onFocus={() => {
+          setIsFocused(true);
+          onFocus?.();
+        }}
+        onBlur={() => setIsFocused(false)}
         placeholder={placeholder}
+        data-focus-visible={isFocused ? "true" : "false"}
         aria-invalid={invalid ? "true" : undefined}
         aria-describedby={ariaDescribedBy}
-        style={textInputStyle(mono)}
+        style={textInputStyle(mono, isFocused, invalid)}
       />
     </div>
   );
 }
 
 function TextAreaControl({
+  id,
   value,
   onChange,
   placeholder,
+  required,
+  "aria-describedby": ariaDescribedBy,
 }: {
+  id?: string | undefined;
   value: string;
   onChange: (value: string) => void;
-  placeholder?: string;
+  placeholder?: string | undefined;
+  required?: boolean | undefined;
+  "aria-describedby"?: string | undefined;
 }) {
+  const [isFocused, setIsFocused] = useState(false);
+
   return (
-    <div style={{ ...inputShellStyle(), alignItems: "stretch" }}>
+    <div
+      className="ent-booking-input-shell"
+      data-focused={isFocused ? "true" : "false"}
+      data-invalid="false"
+      style={{ ...inputShellStyle(false, isFocused), alignItems: "stretch" }}
+    >
       <textarea
+        id={id}
+        className="ent-booking-control"
         value={value}
+        required={required}
         onChange={(event) => onChange(event.currentTarget.value)}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => setIsFocused(false)}
         rows={3}
         placeholder={placeholder}
+        data-focus-visible={isFocused ? "true" : "false"}
+        aria-describedby={ariaDescribedBy}
         style={{
-          ...textInputStyle(),
+          ...textInputStyle(false, isFocused, false),
           resize: "vertical",
           lineHeight: 1.5,
         }}
@@ -149,19 +318,29 @@ function TextAreaControl({
 
 function SegmentedControl<T extends string>({
   name,
+  groupLabel,
+  ariaLabelledBy,
+  ariaDescribedBy,
   value,
   onChange,
   options,
 }: {
   name: string;
+  groupLabel: string;
+  ariaLabelledBy?: string | undefined;
+  ariaDescribedBy?: string | undefined;
   value: T;
   onChange: (value: T) => void;
-  options: { value: T; label: string; icon?: string }[];
+  options: { value: T; label: string; icon?: string | undefined }[];
 }) {
+  const [focusedValue, setFocusedValue] = useState<T | null>(null);
+
   return (
     <div
       role="radiogroup"
-      aria-label={name}
+      aria-label={groupLabel}
+      aria-labelledby={ariaLabelledBy}
+      aria-describedby={ariaDescribedBy}
       style={{
         display: "inline-flex",
         background: t.surfaceLo,
@@ -175,9 +354,12 @@ function SegmentedControl<T extends string>({
     >
       {options.map((option) => {
         const checked = option.value === value;
+        const isFocused = focusedValue === option.value;
+        const optionId = enterpriseBookingFieldId(`${name}-${option.value}`);
         return (
           <label
             key={option.value}
+            htmlFor={optionId}
             style={{
               flex: 1,
               position: "relative",
@@ -186,11 +368,19 @@ function SegmentedControl<T extends string>({
             }}
           >
             <input
+              id={optionId}
+              className="ent-booking-radio-input"
               type="radio"
               name={name}
               value={option.value}
               checked={checked}
               onChange={() => onChange(option.value)}
+              onFocus={() => setFocusedValue(option.value)}
+              onBlur={() =>
+                setFocusedValue((current) =>
+                  current === option.value ? null : current,
+                )
+              }
               style={{
                 position: "absolute",
                 opacity: 0,
@@ -199,24 +389,38 @@ function SegmentedControl<T extends string>({
               }}
             />
             <span
+              className="ent-booking-radio-option"
+              data-checked={checked ? "true" : "false"}
+              data-focused={isFocused ? "true" : "false"}
               style={{
                 display: "inline-flex",
                 width: "100%",
                 justifyContent: "center",
                 alignItems: "center",
                 gap: 6,
-                background: checked ? t.surface : "transparent",
-                color: checked ? t.primary : t.muted,
+                background: checked || isFocused ? t.surface : "transparent",
+                color: checked ? t.primary : isFocused ? t.ink : t.muted,
+                border: "1px solid " + (isFocused ? t.primary : "transparent"),
+                outline: isFocused ? "2px solid " + t.primary : "none",
+                outlineOffset: isFocused ? 1 : undefined,
                 fontWeight: 600,
                 fontSize: 13,
                 padding: "8px 14px",
                 borderRadius: t.radiusSm - 3,
-                boxShadow: checked ? t.shadowSm : "none",
+                boxShadow: isFocused
+                  ? "0 0 0 3px " + t.primaryBg
+                  : checked
+                    ? t.shadowSm
+                    : "none",
                 whiteSpace: "nowrap",
                 boxSizing: "border-box",
               }}
             >
-              {option.icon ? <EIcon name={option.icon} size={14} /> : null}
+              {option.icon ? (
+                <span aria-hidden="true" style={{ display: "inline-flex" }}>
+                  <EIcon name={option.icon} size={14} />
+                </span>
+              ) : null}
               {option.label}
             </span>
           </label>
@@ -227,20 +431,40 @@ function SegmentedControl<T extends string>({
 }
 
 function SelectControl({
+  id,
   value,
   onChange,
   options,
+  required,
+  "aria-describedby": ariaDescribedBy,
 }: {
+  id?: string | undefined;
   value: string;
   onChange: (value: string) => void;
   options: Option[];
+  required?: boolean | undefined;
+  "aria-describedby"?: string | undefined;
 }) {
+  const [isFocused, setIsFocused] = useState(false);
+
   return (
-    <div style={inputShellStyle()}>
+    <div
+      className="ent-booking-input-shell"
+      data-focused={isFocused ? "true" : "false"}
+      data-invalid="false"
+      style={inputShellStyle(false, isFocused)}
+    >
       <select
+        id={id}
+        className="ent-booking-control"
         value={value}
+        required={required}
         onChange={(event) => onChange(event.currentTarget.value)}
-        style={textInputStyle()}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => setIsFocused(false)}
+        data-focus-visible={isFocused ? "true" : "false"}
+        aria-describedby={ariaDescribedBy}
+        style={textInputStyle(false, isFocused, false)}
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -263,19 +487,19 @@ export function EnterpriseBookingForm({
   passengers: string[];
   addresses: string[];
   costCenters: string[];
-  bookingId?: string;
+  bookingId?: string | undefined;
 }) {
   const { locale, t: tr } = useTranslation();
   const [draft, setDraft] = useState(initialDraft);
   const [isPlacardCustomized, setIsPlacardCustomized] = useState(
     Boolean(
       initialDraft.placard &&
-        initialDraft.placard !==
-          formatDefaultPlacard(
-            initialDraft.passengerMode === "self"
-              ? initialDraft.bookedBy
-              : initialDraft.passenger,
-          ),
+      initialDraft.placard !==
+        formatDefaultPlacard(
+          initialDraft.passengerMode === "self"
+            ? initialDraft.bookedBy
+            : initialDraft.passenger,
+        ),
     ),
   );
   const [addressTarget, setAddressTarget] = useState<"pickup" | "dropoff">(
@@ -295,6 +519,11 @@ export function EnterpriseBookingForm({
     undefined,
     locale,
   );
+  const hasReservationWindowInput = Boolean(
+    draft.reservationDate && draft.reservationTime,
+  );
+  const isReservationWindowInvalid =
+    hasReservationWindowInput && !timeValidation.isValid;
   const canContinue =
     isEnterpriseDraftComplete(draft) && timeValidation.isValid;
 
@@ -305,7 +534,7 @@ export function EnterpriseBookingForm({
   const vehicleOptions: {
     value: EnterpriseVehiclePreference;
     label: string;
-    icon?: string;
+    icon?: string | undefined;
   }[] = [
     { value: "sedan", label: tr("fixture.vehicle.standard") },
     { value: "business", label: tr("fixture.vehicle.business") },
@@ -355,8 +584,57 @@ export function EnterpriseBookingForm({
       draft.passengerMode === "self" ? draft.bookedBy : draft.passenger,
     );
 
+  const passengerFieldId = enterpriseBookingFieldId("passenger");
+  const passengerHintId = `${passengerFieldId}-hint`;
+  const placardFieldId = enterpriseBookingFieldId("placard");
+  const placardHintId = `${placardFieldId}-hint`;
+  const pickupFieldId = enterpriseBookingFieldId("pickup");
+  const dropoffFieldId = enterpriseBookingFieldId("dropoff");
+  const dateFieldId = enterpriseBookingFieldId("date");
+  const timeFieldId = enterpriseBookingFieldId("time");
+  const windowErrorId = enterpriseBookingFieldId("window-error");
+  const airportHintId = enterpriseBookingFieldId("airport-hint");
+  const airportDirectionLabelId = enterpriseBookingFieldId(
+    "airport-direction-label",
+  );
+  const terminalFieldId = enterpriseBookingFieldId("terminal");
+  const flightFieldId = enterpriseBookingFieldId("flight");
+  const luggageFieldId = enterpriseBookingFieldId("luggage");
+  const costCenterFieldId = enterpriseBookingFieldId("cost-center");
+  const costCenterHintId = `${costCenterFieldId}-hint`;
+  const bookedByFieldId = enterpriseBookingFieldId("booked-by");
+  const contactFieldId = enterpriseBookingFieldId("contact");
+  const vehicleLabelId = enterpriseBookingFieldId("vehicle-preference-label");
+  const notesFieldId = enterpriseBookingFieldId("notes");
+
+  const windowErrorTitle = timeValidation.isPast
+    ? resolveCopyByLocale(
+        locale,
+        "用車時間不能為過去時間",
+        "Reservation Time In Past",
+      )
+    : resolveCopyByLocale(
+        locale,
+        "未達最短提前預約時間",
+        "Advance Lead Time Not Met",
+      );
+  const windowErrorBody =
+    timeValidation.errorMessage ??
+    resolveCopyByLocale(
+      locale,
+      `最早可預約時間為 ${timeValidation.earliestAllowedDisplay}`,
+      `Earliest allowed time is ${timeValidation.earliestAllowedDisplay}`,
+    );
+
+  const formThemeVars = {
+    "--ent-focus-ring": t.primary,
+    "--ent-focus-bg": t.primaryBg,
+    "--ent-danger-ring": t.danger,
+    "--ent-danger-bg": t.dangerBg,
+  } as CSSProperties;
+
   return (
-    <div className="ent-form-layout">
+    <div className="ent-form-layout" style={formThemeVars}>
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {/* Passenger Card */}
         <ECard
@@ -366,6 +644,7 @@ export function EnterpriseBookingForm({
         >
           <SegmentedControl
             name="passenger-mode"
+            groupLabel={tr("new.field.passenger")}
             value={draft.passengerMode}
             onChange={setPassengerMode}
             options={[
@@ -409,23 +688,27 @@ export function EnterpriseBookingForm({
           ) : (
             <>
               <div style={{ height: 14 }} />
-              <EField
-                t={t}
+              <BookingField
+                fieldId={passengerFieldId}
                 label={tr("new.passenger.choose")}
                 req
                 hint={tr("new.passenger.chooseHint")}
+                hintId={passengerHintId}
               >
                 <TextControl
+                  id={passengerFieldId}
                   icon="search"
+                  required
                   value={draft.passenger}
                   onChange={setPassengerName}
+                  aria-describedby={passengerHintId}
                   placeholder={resolveCopyByLocale(
                     locale,
                     "輸入訪客或同事姓名",
                     "Enter guest or colleague name",
                   )}
                 />
-              </EField>
+              </BookingField>
               <div
                 style={{
                   display: "flex",
@@ -438,6 +721,7 @@ export function EnterpriseBookingForm({
                   <button
                     key={passenger}
                     type="button"
+                    className="ent-booking-chip-btn"
                     onClick={() => {
                       patch({
                         passengerMode: "other",
@@ -458,8 +742,8 @@ export function EnterpriseBookingForm({
 
           {/* Placard sync & explicit editing */}
           <div style={{ marginTop: 14 }}>
-            <EField
-              t={t}
+            <BookingField
+              fieldId={placardFieldId}
               label={resolveCopyByLocale(
                 locale,
                 "舉牌姓名 placard",
@@ -470,18 +754,21 @@ export function EnterpriseBookingForm({
                 "司機接送時手持舉牌顯示的文字，預設與乘客姓名同步，亦可自行編輯",
                 "Name displayed on the welcome placard. Synced with passenger name by default, can be edited directly.",
               )}
+              hintId={placardHintId}
             >
               <TextControl
+                id={placardFieldId}
                 icon="user"
                 value={effectivePlacard}
                 onChange={handlePlacardChange}
+                aria-describedby={placardHintId}
                 placeholder={resolveCopyByLocale(
                   locale,
                   "例如：林宜君 様",
                   "e.g. Sato 様",
                 )}
               />
-            </EField>
+            </BookingField>
           </div>
         </ECard>
 
@@ -492,80 +779,91 @@ export function EnterpriseBookingForm({
           sub={tr("card.sub.pickupDropoffWindow")}
         >
           <div className="ent-fields-two-cols">
-            <EField t={t} label={tr("new.field.pickup")} req full>
+            <BookingField
+              fieldId={pickupFieldId}
+              label={tr("new.field.pickup")}
+              req
+              full
+            >
               <TextControl
+                id={pickupFieldId}
                 icon="pin"
+                required
                 value={draft.pickup}
                 onChange={(pickup) => patch({ pickup })}
                 onFocus={() => setAddressTarget("pickup")}
               />
-            </EField>
-            <EField t={t} label={tr("new.field.dropoff")} req full>
+            </BookingField>
+            <BookingField
+              fieldId={dropoffFieldId}
+              label={tr("new.field.dropoff")}
+              req
+              full
+            >
               <TextControl
+                id={dropoffFieldId}
                 icon="pin"
+                required
                 value={draft.dropoff}
                 onChange={(dropoff) => patch({ dropoff })}
                 onFocus={() => setAddressTarget("dropoff")}
               />
-            </EField>
-            <EField t={t} label={tr("new.field.window")} req>
+            </BookingField>
+            <BookingField
+              fieldId={dateFieldId}
+              label={tr("new.field.window")}
+              req
+            >
               <TextControl
+                id={dateFieldId}
                 icon="cal"
                 type="date"
+                required
                 value={draft.reservationDate}
                 onChange={(reservationDate) => patch({ reservationDate })}
-                invalid={
-                  Boolean(draft.reservationDate && draft.reservationTime) &&
-                  !timeValidation.isValid
+                invalid={isReservationWindowInvalid}
+                aria-describedby={
+                  isReservationWindowInvalid ? windowErrorId : undefined
                 }
                 mono
               />
-            </EField>
-            <EField t={t} label={tr("new.field.time")} req>
+            </BookingField>
+            <BookingField
+              fieldId={timeFieldId}
+              label={tr("new.field.time")}
+              req
+            >
               <TextControl
+                id={timeFieldId}
                 icon="clock"
                 type="time"
+                required
                 value={draft.reservationTime}
                 onChange={(reservationTime) => patch({ reservationTime })}
-                invalid={
-                  Boolean(draft.reservationDate && draft.reservationTime) &&
-                  !timeValidation.isValid
+                invalid={isReservationWindowInvalid}
+                aria-describedby={
+                  isReservationWindowInvalid ? windowErrorId : undefined
                 }
                 mono
               />
-            </EField>
+            </BookingField>
           </div>
 
-          {/* Real-time date & time error banner if invalid */}
-          {!timeValidation.isValid &&
-          draft.reservationDate &&
-          draft.reservationTime ? (
-            <div style={{ marginTop: 12 }}>
+          {/* Real-time date & time error banner if invalid (single live alert) */}
+          {isReservationWindowInvalid ? (
+            <div
+              id={windowErrorId}
+              role="alert"
+              aria-live="assertive"
+              aria-atomic="true"
+              style={{ marginTop: 12 }}
+            >
               <EBanner
                 t={t}
                 tone="danger"
                 icon="alert"
-                title={
-                  timeValidation.isPast
-                    ? resolveCopyByLocale(
-                        locale,
-                        "用車時間不能為過去時間",
-                        "Reservation Time In Past",
-                      )
-                    : resolveCopyByLocale(
-                        locale,
-                        "未達最短提前預約時間",
-                        "Advance Lead Time Not Met",
-                      )
-                }
-                body={
-                  timeValidation.errorMessage ??
-                  resolveCopyByLocale(
-                    locale,
-                    `最早可預約時間為 ${timeValidation.earliestAllowedDisplay}`,
-                    `Earliest allowed time is ${timeValidation.earliestAllowedDisplay}`,
-                  )
-                }
+                title={windowErrorTitle}
+                body={windowErrorBody}
               />
             </div>
           ) : null}
@@ -582,6 +880,7 @@ export function EnterpriseBookingForm({
               <button
                 key={address}
                 type="button"
+                className="ent-booking-chip-btn"
                 onClick={() =>
                   patch(
                     addressTarget === "pickup"
@@ -610,12 +909,18 @@ export function EnterpriseBookingForm({
               </EPill>
             </span>
           }
-          sub={tr("new.airport.hint")}
+          sub={<span id={airportHintId}>{tr("new.airport.hint")}</span>}
         >
           <div className="ent-fields-two-cols">
-            <EField t={t} label={tr("new.airport.direction")}>
+            <BookingGroupField
+              labelId={airportDirectionLabelId}
+              label={tr("new.airport.direction")}
+            >
               <SegmentedControl<EnterpriseAirportDirection>
                 name="airport-direction"
+                groupLabel={tr("new.airport.direction")}
+                ariaLabelledBy={airportDirectionLabelId}
+                ariaDescribedBy={airportHintId}
                 value={draft.airportDirection}
                 onChange={(airportDirection) => patch({ airportDirection })}
                 options={[
@@ -629,27 +934,43 @@ export function EnterpriseBookingForm({
                   },
                 ]}
               />
-            </EField>
-            <EField t={t} label={tr("new.airport.terminal")}>
+            </BookingGroupField>
+            <BookingField
+              fieldId={terminalFieldId}
+              label={tr("new.airport.terminal")}
+            >
               <TextControl
+                id={terminalFieldId}
                 value={draft.terminal}
                 onChange={(terminal) => patch({ terminal })}
+                aria-describedby={airportHintId}
               />
-            </EField>
-            <EField t={t} label={tr("new.airport.flight")}>
+            </BookingField>
+            <BookingField
+              fieldId={flightFieldId}
+              label={tr("new.airport.flight")}
+            >
               <TextControl
+                id={flightFieldId}
                 icon="flag"
                 value={draft.flight}
                 onChange={(flight) => patch({ flight })}
+                aria-describedby={airportHintId}
                 mono
               />
-            </EField>
-            <EField t={t} label={tr("new.airport.luggage")}>
+            </BookingField>
+            <BookingField
+              fieldId={luggageFieldId}
+              label={tr("new.airport.luggage")}
+            >
               <TextControl
+                id={luggageFieldId}
+                inputMode="numeric"
                 value={draft.luggageCount}
                 onChange={(luggageCount) => patch({ luggageCount })}
+                aria-describedby={airportHintId}
               />
-            </EField>
+            </BookingField>
           </div>
         </ECard>
 
@@ -660,21 +981,29 @@ export function EnterpriseBookingForm({
           sub={tr("card.sub.costVehicleNotes")}
         >
           <div className="ent-fields-two-cols">
-            <EField
-              t={t}
+            <BookingField
+              fieldId={costCenterFieldId}
               label={tr("new.field.costCenter")}
               req
               full
               hint={tr("new.costCenter.hint")}
+              hintId={costCenterHintId}
             >
               <SelectControl
+                id={costCenterFieldId}
+                required
                 value={draft.costCenterCode}
                 onChange={setCostCenterCode}
                 options={costCenterOptions}
+                aria-describedby={costCenterHintId}
               />
-            </EField>
-            <EField t={t} label={tr("new.field.bookedBy")}>
+            </BookingField>
+            <BookingField
+              fieldId={bookedByFieldId}
+              label={tr("new.field.bookedBy")}
+            >
               <TextControl
+                id={bookedByFieldId}
                 icon="user"
                 value={draft.bookedBy}
                 onChange={(bookedBy) => {
@@ -691,29 +1020,47 @@ export function EnterpriseBookingForm({
                   });
                 }}
               />
-            </EField>
-            <EField t={t} label={tr("new.field.contact")} req>
+            </BookingField>
+            <BookingField
+              fieldId={contactFieldId}
+              label={tr("new.field.contact")}
+              req
+            >
               <TextControl
+                id={contactFieldId}
                 icon="phone"
+                inputMode="tel"
+                required
                 value={draft.onsiteContactPhone}
                 onChange={(onsiteContactPhone) => patch({ onsiteContactPhone })}
                 mono
               />
-            </EField>
-            <EField t={t} label={tr("new.policy.vehicle")} full>
+            </BookingField>
+            <BookingGroupField
+              labelId={vehicleLabelId}
+              label={tr("new.policy.vehicle")}
+              full
+            >
               <SegmentedControl<EnterpriseVehiclePreference>
                 name="vehicle-preference"
+                groupLabel={tr("new.policy.vehicle")}
+                ariaLabelledBy={vehicleLabelId}
                 value={draft.vehicle}
                 onChange={(vehicle) => patch({ vehicle })}
                 options={vehicleOptions}
               />
-            </EField>
-            <EField t={t} label={tr("new.field.notes")} full>
+            </BookingGroupField>
+            <BookingField
+              fieldId={notesFieldId}
+              label={tr("new.field.notes")}
+              full
+            >
               <TextAreaControl
+                id={notesFieldId}
                 value={draft.notes}
                 onChange={(notes) => patch({ notes })}
               />
-            </EField>
+            </BookingField>
           </div>
         </ECard>
       </div>
@@ -771,10 +1118,10 @@ export function EnterpriseBookingForm({
           </div>
         </ECard>
 
-        {!timeValidation.isValid &&
-        draft.reservationDate &&
-        draft.reservationTime ? (
+        {isReservationWindowInvalid ? (
           <div
+            data-testid="enterprise-booking-aside-time-error"
+            aria-hidden="true"
             style={{
               padding: "10px 12px",
               background: t.dangerBg,
@@ -793,6 +1140,9 @@ export function EnterpriseBookingForm({
           href={reviewHref}
           data-drt-intent="enterprise-review"
           aria-disabled={!canContinue}
+          aria-describedby={
+            isReservationWindowInvalid ? windowErrorId : undefined
+          }
           style={entBtnStyle(t, {
             variant: "primary",
             size: "lg",

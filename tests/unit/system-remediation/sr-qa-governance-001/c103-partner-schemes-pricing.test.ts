@@ -68,7 +68,7 @@ describe("C103: 合作夥伴方案、入口、價格發布、來源歸屬與結�
   });
 
   it("發布費率規則時自動將舊版 active 規則歸檔 (archived)，更新生效期並保留審計追蹤", () => {
-    const { service } = createPlatformAdminService();
+    const { service, auditNotificationService } = createPlatformAdminService();
 
     const ruleV1 = service.createPlatformPricingRule({
       ruleName: "尊榮商務包車方案",
@@ -80,9 +80,13 @@ describe("C103: 合作夥伴方案、入口、價格發布、來源歸屬與結�
 
     const publishedV1 = service.publishPlatformPricingRule(ruleV1.ruleId, {
       publishedBy: "pricing_officer_01",
+      reason: "Initial rollout of executive business charter pricing v1",
     });
     expect(publishedV1.status).toBe("active");
     expect(publishedV1.publishedBy).toBe("pricing_officer_01");
+    expect(publishedV1.publishReason).toBe(
+      "Initial rollout of executive business charter pricing v1",
+    );
 
     // 建立並發布 V2
     const ruleV2 = service.createPlatformPricingRule({
@@ -95,8 +99,29 @@ describe("C103: 合作夥伴方案、入口、價格發布、來源歸屬與結�
 
     const publishedV2 = service.publishPlatformPricingRule(ruleV2.ruleId, {
       publishedBy: "pricing_officer_02",
+      reason: "Q2 fee schedule revision for executive business charter v2",
     });
     expect(publishedV2.status).toBe("active");
+    expect(publishedV2.publishReason).toBe(
+      "Q2 fee schedule revision for executive business charter v2",
+    );
+
+    const publishAuditLog = auditNotificationService
+      .listAuditLogs()
+      .find(
+        (log) =>
+          log.actionName === "publish_platform_pricing_rule" &&
+          log.resourceId === ruleV2.ruleId,
+      );
+    expect(publishAuditLog?.actorId).toBe("pricing_officer_02");
+    expect(publishAuditLog?.newValuesSummary).toEqual(
+      expect.objectContaining({
+        ruleId: ruleV2.ruleId,
+        version: "v2",
+        publishedBy: "pricing_officer_02",
+        reason: "Q2 fee schedule revision for executive business charter v2",
+      }),
+    );
 
     // 檢查 V1 自動轉為 archived
     const allRules = service.listPlatformPricingRules();

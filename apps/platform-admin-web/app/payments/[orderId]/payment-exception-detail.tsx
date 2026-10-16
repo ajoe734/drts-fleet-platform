@@ -80,10 +80,12 @@ function formatAmount(
   if (!amount) {
     return unavailable;
   }
+  const hasMinorUnits = amount.amountMinor % 100 !== 0;
   return new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en-US", {
     style: "currency",
     currency: amount.currency,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: hasMinorUnits ? 2 : 0,
+    maximumFractionDigits: 2,
   }).format(amount.amountMinor / 100);
 }
 

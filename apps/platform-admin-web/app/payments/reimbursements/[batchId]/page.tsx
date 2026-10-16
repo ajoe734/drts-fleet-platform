@@ -7,6 +7,7 @@ import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { createIdempotencyKey } from "@drts/api-client";
 import { useTranslation } from "@/lib/i18n";
 import type {
+  ReimbursementBatchExportReceipt,
   ReimbursementBatchRecord,
   ReimbursementItemRecord,
   RemittanceProofReadbackGrant,
@@ -25,23 +26,26 @@ import {
   type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
+import {
+  REIMBURSEMENT_WORKFLOW_STEPS,
+  deriveReimbursementWorkflowState,
+  formatReimbursementMoney,
+  type ReimbursementWorkflowState,
+} from "../reimbursement-readback";
 import { proofT } from "../translations";
+import {
+  exportReimbursementBatch,
+  markReimbursementBatchReconciled,
+} from "../reimbursement-workflow-client";
 
 const theme = buildCanvasTheme({
   surface: "platform",
   density: "compact",
 });
 
-const WORKFLOW_STEPS = [
-  "draft",
-  "pending_approval",
-  "approved",
-  "exported",
-  "paid",
-  "reconciled",
-] as const;
+const WORKFLOW_STEPS = REIMBURSEMENT_WORKFLOW_STEPS;
 
-type WorkflowStep = (typeof WORKFLOW_STEPS)[number];
+type WorkflowStep = ReimbursementWorkflowState;
 
 type TimelineEntry = {
   at: string;
@@ -266,27 +270,18 @@ function GateRow({
   );
 }
 
-function formatMoney(
-  amount?: { amountMinor: number; currency: string } | null,
-) {
-  if (!amount) return "—";
-  return `${amount.amountMinor.toLocaleString()} ${amount.currency}`;
-}
+const formatMoney = formatReimbursementMoney;
 
+/**
+ * The backend now persists an authoritative `workflowState` (C080); prefer
+ * it over the display-task's derivation heuristic, which infers "exported"
+ * from `remittanceProofId` (the driver's own remittance-proof upload, a
+ * different object -- see `../reimbursement-workflow-client`) and has no
+ * notion of this task's real export/reconcile actions. Falls back to the
+ * heuristic only for a record that genuinely has no backend state yet.
+ */
 function getWorkflowState(batch: ReimbursementBatchRecord): WorkflowStep {
-  if (batch.status === "paid") {
-    return "paid";
-  }
-  if (batch.remittanceProofId) {
-    return "exported";
-  }
-  if (batch.approvedAt) {
-    return "approved";
-  }
-  if (batch.items.length === 0) {
-    return "draft";
-  }
-  return "pending_approval";
+  return batch.workflowState ?? deriveReimbursementWorkflowState(batch);
 }
 
 function workflowTone(step: WorkflowStep): CanvasTone {
@@ -438,15 +433,26 @@ export default function ReimbursementDetailPage() {
   const [approveReason, setApproveReason] = useState("");
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [approvalReceipt, setApprovalReceipt] = useState<string | null>(null);
-  const [savingAction, setSavingAction] = useState<"approve" | "paid" | null>(
-    null,
-  );
+  const [savingAction, setSavingAction] = useState<
+    "approve" | "paid" | "export" | "reconcile" | null
+  >(null);
   const [approvalKey, setApprovalKey] = useState(() =>
     createIdempotencyKey("reimbursement-approve"),
   );
   const [payWithProofKey, setPayWithProofKey] = useState(() =>
     createIdempotencyKey("reimbursement-pay-with-proof"),
   );
+  const [exportKey, setExportKey] = useState(() =>
+    createIdempotencyKey("reimbursement-export"),
+  );
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportReceipt, setExportReceipt] =
+    useState<ReimbursementBatchExportReceipt | null>(null);
+  const [reconcileReason, setReconcileReason] = useState("");
+  const [reconcileKey, setReconcileKey] = useState(() =>
+    createIdempotencyKey("reimbursement-reconcile"),
+  );
+  const [reconcileError, setReconcileError] = useState<string | null>(null);
   const [proof, setProof] = useState<RemittanceProofRecord | null>(null);
   const [proofLoading, setProofLoading] = useState(false);
   const [proofError, setProofError] = useState<string | null>(null);
@@ -625,6 +631,75 @@ export default function ReimbursementDetailPage() {
       await loadBatch();
     } catch (nextError: any) {
       setPayWithProofError(nextError?.message ?? String(nextError));
+    } finally {
+      setSavingAction(null);
+    }
+  }
+
+  async function handleExport() {
+    if (!batch) {
+      return;
+    }
+    if (!window.confirm(proofT("export.confirmMessage", locale))) {
+      return;
+    }
+
+    setSavingAction("export");
+    setExportError(null);
+
+    try {
+      const receipt = await exportReimbursementBatch(client, batch.batchId, {
+        idempotencyKey: exportKey,
+      });
+      setExportReceipt(receipt);
+      setApprovalReceipt(
+        proofT("export.success", locale, {
+          manifestHash: receipt.manifestHash.slice(0, 16),
+          receiptId: receipt.receiptId,
+        }),
+      );
+      setExportKey(createIdempotencyKey("reimbursement-export"));
+      await loadBatch();
+    } catch (nextError: any) {
+      setExportError(nextError?.message ?? String(nextError));
+    } finally {
+      setSavingAction(null);
+    }
+  }
+
+  async function handleReconcile() {
+    if (!batch) {
+      return;
+    }
+    const reason = reconcileReason.trim();
+    if (!reason) {
+      setReconcileError(proofT("reconcile.reasonRequired", locale));
+      return;
+    }
+    if (!window.confirm(proofT("reconcile.confirmMessage", locale))) {
+      return;
+    }
+
+    setSavingAction("reconcile");
+    setReconcileError(null);
+
+    try {
+      const receipt = await markReimbursementBatchReconciled(
+        client,
+        batch.batchId,
+        { reason },
+        { idempotencyKey: reconcileKey },
+      );
+      setApprovalReceipt(
+        proofT("reconcile.success", locale, {
+          receiptId: receipt.receiptId,
+        }),
+      );
+      setReconcileReason("");
+      setReconcileKey(createIdempotencyKey("reimbursement-reconcile"));
+      await loadBatch();
+    } catch (nextError: any) {
+      setReconcileError(nextError?.message ?? String(nextError));
     } finally {
       setSavingAction(null);
     }
@@ -897,6 +972,86 @@ export default function ReimbursementDetailPage() {
 
         <Card
           theme={theme}
+          title={proofT("export.cardTitle", locale)}
+          subtitle={proofT("export.cardSubtitle", locale)}
+        >
+          <div style={actionPanelStyle}>
+            {exportError ? (
+              <Banner
+                theme={theme}
+                tone="danger"
+                title={proofT("export.error", locale)}
+                body={exportError}
+              />
+            ) : null}
+            {batch.exportedAt ? (
+              <div
+                style={{
+                  fontSize: 11,
+                  color: theme.textMuted,
+                  display: "flex",
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span>
+                  {proofT("export.metaExportedAt", locale)}:{" "}
+                  <b style={{ color: theme.text, fontWeight: 600 }}>
+                    {formatDateTime(batch.exportedAt)}
+                  </b>
+                </span>
+                <span>
+                  {proofT("export.metaExportedBy", locale)}:{" "}
+                  <b style={{ color: theme.text, fontWeight: 600 }}>
+                    {batch.exportedByActorId ?? "—"}
+                  </b>
+                </span>
+                {batch.exportManifestHash ? (
+                  <span>
+                    {proofT("export.metaManifestHash", locale)}:{" "}
+                    <b style={{ color: theme.text, fontWeight: 600 }}>
+                      {batch.exportManifestHash.slice(0, 16)}…
+                    </b>
+                  </span>
+                ) : null}
+              </div>
+            ) : (
+              <div style={{ fontSize: 11.5, color: theme.textMuted }}>
+                {proofT("export.notApprovedHint", locale)}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Btn
+                theme={theme}
+                variant="primary"
+                icon="download"
+                disabled={!batch.approvedAt || savingAction !== null}
+                onClick={() => void handleExport()}
+              >
+                {savingAction === "export"
+                  ? proofT("export.saving", locale)
+                  : proofT("export.button", locale)}
+              </Btn>
+              {(exportReceipt?.download.downloadUrl ??
+              batch.exportDownloadMetadata?.downloadUrl) ? (
+                <a
+                  href={
+                    exportReceipt?.download.downloadUrl ??
+                    batch.exportDownloadMetadata!.downloadUrl
+                  }
+                  target="_blank"
+                  rel="noreferrer"
+                  style={actionButtonLinkStyle()}
+                >
+                  {proofT("export.downloadButton", locale)}
+                </a>
+              ) : null}
+            </div>
+          </div>
+        </Card>
+
+        <Card
+          theme={theme}
           title={proofT("proof.cardTitle", locale)}
           subtitle={proofT("proof.cardSubtitle", locale)}
         >
@@ -1129,6 +1284,65 @@ export default function ReimbursementDetailPage() {
                 ? proofT("payWithProof.saving", locale)
                 : proofT("payWithProof.button", locale)}
             </Btn>
+          </div>
+        </Card>
+
+        <Card
+          theme={theme}
+          title={proofT("reconcile.cardTitle", locale)}
+          subtitle={proofT("reconcile.cardSubtitle", locale)}
+        >
+          <div style={actionPanelStyle}>
+            {batch.reconciledAt ? (
+              <Banner
+                theme={theme}
+                tone="success"
+                title={proofT("reconcile.cardTitle", locale)}
+                body={proofT("reconcile.alreadyReconciledHint", locale, {
+                  reconciledAt: formatDateTime(batch.reconciledAt),
+                  reason: batch.reconciliationReason ?? "",
+                })}
+              />
+            ) : (
+              <>
+                <label style={{ display: "grid", gap: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700 }}>
+                    {proofT("reconcile.reasonLabel", locale)}
+                  </span>
+                  <textarea
+                    value={reconcileReason}
+                    onChange={(event) => setReconcileReason(event.target.value)}
+                    placeholder={proofT("reconcile.reasonPlaceholder", locale)}
+                    style={textAreaStyle}
+                  />
+                </label>
+                {reconcileError ? (
+                  <Banner
+                    theme={theme}
+                    tone="danger"
+                    title={proofT("reconcile.error", locale)}
+                    body={reconcileError}
+                  />
+                ) : batch.status !== "paid" ? (
+                  <div style={{ fontSize: 11.5, color: theme.textMuted }}>
+                    {proofT("reconcile.notPaidHint", locale)}
+                  </div>
+                ) : null}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <Btn
+                    theme={theme}
+                    variant="primary"
+                    icon="check"
+                    disabled={batch.status !== "paid" || savingAction !== null}
+                    onClick={() => void handleReconcile()}
+                  >
+                    {savingAction === "reconcile"
+                      ? proofT("reconcile.saving", locale)
+                      : proofT("reconcile.button", locale)}
+                  </Btn>
+                </div>
+              </>
+            )}
           </div>
         </Card>
 

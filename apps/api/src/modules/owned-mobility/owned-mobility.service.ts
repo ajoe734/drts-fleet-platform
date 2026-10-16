@@ -692,6 +692,7 @@ export class OwnedMobilityService
     orderId: string,
   ): Promise<DispatchCandidate[]> {
     const order = this.requireOrder(orderId);
+    await this.prepareDispatchEligibility(order);
     return this.excludePlatformPresenceBlockedCandidates(
       this.listEligibleDispatchCandidates(order),
     );
@@ -1055,14 +1056,7 @@ export class OwnedMobilityService
     return this.cloneOrder(order);
   }
 
-  createMultiTaxiRide(
-    command: CreateMultiTaxiRideCommand,
-    authorization: MultiTaxiOperatingAuthorizationRecord,
-    identity?: BootstrapRequestIdentity | null,
-    requestId?: string,
-    callContext?: MultiTaxiCallContext,
-    commitCreation?: MultiTaxiCreationCommit,
-  ): MaybePromise<OwnedOrderRecord> {
+  validateMultiTaxiRideRequest(command: CreateMultiTaxiRideCommand) {
     this.assertNoCanonicalMultiTaxiContextOverrides(command);
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
@@ -1094,6 +1088,18 @@ export class OwnedMobilityService
         );
       }
     }
+    return requestedPickupAt;
+  }
+
+  createMultiTaxiRide(
+    command: CreateMultiTaxiRideCommand,
+    authorization: MultiTaxiOperatingAuthorizationRecord,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    callContext?: MultiTaxiCallContext,
+    commitCreation?: MultiTaxiCreationCommit,
+  ): MaybePromise<OwnedOrderRecord> {
+    const requestedPickupAt = this.validateMultiTaxiRideRequest(command);
     if (callContext && !callContext.callId?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -1106,32 +1112,40 @@ export class OwnedMobilityService
     // fence,不能換入口繞過" -- the callcenter/multi-taxi entry point must not
     // be usable to create a second order for a call a voice intent already
     // owns (or has a pending AI command for).
-    if (callContext?.callId && this.voiceBookingRepository?.isEnabled()) {
-      return this.assertNoConflictingVoiceIntentForCall(
-        callContext.callId,
-        "create_multi_taxi_ride",
-      ).then(() =>
-        this.buildAndPersistMultiTaxiRide(
-          command,
-          authorization,
-          requestedPickupAt,
-          identity,
-          requestId,
-          callContext,
-          commitCreation,
-        ),
-      );
-    }
+    const create = () => {
+      if (callContext?.callId && this.voiceBookingRepository?.isEnabled()) {
+        return this.assertNoConflictingVoiceIntentForCall(
+          callContext.callId,
+          "create_multi_taxi_ride",
+        ).then(() =>
+          this.buildAndPersistMultiTaxiRide(
+            command,
+            authorization,
+            requestedPickupAt,
+            identity,
+            requestId,
+            callContext,
+            commitCreation,
+          ),
+        );
+      }
 
-    return this.buildAndPersistMultiTaxiRide(
-      command,
-      authorization,
-      requestedPickupAt,
-      identity,
-      requestId,
-      callContext,
-      commitCreation,
-    );
+      return this.buildAndPersistMultiTaxiRide(
+        command,
+        authorization,
+        requestedPickupAt,
+        identity,
+        requestId,
+        callContext,
+        commitCreation,
+      );
+    };
+    const preparing =
+      this.serviceProductService?.prepareRuntimeProfileServiceProduct(
+        "multi_taxi_direct",
+        "taxi_reservation",
+      );
+    return preparing ? preparing.then(create) : create();
   }
 
   private buildAndPersistMultiTaxiRide(
@@ -2305,6 +2319,89 @@ export class OwnedMobilityService
 
   listOrders() {
     return this.orders.map((order) => this.cloneOrder(order));
+  }
+
+  // Public HTTP reads use committed rows. Synchronous internal callers retain
+  // their original contract; a database miss/error must never revive a cache.
+  async listOrdersForRead(orderIds?: readonly string[]) {
+    const orders = this.ownedMobilityRepository?.isEnabled()
+      ? await this.ownedMobilityRepository.listOrdersForRead(orderIds)
+      : this.orders.filter(
+          (order) => !orderIds || orderIds.includes(order.orderId),
+        );
+    return orders.map((order) => this.cloneOrder(order));
+  }
+
+  async getOrderForRead(orderId: string) {
+    if (!this.ownedMobilityRepository?.isEnabled())
+      return this.getOrder(orderId);
+    const order = await this.ownedMobilityRepository.findOrderById(orderId);
+    if (!order)
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "ORDER_NOT_FOUND",
+        "Order was not found.",
+      );
+    return this.cloneOrder(order);
+  }
+
+  /** Refresh only the target aggregate before entering the unchanged command
+   * implementation. Its row/resource locks and ownership checks remain authoritative. */
+  async prepareOrderAction(
+    key: { orderId: string } | { taskId: string } | { dispatchJobId: string },
+  ) {
+    if (!this.ownedMobilityRepository?.isEnabled()) return;
+    const context =
+      await this.ownedMobilityRepository.loadOrderActionContext(key);
+    if (!context) {
+      if ("taskId" in key)
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "DRIVER_TASK_NOT_FOUND",
+          "Driver task was not found.",
+        );
+      if ("dispatchJobId" in key)
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "DISPATCH_JOB_NOT_FOUND",
+          "Dispatch job was not found.",
+        );
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "ORDER_NOT_FOUND",
+        "Order was not found.",
+      );
+    }
+    const orderId = context.orders[0]!.orderId;
+    await this.regulatoryRegistryService.prepareDispatchSupply?.(
+      context.orders[0]!.serviceBucket,
+    );
+    const replace = <T extends { orderId: string }>(
+      current: T[],
+      committed: T[],
+    ) => [
+      ...structuredClone(committed),
+      ...current.filter((row) => row.orderId !== orderId),
+    ];
+    this.orders = replace(this.orders, context.orders);
+    this.dispatchJobs = replace(this.dispatchJobs, context.dispatchJobs);
+    this.dispatchAttempts = replace(
+      this.dispatchAttempts,
+      context.dispatchAttempts,
+    );
+    this.dispatchAssignments = replace(
+      this.dispatchAssignments,
+      context.dispatchAssignments,
+    );
+    this.driverTasks = replace(this.driverTasks, context.driverTasks);
+    this.dispatchTraceLogs = replace(
+      this.dispatchTraceLogs,
+      context.dispatchTraceLogs,
+    );
+    this.passengerDisclosureSnapshots = replace(
+      this.passengerDisclosureSnapshots,
+      context.passengerDisclosureSnapshots,
+    );
   }
 
   getOrder(orderId: string, identity?: BootstrapRequestIdentity | null) {
@@ -3651,7 +3748,12 @@ export class OwnedMobilityService
         ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
       },
       execute: async () => {
-        const res = this._executeDispatchOrder(orderId, command, requestId);
+        const res = await this._executeDispatchOrder(
+          orderId,
+          command,
+          requestId,
+          options?.required === true,
+        );
         return {
           data: res,
           statusCode: 200,
@@ -3666,19 +3768,25 @@ export class OwnedMobilityService
     orderId: string,
     command: DispatchOrderCommand,
     requestId?: string,
+    awaitPersistence = false,
   ) {
     const prepared = this.prepareDispatchOrder(
       this.cloneOrder(this.requireOrder(orderId)),
       command,
       requestId,
     );
-    this.persistChanges(
+    const pending = this.persistChanges(
       {
         ...prepared.changes,
         orders: prepared.shouldPersistOrder ? prepared.changes.orders : [],
       },
       "dispatch_order",
     );
+    // HTTP dispatch must acknowledge its own job/attempt writes before another
+    // instance can consume the returned ID. Internal synchronous callers retain
+    // their original contract; unrelated workflow writes are not awaited here.
+    if (awaitPersistence && pending)
+      return pending.then(() => prepared.apply());
     return prepared.apply();
   }
 
@@ -4825,6 +4933,22 @@ export class OwnedMobilityService
     return this.dispatchJobs.map((job) => this.buildDispatchJobSnapshot(job));
   }
 
+  async listDispatchJobsForRead() {
+    if (!this.ownedMobilityRepository?.isEnabled())
+      return this.listDispatchJobs();
+    const jobs = await this.ownedMobilityRepository.listDispatchJobsForRead();
+    const orders = new Map(
+      (
+        await this.listOrdersForRead([
+          ...new Set(jobs.map((job) => job.orderId)),
+        ])
+      ).map((order) => [order.orderId, order]),
+    );
+    return jobs.map((job) =>
+      this.buildDispatchJobSnapshot(job, orders.get(job.orderId) ?? null),
+    );
+  }
+
   listDispatchTrace(orderId: string) {
     this.requireOrder(orderId);
     return this.dispatchTraceLogs
@@ -4838,6 +4962,7 @@ export class OwnedMobilityService
   ): Promise<DispatchCandidate[]> {
     const dispatchJob = this.requireDispatchJob(dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
+    await this.prepareDispatchEligibility(order);
     const candidates = await this.listDispatchCandidatesWithEligibility(
       dispatchJob,
       order,
@@ -4846,10 +4971,16 @@ export class OwnedMobilityService
     return candidates.map((candidate) => ({ ...candidate }));
   }
 
-  private buildDispatchJobSnapshot(dispatchJob: DispatchJobRecord) {
-    const order = this.orders.find(
-      (candidateOrder) => candidateOrder.orderId === dispatchJob.orderId,
-    );
+  private buildDispatchJobSnapshot(
+    dispatchJob: DispatchJobRecord,
+    authoritativeOrder?: OwnedOrderRecord | null,
+  ) {
+    const order =
+      authoritativeOrder === undefined
+        ? this.orders.find(
+            (candidateOrder) => candidateOrder.orderId === dispatchJob.orderId,
+          )
+        : authoritativeOrder;
     if (!order) {
       return { ...dispatchJob };
     }
@@ -5283,6 +5414,7 @@ export class OwnedMobilityService
           }
           order = current.order;
           dispatchJob = currentJob;
+          await this.prepareDispatchEligibility(order, [vehicleId]);
           if (
             order.runtimeProfileCode === "multi_taxi_direct" &&
             order.operatingAuthorizationId
@@ -5457,11 +5589,15 @@ export class OwnedMobilityService
       );
     }
 
-    const eligibilityRecheckResult = this.assertAssignmentEligibilityRecheck(
-      order,
-      dispatchJob.dispatchJobId,
-      vehicleId,
-      driverId,
+    const eligibilityRecheckResult = this.afterMaybePromise(
+      this.prepareDispatchEligibility(order, [vehicleId]),
+      () =>
+        this.assertAssignmentEligibilityRecheck(
+          order,
+          dispatchJob.dispatchJobId,
+          vehicleId,
+          driverId,
+        ),
     );
     return this.afterMaybePromise(eligibilityRecheckResult, () => {
       const sandboxGateResult = this.assertSandboxDispatchGate(
@@ -6208,6 +6344,56 @@ export class OwnedMobilityService
       }
       return clone;
     });
+  }
+
+  async listDriverTasksForRead() {
+    if (!this.ownedMobilityRepository?.isEnabled())
+      return this.listDriverTasks();
+    const tasks = await this.ownedMobilityRepository.listDriverTasksForRead();
+    const orders = new Map(
+      (
+        await this.listOrdersForRead([
+          ...new Set(tasks.map((task) => task.orderId)),
+        ])
+      ).map((order) => [order.orderId, order]),
+    );
+    return tasks.map((task) =>
+      this.cloneDriverTaskForRead(task, orders.get(task.orderId) ?? null),
+    );
+  }
+
+  async findDriverTaskForRead(taskId: string) {
+    if (!this.ownedMobilityRepository?.isEnabled())
+      return this.driverTasks.some((task) => task.taskId === taskId)
+        ? this.getDriverTask(taskId)
+        : null;
+    const task =
+      await this.ownedMobilityRepository.findDriverTaskForRead(taskId);
+    if (!task) return null;
+    const order = await this.ownedMobilityRepository.findOrderById(
+      task.orderId,
+    );
+    return this.cloneDriverTaskForRead(task, order);
+  }
+
+  private cloneDriverTaskForRead(
+    task: DriverTaskRecord,
+    order: OwnedOrderRecord | null,
+  ) {
+    const clone = this.cloneTask(task, order);
+    clone.sourcePlatform ??= this.forwarderSourceMap.get(task.orderId) ?? null;
+    return clone;
+  }
+
+  async getDriverTaskForRead(taskId: string) {
+    const task = await this.findDriverTaskForRead(taskId);
+    if (!task)
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "DRIVER_TASK_NOT_FOUND",
+        "Driver task was not found.",
+      );
+    return task;
   }
 
   getReportingSnapshot(): OwnedMobilityReportingSnapshot {
@@ -10203,6 +10389,25 @@ export class OwnedMobilityService
     }
   }
 
+  private prepareDispatchEligibility(
+    order: OwnedOrderRecord,
+    vehicleIds?: string[],
+  ): MaybePromise<void> {
+    const capabilities =
+      this.vehicleEligibilityService?.prepareVehicleCapabilities?.(
+        vehicleIds ?? order.serviceBucket,
+      );
+    const product =
+      order.runtimeProfileCode && order.serviceProductCode
+        ? this.serviceProductService?.prepareRuntimeProfileServiceProduct?.(
+            order.runtimeProfileCode,
+            order.serviceProductCode,
+          )
+        : undefined;
+    if (capabilities || product)
+      return Promise.all([capabilities, product]).then(() => undefined);
+  }
+
   private assertAssignmentEligibilityRecheck(
     order: OwnedOrderRecord,
     dispatchJobId: string,
@@ -11337,6 +11542,7 @@ export class OwnedMobilityService
         this.ownedMobilityRepository!.reportPersistenceFailure(error, context);
       },
     );
+    return pending;
   }
 
   private async persistChangesRequired(
@@ -13890,7 +14096,7 @@ export class OwnedMobilityService
     try {
       this.tenantPartnerService.getPassengerMasterRecord(tenantId, passengerId);
     } catch {
-      this.tenantPartnerService.upsertPassenger(tenantId, {
+      await this.tenantPartnerService.upsertPassenger(tenantId, {
         passengerId,
         fullName: command.passengerName || "Referral Passenger",
         mobile: command.passengerPhone || "0912345678",
@@ -14718,10 +14924,16 @@ export class OwnedMobilityService
     };
   }
 
-  private cloneTask(task: DriverTaskRecord): DriverTaskRecord {
-    const order = this.orders.find(
-      (candidateOrder) => candidateOrder.orderId === task.orderId,
-    );
+  private cloneTask(
+    task: DriverTaskRecord,
+    authoritativeOrder?: OwnedOrderRecord | null,
+  ): DriverTaskRecord {
+    const order =
+      authoritativeOrder === undefined
+        ? this.orders.find(
+            (candidateOrder) => candidateOrder.orderId === task.orderId,
+          )
+        : authoritativeOrder;
     return {
       ...this.cloneTaskWithDetachedActualFare(task),
       ...(task.bookingQualification

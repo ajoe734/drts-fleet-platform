@@ -750,7 +750,7 @@ describe("tenant partner foundation service", () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
-    const passenger = tenantPartnerService.upsertPassenger(
+    const passenger = await tenantPartnerService.upsertPassenger(
       TENANT_ID,
       {
         fullName: "測試乘客",
@@ -761,7 +761,7 @@ describe("tenant partner foundation service", () => {
       },
       "passenger-upsert-request",
     );
-    const address = tenantPartnerService.upsertAddress(
+    const address = await tenantPartnerService.upsertAddress(
       TENANT_ID,
       {
         ownerPassengerId: passenger.passengerId,
@@ -844,7 +844,7 @@ describe("tenant partner foundation service", () => {
         },
       ],
     });
-    const otherPassenger = tenantPartnerService.upsertPassenger(
+    const otherPassenger = await tenantPartnerService.upsertPassenger(
       OTHER_TENANT_ID,
       {
         fullName: "Other Tenant Passenger",
@@ -1062,17 +1062,17 @@ describe("tenant partner foundation service", () => {
     ).toThrowError(ApiRequestError);
   });
 
-  it("rejects cross-tenant passenger and address upserts when ids belong to another tenant", () => {
+  it("rejects cross-tenant passenger and address upserts when ids belong to another tenant", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
-    const otherPassenger = tenantPartnerService.upsertPassenger(
+    const otherPassenger = await tenantPartnerService.upsertPassenger(
       OTHER_TENANT_ID,
       {
         fullName: "Other Tenant Passenger",
       },
     );
-    const otherAddress = tenantPartnerService.upsertAddress(OTHER_TENANT_ID, {
+    const otherAddress = await tenantPartnerService.upsertAddress(OTHER_TENANT_ID, {
       ownerPassengerId: otherPassenger.passengerId,
       addressName: "Other Tenant HQ",
       addressText: "台中市西屯區台灣大道 99 號",
@@ -1080,7 +1080,7 @@ describe("tenant partner foundation service", () => {
 
     let passengerError: unknown;
     try {
-      tenantPartnerService.upsertPassenger(TENANT_ID, {
+      await tenantPartnerService.upsertPassenger(TENANT_ID, {
         passengerId: otherPassenger.passengerId,
         fullName: "Hijacked Passenger",
       });
@@ -1090,7 +1090,7 @@ describe("tenant partner foundation service", () => {
 
     let addressError: unknown;
     try {
-      tenantPartnerService.upsertAddress(TENANT_ID, {
+      await tenantPartnerService.upsertAddress(TENANT_ID, {
         addressId: otherAddress.addressId,
         addressName: "Hijacked Address",
         addressText: "台北市信義區松仁路 100 號",
@@ -1434,7 +1434,7 @@ describe("tenant partner foundation service", () => {
     tenantPartnerService.updateSlaProfile(TENANT_ID, {
       waitThresholdMin: 20,
     });
-    tenantPartnerService.upsertPassenger(TENANT_ID, {
+    await tenantPartnerService.upsertPassenger(TENANT_ID, {
       passengerId: "passenger-persisted-001",
       fullName: "Persisted Passenger Updated",
     });

@@ -506,7 +506,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
             new TextDecoder().decode(init.body as ArrayBuffer),
           );
         }
-        const res = tenantPartnerController.upsertCostCenter(
+        const res = await tenantPartnerController.upsertCostCenter(
           bodyObj,
           payload.tenantId ?? tenantId,
           "req-e2e-cc-create-001",

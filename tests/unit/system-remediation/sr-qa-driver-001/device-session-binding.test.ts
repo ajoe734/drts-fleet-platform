@@ -1,4 +1,3 @@
-import { enabledRegistryRepository } from "../../registry-driver-master-durable-ack-20261014/storage-fixture";
 // SR-QA-DRIVER-001 -- C050 (換機／遺失裝置司機: bind/unbind/recover).
 //
 // `tests/unit/driver-device-session.test.ts` (IAM-DRV-001) already covers
@@ -36,6 +35,7 @@ import { DriverDeviceSessionRepository } from "../../../../apps/api/src/modules/
 import { DriverDeviceSessionService } from "../../../../apps/api/src/modules/auth/driver-device-session.service";
 import { DriverProfileService } from "../../../../apps/api/src/modules/driver-profile/driver-profile.service";
 import { RegulatoryRegistryService } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
+import { RegulatoryRegistryRepository } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
 import { SecurityEventsRepository } from "../../../../apps/api/src/modules/security-events/security-events.repository";
 import { SecurityEventsService } from "../../../../apps/api/src/modules/security-events/security-events.service";
 
@@ -52,12 +52,30 @@ function setupServices() {
   const securityEventsService = new SecurityEventsService(
     new SecurityEventsRepository(),
   );
+  const driverRows = new Map<string, unknown>();
+  const regulatoryRepository = new RegulatoryRegistryRepository({
+    isEnabled: () => true,
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes("INSERT INTO reg.phase1_registry_drivers"))
+        driverRows.set(values[0] as string, JSON.parse(values[5] as string));
+      const driver = driverRows.get(values[0] as string);
+      return {
+        rows:
+          sql.includes("SELECT record FROM reg.phase1_registry_drivers") &&
+          driver
+            ? [{ record: structuredClone(driver) }]
+            : [],
+      };
+    },
+  } as never);
   const regulatoryService = new RegulatoryRegistryService(
     opsDispatchEventsService,
     auditService,
     driverProfileService,
-    enabledRegistryRepository(),
+    regulatoryRepository,
   );
+  for (const driver of regulatoryService.listDrivers())
+    driverRows.set(driver.driverId, structuredClone(driver));
   const sessionService = new DriverDeviceSessionService(
     jwtAuthService,
     driverProfileService,
