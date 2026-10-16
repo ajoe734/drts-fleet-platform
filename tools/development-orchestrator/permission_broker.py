@@ -1166,14 +1166,17 @@ def _visible_status_shell(command: str) -> str | None:
 
 
 def _matches_status_script(path_token: str, name: str, cwd: Path) -> bool:
-    """Only canonical source or the peer of this actually loaded release.
+    """Only assigned workspace source or the peer of this loaded release.
 
     Runtime discovery never consults a caller-supplied release name, a glob of
     installed releases, or a status-root script. Both lexical and resolved paths
-    must match so an escaping symlink cannot inherit canonical/bundle authority.
+    must match so an escaping symlink cannot inherit workspace/bundle authority.
+    The adapter's assigned workspace is authoritative alongside canonical;
+    hook cwd resolves relative paths but never grants another root authority.
     """
     canonical = workspace_root()
-    expected = [canonical / "tools" / "development-orchestrator" / "bin" / name]
+    expected = [root / "tools" / "development-orchestrator" / "bin" / name
+                for root in workspace_roots()]
     release = THIS_DIR.parent.parent
     if (release.parent == canonical / ".artifacts" / "releases"
             and THIS_DIR == release / "tools" / "development-orchestrator"):

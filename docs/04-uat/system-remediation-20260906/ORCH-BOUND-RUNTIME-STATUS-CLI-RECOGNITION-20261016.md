@@ -2,6 +2,27 @@
 
 Owner: Codex. Independent reviewer: Claude2. Source-only candidate; runtime adoption belongs to the existing sole maintainer.
 
+## Rework after Claude2 review of `eee6f41e3a59b52dc45b4ca89bb95c50b9118935`
+
+Claude2 reopened the original candidate on 2026-10-16 at 11:26:04Z: the assigned worker's relative CLI must remain supported when `ORCH_CANONICAL_ROOT` and `ORCH_WORKSPACE_ROOT` differ. This is the first independent return for this finding. The earlier owner interpretation below (calling that assigned checkout untrusted and unsetting its environment for full tests) was incorrect. Its results remain historical evidence, not validation of this repair.
+
+Minimal reproduction, **without unsetting either dispatch variable**, at the rejected SHA: from `tools/development-orchestrator`, `python3 -m unittest test_provider_permissions -v` ran 79 tests and failed the two original assertions `test_status_sync_with_quoted_env_value_is_auto_allowed` and `test_multiline_status_sync_handoff_is_auto_allowed`, exit 1. Evidence: `/home/lupin/workspace/drts-fleet-platform/.local/bound-runtime-status-cli-20261016-codex/rework-worker-root/provider-before.log`.
+
+Actual path: `provider_permissions` tests call production `permission_broker.classify_command` → `_classify_status_command` → `_is_safe_status_sync_command` → `_matches_status_script`. `worker_cwd()` already resolves from assigned workspace (or hook cwd), but the last function omitted the assigned workspace from its exact expected entrypoints. Repair only that expected list to use existing `workspace_roots()` authority (canonical plus adapter-assigned workspace); retain the loaded immutable peer condition and all lexical/resolved/existing-file checks. A hook cwd changes path resolution, never the trusted root list. Other worktrees, historical releases, temp copies, environment overrides inside the command, and escaping symlinks remain deferred.
+
+Four additional production-function regressions use a loaded bundle fixture and a third, explicitly assigned workspace outside canonical. Existing tests/assertions are preserved. With only these new tests against rejected production code: four tests, 80 failing positive subtests, exit 1; no setup errors (`regressions-before.log`). After the minimal production fix: broker plus provider suites pass 143 tests, exit 0, in the actual inherited dispatch environment (`broker-provider-after.log`). Fixtures create inert entrypoint files and patch only authoritative environment/context, never classification logic; all saved lifecycle invocations remain data.
+
+| Finding / required acceptance | Source / modification | Before → after | Command/version/evidence | Remaining gate |
+| --- | --- | --- | --- | --- |
+| Assigned worker relative CLI regression; `bound-runtime-status-cli_actual-trusted-loaded-peer-and-canonical-recognition` | `_matches_status_script` uses `workspace_roots()`; four added tests in original test file | Rejected SHA: 2 original failures / 80 new positive subtest failures → 143 broker/provider tests pass | Actual inherited dispatch; commands and local logs above | Full regression and final source hashes recorded at closeout; independent new-SHA review, CI, merge and bounded Source evidence still required. |
+| Preserve complete command and trust guards; `bound-runtime-status-cli_full-negative-guard-regressions-and-exact-candidate-validation` | All original deny/composition/native guards unchanged; new assigned-root tests cover shell chaining, redirection, substitutions, pipe interpreters, destructive git/shared-force, secrets, inline authority overrides, unassigned hook cwd/copies, symlink/dotdot | New negative cases pass before and after; exact assigned positive forms alone gain recognition | `regressions-before.log`, `broker-provider-after.log` | Full original suites and original-test AST preservation recorded at closeout. No runtime installation or pending operation replay. |
+
+At rework fetch, remote task/PR #2743 head matched rejected local SHA. `origin/dev` advanced to `3220526523dd18f21003c965b8a1021efba952ee`, with no changes to the three owned paths since accepted base. Published history is retained with ordinary additional commits; no rebase, amend, force push, or unnecessary trunk merge.
+
+## Previous candidate evidence (historical, superseded by the rework above)
+
+The following original artifact is retained to preserve its original before/fixed-after probes and the precise limitation that caused review rejection. Its old source hashes and test totals bind the rejected candidate only.
+
 ## Authority, baseline and scope
 
 - Isolated worker branch: `codex/orch-bound-runtime-status-cli-recognition-20261016`.
