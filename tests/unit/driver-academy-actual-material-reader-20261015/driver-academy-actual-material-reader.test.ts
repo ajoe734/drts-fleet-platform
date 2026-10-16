@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import Module from "node:module";
 import path from "node:path";
@@ -40,6 +40,7 @@ type TestRenderer = {
 };
 
 type DriverRuntime = {
+  dispose: () => void;
   React: {
     createElement: (
       type: unknown,
@@ -147,6 +148,8 @@ function setupDriverRuntime(): DriverRuntime {
   };
 
   const originalLoad = moduleInternal._load;
+  const originalTsExtension = moduleInternal._extensions[".ts"];
+  const originalTsxExtension = moduleInternal._extensions[".tsx"];
 
   const compileTs = (
     mod: { _compile: (code: string, file: string) => void },
@@ -235,18 +238,50 @@ function setupDriverRuntime(): DriverRuntime {
   };
 
   return {
+    dispose: () => {
+      moduleInternal._load = originalLoad;
+      for (const [extension, original] of [
+        [".ts", originalTsExtension],
+        [".tsx", originalTsxExtension],
+      ] as const) {
+        if (original) moduleInternal._extensions[extension] = original;
+        else delete moduleInternal._extensions[extension];
+      }
+    },
     React,
     act,
     create,
     loadHistoricalModuleReader: () => {
-      const historicalSource = execFileSync(
-        "git",
-        [
-          "show",
-          `${ACCEPTED_BASE_SHA}:apps/driver-app/components/academy/module-reader.tsx`,
-        ],
-        { cwd: REPO_ROOT, encoding: "utf8" },
+      // Keep the actual historical component, not a reconstructed implementation.
+      // Hosted/shallow checkouts need only these tracked bytes, never Git history.
+      const fixtureDirectory = path.join(__dirname, "fixtures");
+      const provenance = JSON.parse(
+        fs.readFileSync(
+          path.join(fixtureDirectory, "module-reader.431966.provenance.json"),
+          "utf8",
+        ),
       );
+      expect(provenance.commit).toBe(ACCEPTED_BASE_SHA);
+      expect(provenance.path).toBe(
+        "apps/driver-app/components/academy/module-reader.tsx",
+      );
+      const historicalBytes = fs.readFileSync(
+        path.join(fixtureDirectory, "module-reader.431966.original.tsx.txt"),
+      );
+      expect(historicalBytes.length).toBe(10946);
+      expect(provenance.bytes).toBe(historicalBytes.length);
+      const sha256 = createHash("sha256").update(historicalBytes).digest("hex");
+      expect(sha256).toBe(
+        "4214e442333f0d4a4f0d164d254a9240ab5d6453be2526ee4126e236d32ea370",
+      );
+      expect(provenance.sha256).toBe(sha256);
+      const blob = createHash("sha1")
+        .update(`blob ${historicalBytes.length}\0`)
+        .update(historicalBytes)
+        .digest("hex");
+      expect(blob).toBe("4fb3b2461bec5f154c5f53f4b4d15267ff5a4a6e");
+      expect(provenance.blob).toBe(blob);
+      const historicalSource = historicalBytes.toString("utf8");
       const fakeFilename = path.join(
         DRIVER_APP_ROOT,
         "components/academy/__historical_module_reader__.tsx",
@@ -440,6 +475,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  runtime.dispose();
   vi.unstubAllGlobals();
 });
 
@@ -478,6 +514,12 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
       expect(initialText).toContain(
         "影片資源位址：https://cdn.drts.internal/academy/videos/defensive-v2.mp4",
       );
+      expect(
+        renderer.root.findAll(
+          (node) =>
+            node.type === "Pressable" && nodeText(node).includes("▶"),
+        ),
+      ).toHaveLength(0);
       expect(boundary.openURL).not.toHaveBeenCalled();
 
       // 2. Switch between two distinct SOP modules: both render the exact same canned generic paragraph
@@ -490,6 +532,11 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
       const sop2Text = allRenderedText(renderer);
       expect(sop2Text).toContain("【標準作業指引 SOP】");
       expect(sop2Text).toContain("1. 接單前請確認車輛安全自檢與整潔完成。");
+      const cannedBody = (text: string, prefix: string) =>
+        text.split("\n").filter((line) => line.startsWith(prefix));
+      expect(cannedBody(sop2Text, "【標準作業指引 SOP】")).toEqual(
+        cannedBody(sop1Text, "【標準作業指引 SOP】"),
+      );
 
       // 3. Switch between two distinct article modules: both render the exact same canned generic paragraph
       await pressNode(findButtonByText(renderer, "駕駛承攬權益與責任分工講義"));
@@ -506,6 +553,9 @@ describe("DRIVER-ACADEMY-ACTUAL-MATERIAL-READER-20261015 (C059-F1)", () => {
       expect(art2Text).toContain("【專業知識講義】");
       expect(art2Text).toContain(
         "本單元涵蓋平台服務法規、責任分工原則與合約條款注意事項。",
+      );
+      expect(cannedBody(art2Text, "【專業知識講義】")).toEqual(
+        cannedBody(art1Text, "【專業知識講義】"),
       );
       expect(boundary.openURL).not.toHaveBeenCalled();
     });
