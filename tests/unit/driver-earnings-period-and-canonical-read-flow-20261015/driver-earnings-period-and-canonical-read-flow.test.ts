@@ -1295,3 +1295,236 @@ describe("R2 production query, calendar edges and failure negatives", () => {
     ]);
   });
 });
+
+// R3: actual USER answer confirms the complete Monday-through-Sunday week.
+// Exercise the production controller/service/repository, not just range helpers.
+describe("R3 USER full Asia/Taipei calendar week", () => {
+  it.each([
+    [
+      "2026-10-11T15:59:59.999Z",
+      "2026-10-05",
+      "2026-10-11",
+      "2026-10-04",
+      "2026-10-12",
+    ],
+    [
+      "2026-10-11T16:00:00.000Z",
+      "2026-10-12",
+      "2026-10-18",
+      "2026-10-11",
+      "2026-10-19",
+    ],
+    [
+      "2026-10-12T00:00:00.000Z",
+      "2026-10-12",
+      "2026-10-18",
+      "2026-10-11",
+      "2026-10-19",
+    ],
+    [
+      "2026-10-17T16:00:00.000Z",
+      "2026-10-12",
+      "2026-10-18",
+      "2026-10-11",
+      "2026-10-19",
+    ],
+    [
+      "2026-10-18T15:59:59.999Z",
+      "2026-10-12",
+      "2026-10-18",
+      "2026-10-11",
+      "2026-10-19",
+    ],
+    [
+      "2026-10-18T16:00:00.000Z",
+      "2026-10-19",
+      "2026-10-25",
+      "2026-10-18",
+      "2026-10-26",
+    ],
+    [
+      "2026-09-30T16:00:00.000Z",
+      "2026-09-28",
+      "2026-10-04",
+      "2026-09-27",
+      "2026-10-05",
+    ],
+    [
+      "2026-12-30T16:00:00.000Z",
+      "2026-12-28",
+      "2027-01-03",
+      "2026-12-27",
+      "2027-01-04",
+    ],
+    [
+      "2026-12-31T16:00:00.000Z",
+      "2026-12-28",
+      "2027-01-03",
+      "2026-12-27",
+      "2027-01-04",
+    ],
+  ])(
+    "includes the complete week through both endpoints at %s",
+    async (now, monday, sunday, previousSunday, nextMonday) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(now));
+      // Unique amounts expose a lost Monday, truncated future Sunday, adjacent-week
+      // inclusion or foreign driver leak, even when the selected week crosses years.
+      const rows: LedgerFixtureRow[] = [
+        previousSunday,
+        monday,
+        sunday,
+        nextMonday,
+      ].map((period_date, index) => ({
+        driver_id: OWN_DRIVER_UUID,
+        platform_code: PLATFORM_CODE_UBER,
+        period_date,
+        currency_code: "TWD",
+        gross_minor: 100 * (index + 1),
+        fee_minor: 10 * (index + 1),
+        subsidy_minor: index + 1,
+        net_minor: 91 * (index + 1),
+      }));
+      rows.push({
+        ...rows[1]!,
+        driver_id: FOREIGN_DRIVER_UUID,
+        gross_minor: 999999,
+        net_minor: 999999,
+      });
+      const { db, recordedQueries } = createCanonicalLedgerDatabaseDouble(rows);
+      const controller = new PlatformEarningsController(
+        new PlatformEarningsService(new PlatformEarningsRepository(db)),
+      );
+      const identity = makeDriverIdentity();
+      const breakdown = await controller.getByPlatform(
+        identity,
+        undefined,
+        "week-breakdown",
+        "week",
+      );
+      expect(breakdown.data.items).toEqual([
+        {
+          platformCode: PLATFORM_CODE_UBER,
+          grossEarning: { currency: "TWD", amountMinor: 500 },
+          serviceFee: { currency: "TWD", amountMinor: 50 },
+          subsidy: { currency: "TWD", amountMinor: 5 },
+          netAmount: { currency: "TWD", amountMinor: 455 },
+        },
+      ]);
+      const summary = await controller.getSummary(
+        identity,
+        undefined,
+        "week-summary",
+        "week",
+      );
+      expect(summary.data).toMatchObject({
+        driverId: OWN_DRIVER_UUID,
+        totalGross: { currency: "TWD", amountMinor: 500 },
+        totalServiceFee: { currency: "TWD", amountMinor: 50 },
+        totalSubsidy: { currency: "TWD", amountMinor: 5 },
+        totalNet: { currency: "TWD", amountMinor: 455 },
+      });
+      expect(recordedQueries).toHaveLength(2);
+      for (const query of recordedQueries) {
+        expect(query.sql).toContain("WHERE driver_id = $1");
+        expect(query.sql).toContain(
+          "period_date >= $2::date AND period_date <= $3::date",
+        );
+        expect(query.params).toEqual([OWN_DRIVER_UUID, monday, sunday]);
+      }
+    },
+  );
+
+  it("keeps the selected full week during mounted refresh, rejection and retry", async () => {
+    vi.useFakeTimers();
+    // Taipei Monday 00:00 while UTC is still Sunday; Sunday is in the future.
+    vi.setSystemTime(new Date("2026-10-11T16:00:00.000Z"));
+    const { db, recordedQueries } = createCanonicalLedgerDatabaseDouble([
+      {
+        driver_id: OWN_DRIVER_UUID,
+        platform_code: PLATFORM_CODE_UBER,
+        period_date: "2026-10-18",
+        currency_code: "TWD",
+        gross_minor: 50000,
+        fee_minor: 5000,
+        subsidy_minor: 2000,
+        net_minor: 47000,
+      },
+    ]);
+    const earningsController = new PlatformEarningsController(
+      new PlatformEarningsService(new PlatformEarningsRepository(db)),
+    );
+    const { EarningsScreen, requestedUrls } =
+      createMountedDriverEarningsAppHarness({
+        identity: makeDriverIdentity(),
+        earningsController,
+      });
+    let renderer!: TestRendererInstance;
+    await act(async () => {
+      renderer = TestRenderer.create(React.createElement(EarningsScreen));
+    });
+    await flushMicrotasks();
+    const weekPill = renderer.root.find(
+      (node) =>
+        typeof node.props?.onPress === "function" &&
+        node
+          .findAll((child) => String(child.type) === "Text")
+          .some((textNode) => textNode.children.includes("本週")),
+    );
+    await act(async () => {
+      weekPill.props.onPress();
+    });
+    await flushMicrotasks();
+    expect(collectRenderedText(renderer)).toContain("470");
+    expect(recordedQueries.at(-1)?.params).toEqual([
+      OWN_DRIVER_UUID,
+      "2026-10-12",
+      "2026-10-18",
+    ]);
+
+    const query = vi.mocked(db.query);
+    const successfulQuery = query.getMockImplementation()!;
+    query.mockRejectedValue(
+      new Error("canonical ledger unavailable during weekly refresh"),
+    );
+    const pressRefresh = async () => {
+      const button = renderer.root.find(
+        (node) =>
+          typeof node.props?.onPress === "function" &&
+          node
+            .findAll((child) => String(child.type) === "Text")
+            .some((textNode) => textNode.children.includes("重新整理")),
+      );
+      await act(async () => {
+        button.props.onPress();
+      });
+      await flushMicrotasks();
+    };
+    await pressRefresh();
+    expect(collectRenderedText(renderer)).toContain("收益資料同步失敗");
+    expect(collectRenderedText(renderer)).not.toContain(
+      "這段期間還沒有平台收益",
+    );
+    query.mockImplementation(successfulQuery);
+    await pressRefresh();
+    expect(collectRenderedText(renderer)).not.toContain("收益資料同步失敗");
+    expect(collectRenderedText(renderer)).toContain("470");
+    const urls = requestedUrls.filter((url) =>
+      url.includes("/platform-earnings/by-platform"),
+    );
+    expect(urls.map((url) => new URL(url).searchParams.get("period"))).toEqual([
+      "today",
+      "week",
+      "week",
+      "week",
+    ]);
+    expect(recordedQueries.at(-1)?.params).toEqual([
+      OWN_DRIVER_UUID,
+      "2026-10-12",
+      "2026-10-18",
+    ]);
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+});

@@ -21,8 +21,11 @@ export interface PlatformEarningsAggregateItem {
   netAmount: MoneyAmount;
 }
 
-// Calendar arithmetic retained from the original unreviewed f5fd091 repair.
-// The ledger stores DATE, so bounds are calendar dates in the product timezone.
+// USER calendar definition (2026-10-16; task UAT records immutable authority):
+// week is the complete current Asia/Taipei Monday-through-Sunday calendar week.
+// V0018 stores period_date as DATE: inclusive Monday..Sunday is equivalent to
+// Monday 00:00 inclusive through next Monday 00:00 exclusive in that timezone.
+// Today/month retain their existing complete calendar-date bounds.
 export const PLATFORM_EARNINGS_TIMEZONE = DEFAULT_PRODUCT_TIMEZONE;
 export const PLATFORM_EARNINGS_PERIODS = ["today", "week", "month"] as const;
 export type PlatformEarningsPeriod = (typeof PLATFORM_EARNINGS_PERIODS)[number];

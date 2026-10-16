@@ -1,4 +1,16 @@
-# Driver earnings period and canonical read continuation (R2)
+# Driver earnings period and canonical read continuation (R2 / R3)
+
+## R3 resumption — actual USER authority (2026-10-16)
+
+Current owner remains Codex; the assigned independent reviewer is now **Claude2**. The R2 sections below are preserved dated history, including their then-unresolved calendar question, Codex2 reviewer identity, prior checks and checkpoint disposition. They do not describe the current blocker or substitute for R3 verification.
+
+The user's exact answer is **「週一至週日，完整曆週（建議）」**. Immutable authority: `/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261016T011617Z-original-frozen-review-frontier-root/USER-Earnings-AsiaTaipei-Monday-through-Sunday-full-calendar-week-definition.json`, SHA-256 `d3e6e0c27b28c201bfa8b0d6cb9cef0cd3444a91e64389d95f798d09d96631d5` (reverified). R3 registered task spec in the same directory retains the original six scopes, six clauses and four keys.
+
+For `period=week`, select the complete current Asia/Taipei week: Monday 00:00 inclusive to next Monday 00:00 exclusive, including all Sunday and dates after today or across month/year boundaries. `V0018__platform_earnings.sql` defines `period_date date NOT NULL`, so the retained `>= Monday::date AND <= Sunday::date` predicate expresses exactly that interval for ledger DATE values. No timestamp truncation or end-of-today cap is added. Daily/monthly behavior remains unchanged. The earlier provisional algorithm already matches this answer; R3 documents its authority and verifies the real composition rather than claiming the metadata itself is a fix.
+
+Resumption preflight: clean assigned original owner worktree at `03ae2187fbb7be9f9e6f1baa5fbf10eaa2f27be0`, published branch and draft PR #2712 agree. Fresh `origin/dev` is `b7d6b04b18a4a6b0cc47c37ba426bc5ad468e952`; no candidate is locked and no published history is rewritten. Current task slice confirms owner Codex/reviewer Claude2 and all six exact writer grants. ENTRY remains in acceptance with its historical broad test reservation; the original Root grant for this direct test/task namespace remains in force. C089 remains backlog with separate billing scopes, read-only here. New checks and results will be recorded below before handoff. Local evidence: `.local/earnings-r3/`.
+
+## Preserved R2 record
 
 Task: `DRIVER-EARNINGS-PERIOD-AND-CANONICAL-READ-FLOW-20261015`. Owner Codex; independent reviewer Codex2.
 Branch: `codex/driver-earnings-period-and-canonical-read-flow-20261015-delivery-r2-20261015`.
