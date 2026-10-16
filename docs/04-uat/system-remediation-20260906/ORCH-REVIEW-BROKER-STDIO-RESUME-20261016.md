@@ -306,3 +306,95 @@ Acceptance keys: unchanged from Finding 4's note — this is an integration/
 mergeability repair only, not new acceptance evidence. The resulting SHA must
 go through its own fresh review and CI per the normal candidate lifecycle;
 this worker does not self-approve or self-merge.
+
+### Finding 6 (R3 functional continuation) — wire the already-configured `permission_prompt_tool` into both the initial launch and same-session resume CLI builders
+
+Supervisor layered a new functional-continuation spec (R3,
+`.local/passenger-transport-bureau-review-20261015/ORCH-REVIEW-BROKER-STDIO-RESUME-20261016-R3-existing-callback-wiring.json`)
+onto this same task after Finding 5's merge repair: the accepted MCP
+entrypoint (`b726`/`#2653`) is restored and reachable, but neither actual
+Claude CLI command-construction call site reads `runtime.permission_prompt_tool`
+from config, so real workers launch and resume with no
+`--permission-prompt-tool` flag and every tool-use still defers instead of
+routing through the configured `mcp__orchestrator_approval_broker__approval_prompt`
+callback (evidence:
+`.local/passenger-transport-bureau-review-20261015/actual-existing-configured-Claude-permission-callback-ignored-in-launch-and-resume.json`,
+`accepted_code_observations` for both files below, `configured_callback_key_ignored: true`).
+
+Confirmed the gap by grep: neither
+`tools/development-orchestrator/adapters/claude_cli.py` nor
+`tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py`
+referenced `permission_prompt_tool` anywhere, even though
+`config/config.example.json` already configures it per-provider alongside
+`mcp_config` (lines 255/288, value
+`mcp__orchestrator_approval_broker__approval_prompt`), and
+`claude_permission_prompt_mcp.py:22` registers exactly that tool
+(`TOOL_NAME = "approval_prompt"`, server namespace `orchestrator_approval_broker`).
+Both call sites already have an identical, working pattern for the sibling
+`mcp_config` key (`runtime.get("mcp_config")` → `--mcp-config <path>`); the
+repair mirrors that exact pattern for `permission_prompt_tool`:
+
+- `adapters/claude_cli.py` `ClaudeCLIAdapter.deliver()` (initial launch, already
+  invoked with `-p`/print mode): added `permission_prompt_tool = runtime.get("permission_prompt_tool")`
+  → `command.extend(["--permission-prompt-tool", str(permission_prompt_tool)])`
+  right after the existing `--mcp-config` block.
+- `control_plane/runtime/supervisor_runtime.py` `resume_claude_worker()`
+  (same-session noninteractive resume): identical addition right after its
+  own `--mcp-config` block.
+
+New old-fails/fixed-passes builder tests (no real `claude` subprocess invoked;
+these are pure command-construction unit tests per the acceptance key's own
+"production-builder tests" wording):
+- `test_claude_cli_adapter.py::test_configured_permission_prompt_tool_is_passed_to_initial_launch`
+  and `::test_unset_permission_prompt_tool_omits_flag_for_backward_compatibility`.
+- `test_live_approval_resume.py::test_configured_permission_prompt_tool_is_passed_to_resume_command`
+  and `::test_unset_permission_prompt_tool_omits_flag_from_resume_for_backward_compatibility`.
+
+All four fail against the pre-repair builders (neither function emitted
+`--permission-prompt-tool` under any configuration) and pass against the
+repaired ones. No existing permission mode, hook, provider, timeout, identity,
+queue contract, or allow/deny/defer decision was touched; `git diff` for both
+production files is exactly the two added lines (plus the `permission_prompt_tool`
+local variable) per call site.
+
+Verification gap, disclosed rather than guessed around: the R3 spec's own
+`headless_resume` note states the installed CLI's own help text says
+`--permission-prompt-tool` "only works with `--print`", and `resume_claude_worker()`'s
+command never included `--print`/a prompt message (it resumes via `--resume
+<session_id>` alone, reconnecting to continue the session's last pending turn,
+not starting a fresh print-mode turn). This worker's sandbox denies invoking
+the installed `claude` binary at all (`command -v claude`, `claude --help` and
+similar were all blocked by the permission classifier before any argument
+reached a real process), so whether `--resume --permission-prompt-tool`
+together is accepted, ignored, or rejected by the real CLI could not be
+verified here. Rather than guess and bolt on an unverified `--print`/new
+prompt-message change to a fragile, live-production resume path (explicitly
+against the "no bypass or new mode" constraint), this repair stops at wiring
+the flag through exactly where the sibling `mcp_config` flag already proves
+the pattern is correct, and surfaces the open question for Root/Supervisor to
+verify against the real installed CLI outside this sandbox before relying on
+resume-time callback routing in production.
+
+Regression after this repair, from `tools/development-orchestrator`:
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test_claude_cli_adapter test_live_approval_resume -v
+```
+Result: 10 pass, exit 0, 0.257s.
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s . -p 'test_*.py'
+```
+Result: 1057 pass, exit 0, 41.773s (1053 prior + 4 new). Same expected mocked
+`RuntimeError: boom` fault-injection traceback and benign subprocess
+`ResourceWarning` noted in prior findings — not failures.
+
+Acceptance keys: `orch-review-broker_standard-stdio-and-resumable-alias-source-proof`'s
+fourth bullet (honor configured `permission_prompt_tool` in both builders,
+with old-fails/fixed-passes production-builder tests, preserving existing
+modes/hooks/decisions/timeouts/identities) is addressed by this repair at the
+source level; `orch-review-broker_actual-existing-entrypoint-connection-restored`
+and the live-CLI resume-flag verification above remain pending Root/Supervisor
+actions outside this worker's write scope — not claimed here. New full
+resolvable SHA/generation handed off through the normal review/CI/merge
+lifecycle; no product/dev/browser/Docker infrastructure started.

@@ -139,6 +139,45 @@ class LiveApprovalResumeTests(unittest.TestCase):
         finalize.assert_called_once_with({}, {}, worker, "failed", "Operation not allowed")
         resume.assert_not_called()
 
+    def _resume_command(self, runtime_overrides: dict) -> list:
+        worker = self.worker(status="suspended_approval")
+        config = {
+            "paths": {
+                "status_file": "/tmp/canonical/ai-status.json",
+                "state_file": "/tmp/canonical/state.json",
+            },
+            "providers": {
+                "claude2": {"runtime": {"cli": "claude", **runtime_overrides}},
+            },
+        }
+        process = mock.Mock()
+        with (
+            mock.patch.object(supervisor, "command_exists", return_value="/usr/bin/claude"),
+            mock.patch.object(
+                supervisor, "spawn_background_process",
+                return_value=(process, None),
+            ) as spawn,
+            mock.patch.object(supervisor, "background_process_pid", return_value=9999),
+            mock.patch.object(supervisor, "apply_worker_unit_env", return_value="drts-worker-x.service"),
+            mock.patch.object(supervisor, "new_runtime_id", return_value="claude2-resume-test"),
+        ):
+            supervisor.resume_claude_worker(config, worker, {})
+        return spawn.call_args.args[0]
+
+    def test_configured_permission_prompt_tool_is_passed_to_resume_command(self):
+        command = self._resume_command(
+            {"permission_prompt_tool": "mcp__orchestrator_approval_broker__approval_prompt"}
+        )
+        self.assertIn("--permission-prompt-tool", command)
+        self.assertEqual(
+            command[command.index("--permission-prompt-tool") + 1],
+            "mcp__orchestrator_approval_broker__approval_prompt",
+        )
+
+    def test_unset_permission_prompt_tool_omits_flag_from_resume_for_backward_compatibility(self):
+        command = self._resume_command({})
+        self.assertNotIn("--permission-prompt-tool", command)
+
 
 if __name__ == "__main__":
     unittest.main()

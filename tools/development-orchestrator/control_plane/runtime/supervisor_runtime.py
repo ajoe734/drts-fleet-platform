@@ -5049,6 +5049,9 @@ def resume_claude_worker(
     mcp_config = runtime.get("mcp_config")
     if mcp_config:
         command.extend(["--mcp-config", str(config_path(config, "claude_mcp_config"))])
+    permission_prompt_tool = runtime.get("permission_prompt_tool")
+    if permission_prompt_tool:
+        command.extend(["--permission-prompt-tool", str(permission_prompt_tool)])
     log_path = config_path(config, "state_file").parent / "logs" / f"{new_runtime_id(f'{provider_key}-resume')}.log"
     env = os.environ.copy()
     runtime_overrides = runtime_env_overrides(runtime)
