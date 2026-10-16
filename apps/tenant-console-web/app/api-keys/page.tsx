@@ -22,7 +22,7 @@ type ApiKeyPageData = {
 };
 
 function canManageApiKeys(identity: IdentityContext | null) {
-  if (!identity) return false;
+  if (!identity || !identity.scopes.includes("tenant:write")) return false;
   if (identity.actorType === "tenant_admin") return true;
   return identity.roles.some((role: string) =>
     ["tenant_admin", "tc_admin", "tc_integration_mgr"].includes(role),
