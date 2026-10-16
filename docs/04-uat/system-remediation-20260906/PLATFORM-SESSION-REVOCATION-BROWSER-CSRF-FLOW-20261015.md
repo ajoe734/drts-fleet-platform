@@ -175,3 +175,30 @@ All launched checks must finish and be read before any handoff. The remaining
 readback defect prevents a final candidate. After a scoped repair, rerun the
 complete mounted flow and relevant checks, push normally, verify local/remote/PR
 head equality, and use the release CLI's ordinary exact-SHA handoff to Claude2.
+
+## Full checkpoint run
+
+At pushed anchor `fd8db596bd552a3f71661f32573513dde7c9215a`, run the regression
+command above with the **entire**
+`tests/unit/platform-session-revocation-browser-csrf-flow-20261015` directory in
+place of its single boundary test. Result: exit 1; **162 pass, 1 fail, 163 total,
+11 files; no skipped cases**. The only failure is the original mounted
+same-session readback assertion. Before reaching that assertion, the test now
+also verifies the real canonical session is revoked by the registered principal,
+its refresh family is revoked, the unselected own session remains active, and the
+actual four calls are inventory GET → local proof GET → selected-session POST →
+inventory GET. The missing revoked row remains a required failure.
+
+Full log: `.local/platform-session-csrf/checkpoint-full.log`, SHA-256
+`263bea8d60e15d55d5c1c4de5cc577f0367ac320c8ec801f2f54520a01980a41`.
+Root lint rerun log SHA-256:
+`eb3f3067067e4f6c5871ec40fbb6cce8a0708ea9265382afcafce9c10eafffdc`.
+Do not describe the full run as green or hand off this checkpoint as a candidate.
+
+Rechecks launched at that same anchor all completed and were read: app typecheck
+exit 0 (`app-typecheck-checkpoint.log`), app lint exit 0
+(`app-lint-checkpoint.log`), and complete root typecheck with the documented local
+source mappings exit 0 (`root-local-paths-checkpoint.log`). Standard root
+typecheck remains the separately recorded failed command. Only this evidence
+document changes after these rechecks; the incidental generated next-env import
+is again removed. No check is left running at the progress checkpoint.
