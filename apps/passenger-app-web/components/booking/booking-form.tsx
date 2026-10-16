@@ -1,5 +1,11 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { useRouter } from "next/navigation";
 import type { PassengerBookingClient } from "@drts/passenger-client";
 import type { PassengerBookingSettingsResponse } from "@drts/contracts";
@@ -47,7 +53,7 @@ export function BookingForm({
   client: PassengerBookingClient;
   settings: PassengerBookingSettingsResponse;
   draft: BookingDraft;
-  onChange: (draft: BookingDraft) => void;
+  onChange: Dispatch<SetStateAction<BookingDraft>>;
   onQuote: () => void;
   busy: boolean;
 }) {
@@ -79,6 +85,9 @@ export function BookingForm({
   if (demo === null) return <p>{DEMO_T.addressLoading}</p>;
   const fixedAddresses =
     demo || (review && draft.reviewAddressMode !== "standard");
+  function patchDraft(update: Partial<BookingDraft>) {
+    onChange((current) => ({ ...current, ...update }));
+  }
   function demoAddress(field: "origin" | "destination") {
     const addresses = review ? PAX_REVIEW_STOPS : DEMO_ADDRESSES;
     return (
@@ -94,8 +103,7 @@ export function BookingForm({
           disabled={busy}
           value={draft[field]?.addressId ?? ""}
           onChange={(event) =>
-            onChange({
-              ...draft,
+            patchDraft({
               [field]:
                 addresses.find(
                   (address) => address.addressId === event.target.value,
@@ -131,8 +139,7 @@ export function BookingForm({
                   reviewAddressMode !== "standard"
                 )
                   return;
-                onChange({
-                  ...draft,
+                patchDraft({
                   origin: null,
                   destination: null,
                   reviewAddressMode,
@@ -155,7 +162,7 @@ export function BookingForm({
               value={draft.origin}
               reverse={provider.reverse}
               disabled={busy}
-              onSelect={(origin) => onChange({ ...draft, origin })}
+              onSelect={(origin) => patchDraft({ origin })}
             />
             <AddressMapPicker
               id="booking-origin"
@@ -165,8 +172,7 @@ export function BookingForm({
               labels={labels}
               value={draft.origin}
               onChange={(change) =>
-                onChange({
-                  ...draft,
+                patchDraft({
                   origin: change.dispatchReady ? change.address : null,
                 })
               }
@@ -187,8 +193,7 @@ export function BookingForm({
             labels={labels}
             value={draft.destination}
             onChange={(change) =>
-              onChange({
-                ...draft,
+              patchDraft({
                 destination: change.dispatchReady ? change.address : null,
               })
             }
@@ -206,9 +211,7 @@ export function BookingForm({
             value={draft.localTime}
             min={earliestBookingTime(settings)}
             disabled={busy}
-            onChange={(event) =>
-              onChange({ ...draft, localTime: event.target.value })
-            }
+            onChange={(event) => patchDraft({ localTime: event.target.value })}
           />
         </label>
         <p>{T.lead(settings.minLeadTimeMinutes)}</p>

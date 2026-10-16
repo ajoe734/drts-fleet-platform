@@ -38,13 +38,15 @@ export async function standardAddressJourney(
       return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
     });
   async function quote() {
+    await pax.getByLabel("預約時間", { exact: true }).fill(await localTime());
+    const button = pax.getByRole("button", { name: "試算車資", exact: true });
+    await expect(button).toBeEnabled();
     const requested = pax.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === "/api/passenger-app/quotes" &&
         response.request().method() === "POST",
     );
-    await pax.getByLabel("預約時間", { exact: true }).fill(await localTime());
-    await pax.getByRole("button", { name: "試算車資", exact: true }).click();
+    await button.click();
     const response = await requested;
     expect(response.status()).toBe(201);
     expect(response.request().postDataJSON()).toMatchObject({
@@ -215,23 +217,28 @@ export async function standardAddressJourney(
       "F cancel undispatched new order and read both roles",
       async () => {
         await opsRead(ops, orderId);
-        const cancelled = pax.waitForResponse(
-          (response) =>
-            new URL(response.url()).pathname ===
-              `/api/passenger-app/rides/${orderId}/cancel` &&
-            response.request().method() === "POST",
-        );
-        const confirmation = pax.waitForEvent("dialog");
-        const clicked = pax
+        const cancel = pax
           .getByRole("button", { name: "取消行程", exact: true })
-          .first()
-          .click();
-        const dialog = await confirmation;
-        expect(dialog.type()).toBe("confirm");
-        expect(dialog.message()).toBe("確定要取消這趟行程嗎？");
-        await dialog.accept();
-        await clicked;
-        expect((await cancelled).status()).toBe(201);
+          .first();
+        await expect(cancel).toBeEnabled();
+        const confirmation = pax
+          .waitForEvent("dialog", { timeout: 30_000 })
+          .then(async (dialog) => {
+            expect(dialog.type()).toBe("confirm");
+            expect(dialog.message()).toBe("確定要取消這趟行程嗎？");
+            await dialog.accept();
+          });
+        const [cancelled] = await Promise.all([
+          pax.waitForResponse(
+            (response) =>
+              new URL(response.url()).pathname ===
+                `/api/passenger-app/rides/${orderId}/cancel` &&
+              response.request().method() === "POST",
+          ),
+          confirmation,
+          cancel.click(),
+        ]);
+        expect(cancelled.status()).toBe(201);
         expect((await authority(pax, orderId)).order.status).toBe("cancelled");
         await opsRead(ops, orderId);
         await expect(ops.getByTestId("ops-review-order-status")).toHaveText(
