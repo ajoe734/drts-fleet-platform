@@ -303,13 +303,41 @@ class CiRecoveryIndependentReviewTest(unittest.TestCase):
                 self.assertEqual(task["ci_status"], ci)
                 self.assertEqual(self.decision(state).target_agent, "Claude")
 
+    def test_reviewed_failures_preserve_original_approval_and_failure_guards(self) -> None:
+        for ci in ("failure", "closed", "merge_conflict"):
+            state = self.state()
+            task = state["tasks"][0]
+            task.update(status="integrating", reviewed_sha=task["candidate_sha"])
+            self.reconcile(state, ci)
+            self.assertEqual(task["status"], "in_progress")
+            self.assertEqual(task["reviewed_sha"], task["candidate_sha"])
+            self.assertEqual(task["ci_status"], ci)
+
+    def test_empty_observation_cannot_resurrect_failed_ci_review(self) -> None:
+        state = self.state()
+        self.reconcile(state, "")
+        task = state["tasks"][0]
+        self.assertEqual(task["status"], "in_progress")
+        self.assertEqual(task["ci_status"], "failure")
+
+    def test_reviewed_merge_still_rejects_pending_or_stale_ci(self) -> None:
+        for ci, previous_sha in (("queued", FROZEN_C073_TASK["candidate_sha"]),
+                                 ("running", FROZEN_C073_TASK["candidate_sha"]), ("", "b" * 40)):
+            state = self.state()
+            task = state["tasks"][0]
+            task.update(status="integrating", reviewed_sha=task["candidate_sha"], ci_status="success", ci_sha=previous_sha)
+            with self.assertRaisesRegex(SystemExit, "successful CI for the same candidate SHA"):
+                self.reconcile(state, ci, MERGE_SHA="c" * 40)
+            self.assertEqual(task["status"], "integrating")
+            self.assertNotIn("merge_sha", task)
+
     def test_done_is_unchanged_and_blocked_is_not_resumed_by_positive_ci(self) -> None:
         for status in ("done", "blocked"):
             state = self.state()
             task = state["tasks"][0]
             task.update(status=status, waiting_for="Supervisor")
             before = copy.deepcopy(task)
-            self.reconcile(state, "success")
+            self.reconcile(state, "success", MERGE_SHA="c" * 40)
             self.assertEqual(task["status"], status)
             self.assertEqual(task["waiting_for"], "Supervisor")
             self.assertIsNone(self.decision(state))
@@ -337,6 +365,51 @@ class CiRecoveryIndependentReviewTest(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "frozen handoff branch"):
             self.reconcile(state, "success", CANDIDATE_BRANCH="foreign/branch")
         self.assertEqual(state["tasks"][0]["candidate_branch"], FROZEN_C073_TASK["candidate_branch"])
+
+    def test_actual_transaction_recovery_retains_original_reviewer_candidate_fence(self) -> None:
+        from control_plane.usecases.task_board_commands import TaskBoardCommandExecutor, TaskBoardCommandRuntime
+
+        state = self.state()
+        task = state["tasks"][0]
+        with tempfile.TemporaryDirectory() as temp:
+            executor = TaskBoardCommandExecutor(TaskBoardCommandRuntime(
+                status_file=Path(temp) / "ai-status.json", load_state=lambda: state,
+                save_state=lambda _: None, sync_all=lambda _: None, read_only_commands={},
+                mutation_commands={"handoff": ai_status.command_handoff, "approve": ai_status.command_approve,
+                                   "reconcile-candidate": ai_status.command_reconcile_candidate},
+            ))
+            owner_env = {"AI_NAME": "Claude", "ORCH_DISPATCH_AGENT": "Claude", "ORCH_DISPATCH_ROLE": "owner",
+                         "ORCH_DISPATCH_TASK_ID": task["id"], "ORCH_RUN_ID": "new-owner-handoff",
+                         "CANDIDATE_SHA": task["candidate_sha"], "CANDIDATE_BRANCH": task["candidate_branch"]}
+            with mock.patch.dict(os.environ, owner_env, clear=True), \
+                    mock.patch.object(ai_status, "resolve_full_commit_sha", side_effect=lambda value: value):
+                executor.execute("handoff", [task["id"], "Claude2", "Owner exact handoff"])
+            generation = task["candidate_generation"]
+            for ci in ("failure", "queued", "running", "success"):
+                with mock.patch.dict(os.environ, {"AI_NAME": "Supervisor", "CANDIDATE_HEAD_SHA": task["candidate_sha"],
+                                                 "CANDIDATE_CI_STATUS": ci}, clear=True):
+                    executor.execute("reconcile-candidate", [task["id"]])
+            self.assert_review(state)
+            reviewer_env = {"AI_NAME": "Claude2", "ORCH_DISPATCH_AGENT": "Claude2", "ORCH_DISPATCH_ROLE": "reviewer",
+                            "ORCH_DISPATCH_TASK_ID": task["id"], "ORCH_RUN_ID": "independent-review",
+                            "ORCH_DISPATCH_CANDIDATE_SHA": task["candidate_sha"],
+                            "ORCH_DISPATCH_CANDIDATE_GENERATION": generation, "REVIEWED_SHA": task["candidate_sha"]}
+            for key in ("ORCH_DISPATCH_CANDIDATE_SHA", "ORCH_DISPATCH_CANDIDATE_GENERATION"):
+                before = copy.deepcopy(state)
+                with mock.patch.dict(os.environ, {**reviewer_env, key: "stale"}, clear=True):
+                    with self.assertRaisesRegex(SystemExit, "Review candidate changed"):
+                        executor.execute("approve", [task["id"], "Stale request rejected"])
+                self.assertEqual(state, before)
+            with mock.patch.dict(os.environ, owner_env, clear=True):
+                with self.assertRaisesRegex(SystemExit, "Only the reviewer"):
+                    executor.execute("approve", [task["id"], "Owner cannot approve"])
+            with mock.patch.dict(os.environ, reviewer_env, clear=True), \
+                    mock.patch.object(ai_status, "git_commit_exists", return_value=True):
+                executor.execute("approve", [task["id"], "Original independent reviewer decision"])
+            self.assertEqual(task["status"], "integrating")
+            self.assertEqual(task["reviewed_sha"], task["candidate_sha"])
+            self.assertEqual(task["candidate_generation"], generation)
+            self.assertEqual(task["worker_outcomes"]["independent-review"]["command"], "approve")
 
     def test_unapproved_merge_never_completes_but_review_ci_merge_acceptance_still_works(self) -> None:
         state = self.state()

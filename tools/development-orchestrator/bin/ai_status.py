@@ -2406,11 +2406,12 @@ def command_reconcile_candidate(state: dict[str, Any], args: list[str]) -> None:
         )
         return
 
+    observed_branch = os.environ.get("CANDIDATE_BRANCH", "").strip()
+    if observed_branch and task.get("candidate_branch") and task["candidate_branch"] != observed_branch:
+        raise SystemExit("CANDIDATE_BRANCH must match the frozen handoff branch")
     for env_name, key in (("PR_URL", "pr_url"), ("CANDIDATE_BRANCH", "candidate_branch"), ("CI_RUN_URL", "ci_run_url")):
         value = os.environ.get(env_name, "").strip()
         if value:
-            if key == "candidate_branch" and task.get(key) and task[key] != value:
-                raise SystemExit("CANDIDATE_BRANCH must match the frozen handoff branch")
             task[key] = value
     if ci_status:
         task["ci_status"] = ci_status
@@ -2427,6 +2428,9 @@ def command_reconcile_candidate(state: dict[str, Any], args: list[str]) -> None:
         task["last_update"] = timestamp
         task["next"] = args[1] if len(args) > 1 else f"Candidate CI {ci_status}; owner must repair and hand off a new candidate."
         mark_handoffs_done(state, task_id)
+    elif task.get("status") == "blocked":
+        # CI/merge observations cannot resume an explicitly blocked task.
+        pass
     elif merge_sha:
         if task.get("reviewed_sha") != candidate_sha:
             owner_continuation = (
@@ -2455,7 +2459,10 @@ def command_reconcile_candidate(state: dict[str, Any], args: list[str]) -> None:
     elif task.get("status") in {"in_progress", "integrating"} and task.get("reviewed_sha") != candidate_sha:
         # Positive CI is not approval. Restore the original review route only
         # while its owner handoff still describes this exact generation.
-        task["status"] = "review" if candidate_review_handoff_is_current(task) else "in_progress"
+        task["status"] = "review" if (
+            task.get("ci_status") in {"queued", "running", "success"}
+            and candidate_review_handoff_is_current(task)
+        ) else "in_progress"
         task["last_update"] = timestamp
         task["next"] = (
             f"Candidate {candidate_sha[:12]} still requires independent same-SHA reviewer approval."
