@@ -14,10 +14,49 @@ Four additional production-function regressions use a loaded bundle fixture and 
 
 | Finding / required acceptance | Source / modification | Before → after | Command/version/evidence | Remaining gate |
 | --- | --- | --- | --- | --- |
-| Assigned worker relative CLI regression; `bound-runtime-status-cli_actual-trusted-loaded-peer-and-canonical-recognition` | `_matches_status_script` uses `workspace_roots()`; four added tests in original test file | Rejected SHA: 2 original failures / 80 new positive subtest failures → 143 broker/provider tests pass | Actual inherited dispatch; commands and local logs above | Full regression and final source hashes recorded at closeout; independent new-SHA review, CI, merge and bounded Source evidence still required. |
-| Preserve complete command and trust guards; `bound-runtime-status-cli_full-negative-guard-regressions-and-exact-candidate-validation` | All original deny/composition/native guards unchanged; new assigned-root tests cover shell chaining, redirection, substitutions, pipe interpreters, destructive git/shared-force, secrets, inline authority overrides, unassigned hook cwd/copies, symlink/dotdot | New negative cases pass before and after; exact assigned positive forms alone gain recognition | `regressions-before.log`, `broker-provider-after.log` | Full original suites and original-test AST preservation recorded at closeout. No runtime installation or pending operation replay. |
+| Assigned worker relative CLI regression; `bound-runtime-status-cli_actual-trusted-loaded-peer-and-canonical-recognition` | `_matches_status_script` uses `workspace_roots()`; four added tests in original test file | Rejected SHA: 2 original failures / 80 new positive subtest failures → 143 broker/provider tests pass; exact original provider reproduction now 79/79 pass | Actual inherited dispatch; commands and local logs above and below | Independent new-SHA review, same-SHA CI, protected merge and bounded Source evidence still required. |
+| Preserve complete command and trust guards; `bound-runtime-status-cli_full-negative-guard-regressions-and-exact-candidate-validation` | All original deny/composition/native guards unchanged; new assigned-root tests cover shell chaining, redirection, substitutions, pipe interpreters, destructive git/shared-force, secrets, inline authority overrides, unassigned hook cwd/copies, symlink/dotdot | New negative cases pass before and after; exact assigned positive forms alone gain recognition; 276 focused / 1,081 full tests pass | `regressions-before.log`, `broker-provider-after.log`, `scoped-after.log`, `full-after.log`; AST preservation below | Same independent review/CI/merge/Source gates remain pending. No runtime installation or pending operation replay. |
 
 At rework fetch, remote task/PR #2743 head matched rejected local SHA. `origin/dev` advanced to `3220526523dd18f21003c965b8a1021efba952ee`, with no changes to the three owned paths since accepted base. Published history is retained with ordinary additional commits; no rebase, amend, force push, or unnecessary trunk merge.
+
+### Rework final verification
+
+Source/test anchor: `e3ef2c975a0a762ed19bf4868a765e86c7293652`; subsequent closeout changes only this UAT. All checks below finished and their output was read before handoff. Both inherited variables remained set: canonical `/home/lupin/workspace/drts-fleet-platform`, workspace the dispatched task worktree. No product/dev/preview/browser/E2E/PG/Docker server was started.
+
+| Check | Exit/result | Evidence under `rework-worker-root/` |
+| --- | --- | --- |
+| Exact original provider reproduction after fix | 0; 79 tests pass, 2.543s | `provider-after.log` |
+| Broker + provider | 0; 143 tests pass, 4.492s | `broker-provider-after.log` |
+| Focused broker/provider/hook/approval/native task-board/dispatch/acceptance-review suites | 0; 276 tests pass, 8.913s | `scoped-after.log` |
+| Full original orchestrator discovery + added regressions | 0; 1,081 tests pass, 37.724s; no skips/failures/errors | `full-after.log` |
+| Actual installed before / prospective source-overlay after, eight complete saved pairs | 0; original runtime defer/canonical allow → prospective runtime allow/canonical allow; original installed hash unchanged | `paired-before-after.json`; old evidence remains untouched |
+| Original test preservation | 0; all 12 base test classes AST-identical; all 13 prior loaded-fixture methods AST-identical | `verification-metadata.json` |
+| Syntax and diff checks | 0; both changed Python files compile; working-tree and full base-to-candidate diff checks clean | Commands below |
+
+Re-run commands (first two from `tools/development-orchestrator`; remaining commands from task root):
+
+```bash
+python3 -m unittest test_provider_permissions -v
+python3 -m unittest test_permission_broker test_provider_permissions test_claude_permission_prompt_mcp test_approval_queue test_live_approval_resume test_ai_status test_ai_status_merge_reachability test_dispatch_contract control_plane.tests.test_task_board_commands control_plane.tests.test_dispatch_policy control_plane.tests.acceptance_review_routing.test_transactions control_plane.tests.acceptance_review_routing.test_runtime -v
+python3 -m unittest discover -s tools/development-orchestrator -p 'test_*.py' -v
+python3 -m py_compile tools/development-orchestrator/permission_broker.py tools/development-orchestrator/test_permission_broker.py
+git diff --check
+git diff --check a1dcfded7c5af92e13b5d24c5d955f112557b7f4
+python3 /home/lupin/workspace/drts-fleet-platform/.local/bound-runtime-status-cli-20261016-codex/rework-worker-root/offline-probe.py tools/development-orchestrator/permission_broker.py
+```
+
+Current source SHA-256: `permission_broker.py` = `a89326beda9b893f37760afdf6020bbcc6510b9564ff4d901c69c126fb4fd2a4`; `test_permission_broker.py` = `63adc28522237b2f55b3b9d30b62d26a12a2184fa67a80da7a858afba00782c6`.
+
+Evidence SHA-256 (directory `/home/lupin/workspace/drts-fleet-platform/.local/bound-runtime-status-cli-20261016-codex/rework-worker-root/`):
+
+- `provider-before.log`: `1d94cb1fb57b9d8f979b8ba6073e5c94e100324dcc46d378e1c2ff899b19a73d`.
+- `regressions-before.log`: `36e2e548f5b8172879627d4b9f71e9d4887a1b0d355cbba74e247151bd3fc9e8`.
+- `provider-after.log`: `2f35fa0d6e362ad123b0a4ba755cd001d887bf7a1b0cbd115c9421988e6075fa`.
+- `broker-provider-after.log`: `ecd8edd784de656a4ce87aafa4a61e5126e55c7cba2880515b95592b8381519e`.
+- `scoped-after.log`: `a5e5c51dd1e34c72c4a8a00f723e838d0ed65324b2210836b639070a04d726c6`.
+- `full-after.log`: `b9c5991a9d94218f8639d1b16bd4021ef6574ca047d1e645d04d4850755c8399`.
+- `verification-metadata.json`: `0f20cbab8e9c835ad62ec581c209d5e2efca600a12f52e9c27919a290602eec4`.
+- `paired-before-after.json`: `29e30dceed7d8704978c86d4d9ea42644361604acf92c22546211993e0519cf7`.
 
 ## Previous candidate evidence (historical, superseded by the rework above)
 
