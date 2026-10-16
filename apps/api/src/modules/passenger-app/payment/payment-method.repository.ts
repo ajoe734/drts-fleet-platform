@@ -121,6 +121,29 @@ export class PaymentMethodRepository {
     });
   }
 
+  /** Completion needs only the selected owner's public card metadata. Do not
+   * load/decrypt a PSP token or take an account lock inside an order workflow. */
+  async findReceiptDisplay(
+    passengerId: string,
+    id: string,
+  ): Promise<string | null> {
+    const result = await this.database.query(
+      `SELECT card_type,last4 FROM passenger.psp_tokens
+       WHERE drts_passenger_id=$1 AND payment_method_id=$2 AND status='active'`,
+      [passengerId, id],
+    );
+    const row = result.rows[0];
+    if (
+      !row ||
+      typeof row.card_type !== "string" ||
+      !/^[A-Za-z0-9 _-]{1,40}$/.test(row.card_type) ||
+      typeof row.last4 !== "string" ||
+      !/^[0-9]{4}$/.test(row.last4)
+    )
+      return null;
+    return `${row.card_type.trim()} ••••${row.last4}`;
+  }
+
   async claimBinding(
     passengerId: string,
     provider: string,

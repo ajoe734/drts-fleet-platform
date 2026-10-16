@@ -3970,6 +3970,21 @@ export class RegulatoryRegistryService
     return cred ? { ...cred } : null;
   }
 
+  /** Refresh only this completion's declared profile and public credential.
+   * Database absence is authoritative; never replace it with a startup seed. */
+  async getDriverCompletionReceiptIdentity(driverId: string) {
+    await this.driverProfileService.prepareProfileAuthority(driverId);
+    const surname = this.getDriverDeclaredSurnameSnapshot(driverId);
+    const repository = this.regulatoryRegistryRepository;
+    const credential = repository?.isEnabled()
+      ? await repository.findDriverPublicRegistrationCredential(driverId)
+      : this.getDriverPublicRegistrationCredential(driverId);
+    return {
+      surname,
+      driverRegistrationMasked: credential?.maskedDisplay ?? null,
+    };
+  }
+
   listVehiclePassengerDisclosureProfiles(): VehiclePassengerDisclosureProfile[] {
     return this.disclosureProfiles.map((p) => ({ ...p }));
   }

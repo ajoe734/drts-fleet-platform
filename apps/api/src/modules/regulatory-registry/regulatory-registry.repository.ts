@@ -250,6 +250,18 @@ export class RegulatoryRegistryRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
+  async findDriverPublicRegistrationCredential(
+    driverId: string,
+  ): Promise<DriverPublicRegistrationCredential | null> {
+    if (!this.isEnabled()) return null;
+    const result =
+      await this.databaseService!.query<DriverPublicRegistrationCredentialRow>(
+        `SELECT * FROM reg.driver_public_registration_credentials WHERE driver_id=$1`,
+        [driverId],
+      );
+    return result.rows[0] ? this.mapDriverCredentialRow(result.rows[0]) : null;
+  }
+
   async ensureLiveMapTestDriver() {
     return ensureLiveMapFixture(this.databaseService);
   }
