@@ -169,11 +169,7 @@ function toSeverityLabel(
   severity: PlatformNoticeSeverity,
   locale: "en" | "zh",
 ): string {
-  return severity === "maintenance"
-    ? locale === "zh"
-      ? "維護"
-      : "Maintenance"
-    : getNoticeSeverityLabel(locale, severity);
+  return getNoticeSeverityLabel(locale, severity);
 }
 
 function toStatusLabel(
@@ -334,7 +330,7 @@ export default function NoticesPage() {
         severity: notice.severity,
         targets: audienceTargets(notice.targetAudience, locale),
         delivery:
-          `${notice.status === "resolved" ? `${notice.downlistedReason === "expired" ? (locale === "zh" ? "已到期下架" : "Expired") : copy.archived} · ` : ""}` +
+          `${notice.status === "resolved" ? `${notice.downlistedReason === "expired" ? copy.expired : copy.archived} · ` : ""}` +
           (notice.outcomes?.length
             ? notice.outcomes
                 .map(
@@ -342,14 +338,12 @@ export default function NoticesPage() {
                     `${o.audience}: ${o.state}${o.notificationId ? ` (${o.notificationId})` : ""}`,
                 )
                 .join(" · ")
-            : locale === "zh"
-              ? "狀態未知"
-              : "Unknown"),
+            : copy.unknown),
         broadcastAt: formatDateTime(
           notice.scheduledAt ?? notice.updatedAt ?? notice.createdAt,
         ),
       })),
-    [locale, sortedNotices, copy.archived],
+    [locale, sortedNotices, copy.archived, copy.expired, copy.unknown],
   );
 
   const noticeColumns = useMemo<CanvasTableColumn<NoticeRow>[]>(
@@ -972,7 +966,7 @@ export default function NoticesPage() {
                           {copy.severityOptions.critical}
                         </option>
                         <option value="maintenance">
-                          {locale === "zh" ? "維護" : "Maintenance"}
+                          {copy.severityOptions.maintenance}
                         </option>
                       </select>
                     </CanvasField>
@@ -1014,20 +1008,9 @@ export default function NoticesPage() {
                       style={textInputStyle}
                     />
                   </CanvasField>
-                  <CanvasField
-                    theme={theme}
-                    label={
-                      locale === "zh"
-                        ? "到期下架時間（選填）"
-                        : "Expiry (optional)"
-                    }
-                  >
+                  <CanvasField theme={theme} label={copy.expiry}>
                     <input
-                      aria-label={
-                        locale === "zh"
-                          ? "到期下架時間（選填）"
-                          : "Expiry (optional)"
-                      }
+                      aria-label={copy.expiry}
                       type="datetime-local"
                       value={noticeExpiry}
                       onChange={(e) => setNoticeExpiry(e.target.value)}
@@ -1057,9 +1040,7 @@ export default function NoticesPage() {
                           checked={noticeConfirmed}
                           onChange={(e) => setNoticeConfirmed(e.target.checked)}
                         />
-                        {locale === "zh"
-                          ? "確認向選定受眾發布此高風險公告"
-                          : "Confirm this high-risk notice for the selected audience"}
+                        {copy.highRiskConfirmation}
                       </label>
                     </>
                   )}

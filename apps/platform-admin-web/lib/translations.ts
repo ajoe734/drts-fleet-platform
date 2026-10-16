@@ -4153,9 +4153,15 @@ const en = {
   "notices.status.scheduled": "scheduled",
   "notices.status.resolved": "resolved",
   "notices.status.archived": "archived",
+  "notices.status.expired": "Expired",
+  "notices.status.unknown": "Unknown",
+  "notices.form.expiry": "Expiry (optional)",
+  "notices.form.highRiskConfirmation":
+    "Confirm this high-risk notice for the selected audience",
   "notices.severity.info": "low",
   "notices.severity.warning": "medium",
   "notices.severity.critical": "high",
+  "notices.severity.maintenance": "Maintenance",
   "notices.window.notScheduled": "Not scheduled",
   "notices.risk.high": "high risk",
   "notices.systemUser": "system",
@@ -7456,9 +7462,14 @@ const zh: typeof en = {
   "notices.status.scheduled": "已排程",
   "notices.status.resolved": "已解決",
   "notices.status.archived": "已封存",
+  "notices.status.expired": "已到期下架",
+  "notices.status.unknown": "狀態未知",
+  "notices.form.expiry": "到期下架時間（選填）",
+  "notices.form.highRiskConfirmation": "確認向選定受眾發布此高風險公告",
   "notices.severity.info": "低",
   "notices.severity.warning": "中",
   "notices.severity.critical": "高",
+  "notices.severity.maintenance": "維護",
   "notices.window.notScheduled": "未排定",
   "notices.risk.high": "高風險",
   "notices.systemUser": "system",
@@ -8245,7 +8256,7 @@ export function getNoticesAudienceLabel(
 
 export function getNoticeSeverityLabel(
   locale: Locale,
-  severity: PlatformNoticeSeverity,
+  severity: PlatformNoticeSeverity | "maintenance",
 ): string {
   return translateKey(locale, `notices.severity.${severity}`);
 }
@@ -8369,6 +8380,13 @@ export function getNoticesPageCopy(locale: Locale) {
     id: translateKey(locale, "notices.col.id"),
     historySubtitle: translateKey(locale, "notices.history.subtitle"),
     archived: translateKey(locale, "notices.status.archived"),
+    expired: translateKey(locale, "notices.status.expired"),
+    unknown: translateKey(locale, "notices.status.unknown"),
+    expiry: translateKey(locale, "notices.form.expiry"),
+    highRiskConfirmation: translateKey(
+      locale,
+      "notices.form.highRiskConfirmation",
+    ),
     noticeTitleRequired: translateKey(locale, "notices.noticeTitleRequired"),
     noticeBodyRequired: translateKey(locale, "notices.noticeBodyRequired"),
     maintenanceRisk: translateKey(locale, "notices.risk.high"),
@@ -8377,6 +8395,7 @@ export function getNoticesPageCopy(locale: Locale) {
       info: translateKey(locale, "notices.severity.info"),
       warning: translateKey(locale, "notices.severity.warning"),
       critical: translateKey(locale, "notices.severity.critical"),
+      maintenance: translateKey(locale, "notices.severity.maintenance"),
     },
     audienceOptions: {
       ops: translateKey(locale, "notices.audience.ops"),
