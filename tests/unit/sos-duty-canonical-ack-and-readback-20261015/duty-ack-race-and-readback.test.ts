@@ -6,6 +6,7 @@ import { DriverSosService } from "../../../apps/api/src/modules/driver-sos/drive
 import type { DriverSosRepository } from "../../../apps/api/src/modules/driver-sos/driver-sos.repository";
 import type { DriverSosVerificationRepository } from "../../../apps/api/src/modules/driver-sos/driver-sos-verification.repository";
 import { IncidentService } from "../../../apps/api/src/modules/incident/incident.service";
+import type { IncidentRepository } from "../../../apps/api/src/modules/incident/incident.repository";
 
 function buildDriverIdentity(driverId = "drv-race-01"): BootstrapRequestIdentity {
   return {
@@ -581,5 +582,314 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R4 reopen: F4 losing ACK 
         (entry) => entry.eventType === "duty_acknowledged",
       ),
     ).toHaveLength(1);
+  });
+});
+
+describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R5 repair: F1 Incident claim closes the real overlap window", () => {
+  it("F1: a genuinely overlapping direct Incident assignment cannot land underneath an in-flight acknowledgment and go unnoticed", async () => {
+    const deferred = createDeferred<{
+      accepted: boolean;
+      acknowledgedByActorId: string;
+      acknowledgedAt: string;
+    }>();
+    const mockVerificationRepository = {
+      isEnabled: () => true,
+      persistDutyAcknowledgement: async (event: {
+        dutyAcknowledgement: {
+          acknowledgedByActorId: string | null;
+          acknowledgedAt: string | null;
+        };
+      }) =>
+        deferred.promise.then(() => ({
+          accepted: true,
+          acknowledgedByActorId: event.dutyAcknowledgement.acknowledgedByActorId!,
+          acknowledgedAt: event.dutyAcknowledgement.acknowledgedAt!,
+        })),
+    } as unknown as DriverSosVerificationRepository;
+
+    const { driverSosService, incidentService } = setupService(
+      mockVerificationRepository,
+    );
+    const sos = await submitSos(
+      driverSosService,
+      "44444444-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    );
+    const opsAck = buildOpsIdentity("ops-overlap-ack");
+    const opsDirect = buildOpsIdentity("ops-overlap-direct");
+
+    const ackCall = driverSosService.acknowledgeDuty(
+      sos.event.sosEventId,
+      {},
+      opsAck,
+    );
+    // Give the ack call a chance to reach (and block inside) its await on
+    // the held-open SOS-side CAS write. The Incident claim is this call's
+    // real first write and happens synchronously before that await, so by
+    // this point the Incident is already durably claimed.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The real reachable caller: a direct PATCH /incidents/:id arriving
+    // "during" the still-in-flight SOS write. With the old read-only
+    // pre-check this silently won and left the two subsystems disagreeing;
+    // now it sees the already-committed claim and gets a truthful conflict.
+    let directAssignError: unknown;
+    try {
+      incidentService.updateIncident(
+        sos.receipt.incidentId,
+        { assignedTo: opsDirect.actorId as string },
+        undefined,
+        opsDirect,
+      );
+    } catch (error) {
+      directAssignError = error;
+    }
+    expect((directAssignError as { code?: string })?.code).toBe(
+      "INCIDENT_ASSIGNMENT_CONFLICT",
+    );
+
+    deferred.resolve({
+      accepted: true,
+      acknowledgedByActorId: opsAck.actorId as string,
+      acknowledgedAt: new Date().toISOString(),
+    });
+    const ack = await ackCall;
+
+    expect(ack.wonAcknowledgement).toBe(true);
+    expect(ack.dutyAcknowledgement.acknowledgedByActorId).toBe(
+      opsAck.actorId,
+    );
+    const incidentAfter = incidentService.getIncident(sos.receipt.incidentId);
+    expect(incidentAfter.assignedTo).toBe(opsAck.actorId);
+  });
+
+  it("F1: a failed durable Incident handover write makes acknowledgeDuty fail honestly instead of reporting success", async () => {
+    const mockIncidentRepository = {
+      isEnabled: () => true,
+      persistChanges: async () => {
+        throw new Error("simulated incident persistence failure");
+      },
+      reportPersistenceFailure: () => {},
+    } as unknown as IncidentRepository;
+
+    const auditService = new AuditNotificationService();
+    const incidentService = new IncidentService(
+      auditService,
+      mockIncidentRepository,
+    );
+    const driverSosService = new DriverSosService(auditService, incidentService);
+    const sos = await submitSos(
+      driverSosService,
+      "55555555-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    );
+    const opsIdentity = buildOpsIdentity("ops-incident-db-fail");
+
+    let ackError: unknown;
+    try {
+      await driverSosService.acknowledgeDuty(
+        sos.event.sosEventId,
+        {},
+        opsIdentity,
+      );
+    } catch (error) {
+      ackError = error;
+    }
+    expect((ackError as { code?: string })?.code).toBe(
+      "INCIDENT_HANDOVER_UNAVAILABLE",
+    );
+
+    const incidentAfter = incidentService.getIncident(sos.receipt.incidentId);
+    expect(incidentAfter.assignedTo).toBeNull();
+    const eventAfter = await driverSosService.getEventForOps(
+      sos.event.sosEventId,
+      opsIdentity,
+    );
+    expect(
+      eventAfter.event.dutyAcknowledgement.acknowledgedByActorId,
+    ).toBeNull();
+  });
+});
+
+describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R5 repair: F2 the unified per-event lock serializes ack against reconcile", () => {
+  it("F2: a concurrent authoritative reconcile can never overwrite an in-flight (or just-completed) acknowledgment with a stale pre-ack snapshot", async () => {
+    const persistStatusDeferred = createDeferred<void>();
+    const mockVerificationRepository = {
+      isEnabled: () => true,
+      persistDutyAcknowledgement: async (event: {
+        dutyAcknowledgement: {
+          acknowledgedByActorId: string | null;
+          acknowledgedAt: string | null;
+        };
+      }) => ({
+        accepted: true,
+        acknowledgedByActorId: event.dutyAcknowledgement.acknowledgedByActorId!,
+        acknowledgedAt: event.dutyAcknowledgement.acknowledgedAt!,
+      }),
+      persistStatusTransition: async () => persistStatusDeferred.promise,
+    } as unknown as DriverSosVerificationRepository;
+
+    const { driverSosService, incidentService } = setupService(
+      mockVerificationRepository,
+    );
+    const sos = await submitSos(
+      driverSosService,
+      "66666666-cccc-4ccc-8ccc-cccccccccccc",
+    );
+    const opsIdentity = buildOpsIdentity("ops-f2-race");
+
+    incidentService.updateIncident(
+      sos.receipt.incidentId,
+      { status: "investigating" },
+      undefined,
+      opsIdentity,
+    );
+
+    // Start a readback that reconciles "investigating" onto the SOS event
+    // and holds its own persistence open -- the exact overlap window the
+    // old two-separate-locks implementation let a concurrent acknowledgment
+    // race underneath, overwriting it with a stale pre-ack snapshot.
+    const readbackCall = driverSosService.getOwnEventForDriver(
+      sos.event.sosEventId,
+      buildDriverIdentity(sos.event.driverId),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const ackCall = driverSosService.acknowledgeDuty(
+      sos.event.sosEventId,
+      {},
+      opsIdentity,
+    );
+
+    persistStatusDeferred.resolve();
+    const [, ack] = await Promise.all([readbackCall, ackCall]);
+
+    expect(ack.wonAcknowledgement).toBe(true);
+    expect(ack.dutyAcknowledgement.acknowledgedByActorId).toBe(
+      opsIdentity.actorId,
+    );
+
+    // The unified per-event lock means the ack could not even start until
+    // the reconcile fully settled, so this later readback must still see
+    // the ack's owner -- never silently lost or reverted.
+    const afterAck = await driverSosService.getEventForOps(
+      sos.event.sosEventId,
+      opsIdentity,
+    );
+    expect(afterAck.event.dutyAcknowledgement.acknowledgedByActorId).toBe(
+      opsIdentity.actorId,
+    );
+  });
+});
+
+describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R5 repair: F4 authoritative readback does not stop at the first known owner", () => {
+  it("F4: an authoritative later status without a known owner still propagates on readback instead of staying stuck at the cached status", async () => {
+    let reloadCallCount = 0;
+    const mockRepository = {
+      isEnabled: () => false,
+      reloadEventState: async (sosEventId: string) => {
+        reloadCallCount += 1;
+        return {
+          event: {
+            sosEventId,
+            status: "duty_alerted" as const,
+            dutyAcknowledgement: {
+              acknowledgedAt: null,
+              acknowledgedByActorId: null,
+            },
+          },
+          timelines: [],
+          outbox: null,
+        };
+      },
+    } as unknown as DriverSosRepository;
+
+    const auditService = new AuditNotificationService();
+    const incidentService = new IncidentService(auditService);
+    const driverSosService = new DriverSosService(
+      auditService,
+      incidentService,
+      mockRepository,
+    );
+    const sos = await submitSos(
+      driverSosService,
+      "77777777-dddd-4ddd-8ddd-dddddddddddd",
+    );
+    const opsIdentity = buildOpsIdentity("ops-f4-no-owner");
+
+    const readback = await driverSosService.getEventForOps(
+      sos.event.sosEventId,
+      opsIdentity,
+    );
+    expect(reloadCallCount).toBeGreaterThan(0);
+    expect(readback.event.status).toBe("duty_alerted");
+    expect(
+      readback.event.dutyAcknowledgement.acknowledgedByActorId,
+    ).toBeNull();
+  });
+
+  it("F4: an authoritative closed status propagates on readback even once this process already knows a duty owner", async () => {
+    const mockVerificationRepository = {
+      isEnabled: () => true,
+      persistDutyAcknowledgement: async (event: {
+        dutyAcknowledgement: {
+          acknowledgedByActorId: string | null;
+          acknowledgedAt: string | null;
+        };
+      }) => ({
+        accepted: true,
+        acknowledgedByActorId: event.dutyAcknowledgement.acknowledgedByActorId!,
+        acknowledgedAt: event.dutyAcknowledgement.acknowledgedAt!,
+      }),
+    } as unknown as DriverSosVerificationRepository;
+
+    let reloadCallCount = 0;
+    const mockRepository = {
+      isEnabled: () => false,
+      reloadEventState: async (sosEventId: string) => {
+        reloadCallCount += 1;
+        return {
+          event: {
+            sosEventId,
+            status: "closed" as const,
+            dutyAcknowledgement: {
+              acknowledgedAt: "2026-10-16T00:00:00.000Z",
+              acknowledgedByActorId: "ops-f4-owner",
+            },
+          },
+          timelines: [],
+          outbox: null,
+        };
+      },
+    } as unknown as DriverSosRepository;
+
+    const auditService = new AuditNotificationService();
+    const incidentService = new IncidentService(auditService);
+    const driverSosService = new DriverSosService(
+      auditService,
+      incidentService,
+      mockRepository,
+      mockVerificationRepository,
+    );
+    const sos = await submitSos(
+      driverSosService,
+      "88888888-eeee-4eee-8eee-eeeeeeeeeeee",
+    );
+    const opsIdentity = buildOpsIdentity("ops-f4-owner");
+
+    const ack = await driverSosService.acknowledgeDuty(
+      sos.event.sosEventId,
+      {},
+      opsIdentity,
+    );
+    expect(ack.wonAcknowledgement).toBe(true);
+
+    reloadCallCount = 0;
+    const readback = await driverSosService.getEventForOps(
+      sos.event.sosEventId,
+      opsIdentity,
+    );
+    expect(reloadCallCount).toBeGreaterThan(0);
+    expect(readback.event.status).toBe("closed");
   });
 });

@@ -450,6 +450,147 @@ export class IncidentService implements OnModuleInit {
     return this.cloneIncident(decorated);
   }
 
+  /**
+   * Narrow, additive assignment facade for cross-module callers (currently
+   * DriverSos duty acknowledgment) that need both a race-free arbitration
+   * decision AND a durable persistence confirmation before reporting their
+   * own success -- `updateIncident`'s existing fire-and-forget persistence
+   * is deliberately left unchanged for every other caller.
+   *
+   * The win/lose decision commits synchronously, reusing the exact same
+   * assignedTo conflict rule as `updateIncident` (above): nothing in this
+   * method awaits before that decision is committed to `this.incidents`, so
+   * it is atomic with respect to every other synchronous mutation of
+   * incident state, including a concurrent direct `updateIncident` call.
+   * Only the durability confirmation after that point is asynchronous. If
+   * the durable write is rejected, the in-memory claim is rolled back so
+   * this method never reports a win the database did not actually accept
+   * -- the caller gets `accepted: false` and can retry (e.g. via the next
+   * idempotent acknowledgeDuty replay) instead of a false success.
+   */
+  async assignIncidentOwnerDurable(
+    incidentId: string,
+    owner: string,
+    requestId: string | undefined,
+    identity: BootstrapRequestIdentity | null,
+  ): Promise<{
+    accepted: boolean;
+    currentOwner: string | null;
+    wasNewClaim: boolean;
+  }> {
+    const incident = this.require(incidentId);
+    if (incident.assignedTo && incident.assignedTo !== owner) {
+      return {
+        accepted: false,
+        currentOwner: incident.assignedTo,
+        wasNewClaim: false,
+      };
+    }
+    if (incident.assignedTo === owner) {
+      return { accepted: true, currentOwner: owner, wasNewClaim: false };
+    }
+
+    const now = new Date().toISOString();
+    const updated: IncidentRecord = {
+      ...incident,
+      assignedTo: owner,
+      updatedAt: now,
+    };
+    const timelineEntry = this.createTimelineEntry(
+      incidentId,
+      TIMELINE_ACTIONS.assigned,
+      `Assigned to ${owner}.`,
+      this.resolveActorId(identity, "ops_user"),
+      now,
+    );
+    const decorated = this.decorateIncident(updated, identity);
+
+    // Commit the claim now, before this method's first await: this is the
+    // atomic arbitration point.
+    this.replace(decorated);
+    this.timelines.set(incidentId, [
+      ...(this.timelines.get(incidentId) ?? []),
+      timelineEntry,
+    ]);
+
+    if (this.incidentRepository) {
+      try {
+        await this.incidentRepository.persistChanges({
+          incidents: [this.cloneIncident(decorated)],
+          timelines: [{ ...timelineEntry }],
+        });
+      } catch (error) {
+        this.incidentRepository.reportPersistenceFailure(
+          error,
+          "assign_incident_owner_durable",
+        );
+        // Roll back: the claim never durably happened, so it never truly
+        // won. A fresh call (replay) can re-attempt it from this same
+        // prior state.
+        this.replace(incident);
+        this.timelines.set(
+          incidentId,
+          (this.timelines.get(incidentId) ?? []).filter(
+            (entry) => entry.entryId !== timelineEntry.entryId,
+          ),
+        );
+        return {
+          accepted: false,
+          currentOwner: incident.assignedTo,
+          wasNewClaim: false,
+        };
+      }
+    }
+
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType: this.resolveAuditActorType(identity, "ops_user"),
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "incident",
+        actionName: "assign_incident_owner_durable",
+        resourceType: "incident",
+        resourceId: incidentId,
+        newValuesSummary: { assignedTo: decorated.assignedTo },
+      },
+      requestId,
+    );
+    this.opsDispatchEventsService?.publishIncidentUpdated(decorated, requestId);
+
+    return { accepted: true, currentOwner: owner, wasNewClaim: true };
+  }
+
+  /**
+   * Reverts a fresh claim made by `assignIncidentOwnerDurable` (identified
+   * by `wasNewClaim: true`) when the caller's own subsequent write failed
+   * and the caller's contract (e.g. DriverSos duty acknowledgment) requires
+   * that a rejected write never leave the Incident mutated. Only reverts
+   * when the Incident is still assigned to exactly `owner` -- if anything
+   * else has since changed it, that is real state this rollback must not
+   * clobber.
+   */
+  async releaseIncidentOwnerClaim(
+    incidentId: string,
+    owner: string,
+    requestId: string | undefined,
+    identity: BootstrapRequestIdentity | null,
+  ): Promise<void> {
+    const incident = this.require(incidentId);
+    if (incident.assignedTo !== owner) {
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const reverted: IncidentRecord = {
+      ...incident,
+      assignedTo: null,
+      updatedAt: now,
+    };
+    const decorated = this.decorateIncident(reverted, identity);
+    this.replace(decorated);
+    this.persist({ incidents: [decorated] }, "release_incident_owner_claim");
+  }
+
   /** Both controller entrances must validate, commit the complaint side and
    * publish the incident side as one ordered operation for this incident. */
   async withComplaintLink<T>(
