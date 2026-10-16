@@ -319,14 +319,7 @@ it("mounted drawer acquires proof, revokes its selected real repository session 
     within(row.closest("tr")!).getByRole("button", { name: "Revoke" }),
   );
   await waitFor(() => expect(h.revoke).toHaveBeenCalledTimes(1));
-  await waitFor(() =>
-    expect(
-      within(screen.getByText("test-own-session").closest("tr")!).queryByRole(
-        "button",
-        { name: "Revoke" },
-      ),
-    ).toBeNull(),
-  );
+  await waitFor(() => expect(h.calls).toHaveLength(4));
   expect(h.calls.map((c) => `${c.method} ${c.url}`)).toEqual([
     "GET /control-plane-proxy/identity/sessions",
     "GET /api/identity-session-csrf",
@@ -353,6 +346,14 @@ it("mounted drawer acquires proof, revokes its selected real repository session 
   expect(
     await h.repository.getSession("test-unselected-session"),
   ).toMatchObject({ status: "active" });
+  await waitFor(() =>
+    expect(
+      within(screen.getByText("test-own-session").closest("tr")!).queryByRole(
+        "button",
+        { name: "Revoke" },
+      ),
+    ).toBeNull(),
+  );
   expect(screen.queryByText(/Access Denied|Failed/)).toBeNull();
 });
 

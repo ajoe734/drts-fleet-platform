@@ -216,6 +216,69 @@ it("does not impose the new check on other mutation families", async () => {
   expect(upstream).toHaveBeenCalledTimes(1);
 });
 
+it("does not accept another host's signed proof cookie", async () => {
+  const foreign = "https://sibling.example";
+  const response = await issue(
+    new NextRequest(`${foreign}/api/identity-session-csrf`, {
+      headers: { origin: foreign },
+    }),
+  );
+  const { token } = await response.json();
+  const cookie = response.headers.get("set-cookie")!.split(";")[0]!;
+  const upstream = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(Response.json({}));
+  expect((await revoke({ origin, cookie, "x-csrf-token": token })).status).toBe(
+    403,
+  );
+  expect(upstream).not.toHaveBeenCalled();
+});
+
+it("valid CSRF proof never substitutes for required IAP authentication", async () => {
+  const { token, cookie } = await proof();
+  vi.stubEnv("DRTS_ENV", "staging");
+  vi.stubEnv("CONTROL_PLANE_IAP_ENABLED", "true");
+  const upstream = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(Response.json({}));
+  expect((await revoke({ origin, cookie, "x-csrf-token": token })).status).toBe(
+    401,
+  );
+  expect(upstream).not.toHaveBeenCalled();
+});
+
+it("preserves Cloud Run transport credentials separately from the internal application bearer", async () => {
+  const { token, cookie } = await proof();
+  vi.stubEnv("DRTS_API_URL", "https://controlled-api.a.run.app");
+  vi.stubEnv("DRTS_API_AUTH_AUDIENCE", "");
+  vi.stubEnv("JWT_SECRET", "controlled-inner-token-signing-key");
+  const upstream = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (target, init) => {
+      const url = new URL(String(target));
+      if (url.hostname === "metadata.google.internal") {
+        expect(new Headers(init?.headers).get("Metadata-Flavor")).toBe(
+          "Google",
+        );
+        return new Response("controlled-transport-token");
+      }
+      const forwarded = new Headers(init?.headers);
+      expect(forwarded.get("x-serverless-authorization")).toBe(
+        "Bearer controlled-transport-token",
+      );
+      expect(forwarded.get("x-drts-authorization")).toMatch(/^Bearer /);
+      expect(forwarded.get("x-drts-authorization")).not.toBe(
+        "Bearer controlled-transport-token",
+      );
+      expect(forwarded.has("cookie")).toBe(false);
+      return Response.json({ data: {} });
+    });
+  expect((await revoke({ origin, cookie, "x-csrf-token": token })).status).toBe(
+    200,
+  );
+  expect(upstream).toHaveBeenCalledTimes(2);
+});
+
 it("fails closed when the existing server signing secret is unavailable", async () => {
   for (const key of [
     "BFF_STATE_SECRET",
