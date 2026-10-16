@@ -13,6 +13,50 @@ const command = {
   expiresAt: "2026-10-16T11:00:00Z",
 };
 describe("production notice clock and command boundaries", () => {
+  it.each([
+    ["2026-10-16T09:59:59.999Z", "scheduled"],
+    ["2026-10-16T10:00:00.000Z", "active"],
+    ["2026-10-16T10:00:00.001Z", "active"],
+    ["2026-10-16T10:59:59.999Z", "active"],
+    ["2026-10-16T11:00:00.000Z", "resolved"],
+    ["2026-10-16T11:00:00.001Z", "resolved"],
+  ])(
+    "evaluates the actual canonical projection at %s as %s",
+    (now, expected) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-10-16T09:00:00Z"));
+      const service = new PlatformAdminService(new AuditNotificationService());
+      const created = service.createPlatformNotice(command);
+      vi.setSystemTime(new Date(now!));
+      expect(
+        service
+          .listPlatformNotices()
+          .find((n) => n.noticeId === created.noticeId)?.status,
+      ).toBe(expected);
+    },
+  );
+  it("retains explicit open-ended notices and manual resolve across clock changes", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-16T09:00:00Z"));
+    const service = new PlatformAdminService(new AuditNotificationService());
+    const open = service.createPlatformNotice({
+      ...command,
+      scheduledAt: null,
+      expiresAt: null,
+    });
+    expect(open.updatedAt).toBe("2026-10-16T09:00:00.000Z");
+    const scheduled = service.createPlatformNotice(command);
+    service.resolveNotice(scheduled.noticeId);
+    vi.setSystemTime(new Date("2027-10-16T12:00:00Z"));
+    expect(
+      service.listPlatformNotices().find((n) => n.noticeId === open.noticeId),
+    ).toMatchObject({ status: "active", expiresAt: null });
+    expect(
+      service
+        .listPlatformNotices()
+        .find((n) => n.noticeId === scheduled.noticeId),
+    ).toMatchObject({ status: "resolved", downlistedReason: "manual" });
+  });
   it("activates at schedule, downlists at explicit expiry, retains canonical history", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-16T09:00:00Z"));

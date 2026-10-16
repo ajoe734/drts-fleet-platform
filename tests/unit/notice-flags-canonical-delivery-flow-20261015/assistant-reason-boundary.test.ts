@@ -73,4 +73,56 @@ describe("assistant direct caller confirmation reason boundary", () => {
     });
     expect(() => action.execute(domain, "missing-reason")).toThrow();
   });
+  it("actual assistant retains missing-reason rejection and maintenance state/window audit binding", () => {
+    const audit = new AuditNotificationService();
+    const domain = new PlatformAdminService(audit);
+    const assistant = new PlatformAdminAssistantService(
+      {} as never,
+      {} as never,
+      domain,
+      audit,
+      {} as never,
+      undefined,
+      undefined,
+      {} as never,
+    );
+    const identity = principal("platform");
+    identity.roleFamilies = ["platform"];
+    identity.roles = ["superadmin"];
+    const session = assistant.createSession(identity);
+    const command = {
+      toolName: "action.set_maintenance_mode" as const,
+      payload: {
+        enabled: true,
+        scheduledStart: "2026-11-01T01:00:00Z",
+        scheduledEnd: "2026-11-01T02:00:00Z",
+      },
+    };
+    expect(() =>
+      assistant.executeAction(session.sessionId, identity, {
+        ...command,
+        reason: "  ",
+      }),
+    ).toThrow();
+    expect(domain.getMaintenanceMode().enabled).toBe(false);
+    const result = assistant.executeAction(
+      session.sessionId,
+      identity,
+      { ...command, reason: "Approved maintenance" },
+      "maintenance-reason",
+    );
+    expect(result.receipt.status).toBe("completed");
+    expect(domain.getMaintenanceMode()).toMatchObject({
+      enabled: true,
+      reason: "Approved maintenance",
+      scheduledStart: "2026-11-01T01:00:00.000Z",
+      scheduledEnd: "2026-11-01T02:00:00.000Z",
+    });
+    expect(
+      audit
+        .listAuditLogs()
+        .find((a) => a.actionName === "enable_maintenance_mode")
+        ?.newValuesSummary,
+    ).toMatchObject({ reason: "Approved maintenance" });
+  });
 });
