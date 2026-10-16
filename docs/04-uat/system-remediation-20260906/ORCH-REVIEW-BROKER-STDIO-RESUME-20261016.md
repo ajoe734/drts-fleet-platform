@@ -51,6 +51,73 @@ resumption in the supervisor runtime. No new provider allowlist, timeout, or
 permission mechanism was added; non-resumable dead workers (no session/resume
 token) and workers with missing state are still pruned exactly as before.
 
+### Finding 3 (F1, review reopen) — out-of-scope hardening caps added by the inherited `59092d56a` fix
+
+Reviewer Codex reopened candidate `bc53df8551dd13ccfe0da67e35d9a2074d6efb75`
+(generation `9014305af5994c2c963873dce8791687`) against the authoritative spec
+`.local/passenger-transport-bureau-review-20261015/ORCH-REVIEW-BROKER-STDIO-RESUME-20261016-R2-actual-native-roles.json`
+and the explicit scope-evidence file
+`.local/passenger-transport-bureau-review-20261015/actual-broker-WIP-new-frame-limit-outside-user-functional-scope-normal-evidence.json`,
+which records the user's direct instruction ("你不要去加強什麼安全機制喔，老老實實地補上功能缺項就好了" —
+do not add security hardening, just fix the actual functional gap). Finding 1
+above incorrectly treated `claude_permission_prompt_mcp.py` as fully settled
+by `59092d56a` (PR #2653); in fact that fix bundled in four arbitrary
+resource-limit/hardening additions that were never part of the original
+pre-#2653 entrypoint and are not required to make standard JSONL transport or
+legacy Content-Length framing work: `MAX_MESSAGE_BYTES` (1 MiB frame cap),
+`MAX_HEADER_BYTES` (8192-byte header cap), rejection of duplicate legacy
+header keys, and a 10-digit cap on the `Content-Length` value string. Flagged
+file sha256 `904e67b81b353a33e2d51fd3da6ad6940d0a3360bcce3ae3e4771ea8068359a4`
+(`claude_permission_prompt_mcp.py:34-35,42-45,61-74` in that revision).
+
+Repair: removed exactly those four additions and the `_line(limit)`
+byte-counting machinery that existed only to enforce them, and the one
+duplicate-header test case plus the whole `test_size_limits_...` hardening
+test from `test_claude_permission_prompt_mcp.py` (kept the
+framing-cannot-switch-mid-session half of that test, renamed
+`test_framing_cannot_switch_mid_session`, since that is protocol correctness,
+not a size/hardening cap). Fixed file sha256
+`d75f5d291ff41a7c3deab772db1e07d2b388b07ccb2400d67a0f3f8a6caf88c7`. Kept
+unchanged: the dual legacy/JSONL auto-detect, the "unterminated line" EOF
+check (not flagged — lines 46-48 of the flagged revision, outside the
+reviewer's 42-45/61-74 ranges), `isdigit()`/positive-length validation on
+`Content-Length` (rejects non-numeric/negative/zero — original protocol
+correctness, not a resource-exhaustion guard), truncated-body detection, the
+`main()` try/except that turns transport errors into a clean stderr message
+instead of a traceback, and every original permission decision / queue
+contract path.
+
+Before/after probe (minimal production-parser comparison, no copied parser
+logic; load each revision's module via `compile`/`exec` and call
+`StdioCodec(...).read_message()` directly on a crafted frame):
+
+| Probe | Old (flagged, `904e67b8...`) | New (fixed, `d75f5d29...`) |
+| --- | --- | --- |
+| Legacy-framed JSON ping with a 1 MiB+ `params.padding` string, correct `Content-Length` | `ValueError: invalid content length` (rejected a valid, just-large message) | Parses, returns the `ping` message |
+| `Content-Length: 2\r\nContent-Length: 2\r\n\r\n{}` (duplicate header, same value) | `ValueError: invalid legacy header` | Parses `{}` (last value wins, same as any ordinary dict-overwrite header parser) |
+| `Content-Length: 2\r\nX: ` + 8192 `x` bytes + `\r\n\r\n{}` (oversized but well-formed extra header) | `ValueError: frame limit exceeded` | Parses `{}` |
+
+Regression after the repair (same isolated worktree, `tools/development-orchestrator`):
+
+```
+python3 -m unittest test_approval_queue test_claude_permission_prompt_mcp -v
+```
+Result: 15 pass, exit 0, 3.3s.
+
+```
+python3 -m unittest discover -s . -p 'test_*.py'
+```
+Result: 1053 pass, exit 0, 36.9s. (Same expected mocked
+`RuntimeError: boom` fault-injection traceback and benign subprocess
+`ResourceWarning` as before — not failures.)
+
+Acceptance keys addressed by this repair:
+`orch-review-broker_standard-stdio-and-resumable-alias-source-proof` (the
+transport now matches the spec's "no new security hardening" constraint, not
+just "JSONL works") and `orch-review-broker_actual-existing-entrypoint-connection-restored`
+remains a Root/Supervisor/Codex action outside this worker's write scope, not
+claimed here — unchanged from Finding 1/2's note above.
+
 ## Verification ledger
 
 | Finding / required acceptance | Source and repair | Old → new | Command / evidence | Pending limitation |
