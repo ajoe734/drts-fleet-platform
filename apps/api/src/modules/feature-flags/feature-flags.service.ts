@@ -3,6 +3,7 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { FeatureFlag } from "@drts/contracts";
 
 import { FeatureFlagRepository } from "./feature-flag.repository";
+import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 
 export interface FeatureFlagSeed {
@@ -121,8 +122,7 @@ export class FeatureFlagsService {
       {
         key: "opsRealMapEnabled",
         enabled: false,
-        description:
-          "Enable live map rendering on ops and dispatch surfaces",
+        description: "Enable live map rendering on ops and dispatch surfaces",
       },
       {
         key: "platformGeometryEditorEnabled",
@@ -299,6 +299,13 @@ export class FeatureFlagsService {
         enabled,
         desc,
       );
+      if (!persisted) {
+        throw new ApiRequestError(
+          503,
+          "FLAG_WRITE_NOT_ACKNOWLEDGED",
+          "Enabled repository returned no flag row.",
+        );
+      }
       this.recordTenantOverrideAudit(key, tenantId, enabled, desc);
       return persisted;
     }
