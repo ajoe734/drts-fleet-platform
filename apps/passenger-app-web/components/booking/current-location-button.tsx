@@ -22,11 +22,18 @@ export function CurrentLocationButton({
   const [locating, setLocating] = useState(false);
   const [error, setError] = useState("");
   const request = useRef(0);
+  const boundary = useRef({ value, disabled });
   const select = useRef(onSelect);
   useEffect(() => {
     select.current = onSelect;
   }, [onSelect]);
   useEffect(() => {
+    if (
+      boundary.current.value === value &&
+      boundary.current.disabled === disabled
+    )
+      return;
+    boundary.current = { value, disabled };
     request.current += 1;
     setLocating(false);
     setError("");

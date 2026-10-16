@@ -27,11 +27,15 @@ const { Pool } = apiRequire("pg") as typeof import("pg");
 const repoRoot = path.resolve(__dirname, "../../../..");
 const driverId = "drv-demo-002";
 
-// Only the existing hosted CI unit job owns this PostgreSQL check. In that
-// job a missing connection/migration is a failure, never a skipped DB pass.
+// The existing hosted root-unit jobs own this PostgreSQL check. Both CI lanes
+// now execute tests in shards; the integration `unit` job only aggregates them.
+// A missing connection/migration in a test-running job is a failure, not a skip.
 // No VM PostgreSQL server, browser, or product process is started by this file.
 const hostedUnit =
-  process.env.GITHUB_ACTIONS === "true" && process.env.GITHUB_JOB === "unit";
+  process.env.GITHUB_ACTIONS === "true" &&
+  ["unit", "unit-shard", "product_root_unit"].includes(
+    process.env.GITHUB_JOB ?? "",
+  );
 describe.skipIf(!hostedUnit)(
   "C114 fixture on official PostgreSQL migrations",
   () => {
