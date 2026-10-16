@@ -1355,20 +1355,28 @@ function geometryContainsPoint(geometry: ServiceAreaGeometry, point: GeoPoint) {
   if (geometry.type === "circle") {
     return distanceMeters(geometry.center, point) <= geometry.radiusMeters;
   }
-  return polygonContainsPoint(geometry.coordinates, point);
+  if (!polygonRingContainsPoint(geometry.coordinates, point)) {
+    return false;
+  }
+  for (const hole of geometry.holes ?? []) {
+    if (polygonRingContainsPointStrictlyInside(hole, point)) {
+      return false;
+    }
+  }
+  return true;
 }
 
-function polygonContainsPoint(points: GeoPoint[], point: GeoPoint) {
+function polygonRingContainsPoint(points: GeoPoint[], point: GeoPoint) {
   if (points.length < 3) {
     return false;
+  }
+  if (polygonRingBoundaryContainsPoint(points, point)) {
+    return true;
   }
   let inside = false;
   for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
     const current = points[i]!;
     const previous = points[j]!;
-    if (pointOnSegment(point, previous, current)) {
-      return true;
-    }
     const intersects =
       current.lng > point.lng !== previous.lng > point.lng &&
       point.lat <
@@ -1380,6 +1388,28 @@ function polygonContainsPoint(points: GeoPoint[], point: GeoPoint) {
     }
   }
   return inside;
+}
+
+function polygonRingContainsPointStrictlyInside(
+  points: GeoPoint[],
+  point: GeoPoint,
+) {
+  if (points.length < 3) {
+    return false;
+  }
+  if (polygonRingBoundaryContainsPoint(points, point)) {
+    return false;
+  }
+  return polygonRingContainsPoint(points, point);
+}
+
+function polygonRingBoundaryContainsPoint(points: GeoPoint[], point: GeoPoint) {
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    if (pointOnSegment(point, points[j]!, points[i]!)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function pointOnSegment(point: GeoPoint, start: GeoPoint, end: GeoPoint) {
@@ -1421,7 +1451,10 @@ function geometryToGeoJson(geometry: ServiceAreaGeometry) {
   if (geometry.type === "polygon") {
     return {
       type: "Polygon" as const,
-      coordinates: [closeGeoJsonRing(geometry.coordinates)],
+      coordinates: [
+        closeGeoJsonRing(geometry.coordinates, "ccw"),
+        ...(geometry.holes ?? []).map((hole) => closeGeoJsonRing(hole, "cw")),
+      ],
     };
   }
   return {
@@ -1430,14 +1463,34 @@ function geometryToGeoJson(geometry: ServiceAreaGeometry) {
   };
 }
 
-function closeGeoJsonRing(points: GeoPoint[]) {
-  const ring = points.map((point) => [point.lng, point.lat]);
+function closeGeoJsonRing(
+  points: GeoPoint[],
+  winding: "ccw" | "cw" = "ccw",
+): [number, number][] {
+  const ring: [number, number][] = points.map((point) => [
+    point.lng,
+    point.lat,
+  ]);
   const first = ring[0];
   const last = ring[ring.length - 1];
   if (first && last && (first[0] !== last[0] || first[1] !== last[1])) {
-    ring.push([...first]);
+    ring.push([first[0], first[1]]);
+  }
+  const area = signedRingArea(points);
+  if ((winding === "ccw" && area < 0) || (winding === "cw" && area > 0)) {
+    ring.reverse();
   }
   return ring;
+}
+
+function signedRingArea(points: GeoPoint[]) {
+  let area = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index]!;
+    const next = points[(index + 1) % points.length]!;
+    area += current.lng * next.lat - next.lng * current.lat;
+  }
+  return area / 2;
 }
 
 function circleToGeoJsonRing(center: GeoPoint, radiusMeters: number) {

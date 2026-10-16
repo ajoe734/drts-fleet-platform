@@ -353,6 +353,7 @@ export function hasAddressCoordinateProvenance(
 export type GeoPolygon = {
   type: "polygon";
   coordinates: GeoPoint[];
+  holes?: GeoPoint[][];
 };
 
 export type GeoCircle = {

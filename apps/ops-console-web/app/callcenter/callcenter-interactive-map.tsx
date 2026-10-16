@@ -196,52 +196,76 @@ export function CallcenterInteractiveMap({
     }
   }
 
-  const overlayPolygons = features.flatMap((feature) =>
-    feature.geometry.coordinates.map((ring, ringIndex) => {
-      const visual = featureVisual(feature);
-      const points = ring
-        .map((coordinate) => {
-          const lng = coordinate[0];
-          const lat = coordinate[1];
-          if (
-            typeof lat !== "number" ||
-            typeof lng !== "number" ||
-            !Number.isFinite(lat) ||
-            !Number.isFinite(lng)
-          ) {
-            return null;
-          }
-          const projected = projectOpsMapPointToViewport(
-            {
-              key: `${feature.id}:${ringIndex}`,
-              kind: stopKind,
-              label: featureCode(feature),
-              lat,
-              lng,
-            },
-            viewport,
-          );
-          return `${(projected.leftPct / 100) * MAP_WIDTH},${
-            (projected.topPct / 100) * MAP_HEIGHT
-          }`;
-        })
-        .filter(Boolean)
-        .join(" ");
+  const overlayPolygons = features.flatMap((feature) => {
+    const visual = featureVisual(feature);
+    const projectedRings = feature.geometry.coordinates
+      .map((ring, ringIndex) =>
+        ring
+          .map((coordinate) => {
+            const lng = coordinate[0];
+            const lat = coordinate[1];
+            if (
+              typeof lat !== "number" ||
+              typeof lng !== "number" ||
+              !Number.isFinite(lat) ||
+              !Number.isFinite(lng)
+            ) {
+              return null;
+            }
+            const projected = projectOpsMapPointToViewport(
+              {
+                key: `${feature.id}:${ringIndex}`,
+                kind: stopKind,
+                label: featureCode(feature),
+                lat,
+                lng,
+              },
+              viewport,
+            );
+            return `${(projected.leftPct / 100) * MAP_WIDTH},${
+              (projected.topPct / 100) * MAP_HEIGHT
+            }`;
+          })
+          .filter((point): point is string => Boolean(point)),
+      )
+      .filter((ring) => ring.length >= 3);
 
-      return (
+    if (projectedRings.length === 0) {
+      return [];
+    }
+
+    if (projectedRings.length === 1) {
+      return [
         <polygon
-          key={`${feature.id}:${ringIndex}`}
+          key={feature.id}
           aria-label={featureLabel(feature)}
           data-map-feature-code={featureCode(feature)}
           data-map-feature-kind={feature.properties.recordKind}
+          data-map-ring-count={1}
           fill={visual.fill}
-          points={points}
+          points={projectedRings[0]!.join(" ")}
           stroke={visual.stroke}
           strokeWidth={visual.strokeWidth}
-        />
-      );
-    }),
-  );
+        />,
+      ];
+    }
+
+    const d = projectedRings.map((ring) => `M ${ring.join(" L ")} Z`).join(" ");
+    return [
+      <path
+        key={feature.id}
+        aria-label={featureLabel(feature)}
+        d={d}
+        data-map-feature-code={featureCode(feature)}
+        data-map-feature-kind={feature.properties.recordKind}
+        data-map-ring-count={projectedRings.length}
+        fill={visual.fill}
+        fillRule="evenodd"
+        stroke={visual.stroke}
+        strokeWidth={visual.strokeWidth}
+      />,
+    ];
+  });
 
   return (
     <div

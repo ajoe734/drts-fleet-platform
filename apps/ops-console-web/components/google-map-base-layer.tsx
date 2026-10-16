@@ -269,21 +269,31 @@ export function GoogleMapBaseLayer({
     if (status !== "ready" || !mapRef.current) {
       return;
     }
-    polygonsRef.current = features.flatMap((feature) =>
-      feature.geometry.coordinates.map(
-        (ring) =>
-          new google.maps.Polygon({
-            map: mapRef.current,
-            paths: ring.flatMap(([lng, lat]) =>
-              typeof lat === "number" && typeof lng === "number"
-                ? [{ lat, lng }]
-                : [],
-            ),
-            clickable: false,
-            ...polygonStyle(feature),
-          }),
-      ),
-    );
+    polygonsRef.current = features.flatMap((feature) => {
+      const paths = feature.geometry.coordinates
+        .map((ring) =>
+          ring.flatMap(([lng, lat]) =>
+            typeof lat === "number" &&
+            typeof lng === "number" &&
+            Number.isFinite(lat) &&
+            Number.isFinite(lng)
+              ? [{ lat, lng }]
+              : [],
+          ),
+        )
+        .filter((ringPath) => ringPath.length >= 3);
+      if (paths.length === 0) {
+        return [];
+      }
+      return [
+        new google.maps.Polygon({
+          map: mapRef.current,
+          paths,
+          clickable: false,
+          ...polygonStyle(feature),
+        }),
+      ];
+    });
     return () => {
       polygonsRef.current.forEach((polygon) => polygon.setMap(null));
       polygonsRef.current = [];
