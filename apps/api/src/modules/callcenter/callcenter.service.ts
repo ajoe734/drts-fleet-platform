@@ -180,9 +180,23 @@ export class CallcenterService implements OnModuleInit {
   }
 
   openCallSessionForWrite(command: OpenCallSessionCommand, requestId?: string) {
-    return this.runPhoneSessionWrite(null, (write) =>
-      this.openCallSession(command, requestId, write),
-    );
+    return this.runPhoneSessionWrite(null, (write) => {
+      if (!write) return this.openCallSession(command, requestId);
+      // A cold peer must not upsert its first local sequence over an existing
+      // call and erase that call's committed order/recording linkage.
+      return this.callcenterRepository!.lockCall(
+        "session-sequence",
+        write.executor,
+      )
+        .then(() => this.callcenterRepository!.loadSessions(write.executor))
+        .then((sessions) => {
+          this.callSequence = Math.max(
+            this.callSequence,
+            this.deriveNextCallSequence(sessions),
+          );
+          return this.openCallSession(command, requestId, write);
+        });
+    });
   }
 
   attachRecordingCallbackForWrite(
@@ -306,7 +320,7 @@ export class CallcenterService implements OnModuleInit {
     listeners: Array<(event: T) => void | Promise<void>>,
     event: T,
   ) {
-    let pending: void | Promise<void>;
+    let pending: void | Promise<void> = undefined;
     for (const listener of listeners) {
       if (pending) pending = pending.then(() => listener(event));
       else pending = listener(event);
@@ -887,24 +901,25 @@ export class CallcenterService implements OnModuleInit {
       write,
       "attach_recording_callback",
       () => {
-        this.recordAudit(
-          {
-            actorId: command.agentId ?? session.agentId,
-            actorType: "ops_user",
-            tenantId: null,
-            moduleName: "callcenter",
-            actionName: "attach_recording_callback",
-            resourceType: "call_session",
-            resourceId: session.callId,
-            newValuesSummary: {
-              recordingId: session.recordingId,
-              providerRecordingRef: session.providerRecordingRef,
-              recordingUrl: session.recordingUrl,
-              status: session.status,
+        if (!recordingAlreadyBound)
+          this.recordAudit(
+            {
+              actorId: command.agentId ?? session.agentId,
+              actorType: "ops_user",
+              tenantId: null,
+              moduleName: "callcenter",
+              actionName: "attach_recording_callback",
+              resourceType: "call_session",
+              resourceId: session.callId,
+              newValuesSummary: {
+                recordingId: session.recordingId,
+                providerRecordingRef: session.providerRecordingRef,
+                recordingUrl: session.recordingUrl,
+                status: session.status,
+              },
             },
-          },
-          requestId,
-        );
+            requestId,
+          );
       },
       () => this.notifyRecordingAttachment(event, session, requestId, write),
     );

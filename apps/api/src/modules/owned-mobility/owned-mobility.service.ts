@@ -2187,6 +2187,13 @@ export class OwnedMobilityService
       return;
     }
 
+    if (
+      order.recordingId === event.recordingId &&
+      order.complianceFlags.includes("recording_bound") &&
+      order.status !== "recording_pending"
+    )
+      return;
+
     const now = new Date().toISOString();
     order.recordingId = event.recordingId;
     order.updatedAt = now;

@@ -21,12 +21,14 @@ export class CallcenterRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
-  async loadSessions() {
+  async loadSessions(executor?: CallcenterQueryExecutor) {
     if (!this.isEnabled()) {
       return [] as CallSessionRecord[];
     }
 
-    const result = await this.databaseService!.query<JsonRecordRow>(
+    const result = await (
+      executor ?? this.databaseService!
+    ).query<JsonRecordRow>(
       `
         SELECT record
         FROM crm.phase1_call_sessions

@@ -1,4 +1,7 @@
 import { EventEmitter } from "node:events";
+import { IdempotencyRepository } from "../../../apps/api/src/common/idempotency/idempotency.repository";
+import { IdempotencyService } from "../../../apps/api/src/common/idempotency/idempotency.service";
+import { OwnedMobilityController } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.controller";
 import { describe, expect, it, vi } from "vitest";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { CallcenterController } from "../../../apps/api/src/modules/callcenter/callcenter.controller";
@@ -51,6 +54,14 @@ export function fixture() {
       target.set(`${table}:${values[0]}`, JSON.parse(String(values.at(-1))));
     }
     if (table && /SELECT record/.test(sql)) {
+      if (values.length === 0) {
+        return {
+          rows: [...target.entries()]
+            .filter(([key]) => key.startsWith(`${table}:`))
+            .map(([, record]) => ({ record: structuredClone(record) })),
+          rowCount: target.size,
+        };
+      }
       const record = target.get(`${table}:${values[0]}`);
       return {
         rows: record ? [{ record: structuredClone(record) }] : [],
@@ -106,6 +117,9 @@ export function fixture() {
     auditWrite,
     published,
     entered,
+    release() {
+      block = "";
+    },
     hold(fragment: string) {
       block = fragment;
       gate = deferred();
@@ -168,6 +182,247 @@ describe("phone durable acknowledgement", () => {
       orderId: order.orderId,
       callId: "synthetic-call-create",
       status: "recording_pending",
+    });
+  });
+  it.each([
+    "INSERT INTO ops.phase1_owned_orders",
+    "INSERT INTO crm.phase1_call_sessions",
+    "COMMIT",
+  ])(
+    "rolls back a rejected %s without phantom orders, links, audits, or successful replay",
+    async (fragment) => {
+      const h = fixture();
+      const idem = new IdempotencyRepository();
+      const controller = new OwnedMobilityController(
+        h.owned,
+        new IdempotencyService(idem),
+      );
+      const command = phoneCommand("synthetic-call-failure");
+      const gate = h.hold(fragment);
+      const response = { setHeader: vi.fn(), status: vi.fn() };
+      const pending = controller.createCallCenterOrder(
+        command,
+        response as never,
+        "synthetic-key",
+      );
+      const rejected = expect(pending).rejects.toThrow(
+        "synthetic write failure",
+      );
+      await h.entered.promise;
+      expect(h.owned.listOrders()).toEqual([]);
+      expect(h.calls.listCallSessions()).toEqual([]);
+      expect(h.published).not.toHaveBeenCalled();
+      gate.reject(new Error("synthetic write failure"));
+      await rejected;
+      expect([...h.rows.keys()]).toEqual([]);
+      expect(
+        h.auditWrite.mock.calls.filter(
+          ([row]) => row.actionName === "create_phone_order",
+        ),
+      ).toEqual([]);
+      const receipt = await idem.findByKey(
+        `crm:callcenter:session:${command.callId}:order_create`,
+        "synthetic-key",
+      );
+      expect(receipt?.status).not.toBe("completed");
+      h.release();
+      const created = await controller.createCallCenterOrder(
+        command,
+        response as never,
+        "synthetic-key",
+      );
+      const replayed = await controller.createCallCenterOrder(
+        command,
+        response as never,
+        "synthetic-key",
+      );
+      expect(replayed.data).toEqual(created.data);
+      expect(h.owned.listOrders()).toHaveLength(1);
+      expect(h.published).toHaveBeenCalledTimes(1);
+      expect(await h.owned.getOrderForRead(created.data.orderId)).toMatchObject(
+        { callId: command.callId },
+      );
+    },
+  );
+
+  it("recording callback waits for order propagation and commits both read models before acknowledgement", async () => {
+    const h = fixture();
+    const created = await h.owned.createCallCenterOrder(
+      phoneCommand("synthetic-recording"),
+    );
+    const gate = h.hold("INSERT INTO ops.phase1_owned_orders");
+    let settled = false;
+    const pending = Promise.resolve(
+      h.controller.attachRecordingCallback(created.callId!, {
+        recordingId: "synthetic-rec",
+        recordingUrl: "https://recordings.example.com/synthetic-rec",
+      }),
+    ).then((result) => {
+      settled = true;
+      return result;
+    });
+    await h.entered.promise;
+    await Promise.resolve();
+    const early = {
+      settled,
+      order: await h.owned.getOrderForRead(created.orderId),
+      session: h.calls.getCallSession(created.callId!),
+    };
+    gate.resolve();
+    await pending;
+    expect(early.settled).toBe(false);
+    expect(early.order.recordingId).toBeNull();
+    expect(early.session.recordingId).toBeNull();
+    expect(await h.owned.getOrderForRead(created.orderId)).toMatchObject({
+      recordingId: "synthetic-rec",
+      status: "ready_for_dispatch",
+      complianceFlags: ["recording_bound"],
+    });
+    // A peer with no hydrated session cache must use the production PG reader.
+    const cold = new CallcenterService(
+      new AuditNotificationService(),
+      new CallcenterRepository(h.database as never),
+    );
+    expect(await cold.getCallSessionForRead(created.callId!)).toMatchObject({
+      recordingId: "synthetic-rec",
+      linkedOrderId: created.orderId,
+      recordingState: "ready",
+    });
+    const beforeReplay = h.auditWrite.mock.calls.length;
+    await h.controller.attachRecordingCallback(created.callId!, {
+      recordingId: "synthetic-rec",
+      recordingUrl: "https://recordings.example.com/synthetic-rec",
+    });
+    expect(h.auditWrite.mock.calls.length).toBe(beforeReplay);
+  });
+
+  it("a failed order propagation rolls back a recording-bound session; identical callback can be retried", async () => {
+    const h = fixture();
+    const created = await h.owned.createCallCenterOrder(
+      phoneCommand("synthetic-callback-fail"),
+    );
+    const gate = h.hold("INSERT INTO ops.phase1_owned_orders");
+    const pending = h.controller.attachRecordingCallback(created.callId!, {
+      recordingId: "synthetic-rec-fail",
+    });
+    const rejected = expect(pending).rejects.toThrow(
+      "synthetic recording failure",
+    );
+    await h.entered.promise;
+    gate.reject(new Error("synthetic recording failure"));
+    await rejected;
+    expect(await h.calls.getCallSessionForRead(created.callId!)).toMatchObject({
+      recordingId: null,
+      flags: ["recording_pending"],
+    });
+    expect(await h.owned.getOrderForRead(created.orderId)).toMatchObject({
+      recordingId: null,
+      status: "recording_pending",
+    });
+    expect(h.calls.getCallSession(created.callId!).recordingId).toBeNull();
+    h.release();
+    await h.controller.attachRecordingCallback(created.callId!, {
+      recordingId: "synthetic-rec-fail",
+    });
+    expect(await h.owned.getOrderForRead(created.orderId)).toMatchObject({
+      recordingId: "synthetic-rec-fail",
+      status: "ready_for_dispatch",
+    });
+  });
+
+  it.each(["pending", "failed"] as const)(
+    "recording %s ACK includes its required order-state write",
+    async (state) => {
+      const h = fixture();
+      const created = await h.owned.createCallCenterOrder({
+        ...phoneCommand(`synthetic-state-${state}`),
+        recordingId: "synthetic-start-rec",
+      });
+      const gate = h.hold("INSERT INTO ops.phase1_owned_orders");
+      let settled = false;
+      const operation =
+        state === "pending"
+          ? h.calls.markRecordingPendingForWrite.bind(h.calls)
+          : h.calls.markRecordingFailedForWrite.bind(h.calls);
+      const pending = Promise.resolve(operation(created.callId!)).then(
+        (result) => {
+          settled = true;
+          return result;
+        },
+      );
+      await h.entered.promise;
+      await Promise.resolve();
+      const early = settled;
+      gate.resolve();
+      await pending;
+      expect(early).toBe(false);
+      expect(await h.owned.getOrderForRead(created.orderId)).toMatchObject({
+        recordingId: null,
+        status: "recording_pending",
+        complianceFlags: [
+          state === "failed" ? "recording_missing" : "recording_pending",
+        ],
+      });
+      expect(
+        await h.calls.getCallSessionForRead(created.callId!),
+      ).toMatchObject({
+        recordingId: null,
+        recordingState: state === "failed" ? "missing" : "pending",
+      });
+    },
+  );
+
+  it("does not rebind a call to a second phone order", async () => {
+    const h = fixture();
+    const command = phoneCommand("synthetic-single-call");
+    const created = await h.owned.createCallCenterOrder(command);
+    await expect(
+      Promise.resolve(h.owned.createCallCenterOrder(command)),
+    ).rejects.toMatchObject({ code: "VOICE_ORDER_ALREADY_LINKED" });
+    expect(h.owned.listOrders()).toHaveLength(1);
+    expect(await h.calls.getCallSessionForRead(command.callId)).toMatchObject({
+      linkedOrderId: created.orderId,
+    });
+  });
+  it("rejected open does not publish a phantom session or successful audit", async () => {
+    const h = fixture();
+    const gate = h.hold("COMMIT");
+    const pending = h.controller.openCallSession({
+      callType: "booking",
+      callerPhone: "+886900000203",
+    });
+    const rejected = expect(pending).rejects.toThrow("synthetic open failure");
+    await h.entered.promise;
+    expect(h.calls.listCallSessions()).toEqual([]);
+    expect(h.auditWrite).not.toHaveBeenCalled();
+    gate.reject(new Error("synthetic open failure"));
+    await rejected;
+    expect(h.calls.listCallSessions()).toEqual([]);
+    expect([...h.rows.keys()]).toEqual([]);
+    expect(h.auditWrite).not.toHaveBeenCalled();
+  });
+
+  it("a cold peer opening another call preserves the first committed call identity and order link", async () => {
+    const h = fixture();
+    const first = await h.controller.openCallSession({
+      callType: "booking",
+      callerPhone: "+886900000203",
+    });
+    const order = await h.owned.createCallCenterOrder(
+      phoneCommand(first.data.callId),
+    );
+    const cold = new CallcenterService(
+      new AuditNotificationService(),
+      new CallcenterRepository(h.database as never),
+    );
+    const second = await cold.openCallSessionForWrite({
+      callType: "booking",
+      callerPhone: "+886900000204",
+    });
+    expect(second.callId).not.toBe(first.data.callId);
+    expect(await cold.getCallSessionForRead(first.data.callId)).toMatchObject({
+      linkedOrderId: order.orderId,
+      callerPhone: "+886900000203",
     });
   });
 });
