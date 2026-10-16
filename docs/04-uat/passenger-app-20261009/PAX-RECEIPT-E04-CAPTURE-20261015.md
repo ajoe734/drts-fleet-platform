@@ -283,3 +283,24 @@ published candidate `2868dbc109df79a88c3c51806c033e949d815033` remains intact
 while its remaining integration/browser jobs finish. The revision needs a new
 same-SHA review/CI cycle after normal push and handoff; neither acceptance key,
 merge nor shared-dev delivery is claimed by these local checks.
+
+### Original candidate CI finished before revision push
+
+Both original runs have now finished on
+`2868dbc109df79a88c3c51806c033e949d815033`; neither was cancelled to publish
+this repair. Run `38843863978` failed its root shard 4 as recorded above.
+Integration run `38843863970` also finished **failure**: shard 4 job
+`116793338084` has the identical two fixture reservation failures, 2640 passes
+and 2 skips. Its other unit shards, build, typecheck, lint, integration,
+dependency/IAM checks, cross-surface E2E and UI-route E2E passed.
+
+The original candidate's [three-journey browser job](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38843863970/job/116792018019)
+finished **success** at `2026-10-16T03:29:39Z`: the single browser scenario
+containing all three journeys passed (8.8 minutes), with the new E04 raw
+snapshot/readback/download assertions. Hosted Driver probes also passed 8/8.
+Artifact: `pax-review-shared-order-38843863970`, GitHub artifact ID
+`12022868242`. Logs `integration-shard4.log` and
+`original-three-journeys.log`, plus terminal `original-integration.json`, are
+preserved in the same local evidence directory. These results diagnose and
+bound the old candidate; the revised candidate still requires its own full
+CI, independent review, normal merge and same-version shared-dev acceptance.
