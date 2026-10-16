@@ -16,6 +16,7 @@ import { DEMO_ADDRESSES, isDemoMode } from "../../lib/demo/store";
 import { DEMO_T } from "../../lib/demo/translations";
 import { PAX_REVIEW_STOPS } from "@drts/api-client";
 import { useReviewDemo } from "../review-demo/review-context";
+import { CurrentLocationButton } from "./current-location-button";
 
 export interface BookingDraft {
   origin: AddressPayload | null;
@@ -115,21 +116,29 @@ export function BookingForm({
         {demo || review ? (
           demoAddress("origin")
         ) : (
-          <AddressMapPicker
-            id="booking-origin"
-            provider={provider}
-            surface="passenger_entry"
-            theme={theme}
-            labels={labels}
-            value={draft.origin}
-            onChange={(change) =>
-              onChange({
-                ...draft,
-                origin: change.dispatchReady ? change.address : null,
-              })
-            }
-            enableServiceabilityPreview={false}
-          />
+          <>
+            <CurrentLocationButton
+              value={draft.origin}
+              reverse={provider.reverse}
+              disabled={busy}
+              onSelect={(origin) => onChange({ ...draft, origin })}
+            />
+            <AddressMapPicker
+              id="booking-origin"
+              provider={provider}
+              surface="passenger_entry"
+              theme={theme}
+              labels={labels}
+              value={draft.origin}
+              onChange={(change) =>
+                onChange({
+                  ...draft,
+                  origin: change.dispatchReady ? change.address : null,
+                })
+              }
+              enableServiceabilityPreview={false}
+            />
+          </>
         )}
       </P5Card>
       <P5Card title={T.dropoff}>
