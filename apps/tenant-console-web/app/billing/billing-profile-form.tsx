@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+  type CSSProperties,
+} from "react";
 import { useRouter } from "next/navigation";
 import type {
   ResourceActionDescriptor,
@@ -73,7 +79,11 @@ export function BillingProfileForm(props: BillingProfileFormProps) {
   return <BillingProfileEditor key={resourceKey} {...props} />;
 }
 
-function BillingProfileEditor({ profile, descriptor, locale }: BillingProfileFormProps) {
+function BillingProfileEditor({
+  profile,
+  descriptor,
+  locale,
+}: BillingProfileFormProps) {
   const router = useRouter();
   const [values, setValues] = useState(() => profileValues(profile));
   const [savedProfile, setSavedProfile] = useState(profile);
@@ -84,7 +94,9 @@ function BillingProfileEditor({ profile, descriptor, locale }: BillingProfileFor
 
   useEffect(() => {
     active.current = true;
-    return () => { active.current = false; };
+    return () => {
+      active.current = false;
+    };
   }, []);
 
   return (
