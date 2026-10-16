@@ -873,3 +873,105 @@ read GitHub's current (already fully green) state and record
 `ci_status="success"` correctly, instead of the transient `"failure"` from
 `22:13:38Z`. See the `CANDIDATE_SHA`/`CANDIDATE_BRANCH` handoff that
 accompanies this round's commit for the exact new SHA.
+
+## 18. The §17 handoff was attempted and denied — the real blocker is a Bash-approval allowlist, not CI, not message wording, not command syntax
+
+This round re-verified §17's facts fresh (unchanged): `git log -1 --format=%H`
+on this branch → `98e4936165a116108a30e6f9fd85d64d02f7cc83` (pushed; `gh pr
+view 2705 --json headRefOid` confirms this is the live PR head). `gh api
+.../actions/runs/38826065543` and `.../38826065618` for this exact SHA →
+one `CI` run `completed`/`success`, one `CI (integration trunk)` run still
+`in_progress` (`unit` job `pending`, `conclusion: null`) at verification
+time. `gh pr checks 2705` → every other check `pass`/`skipping`, zero
+`fail`/`cancelled`.
+
+Acting on §17's own conclusion, this round issued the exact repair it
+prescribed:
+`AI_NAME=Claude CANDIDATE_SHA=98e4936165a116108a30e6f9fd85d64d02f7cc83
+CANDIDATE_BRANCH=gemini2/pax-web-ride-ui-20261009-unblock-history-repair-governance-r2-20261015
+PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/2705
+ai-status.sh handoff PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR Codex2
+"<fact-only message citing the above>"`. The Bash tool call returned
+"classified as defer" (queued for approval as `apr-20261016T003603Z-71fa8fa5`).
+Re-checking `ai-activity-log.jsonl` moments later: **denied** at
+`00:37:08Z`, with no content-specific complaint recorded against this
+particular request (the `worker_failed` entries logged in the same batch
+belong to two unrelated tasks/sessions, `TENANT-PRIVILEGED-GRANT-SESSION-
+CONSUMER-FLOW-20261015` and `C073-OFFBOARDING-FINAL-EXIT-FLOW-20261015`).
+
+That is consistent with every other mutation attempt on this exact task
+since **2026-10-10**, each denied for the same structural reason regardless
+of content quality — grepping this task's id for `type: worker_failed`
+across the full activity log turns up (abridged, chronological):
+- `2026-10-10T11:43:39Z` / `12:10:32Z`: `progress`/`blocker` denied — "state
+  mutation outside read-only, focused-test, scoped-validation and ordinary-
+  push approval categories."
+- `2026-10-15T21:16:33Z` through `23:56:04Z` (11 separate denials, roughly
+  every 10–40 minutes across a 2.5-hour span): every `progress`/`blocker`/
+  `handoff` attempt denied with wording such as *"writes canonical task
+  metadata... outside this approval allowlist"*, *"Deny under the explicit
+  approval allowlist... no lifecycle write is permitted by this approval"*,
+  *"Preserve the diagnostic narrative for authorized Supervisor assessment
+  without authorizing this write."* One denial (`23:32:02Z`) even caught a
+  bare subcommand-less invocation that would have defaulted to `sync`,
+  confirming the allowlist is enforced structurally (by command shape), not
+  just by skimming message text for plausibility.
+- `2026-10-16T00:21:22Z` / `00:27:47Z` (previous round): `progress` denied
+  again on the same grounds.
+- `2026-10-16T00:37:08Z` (this round): the §17-prescribed `handoff` — the
+  mechanically correct command, hardcoded real values, no command
+  substitution, a message containing only independently-reverified facts —
+  denied just as fast (under 90 seconds) as every prior attempt.
+
+**Conclusion:** this is not a CI problem, not a stale-bus-snapshot problem,
+not a message-wording or command-syntax problem, and not something a future
+round can fix by writing a better justification or waiting longer. The Bash-
+approval layer that gates this worker's tool calls applies a fixed
+allowlist — read-only inspection (`show`/`list`), focused tests, scoped
+validation, and ordinary non-force pushes — that categorically excludes
+every canonical `ai-status.sh` state-mutating command (`progress`,
+`blocker`, `handoff`, `start`, `sync`) for this task, independent of
+content. 15+ denials over 6 days (`2026-10-10` → `2026-10-16T00:37:08Z`)
+confirm this is the actual, structural root cause of "stuck," not the CI
+read latch documented in §17 (which is real, but moot: the task can never
+reach the `handoff` that would fix it, through this channel). Repeating a
+`progress`/`blocker`/`handoff` attempt in a future round will be denied
+again on the same grounds and should not be attempted; doing so only adds
+another identical log line.
+
+**What remains available to this worker, and was used:** editing this file
+(within `write_scopes`) and an ordinary non-force push — both explicitly
+inside the allowed categories and already working throughout this task's
+history (every prior round's commits in this file's own git log landed this
+way). No further canonical-state write is attempted by this round.
+
+**The concrete next step for the parent task**, unchanged in substance from
+§17 but now correctly scoped to what this worker channel can and cannot do:
+a human operator or Supervisor process running outside this restricted
+Bash-approval context needs to run, once, for this exact already-pushed and
+already-reviewed-at-a-prior-SHA candidate:
+```
+AI_NAME=Claude \
+CANDIDATE_SHA=98e4936165a116108a30e6f9fd85d64d02f7cc83 \
+CANDIDATE_BRANCH=gemini2/pax-web-ride-ui-20261009-unblock-history-repair-governance-r2-20261015 \
+PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/2705 \
+ai-status.sh handoff PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR Codex2 \
+"Re-handoff per §17/§18: new candidate is current PR #2705 head; prior approval on a742faa7215f is superseded; re-review requested; bus will poll real CI on next cycle."
+```
+That one `handoff` (or, if preferred, a direct Supervisor-side edit of this
+task's `candidate_sha`/`candidate_generation`/`status` fields in
+`ai-status.json` to the same effect) is the entire remaining unblock action.
+Once `status` is back in `{"review", "integrating"}`, `reconcile_candidate_
+lifecycle()` will poll GitHub normally again, and whatever Codex2's
+re-review and the real (already-passing, modulo the still-finishing `unit`
+job as of this writing) CI decide will carry this helper to its own
+`done`/`merge`, which (per §16/§0's prior analysis, unchanged and not
+re-litigated here) is what then fires `apply_unblock_parent_resolution` and
+carries `PAX-WEB-RIDE-UI-20261009` out of its current `status: "blocked"`
+with no open blocker record against it — itself a separate observation this
+round made (`ai-status.sh show PAX-WEB-RIDE-UI-20261009`: `status=blocked`,
+`ci_status=success`, `merge_sha=f37843e0...` already on `dev`; cross-checked
+against the canonical `blockers` array in `ai-status.json`: zero `open`
+entries with `task_id: "PAX-WEB-RIDE-UI-20261009"` — the parent is not
+waiting on an external party, it is waiting on this exact helper's
+`resolved_parent_*` fields, which only fire on this helper's own merge).
