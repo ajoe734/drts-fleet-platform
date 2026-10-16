@@ -1,13 +1,13 @@
 import type {
   CreatePlatformNoticeCommand,
   PlatformMaintenanceModeRecord,
-  PlatformNoticeRecord,
   ResourceActionDescriptor,
   SetPlatformMaintenanceModeCommand,
 } from "@drts/contracts";
 
 import type { AuditedActionResult } from "../../common/action-receipt";
 import type { PlatformAdminService } from "../platform-admin/platform-admin.service";
+import type { CanonicalNotice } from "../platform-admin/platform-notice-lifecycle";
 import type {
   PlatformAdminAssistantActionCommand,
   PlatformAdminAssistantActionToolName,
@@ -28,7 +28,7 @@ export interface PlatformAdminAssistantResolvedAction {
   execute(
     service: PlatformAdminService,
     requestId?: string,
-  ): AuditedActionResult<PlatformNoticeRecord | PlatformMaintenanceModeRecord>;
+  ): AuditedActionResult<CanonicalNotice | PlatformMaintenanceModeRecord>;
 }
 
 export function resolvePlatformAdminAssistantAction(
