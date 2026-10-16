@@ -221,10 +221,16 @@ export async function standardAddressJourney(
               `/api/passenger-app/rides/${orderId}/cancel` &&
             response.request().method() === "POST",
         );
-        await pax
+        const confirmation = pax.waitForEvent("dialog");
+        const clicked = pax
           .getByRole("button", { name: "取消行程", exact: true })
           .first()
           .click();
+        const dialog = await confirmation;
+        expect(dialog.type()).toBe("confirm");
+        expect(dialog.message()).toBe("確定要取消這趟行程嗎？");
+        await dialog.accept();
+        await clicked;
         expect((await cancelled).status()).toBe(201);
         expect((await authority(pax, orderId)).order.status).toBe("cancelled");
         await opsRead(ops, orderId);
