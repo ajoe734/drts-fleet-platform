@@ -643,6 +643,39 @@ def candidate_is_locked(task: dict[str, Any]) -> bool:
     return bool(candidate_sha and (candidate_sha == "not_applicable" or git_commit_exists(candidate_sha)))
 
 
+def candidate_review_handoff_is_current(task: dict[str, Any]) -> bool:
+    """CI recovery may restore an owner handoff, never create one.
+
+    New handoffs retain their exact identity independently of bounded worker
+    receipts. Legacy candidates (including C073) already have transactional
+    owner handoff receipts; a CI failure only completed their routing entries,
+    not that same-generation source handoff. An explicit invalidation marker
+    must not fall back to those older receipts.
+    """
+    identity = {key: task.get(key) for key in (
+        "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation"
+    )}
+    if any(not isinstance(value, str) or not value.strip() for value in identity.values()):
+        return False
+    if identity["owner"] == identity["reviewer"] or task.get("reviewed_sha"):
+        return False
+    if "candidate_review_handoff" in task:
+        return task["candidate_review_handoff"] == identity
+    receipts = task.get("worker_outcomes") or {}
+    if not isinstance(receipts, dict):
+        return False
+    return any(
+        isinstance(receipt, dict)
+        and receipt.get("command") == "handoff"
+        and receipt.get("outcome") == "advanced"
+        and receipt.get("role") == "owner"
+        and receipt.get("agent") == identity["owner"]
+        and receipt.get("candidate_sha") == identity["candidate_sha"]
+        and receipt.get("candidate_generation") == identity["candidate_generation"]
+        for receipt in receipts.values()
+    )
+
+
 def clear_candidate_evidence(task: dict[str, Any], *, preserve_failed_sha: bool = False) -> None:
     request = task.get("acceptance_review_request")
     if request is not None and (not isinstance(request, dict) or request.get("state") not in ("declined", "reopened")):
@@ -653,6 +686,7 @@ def clear_candidate_evidence(task: dict[str, Any], *, preserve_failed_sha: bool 
     for key in (
         "candidate_sha",
         "candidate_branch",
+        "candidate_review_handoff",
         "reviewed_sha",
         "ci_sha",
         "ci_status",
@@ -1969,6 +2003,9 @@ def command_start(state: dict[str, Any], args: list[str]) -> None:
             "record-acceptance for evidence, or an explicit reviewer reopen for code changes"
         )
     timestamp = iso_now()
+    if task.get("candidate_sha"):
+        # Explicit owner work requires a fresh handoff, even at the same SHA.
+        task["candidate_review_handoff"] = None
     task["status"] = "in_progress"
     task["last_update"] = timestamp
     task["next"] = message
@@ -2164,6 +2201,9 @@ def command_handoff(state: dict[str, Any], args: list[str]) -> None:
     task["candidate_generation"] = uuid.uuid4().hex
     task["candidate_sha"] = candidate_sha
     task["candidate_branch"] = candidate_branch
+    task["candidate_review_handoff"] = {key: task[key] for key in (
+        "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation"
+    )}
     pr_url = os.environ.get("PR_URL", "").strip()
     if pr_url:
         task["pr_url"] = pr_url
@@ -2366,6 +2406,9 @@ def command_reconcile_candidate(state: dict[str, Any], args: list[str]) -> None:
         )
         return
 
+    observed_branch = os.environ.get("CANDIDATE_BRANCH", "").strip()
+    if observed_branch and task.get("candidate_branch") and task["candidate_branch"] != observed_branch:
+        raise SystemExit("CANDIDATE_BRANCH must match the frozen handoff branch")
     for env_name, key in (("PR_URL", "pr_url"), ("CANDIDATE_BRANCH", "candidate_branch"), ("CI_RUN_URL", "ci_run_url")):
         value = os.environ.get(env_name, "").strip()
         if value:
@@ -2379,14 +2422,27 @@ def command_reconcile_candidate(state: dict[str, Any], args: list[str]) -> None:
         task["next"] = args[1] if len(args) > 1 else f"Candidate {candidate_sha[:12]} is ready for reviewer evidence."
     elif ci_status in {"failure", "merge_conflict", "closed"}:
         task["status"] = "in_progress"
+        if ci_status in {"merge_conflict", "closed"}:
+            # Unlike retryable CI, these observations require owner repair.
+            task["candidate_review_handoff"] = None
         task["last_update"] = timestamp
         task["next"] = args[1] if len(args) > 1 else f"Candidate CI {ci_status}; owner must repair and hand off a new candidate."
         mark_handoffs_done(state, task_id)
+    elif task.get("status") == "blocked":
+        # CI/merge observations cannot resume an explicitly blocked task.
+        pass
     elif merge_sha:
         if task.get("reviewed_sha") != candidate_sha:
-            task["status"] = "review"
+            owner_continuation = (
+                task.get("status") == "in_progress" or "candidate_review_handoff" in task
+            ) and not candidate_review_handoff_is_current(task)
+            task["status"] = "in_progress" if owner_continuation else "review"
             task["last_update"] = timestamp
-            task["next"] = f"Merged candidate {candidate_sha[:12]} still requires independent same-SHA reviewer approval."
+            task["next"] = (
+                f"Merged candidate {candidate_sha[:12]} requires owner continuation and a fresh review handoff."
+                if owner_continuation else
+                f"Merged candidate {candidate_sha[:12]} still requires independent same-SHA reviewer approval."
+            )
             append_log({"ts": timestamp, "agent": current_actor("Supervisor"),
                         "type": "candidate_review_required", "task_id": task_id,
                         "candidate_sha": candidate_sha, "message": task["next"]})
@@ -2400,7 +2456,20 @@ def command_reconcile_candidate(state: dict[str, Any], args: list[str]) -> None:
             message=args[1] if len(args) > 1 else f"Candidate {candidate_sha[:12]} merged as {merge_sha[:12]}.",
             timestamp=timestamp,
         )
-    else:
+    elif task.get("status") in {"in_progress", "integrating"} and task.get("reviewed_sha") != candidate_sha:
+        # Positive CI is not approval. Restore the original review route only
+        # while its owner handoff still describes this exact generation.
+        task["status"] = "review" if (
+            task.get("ci_status") in {"queued", "running", "success"}
+            and candidate_review_handoff_is_current(task)
+        ) else "in_progress"
+        task["last_update"] = timestamp
+        task["next"] = (
+            f"Candidate {candidate_sha[:12]} still requires independent same-SHA reviewer approval."
+            if task["status"] == "review" else
+            f"Candidate {candidate_sha[:12]} requires owner continuation and a fresh review handoff."
+        )
+    elif task.get("status") in {"in_progress", "integrating"}:
         task["status"] = "integrating"
         task["last_update"] = timestamp
         task["next"] = args[1] if len(args) > 1 else f"Candidate {candidate_sha[:12]} is awaiting same-SHA CI/merge evidence."
