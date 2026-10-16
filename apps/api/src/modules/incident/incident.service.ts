@@ -487,6 +487,24 @@ export class IncidentService implements OnModuleInit {
       };
     }
     if (incident.assignedTo === owner) {
+      // This ownership may already be set only in memory by a
+      // fire-and-forget writer (e.g. the generic updateIncident path) whose
+      // own durable write is still pending or has already failed. Re-confirm
+      // durability here instead of trusting the in-memory value, so this
+      // call never reports a win the database did not actually accept (F1).
+      if (this.incidentRepository) {
+        try {
+          await this.incidentRepository.persistChanges({
+            incidents: [this.cloneIncident(incident)],
+          });
+        } catch (error) {
+          this.incidentRepository.reportPersistenceFailure(
+            error,
+            "assign_incident_owner_durable_confirm",
+          );
+          return { accepted: false, currentOwner: owner, wasNewClaim: false };
+        }
+      }
       return { accepted: true, currentOwner: owner, wasNewClaim: false };
     }
 
@@ -524,10 +542,25 @@ export class IncidentService implements OnModuleInit {
           error,
           "assign_incident_owner_durable",
         );
-        // Roll back: the claim never durably happened, so it never truly
-        // won. A fresh call (replay) can re-attempt it from this same
-        // prior state.
-        this.replace(incident);
+        // Roll back only the assignedTo claim this call made. Re-read the
+        // current state first so an unrelated concurrent mutation (e.g. a
+        // status change landed by another caller while this write was in
+        // flight) is preserved rather than clobbered by restoring the
+        // entire pre-claim snapshot captured before this method's first
+        // await (F5).
+        const current = this.require(incidentId);
+        if (current.assignedTo === owner) {
+          this.replace(
+            this.decorateIncident(
+              {
+                ...current,
+                assignedTo: null,
+                updatedAt: new Date().toISOString(),
+              },
+              identity,
+            ),
+          );
+        }
         this.timelines.set(
           incidentId,
           (this.timelines.get(incidentId) ?? []).filter(
@@ -536,7 +569,7 @@ export class IncidentService implements OnModuleInit {
         );
         return {
           accepted: false,
-          currentOwner: incident.assignedTo,
+          currentOwner: current.assignedTo === owner ? null : current.assignedTo,
           wasNewClaim: false,
         };
       }
@@ -588,7 +621,22 @@ export class IncidentService implements OnModuleInit {
     };
     const decorated = this.decorateIncident(reverted, identity);
     this.replace(decorated);
-    this.persist({ incidents: [decorated] }, "release_incident_owner_claim");
+    if (this.incidentRepository) {
+      try {
+        await this.incidentRepository.persistChanges({
+          incidents: [this.cloneIncident(decorated)],
+        });
+      } catch (error) {
+        // Best-effort durable compensation: the in-memory claim is already
+        // released, and the next handover attempt (fresh claim or repair)
+        // retries this write. Report it instead of silently fire-and-forget
+        // so a persistent failure here is visible, not just assumed (F1).
+        this.incidentRepository.reportPersistenceFailure(
+          error,
+          "release_incident_owner_claim",
+        );
+      }
+    }
   }
 
   /** Both controller entrances must validate, commit the complaint side and

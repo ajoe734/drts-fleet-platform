@@ -893,3 +893,316 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R5 repair: F4 authoritati
     expect(readback.event.status).toBe("closed");
   });
 });
+
+describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R6 repair: F1 durable confirmation of an already-equal owner", () => {
+  it("F1: acknowledgeDuty fails honestly instead of claiming a win when the Incident's existing in-memory ownership was never durably confirmed", async () => {
+    let persistCallCount = 0;
+    const mockIncidentRepository = {
+      isEnabled: () => true,
+      persistChanges: async () => {
+        persistCallCount += 1;
+        throw new Error("simulated incident persistence failure");
+      },
+      reportPersistenceFailure: () => {},
+    } as unknown as IncidentRepository;
+
+    const auditService = new AuditNotificationService();
+    const incidentService = new IncidentService(
+      auditService,
+      mockIncidentRepository,
+    );
+    const driverSosService = new DriverSosService(auditService, incidentService);
+    const sos = await submitSos(
+      driverSosService,
+      "99999999-ffff-4fff-8fff-ffffffffffff",
+    );
+    const opsDirect = buildOpsIdentity("ops-direct");
+
+    // The real reachable generic caller: PATCH /api/incidents/:id ->
+    // updateIncident, whose own persistence is fire-and-forget and has
+    // already failed asynchronously by the time acknowledgeDuty runs for
+    // the same actor -- the in-memory assignedTo is set, but was never
+    // durably confirmed.
+    incidentService.updateIncident(
+      sos.receipt.incidentId,
+      { assignedTo: opsDirect.actorId as string },
+      undefined,
+      opsDirect,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(persistCallCount).toBeGreaterThan(0);
+
+    let ackError: unknown;
+    try {
+      await driverSosService.acknowledgeDuty(
+        sos.event.sosEventId,
+        {},
+        opsDirect,
+      );
+    } catch (error) {
+      ackError = error;
+    }
+    expect((ackError as { code?: string })?.code).toBe(
+      "INCIDENT_HANDOVER_UNAVAILABLE",
+    );
+
+    const eventAfter = await driverSosService.getEventForOps(
+      sos.event.sosEventId,
+      opsDirect,
+    );
+    expect(
+      eventAfter.event.dutyAcknowledgement.acknowledgedByActorId,
+    ).toBeNull();
+  });
+});
+
+describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R6 repair: F5 rejected claim preserves a concurrent unrelated Incident update", () => {
+  it("F5: rolling back a rejected fresh Incident claim does not erase a status change that landed on the Incident while the claim write was in flight", async () => {
+    const persistDeferred = createDeferred<void>();
+    let persistCallCount = 0;
+    const mockIncidentRepository = {
+      isEnabled: () => true,
+      persistChanges: async () => {
+        persistCallCount += 1;
+        if (persistCallCount === 1) {
+          await persistDeferred.promise;
+          throw new Error("simulated incident persistence failure");
+        }
+        return undefined;
+      },
+      reportPersistenceFailure: () => {},
+    } as unknown as IncidentRepository;
+
+    const auditService = new AuditNotificationService();
+    const incidentService = new IncidentService(
+      auditService,
+      mockIncidentRepository,
+    );
+    const driverSosService = new DriverSosService(auditService, incidentService);
+    const sos = await submitSos(
+      driverSosService,
+      "aaaaaaaa-0000-4000-8000-000000000001",
+    );
+    const opsIdentity = buildOpsIdentity("ops-f5-claim");
+
+    const ackCall = driverSosService.acknowledgeDuty(
+      sos.event.sosEventId,
+      {},
+      opsIdentity,
+    );
+    // Let the ack call reach (and block inside) its await on the held-open
+    // fresh Incident claim write -- the claim itself already committed
+    // synchronously before this point.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // An unrelated concurrent status update lands on the Incident while
+    // the claim's durability confirmation is still in flight.
+    incidentService.updateIncident(
+      sos.receipt.incidentId,
+      { status: "investigating" },
+      undefined,
+      opsIdentity,
+    );
+    expect(
+      incidentService.getIncident(sos.receipt.incidentId).status,
+    ).toBe("investigating");
+
+    persistDeferred.resolve();
+    await expect(ackCall).rejects.toThrow();
+
+    const incidentAfter = incidentService.getIncident(sos.receipt.incidentId);
+    // The rejected claim's own assignedTo write must be rolled back...
+    expect(incidentAfter.assignedTo).toBeNull();
+    // ...but the concurrent status change must survive, not be clobbered
+    // by restoring the entire pre-claim snapshot captured before this
+    // method's first await.
+    expect(incidentAfter.status).toBe("investigating");
+  });
+});
+
+describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R6 repair: F1 competing-instance convergence releases a losing fresh claim", () => {
+  it("F1 competing-instance: a losing SOS-side CAS result releases this call's own fresh Incident claim so the real winner can durably converge", async () => {
+    const mockVerificationRepository = {
+      isEnabled: () => true,
+      persistDutyAcknowledgement: async () => ({
+        accepted: false,
+        acknowledgedByActorId: "ops-db-winner",
+        acknowledgedAt: "2026-10-16T00:00:00.000Z",
+      }),
+    } as unknown as DriverSosVerificationRepository;
+
+    const { driverSosService, incidentService } = setupService(
+      mockVerificationRepository,
+    );
+    const sos = await submitSos(
+      driverSosService,
+      "bbbbbbbb-0000-4000-8000-000000000002",
+    );
+    const localOps = buildOpsIdentity("ops-local-claim");
+
+    const ack = await driverSosService.acknowledgeDuty(
+      sos.event.sosEventId,
+      {},
+      localOps,
+    );
+
+    expect(ack.wonAcknowledgement).toBe(false);
+    expect(ack.dutyAcknowledgement.acknowledgedByActorId).toBe(
+      "ops-db-winner",
+    );
+
+    // Before this fix, the just-created local claim ("ops-local-claim")
+    // was never released, so repairIncidentHandover's attempt to assign
+    // the real winner was discarded as a conflict and the Incident stayed
+    // durably assigned to a loser that never actually won the SOS CAS.
+    const incidentAfter = incidentService.getIncident(sos.receipt.incidentId);
+    expect(incidentAfter.assignedTo).toBe("ops-db-winner");
+  });
+});
+
+describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R6 repair: F2 render application never clobbers a concurrent acknowledgment", () => {
+  it("F2: a render observation that resolves after a concurrent acknowledgment completes does not erase the ack or duplicate its timeline on replay", async () => {
+    const renderDeferred = createDeferred<{
+      sosEventId: string;
+      incidentId: string;
+      eventNo: string;
+      fleetReportConfirmedAt: string;
+      opsAlertRenderedAt: string;
+      opsAlertReceiptRecordedAt: string;
+      alertToOpsLatencyMs: number;
+      duplicate: boolean;
+      dutyAlertApplied: boolean;
+    }>();
+    const mockVerificationRepository = {
+      isEnabled: () => true,
+      persistAlertObservation: async () => renderDeferred.promise,
+      persistDutyAcknowledgement: async (event: {
+        dutyAcknowledgement: {
+          acknowledgedByActorId: string | null;
+          acknowledgedAt: string | null;
+        };
+      }) => ({
+        accepted: true,
+        acknowledgedByActorId: event.dutyAcknowledgement.acknowledgedByActorId!,
+        acknowledgedAt: event.dutyAcknowledgement.acknowledgedAt!,
+      }),
+    } as unknown as DriverSosVerificationRepository;
+
+    const { driverSosService } = setupService(mockVerificationRepository);
+    const sos = await submitSos(
+      driverSosService,
+      "cccccccc-0000-4000-8000-000000000003",
+    );
+    const opsIdentity = buildOpsIdentity("ops-render-race");
+
+    const renderedAt = new Date(
+      Date.parse(sos.receipt.fleetReportConfirmedAt) + 1_000,
+    ).toISOString();
+    const renderCall = driverSosService.recordOpsAlertsRendered(
+      { incidentIds: [sos.receipt.incidentId], renderedAt },
+      opsIdentity,
+    );
+    // Let the render call reach (and block inside) its await on the
+    // held-open external persistence completion.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const ack = await driverSosService.acknowledgeDuty(
+      sos.event.sosEventId,
+      {},
+      opsIdentity,
+    );
+    expect(ack.wonAcknowledgement).toBe(true);
+
+    // The render's delayed response now resolves, after the ack already
+    // committed -- a legitimate ordering since the render's commit can
+    // precede the ack while its own response completes after it.
+    renderDeferred.resolve({
+      sosEventId: sos.event.sosEventId,
+      incidentId: sos.receipt.incidentId,
+      eventNo: sos.event.eventNo,
+      fleetReportConfirmedAt: sos.receipt.fleetReportConfirmedAt,
+      opsAlertRenderedAt: renderedAt,
+      opsAlertReceiptRecordedAt: new Date().toISOString(),
+      alertToOpsLatencyMs: 1000,
+      duplicate: false,
+      dutyAlertApplied: true,
+    });
+    await renderCall;
+
+    const readback = await driverSosService.getEventForOps(
+      sos.event.sosEventId,
+      opsIdentity,
+    );
+    expect(readback.event.dutyAcknowledgement.acknowledgedByActorId).toBe(
+      opsIdentity.actorId,
+    );
+    expect(readback.event.status).toBe("acknowledged");
+    expect(
+      readback.timeline.filter(
+        (entry) => entry.eventType === "duty_acknowledged",
+      ),
+    ).toHaveLength(1);
+
+    // A replay must not create a second local duty timeline either.
+    const replay = await driverSosService.acknowledgeDuty(
+      sos.event.sosEventId,
+      {},
+      opsIdentity,
+    );
+    expect(replay.wonAcknowledgement).toBe(true);
+    expect(
+      replay.timeline.filter(
+        (entry) => entry.eventType === "duty_acknowledged",
+      ),
+    ).toHaveLength(1);
+  });
+});
+
+describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R6 repair: F2 progression never regresses on duty acknowledgment", () => {
+  it("F2 progression: acknowledging duty after the Incident has already progressed to investigating does not move the SOS event's status backward", async () => {
+    const { driverSosService, incidentService } = setupService();
+    const sos = await submitSos(
+      driverSosService,
+      "dddddddd-0000-4000-8000-000000000004",
+    );
+    const opsIdentity = buildOpsIdentity("ops-progress-regression");
+
+    incidentService.updateIncident(
+      sos.receipt.incidentId,
+      { status: "investigating" },
+      undefined,
+      opsIdentity,
+    );
+    // Reconcile the Incident's progression onto the SOS event before duty
+    // acknowledgment ever happens -- the real reachable order a late/slow
+    // Ops caller can hit.
+    const beforeAck = await driverSosService.getEventForOps(
+      sos.event.sosEventId,
+      opsIdentity,
+    );
+    expect(beforeAck.event.status).toBe("investigating");
+
+    const ack = await driverSosService.acknowledgeDuty(
+      sos.event.sosEventId,
+      {},
+      opsIdentity,
+    );
+    expect(ack.wonAcknowledgement).toBe(true);
+    expect(ack.dutyAcknowledgement.acknowledgedByActorId).toBe(
+      opsIdentity.actorId,
+    );
+    expect(ack.event.status).toBe("investigating");
+
+    const afterAck = await driverSosService.getEventForOps(
+      sos.event.sosEventId,
+      opsIdentity,
+    );
+    expect(afterAck.event.status).toBe("investigating");
+    expect(afterAck.event.dutyAcknowledgement.acknowledgedByActorId).toBe(
+      opsIdentity.actorId,
+    );
+  });
+});

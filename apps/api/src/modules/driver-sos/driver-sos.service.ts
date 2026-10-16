@@ -694,8 +694,25 @@ export class DriverSosService implements OnModuleInit {
       if (!persistedObservation.duplicate) {
         this.appendTimeline(timeline);
         if (persistedObservation.dutyAlertApplied && dutyAlertPlan) {
-          this.replaceEvent(dutyAlertPlan.event);
-          this.appendTimeline(dutyAlertPlan.timeline);
+          // `dutyAlertPlan.event` was built from a snapshot captured before
+          // the `persistAlertObservation` await above, so a concurrent
+          // acknowledgeDuty (or any other event mutation) can have landed
+          // in the meantime. Apply this transition inside the same
+          // per-event mutation lock acknowledgeDuty uses, and re-check the
+          // event's live status at that point instead of trusting the
+          // stale pre-await snapshot -- a render response that resolves
+          // after a concurrent ACK must never erase that ACK (F2).
+          await this.withEventMutationLock(outbox.sosEventId, async () => {
+            const liveEvent = this.eventById.get(outbox.sosEventId);
+            if (liveEvent && liveEvent.status === "submitted") {
+              this.replaceEvent({
+                ...liveEvent,
+                status: "duty_alerted",
+                updatedAt: renderedAt,
+              });
+              this.appendTimeline(dutyAlertPlan.timeline);
+            }
+          });
         }
       }
       observations.push(persistedObservation);
@@ -832,7 +849,17 @@ export class DriverSosService implements OnModuleInit {
           requestId,
           identity,
         );
-        if (!claim.accepted && claim.currentOwner === null) {
+        // `accepted: false` means either a genuine conflict (someone else
+        // durably owns it -- currentOwner is that other owner) or this
+        // call's own claim/confirm could not be durably confirmed
+        // (currentOwner is null or still actorId). Only the former is a
+        // truthful "different current owner"; the latter must not let this
+        // call fabricate a successful SOS ack on top of unknown durability
+        // (F1).
+        if (
+          !claim.accepted &&
+          (claim.currentOwner === null || claim.currentOwner === actorId)
+        ) {
           throw new ApiRequestError(
             HttpStatus.SERVICE_UNAVAILABLE,
             "INCIDENT_HANDOVER_UNAVAILABLE",
@@ -858,9 +885,19 @@ export class DriverSosService implements OnModuleInit {
           note,
         },
       );
+      // Filling the duty snapshot must never move an already-progressed
+      // event (investigating/resolved/closed) backward to "acknowledged" --
+      // only advance status when the event has not yet reached that rank
+      // (F2 progression).
+      const preAckRank = DriverSosService.SOS_PROGRESS_RANK[event.status];
+      const nextStatus: DriverSosStatus =
+        preAckRank !== undefined &&
+        preAckRank < DriverSosService.SOS_PROGRESS_RANK.acknowledged!
+          ? "acknowledged"
+          : event.status;
       const updatedEvent: DriverSosEventRecord = {
         ...event,
-        status: "acknowledged",
+        status: nextStatus,
         dutyAcknowledgement: {
           acknowledgedAt: now,
           acknowledgedByActorId: incidentOwner,
@@ -902,6 +939,20 @@ export class DriverSosService implements OnModuleInit {
       // (`finalOwner`) disagree with it, in which case converge the
       // Incident onto that real final truth too.
       if (finalOwner !== incidentOwner) {
+        if (claimedFreshIncidentOwnership && incidentId) {
+          // This call's own fresh Incident claim lost the real SOS-side CAS
+          // race to finalOwner. Release it first so the Incident is not left
+          // durably assigned to a loser that never actually won -- otherwise
+          // the repair below would see the Incident still assigned to this
+          // call's actorId and discard the real winner's convergence (F1
+          // competing-instance).
+          await this.incidentService.releaseIncidentOwnerClaim(
+            incidentId,
+            incidentOwner,
+            requestId,
+            identity,
+          );
+        }
         await this.repairIncidentHandover(
           event.incidentId,
           finalOwner,
@@ -921,7 +972,7 @@ export class DriverSosService implements OnModuleInit {
             ? hydrated
             : {
                 ...event,
-                status: "acknowledged" as const,
+                status: nextStatus,
                 dutyAcknowledgement: {
                   acknowledgedAt: finalAcknowledgedAt,
                   acknowledgedByActorId: finalOwner,
