@@ -1247,11 +1247,11 @@ def _is_safe_status_sync_command(shell_command: str, *, cwd: Path | None = None)
     remaining = parts[index:]
     if not remaining:
         return False
-    name = "ai-status.sh"
     if remaining[0] in {"python3", "bash"}:
-        name = "ai_status.py" if remaining[0] == "python3" else name
-        remaining = remaining[1:]
-    return bool(remaining and _matches_status_script(remaining[0], name, cwd or worker_cwd()))
+        name = "ai_status.py" if remaining[0] == "python3" else "ai-status.sh"
+        return len(remaining) > 1 and _matches_status_script(remaining[1], name, cwd or worker_cwd())
+    return any(_matches_status_script(remaining[0], name, cwd or worker_cwd())
+               for name in ("ai-status.sh", "ai_status.py"))
 
 
 def _classify_status_command(shell_command: str, *, _depth: int) -> str:

@@ -65,7 +65,8 @@ class LoadedRuntimeStatusCliTests(unittest.TestCase):
         return [form for directory in (self.canonical / self.relative_bin, self.loaded / "bin")
                 for form in (shlex.quote(str(directory / "ai-status.sh")),
                              "bash " + shlex.quote(str(directory / "ai-status.sh")),
-                             "python3 " + shlex.quote(str(directory / "ai_status.py")))]
+                             "python3 " + shlex.quote(str(directory / "ai_status.py")),
+                             shlex.quote(str(directory / "ai_status.py")))]
 
     def test_loaded_and_canonical_entrypoints_with_literal_wrappers(self) -> None:
         for entrypoint in self.forms() + ["./tools/development-orchestrator/bin/ai-status.sh",
@@ -183,7 +184,7 @@ class LoadedRuntimeStatusCliTests(unittest.TestCase):
             self.assertEqual(self.broker.classify_command("python3 " + fake + " show TEST-001"), "defer")
 
     def test_recognition_keeps_existing_denial_and_pending_approval_binding(self) -> None:
-        command = self.forms()[3] + " show TEST-001"
+        command = self.forms()[4] + " show TEST-001"
         self.assertEqual(self.broker.classify_command(command), "allow")
         for event in ("PreToolUse", "PermissionRequest"):
             for pending, history in ((None, {"approval_id": "denied-status", "decision": "deny", "note": "Original refusal"}),
@@ -249,7 +250,7 @@ class LoadedRuntimeStatusCliTests(unittest.TestCase):
                 status.write_text(json.dumps(state))
                 before = status.read_bytes()
                 supplied = {**env, **changes}
-                invocation = ("AI_NAME=" + supplied["AI_NAME"] + " " + self.forms()[3]
+                invocation = ("AI_NAME=" + supplied["AI_NAME"] + " " + self.forms()[4]
                               + " decline-acceptance-review " + shlex.join(attempted_args))
                 self.assertEqual(self.broker.classify_command(invocation), "allow")
                 result = run_task_board_command({"paths": {"status_file": str(status)}},
