@@ -6,7 +6,7 @@ import type {
   FleetTrainingSummaryRow,
 } from "@drts/contracts";
 
-import { getServerFleetPartnerClient } from "./api-client.server";
+import { getServerFleetTrainingClient } from "./academy-api.server";
 
 export type DataSource = "live" | "fallback";
 
@@ -32,16 +32,20 @@ export function isConfigError(err: unknown): boolean {
 /**
  * Server data loader for the Fleet Partner Training dashboard.
  *
- * Calls the authoritative backend routes via `@drts/api-client`:
+ * Calls the authoritative backend routes via the C071-local training client
+ * (`getServerFleetTrainingClient()`):
  * - `getFleetTrainingSummary()` -> `/api/fleet-partner/training/summary`
  * - `listFleetDriverRoster()` -> `/api/fleet-partner/training/roster`
  *
- * Falls back gracefully to zero/empty data when backend is unreachable,
- * without injecting fabricated percentages or mock fixtures.
+ * Adopts the existing verified principal (tenant realm derives canonical
+ * `fleetPartnerId` from `tenantId`; authorized non-tenant context passes
+ * explicit canonical `?fleetPartnerId=<id>`). Falls back gracefully to
+ * unavailable state when backend rejects or is unreachable, without injecting
+ * fabricated percentages or mock fixtures.
  */
 export async function loadFleetTraining(): Promise<FleetTrainingData> {
   try {
-    const { client } = await getServerFleetPartnerClient();
+    const { client } = await getServerFleetTrainingClient();
     const [summaryResult, rosterResult] = await Promise.all([
       client.getFleetTrainingSummary(),
       client.listFleetDriverRoster(),
@@ -88,7 +92,7 @@ export async function loadFleetDriverQuizAttempt(
   attemptId: string,
 ): Promise<DriverQuizAttemptDetail | null> {
   try {
-    const { client } = await getServerFleetPartnerClient();
+    const { client } = await getServerFleetTrainingClient();
     return await client.getFleetDriverQuizAttempt(driverId, attemptId);
   } catch (err) {
     if (isConfigError(err)) {

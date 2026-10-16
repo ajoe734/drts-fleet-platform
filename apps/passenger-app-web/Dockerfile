@@ -17,6 +17,7 @@ FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY packages/ packages/
 COPY apps/passenger-app-web/package.json apps/passenger-app-web/
+COPY apps/driver-app/package.json apps/driver-app/
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 
@@ -24,7 +25,13 @@ FROM deps AS build
 ARG DRTS_CANDIDATE_SHA
 ENV DRTS_CANDIDATE_SHA=$DRTS_CANDIDATE_SHA
 COPY apps/passenger-app-web/ apps/passenger-app-web/
+COPY apps/driver-app/ apps/driver-app/
 COPY tsconfig.base.json .
+RUN EXPO_PUBLIC_API_URL=/api/review-driver-api \
+    EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH=/review-driver \
+    pnpm --filter @drts/driver-app exec expo export --platform web --output-dir dist && \
+    mkdir -p apps/passenger-app-web/public/review-driver && \
+    cp -R apps/driver-app/dist/. apps/passenger-app-web/public/review-driver/
 RUN mkdir -p apps/passenger-app-web/public && \
     pnpm --filter @drts/contracts build && \
     pnpm --filter @drts/ui-tokens build && \

@@ -1,3 +1,4 @@
+import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
 import { createHash } from "node:crypto";
 import { buildOrderFixture } from "../integration/voice-order-fixture";
 
@@ -200,27 +201,9 @@ function createOwnedMobilityService(options?: {
       options.serviceProductOverrides as never,
     );
   }
-  const callcenterService = {
-    registerRecordingAttachmentListener: vi.fn(),
-    registerRecordingStateChangeListener: vi.fn(),
-    linkOrderToCallSession: vi.fn(
-      ({
-        callId,
-        callType,
-        callerPhone,
-        agentId,
-        linkedOrderId,
-        recordingId,
-      }) => ({
-        callId,
-        callType,
-        callerPhone,
-        agentId,
-        linkedOrderId,
-        recordingId: recordingId ?? null,
-      }),
-    ),
-  };
+  const callcenterService = new CallcenterService(
+    auditNotificationService as never,
+  );
   const taskEventsService = new OwnedMobilityTaskEventsService(
     new EventEmitter2(),
   );
@@ -239,7 +222,7 @@ function createOwnedMobilityService(options?: {
   const service = new OwnedMobilityService(
     regulatoryRegistryService as never,
     auditNotificationService as never,
-    callcenterService as never,
+    callcenterService,
     taskEventsService,
     opsDispatchEventsService,
     options?.repository as never,
@@ -1643,14 +1626,14 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const tenantPartnerService = new TenantPartnerService(
       new AuditNotificationService(),
     );
-    const passenger = tenantPartnerService.upsertPassenger("tenant-demo-001", {
+    const passenger = await tenantPartnerService.upsertPassenger("tenant-demo-001", {
       passengerId: "passenger-master-001",
       fullName: "王小美",
       mobile: "0911222333",
       roles: ["employee", "passenger"],
       employeeNo: "EMP-001",
     });
-    const pickupAddress = tenantPartnerService.upsertAddress(
+    const pickupAddress = await tenantPartnerService.upsertAddress(
       "tenant-demo-001",
       {
         addressId: "address-master-pickup-001",
@@ -1662,7 +1645,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         lng: 121.5637,
       },
     );
-    const dropoffAddress = tenantPartnerService.upsertAddress(
+    const dropoffAddress = await tenantPartnerService.upsertAddress(
       "tenant-demo-001",
       {
         addressId: "address-master-dropoff-001",
@@ -1722,7 +1705,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       maskedAddress: dropoffAddress.maskedAddressText,
     });
 
-    const updatedPassenger = tenantPartnerService.upsertPassenger(
+    const updatedPassenger = await tenantPartnerService.upsertPassenger(
       "tenant-demo-001",
       {
         passengerId: "passenger-master-002",
@@ -1936,7 +1919,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       });
     }
 
-    tenantPartnerService.disableCostCenter("tenant-demo-001", {
+    await tenantPartnerService.disableCostCenter("tenant-demo-001", {
       code: "CC-FIN-04",
       reason: "sunset",
     });

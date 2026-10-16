@@ -757,15 +757,17 @@ async function loadWorkspaceData(): Promise<WorkspaceLoadResult> {
     next.taskViews = tasksResult.value.tasks;
     next.taskFallbackMode = tasksResult.value.fallbackMode;
 
-    const uniqueOrderIds = [
-      ...new Set(
-        tasksResult.value.tasks.map((task) => task.orderId).filter(Boolean),
-      ),
-    ];
+    const orderTasks = new Map(
+      tasksResult.value.tasks
+        .filter((task) => task.orderId)
+        .map((task) => [task.orderId, task]),
+    );
     const orderResults = await Promise.all(
-      uniqueOrderIds.map(async (orderId) => {
+      [...orderTasks].map(async ([orderId, task]) => {
         try {
-          const order = (await client.getOrder(orderId)) as OwnedOrderRecord;
+          const order = isOwnedUnifiedTask(task)
+            ? await client.getDriverTaskOrder(task.taskId)
+            : await client.getOrder(orderId);
           return { orderId, order };
         } catch {
           return { orderId, order: null };
@@ -2616,9 +2618,7 @@ export default function WorkspaceIndex() {
         <View style={styles.sectionHeader}>
           <View>
             <Text style={styles.sectionEyebrow}>整備狀態</Text>
-            <Text style={styles.sectionTitle}>
-              裝置 / 身份 / 平台整備狀態
-            </Text>
+            <Text style={styles.sectionTitle}>裝置 / 身份 / 平台整備狀態</Text>
           </View>
         </View>
         <View style={styles.readinessStrip}>

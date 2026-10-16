@@ -8,7 +8,10 @@ import {
   SurfaceCard,
 } from "@/components/page-primitives";
 import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
-import { loadBankStatementsData } from "@/lib/bank-dev-read-models";
+import {
+  getTaipeiDateString as formatDate,
+  loadBankStatementsData,
+} from "@/lib/bank-dev-read-models";
 import {
   BANK_CONSOLE_ROLE_COOKIE,
   BANK_CONSOLE_SESSION_COOKIE,
@@ -48,14 +51,6 @@ function one(value: string | string[] | undefined): string | undefined {
 
 function formatPeriod(period: string) {
   return `${period.slice(0, 4)} / ${period.slice(5, 7)}`;
-}
-
-function formatDate(value: string) {
-  const date = new Date(value);
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
 }
 
 function formatCurrency(amount: number, locale: Locale) {
@@ -102,15 +97,15 @@ export default async function StatementDetailPage({
   }
   const roleParam = one(resolvedSearchParams.role);
   const sessionRole = resolveServerSessionRole(cookieRole, roleParam).role;
-  const session = getBankConsoleSession(
-    tenant,
-    locale,
-    sessionRole,
-  );
+  const session = getBankConsoleSession(tenant, locale, sessionRole);
   const issuerBrand = tenant.template;
-  const statementData = await loadBankStatementsData(tenant.tenantId, session.role);
+  const statementData = await loadBankStatementsData(
+    tenant.tenantId,
+    session.role,
+  );
   const statement =
-    statementData.data.statements.find((item) => item.period === period) ?? null;
+    statementData.data.statements.find((item) => item.period === period) ??
+    null;
 
   if (!statement) {
     notFound();
@@ -169,13 +164,21 @@ export default async function StatementDetailPage({
             <>
               <span
                 className="statement-link is-disabled"
-                style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
+                style={{
+                  opacity: 0.5,
+                  pointerEvents: "none",
+                  cursor: "not-allowed",
+                }}
               >
                 {t("statements.actions.exportCsv", locale)}
               </span>
               <span
                 className="statement-link is-disabled"
-                style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
+                style={{
+                  opacity: 0.5,
+                  pointerEvents: "none",
+                  cursor: "not-allowed",
+                }}
               >
                 {t("statements.actions.downloadSigned", locale)}
               </span>
@@ -393,7 +396,11 @@ export default async function StatementDetailPage({
                 {session.role === "bank_ops_viewer" ? (
                   <span
                     className="statement-link is-disabled"
-                    style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
+                    style={{
+                      opacity: 0.5,
+                      pointerEvents: "none",
+                      cursor: "not-allowed",
+                    }}
                   >
                     {t("statements.actions.download", locale)}
                   </span>
@@ -414,7 +421,11 @@ export default async function StatementDetailPage({
                 ) : (
                   <span
                     className="statement-link is-disabled"
-                    style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
+                    style={{
+                      opacity: 0.5,
+                      pointerEvents: "none",
+                      cursor: "not-allowed",
+                    }}
                   >
                     {t("statements.actions.reportDispute", locale)}
                   </span>

@@ -250,6 +250,29 @@ export class RegulatoryRegistryRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
+  async findDriverPublicRegistrationCredential(
+    driverId: string,
+  ): Promise<DriverPublicRegistrationCredential | null> {
+    if (!this.isEnabled()) return null;
+    const result =
+      await this.databaseService!.query<DriverPublicRegistrationCredentialRow>(
+        `SELECT * FROM reg.driver_public_registration_credentials WHERE driver_id=$1`,
+        [driverId],
+      );
+    return result.rows[0] ? this.mapDriverCredentialRow(result.rows[0]) : null;
+  }
+
+  async findCompletionOperatorId(
+    authorizationId: string,
+  ): Promise<string | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<{ operator_id: string }>(
+      `SELECT operator_id FROM reg.multi_taxi_operating_authorizations WHERE authorization_id=$1`,
+      [authorizationId],
+    );
+    return result.rows[0]?.operator_id ?? null;
+  }
+
   async ensureLiveMapTestDriver() {
     return ensureLiveMapFixture(this.databaseService);
   }
@@ -410,6 +433,99 @@ export class RegulatoryRegistryRepository {
       driverCredentials: driverCredentialsResult.rows.map((row) =>
         this.mapDriverCredentialRow(row),
       ),
+    };
+  }
+
+  /** One MVCC snapshot, restricted to supply for the requested service bucket.
+   * Include unavailable drivers as well, so stale availability cannot survive.
+   */
+  async findDispatchSupplyContext(serviceBucket: string) {
+    this.assertDatabaseEnabled("read dispatch supply authority");
+    const result = await this.databaseService!.query<{
+      vehicles: (JsonRecordRow & { license_class: string | null })[];
+      drivers: JsonRecordRow[];
+      pairs: JsonRecordRow[];
+      contracts: JsonRecordRow[];
+      policies: JsonRecordRow[];
+      exclusivities: JsonRecordRow[];
+      disclosures: VehiclePassengerDisclosureProfileRow[];
+      credentials: DriverPublicRegistrationCredentialRow[];
+      locations: DriverLocationRow[];
+    }>(
+      `WITH vehicles AS MATERIALIZED (
+         SELECT v.vehicle_id, v.record, c.license_class
+         FROM reg.phase1_registry_vehicles v
+         LEFT JOIN reg.vehicles c ON c.vehicle_id::text = v.vehicle_id
+         WHERE v.record->'supportedServiceBuckets' ? $1
+       ), pairs AS MATERIALIZED (
+         SELECT p.* FROM reg.phase1_registry_supply_pairs p
+         JOIN vehicles v USING (vehicle_id)
+       ), drivers AS MATERIALIZED (
+         SELECT d.* FROM reg.phase1_registry_drivers d
+         WHERE d.driver_id IN (SELECT driver_id FROM pairs)
+       )
+       SELECT
+         COALESCE((SELECT jsonb_agg(to_jsonb(v)) FROM vehicles v), '[]') AS vehicles,
+         COALESCE((SELECT jsonb_agg(to_jsonb(d)) FROM drivers d), '[]') AS drivers,
+         COALESCE((SELECT jsonb_agg(to_jsonb(p)) FROM pairs p), '[]') AS pairs,
+         COALESCE((SELECT jsonb_agg(to_jsonb(c)) FROM reg.phase1_registry_contracts c
+           WHERE c.vehicle_id IN (SELECT vehicle_id FROM vehicles)), '[]') AS contracts,
+         COALESCE((SELECT jsonb_agg(to_jsonb(p)) FROM reg.phase1_registry_policies p
+           WHERE p.vehicle_id IN (SELECT vehicle_id FROM vehicles)), '[]') AS policies,
+         COALESCE((SELECT jsonb_agg(to_jsonb(e)) FROM reg.phase1_registry_exclusivities e
+           WHERE e.vehicle_id IN (SELECT vehicle_id FROM vehicles)), '[]') AS exclusivities,
+         COALESCE((SELECT jsonb_agg(to_jsonb(p)) FROM reg.vehicle_passenger_disclosure_profiles p
+           WHERE p.vehicle_id IN (SELECT vehicle_id FROM vehicles)), '[]') AS disclosures,
+         COALESCE((SELECT jsonb_agg(to_jsonb(c)) FROM reg.driver_public_registration_credentials c
+           WHERE c.driver_id IN (SELECT driver_id FROM drivers)), '[]') AS credentials,
+         COALESCE((SELECT jsonb_agg(to_jsonb(l)) FROM ops.phase1_driver_locations l
+           WHERE l.driver_id IN (SELECT driver_id FROM drivers)), '[]') AS locations`,
+      [serviceBucket],
+    );
+    const row = result.rows[0]!;
+    const records = <T>(rows: JsonRecordRow[], table: string) =>
+      rows.map((r) => this.parseRecord<T>(r.record, table));
+    const state: RegulatoryRegistryState = {
+      vehicles: row.vehicles.map((r) => {
+        const record = this.parseRecord<VehicleRegistryRecord>(
+          r.record,
+          "reg.phase1_registry_vehicles",
+        );
+        const licenseType =
+          record.licenseType ??
+          (r.license_class
+            ? this.mapVehicleLicenseClass(r.license_class)
+            : null);
+        return licenseType ? { ...record, licenseType } : record;
+      }),
+      drivers: records(row.drivers, "reg.phase1_registry_drivers"),
+      supplyPairs: records(row.pairs, "reg.phase1_registry_supply_pairs"),
+      contracts: records(row.contracts, "reg.phase1_registry_contracts"),
+      policies: records(row.policies, "reg.phase1_registry_policies"),
+      exclusivities: records(
+        row.exclusivities,
+        "reg.phase1_registry_exclusivities",
+      ),
+      disclosureProfiles: row.disclosures.map((r) =>
+        this.mapDisclosureProfileRow(r),
+      ),
+      driverCredentials: row.credentials.map((r) =>
+        this.mapDriverCredentialRow(r),
+      ),
+    };
+    return {
+      state,
+      locations: row.locations.map((r) => ({
+        driverId: r.driver_id,
+        lat: this.parseNumericValue(r.lat, "lat"),
+        lng: this.parseNumericValue(r.lng, "lng"),
+        accuracyM:
+          r.accuracy_m === null
+            ? null
+            : this.parseNumericValue(r.accuracy_m, "accuracy_m"),
+        recordedAt: this.toIsoString(r.recorded_at),
+        updatedAt: this.toIsoString(r.updated_at),
+      })),
     };
   }
 

@@ -9,6 +9,8 @@ type JsonRecordRow = {
   record: unknown;
 };
 
+export type CallcenterQueryExecutor = Pick<DatabaseService, "query">;
+
 @Injectable()
 export class CallcenterRepository {
   private readonly logger = new Logger(CallcenterRepository.name);
@@ -19,12 +21,14 @@ export class CallcenterRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
-  async loadSessions() {
+  async loadSessions(executor?: CallcenterQueryExecutor) {
     if (!this.isEnabled()) {
       return [] as CallSessionRecord[];
     }
 
-    const result = await this.databaseService!.query<JsonRecordRow>(
+    const result = await (
+      executor ?? this.databaseService!
+    ).query<JsonRecordRow>(
       `
         SELECT record
         FROM crm.phase1_call_sessions
@@ -40,14 +44,67 @@ export class CallcenterRepository {
     );
   }
 
-  async upsertSession(session: CallSessionRecord) {
+  async findSession(callId: string, executor?: CallcenterQueryExecutor) {
+    if (!this.isEnabled()) return null;
+    const result = await (
+      executor ?? this.databaseService!
+    ).query<JsonRecordRow>(
+      `SELECT record FROM crm.phase1_call_sessions WHERE call_id = $1${executor ? " FOR UPDATE" : ""}`,
+      [callId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<CallSessionRecord>(
+          result.rows[0].record,
+          "crm.phase1_call_sessions",
+        )
+      : null;
+  }
+
+  async withTransaction<T>(
+    work: (executor: CallcenterQueryExecutor) => Promise<T>,
+  ) {
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL lock_timeout = '3s'");
+      await client.query("SET LOCAL statement_timeout = '8s'");
+      const result = await work(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        this.reportPersistenceFailure(
+          rollbackError,
+          "phone transaction rollback",
+        );
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async lockCall(callId: string, executor: CallcenterQueryExecutor) {
+    // Also serializes a call whose first session row has not been inserted yet.
+    await executor.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [`phone-call:${callId}`],
+    );
+  }
+
+  async upsertSession(
+    session: CallSessionRecord,
+    executor?: CallcenterQueryExecutor,
+  ) {
     if (!this.isEnabled()) {
       return;
     }
 
     const updatedAt = session.endedAt ?? new Date().toISOString();
 
-    await this.databaseService!.query(
+    await (executor ?? this.databaseService!).query(
       `
         INSERT INTO crm.phase1_call_sessions (
           call_id,
@@ -154,7 +211,9 @@ export class CallcenterRepository {
       [dedupeKey, payloadRef],
     );
 
-    const enqueued = Boolean(insertResult.rowCount && insertResult.rowCount > 0);
+    const enqueued = Boolean(
+      insertResult.rowCount && insertResult.rowCount > 0,
+    );
     return { enqueued, deduped: !enqueued };
   }
 

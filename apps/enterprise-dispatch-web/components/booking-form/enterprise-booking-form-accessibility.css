@@ -1,0 +1,37 @@
+/* Scoped keyboard focus and accessibility rules for EnterpriseBookingForm.
+ * Colors are supplied via CSS custom properties from tenantEnterpriseTheme (@drts/ui-tokens).
+ */
+
+.ent-booking-input-shell:focus-within {
+  border-color: var(--ent-focus-ring) !important;
+  box-shadow: 0 0 0 3px var(--ent-focus-bg);
+}
+
+.ent-booking-input-shell[data-invalid="true"]:focus-within {
+  border-color: var(--ent-danger-ring) !important;
+  box-shadow: 0 0 0 3px var(--ent-danger-bg);
+}
+
+.ent-booking-control:focus-visible {
+  outline: 2px solid var(--ent-focus-ring);
+  outline-offset: 2px;
+}
+
+.ent-booking-control[aria-invalid="true"]:focus-visible {
+  outline: 2px solid var(--ent-danger-ring);
+  outline-offset: 2px;
+}
+
+.ent-booking-radio-input:focus + .ent-booking-radio-option,
+.ent-booking-radio-input:focus-visible + .ent-booking-radio-option {
+  border-color: var(--ent-focus-ring) !important;
+  outline: 2px solid var(--ent-focus-ring);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--ent-focus-bg);
+}
+
+.ent-booking-chip-btn:focus-visible {
+  outline: 2px solid var(--ent-focus-ring);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--ent-focus-bg);
+}

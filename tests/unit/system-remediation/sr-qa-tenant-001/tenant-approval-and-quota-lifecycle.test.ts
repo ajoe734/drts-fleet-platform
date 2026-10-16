@@ -371,7 +371,7 @@ describe("SR-QA-TENANT-001 — cost-center quota: consumption ledger and summary
 
     const { tenantPartnerService, ownedMobilityService } = createHarness();
 
-    const costCenter = tenantPartnerService.upsertCostCenter(TENANT_ID, {
+    const costCenter = await tenantPartnerService.upsertCostCenter(TENANT_ID, {
       code: "CC-QA-QUOTA-01",
       name: "QA Quota Cost Center",
     } as never);
@@ -458,7 +458,7 @@ describe("SR-QA-TENANT-001 — cost-center quota: consumption ledger and summary
 
     const { tenantPartnerService, ownedMobilityService } = createHarness();
 
-    tenantPartnerService.upsertCostCenter(TENANT_ID, {
+    await tenantPartnerService.upsertCostCenter(TENANT_ID, {
       code: "CC-QA-QUOTA-BOUNDARY",
       name: "QA Quota Boundary Cost Center",
     } as never);
@@ -527,7 +527,7 @@ describe("SR-QA-TENANT-001 — cost-center quota: consumption ledger and summary
   it("negative: a cost center with a zero booking-count limit blocks new bookings and leaves the ledger untouched (regression, R-existing)", async () => {
     const { tenantPartnerService, ownedMobilityService } = createHarness();
 
-    tenantPartnerService.upsertCostCenter(TENANT_ID, {
+    await tenantPartnerService.upsertCostCenter(TENANT_ID, {
       code: "CC-QA-QUOTA-ZERO",
       name: "QA Zero Quota Cost Center",
     } as never);

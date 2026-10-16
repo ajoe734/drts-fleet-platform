@@ -54,6 +54,18 @@ import { PAYMENT_CAPTURE_POLICY } from "./payment/payment-capture.policy";
 import { paymentCapturePolicyFromEnv } from "./payment/payment-capture.config";
 import type { PaymentRuntime } from "./payment/payment-runtime.config";
 import { MultiTaxiRepository } from "../multi-taxi/multi-taxi.repository";
+import { reviewDemoEnabled } from "./review-demo/review-demo.config";
+import { ReviewSmsPort } from "./review-demo/review-sms.port";
+import {
+  ReviewDemoController,
+  ReviewDemoOpsController,
+} from "./review-demo/review-demo.controller";
+import { ReviewSupplyService } from "./review-demo/review-supply.service";
+import { FleetPartnerModule } from "../fleet-partner/fleet-partner.module";
+import { DriverProfileModule } from "../driver-profile/driver-profile.module";
+import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
+import { ServiceProductModule } from "../service-product/service-product.module";
+import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibility.module";
 import {
   PAYMENT_RECOVERY_NOTICE_EXPIRY,
   PAYMENT_RECOVERY_NOTICE_OUTBOX,
@@ -68,6 +80,11 @@ import {
     ServiceAreaModule,
     MultiTaxiModule,
     ComplaintModule,
+    RegulatoryRegistryModule,
+    ServiceProductModule,
+    VehicleEligibilityModule,
+    FleetPartnerModule,
+    DriverProfileModule,
   ],
   controllers: [
     PassengerAccountController,
@@ -82,6 +99,8 @@ import {
     PassengerReceiptController,
     PaymentMethodController,
     PaymentRefundController,
+    ReviewDemoController,
+    ReviewDemoOpsController,
   ],
   providers: [
     PassengerJwtService,
@@ -106,6 +125,8 @@ import {
     PaymentChargeWorker,
     PaymentRefundRepository,
     PaymentRefundService,
+    ReviewSmsPort,
+    ReviewSupplyService,
     {
       provide: PAYMENT_RUNTIME,
       useFactory: () => paymentRuntimeFromEnv(process.env),
@@ -128,7 +149,12 @@ import {
       useFactory: (database: DatabaseService) =>
         new MultiTaxiRepository(database),
     },
-    { provide: SMS_PORT, useClass: UnconfiguredSmsPort },
+    {
+      provide: SMS_PORT,
+      inject: [ReviewSmsPort],
+      useFactory: (reviewSms: ReviewSmsPort) =>
+        reviewDemoEnabled(process.env) ? reviewSms : new UnconfiguredSmsPort(),
+    },
     { provide: OTP_OPTIONS, useFactory: () => otpOptionsFromEnv(process.env) },
     {
       provide: OTP_MAIL_DELIVERY,
@@ -138,6 +164,7 @@ import {
     },
   ],
   exports: [
+    PaymentMethodService,
     PaymentChargeService,
     PassengerAccountService,
     PassengerJwtService,

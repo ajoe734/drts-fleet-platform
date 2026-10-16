@@ -34,6 +34,8 @@ const nextConfig: NextConfig = {
   async headers() {
     const candidateSha =
       process.env.DRTS_CANDIDATE_SHA?.trim() || "unconfigured";
+    const contentSecurityPolicy =
+      "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';";
     return [
       {
         source: "/:path*",
@@ -56,8 +58,21 @@ const nextConfig: NextConfig = {
           },
           {
             key: "Content-Security-Policy",
-            value:
-              "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';",
+            value: contentSecurityPolicy,
+          },
+        ],
+      },
+      {
+        source: "/review-driver/:path*",
+        headers: [
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+          { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
+          {
+            key: "Content-Security-Policy",
+            // Expo's SQLite runtime wraps its same-origin worker in a Blob
+            // under cross-origin isolation. Keep this allowance on the Driver
+            // mount, after the ordinary Passenger policy in Next's rule order.
+            value: `${contentSecurityPolicy} worker-src 'self' blob:;`,
           },
         ],
       },

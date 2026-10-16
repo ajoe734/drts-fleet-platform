@@ -273,12 +273,12 @@ export class FleetPartnerController {
   }
 
   @Post("admin/fleet-partners")
-  createFleetPartner(
+  async createFleetPartner(
     @Body() command: CreateFleetPartnerCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.fleetPartnerService.createFleetPartner(command),
+      await this.fleetPartnerService.createFleetPartner(command),
       requestId,
     );
   }
@@ -295,13 +295,16 @@ export class FleetPartnerController {
   }
 
   @Put("admin/fleet-partners/:fleetPartnerId")
-  updateFleetPartner(
+  async updateFleetPartner(
     @Param("fleetPartnerId") fleetPartnerId: string,
     @Body() command: UpdateFleetPartnerCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.fleetPartnerService.updateFleetPartner(fleetPartnerId, command),
+      await this.fleetPartnerService.updateFleetPartner(
+        fleetPartnerId,
+        command,
+      ),
       requestId,
     );
   }
@@ -320,13 +323,16 @@ export class FleetPartnerController {
   }
 
   @Post("admin/drivers/:driverId/fleet-affiliations")
-  createDriverFleetAffiliation(
+  async createDriverFleetAffiliation(
     @Param("driverId") driverId: string,
     @Body() command: CreateDriverFleetAffiliationCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.fleetPartnerService.createDriverFleetAffiliation(driverId, command),
+      await this.fleetPartnerService.createDriverFleetAffiliation(
+        driverId,
+        command,
+      ),
       requestId,
     );
   }

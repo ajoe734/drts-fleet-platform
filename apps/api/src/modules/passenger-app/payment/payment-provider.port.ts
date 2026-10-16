@@ -41,6 +41,10 @@ export interface CaptureCommand {
   token: string;
   amountMinor: number;
   currency: "TWD";
+  /** Durable attempt metadata for an explicitly selected external simulator.
+   * It is not part of the PSP operation identity or a request to charge twice.
+   */
+  attemptCount?: number;
 }
 
 export interface RefundCommand {
@@ -53,6 +57,7 @@ export interface RefundCommand {
 export interface PaymentProviderPort {
   readonly name: string;
   readonly available: boolean;
+  readonly captureAttemptMetadata?: boolean;
   bind(credential: string, idempotencyKey: string): Promise<BindResult>;
   capture(command: CaptureCommand): Promise<MoneyResult>;
   readCapture(idempotencyKey: string): Promise<MoneyResult>;

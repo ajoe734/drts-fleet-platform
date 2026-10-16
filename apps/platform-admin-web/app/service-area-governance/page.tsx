@@ -20,6 +20,7 @@ import {
   statusLabelKey,
   statusToneOf,
 } from "@/lib/service-area-governance";
+import { parseServiceAreaPreviewInput } from "@/lib/service-area-preview-input";
 import {
   SERVICE_PRODUCT_TYPES,
   STOP_POLICY_DIRECTIONS,
@@ -222,23 +223,19 @@ export default function ServiceAreaGovernancePage() {
   async function runPreview() {
     setPreviewErr(null);
     setPreview(null);
-    const plat = Number(pickupLat);
-    const plng = Number(pickupLng);
-    if (!Number.isFinite(plat) || !Number.isFinite(plng)) {
+    const parsed = parseServiceAreaPreviewInput({
+      serviceProductType: product,
+      pickupLat,
+      pickupLng,
+      dropoffLat,
+      dropoffLng,
+    });
+    if (!parsed.ok) {
       setPreviewErr(t("serviceAreaGov.preview.invalid"));
       return;
     }
-    const dlat = Number(dropoffLat);
-    const dlng = Number(dropoffLng);
-    const hasDrop = Number.isFinite(dlat) && Number.isFinite(dlng);
     try {
-      setPreview(
-        await client.evaluateServiceArea({
-          serviceProductType: product,
-          pickup: { lat: plat, lng: plng },
-          dropoff: hasDrop ? { lat: dlat, lng: dlng } : null,
-        }),
-      );
+      setPreview(await client.evaluateServiceArea(parsed.command));
     } catch (e: unknown) {
       setPreviewErr(e instanceof Error ? e.message : String(e));
     }

@@ -16,6 +16,7 @@
     "@drts/contracts": "workspace:*",
     "@drts/control-plane-auth": "workspace:*",
     "@drts/shared-types": "workspace:*",
+    "@drts/tenant-auth": "workspace:*",
     "@drts/ui-tokens": "workspace:*",
     "@drts/ui-web": "workspace:*",
     "next": "^16.3.8",

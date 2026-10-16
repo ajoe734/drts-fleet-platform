@@ -266,7 +266,7 @@ describe("SR-QA-BOOKING-001-FIX-QUOTA-RELEASE: 租戶取消訂單配額釋放驗
     const { service, tenantPartnerService } = createQuotaHarness(TENANT_ID);
 
     // 為成本中心 CC-FIN 配置獨立 quota
-    tenantPartnerService.upsertCostCenter(TENANT_ID, {
+    await tenantPartnerService.upsertCostCenter(TENANT_ID, {
       code: "CC-FIN",
       name: "Finance Department",
     });

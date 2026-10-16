@@ -31,12 +31,15 @@ export class CallcenterController {
   ) {}
 
   @Post("webhooks/sandbox")
-  ingestSandboxWebhook(
+  async ingestSandboxWebhook(
     @Body() payload: Record<string, unknown>,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.sandboxWebhookAdapter.ingest(payload as never, requestId),
+      await this.sandboxWebhookAdapter.ingestForWrite(
+        payload as never,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -54,25 +57,29 @@ export class CallcenterController {
   }
 
   @Post("sessions")
-  openCallSession(
+  async openCallSession(
     @Body() command: OpenCallSessionCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.openCallSession(command, requestId),
+      await this.callcenterService.openCallSessionForWrite(command, requestId),
       requestId,
     );
   }
 
   @Get("sessions/:callId")
   @RequireRealms("platform", "ops")
-  getCallSession(
+  async getCallSession(
     @Param("callId") callId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.getCallSession(callId, requestId, identity),
+      await this.callcenterService.getCallSessionForRead(
+        callId,
+        requestId,
+        identity,
+      ),
       requestId,
     );
   }
@@ -90,13 +97,17 @@ export class CallcenterController {
   }
 
   @Post("sessions/:callId/close")
-  closeCallSession(
+  async closeCallSession(
     @Param("callId") callId: string,
     @Body() command: CloseCallSessionCommand = {},
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.closeCallSession(callId, command, requestId),
+      await this.callcenterService.closeCallSessionForWrite(
+        callId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -130,13 +141,13 @@ export class CallcenterController {
   }
 
   @Post("sessions/:callId/recording-callback")
-  attachRecordingCallback(
+  async attachRecordingCallback(
     @Param("callId") callId: string,
     @Body() command: AttachCallRecordingCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.attachRecordingCallback(
+      await this.callcenterService.attachRecordingCallbackForWrite(
         callId,
         command,
         requestId,

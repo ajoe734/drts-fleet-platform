@@ -284,7 +284,7 @@ describe("SR-ADMIN-ADAPTER-001 platform adapter registry", () => {
     expect(reloaded?.config.isEnabled).toBe(!seeded.config.isEnabled);
   });
 
-  it("logs, but does not throw to the caller, when the durable revision-guarded write conflicts (best-effort persistence sidecar)", async () => {
+  it("propagates a 409 conflict and preserves in-memory state when the durable revision-guarded write conflicts", async () => {
     const repository = {
       isEnabled: () => true,
       loadState: vi.fn(async () => ({
@@ -307,12 +307,19 @@ describe("SR-ADMIN-ADAPTER-001 platform adapter registry", () => {
     await service.onModuleInit();
     const before = service.listPlatformAdapters()[0]!;
 
-    const updated = await service.updatePlatformAdapter(before.id, {
-      config: { isEnabled: !before.config.isEnabled },
-    });
+    await expect(
+      service.updatePlatformAdapter(before.id, {
+        config: { isEnabled: !before.config.isEnabled },
+      }),
+    ).rejects.toMatchObject({ code: "PLATFORM_ADAPTER_REVISION_CONFLICT" });
 
-    expect(updated).toBeTruthy();
     expect(repository.reportPersistenceFailure).toHaveBeenCalled();
+    expect(service.getPlatformAdapter(before.id)?.config.isEnabled).toBe(
+      before.config.isEnabled,
+    );
+    expect(service.getPlatformAdapter(before.id)?.revision).toBe(
+      before.revision,
+    );
   });
 
   it("requires the platform realm and a foundation scope for every /platform-admin/adapters* route (unauthorized is rejected)", () => {
@@ -340,7 +347,7 @@ describe("SR-ADMIN-ADAPTER-001 platform adapter registry", () => {
     const service = new PlatformAdminService(new AuditNotificationService());
     await service.onModuleInit();
 
-    const registered = service.registerPlatformAdapter({
+    const registered = await service.registerPlatformAdapter({
       id: "new-partner",
       platformCode: "NEWP",
       name: "New Partner",

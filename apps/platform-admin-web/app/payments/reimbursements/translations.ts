@@ -58,6 +58,33 @@ const DICTIONARY: Record<Locale, Record<string, string>> = {
     "payWithProof.error": "標記已付款失敗",
     "payWithProof.success":
       "已以匯款證明 {proofId} 標記付款，收據 {receiptId}。",
+    "export.cardTitle": "匯出批次成品 · Signed export (C080)",
+    "export.cardSubtitle":
+      "需批次已核可；成品位元組與雜湊一經首次匯出即固定，重新連結僅重簽連結，不重新產生內容",
+    "export.button": "匯出批次",
+    "export.saving": "匯出中…",
+    "export.error": "匯出失敗",
+    "export.success": "已匯出，雜湊 {manifestHash}，收據 {receiptId}。",
+    "export.downloadButton": "下載成品",
+    "export.confirmMessage": "確認匯出此批次的簽署成品？",
+    "export.notApprovedHint": "批次須先核可才能匯出。",
+    "export.metaExportedAt": "匯出時間",
+    "export.metaExportedBy": "匯出者",
+    "export.metaManifestHash": "內容雜湊",
+    "reconcile.cardTitle": "標記已對帳 · Mark reconciled (Q-ADM12)",
+    "reconcile.cardSubtitle":
+      "需批次已付款；此轉換每批次僅發生一次，重複呼叫回傳原始收據，不覆寫原始原因與時間",
+    "reconcile.reasonLabel": "對帳原因",
+    "reconcile.reasonPlaceholder": "例如：已核對銀行對帳單第 ... 筆",
+    "reconcile.reasonRequired": "請填寫對帳原因",
+    "reconcile.button": "標記已對帳",
+    "reconcile.saving": "處理中…",
+    "reconcile.error": "標記對帳失敗",
+    "reconcile.success": "已標記對帳，收據 {receiptId}。",
+    "reconcile.confirmMessage": "確認將此批次標記為已對帳？",
+    "reconcile.notPaidHint": "批次須先標記已付款才能對帳。",
+    "reconcile.alreadyReconciledHint":
+      "此批次已於 {reconciledAt} 對帳，原因：{reason}。",
   },
   en: {
     "proof.cardTitle": "Remittance proof",
@@ -104,6 +131,36 @@ const DICTIONARY: Record<Locale, Record<string, string>> = {
     "payWithProof.error": "Mark-paid failed",
     "payWithProof.success":
       "Marked paid with remittance proof {proofId}, receipt {receiptId}.",
+    "export.cardTitle": "Export batch artifact · Signed export (C080)",
+    "export.cardSubtitle":
+      "Requires an approved batch; bytes and hash are fixed at first export -- a later call only reissues the link, never different content",
+    "export.button": "Export batch",
+    "export.saving": "Exporting…",
+    "export.error": "Export failed",
+    "export.success": "Exported, hash {manifestHash}, receipt {receiptId}.",
+    "export.downloadButton": "Download artifact",
+    "export.confirmMessage": "Export this batch's signed artifact?",
+    "export.notApprovedHint":
+      "The batch must be approved before it can be exported.",
+    "export.metaExportedAt": "Exported at",
+    "export.metaExportedBy": "Exported by",
+    "export.metaManifestHash": "Content hash",
+    "reconcile.cardTitle": "Mark reconciled (Q-ADM12)",
+    "reconcile.cardSubtitle":
+      "Requires a paid batch; this transition happens once per batch -- a repeat call returns the original receipt, never overwriting the original reason and time",
+    "reconcile.reasonLabel": "Reconciliation reason",
+    "reconcile.reasonPlaceholder":
+      "e.g. Matched against bank statement line ...",
+    "reconcile.reasonRequired": "A reconciliation reason is required",
+    "reconcile.button": "Mark reconciled",
+    "reconcile.saving": "Saving…",
+    "reconcile.error": "Mark-reconciled failed",
+    "reconcile.success": "Marked reconciled, receipt {receiptId}.",
+    "reconcile.confirmMessage": "Mark this batch as reconciled?",
+    "reconcile.notPaidHint":
+      "The batch must be marked paid before it can be reconciled.",
+    "reconcile.alreadyReconciledHint":
+      "This batch was reconciled at {reconciledAt}, reason: {reason}.",
   },
 };
 

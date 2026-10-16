@@ -5261,6 +5261,8 @@ export type FleetRevenueShareFormula =
 
 export interface FleetPartnerRecord {
   fleetPartnerId: string;
+  /** Explicit operating-authority operator IDs; never inferred from affiliation. */
+  multiTaxiOperatorIds?: string[];
   legalName: string;
   displayName: string;
   businessRegistrationNo: string;
@@ -5271,6 +5273,7 @@ export interface FleetPartnerRecord {
 }
 
 export interface CreateFleetPartnerCommand {
+  multiTaxiOperatorIds?: string[];
   legalName: string;
   displayName: string;
   businessRegistrationNo: string;
@@ -5281,6 +5284,7 @@ export interface CreateFleetPartnerCommand {
 }
 
 export interface UpdateFleetPartnerCommand {
+  multiTaxiOperatorIds?: string[];
   legalName?: string;
   displayName?: string;
   businessRegistrationNo?: string;
@@ -5567,6 +5571,17 @@ export interface ReimbursementItemRecord {
   channelKey?: string;
 }
 
+export const REIMBURSEMENT_BATCH_WORKFLOW_STATES = [
+  "draft",
+  "pending_approval",
+  "approved",
+  "exported",
+  "paid",
+  "reconciled",
+] as const;
+export type ReimbursementBatchWorkflowState =
+  (typeof REIMBURSEMENT_BATCH_WORKFLOW_STATES)[number];
+
 export interface ReimbursementBatchRecord {
   batchId: string;
   driverId: string;
@@ -5578,6 +5593,27 @@ export interface ReimbursementBatchRecord {
   items: ReimbursementItemRecord[];
   approvedAt: string | null;
   paidAt: string | null;
+  /**
+   * Authoritative Q-ADM12 six-state workflow position. Separate from
+   * `status` (which stays `pending|paid`, the shared `DriverPayoutStatus`
+   * union) on purpose -- see `phase1_service_contracts_v1.md` §3.11
+   * ("driver wallet 僅為讀模型，不作真值帳本") and the C080/C081 workflow
+   * locator: the queue/detail six-state machine is a Billing-owned view
+   * over this batch, never a rename of the shared driver payout status.
+   * Monotonic: a later mutation (e.g. re-export after paid) never regresses
+   * this backward.
+   */
+  workflowState?: ReimbursementBatchWorkflowState;
+  exportedAt?: string | null;
+  exportedByActorId?: string | null;
+  exportReceiptId?: string | null;
+  exportManifestHash?: string | null;
+  exportDownloadMetadata?: ControlledDownloadRecord | null;
+  reconciledAt?: string | null;
+  reconciledByActorId?: string | null;
+  reconciliationReason?: string | null;
+  reconciliationEvidenceRef?: string | null;
+  reconciliationReceiptId?: string | null;
 }
 
 export interface ApproveReimbursementBatchCommand {
@@ -7652,6 +7688,7 @@ export interface PlatformPricingRuleRecord {
   effectiveTo: string | null;
   publishedBy: string | null;
   publishedAt: string | null;
+  publishReason?: string | null;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -7671,6 +7708,7 @@ export interface PublishPlatformPricingRuleCommand {
   effectiveFrom?: string | null;
   effectiveTo?: string | null;
   publishedBy?: string | null;
+  reason: string;
 }
 
 export interface SetTenantStatusCommand {
@@ -7708,6 +7746,7 @@ export * from "./unattended-voice";
 export * from "./voice-dialogue";
 export * from "./system-remediation";
 export * from "./remittance-proof";
+export * from "./reimbursement-workflow";
 export * from "./passenger-push-delivery";
 export * from "./partner-passenger-notification";
 export * from "./passenger-notification-channel";

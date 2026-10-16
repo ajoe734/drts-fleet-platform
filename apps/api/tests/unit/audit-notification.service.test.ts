@@ -20,10 +20,10 @@ const PLATFORM_IDENTITY = {
 };
 
 describe("AuditNotificationService evidence governance workflows", () => {
-  it("tracks legal holds and deletion exceptions on the evidence subject view", () => {
+  it("tracks legal holds and deletion exceptions on the evidence subject view", async () => {
     const service = new AuditNotificationService();
 
-    const hold = service.placeEvidenceLegalHold(
+    const hold = await service.placeEvidenceLegalHold(
       {
         family: "report_artifact",
         subjectId: "artifact-report-001",
@@ -36,7 +36,7 @@ describe("AuditNotificationService evidence governance workflows", () => {
       "req-hold-001",
     );
 
-    const deletionException = service.registerEvidenceDeletionException(
+    const deletionException = await service.registerEvidenceDeletionException(
       {
         family: "report_artifact",
         subjectId: "artifact-report-001",
@@ -89,9 +89,9 @@ describe("AuditNotificationService evidence governance workflows", () => {
     expect(governance.activeDeletionExceptions).toHaveLength(1);
   });
 
-  it("only allows platform admins to release legal holds", () => {
+  it("only allows platform admins to release legal holds", async () => {
     const service = new AuditNotificationService();
-    const hold = service.placeEvidenceLegalHold(
+    const hold = await service.placeEvidenceLegalHold(
       {
         family: "filing_package",
         subjectId: "pkg-001",
@@ -101,15 +101,15 @@ describe("AuditNotificationService evidence governance workflows", () => {
       OPS_IDENTITY,
     );
 
-    expect(() =>
+    await expect(
       service.releaseEvidenceLegalHold(
         hold.holdId,
         { releaseReason: "ops attempted release" },
         OPS_IDENTITY,
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
 
-    const released = service.releaseEvidenceLegalHold(
+    const released = await service.releaseEvidenceLegalHold(
       hold.holdId,
       { releaseReason: "regulator packet closed" },
       PLATFORM_IDENTITY,
