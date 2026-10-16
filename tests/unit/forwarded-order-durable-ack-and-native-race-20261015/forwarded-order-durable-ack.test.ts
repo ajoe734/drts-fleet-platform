@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
+import type { BootstrapRequestIdentity } from "../../../apps/api/src/common/auth";
+import type { DatabaseService } from "../../../apps/api/src/common/db";
 import { ForwarderController } from "../../../apps/api/src/modules/forwarder/forwarder.controller";
+import { ForwarderRepository } from "../../../apps/api/src/modules/forwarder/forwarder.repository";
 import { ForwarderService } from "../../../apps/api/src/modules/forwarder/forwarder.service";
-import type { ForwarderRepository } from "../../../apps/api/src/modules/forwarder/forwarder.repository";
 import { GRAB_TAIWAN_PLATFORM_CODE } from "../../../apps/api/src/modules/forwarder/grab-taiwan.adapter";
 import type {
   ForwarderAdapterAcceptInput,
@@ -14,6 +15,20 @@ import type {
   ForwarderAdapterInterface,
   ForwarderAdapterRejectInput,
 } from "../../../apps/api/src/modules/forwarder/forwarder-adapter.interface";
+
+function driverIdentity(driverId: string): BootstrapRequestIdentity {
+  return {
+    authMode: "bootstrap_headers",
+    actorType: "driver_user",
+    actorId: driverId,
+    realm: "driver",
+    tenantId: null,
+    roleFamilies: ["driver"],
+    roles: ["driver"],
+    scopes: [],
+    requestId: null,
+  };
+}
 
 /**
  * C033-F1 regression coverage: the forwarded mirror command lifecycle must
@@ -99,6 +114,7 @@ function createControllableRepository() {
       }
     },
   );
+  const findOrderByIdentity = vi.fn(async () => null);
 
   return {
     repository: {
@@ -107,10 +123,70 @@ function createControllableRepository() {
         adapterHealth: [],
       })),
       persistChanges,
+      findOrderByIdentity,
       reportPersistenceFailure: vi.fn(),
     } as unknown as ForwarderRepository,
     persistChanges,
+    findOrderByIdentity,
     readPersisted: () => persistedForwardedOrders,
+  };
+}
+
+/**
+ * Real-shaped `DatabaseService` double used for the C034-F1 regression below:
+ * controls exactly one targeted `query()` call (the forwarded-order write
+ * whose `status` column matches `gatedStatus`) so the test can hold it open
+ * while a concurrent command races it, without duplicating any business SQL
+ * — every call still goes through the real `ForwarderRepository` and its
+ * actual INSERT/UPSERT statements.
+ */
+function createGatedDatabaseService(gatedStatus: string) {
+  let releaseGate!: () => void;
+  let gateRejects = false;
+  const gate = new Promise<void>((resolve) => {
+    releaseGate = resolve;
+  });
+  let gateEnteredResolve!: () => void;
+  const gateEntered = new Promise<void>((resolve) => {
+    gateEnteredResolve = resolve;
+  });
+  let gateHit = false;
+
+  const query = vi.fn(
+    async (text: string, values?: readonly unknown[]): Promise<{
+      rows: unknown[];
+      rowCount: number;
+    }> => {
+      const isForwardedOrderWrite =
+        text.includes("ops.phase1_forwarded_orders") &&
+        text.includes("INSERT");
+      const status = isForwardedOrderWrite
+        ? (values as unknown[] | undefined)?.[3]
+        : undefined;
+
+      if (isForwardedOrderWrite && status === gatedStatus && !gateHit) {
+        gateHit = true;
+        gateEnteredResolve();
+        await gate;
+        if (gateRejects) {
+          throw new Error(
+            `simulated write failure for gated status ${gatedStatus}`,
+          );
+        }
+      }
+
+      return { rows: [], rowCount: 0 };
+    },
+  );
+
+  return {
+    databaseService: { isEnabled: () => true, query } as unknown as DatabaseService,
+    query,
+    waitForGateEntered: () => gateEntered,
+    releaseGate: (rejectAfter: boolean) => {
+      gateRejects = rejectAfter;
+      releaseGate();
+    },
   };
 }
 
@@ -400,5 +476,342 @@ describe("FORWARDED-ORDER-DURABLE-ACK-AND-NATIVE-RACE-FLOW-20261015: C033-F1 dur
 
     expect(resolved.mirrorOrderId).toBe("FWD-readback-001");
     expect(resolved.status).toBe("confirmed_by_platform");
+  });
+
+  it("does not let a driver-visible read (getOrder/listOrders/driver task view) observe the broadcast before its durable ACK resolves", async () => {
+    const { repository, persistChanges } = createControllableRepository();
+    const { service } = createHarness({ repository });
+
+    const order = await service.ingestExternalOrder({
+      platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+      externalOrderId: "grab-order-cache-gate-001",
+      payload: { serviceBucket: "standard_taxi" },
+    });
+
+    let resolvePersist!: () => void;
+    persistChanges.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvePersist = () => resolve();
+        }),
+    );
+
+    const broadcastPromise = service.broadcastOrder(order.mirrorOrderId, {
+      candidateDriverIds: ["driver-ack-001"],
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The durable write for the broadcast is still in flight: no reader may
+    // observe "broadcasted" yet, including the driver task view that would
+    // newly become visible once candidateDriverIds includes this driver.
+    expect(service.getOrder(order.mirrorOrderId).status).toBe("received");
+    expect(service.listOrders()[0]!.status).toBe("received");
+    expect(
+      await service.listDriverTaskViewsForRead("driver-ack-001"),
+    ).toEqual([]);
+
+    resolvePersist();
+    await broadcastPromise;
+
+    expect(service.getOrder(order.mirrorOrderId).status).toBe("broadcasted");
+    expect(
+      (await service.listDriverTaskViewsForRead("driver-ack-001")).map(
+        (view) => view.taskId,
+      ),
+    ).toContain(order.mirrorOrderId);
+  });
+
+  describe("C033-F1 reportSyncFailure: honest durable-ACK command", () => {
+    it("durably records the sync failure and returns it once the write is ACKed", async () => {
+      const { repository } = createControllableRepository();
+      const { service, auditNotificationService } = createHarness({
+        repository,
+      });
+
+      const order = await service.ingestExternalOrder({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-report-sync-failure-001",
+        payload: { serviceBucket: "standard_taxi" },
+      });
+      auditNotificationService.recordAuditLog.mockClear();
+
+      const resolved = await service.reportSyncFailure(order.mirrorOrderId, {
+        errorCode: "FORWARDER_MANUAL_SYNC_FAILURE",
+        errorMessage: "ops reported a platform mismatch",
+        retryable: true,
+      });
+
+      expect(resolved.status).toBe("sync_failed");
+      expect(resolved.lastSyncError).toMatchObject({
+        code: "FORWARDER_MANUAL_SYNC_FAILURE",
+      });
+      expect(service.listOrders()[0]!.status).toBe("sync_failed");
+      expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actionName: "mark_forwarder_sync_failed",
+          newValuesSummary: expect.objectContaining({ persisted: true }),
+        }),
+      );
+    });
+
+    it("throws instead of reporting a fake success when its own durable write is never ACKed", async () => {
+      const { repository, persistChanges } = createControllableRepository();
+      const { service } = createHarness({ repository });
+
+      const order = await service.ingestExternalOrder({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-report-sync-failure-ack-002",
+        payload: { serviceBucket: "standard_taxi" },
+      });
+
+      persistChanges.mockRejectedValueOnce(
+        new Error("simulated connection reset recording sync failure"),
+      );
+
+      await expect(
+        service.reportSyncFailure(order.mirrorOrderId, {
+          errorCode: "FORWARDER_MANUAL_SYNC_FAILURE",
+          errorMessage: "ops reported a platform mismatch",
+          retryable: true,
+        }),
+      ).rejects.toMatchObject({
+        response: {
+          error: {
+            code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN",
+            retryable: true,
+          },
+        },
+      });
+
+      // The in-memory record is honestly marked uncertain (not a confirmed
+      // sync_failed), distinguishable from a durably-recorded failure.
+      const cached = service.listOrders()[0]!;
+      expect(cached.status).toBe("sync_failed");
+      expect(cached.lastSyncError).toMatchObject({
+        code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN",
+      });
+    });
+  });
+
+  describe("C033-F1 ingest retry: readback before re-attempting a write", () => {
+    it("adopts the repository's readback instead of blindly trusting the cached uncertain guess", async () => {
+      const { repository, persistChanges, findOrderByIdentity } =
+        createControllableRepository();
+      persistChanges.mockRejectedValueOnce(
+        new Error("simulated timeout before ACK"),
+      );
+      const { service } = createHarness({ repository });
+
+      await expect(
+        service.ingestExternalOrder({
+          platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+          externalOrderId: "grab-order-retry-readback-001",
+          payload: { serviceBucket: "standard_taxi" },
+        }),
+      ).rejects.toMatchObject({
+        response: { error: { code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN" } },
+      });
+      const firstMirrorOrderId = service.listOrders()[0]!.mirrorOrderId;
+
+      // The prior write actually landed server-side despite the client
+      // never seeing the ACK (e.g. a connection reset after commit).
+      // Readback must recover that real row rather than re-writing.
+      findOrderByIdentity.mockResolvedValueOnce({
+        mirrorOrderId: firstMirrorOrderId,
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-retry-readback-001",
+        orderDomain: "forwarded",
+        dispatchSemantics: "forwarder_broadcast",
+        status: "received",
+        candidateDriverIds: [],
+        acceptedDriverId: null,
+        lastNativeStatus: null,
+        payload: { serviceBucket: "standard_taxi" },
+        authoritativeSnapshot: {
+          platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+          externalOrderId: "grab-order-retry-readback-001",
+          nativeStatus: "received",
+        },
+        financeContext: {
+          fareAuthority: "external_platform",
+          settlementAuthority: "external_platform",
+          driverPayoutAuthority: "external_platform",
+          localLedgerMode: "shadow_only",
+        },
+        lastSyncError: null,
+        manualFallback: {
+          required: false,
+          reason: null,
+          requestedAt: null,
+          requestedBy: null,
+          notes: null,
+        },
+        reconciliationJob: null,
+        createdAt: "2026-10-16T00:00:00.000Z",
+        updatedAt: "2026-10-16T00:05:00.000Z",
+      } as never);
+
+      const callsBeforeRetry = persistChanges.mock.calls.length;
+      const retried = await service.ingestExternalOrder({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-retry-readback-001",
+        payload: { serviceBucket: "standard_taxi" },
+      });
+
+      expect(findOrderByIdentity).toHaveBeenCalledWith(
+        GRAB_TAIWAN_PLATFORM_CODE,
+        "grab-order-retry-readback-001",
+      );
+      expect(retried.mirrorOrderId).toBe(firstMirrorOrderId);
+      expect(retried.status).toBe("received");
+      expect(retried.lastSyncError).toBeNull();
+      // Readback adoption must not re-attempt a write of its own.
+      expect(persistChanges.mock.calls.length).toBe(callsBeforeRetry);
+    });
+
+    it("re-attempts the write (not just a cache return) when nothing durable exists yet for this identity", async () => {
+      const { repository, persistChanges, findOrderByIdentity } =
+        createControllableRepository();
+      persistChanges.mockRejectedValueOnce(
+        new Error("simulated timeout before ACK"),
+      );
+      const { service } = createHarness({ repository });
+
+      await expect(
+        service.ingestExternalOrder({
+          platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+          externalOrderId: "grab-order-retry-write-001",
+          payload: { serviceBucket: "standard_taxi" },
+        }),
+      ).rejects.toMatchObject({
+        response: { error: { code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN" } },
+      });
+      const firstMirrorOrderId = service.listOrders()[0]!.mirrorOrderId;
+
+      // Default double continues to report no durable row for this identity.
+      const callsBeforeRetry = persistChanges.mock.calls.length;
+      const retried = await service.ingestExternalOrder({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-retry-write-001",
+        payload: { serviceBucket: "standard_taxi" },
+      });
+
+      expect(findOrderByIdentity).toHaveBeenCalled();
+      // A genuine new write was attempted (and, here, succeeded).
+      expect(persistChanges.mock.calls.length).toBeGreaterThan(
+        callsBeforeRetry,
+      );
+      expect(retried.mirrorOrderId).toBe(firstMirrorOrderId);
+      expect(retried.externalOrderId).toBe("grab-order-retry-write-001");
+      expect(retried.status).toBe("received");
+      expect(retried.lastSyncError).toBeNull();
+      expect(service.listOrders()).toHaveLength(1);
+    });
+  });
+
+  describe("C034-F1 real repository-level race: accept vs. native authority", () => {
+    async function setupBroadcastedOrder(databaseService: DatabaseService) {
+      const repository = new ForwarderRepository(databaseService);
+      const regulatoryRegistryService = {
+        getEligibleCandidates: vi.fn(() => [
+          {
+            driverId: "driver-dbrace-001",
+            vehicleId: "veh-dbrace-001",
+            etaMinutes: 5,
+            operatingArea: "default",
+            serviceBuckets: ["standard_taxi"],
+            currentLocation: null,
+          },
+        ]),
+        getVehicleLicenseType: vi.fn(() => "taxi"),
+      };
+      const auditNotificationService = { recordAuditLog: vi.fn() };
+      const adapter = createAdapter();
+      const service = new ForwarderService(
+        regulatoryRegistryService as never,
+        auditNotificationService as never,
+        [adapter],
+        repository,
+      );
+      const controller = new ForwarderController(service);
+
+      const order = await service.ingestExternalOrder({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-db-race-001",
+        payload: { serviceBucket: "standard_taxi" },
+      });
+      await service.broadcastOrder(order.mirrorOrderId, {
+        candidateDriverIds: ["driver-dbrace-001"],
+      });
+
+      return { service, controller, order };
+    }
+
+    it("preserves a native cancellation over a stale accept write even when the accept's own durable write ultimately fails (late rejection)", async () => {
+      const { databaseService, waitForGateEntered, releaseGate } =
+        createGatedDatabaseService("accept_pending");
+      const { service, controller, order } =
+        await setupBroadcastedOrder(databaseService);
+
+      // Exercised through the actual mounted driver caller, not just the
+      // service method directly.
+      const acceptPromise = controller.acceptForwardedOrder(
+        order.mirrorOrderId,
+        driverIdentity("driver-dbrace-001"),
+        {},
+      );
+
+      // Let the accept relay's real repository write reach (and hold) the
+      // gate before the native sync is issued, so the native sync is forced
+      // to queue behind the accept command's own commit instead of racing
+      // ahead of it.
+      await waitForGateEntered();
+      const syncPromise = service.syncNativeStatus(order.mirrorOrderId, {
+        nativeStatus: "cancelled_by_platform",
+      });
+
+      releaseGate(true);
+
+      await Promise.allSettled([acceptPromise, syncPromise]);
+
+      const finalOrder = service.listOrders()[0]!;
+      expect(finalOrder.status).toBe("cancelled_by_platform");
+      // syncNativeStatus never touches acceptedDriverId; the driver who
+      // attempted the accept stays attributable for dispatch/manual
+      // follow-up even though the native platform's cancellation wins.
+      expect(finalOrder.acceptedDriverId).toBe("driver-dbrace-001");
+    });
+
+    it("preserves a native cancellation over a stale accept write even when the accept's own durable write ultimately succeeds (late success)", async () => {
+      const { databaseService, waitForGateEntered, releaseGate } =
+        createGatedDatabaseService("accept_pending");
+      const { service, controller, order } =
+        await setupBroadcastedOrder(databaseService);
+
+      const acceptPromise = controller.acceptForwardedOrder(
+        order.mirrorOrderId,
+        driverIdentity("driver-dbrace-001"),
+        {},
+      );
+
+      await waitForGateEntered();
+      const syncPromise = service.syncNativeStatus(order.mirrorOrderId, {
+        nativeStatus: "cancelled_by_platform",
+      });
+
+      releaseGate(false);
+
+      await Promise.allSettled([acceptPromise, syncPromise]);
+
+      // Even though the accept relay's own durable write landed, it landed
+      // strictly before the native sync's write (the lock forces that
+      // ordering), so the native cancellation is the final durable row —
+      // never a restored/stale accept_pending.
+      const finalOrder = service.listOrders()[0]!;
+      expect(finalOrder.status).toBe("cancelled_by_platform");
+      expect(finalOrder.acceptedDriverId).toBe("driver-dbrace-001");
+    });
   });
 });

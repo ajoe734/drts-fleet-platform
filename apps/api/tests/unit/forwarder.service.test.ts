@@ -98,6 +98,7 @@ function createForwarderRepositoryMock() {
       adapterHealth: [],
     })),
     persistChanges: vi.fn(async () => undefined),
+    findOrderByIdentity: vi.fn(async () => null),
     reportPersistenceFailure: vi.fn(),
   };
 }

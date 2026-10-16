@@ -98,6 +98,17 @@ export class ForwarderService implements OnModuleInit {
 
   private adapterHealth: AdapterHealthRecord[] = [];
 
+  // Per-mirror-identity mutation queue: guarantees the "read canonical,
+  // build draft, await durable ACK, commit" critical section for any given
+  // order (or pre-creation platformCode/externalOrderId identity) never
+  // interleaves with another command's critical section for the same
+  // identity. This is what makes a late-resolving command observe (and
+  // defer to) a command that already committed while it was in flight,
+  // instead of both mutating the same shared object out of order. Never
+  // held across an external adapter call — only around the local
+  // mutate+persist+commit section.
+  private readonly orderLocks = new Map<string, Promise<void>>();
+
   constructor(
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
     private readonly auditNotificationService: AuditNotificationService,
@@ -151,15 +162,31 @@ export class ForwarderService implements OnModuleInit {
     this.assertNonBlank(command.platformCode, "platformCode");
     this.assertNonBlank(command.externalOrderId, "externalOrderId");
 
-    const existing = this.forwardedOrders.find(
-      (order) =>
-        order.platformCode === command.platformCode &&
-        order.externalOrderId === command.externalOrderId,
+    const lockKey = this.ingressLockKey(
+      command.platformCode,
+      command.externalOrderId,
     );
-    if (existing) {
-      return this.cloneOrder(existing);
-    }
+    return this.withLock(lockKey, async () => {
+      const existing = this.forwardedOrders.find(
+        (order) =>
+          order.platformCode === command.platformCode &&
+          order.externalOrderId === command.externalOrderId,
+      );
+      if (existing) {
+        return this.reconcileExistingIngest(existing, requestId);
+      }
+      return this.createNewForwardedOrder(command, requestId);
+    });
+  }
 
+  private ingressLockKey(platformCode: PlatformCode, externalOrderId: string) {
+    return `ingress:${platformCode}:${externalOrderId}`;
+  }
+
+  private async createNewForwardedOrder(
+    command: IngestExternalOrderCommand,
+    requestId?: string,
+  ) {
     const now = new Date().toISOString();
     const forwardedOrder: ForwardedOrderRecord = {
       mirrorOrderId: `FWD-${randomUUID()}`,
@@ -192,16 +219,14 @@ export class ForwarderService implements OnModuleInit {
       updatedAt: now,
     };
 
-    this.forwardedOrders = [forwardedOrder, ...this.forwardedOrders];
-    this.ownedMobilityService?.registerForwarderSource(
-      forwardedOrder.mirrorOrderId,
-      forwardedOrder.platformCode,
-    );
     const adapterHealth = this.updateAdapterHealth(
       command.platformCode,
       this.buildHealthyAdapterHealthPatch(command.platformCode),
     );
-    await this.persistOrFail(
+    // Not yet committed into this.forwardedOrders: readers (list/getOrder/
+    // driver task views) must not observe this order until the durable ACK
+    // below actually lands (persistOrFail only commits on success).
+    const committed = await this.persistOrFail(
       forwardedOrder,
       {
         forwardedOrders: [this.cloneOrder(forwardedOrder)],
@@ -209,6 +234,10 @@ export class ForwarderService implements OnModuleInit {
       },
       "ingest_external_order",
       requestId,
+    );
+    this.ownedMobilityService?.registerForwarderSource(
+      committed.mirrorOrderId,
+      committed.platformCode,
     );
     this.recordAudit(
       {
@@ -218,17 +247,109 @@ export class ForwarderService implements OnModuleInit {
         moduleName: "forwarder",
         actionName: "ingest_external_order",
         resourceType: "forwarded_order",
-        resourceId: forwardedOrder.mirrorOrderId,
+        resourceId: committed.mirrorOrderId,
         newValuesSummary: {
-          platformCode: forwardedOrder.platformCode,
-          externalOrderId: forwardedOrder.externalOrderId,
-          status: forwardedOrder.status,
+          platformCode: committed.platformCode,
+          externalOrderId: committed.externalOrderId,
+          status: committed.status,
         },
       },
       requestId,
     );
 
-    return this.cloneOrder(forwardedOrder);
+    return this.cloneOrder(committed);
+  }
+
+  /**
+   * Handles a repeat ingress for a platformCode/externalOrderId that already
+   * has a cached mirror. A cached record whose last write was durably ACKed
+   * is genuinely idempotent and can be returned as-is. But a record whose
+   * last write is only an in-memory "uncertain" guess (the prior attempt's
+   * own durable ACK never landed) is not confirmed canonical truth yet, so
+   * this retry reads back the real persisted row first, and only falls back
+   * to re-attempting the same write (same mirrorOrderId/platformCode/
+   * externalOrderId/snapshots — never a new mirror identity) if nothing
+   * durable exists for this identity yet.
+   */
+  private async reconcileExistingIngest(
+    existing: ForwardedOrderRecord,
+    requestId?: string,
+  ) {
+    const isUncertain =
+      existing.lastSyncError?.code === "FORWARDER_PERSISTENCE_ACK_UNCERTAIN";
+    if (!isUncertain || !this.forwarderRepository) {
+      return this.cloneOrder(existing);
+    }
+
+    let readback: ForwardedOrderRecord | null = null;
+    try {
+      readback = await this.forwarderRepository.findOrderByIdentity(
+        existing.platformCode,
+        existing.externalOrderId,
+      );
+    } catch (error) {
+      this.forwarderRepository.reportPersistenceFailure(
+        error,
+        "ingest_external_order_readback",
+      );
+    }
+
+    if (readback) {
+      const committed = this.cloneOrder(readback);
+      this.commitOrder(committed);
+      return this.cloneOrder(committed);
+    }
+
+    const retryDraft = this.cloneOrder(existing);
+    retryDraft.status = "received";
+    retryDraft.lastSyncError = null;
+    retryDraft.manualFallback = {
+      required: false,
+      reason: null,
+      requestedAt: null,
+      requestedBy: null,
+      notes: null,
+    };
+    retryDraft.reconciliationJob = null;
+    retryDraft.updatedAt = new Date().toISOString();
+
+    const adapterHealth = this.updateAdapterHealth(
+      retryDraft.platformCode,
+      this.buildHealthyAdapterHealthPatch(retryDraft.platformCode),
+    );
+
+    const committed = await this.persistOrFail(
+      retryDraft,
+      {
+        forwardedOrders: [this.cloneOrder(retryDraft)],
+        adapterHealth: [{ ...adapterHealth }],
+      },
+      "ingest_external_order_retry",
+      requestId,
+    );
+    this.ownedMobilityService?.registerForwarderSource(
+      committed.mirrorOrderId,
+      committed.platformCode,
+    );
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "system",
+        tenantId: null,
+        moduleName: "forwarder",
+        actionName: "ingest_external_order_retry",
+        resourceType: "forwarded_order",
+        resourceId: committed.mirrorOrderId,
+        newValuesSummary: {
+          platformCode: committed.platformCode,
+          externalOrderId: committed.externalOrderId,
+          status: committed.status,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneOrder(committed);
   }
 
   async ingestGrabTaiwanWebhook(
@@ -444,60 +565,62 @@ export class ForwarderService implements OnModuleInit {
   ): Promise<ForwardedDriverActionResponse> {
     this.assertNonBlank(driverId, "driverId");
 
-    const forwardedOrder = this.requireOrder(taskId);
-    if (forwardedOrder.status !== "broadcasted") {
-      if (!this.isForwardedOrderVisibleToDriver(forwardedOrder, driverId)) {
+    return this.withLock(taskId, async () => {
+      const canonical = this.requireOrder(taskId);
+      if (canonical.status !== "broadcasted") {
+        if (!this.isForwardedOrderVisibleToDriver(canonical, driverId)) {
+          throw this.driverTaskViewNotFound(taskId);
+        }
+        return this.buildForwardedDriverActionResponse(
+          "reject",
+          this.resolveForwardedOutcomeFromStatus(canonical.status),
+          canonical,
+        );
+      }
+
+      if (!canonical.candidateDriverIds.includes(driverId)) {
         throw this.driverTaskViewNotFound(taskId);
       }
-      return this.buildForwardedDriverActionResponse(
-        "reject",
-        this.resolveForwardedOutcomeFromStatus(forwardedOrder.status),
-        forwardedOrder,
-      );
-    }
 
-    if (!forwardedOrder.candidateDriverIds.includes(driverId)) {
-      throw this.driverTaskViewNotFound(taskId);
-    }
-
-    forwardedOrder.candidateDriverIds =
-      forwardedOrder.candidateDriverIds.filter(
+      const draft = this.cloneOrder(canonical);
+      draft.candidateDriverIds = draft.candidateDriverIds.filter(
         (candidateDriverId) => candidateDriverId !== driverId,
       );
-    forwardedOrder.updatedAt = new Date().toISOString();
-    await this.persistOrFail(
-      forwardedOrder,
-      {
-        forwardedOrders: [this.cloneOrder(forwardedOrder)],
-      },
-      "reject_forwarded_order",
-      requestId,
-    );
-    this.recordAudit(
-      {
-        actorId: driverId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "forwarder",
-        actionName: "reject_forwarded_order",
-        resourceType: "forwarded_order",
-        resourceId: forwardedOrder.mirrorOrderId,
-        ...(reason?.trim()
-          ? { oldValuesSummary: { reason: reason.trim() } }
-          : {}),
-        newValuesSummary: {
-          status: forwardedOrder.status,
-          candidateDriverIds: forwardedOrder.candidateDriverIds,
+      draft.updatedAt = new Date().toISOString();
+      const committed = await this.persistOrFail(
+        draft,
+        {
+          forwardedOrders: [this.cloneOrder(draft)],
         },
-      },
-      requestId,
-    );
+        "reject_forwarded_order",
+        requestId,
+      );
+      this.recordAudit(
+        {
+          actorId: driverId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "forwarder",
+          actionName: "reject_forwarded_order",
+          resourceType: "forwarded_order",
+          resourceId: committed.mirrorOrderId,
+          ...(reason?.trim()
+            ? { oldValuesSummary: { reason: reason.trim() } }
+            : {}),
+          newValuesSummary: {
+            status: committed.status,
+            candidateDriverIds: committed.candidateDriverIds,
+          },
+        },
+        requestId,
+      );
 
-    return this.buildForwardedDriverActionResponse(
-      "reject",
-      "rejected",
-      forwardedOrder,
-    );
+      return this.buildForwardedDriverActionResponse(
+        "reject",
+        "rejected",
+        committed,
+      );
+    });
   }
 
   async broadcastOrder(
@@ -505,78 +628,83 @@ export class ForwarderService implements OnModuleInit {
     command: BroadcastForwardedOrderCommand,
     requestId?: string,
   ) {
-    const forwardedOrder = this.requireOrder(orderId);
-    const serviceBucket = this.resolveServiceBucket(
-      forwardedOrder.payload,
-      forwardedOrder.authoritativeSnapshot,
-    );
-    const eligibleDrivers = new Set(
-      (this.vehicleEligibilityService
-        ? this.vehicleEligibilityService.listEligibleSupply(
-            "third_party_forwarded_order",
-            {
-              serviceBucketOverride: serviceBucket,
-            },
-          )
-        : this.regulatoryRegistryService.getEligibleCandidates(serviceBucket)
-      ).map((candidate) => candidate.driverId),
-    );
-    const requestedDrivers =
-      command.candidateDriverIds.length > 0
-        ? command.candidateDriverIds
-        : [...eligibleDrivers];
-    const candidateDriverIds = requestedDrivers.filter((driverId) =>
-      eligibleDrivers.has(driverId),
-    );
-    if (candidateDriverIds.length === 0) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "NO_ELIGIBLE_FORWARDER_CANDIDATES",
-        "Forwarded order broadcast requires at least one locally eligible driver.",
-        {
-          orderId,
-        },
+    return this.withLock(orderId, async () => {
+      const canonical = this.requireOrder(orderId);
+      const serviceBucket = this.resolveServiceBucket(
+        canonical.payload,
+        canonical.authoritativeSnapshot,
       );
-    }
+      const eligibleDrivers = new Set(
+        (this.vehicleEligibilityService
+          ? this.vehicleEligibilityService.listEligibleSupply(
+              "third_party_forwarded_order",
+              {
+                serviceBucketOverride: serviceBucket,
+              },
+            )
+          : this.regulatoryRegistryService.getEligibleCandidates(
+              serviceBucket,
+            )
+        ).map((candidate) => candidate.driverId),
+      );
+      const requestedDrivers =
+        command.candidateDriverIds.length > 0
+          ? command.candidateDriverIds
+          : [...eligibleDrivers];
+      const candidateDriverIds = requestedDrivers.filter((driverId) =>
+        eligibleDrivers.has(driverId),
+      );
+      if (candidateDriverIds.length === 0) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "NO_ELIGIBLE_FORWARDER_CANDIDATES",
+          "Forwarded order broadcast requires at least one locally eligible driver.",
+          {
+            orderId,
+          },
+        );
+      }
 
-    forwardedOrder.status = "broadcasted";
-    forwardedOrder.candidateDriverIds = [...candidateDriverIds];
-    forwardedOrder.updatedAt = new Date().toISOString();
-    const adapterHealth = this.updateAdapterHealth(
-      forwardedOrder.platformCode,
-      this.buildHealthyAdapterHealthPatch(forwardedOrder.platformCode),
-    );
-    await this.persistOrFail(
-      forwardedOrder,
-      {
-        forwardedOrders: [this.cloneOrder(forwardedOrder)],
-        adapterHealth: [{ ...adapterHealth }],
-      },
-      "broadcast_forwarded_order",
-      requestId,
-    );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "system",
-        tenantId: null,
-        moduleName: "forwarder",
-        actionName: "broadcast_forwarded_order",
-        resourceType: "forwarded_order",
-        resourceId: forwardedOrder.mirrorOrderId,
-        newValuesSummary: {
-          status: forwardedOrder.status,
-          candidateDriverIds: forwardedOrder.candidateDriverIds,
+      const draft = this.cloneOrder(canonical);
+      draft.status = "broadcasted";
+      draft.candidateDriverIds = [...candidateDriverIds];
+      draft.updatedAt = new Date().toISOString();
+      const adapterHealth = this.updateAdapterHealth(
+        draft.platformCode,
+        this.buildHealthyAdapterHealthPatch(draft.platformCode),
+      );
+      const committed = await this.persistOrFail(
+        draft,
+        {
+          forwardedOrders: [this.cloneOrder(draft)],
+          adapterHealth: [{ ...adapterHealth }],
         },
-      },
-      requestId,
-    );
+        "broadcast_forwarded_order",
+        requestId,
+      );
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "system",
+          tenantId: null,
+          moduleName: "forwarder",
+          actionName: "broadcast_forwarded_order",
+          resourceType: "forwarded_order",
+          resourceId: committed.mirrorOrderId,
+          newValuesSummary: {
+            status: committed.status,
+            candidateDriverIds: committed.candidateDriverIds,
+          },
+        },
+        requestId,
+      );
 
-    return {
-      mirrorOrderId: forwardedOrder.mirrorOrderId,
-      status: forwardedOrder.status,
-      candidateDriverIds: [...forwardedOrder.candidateDriverIds],
-    };
+      return {
+        mirrorOrderId: committed.mirrorOrderId,
+        status: committed.status,
+        candidateDriverIds: [...committed.candidateDriverIds],
+      };
+    });
   }
 
   async relayDriverAccept(
@@ -610,33 +738,50 @@ export class ForwarderService implements OnModuleInit {
 
     const adapter = this.findAdapter(forwardedOrder.platformCode);
     if (!adapter) {
-      await this.markSyncFailed(
-        forwardedOrder,
-        {
-          errorCode: "FORWARDER_ADAPTER_UNAVAILABLE",
-          errorMessage:
-            "No forwarder adapter is registered for the platform accept relay.",
-          retryable: false,
-          manualFallbackReason:
-            "Dispatch must confirm the final platform state manually before re-offer.",
-        },
-        requestId,
-        command.driverId,
-      );
-      throw new ApiRequestError(
-        HttpStatus.SERVICE_UNAVAILABLE,
-        "FORWARDER_ADAPTER_UNAVAILABLE",
-        "Forwarder adapter is unavailable for local accept relay.",
-        {
-          orderId,
-          platformCode: forwardedOrder.platformCode,
-          reconciliationJobId:
-            forwardedOrder.reconciliationJob?.reconciliationJobId ?? null,
-        },
-        true,
-      );
+      return this.withLock(orderId, async () => {
+        const fresh = this.requireOrder(orderId);
+        if (fresh.status !== "broadcasted") {
+          return {
+            status: fresh.status,
+            acceptedDriverId: fresh.acceptedDriverId,
+          };
+        }
+        const draft = this.cloneOrder(fresh);
+        const { order: failedOrder } = await this.markSyncFailed(
+          draft,
+          {
+            errorCode: "FORWARDER_ADAPTER_UNAVAILABLE",
+            errorMessage:
+              "No forwarder adapter is registered for the platform accept relay.",
+            retryable: false,
+            manualFallbackReason:
+              "Dispatch must confirm the final platform state manually before re-offer.",
+          },
+          requestId,
+          command.driverId,
+        );
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "FORWARDER_ADAPTER_UNAVAILABLE",
+          "Forwarder adapter is unavailable for local accept relay.",
+          {
+            orderId,
+            platformCode: failedOrder.platformCode,
+            reconciliationJobId:
+              failedOrder.reconciliationJob?.reconciliationJobId ?? null,
+          },
+          true,
+        );
+      });
     }
 
+    // Deliberately outside the order lock: this is a potentially slow
+    // external call and must never block other commands (in particular a
+    // native authority sync) on this same order while it is in flight. Any
+    // staleness this creates is re-checked immediately below, inside the
+    // lock, right before this relay's own mutation would be committed.
+    let adapterAcknowledged = true;
+    let adapterError: unknown = null;
     try {
       const adapterResult = await adapter.accept({
         externalOrderId: forwardedOrder.externalOrderId,
@@ -651,103 +796,118 @@ export class ForwarderService implements OnModuleInit {
         throw new Error(adapterResult.detail ?? "adapter did not acknowledge");
       }
     } catch (error) {
-      if (forwardedOrder.status !== "broadcasted") {
-        // A newer authoritative outcome (native sync/reconciliation, or a
-        // competing accept that already claimed the order) landed while this
-        // relay call was awaiting the adapter. That outcome is canonical;
-        // this local relay failure is moot and must not reconstruct
-        // sync_failed over it.
+      adapterAcknowledged = false;
+      adapterError = error;
+    }
+
+    if (!adapterAcknowledged) {
+      return this.withLock(orderId, async () => {
+        const fresh = this.requireOrder(orderId);
+        if (fresh.status !== "broadcasted") {
+          // A newer authoritative outcome (native sync/reconciliation, or a
+          // competing accept that already claimed the order) landed while
+          // this relay call was awaiting the adapter. That outcome is
+          // canonical; this local relay failure is moot and must not
+          // reconstruct sync_failed over it.
+          return {
+            status: fresh.status,
+            acceptedDriverId: fresh.acceptedDriverId,
+          };
+        }
+
+        const errorMessage =
+          adapterError instanceof Error
+            ? adapterError.message
+            : String(adapterError);
+        const draft = this.cloneOrder(fresh);
+        const { order: failedOrder } = await this.markSyncFailed(
+          draft,
+          {
+            errorCode: "FORWARDER_ACCEPT_RELAY_FAILED",
+            errorMessage,
+            retryable: true,
+            manualFallbackReason:
+              "Dispatch must confirm platform acceptance manually before continuing.",
+          },
+          requestId,
+          command.driverId,
+        );
+        throw new ApiRequestError(
+          HttpStatus.BAD_GATEWAY,
+          "FORWARDER_ACCEPT_RELAY_FAILED",
+          "Forwarder accept relay failed; reconciliation and manual fallback are required.",
+          {
+            orderId,
+            platformCode: failedOrder.platformCode,
+            reconciliationJobId:
+              failedOrder.reconciliationJob?.reconciliationJobId ?? null,
+          },
+          true,
+        );
+      });
+    }
+
+    return this.withLock(orderId, async () => {
+      const fresh = this.requireOrder(orderId);
+      if (fresh.status !== "broadcasted") {
+        // Same race as above, but the adapter call itself succeeded (late
+        // success): a newer native/competing outcome already landed during
+        // the await and must survive instead of being overwritten below.
         return {
-          status: forwardedOrder.status,
-          acceptedDriverId: forwardedOrder.acceptedDriverId,
+          status: fresh.status,
+          acceptedDriverId: fresh.acceptedDriverId,
         };
       }
 
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      await this.markSyncFailed(
-        forwardedOrder,
+      const draft = this.cloneOrder(fresh);
+      draft.status = "accept_pending";
+      draft.acceptedDriverId = command.driverId;
+      draft.lastSyncError = null;
+      draft.manualFallback = {
+        ...draft.manualFallback,
+        required: false,
+      };
+      draft.updatedAt = new Date().toISOString();
+      const adapterHealth = this.updateAdapterHealth(
+        draft.platformCode,
+        this.buildHealthyAdapterHealthPatch(draft.platformCode, {
+          credentialStatus: "valid",
+          authStatus: "authenticated",
+          rateLimitStatus: "ok",
+        }),
+      );
+      const committed = await this.persistOrFail(
+        draft,
         {
-          errorCode: "FORWARDER_ACCEPT_RELAY_FAILED",
-          errorMessage,
-          retryable: true,
-          manualFallbackReason:
-            "Dispatch must confirm platform acceptance manually before continuing.",
+          forwardedOrders: [this.cloneOrder(draft)],
+          adapterHealth: [{ ...adapterHealth }],
         },
+        "relay_driver_accept",
         requestId,
         command.driverId,
       );
-      throw new ApiRequestError(
-        HttpStatus.BAD_GATEWAY,
-        "FORWARDER_ACCEPT_RELAY_FAILED",
-        "Forwarder accept relay failed; reconciliation and manual fallback are required.",
+      this.recordAudit(
         {
-          orderId,
-          platformCode: forwardedOrder.platformCode,
-          reconciliationJobId:
-            forwardedOrder.reconciliationJob?.reconciliationJobId ?? null,
+          actorId: command.driverId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "forwarder",
+          actionName: "relay_driver_accept",
+          resourceType: "forwarded_order",
+          resourceId: committed.mirrorOrderId,
+          newValuesSummary: {
+            status: committed.status,
+            acceptedDriverId: committed.acceptedDriverId,
+          },
         },
-        true,
+        requestId,
       );
-    }
 
-    if (forwardedOrder.status !== "broadcasted") {
-      // Same race as above, but the adapter call itself succeeded (late
-      // success): a newer native/competing outcome already landed during
-      // the await and must survive instead of being overwritten below.
       return {
-        status: forwardedOrder.status,
-        acceptedDriverId: forwardedOrder.acceptedDriverId,
+        status: committed.status,
+        acceptedDriverId: committed.acceptedDriverId,
       };
-    }
-
-    forwardedOrder.status = "accept_pending";
-    forwardedOrder.acceptedDriverId = command.driverId;
-    forwardedOrder.lastSyncError = null;
-    forwardedOrder.manualFallback = {
-      ...forwardedOrder.manualFallback,
-      required: false,
-    };
-    forwardedOrder.updatedAt = new Date().toISOString();
-    const adapterHealth = this.updateAdapterHealth(
-      forwardedOrder.platformCode,
-      this.buildHealthyAdapterHealthPatch(forwardedOrder.platformCode, {
-        credentialStatus: "valid",
-        authStatus: "authenticated",
-        rateLimitStatus: "ok",
-      }),
-    );
-    await this.persistOrFail(
-      forwardedOrder,
-      {
-        forwardedOrders: [this.cloneOrder(forwardedOrder)],
-        adapterHealth: [{ ...adapterHealth }],
-      },
-      "relay_driver_accept",
-      requestId,
-      command.driverId,
-    );
-    this.recordAudit(
-      {
-        actorId: command.driverId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "forwarder",
-        actionName: "relay_driver_accept",
-        resourceType: "forwarded_order",
-        resourceId: forwardedOrder.mirrorOrderId,
-        newValuesSummary: {
-          status: forwardedOrder.status,
-          acceptedDriverId: forwardedOrder.acceptedDriverId,
-        },
-      },
-      requestId,
-    );
-
-    return {
-      status: forwardedOrder.status,
-      acceptedDriverId: forwardedOrder.acceptedDriverId,
-    };
+    });
   }
 
   async reportSyncFailure(
@@ -755,9 +915,32 @@ export class ForwarderService implements OnModuleInit {
     command: ReportForwarderSyncFailureCommand,
     requestId?: string,
   ) {
-    const forwardedOrder = this.requireOrder(orderId);
-    await this.markSyncFailed(forwardedOrder, command, requestId);
-    return this.cloneOrder(forwardedOrder);
+    return this.withLock(orderId, async () => {
+      const canonical = this.requireOrder(orderId);
+      const draft = this.cloneOrder(canonical);
+      const { order, persisted } = await this.markSyncFailed(
+        draft,
+        command,
+        requestId,
+      );
+      if (!persisted) {
+        // This command's whole job is to durably record the sync-failed
+        // state. If that recording itself never landed, reporting success
+        // would hide the uncertainty from the caller; surface the same
+        // honest degraded-ACK contract persistOrFail uses elsewhere instead.
+        throw new ApiRequestError(
+          HttpStatus.BAD_GATEWAY,
+          "FORWARDER_PERSISTENCE_ACK_UNCERTAIN",
+          "Forwarded order sync-failure record was not durably acknowledged; manual readback/reconciliation is required before treating this as complete.",
+          {
+            orderId,
+            context: "report_sync_failure",
+          },
+          true,
+        );
+      }
+      return this.cloneOrder(order);
+    });
   }
 
   async engageManualFallback(
@@ -765,69 +948,72 @@ export class ForwarderService implements OnModuleInit {
     command: EngageForwarderManualFallbackCommand,
     requestId?: string,
   ) {
-    const forwardedOrder = this.requireOrder(orderId);
-    if (
-      forwardedOrder.status === "confirmed_by_platform" ||
-      forwardedOrder.status === "completed_synced" ||
-      forwardedOrder.status === "lost_race" ||
-      forwardedOrder.status === "cancelled_by_platform"
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "FORWARDED_ORDER_ALREADY_RESOLVED",
-        "Manual fallback can only be engaged while the forwarded order is still unresolved.",
+    return this.withLock(orderId, async () => {
+      const canonical = this.requireOrder(orderId);
+      if (
+        canonical.status === "confirmed_by_platform" ||
+        canonical.status === "completed_synced" ||
+        canonical.status === "lost_race" ||
+        canonical.status === "cancelled_by_platform"
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "FORWARDED_ORDER_ALREADY_RESOLVED",
+          "Manual fallback can only be engaged while the forwarded order is still unresolved.",
+          {
+            orderId,
+            status: canonical.status,
+          },
+        );
+      }
+
+      const now = new Date().toISOString();
+      const draft = this.cloneOrder(canonical);
+      draft.manualFallback = {
+        required: true,
+        reason: command.reason,
+        requestedAt: now,
+        requestedBy: command.requestedBy?.trim() || null,
+        notes: command.notes?.trim() || null,
+      };
+      if (!draft.reconciliationJob) {
+        draft.reconciliationJob = this.createReconciliationJob(
+          draft,
+          "manual_fallback",
+          command.reason,
+          now,
+        );
+      }
+      draft.updatedAt = now;
+      const committed = await this.persistOrFail(
+        draft,
         {
-          orderId,
-          status: forwardedOrder.status,
+          forwardedOrders: [this.cloneOrder(draft)],
         },
+        "engage_manual_fallback",
+        requestId,
       );
-    }
-
-    const now = new Date().toISOString();
-    forwardedOrder.manualFallback = {
-      required: true,
-      reason: command.reason,
-      requestedAt: now,
-      requestedBy: command.requestedBy?.trim() || null,
-      notes: command.notes?.trim() || null,
-    };
-    if (!forwardedOrder.reconciliationJob) {
-      forwardedOrder.reconciliationJob = this.createReconciliationJob(
-        forwardedOrder,
-        "manual_fallback",
-        command.reason,
-        now,
-      );
-    }
-    forwardedOrder.updatedAt = now;
-    await this.persistOrFail(
-      forwardedOrder,
-      {
-        forwardedOrders: [this.cloneOrder(forwardedOrder)],
-      },
-      "engage_manual_fallback",
-      requestId,
-    );
-    this.recordAudit(
-      {
-        actorId: command.requestedBy?.trim() || null,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "forwarder",
-        actionName: "engage_manual_fallback",
-        resourceType: "forwarded_order",
-        resourceId: forwardedOrder.mirrorOrderId,
-        newValuesSummary: {
-          status: forwardedOrder.status,
-          manualFallbackRequired: true,
-          reconciliationJobId:
-            forwardedOrder.reconciliationJob?.reconciliationJobId ?? null,
+      this.recordAudit(
+        {
+          actorId: command.requestedBy?.trim() || null,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "forwarder",
+          actionName: "engage_manual_fallback",
+          resourceType: "forwarded_order",
+          resourceId: committed.mirrorOrderId,
+          newValuesSummary: {
+            status: committed.status,
+            manualFallbackRequired: true,
+            reconciliationJobId:
+              committed.reconciliationJob?.reconciliationJobId ?? null,
+          },
         },
-      },
-      requestId,
-    );
+        requestId,
+      );
 
-    return this.cloneOrder(forwardedOrder);
+      return this.cloneOrder(committed);
+    });
   }
 
   async syncNativeStatus(
@@ -835,68 +1021,71 @@ export class ForwarderService implements OnModuleInit {
     command: SyncForwardedOrderStatusCommand,
     requestId?: string,
   ) {
-    const forwardedOrder = this.requireOrder(orderId);
-    const nextStatus = this.resolveNextStatus(command.nativeStatus);
+    return this.withLock(orderId, async () => {
+      const canonical = this.requireOrder(orderId);
+      const nextStatus = this.resolveNextStatus(command.nativeStatus);
 
-    forwardedOrder.status = nextStatus;
-    forwardedOrder.lastNativeStatus = command.nativeStatus;
-    forwardedOrder.authoritativeSnapshot = {
-      ...forwardedOrder.authoritativeSnapshot,
-      nativeStatus: command.nativeStatus,
-      ...(command.payload ?? {}),
-    };
-    forwardedOrder.updatedAt = new Date().toISOString();
-    if (forwardedOrder.reconciliationJob?.status === "queued") {
-      forwardedOrder.reconciliationJob = {
-        ...forwardedOrder.reconciliationJob,
-        status: "completed",
-        mismatchCount: 0,
-        notes: "Resolved by native status sync.",
-        completedAt: forwardedOrder.updatedAt,
+      const draft = this.cloneOrder(canonical);
+      draft.status = nextStatus;
+      draft.lastNativeStatus = command.nativeStatus;
+      draft.authoritativeSnapshot = {
+        ...draft.authoritativeSnapshot,
+        nativeStatus: command.nativeStatus,
+        ...(command.payload ?? {}),
       };
-      forwardedOrder.lastSyncError = null;
-      forwardedOrder.manualFallback = {
-        ...forwardedOrder.manualFallback,
-        required: false,
-      };
-    }
-    const adapterHealth = this.updateAdapterHealth(
-      forwardedOrder.platformCode,
-      this.buildHealthyAdapterHealthPatch(forwardedOrder.platformCode),
-    );
-    await this.persistOrFail(
-      forwardedOrder,
-      {
-        forwardedOrders: [this.cloneOrder(forwardedOrder)],
-        adapterHealth: [{ ...adapterHealth }],
-      },
-      "sync_forwarded_order_status",
-      requestId,
-    );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "system",
-        tenantId: null,
-        moduleName: "forwarder",
-        actionName: "sync_forwarded_order_status",
-        resourceType: "forwarded_order",
-        resourceId: forwardedOrder.mirrorOrderId,
-        newValuesSummary: {
-          status: forwardedOrder.status,
-          nativeStatus: forwardedOrder.lastNativeStatus,
-          acceptedDriverId: forwardedOrder.acceptedDriverId,
+      draft.updatedAt = new Date().toISOString();
+      if (draft.reconciliationJob?.status === "queued") {
+        draft.reconciliationJob = {
+          ...draft.reconciliationJob,
+          status: "completed",
+          mismatchCount: 0,
+          notes: "Resolved by native status sync.",
+          completedAt: draft.updatedAt,
+        };
+        draft.lastSyncError = null;
+        draft.manualFallback = {
+          ...draft.manualFallback,
+          required: false,
+        };
+      }
+      const adapterHealth = this.updateAdapterHealth(
+        draft.platformCode,
+        this.buildHealthyAdapterHealthPatch(draft.platformCode),
+      );
+      const committed = await this.persistOrFail(
+        draft,
+        {
+          forwardedOrders: [this.cloneOrder(draft)],
+          adapterHealth: [{ ...adapterHealth }],
         },
-      },
-      requestId,
-    );
+        "sync_forwarded_order_status",
+        requestId,
+      );
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "system",
+          tenantId: null,
+          moduleName: "forwarder",
+          actionName: "sync_forwarded_order_status",
+          resourceType: "forwarded_order",
+          resourceId: committed.mirrorOrderId,
+          newValuesSummary: {
+            status: committed.status,
+            nativeStatus: committed.lastNativeStatus,
+            acceptedDriverId: committed.acceptedDriverId,
+          },
+        },
+        requestId,
+      );
 
-    this.closeDriverTasksOnTerminalState(forwardedOrder, requestId);
+      this.closeDriverTasksOnTerminalState(committed, requestId);
 
-    return {
-      status: forwardedOrder.status,
-      authoritativeSnapshot: { ...forwardedOrder.authoritativeSnapshot },
-    };
+      return {
+        status: committed.status,
+        authoritativeSnapshot: { ...committed.authoritativeSnapshot },
+      };
+    });
   }
 
   async completeReconciliation(
@@ -904,76 +1093,78 @@ export class ForwarderService implements OnModuleInit {
     command: CompleteForwarderReconciliationCommand,
     requestId?: string,
   ) {
-    const forwardedOrder = this.requireOrder(orderId);
-    if (!forwardedOrder.reconciliationJob) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "FORWARDER_RECONCILIATION_NOT_FOUND",
-        "Reconciliation job was not found for the forwarded order.",
-        {
-          orderId,
-        },
+    return this.withLock(orderId, async () => {
+      const canonical = this.requireOrder(orderId);
+      if (!canonical.reconciliationJob) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "FORWARDER_RECONCILIATION_NOT_FOUND",
+          "Reconciliation job was not found for the forwarded order.",
+          {
+            orderId,
+          },
+        );
+      }
+
+      const nextStatus = this.resolveNextStatus(command.nativeStatus);
+      const completedAt = new Date().toISOString();
+      const draft = this.cloneOrder(canonical);
+      draft.status = nextStatus;
+      draft.lastNativeStatus = command.nativeStatus;
+      draft.authoritativeSnapshot = {
+        ...draft.authoritativeSnapshot,
+        nativeStatus: command.nativeStatus,
+        ...(command.payload ?? {}),
+      };
+      draft.lastSyncError = null;
+      draft.manualFallback = {
+        ...draft.manualFallback,
+        required: false,
+        notes: command.notes?.trim() ?? draft.manualFallback.notes,
+      };
+      draft.reconciliationJob = {
+        ...draft.reconciliationJob!,
+        status: "completed",
+        mismatchCount: command.mismatchCount,
+        notes: command.notes?.trim() || null,
+        completedAt,
+      };
+      draft.updatedAt = completedAt;
+      const adapterHealth = this.updateAdapterHealth(
+        draft.platformCode,
+        this.buildHealthyAdapterHealthPatch(draft.platformCode),
       );
-    }
-
-    const nextStatus = this.resolveNextStatus(command.nativeStatus);
-    const completedAt = new Date().toISOString();
-    forwardedOrder.status = nextStatus;
-    forwardedOrder.lastNativeStatus = command.nativeStatus;
-    forwardedOrder.authoritativeSnapshot = {
-      ...forwardedOrder.authoritativeSnapshot,
-      nativeStatus: command.nativeStatus,
-      ...(command.payload ?? {}),
-    };
-    forwardedOrder.lastSyncError = null;
-    forwardedOrder.manualFallback = {
-      ...forwardedOrder.manualFallback,
-      required: false,
-      notes: command.notes?.trim() ?? forwardedOrder.manualFallback.notes,
-    };
-    forwardedOrder.reconciliationJob = {
-      ...forwardedOrder.reconciliationJob,
-      status: "completed",
-      mismatchCount: command.mismatchCount,
-      notes: command.notes?.trim() || null,
-      completedAt,
-    };
-    forwardedOrder.updatedAt = completedAt;
-    const adapterHealth = this.updateAdapterHealth(
-      forwardedOrder.platformCode,
-      this.buildHealthyAdapterHealthPatch(forwardedOrder.platformCode),
-    );
-    await this.persistOrFail(
-      forwardedOrder,
-      {
-        forwardedOrders: [this.cloneOrder(forwardedOrder)],
-        adapterHealth: [{ ...adapterHealth }],
-      },
-      "complete_forwarder_reconciliation",
-      requestId,
-    );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "system",
-        tenantId: null,
-        moduleName: "forwarder",
-        actionName: "complete_forwarder_reconciliation",
-        resourceType: "forwarded_order",
-        resourceId: forwardedOrder.mirrorOrderId,
-        newValuesSummary: {
-          status: forwardedOrder.status,
-          nativeStatus: forwardedOrder.lastNativeStatus,
-          reconciliationJobId:
-            forwardedOrder.reconciliationJob.reconciliationJobId,
+      const committed = await this.persistOrFail(
+        draft,
+        {
+          forwardedOrders: [this.cloneOrder(draft)],
+          adapterHealth: [{ ...adapterHealth }],
         },
-      },
-      requestId,
-    );
+        "complete_forwarder_reconciliation",
+        requestId,
+      );
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "system",
+          tenantId: null,
+          moduleName: "forwarder",
+          actionName: "complete_forwarder_reconciliation",
+          resourceType: "forwarded_order",
+          resourceId: committed.mirrorOrderId,
+          newValuesSummary: {
+            status: committed.status,
+            nativeStatus: committed.lastNativeStatus,
+            reconciliationJobId: committed.reconciliationJob!.reconciliationJobId,
+          },
+        },
+        requestId,
+      );
 
-    this.closeDriverTasksOnTerminalState(forwardedOrder, requestId);
+      this.closeDriverTasksOnTerminalState(committed, requestId);
 
-    return this.cloneOrder(forwardedOrder);
+      return this.cloneOrder(committed);
+    });
   }
 
   listSyncErrors() {
@@ -1189,14 +1380,29 @@ export class ForwarderService implements OnModuleInit {
     };
   }
 
+  /**
+   * Mutates `draft` (a clone not yet visible to readers — never the live
+   * array entry) into the honest degraded sync_failed state and commits it.
+   * This is the terminal best-effort recording path: there is no further
+   * fallback to escalate to without inventing a fake ACK, so when
+   * persisting this degraded state ALSO fails, the lastSyncError/
+   * manualFallback are overwritten to flag that double uncertainty instead
+   * of silently keeping the original failure's wording as if it had been
+   * durably recorded. Must always be called from within `withLock` for this
+   * order so the commit below cannot interleave with another command's.
+   * Callers that are themselves a top-level durable-ACK command (not
+   * already inside another command's own failure handling, e.g.
+   * `reportSyncFailure`) must check the returned `persisted` flag and must
+   * not report success when it is false.
+   */
   private async markSyncFailed(
-    forwardedOrder: ForwardedOrderRecord,
+    draft: ForwardedOrderRecord,
     command: ReportForwarderSyncFailureCommand,
     requestId?: string,
     acceptedDriverId?: string,
-  ): Promise<void> {
+  ): Promise<{ order: ForwardedOrderRecord; persisted: boolean }> {
     const failedAt = new Date().toISOString();
-    const lastSyncError: ForwarderSyncErrorRecord = {
+    let lastSyncError: ForwarderSyncErrorRecord = {
       code: command.errorCode,
       message: command.errorMessage,
       retryable: command.retryable,
@@ -1205,45 +1411,55 @@ export class ForwarderService implements OnModuleInit {
       payload: { ...(command.payload ?? {}) },
     };
 
-    forwardedOrder.status = "sync_failed";
-    forwardedOrder.acceptedDriverId =
-      acceptedDriverId ?? forwardedOrder.acceptedDriverId;
-    forwardedOrder.lastSyncError = lastSyncError;
-    forwardedOrder.manualFallback = {
+    draft.status = "sync_failed";
+    draft.acceptedDriverId = acceptedDriverId ?? draft.acceptedDriverId;
+    draft.lastSyncError = lastSyncError;
+    draft.manualFallback = {
       required: true,
       reason: command.manualFallbackReason?.trim() || command.errorMessage,
       requestedAt: failedAt,
       requestedBy: null,
       notes: null,
     };
-    forwardedOrder.reconciliationJob = this.createReconciliationJob(
-      forwardedOrder,
+    draft.reconciliationJob = this.createReconciliationJob(
+      draft,
       "sync_failed",
       command.errorMessage,
       failedAt,
     );
-    forwardedOrder.updatedAt = failedAt;
+    draft.updatedAt = failedAt;
     const adapterHealth = this.updateAdapterHealth(
-      forwardedOrder.platformCode,
-      this.buildFailureAdapterHealthPatch(
-        forwardedOrder.platformCode,
-        command,
-        failedAt,
-      ),
+      draft.platformCode,
+      this.buildFailureAdapterHealthPatch(draft.platformCode, command, failedAt),
     );
+
+    let persisted = true;
     try {
       await this.persistChanges(
         {
-          forwardedOrders: [this.cloneOrder(forwardedOrder)],
+          forwardedOrders: [this.cloneOrder(draft)],
           adapterHealth: [{ ...adapterHealth }],
         },
         "mark_forwarder_sync_failed",
       );
-    } catch {
-      // Already logged via reportPersistenceFailure inside persistChanges.
-      // This is already the terminal honest-failure recording path, so there
-      // is no further fallback to escalate to without inventing a fake ACK.
+    } catch (error) {
+      persisted = false;
+      const detail = error instanceof Error ? error.message : String(error);
+      lastSyncError = {
+        ...lastSyncError,
+        code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN",
+        message: `Durable persistence ACK was not received for mark_forwarder_sync_failed (original ${command.errorCode}: ${command.errorMessage}): ${detail}`,
+      };
+      draft.lastSyncError = lastSyncError;
+      draft.manualFallback = {
+        ...draft.manualFallback,
+        reason:
+          "Local mirror write was not durably confirmed; verify canonical state via readback/reconciliation before retrying.",
+      };
     }
+
+    this.commitOrder(draft);
+
     this.recordAudit(
       {
         actorId: acceptedDriverId ?? null,
@@ -1252,17 +1468,19 @@ export class ForwarderService implements OnModuleInit {
         moduleName: "forwarder",
         actionName: "mark_forwarder_sync_failed",
         resourceType: "forwarded_order",
-        resourceId: forwardedOrder.mirrorOrderId,
+        resourceId: draft.mirrorOrderId,
         newValuesSummary: {
-          status: forwardedOrder.status,
+          status: draft.status,
           errorCode: lastSyncError.code,
           retryable: lastSyncError.retryable,
-          reconciliationJobId:
-            forwardedOrder.reconciliationJob?.reconciliationJobId ?? null,
+          persisted,
+          reconciliationJobId: draft.reconciliationJob?.reconciliationJobId ?? null,
         },
       },
       requestId,
     );
+
+    return { order: draft, persisted };
   }
 
   private updateAdapterHealth(
@@ -2200,26 +2418,31 @@ export class ForwarderService implements OnModuleInit {
 
   /**
    * Durable-ACK gate for the forwarded mirror command lifecycle: awaits the
-   * canonical write and, if it does not land, records the honest degraded
-   * state (reusing the existing sync_failed/manual-fallback/reconciliation
-   * vocabulary rather than inventing a new provider receipt) and throws so
-   * the caller never publishes cache/audit/HTTP success for an unconfirmed
-   * write. Retrying the same command re-targets the same mirrorOrderId, so
-   * platformCode/externalOrderId/mirror identity and snapshots survive.
+   * canonical write for `draft` (a clone, not yet visible to any reader) and
+   * only commits it into the live cache once that write actually lands —
+   * readers (list/getOrder/driver task views) must never observe a draft
+   * ahead of its ACK. If the write does not land, records the honest
+   * degraded state (reusing the existing sync_failed/manual-fallback/
+   * reconciliation vocabulary rather than inventing a new provider receipt)
+   * and throws so the caller never publishes cache/audit/HTTP success for an
+   * unconfirmed write. Retrying the same command re-targets the same
+   * mirrorOrderId, so platformCode/externalOrderId/mirror identity and
+   * snapshots survive. Must always be called from within `withLock` for
+   * this order.
    */
   private async persistOrFail(
-    forwardedOrder: ForwardedOrderRecord,
+    draft: ForwardedOrderRecord,
     changes: PersistForwarderChanges,
     context: string,
     requestId?: string,
     acceptedDriverId?: string,
-  ): Promise<void> {
+  ): Promise<ForwardedOrderRecord> {
     try {
       await this.persistChanges(changes, context);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       await this.markSyncFailed(
-        forwardedOrder,
+        draft,
         {
           errorCode: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN",
           errorMessage: `Durable persistence ACK was not received for ${context}: ${detail}`,
@@ -2235,11 +2458,59 @@ export class ForwarderService implements OnModuleInit {
         "FORWARDER_PERSISTENCE_ACK_UNCERTAIN",
         "Forwarded order mirror write was not durably acknowledged; manual readback/reconciliation is required before treating this as complete.",
         {
-          orderId: forwardedOrder.mirrorOrderId,
+          orderId: draft.mirrorOrderId,
           context,
         },
         true,
       );
     }
+
+    this.commitOrder(draft);
+    return draft;
+  }
+
+  /**
+   * Per-identity mutation mutex (see `orderLocks`). Standard promise-chain
+   * mutex: each waiter's gate resolves only when the previous holder's `fn`
+   * has fully finished (including its own commit), so at most one critical
+   * section per identity runs at a time, and a later-queued caller always
+   * observes whatever the earlier one committed.
+   */
+  private async withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.orderLocks.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.orderLocks.set(
+      key,
+      previous.then(() => gate),
+    );
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
+  /**
+   * Publishes `order` as canonical: replaces its live array entry (or
+   * inserts it, for a brand-new mirror) so subsequent reads observe it. Only
+   * ever called after a durable ACK (or, for the terminal best-effort
+   * sync_failed recording, after that write has been attempted) — never
+   * before, per the cache/HTTP read publication gate.
+   */
+  private commitOrder(order: ForwardedOrderRecord) {
+    const index = this.forwardedOrders.findIndex(
+      (candidate) => candidate.mirrorOrderId === order.mirrorOrderId,
+    );
+    if (index === -1) {
+      this.forwardedOrders = [order, ...this.forwardedOrders];
+      return;
+    }
+    const next = [...this.forwardedOrders];
+    next[index] = order;
+    this.forwardedOrders = next;
   }
 }

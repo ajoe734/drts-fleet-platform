@@ -145,6 +145,41 @@ export class ForwarderRepository {
     await Promise.all(writes);
   }
 
+  /**
+   * Single-row readback used to recover canonical truth for a specific
+   * mirror identity after an uncertain write (restart/reconciliation path),
+   * rather than trusting an in-memory guess about whether a prior command
+   * actually landed. Reuses the same existing table/columns as loadState and
+   * persistChanges; this is not a new migration or schema.
+   */
+  async findOrderByIdentity(
+    platformCode: ForwardedOrderRecord["platformCode"],
+    externalOrderId: string,
+  ): Promise<ForwardedOrderRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_forwarded_orders
+        WHERE platform_code = $1 AND external_order_id = $2
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 1
+      `,
+      [platformCode, externalOrderId],
+    );
+
+    const row = result.rows[0];
+    return row
+      ? this.parseRecord<ForwardedOrderRecord>(
+          row.record,
+          "ops.phase1_forwarded_orders",
+        )
+      : null;
+  }
+
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
     this.logger.warn(
