@@ -290,4 +290,104 @@ describe("real guarded commands, wire casing and scoped notification production"
     ).toBe("available");
     spy.mockRestore();
   });
+  it.each([
+    ["ops", "/api/ops/platform-notices"],
+    ["tenant", "/api/tenant/notifications/platform-notices"],
+    ["driver", "/api/driver/platform-notices"],
+  ] as const)(
+    "%s read returns failure when the actual notification write has no ACK, then permits a real retry",
+    async (realm, path) => {
+      const h = wireHarness();
+      const client = h.client(
+        principal(realm, "ack-reader", realm === "tenant" ? "A" : null),
+      );
+      const n = h.service.createPlatformNotice({
+        title: "Read ACK",
+        body: "Only authoritative read state can acknowledge this command",
+        severity: "info",
+        targetAudience: "all",
+      });
+      const own = (await client.getList<RecipientNotice>(path)).find(
+        (item) => item.noticeId === n.noticeId,
+      )!;
+      // Control only the notification write boundary; the guarded transport,
+      // controller, lifecycle and subsequent notification read remain real.
+      vi.spyOn(h.audit, "markNotificationsRead").mockReturnValueOnce({
+        updated: 0,
+      });
+      await expect(
+        client.post(`${path}/${n.noticeId}/read`, {
+          body: { outcomeId: own.outcome.outcomeId },
+        }),
+      ).rejects.toThrow("Notification read was not acknowledged");
+      expect(
+        h.audit
+          .listNotifications()
+          .find((item) => item.notificationId === own.outcome.notificationId)
+          ?.readAt,
+      ).toBeNull();
+      const ack = await client.post<{ readAt: string }>(
+        `${path}/${n.noticeId}/read`,
+        { body: { outcomeId: own.outcome.outcomeId } },
+      );
+      expect(ack.readAt).toBeTruthy();
+    },
+  );
+  it.each(["history", "repeated read"] as const)(
+    "%s reconciles a previously read receipt against missing notification authority",
+    async (entry) => {
+      const h = wireHarness();
+      const client = h.client(principal("driver"));
+      const n = h.service.createPlatformNotice({
+        title: "Lost receipt authority",
+        body: "A cached read timestamp cannot substitute for current authority",
+        severity: "info",
+        targetAudience: "drivers",
+      });
+      const own = (
+        await client.getList<RecipientNotice>("/api/driver/platform-notices")
+      ).find((item) => item.noticeId === n.noticeId)!;
+      const read = () =>
+        client.post<{ readAt: string }>(
+          `/api/driver/platform-notices/${n.noticeId}/read`,
+          { body: { outcomeId: own.outcome.outcomeId } },
+        );
+      const firstAck = await read();
+      expect(firstAck.readAt).toBeTruthy();
+      const records = h.audit.listNotifications();
+      // Model missing correlated storage at the audit-notification boundary;
+      // this does not claim a hosted deletion or restart was exercised.
+      const authority = vi
+        .spyOn(h.audit, "listNotifications")
+        .mockReturnValue(
+          records.filter(
+            (item) => item.notificationId !== own.outcome.notificationId,
+          ),
+        );
+      if (entry === "repeated read") {
+        await expect(read()).rejects.toThrow(
+          "Notification read was not acknowledged",
+        );
+      }
+      const history = await h.client(principal("platform")).getList<{
+        noticeId: string;
+        outcomes: RecipientNotice["outcome"][];
+      }>("/api/platform-admin/notices");
+      expect(
+        history
+          .find((item) => item.noticeId === n.noticeId)
+          ?.outcomes.find((item) => item.outcomeId === own.outcome.outcomeId),
+      ).toMatchObject({
+        state: "unknown",
+        error: "notification_record_missing",
+        readAt: firstAck.readAt,
+      });
+      authority.mockRestore();
+      expect(await read()).toMatchObject({
+        state: "read",
+        error: null,
+        readAt: firstAck.readAt,
+      });
+    },
+  );
 });

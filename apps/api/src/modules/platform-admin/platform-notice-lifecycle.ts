@@ -170,9 +170,36 @@ export class PlatformNoticeLifecycle {
       if (active && outcome.state === "scheduled") outcome.state = "routed";
     }
   }
+  private reconcileReceipt(
+    outcome: NoticeOutcome,
+    actual: NotificationRecord | undefined,
+  ) {
+    if (!outcome.notificationId) return;
+    if (!actual) {
+      // Keep the historical read timestamp, but do not present it as current
+      // authority or use it to acknowledge another command.
+      outcome.state = "unknown";
+      outcome.error = "notification_record_missing";
+      return;
+    }
+    outcome.readAt = actual.readAt;
+    outcome.state = actual.readAt ? "read" : "available";
+    outcome.error = null;
+  }
   list(): CanonicalNotice[] {
     const now = Date.now();
-    for (const n of this.notices) this.reconcile(n, now);
+    const notifications = new Map(
+      this.notifications.listNotifications().map((n) => [n.notificationId, n]),
+    );
+    for (const n of this.notices) {
+      this.reconcile(n, now);
+      for (const outcome of n.outcomes) {
+        this.reconcileReceipt(
+          outcome,
+          notifications.get(outcome.notificationId ?? ""),
+        );
+      }
+    }
     return this.notices.map((n) => this.snapshot(n));
   }
   create(command: NoticeCommand): CanonicalNotice {
@@ -303,13 +330,7 @@ export class PlatformNoticeLifecycle {
       const actual = this.notifications
         .listNotifications()
         .find((n) => n.notificationId === outcome!.notificationId);
-      if (actual?.readAt) {
-        outcome.readAt = actual.readAt;
-        outcome.state = "read";
-      } else if (!actual) {
-        outcome.state = "unknown";
-        outcome.error = "notification_record_missing";
-      }
+      this.reconcileReceipt(outcome, actual);
       const { outcomes: _outcomes, ...record } = this.snapshot(notice);
       void _outcomes; // Recipient projection deliberately omits every other receipt.
       result.push({ ...record, outcome: { ...outcome } });
@@ -342,18 +363,19 @@ export class PlatformNoticeLifecycle {
       this.notifications.markNotificationsRead({
         notificationIds: [outcome.notificationId],
       });
-      const actual = this.notifications
-        .listNotifications()
-        .find((n) => n.notificationId === outcome.notificationId);
-      if (!actual?.readAt)
-        throw new ApiRequestError(
-          503,
-          "NOTICE_READ_NOT_ACKNOWLEDGED",
-          "Notification read was not acknowledged.",
-        );
-      outcome.readAt = actual.readAt;
-      outcome.state = "read";
     }
+    // Idempotent retries must still read the actual correlated notification.
+    // A timestamp cached before a missing-record read is not a fresh ACK.
+    const actual = this.notifications
+      .listNotifications()
+      .find((n) => n.notificationId === outcome.notificationId);
+    this.reconcileReceipt(outcome, actual);
+    if (!actual?.readAt)
+      throw new ApiRequestError(
+        503,
+        "NOTICE_READ_NOT_ACKNOWLEDGED",
+        "Notification read was not acknowledged.",
+      );
     return { ...outcome };
   }
   notificationFeed(
