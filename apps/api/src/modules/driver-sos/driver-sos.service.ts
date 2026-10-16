@@ -1020,10 +1020,18 @@ export class DriverSosService implements OnModuleInit {
   /** Best-effort Incident handover convergence used for an idempotent
    * replay, or for a cross-process SOS-side CAS race outcome: by this point
    * the SOS event has already durably decided `owner` as the truth, so a
-   * failed or conflicting Incident write here is a residual repair
-   * opportunity (the next acknowledgeDuty replay retries it again), not a
-   * reason to fail the call that is reporting the SOS event's own
-   * correctly-decided outcome. */
+   * failed write here is a residual repair opportunity (the next
+   * acknowledgeDuty replay retries it again), not a reason to fail the call
+   * that is reporting the SOS event's own correctly-decided outcome.
+   *
+   * Uses `convergeIncidentOwnerDurable`, not `assignIncidentOwnerDurable`:
+   * the latter's first-owner-wins arbitration would durably confirm
+   * whatever unrelated owner the Incident already holds (e.g. a stale
+   * claim from a losing instance) as a legitimate conflict and keep it
+   * forever, with no replay able to converge the Incident onto the SOS
+   * side's real winner (F1 competing-instance convergence). This call only
+   * ever runs with `owner` already decided by the SOS side, so it must
+   * converge the Incident onto that truth, not re-arbitrate it. */
   private async repairIncidentHandover(
     incidentId: string | null,
     owner: string,
@@ -1034,7 +1042,7 @@ export class DriverSosService implements OnModuleInit {
       return;
     }
     try {
-      await this.incidentService.assignIncidentOwnerDurable(
+      await this.incidentService.convergeIncidentOwnerDurable(
         incidentId,
         owner,
         requestId,

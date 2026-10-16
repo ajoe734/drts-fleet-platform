@@ -329,3 +329,57 @@ Full re-verification after round-6 fixes:
 - `pnpm exec eslint` on both modified source files and the modified test file → no errors.
 - `git diff --check` → clean (no whitespace errors).
 - Not re-run this round: `apps/api`'s repo-root `tsc --noEmit -p apps/api/tsconfig.json` reports pre-existing errors in unrelated modules (`tenant-partner`, `voice-booking`, `regulatory-reporting`, `reporting-filing`, `sandbox-governance`, `vehicle-eligibility` — stale `@drts/contracts` exports/type drift, consistent with prior rounds' noted gap); confirmed zero errors reference `driver-sos` or `incident.service`/`incident.repository` (`grep` on the tsc output was empty). Real PostgreSQL CAS/competing-process execution, browser/UI interaction, and Android/iOS live device delivery remain out of this VM's scope per the dispatch restriction, same as all prior rounds. This round's push produces a new candidate SHA; hosted CI, independent review, and merge/acceptance evidence for it are recorded by the normal candidate lifecycle, not claimed here.
+
+## Round 7: reviewer reopen (2026-10-16T06:57:45Z) findings and fixes
+
+Codex's independent exact-candidate REOPEN reviewed frozen candidate
+`8d0c08ab8211c0449f35297f3389ee75e0be94f9` (generation
+`b202b8ae4a064690a7f508ad0426cf14`, PR #2707) with F1 durability
+(foreign-owner branch), F1 competing-instance convergence (non-fresh
+claim), F2 cross-instance progression, and F5 rollback durability findings.
+This round repairs the two F1 sub-findings, which share the exact same
+`assignIncidentOwnerDurable` / `repairIncidentHandover` seam R6 already
+widened scope for; F2 cross-instance progression (authoritative
+`driver-sos-verification.repository.ts` persistence) and F5's remaining
+concurrent-accepted-writer leak (generic `updateIncident`'s unconditional
+full-record upsert racing a claim rollback) are each a different
+persistence seam and are intentionally left for the next small unit per
+Guide §0.7's one-independently-verifiable-unit-at-a-time discipline; they
+are NOT claimed fixed by this round.
+
+| Finding / acceptance key | Code location (before) | Fix | Regression test |
+| --- | --- | --- | --- |
+| F1 durability [P1] `assignIncidentOwnerDurable`'s foreign-owner branch (`incident.assignedTo && incident.assignedTo !== owner`) returned `{ accepted: false, currentOwner: incident.assignedTo }` directly from the in-memory value with zero durability confirmation — unlike the already-equal-owner branch R6 fixed. `acknowledgeDuty` then trusted that unconfirmed foreign value as `incidentOwner` and persisted a `duty_acknowledged` SOS timeline under it. On idempotent replay by that same (still-unconfirmed) actor, `assignIncidentOwnerDurable`'s equal-owner branch re-attempted confirmation, but `repairIncidentHandover`'s `catch`-only error handling discarded its returned `{ accepted: false }` result entirely (only a *thrown* error was ever caught), so the replay still reported `wonAcknowledgement: true` on top of a durably-rejected confirmation. | `incident.service.ts` `assignIncidentOwnerDurable` (the `if (incident.assignedTo && incident.assignedTo !== owner)` branch) | The foreign-owner branch now confirms durability the same way the equal-owner branch already does: when an `IncidentRepository` is wired, it `await`s `persistChanges` for the current record before reporting the foreign owner as a real conflict. A rejection returns `currentOwner: null` (not the foreign label) — reusing `acknowledgeDuty`'s existing `claim.currentOwner === null` → `INCIDENT_HANDOVER_UNAVAILABLE` throw, so no code change was needed in `driver-sos.service.ts` for this sub-fix; an actually-durable foreign conflict still proceeds as a truthful win for that owner, unchanged. | `tests/unit/sos-duty-canonical-ack-and-readback-20261015/duty-ack-race-and-readback.test.ts`: "F1: a different Ops actor's acknowledgeDuty fails honestly instead of winning under an unconfirmed foreign Incident owner, and the original actor's replay also fails until durability is confirmed" — reproduces the exact Codex repro (direct `updateIncident({ assignedTo: "ops-unconfirmed" })` with a rejecting `IncidentRepository.persistChanges`, then a *different* actor's `acknowledgeDuty`, then the original actor's replay, then recovery once the repository stops rejecting), asserting `INCIDENT_HANDOVER_UNAVAILABLE` for both failing attempts, no SOS mutation in between, and an honest durable win once the repository recovers. |
+| F1 competing-instance convergence [P1] `repairIncidentHandover` always called `assignIncidentOwnerDurable`, which applies first-owner-wins arbitration. R6 only released this call's own *fresh* claim (`claimedFreshIncidentOwnership: true`) before calling it. When the Incident's current owner was instead an *existing* (non-fresh) assignment — e.g. a separate service instance's own prior direct claim — `wasNewClaim` was `false`, so nothing was released, and `repairIncidentHandover`'s attempt to converge the Incident onto the SOS side's real winner hit `assignIncidentOwnerDurable`'s foreign-owner branch as an ordinary conflict and was silently discarded. The Incident stayed durably assigned to a loser that never actually won the SOS CAS, with no replay able to converge it. | `incident.service.ts` (no non-arbitrating convergence path existed); `driver-sos.service.ts` `repairIncidentHandover` (called `assignIncidentOwnerDurable`) | Added `IncidentService.convergeIncidentOwnerDurable(incidentId, owner, requestId, identity)`: a narrow facade used only by `repairIncidentHandover`, which by construction only ever runs once the SOS side has already durably decided `owner` as the real truth (an idempotent replay, or a resolved cross-process CAS race) — so it force-converges the Incident onto that truth instead of re-arbitrating ownership, while still durably confirming the write and rolling back to the prior owner (preserving any unrelated concurrent mutation, same discipline as R6's F5 rollback) if the write is rejected. `repairIncidentHandover` now calls this new method instead of `assignIncidentOwnerDurable`; its existing `catch`-and-ignore (best-effort, next replay retries) is unchanged, since the new method throws on failure rather than returning a silently-discardable result object. | "F1 competing-instance: a non-fresh (already-assigned) Incident owner still durably converges to the real SOS-side CAS winner" — assigns the Incident to a different actor via a direct `updateIncident` call *before* `acknowledgeDuty` runs (so the resulting claim is never a fresh one, `wasNewClaim: false`), mocks only `persistDutyAcknowledgement` to return a legitimate competing-writer loss to a different winner, and asserts the Incident ends up durably assigned to that real winner instead of staying stuck on the non-fresh loser. |
+
+Both new regression tests were verified by the standard before/after
+method: run once against this round's pre-fix source (the two `incident.service.ts`
+edits reverted via a scoped diff, with the new tests in place) — both
+failed with the exact mismatches described above (`currentOwner` resolving
+to the unconfirmed label instead of `null`; the Incident staying on
+`ops-local-loser` instead of converging to `ops-db-winner`) — then the
+source fix was restored and both passed. F2 and F5 are unchanged by this
+round and remain open findings; they are not represented as fixed anywhere
+in this document.
+
+Full re-verification after round-7 fixes:
+
+- Root: `pnpm exec vitest run tests/unit/sos-duty-canonical-ack-and-readback-20261015/duty-ack-race-and-readback.test.ts tests/unit/system-remediation/sr-qa-call-001/c047-sos-duty-lifecycle.test.ts tests/unit/fleet-statement-decisions-20261013/incident-links.test.ts tests/security/iam-auth-negative-matrix.test.ts tests/security/iam-driver-authz-enforcement.test.ts tests/security/iam-route-driver-negative.test.ts tests/security/iam-route-inventory.test.ts tests/unit/system-remediation/sr-qa-call-001/c046-incident-suppression-recovery.test.ts` → exit 0, 8 files / 90 tests (88 pre-existing + 2 new round-7 cases in `duty-ack-race-and-readback.test.ts`, now 21 cases in that file, up from 19 before this round).
+- `apps/api`: `pnpm exec vitest run tests/unit/driver-sos.service.test.ts tests/unit/driver-sos-provider-adapters.test.ts tests/unit/driver-sos-attachment.service.test.ts tests/unit/driver-sos-incident.test.ts tests/unit/driver-sos-verification.repository.test.ts tests/unit/incident.controller.test.ts tests/unit/incident-escalation-service-recovery.test.ts tests/unit/complaint-incident-escalation.test.ts tests/integration/int-s3-001-driver-sos-idempotency.test.ts` → exit 0, 9 files / 71 tests (no regression).
+- `apps/driver-app`: `pnpm exec vitest run tests/unit/driver-sos-outbox.test.ts tests/unit/driver-sos-end-to-end-platform.test.ts tests/unit/driver-sos-no-os-dialer.test.ts` → exit 0, 3 files / 16 tests (untouched this round).
+- `apps/driver-app`: `pnpm exec tsc --noEmit --incremental false -p apps/driver-app/tsconfig.json` → clean.
+- `apps/ops-console-web`: `pnpm exec tsc --noEmit --incremental false -p apps/ops-console-web/tsconfig.json` → clean.
+- `apps/api`: `pnpm exec tsc --noEmit --incremental false -p apps/api/tsconfig.json` → pre-existing errors in unrelated modules only (`identity`, `multi-taxi/fare-versions`, auth role-union drift, `evidence-governance`, etc. — stale `@drts/contracts` exports/type drift, consistent with every prior round's noted gap); confirmed zero errors reference `driver-sos` or `incident.service`/`incident.repository` (`grep -i "driver-sos\|incident.service\|incident.repository"` on the tsc output was empty).
+- `pnpm exec eslint apps/api/src/modules/driver-sos/driver-sos.service.ts apps/api/src/modules/incident/incident.service.ts tests/unit/sos-duty-canonical-ack-and-readback-20261015/duty-ack-race-and-readback.test.ts` → no diagnostics.
+- `git diff --check` → clean (no whitespace errors).
+- Not run this round: real PostgreSQL CAS/competing-process execution, browser/UI interaction, Android/iOS live device delivery (out of this VM's scope per the dispatch restriction, same as all prior rounds); hosted CI, independent review, and merge/acceptance evidence for this round's new candidate SHA are recorded by the normal candidate lifecycle, not claimed here.
+
+### Original acceptance correspondence (round 7)
+
+| key | evidence/result | pending limits |
+| --- | --- | --- |
+| sos_canonical_first_ack_current_owner_and_same_event | F1 durability (both sub-findings) now fixed and regression-covered | F2 cross-instance progression (authoritative monotonic status) remains open |
+| sos_outbox_handover_and_real_Ops_caller_ACK | foreign-owner and non-fresh-claim convergence now durable/truthful | F5's concurrent-accepted-writer leak on claim rollback remains open |
+| sos_native_honest_pending_ack_and_canonical_readback | unchanged this round; blocked by remaining F2 authoritative inconsistency | actual device/background delivery remains original LIVE-DRIVER |
+| sos_original_atomic_dedup_offline_auth_render_attachment_regressions | full scoped regression suites pass (175+2 cases); no behavior change to dedup/offline/render/attachment paths | F5 durable leakage remains (different seam, not touched this round) |
+| sos_exact_candidate_validation | 2 new meaningful before/after regression cases added this round on top of all prior rounds' cases; scoped lint/tsc/diff checks pass | hosted aggregate checks, approval/protected merge pending the normal candidate lifecycle |

@@ -1206,3 +1206,175 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R6 repair: F2 progression
     );
   });
 });
+
+describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R7 repair: F1 durable confirmation of a foreign (different-actor) owner", () => {
+  it("F1: a different Ops actor's acknowledgeDuty fails honestly instead of winning under an unconfirmed foreign Incident owner, and the original actor's replay also fails until durability is confirmed", async () => {
+    let persistCallCount = 0;
+    const mockIncidentRepository = {
+      isEnabled: () => true,
+      persistChanges: async () => {
+        persistCallCount += 1;
+        throw new Error("simulated incident persistence failure");
+      },
+      reportPersistenceFailure: () => {},
+    } as unknown as IncidentRepository;
+
+    const auditService = new AuditNotificationService();
+    const incidentService = new IncidentService(
+      auditService,
+      mockIncidentRepository,
+    );
+    const driverSosService = new DriverSosService(auditService, incidentService);
+    const sos = await submitSos(
+      driverSosService,
+      "eeeeeeee-0000-4000-8000-000000000005",
+    );
+    const opsUnconfirmed = buildOpsIdentity("ops-unconfirmed");
+    const opsOther = buildOpsIdentity("ops-other");
+
+    // The real reachable generic caller: PATCH /api/incidents/:id ->
+    // updateIncident sets assignedTo in memory synchronously; its own
+    // fire-and-forget persistence then fails asynchronously. Nothing
+    // durably confirmed this ownership.
+    incidentService.updateIncident(
+      sos.receipt.incidentId,
+      { assignedTo: opsUnconfirmed.actorId as string },
+      undefined,
+      opsUnconfirmed,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(persistCallCount).toBeGreaterThan(0);
+
+    // A different Ops actor tries to acknowledge duty. Before this fix,
+    // assignIncidentOwnerDurable's foreign-owner branch returned the
+    // unconfirmed in-memory value directly as a trusted "currentOwner",
+    // and acknowledgeDuty committed a duty_acknowledged timeline under
+    // that unconfirmed actor.
+    let firstError: unknown;
+    try {
+      await driverSosService.acknowledgeDuty(sos.event.sosEventId, {}, opsOther);
+    } catch (error) {
+      firstError = error;
+    }
+    expect((firstError as { code?: string })?.code).toBe(
+      "INCIDENT_HANDOVER_UNAVAILABLE",
+    );
+
+    const afterFirstAttempt = await driverSosService.getEventForOps(
+      sos.event.sosEventId,
+      opsOther,
+    );
+    expect(
+      afterFirstAttempt.event.dutyAcknowledgement.acknowledgedByActorId,
+    ).toBeNull();
+    expect(afterFirstAttempt.event.status).toBe("submitted");
+
+    // The originally-assigned (but never durably confirmed) actor's own
+    // replay must also fail honestly, not silently succeed.
+    let replayError: unknown;
+    try {
+      await driverSosService.acknowledgeDuty(
+        sos.event.sosEventId,
+        {},
+        opsUnconfirmed,
+      );
+    } catch (error) {
+      replayError = error;
+    }
+    expect((replayError as { code?: string })?.code).toBe(
+      "INCIDENT_HANDOVER_UNAVAILABLE",
+    );
+
+    const afterReplay = await driverSosService.getEventForOps(
+      sos.event.sosEventId,
+      opsOther,
+    );
+    expect(
+      afterReplay.event.dutyAcknowledgement.acknowledgedByActorId,
+    ).toBeNull();
+
+    // Once the database recovers, the same actor's acknowledgment durably
+    // succeeds and the SOS event honestly reflects the real confirmed
+    // owner on authoritative readback.
+    persistCallCount = 0;
+    (mockIncidentRepository as unknown as { persistChanges: () => Promise<void> }).persistChanges =
+      async () => undefined;
+    const recovered = await driverSosService.acknowledgeDuty(
+      sos.event.sosEventId,
+      {},
+      opsUnconfirmed,
+    );
+    expect(recovered.wonAcknowledgement).toBe(true);
+    expect(recovered.dutyAcknowledgement.acknowledgedByActorId).toBe(
+      opsUnconfirmed.actorId,
+    );
+
+    const afterRecovery = await driverSosService.getEventForOps(
+      sos.event.sosEventId,
+      opsOther,
+    );
+    expect(
+      afterRecovery.event.dutyAcknowledgement.acknowledgedByActorId,
+    ).toBe(opsUnconfirmed.actorId);
+  });
+});
+
+describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R7 repair: F1 competing-instance convergence without a fresh claim", () => {
+  it("F1 competing-instance: a non-fresh (already-assigned) Incident owner still durably converges to the real SOS-side CAS winner", async () => {
+    const mockVerificationRepository = {
+      isEnabled: () => true,
+      persistDutyAcknowledgement: async () => ({
+        accepted: false,
+        acknowledgedByActorId: "ops-db-winner",
+        acknowledgedAt: "2026-10-16T00:00:00.000Z",
+      }),
+    } as unknown as DriverSosVerificationRepository;
+
+    const { driverSosService, incidentService } = setupService(
+      mockVerificationRepository,
+    );
+    const sos = await submitSos(
+      driverSosService,
+      "ffffffff-0000-4000-8000-000000000006",
+    );
+    const localLoser = buildOpsIdentity("ops-local-loser");
+
+    // Simulate a separate service instance's already-durable direct
+    // assignment -- the Incident is assigned to `localLoser` BEFORE
+    // acknowledgeDuty runs, not via a fresh claim made inside this call.
+    incidentService.updateIncident(
+      sos.receipt.incidentId,
+      { assignedTo: localLoser.actorId as string },
+      undefined,
+      localLoser,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(
+      incidentService.getIncident(sos.receipt.incidentId).assignedTo,
+    ).toBe("ops-local-loser");
+
+    const ack = await driverSosService.acknowledgeDuty(
+      sos.event.sosEventId,
+      {},
+      localLoser,
+    );
+
+    expect(ack.wonAcknowledgement).toBe(false);
+    expect(ack.dutyAcknowledgement.acknowledgedByActorId).toBe(
+      "ops-db-winner",
+    );
+
+    // Before this fix, this call's Incident claim was NOT a fresh claim
+    // (wasNewClaim: false, since the Incident was already durably assigned
+    // to localLoser), so the losing-claim release path never ran and
+    // repairIncidentHandover's attempt to converge onto the real winner
+    // was discarded as a conflict by assignIncidentOwnerDurable's
+    // first-owner-wins arbitration. The Incident stayed durably assigned
+    // to a loser that never actually won the SOS CAS, with no replay able
+    // to converge it.
+    const incidentAfter = incidentService.getIncident(sos.receipt.incidentId);
+    expect(incidentAfter.assignedTo).toBe("ops-db-winner");
+  });
+});

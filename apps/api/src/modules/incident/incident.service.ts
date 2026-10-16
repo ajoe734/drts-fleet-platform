@@ -480,6 +480,29 @@ export class IncidentService implements OnModuleInit {
   }> {
     const incident = this.require(incidentId);
     if (incident.assignedTo && incident.assignedTo !== owner) {
+      // The foreign value may itself be nothing more than an unconfirmed
+      // in-memory artifact of a concurrent fire-and-forget writer (e.g. the
+      // generic updateIncident path) whose own durable write is still
+      // pending or has already failed. Confirm it durably before reporting
+      // it as a real conflict -- otherwise this call (and the SOS
+      // acknowledgment it backs) would commit under an owner the database
+      // never actually accepted (F1 durability, foreign-owner branch).
+      // `currentOwner: null` reuses the same "unknown/unconfirmed, retry"
+      // signal the caller already treats as unavailable rather than a
+      // truthful conflict.
+      if (this.incidentRepository) {
+        try {
+          await this.incidentRepository.persistChanges({
+            incidents: [this.cloneIncident(incident)],
+          });
+        } catch (error) {
+          this.incidentRepository.reportPersistenceFailure(
+            error,
+            "assign_incident_owner_durable_confirm_foreign",
+          );
+          return { accepted: false, currentOwner: null, wasNewClaim: false };
+        }
+      }
       return {
         accepted: false,
         currentOwner: incident.assignedTo,
@@ -637,6 +660,113 @@ export class IncidentService implements OnModuleInit {
         );
       }
     }
+  }
+
+  /**
+   * Force-converges the Incident's current owner to `owner`, bypassing the
+   * first-owner-wins arbitration in `assignIncidentOwnerDurable`. Used only
+   * by SOS's own repair path (`repairIncidentHandover`) once the SOS side
+   * has already durably decided `owner` as the real current truth -- an
+   * idempotent replay of an existing SOS acknowledgment, or the resolution
+   * of a cross-process SOS-side CAS race. In both cases the Incident is a
+   * mirror that must converge to that already-decided truth rather than
+   * re-arbitrate ownership a second time; `assignIncidentOwnerDurable`'s
+   * foreign-owner branch would otherwise durably confirm and then keep
+   * whatever unrelated owner the Incident currently holds forever, with no
+   * replay able to converge it (F1 competing-instance convergence).
+   *
+   * Throws instead of returning a false "accepted" so the existing
+   * best-effort call site (`repairIncidentHandover`) keeps its catch ->
+   * next-replay-retries semantics; it never silently discards a rejection.
+   */
+  async convergeIncidentOwnerDurable(
+    incidentId: string,
+    owner: string,
+    requestId: string | undefined,
+    identity: BootstrapRequestIdentity | null,
+  ): Promise<void> {
+    const incident = this.require(incidentId);
+    if (incident.assignedTo === owner) {
+      if (this.incidentRepository) {
+        await this.incidentRepository.persistChanges({
+          incidents: [this.cloneIncident(incident)],
+        });
+      }
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const updated: IncidentRecord = {
+      ...incident,
+      assignedTo: owner,
+      updatedAt: now,
+    };
+    const timelineEntry = this.createTimelineEntry(
+      incidentId,
+      TIMELINE_ACTIONS.assigned,
+      `Assigned to ${owner}.`,
+      this.resolveActorId(identity, "ops_user"),
+      now,
+    );
+    const decorated = this.decorateIncident(updated, identity);
+
+    this.replace(decorated);
+    this.timelines.set(incidentId, [
+      ...(this.timelines.get(incidentId) ?? []),
+      timelineEntry,
+    ]);
+
+    if (this.incidentRepository) {
+      try {
+        await this.incidentRepository.persistChanges({
+          incidents: [this.cloneIncident(decorated)],
+          timelines: [{ ...timelineEntry }],
+        });
+      } catch (error) {
+        // Roll back only the claim this call made, preserving any
+        // unrelated concurrent mutation the same way
+        // `assignIncidentOwnerDurable`'s own rollback does (F5).
+        const current = this.require(incidentId);
+        if (current.assignedTo === owner) {
+          this.replace(
+            this.decorateIncident(
+              {
+                ...current,
+                assignedTo: incident.assignedTo,
+                updatedAt: new Date().toISOString(),
+              },
+              identity,
+            ),
+          );
+        }
+        this.timelines.set(
+          incidentId,
+          (this.timelines.get(incidentId) ?? []).filter(
+            (entry) => entry.entryId !== timelineEntry.entryId,
+          ),
+        );
+        this.incidentRepository.reportPersistenceFailure(
+          error,
+          "converge_incident_owner_durable",
+        );
+        throw error;
+      }
+    }
+
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType: this.resolveAuditActorType(identity, "ops_user"),
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "incident",
+        actionName: "converge_incident_owner_durable",
+        resourceType: "incident",
+        resourceId: incidentId,
+        newValuesSummary: { assignedTo: decorated.assignedTo },
+      },
+      requestId,
+    );
+    this.opsDispatchEventsService?.publishIncidentUpdated(decorated, requestId);
   }
 
   /** Both controller entrances must validate, commit the complaint side and
