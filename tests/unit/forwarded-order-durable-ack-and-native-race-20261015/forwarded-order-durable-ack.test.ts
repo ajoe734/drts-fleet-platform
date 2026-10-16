@@ -139,8 +139,17 @@ function createControllableRepository() {
  * while a concurrent command races it, without duplicating any business SQL
  * — every call still goes through the real `ForwarderRepository` and its
  * actual INSERT/UPSERT statements.
+ *
+ * Unlike a stateless stub, this double keeps an actual backing table keyed
+ * by mirror_order_id, applying the same "a write older than the row it
+ * would replace is a no-op" guard as the repository's real conditional
+ * UPSERT (`WHERE EXCLUDED.updated_at >= ...`). That lets tests assert on
+ * the durable row directly (`readDurableOrder`) and exercise a genuine
+ * restart (`loadState`) through this same table, instead of only observing
+ * the in-memory service cache.
  */
 function createGatedDatabaseService(gatedStatus: string) {
+  const table = new Map<string, { updatedAt: string; record: unknown }>();
   let releaseGate!: () => void;
   let gateRejects = false;
   const gate = new Promise<void>((resolve) => {
@@ -157,22 +166,56 @@ function createGatedDatabaseService(gatedStatus: string) {
       rows: unknown[];
       rowCount: number;
     }> => {
-      const isForwardedOrderWrite =
-        text.includes("ops.phase1_forwarded_orders") &&
-        text.includes("INSERT");
-      const status = isForwardedOrderWrite
-        ? (values as unknown[] | undefined)?.[3]
-        : undefined;
+      const isForwardedOrdersTable = text.includes(
+        "ops.phase1_forwarded_orders",
+      );
 
-      if (isForwardedOrderWrite && status === gatedStatus && !gateHit) {
-        gateHit = true;
-        gateEnteredResolve();
-        await gate;
-        if (gateRejects) {
-          throw new Error(
-            `simulated write failure for gated status ${gatedStatus}`,
-          );
+      if (isForwardedOrdersTable && text.includes("INSERT")) {
+        const params = values as unknown[];
+        const [mirrorOrderId, , , status, , updatedAt, recordJson] = params;
+
+        if (status === gatedStatus && !gateHit) {
+          gateHit = true;
+          gateEnteredResolve();
+          await gate;
+          if (gateRejects) {
+            throw new Error(
+              `simulated write failure for gated status ${gatedStatus}`,
+            );
+          }
         }
+
+        const existing = table.get(mirrorOrderId as string);
+        if (!existing || (updatedAt as string) >= existing.updatedAt) {
+          table.set(mirrorOrderId as string, {
+            updatedAt: updatedAt as string,
+            record: JSON.parse(recordJson as string),
+          });
+        }
+        return { rows: [], rowCount: 1 };
+      }
+
+      if (isForwardedOrdersTable && text.includes("SELECT")) {
+        if (text.includes("WHERE platform_code")) {
+          const [platformCode, externalOrderId] = values as [string, string];
+          const match = [...table.values()].find((row) => {
+            const record = row.record as {
+              platformCode: string;
+              externalOrderId: string;
+            };
+            return (
+              record.platformCode === platformCode &&
+              record.externalOrderId === externalOrderId
+            );
+          });
+          return match
+            ? { rows: [{ record: match.record }], rowCount: 1 }
+            : { rows: [], rowCount: 0 };
+        }
+        const rows = [...table.values()].map((row) => ({
+          record: row.record,
+        }));
+        return { rows, rowCount: rows.length };
       }
 
       return { rows: [], rowCount: 0 };
@@ -187,6 +230,10 @@ function createGatedDatabaseService(gatedStatus: string) {
       gateRejects = rejectAfter;
       releaseGate();
     },
+    readDurableOrder: (mirrorOrderId: string) =>
+      table.get(mirrorOrderId)?.record as
+        | { status: string; acceptedDriverId: string | null }
+        | undefined,
   };
 }
 
@@ -750,7 +797,7 @@ describe("FORWARDED-ORDER-DURABLE-ACK-AND-NATIVE-RACE-FLOW-20261015: C033-F1 dur
     }
 
     it("preserves a native cancellation over a stale accept write even when the accept's own durable write ultimately fails (late rejection)", async () => {
-      const { databaseService, waitForGateEntered, releaseGate } =
+      const { databaseService, waitForGateEntered, releaseGate, readDurableOrder } =
         createGatedDatabaseService("accept_pending");
       const { service, controller, order } =
         await setupBroadcastedOrder(databaseService);
@@ -774,7 +821,18 @@ describe("FORWARDED-ORDER-DURABLE-ACK-AND-NATIVE-RACE-FLOW-20261015: C033-F1 dur
 
       releaseGate(true);
 
-      await Promise.allSettled([acceptPromise, syncPromise]);
+      const [acceptSettled, syncSettled] = await Promise.allSettled([
+        acceptPromise,
+        syncPromise,
+      ]);
+      // The accept relay's own accept_pending write never durably lands,
+      // but markSyncFailed's own fallback write (a *different* write, not
+      // gated by this double) does land — so accept resolves with an
+      // honestly-confirmed degraded "sync_failed" success envelope, not a
+      // thrown error. The sync caller (queued behind the same lock) must
+      // also resolve cleanly, unaffected by the accept's local failure.
+      expect(acceptSettled.status).toBe("fulfilled");
+      expect(syncSettled.status).toBe("fulfilled");
 
       const finalOrder = service.listOrders()[0]!;
       expect(finalOrder.status).toBe("cancelled_by_platform");
@@ -782,10 +840,29 @@ describe("FORWARDED-ORDER-DURABLE-ACK-AND-NATIVE-RACE-FLOW-20261015: C033-F1 dur
       // attempted the accept stays attributable for dispatch/manual
       // follow-up even though the native platform's cancellation wins.
       expect(finalOrder.acceptedDriverId).toBe("driver-dbrace-001");
+
+      // The durable row itself (not just the in-memory cache) must agree,
+      // and a cold restart reading that same row must reconstruct the
+      // identical canonical state.
+      const durable = readDurableOrder(order.mirrorOrderId);
+      expect(durable?.status).toBe("cancelled_by_platform");
+      expect(durable?.acceptedDriverId).toBe("driver-dbrace-001");
+
+      const restartedRepository = new ForwarderRepository(databaseService);
+      const restartedService = new ForwarderService(
+        { getEligibleCandidates: vi.fn(() => []) } as never,
+        { recordAuditLog: vi.fn() } as never,
+        [createAdapter()],
+        restartedRepository,
+      );
+      await restartedService.onModuleInit();
+      const restarted = restartedService.getOrder(order.mirrorOrderId);
+      expect(restarted.status).toBe("cancelled_by_platform");
+      expect(restarted.acceptedDriverId).toBe("driver-dbrace-001");
     });
 
     it("preserves a native cancellation over a stale accept write even when the accept's own durable write ultimately succeeds (late success)", async () => {
-      const { databaseService, waitForGateEntered, releaseGate } =
+      const { databaseService, waitForGateEntered, releaseGate, readDurableOrder } =
         createGatedDatabaseService("accept_pending");
       const { service, controller, order } =
         await setupBroadcastedOrder(databaseService);
@@ -803,7 +880,12 @@ describe("FORWARDED-ORDER-DURABLE-ACK-AND-NATIVE-RACE-FLOW-20261015: C033-F1 dur
 
       releaseGate(false);
 
-      await Promise.allSettled([acceptPromise, syncPromise]);
+      const [acceptSettled, syncSettled] = await Promise.allSettled([
+        acceptPromise,
+        syncPromise,
+      ]);
+      expect(acceptSettled.status).toBe("fulfilled");
+      expect(syncSettled.status).toBe("fulfilled");
 
       // Even though the accept relay's own durable write landed, it landed
       // strictly before the native sync's write (the lock forces that
@@ -812,6 +894,339 @@ describe("FORWARDED-ORDER-DURABLE-ACK-AND-NATIVE-RACE-FLOW-20261015: C033-F1 dur
       const finalOrder = service.listOrders()[0]!;
       expect(finalOrder.status).toBe("cancelled_by_platform");
       expect(finalOrder.acceptedDriverId).toBe("driver-dbrace-001");
+
+      const durable = readDurableOrder(order.mirrorOrderId);
+      expect(durable?.status).toBe("cancelled_by_platform");
+      expect(durable?.acceptedDriverId).toBe("driver-dbrace-001");
+
+      const restartedRepository = new ForwarderRepository(databaseService);
+      const restartedService = new ForwarderService(
+        { getEligibleCandidates: vi.fn(() => []) } as never,
+        { recordAuditLog: vi.fn() } as never,
+        [createAdapter()],
+        restartedRepository,
+      );
+      await restartedService.onModuleInit();
+      const restarted = restartedService.getOrder(order.mirrorOrderId);
+      expect(restarted.status).toBe("cancelled_by_platform");
+      expect(restarted.acceptedDriverId).toBe("driver-dbrace-001");
+    });
+  });
+
+  describe("R4 batch write settlement: a rejected sibling write must not leave a dangling write behind", () => {
+    /**
+     * Repository double for one persistChanges() batch containing TWO
+     * writes (the forwarded-order write and its adapter-health sibling).
+     * The health write rejects immediately; the order write resolves later
+     * ("slow success"). Before the fix, `Promise.all` in the repository
+     * (and the caller) returned/threw as soon as the health write rejected,
+     * without waiting for the still-in-flight order write — leaving it free
+     * to land after the lock protecting this very batch had already been
+     * released, potentially clobbering a newer command's write. The fix
+     * (`Promise.allSettled`) must wait for the order write too before the
+     * batch is considered settled.
+     */
+    function createSlowOrderFastHealthFailureDatabaseService() {
+      const table = new Map<string, unknown>();
+      let armed = false;
+      let orderWriteSettledBeforeBatchReturns = false;
+      let batchReturned = false;
+      const query = vi.fn(
+        async (
+          text: string,
+          values?: readonly unknown[],
+        ): Promise<{ rows: unknown[]; rowCount: number }> => {
+          if (
+            text.includes("ops.phase1_forwarded_orders") &&
+            text.includes("INSERT")
+          ) {
+            const params = values as unknown[];
+            const [mirrorOrderId, , , , , , recordJson] = params;
+            if (armed) {
+              // Resolve after a macrotask so it is still in flight when the
+              // sibling health write below rejects on the same microtask
+              // turn.
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+            table.set(mirrorOrderId as string, JSON.parse(recordJson as string));
+            if (armed) {
+              orderWriteSettledBeforeBatchReturns = !batchReturned;
+            }
+            return { rows: [], rowCount: 1 };
+          }
+          if (text.includes("ops.phase1_adapter_health")) {
+            if (armed) {
+              throw new Error("adapter health write rejected immediately");
+            }
+            return { rows: [], rowCount: 1 };
+          }
+          return { rows: [], rowCount: 0 };
+        },
+      );
+      return {
+        databaseService: {
+          isEnabled: () => true,
+          query,
+        } as unknown as DatabaseService,
+        readDurableOrder: (mirrorOrderId: string) =>
+          table.get(mirrorOrderId) as
+            | { status: string; acceptedDriverId: string | null }
+            | undefined,
+        // Ingest/broadcast of the order under test must land normally
+        // first; only the accept batch under test should see the health
+        // write fail.
+        arm: () => {
+          armed = true;
+        },
+        markBatchReturned: () => {
+          batchReturned = true;
+        },
+        didOrderWriteSettleBeforeBatchReturned: () =>
+          orderWriteSettledBeforeBatchReturns,
+      };
+    }
+
+    it("waits for the slow order write to land before the batch (and the per-order lock) is considered done", async () => {
+      const {
+        databaseService,
+        readDurableOrder,
+        arm,
+        markBatchReturned,
+        didOrderWriteSettleBeforeBatchReturned,
+      } = createSlowOrderFastHealthFailureDatabaseService();
+      const repository = new ForwarderRepository(databaseService);
+      const { service, controller } = createHarness({ repository });
+
+      const order = await service.ingestExternalOrder({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-batch-settle-001",
+        payload: { serviceBucket: "standard_taxi" },
+      });
+      await service.broadcastOrder(order.mirrorOrderId, {
+        candidateDriverIds: ["driver-ack-001"],
+      });
+
+      arm();
+      await expect(
+        controller.acceptForwardedOrder(
+          order.mirrorOrderId,
+          driverIdentity("driver-ack-001"),
+          {},
+        ),
+      ).rejects.toMatchObject({
+        response: { error: { code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN" } },
+      });
+      markBatchReturned();
+
+      // The whole point of the fix: by the time the batch has returned
+      // (thrown), the slow sibling write was already settled — not still
+      // dangling in the background.
+      expect(didOrderWriteSettleBeforeBatchReturned()).toBe(true);
+
+      // The durable order write did land (with the accept_pending status
+      // this batch attempted), and the subsequent honest fallback
+      // (sync_failed, newer updatedAt) is what is actually canonical now —
+      // nothing is left to resurface later and clobber a future command.
+      const durable = readDurableOrder(order.mirrorOrderId);
+      expect(durable?.status).toBe("sync_failed");
+      expect(service.getOrder(order.mirrorOrderId).status).toBe(
+        "sync_failed",
+      );
+    });
+  });
+
+  describe("C033-F1 mounted accept caller: persistence-uncertain failure must not become a success envelope", () => {
+    it("rejects (instead of returning a sync_failed success envelope) when both the accept write and its own markSyncFailed fallback write are rejected", async () => {
+      const { repository, persistChanges } = createControllableRepository();
+      const { service, controller } = createHarness({ repository });
+
+      const order = await service.ingestExternalOrder({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-accept-double-failure-001",
+        payload: { serviceBucket: "standard_taxi" },
+      });
+      await service.broadcastOrder(order.mirrorOrderId, {
+        candidateDriverIds: ["driver-ack-001"],
+      });
+
+      // Every write from here on (the accept_pending write AND
+      // markSyncFailed's own fallback write) is rejected: this is a
+      // doubly-uncertain write, not a confirmed degraded state.
+      persistChanges.mockRejectedValue(new Error("no write acknowledged"));
+
+      await expect(
+        controller.acceptForwardedOrder(
+          order.mirrorOrderId,
+          driverIdentity("driver-ack-001"),
+          {},
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          error: { code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN" },
+        },
+      });
+
+      // The cache still had to record *something* honest (sync_failed with
+      // an uncertain-ACK error), but the caller must not have reported that
+      // as a driver-visible success.
+      const cached = service.getOrder(order.mirrorOrderId);
+      expect(cached.status).toBe("sync_failed");
+      expect(cached.lastSyncError?.code).toBe(
+        "FORWARDER_PERSISTENCE_ACK_UNCERTAIN",
+      );
+    });
+
+    it("still returns the sync_failed success envelope once that degraded state is itself durably ACKed", async () => {
+      const { repository, persistChanges } = createControllableRepository();
+      const { service, controller } = createHarness({ repository });
+
+      const order = await service.ingestExternalOrder({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-accept-honest-failure-001",
+        payload: { serviceBucket: "standard_taxi" },
+      });
+      await service.broadcastOrder(order.mirrorOrderId, {
+        candidateDriverIds: ["driver-ack-001"],
+      });
+
+      // Only the accept_pending write fails; the markSyncFailed fallback
+      // that records the degraded state durably succeeds.
+      persistChanges.mockRejectedValueOnce(
+        new Error("no write acknowledged for accept_pending"),
+      );
+
+      const response = await controller.acceptForwardedOrder(
+        order.mirrorOrderId,
+        driverIdentity("driver-ack-001"),
+        {},
+      );
+
+      expect(response.data.outcome).toBe("sync_failed");
+      expect(service.getOrder(order.mirrorOrderId).status).toBe(
+        "sync_failed",
+      );
+    });
+  });
+
+  describe("R3 ingress retry shares the mirrorOrderId lock with native sync (unified lock domain)", () => {
+    it("queues native sync behind an in-flight uncertain-retry readback instead of letting it interleave, and the later-queued native result survives", async () => {
+      const { repository, persistChanges, findOrderByIdentity } =
+        createControllableRepository();
+      persistChanges.mockRejectedValueOnce(
+        new Error("order write not acknowledged"),
+      );
+      const { service, controller } = createHarness({ repository });
+
+      await expect(
+        service.ingestExternalOrder({
+          platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+          externalOrderId: "grab-order-lock-unify-001",
+          payload: { serviceBucket: "standard_taxi" },
+        }),
+      ).rejects.toMatchObject({
+        response: { error: { code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN" } },
+      });
+      const mirrorOrderId = service.listOrders()[0]!.mirrorOrderId;
+
+      let releaseReadback!: () => void;
+      let readbackEnteredResolve!: () => void;
+      const readbackEntered = new Promise<void>((resolve) => {
+        readbackEnteredResolve = resolve;
+      });
+      findOrderByIdentity.mockImplementationOnce(async () => {
+        readbackEnteredResolve();
+        await new Promise<void>((resolve) => {
+          releaseReadback = resolve;
+        });
+        return null;
+      });
+
+      const retryPromise = service.ingestExternalOrder({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-lock-unify-001",
+        payload: { serviceBucket: "standard_taxi" },
+      });
+      await readbackEntered;
+
+      let syncResolved = false;
+      const syncPromise = controller
+        .syncNativeStatus(mirrorOrderId, {
+          nativeStatus: "cancelled_by_platform",
+          payload: { providerReference: "native-new-ref" },
+        })
+        .then((result) => {
+          syncResolved = true;
+          return result;
+        });
+
+      // The retry still holds the mirrorOrderId lock while its readback is
+      // in flight; native sync (same lock key) must still be queued behind
+      // it, not interleaved with it.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(syncResolved).toBe(false);
+
+      releaseReadback();
+      const retried = await retryPromise;
+      const syncResult = await syncPromise;
+
+      expect(syncResolved).toBe(true);
+      expect(retried.status).toBe("received");
+      // Native sync ran after the retry released the lock, so its newer
+      // cancellation is what actually survives as canonical — never
+      // clobbered by the retry that queued ahead of it.
+      expect(syncResult.data.status).toBe("cancelled_by_platform");
+      const finalOrder = service.getOrder(mirrorOrderId);
+      expect(finalOrder.status).toBe("cancelled_by_platform");
+      expect(finalOrder.authoritativeSnapshot.providerReference).toBe(
+        "native-new-ref",
+      );
+      expect(finalOrder.mirrorOrderId).toBe(mirrorOrderId);
+      expect(finalOrder.platformCode).toBe(GRAB_TAIWAN_PLATFORM_CODE);
+      expect(finalOrder.externalOrderId).toBe("grab-order-lock-unify-001");
+    });
+
+    it("stays uncertain instead of blindly resetting to received when the readback query itself fails (failure is not evidence of absence)", async () => {
+      const { repository, persistChanges, findOrderByIdentity } =
+        createControllableRepository();
+      persistChanges.mockRejectedValueOnce(
+        new Error("order write not acknowledged"),
+      );
+      const { service } = createHarness({ repository });
+
+      await expect(
+        service.ingestExternalOrder({
+          platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+          externalOrderId: "grab-order-readback-failure-001",
+          payload: { serviceBucket: "standard_taxi" },
+        }),
+      ).rejects.toMatchObject({
+        response: { error: { code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN" } },
+      });
+      const mirrorOrderId = service.listOrders()[0]!.mirrorOrderId;
+
+      findOrderByIdentity.mockRejectedValueOnce(
+        new Error("readback query timed out"),
+      );
+      const callsBeforeRetry = persistChanges.mock.calls.length;
+
+      const retried = await service.ingestExternalOrder({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-readback-failure-001",
+        payload: { serviceBucket: "standard_taxi" },
+      });
+
+      // A failed readback must not be treated as "nothing durable exists
+      // yet": it must neither re-attempt the original write nor fabricate a
+      // "received" reset. It stays uncertain for a later retry/
+      // reconciliation to resolve.
+      expect(persistChanges.mock.calls.length).toBe(callsBeforeRetry);
+      expect(retried.status).toBe("sync_failed");
+      expect(retried.lastSyncError?.code).toBe(
+        "FORWARDER_PERSISTENCE_ACK_UNCERTAIN",
+      );
+      expect(retried.mirrorOrderId).toBe(mirrorOrderId);
+      expect(retried.platformCode).toBe(GRAB_TAIWAN_PLATFORM_CODE);
+      expect(retried.externalOrderId).toBe("grab-order-readback-failure-001");
     });
   });
 });

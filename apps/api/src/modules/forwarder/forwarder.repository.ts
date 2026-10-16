@@ -101,6 +101,7 @@ export class ForwarderRepository {
               created_at = EXCLUDED.created_at,
               updated_at = EXCLUDED.updated_at,
               record = EXCLUDED.record
+            WHERE EXCLUDED.updated_at >= ops.phase1_forwarded_orders.updated_at
           `,
           [
             order.mirrorOrderId,
@@ -142,7 +143,30 @@ export class ForwarderRepository {
       );
     }
 
-    await Promise.all(writes);
+    // Promise.allSettled (not Promise.all): a batch must not report
+    // done/failed until every one of its own writes has actually landed.
+    // Fail-fast on the first rejection would let the still-pending writes
+    // keep running in the background after the caller's per-order lock has
+    // already been released on the error path, so a stale write from this
+    // same batch could land after a later command's newer write and
+    // resurrect expired data. Waiting for every settlement keeps the whole
+    // batch's durable effect inside the critical section that held the lock.
+    const settled = await Promise.allSettled(writes);
+    const failures = settled.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failures.length > 0) {
+      const detail = failures
+        .map((failure) =>
+          failure.reason instanceof Error
+            ? failure.reason.message
+            : String(failure.reason),
+        )
+        .join("; ");
+      throw new Error(
+        `${failures.length}/${writes.length} forwarder persistence write(s) failed: ${detail}`,
+      );
+    }
   }
 
   /**
