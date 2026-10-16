@@ -66,9 +66,17 @@ before log SHA256 `9796a2abbbefb430485d70228df67bb6245cb710c4bf62d10940eb54588fb
 
 | Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、版本與證據位置 | 未驗項與具體限制 |
 | --- | --- | --- | --- | --- |
-| CI inline JSX 版本列 | `PublicFareCard` → `t.VersionInfo(fare.version, fare.effectiveAt)` | 舊 candidate 本機重現兩項 `jsx-text`，exit 1；修正版待下列檢查 | `pnpm run i18n:guard`；本 worktree `.local/pax-fare-copy-20261015/ci-repair/i18n-before.log` | 新 SHA 需重新 hosted CI／Claude2 review；原 key 未記錄 |
+| CI inline JSX 版本列 | `PublicFareCard` → `t.VersionInfo(fare.version, fare.effectiveAt)` | 舊 candidate 本機重現兩項 `jsx-text`，exit 1；source anchor `4e8c31c7f8a6036f8d196bf26402879b6ea4699f` 修正版 exit 0 | `pnpm run i18n:guard`；本 worktree `.local/pax-fare-copy-20261015/ci-repair/i18n-before.log` / `i18n-after.log` | 新 SHA 需重新 hosted CI／Claude2 review；原 key 未記錄 |
 
-本輪後續命令與結果會追加於此，保留前輪所有實際失敗及驗證，不借用舊 SHA 的 CI。
+本輪 source anchor `4e8c31c7f8a6036f8d196bf26402879b6ea4699f` 的檢查均已等到結束並讀結果；以下 log 在同一 `ci-repair/` 目錄，環境仍為 Node v22.23.2 / pnpm 10.33.0 / Vitest 4.1.4：
+
+- `pnpm run i18n:guard`：exit 0，665 files / 11 apps；使用原有 81 exemptions，未新增例外（`i18n-after.log`）。
+- `pnpm --filter @drts/passenger-app-web lint`：exit 0（`lint.log`）。
+- `pnpm exec vitest run tests/unit/pax-fare-copy-20261015 --reporter=dot --maxWorkers=2`：exit 0，30 passed / 0 skipped（`unit.log`）；包含兩個 API 版本／生效日經正式元件呈現的既有案例，沒有另造鏡像測試。此次變更僅抽取版本列翻譯；前輪 384 passed / 3 hosted skips 的完整選集結果保留於上節，未宣稱本輪重跑。
+- `pnpm --filter @drts/passenger-app-web typecheck`：初次 exit 2（`typecheck.log`），本次重新建構工作樹缺 ignored `apps/passenger-app-web/node_modules/@drts/api-client`，導致既有 booking import 無法解析；僅建立指向本 worktree `packages/api-client` 的本地連結後，原命令 exit 0（`typecheck-linked.log`）。未修改任何 tracked 依賴、共用 node_modules、booking 或 tsconfig。
+- 全 App 原指令 `git grep -n -e '每 80 秒' -e '+20%' -e '指派前取消' -- apps/passenger-app-web`：exit 1，無匹配。`git diff --check`：exit 0。`python3 tools/ci/git/check_commit_trailers.py --base b7d6b04b18a4a6b0cc47c37ba426bc5ad468e952 --head HEAD`：4 commits OK，exit 0；最終文件 commit 再核對。
+
+舊 candidate 的完整 PR CI run `38837839669` 隨後因新 source push 結束為 cancelled；其已結束的 i18n job failure 如上，不記為綠燈。新 source anchor 及本次最終 candidate 的 hosted runs 各自屬於其 SHA，只有最終 candidate 的 CI/review 可以供 acceptance 使用。最終 commit 僅追加本驗收紀錄，source/test bytes 與本輪已驗 anchor 一致；交接時重新核對 local HEAD／remote branch／PR head。既有 bus 在 native handoff 後將 draft PR 轉 ready 並觸發 full integration CI，尚待該 SHA CI／獨立 Claude2 review／protected merge，不記錄 key、不呼叫 done。
 
 - 分支：`codex/pax-fare-copy-20261015-delivery-r2-20261016`；[PR #2724](https://github.com/ajoe734/drts-fleet-platform/pull/2724)，base dev，正常 non-force push。
 - `30b763a681c2387eee13192a32e70cc655abfb17` 為已推送 source/checkpoint，**不是 review candidate**。最終 candidate 為包含本 UAT 的最終 HEAD；owner 在 native handoff 以完整 `CANDIDATE_SHA`、`CANDIDATE_BRANCH`、`PR_URL` 鎖定，與遠端 PR head 比對後記錄。後續文件 closeout 不改上述已驗 source/test bytes。
