@@ -106,6 +106,7 @@ interface TestTreeNode {
 
 interface TestRendererInstance {
   root: TestTreeNode;
+  unmount: () => void;
 }
 
 const React = driverRequire("react") as {
@@ -1472,7 +1473,7 @@ describe("R3 USER full Asia/Taipei calendar week", () => {
           .some((textNode) => textNode.children.includes("本週")),
     );
     await act(async () => {
-      weekPill.props.onPress();
+      (weekPill.props.onPress as () => void)();
     });
     await flushMicrotasks();
     expect(collectRenderedText(renderer)).toContain("470");
@@ -1496,7 +1497,7 @@ describe("R3 USER full Asia/Taipei calendar week", () => {
             .some((textNode) => textNode.children.includes("重新整理")),
       );
       await act(async () => {
-        button.props.onPress();
+        (button.props.onPress as () => void)();
       });
       await flushMicrotasks();
     };
