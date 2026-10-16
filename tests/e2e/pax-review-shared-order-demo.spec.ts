@@ -418,9 +418,13 @@ async function completeInternalLostItemCase(
       await ops.getByLabel("負責人 ID", { exact: true }).fill(assigneeId);
       await ops.getByLabel("指派備註", { exact: true }).fill(step.note);
     } else {
-      await ops
-        .getByLabel("處理代碼", { exact: true })
-        .selectOption("resolved_other");
+      // Playwright includes option text in this implicit label's text.
+      const resolutionField = ops.getByLabel("處理代碼");
+      await expect(resolutionField).toBeVisible();
+      await expect(
+        resolutionField.locator('option[value="resolved_other"]'),
+      ).toHaveCount(1);
+      await resolutionField.selectOption("resolved_other");
       await ops.getByLabel("結案備註", { exact: true }).fill(step.note);
     }
     const write = ops.waitForResponse(
@@ -464,6 +468,19 @@ async function completeInternalLostItemCase(
     );
     expect(timeline.at(-1).note).toBe(step.note);
     observed.push({ action: step.action, record, timeline });
+    await info.attach(`A-lost-item-internal-case-${step.action}-facts`, {
+      body: JSON.stringify({
+        orderId,
+        caseNo,
+        action: step.action,
+        status: record.status,
+        assigneeId: record.assigneeId,
+        timelineActions: timeline.map(
+          (entry: { action: string }) => entry.action,
+        ),
+      }),
+      contentType: "application/json",
+    });
   }
   await expect(
     ops
