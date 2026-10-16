@@ -7,7 +7,8 @@ import rootConfig from "../../../vitest.config";
 // completion producer/callers with the accepted baseline. Keep the same source
 // authorities, transport fixtures and assertions, without moving the worktree.
 const baseline = "b726c5cd08c932502d768e5766bbdf4753e4a1f4";
-const producer = "apps/api/src/modules/owned-mobility/owned-mobility.service.ts";
+const producer =
+  "apps/api/src/modules/owned-mobility/owned-mobility.service.ts";
 
 export default defineConfig({
   ...rootConfig,

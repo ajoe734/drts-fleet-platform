@@ -2,7 +2,7 @@
 
 Owner: Codex · Reviewer: Claude2
 
-## 2026-10-16 source preparation checkpoint
+## 2026-10-16 source preparation checkpoint (historical)
 
 This is an implementation checkpoint, **not a review candidate or completed
 acceptance**. Baseline: `b726c5cd0` (the assigned worktree's accepted dev source).
@@ -117,3 +117,72 @@ required acceptance keys remain pending. This branch must remain in owner
 progress until the Fleet scope request, full capture and required regressions
 are completed; do not hand off these preparation anchors as a finished E04
 candidate.
+
+## 2026-10-16 completed source and owner verification
+
+This section supersedes the open implementation items in the historical
+checkpoint above. It does **not** record hosted acceptance, deployment or DONE.
+Production source and hosted assertions are anchored at
+`e600f3e38ff09c6375b5890bd8f5d992c71dce04`; reproducible before-source loading and
+scoped test typechecking were added at
+`c60ca4ac6` (subsequent edits only format that loader and document results).
+There have been no review returns or previous E04 candidates.
+
+### Final source path and boundaries
+
+- Both `OwnedMobilityService.completeDriverTask` and
+  `finalizeDriverTaskCompletionInTransaction` call
+  `captureCompletionIdentity` and `captureMultiTaxiE04` before constructing the
+  completion event/outbox. The snapshot copies all four **actual** fare
+  components, not a quote or an allocation of the total. Existing plate,
+  start/end, distance, duration and declared-surname provenance remain in the
+  immutable event. Existing idempotency/replay and receipt conflict handling
+  retain the original snapshot after source changes.
+- `RegulatoryRegistryRepository.findCompletionOperatorId` resolves this order's
+  persisted `operatingAuthorizationId`. `FleetPartnerRepository` selects only
+  explicit `multiTaxiOperatorIds` mappings and accepts exactly one legal name.
+  `FleetPartnerService` preserves that optional JSON master field in existing
+  create/update writes and detached clones. Writes still await the original ACK;
+  no ID equality, affiliation or display label supplies issuer identity.
+- `RegulatoryRegistryService.getDriverCompletionReceiptIdentity` refreshes the
+  target declared profile and credential. `PaymentMethodService.getReceiptDisplay`
+  reads the order's selected active payment UUID under the order's passenger;
+  neither PSP tokens nor a default method supply receipt display facts.
+- The existing global `PassengerAppModule` exports `PaymentMethodService`.
+  `OwnedMobilityModule` registers stateless Fleet/registry repositories. Existing
+  direct constructor callers remain compatible because the new completion
+  dependencies are appended and optional. All three direct `ReviewSupplyService`
+  callers were updated for the two required rehearsal authorities.
+- Opt-in `ReviewSupplyService.prepare` uses the existing ACK-backed Fleet writer
+  and actual returned Fleet ID, persists its explicit operator mapping, declares
+  the synthetic surname through DriverProfileService, and refreshes structurally
+  valid synthetic credential metadata. Its return and Fleet legal name explicitly
+  say 合成／演練／非正式. Existing rehearsal page/record labels and opt-in remain.
+  No external legal registration, PSP operation or regulatory approval is claimed.
+- Missing actual fare, declared surname, credential, selected owner method,
+  authorization or unique Fleet mapping leaves E04 absent. The original writer,
+  passenger mapper, download readiness validator and ownership checks are
+  unchanged. Registry C073 lifecycle/offboarding hunks are unchanged.
+
+### Finding and acceptance evidence (§0.7)
+
+| Finding / acceptance                                                     | Source and repair                                                                                                                                             | Before → fixed result                                                                                                                                                                                                                                             | Command and evidence                                                                                                                                                                       | Unverified limits                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Both completion callers omit E04 despite available authority             | Owned completion callers, capture helpers, `buildMultiTaxiCertificateEvent`; production Fleet/registry/payment readers                                        | Immutable accepted-baseline Owned source `b726c5cd08c932502d768e5766bbdf4753e4a1f4`: **2 expected failures**, `event.e04Snapshot === undefined`, one per caller. Same assertions with fixed source: **2 pass**, within the 15-case capture suite                  | `pnpm exec vitest run --config tests/unit/pax-receipt-e04-capture-20261015/before.vitest.config.ts`, exit 1, `before-producer.log`; fixed command below                                    | Bounded old-producer reproduction only: all authority ports/fixtures/assertions stay at fixed source, only immutable original Owned source is loaded. No active worktree reset, no production logic mocked              |
+| Event→writer→raw receipt→mapper/artifact and same-order immutable replay | Capture suite calls actual Owned service, CertificateSupport service/repository, MultiTaxi repository and passenger mapper                                    | Fixed direct and transactional callers retain four actual fare components, plate/times/distance/duration, Unicode declared surname and selected payment. Later profile/Fleet/card/credential changes and duplicate completion/delivery preserve original receipt  | `completion-capture.test.ts`; fixed suite `regression.log` / `regression.json`                                                                                                             | Local SQL transport rows are synthetic; no PG transactions, lease recovery or external issuer acceptance claimed                                                                                                        |
+| Missing source facts and ambiguous operator mapping                      | Same caller/writer/readback paths and original validator                                                                                                      | Six source-absence scenarios per caller retain `PASSENGER_RECEIPT_LEGAL_FIELDS_MISSING` / `PASSENGER_E04_NOT_READY`; wrong order cannot read the artifact                                                                                                         | Same 15-case capture suite; `authority-readers.test.ts` covers targeted refresh/absence/errors and owner+method metadata                                                                   | Real PostgreSQL execution remains pending                                                                                                                                                                               |
+| Explicit mapping persistence/ACK                                         | Fleet create/update, clone and lookup                                                                                                                         | Mutation of returned mapping cannot mutate master; pending write is not visible before ACK; failed update retains previous mapping                                                                                                                                | Capture suite plus existing Fleet ACK regression                                                                                                                                           | Concurrent real DB behavior requires hosted CI                                                                                                                                                                          |
+| `pax-receipt-e04_real-completion-snapshot-and-readback`                  | `completion-capture.hosted.test.ts`: formal migrations, production repositories, transaction/outbox drain, original writer, trusted passenger HTML/PDF reader | **Pending**; hosted tests are deliberately skipped locally. Tests assert actual outbox delivery, persisted snapshot, same-passenger readback, peer master updates, deleted card, replay/duplicate delivery, cross-passenger refusal and missing-mapping readiness | Existing `ci-integ.yml` unit shards discover this test; harness requires `GITHUB_ACTIONS=true` and a hosted PG URL, creates a migrated isolated database and validates migration checksums | No hosted PG result or acceptance key recorded yet. Native precompletion setup is a dependency fixture, not browser booking or real external legal/PSP data                                                             |
+| `pax-receipt-e04_explicit-simulation-and-shared-dev-delivery`            | ReviewSupply production writers; `tests/e2e/pax-review-shared-order-demo.spec.ts` existing three-journey `download` path                                      | **Pending**. New assertions inspect each new order's raw E04, actual fare equality, standard passenger download API/HTML, actual receipt UI and explicit synthetic Fleet label, alongside existing rehearsal record download                                      | Existing `ui-shared-order-e2e` hosted job and immutable shared-dev smoke workflow; no new workflow or VM runner                                                                            | Requires exact candidate review/CI/merge, authorized immutable Cloud Run deployment, verified live `DEV_GCP_*` target, and new same-version three-order smoke. Historical Demo results give no credit to this candidate |
+
+Before/fixed probes use the same completion test; only the old-source command
+loads accepted-baseline Owned code. External SQL/event transports are fixtures in
+socket-free cases. The hosted suite instead uses the existing formal migration
+harness and production repositories, with synthetic source records and payment
+provider responses explicitly identified. No validator is replaced or weakened.
+
+### Current check ledger
+
+All local evidence below is in this assigned worktree's
+`.local/pax-receipt-e04-capture-20261015/`. Commands run with Node 22 / pnpm
+10.33.0 / Vitest 4.1.4; exact local results and hosted status follow below.
