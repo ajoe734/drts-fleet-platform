@@ -127,7 +127,8 @@ class SubprocessTransportTests(unittest.TestCase):
         for data in (b"{oops}\n", b"\xff\n", b"[]\n", b"null\n",
                      b'{"method":"ping"}', b"Content-Length: nope\r\n\r\n",
                      b"Content-Length: -1\r\n\r\n", b"Content-Length: 0\r\n\r\n",
-                     b"Content-Length: 5\r\n\r\n{}", b"Content-Length: 5\r\n"):
+                     b"Content-Length: 5\r\n\r\n{}", b"Content-Length: 5\r\n",
+                     b"Content-Length: 2\r\nContent-Length: 2\r\n\r\n{}"):
             with self.subTest(data=data):
                 proc = self.run_bridge(data)
                 self.assertNotEqual(proc.returncode, 0)
@@ -170,7 +171,13 @@ class CodecTests(unittest.TestCase):
                 self.assertIsNone(codec.read_message())
                 self.assertEqual(output.getvalue(), frame(response, legacy) * 2)
 
-    def test_framing_cannot_switch_mid_session(self):
+    def test_size_limits_and_framing_cannot_switch_mid_session(self):
+        for data in (b"x" * (bridge.StdioCodec.MAX_MESSAGE_BYTES + 1),
+                     b"Content-Length: 1048577\r\n\r\n",
+                     b"Content-Length: 2\r\nX: " + b"x" * 8192 + b"\r\n\r\n{}"):
+            with self.subTest(prefix=data[:50]):
+                with self.assertRaises(ValueError):
+                    bridge.StdioCodec(io.BytesIO(data), io.BytesIO()).read_message()
         message = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
         for legacy in (False, True):
             codec = bridge.StdioCodec(io.BytesIO(frame(message, legacy) + frame(message, not legacy)), io.BytesIO())

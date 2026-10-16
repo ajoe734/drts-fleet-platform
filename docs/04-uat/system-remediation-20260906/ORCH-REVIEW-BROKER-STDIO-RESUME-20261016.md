@@ -160,3 +160,85 @@ stderr: (empty)
 Only repository Python unit checks ran on this VM. No product, browser, PG,
 or Docker Compose runtime was started. Full system acceptance and Root
 entrypoint restoration are outside this write scope and NOT claimed here.
+
+### Finding 4 (F2, review reopen) — Finding 3's instruction to remove the caps was itself wrong; caps restored
+
+Reviewer Codex reopened candidate `2a6a25931912d1a8b3dcc4e65ef1f402f02e6b55`
+(generation `9a076e8a37df4356b6f58b1d3f4ce794`) against the authoritative
+`task_spec_ref`
+`.local/passenger-transport-bureau-review-20261015/ORCH-REVIEW-BROKER-STDIO-RESUME-20261016-R2-actual-native-roles.json`,
+whose acceptance source-proof explicitly prohibits guard relaxation, and the
+superseding read_dep
+`.local/passenger-transport-bureau-review-20261015/actual-broker-superseding-correction-accepted2653-baseline-versus-stale-installed-entrypoint.json`.
+That read_dep corrects the baseline Finding 3 relied on and supersedes
+`actual-broker-WIP-new-frame-limit-outside-user-functional-scope-normal-evidence.json`:
+the canonical `ORCH-CLAUDE-MCP-STDIO-FRAMING-20261015` task is independently
+confirmed `done`/accepted (candidate `552c623c310c21ff0ed60d974eea6283e7b1e0bc`,
+reviewer Codex2, green same-SHA CI, merge
+`59092d56a3a0e2ad85ee00fa13500a20cd3b29cf` / PR #2653, all three of its
+acceptance keys satisfied). `git show`/sha256 comparison proves the production
+`claude_permission_prompt_mcp.py` blobs at accepted `552c623c...`, merge
+`59092d56a...`, and this task's own base `b726c5cd08c932502d768e5766bbdf4753e4a1f4`
+are identical (`904e67b81b353a33e2d51fd3da6ad6940d0a3360bcce3ae3e4771ea8068359a4`).
+In other words, `MAX_MESSAGE_BYTES`, `MAX_HEADER_BYTES`, duplicate legacy
+header rejection, and the 10-digit `Content-Length` cap are not hardening
+bolted onto a narrower accepted fix — they are the accepted, reviewed, CI-green,
+merged `#2653` behavior itself. Finding 3's instruction to delete them (acted
+on in `2a6a25931`) was a regression against an already-accepted baseline, not
+a continuation of the original functional repair; the user's "no new security
+hardening" instruction that Finding 3 invoked does not authorize removing
+controls that were already accepted and merged before this task started.
+
+Repair: reverted `tools/development-orchestrator/claude_permission_prompt_mcp.py`
+and `tools/development-orchestrator/test_claude_permission_prompt_mcp.py`
+exactly to their `b726c5cd0` content (`git show b726c5cd0:<path>` written back
+over the `2a6a25931` state; `diff` against `git show b726c5cd0:<path>` is
+empty for both files). `approval_queue.py`, `test_approval_queue.py`, and the
+Claude2 resumable-alias repair from Finding 2 / `bc53df855` are preserved
+unchanged — this repair touches only the two files Finding 3 wrongly edited.
+
+Read-only production-parser probe (same method as Finding 3's table: load the
+real module via `compile`/`exec` with its genuine `__file__`, call
+`StdioCodec(...).read_message()` directly, no copied/mocked codec), five
+frames against the restored module:
+
+| Frame | Restored result |
+| --- | --- |
+| Legacy-framed JSON `ping` with correct `Content-Length` for a 1 MiB+ `params.padding` | `ValueError: invalid content length` (exceeds `MAX_MESSAGE_BYTES`) |
+| `Content-Length: 2\r\nContent-Length: 2\r\n\r\n{}` (duplicate header) | `ValueError: invalid legacy header` |
+| `Content-Length: 2\r\nX: ` + 8192 `x` bytes + `\r\n\r\n{}` (oversized header) | `ValueError: frame limit exceeded` |
+| `Content-Length: 00000000002\r\n\r\n{}` (11-digit length) | `ValueError: invalid content length` |
+| Same oversized JSON `ping` plus a trailing newline | `ValueError: invalid content length` |
+
+All five now reject, matching `b726c5cd0`/accepted-`#2653` behavior and
+reversing `2a6a25931`'s regression (which accepted all five). A normal
+sequential UTF-8 JSONL `initialize`/`initialized`/`tools/list`/`ping` sequence
+still parses cleanly on the restored module (4/4 messages).
+
+Regression after this repair, from `tools/development-orchestrator`:
+
+```
+python3 -m unittest test_approval_queue test_claude_permission_prompt_mcp -v
+```
+Result: 15 pass, exit 0, 4.036s.
+
+```
+python3 -m unittest discover -s . -p 'test_*.py'
+```
+Result: 1053 pass, exit 0, 46.467s. (Same expected mocked `RuntimeError: boom`
+fault-injection traceback and benign subprocess `ResourceWarning` noted in
+Finding 3 — not failures.)
+
+Acceptance keys addressed by this repair:
+`orch-review-broker_standard-stdio-and-resumable-alias-source-proof` — the
+transport now matches the accepted `#2653` baseline exactly (byte-for-byte
+identical source), superseding Finding 3's incorrect "remove the caps" reading
+of that same key; `orch-review-broker_actual-existing-entrypoint-connection-restored`
+remains a Root/Supervisor/Codex action outside this worker's write scope, not
+claimed here — unchanged from Finding 1/2/3's note above.
+
+This disposition does not erase Finding 3: Finding 3's own repair step
+(delegating the Claude2 alias prune to `worker_supports_approval_resume`) was
+correct and is kept; only its "remove the stdio caps" action is reversed here
+because it was based on a stale/incorrect reading of what `#2653` already
+established as the accepted baseline.
