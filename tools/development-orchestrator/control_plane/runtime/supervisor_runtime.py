@@ -5020,10 +5020,13 @@ def resume_claude_worker(
     cli = command_exists(runtime.get("cli") or "claude")
     if not cli:
         return None
+    resume_message = str(runtime.get("resume_continuation_message") or "Continue.")
     command = [
         runtime.get("cli") or cli,
         "--resume",
         str(session_id),
+        "-p",
+        resume_message,
         "--output-format",
         runtime.get("output_format", "stream-json"),
     ]

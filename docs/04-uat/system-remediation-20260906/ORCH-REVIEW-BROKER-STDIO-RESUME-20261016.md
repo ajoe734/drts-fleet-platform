@@ -398,3 +398,117 @@ and the live-CLI resume-flag verification above remain pending Root/Supervisor
 actions outside this worker's write scope — not claimed here. New full
 resolvable SHA/generation handed off through the normal review/CI/merge
 lifecycle; no product/dev/browser/Docker infrastructure started.
+
+### Finding 7 (F4, review reopen) — `resume_claude_worker()` now runs noninteractive print mode so the configured `--permission-prompt-tool` actually executes
+
+Reviewer Codex reopened candidate `a2e1f2ddfcd5208e7eaa88e572ea0a579834bb30`
+(generation `4ff30cd052d54b9ea641c750d8406a66`) against the authoritative
+`task_spec_ref`
+`.local/passenger-transport-bureau-review-20261015/ORCH-REVIEW-BROKER-STDIO-RESUME-20261016-R3-existing-callback-wiring.json`,
+closing exactly the verification gap Finding 6 disclosed above: the installed
+CLI's `--permission-prompt-tool` option description ("only works with
+`--print`") is confirmed by independent bounded read/mmap of
+`/usr/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe` and by a live
+`--help` run (both outside this worker's sandbox, since `command -v claude`
+and `claude --help` remain blocked here, matching Finding 6's own note).
+`resume_claude_worker()` built `--resume <session_id> --output-format
+stream-json ...` with no `-p`/`--print`, and
+`handle_worker_approval_state:5444` → `resume_claude_worker` →
+`spawn_background_process` (`common.py:801`, no `stdin=` argument, so the
+child inherits whatever stdin the supervisor process itself has — never an
+interactive terminal) confirms the resumed process never had interactive
+input to answer a prompt with in the first place. So the configured
+`--permission-prompt-tool` added by Finding 6 was reachable in argv but
+functionally a no-op on real resume: the CLI's own documented prerequisite
+for that flag was never satisfied.
+
+Repair, in `control_plane/runtime/supervisor_runtime.py`'s
+`resume_claude_worker()` only: added `"-p", resume_message` to the command
+immediately after `--resume <session_id>` and before `--output-format`,
+mirroring the pattern already proven correct at the initial-launch call site
+(`adapters/claude_cli.py`'s `ClaudeCLIAdapter.deliver()`, which has used
+`-p`/print mode since before this task). `resume_message` is
+`runtime.get("resume_continuation_message")`, defaulting to the literal
+string `"Continue."` when unset — a plain new user turn in the resumed
+session, not a decision payload; the actual allow/deny routing for the
+pending tool call still flows entirely through the MCP
+`--permission-prompt-tool` callback, unchanged. No permission mode, hook,
+provider, timeout, identity, queue contract, or allow/deny/defer decision
+path was touched; the only lines changed are the one new local variable and
+the two new argv tokens.
+
+This makes `-p` unconditional on resume (not gated on whether
+`permission_prompt_tool` is configured), because the underlying defect —
+no interactive stdin ever reaches a resumed process — applies to every
+resume call, independent of that one flag. Leaving interactive (non-`-p`)
+resume in place for the unconfigured case would not be "backward
+compatible" behavior worth preserving; it was already non-functional for the
+same reason, just without a visible symptom until something tried to read
+stdin.
+
+New old-fails/fixed-passes builder tests in `test_live_approval_resume.py`
+(pure command-construction unit tests; no real `claude` subprocess invoked,
+`spawn_background_process` mocked exactly as the existing
+`test_configured_permission_prompt_tool_is_passed_to_resume_command` already
+does):
+- `test_resume_uses_print_mode_so_permission_prompt_tool_is_not_a_cli_no_op`
+  — parametrized over both `claude` and `claude2` providers (the `_resume_command`
+  helper now takes a `provider` argument instead of hardcoding `claude2`);
+  asserts `-p` and `--permission-prompt-tool` are both present, `--resume
+  session-1` performs same-session continuation (not a fresh session), and
+  `-p` precedes `--output-format` so the CLI treats this as one noninteractive
+  continuation turn.
+- `test_resume_print_mode_continuation_message_is_configurable` and
+  `test_resume_print_mode_has_a_default_continuation_message` — cover the
+  new `resume_continuation_message` runtime key and its default.
+- Existing `test_unset_permission_prompt_tool_omits_flag_from_resume_for_backward_compatibility`
+  kept unchanged and still passes: omitting `permission_prompt_tool` still
+  omits only that flag; `-p` is now present in that case too (see above), and
+  no test asserts its absence.
+
+Old-fails/fixed-passes probe, from `tools/development-orchestrator`, pre-repair
+source temporarily restored via `git stash push -u -m
+"ORCH-REVIEW-BROKER-STDIO-RESUME-20261016-probe-tmp" --
+control_plane/runtime/supervisor_runtime.py` (new tests already present,
+production file alone reverted; no `git reset`/`checkout` on the active
+worktree, per the no-reset-active-worktree rule), then `git stash apply
+<captured sha>` to restore the fix and `git stash drop stash@{0}` to remove
+the temporary entry — the shared stash stack was not otherwise touched:
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test_live_approval_resume -v
+```
+Pre-repair: 10 run, 3 failures + 1 error — exactly the four new/changed
+assertions above (`'-p' is not in list` / `'-p' not found in [...]`); the six
+pre-existing resume tests still passed unchanged. Post-repair (fix restored):
+10 pass, exit 0.
+
+Regression after this repair, from `tools/development-orchestrator`:
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test_approval_queue test_claude_permission_prompt_mcp test_claude_cli_adapter test_live_approval_resume -v
+```
+Result: 28 pass, exit 0, 4.397s.
+
+```
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s . -p 'test_*.py'
+```
+Result: 1060 pass, exit 0, 39.773s (1057 prior + 3 new test methods, one of
+which runs 2 `subTest` cases). Same expected mocked `RuntimeError: boom`
+fault-injection traceback and benign subprocess `ResourceWarning` noted in
+every prior finding — not failures.
+
+Acceptance keys: `orch-review-broker_standard-stdio-and-resumable-alias-source-proof`'s
+`functional_continuation_R3.headless_resume` requirement (supported
+noninteractive same-session callback routing) is now addressed at the source
+level for both `claude` and `claude2`. Not claimed here, same as every prior
+finding in this doc: `orch-review-broker_actual-existing-entrypoint-connection-restored`'s
+Root-side installed-entrypoint receipt and original-role client/read-write
+verification — this remains a Root/Supervisor/Codex action outside this
+worker's write scope. Also not claimed: a real `claude --resume -p
+--permission-prompt-tool` subprocess was actually executed end-to-end: this
+worker's sandbox still blocks invoking the installed `claude` binary at all,
+so the evidence here is production-builder argv construction plus the CLI's
+own documented flag prerequisite, not an observed live resume run. New full
+resolvable SHA/generation handed off through the normal review/CI/merge
+lifecycle; no product/dev/browser/Docker infrastructure started.
