@@ -150,7 +150,7 @@ export class PlatformNoticeLifecycle {
     const active = !n.scheduledAt || now >= Date.parse(n.scheduledAt);
     if (active && n.status === "scheduled") {
       n.status = "active";
-      n.updatedAt = n.scheduledAt!;
+      n.updatedAt = n.scheduledAt ?? n.createdAt;
     }
     // Existing seeds acquire honest route records, never synthetic delivery counts.
     if (!n.outcomes.length) {
@@ -307,6 +307,7 @@ export class PlatformNoticeLifecycle {
         outcome.error = "notification_record_missing";
       }
       const { outcomes: _outcomes, ...record } = this.snapshot(notice);
+      void _outcomes; // Recipient projection deliberately omits every other receipt.
       result.push({ ...record, outcome: { ...outcome } });
     }
     return result;

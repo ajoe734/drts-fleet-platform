@@ -1014,6 +1014,7 @@ export default function FeatureFlagsPage() {
                   <div style={toolbarStyle}>
                     <CanvasField theme={theme} label={copy.scopeField}>
                       <select
+                        aria-label={copy.scopeField}
                         value={selectedTenantId}
                         onChange={(event) =>
                           setSelectedTenantId(event.target.value)
@@ -1272,6 +1273,7 @@ export default function FeatureFlagsPage() {
 
                           <CanvasField theme={theme} label={copy.reasonLabel}>
                             <textarea
+                              aria-label={copy.reasonLabel}
                               value={actionReason}
                               onChange={(event) =>
                                 setActionReason(event.target.value)

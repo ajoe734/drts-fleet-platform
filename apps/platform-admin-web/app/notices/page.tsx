@@ -581,16 +581,23 @@ export default function NoticesPage() {
     setUpdatingMaintenance(true);
     setError(null);
     try {
-      await postNoticeFlagsWithStepUp<PlatformMaintenanceModeRecord>(
-        client,
-        "/api/platform-admin/maintenance-mode",
-        {
-          enabled: maintEnabled,
-          reason: effectiveReason,
-          scheduledStart: fromDatetimeLocalValue(maintStart),
-          scheduledEnd: fromDatetimeLocalValue(maintEnd),
-        },
-      );
+      const ack =
+        await postNoticeFlagsWithStepUp<PlatformMaintenanceModeRecord>(
+          client,
+          "/api/platform-admin/maintenance-mode",
+          {
+            enabled: maintEnabled,
+            reason: effectiveReason,
+            scheduledStart: fromDatetimeLocalValue(maintStart),
+            scheduledEnd: fromDatetimeLocalValue(maintEnd),
+          },
+        );
+      if (
+        !ack?.updatedAt ||
+        ack.enabled !== maintEnabled ||
+        ack.reason !== effectiveReason
+      )
+        throw new Error("Maintenance write was not acknowledged");
       setShowMaintenanceConfirm(false);
       await loadData();
     } catch (nextError: unknown) {

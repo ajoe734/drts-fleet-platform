@@ -1,3 +1,5 @@
+import { TenantsController } from "../../../apps/api/src/modules/platform-admin/tenants.controller";
+import { TenantsService } from "../../../apps/api/src/modules/platform-admin/tenants.service";
 import { IdentityController } from "../../../apps/api/src/modules/identity/identity.controller";
 import { vi } from "vitest";
 import { createRequire } from "node:module";
@@ -61,6 +63,8 @@ export function wireHarness() {
   const service = new PlatformAdminService(audit);
   const flags = new FeatureFlagsService(undefined, audit);
   const admin = new PlatformAdminController(service);
+  const tenants = new TenantsService(audit);
+  const tenantsController = new TenantsController(tenants);
   const recipients = new PlatformNoticesController(service);
   const flagAdmin = new FeatureFlagsController(flags);
   const tenantFlags = new TenantFeatureFlagsController(flags);
@@ -110,7 +114,11 @@ export function wireHarness() {
     let handler: string;
     let args: (id: BootstrapRequestIdentity | null) => unknown[];
     const tenantId = url.searchParams.get("tenantId") ?? undefined;
-    if (path === "/api/identity/step-up-proofs") {
+    if (path === "/api/platform-admin/tenants") {
+      target = tenantsController;
+      handler = "list";
+      args = () => [];
+    } else if (path === "/api/identity/step-up-proofs") {
       target = identityController;
       handler = "createStepUpProof";
       args = (id) => [body, id];
@@ -246,6 +254,7 @@ export function wireHarness() {
     audit,
     service,
     flags,
+    tenants,
     admin,
     recipients,
     client,

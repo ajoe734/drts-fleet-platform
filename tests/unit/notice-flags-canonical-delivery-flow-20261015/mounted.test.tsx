@@ -226,6 +226,179 @@ describe("mounted production forms and observers through local typed transport",
     ).toContain("Disabled");
   });
 
+  it("selected-scope response wins over an older mounted response, and unmount aborts pending work", async () => {
+    vi.useFakeTimers();
+    const h = wireHarness();
+    const { Flags } = adminPages(h);
+    const tenantId = h.tenants.list()[0]!.id;
+    await h.flags.upsertTenantOverride(
+      "tenant-portal.booking",
+      tenantId,
+      false,
+    );
+    let release!: () => void;
+    let held = false;
+    const view = render(<Flags />);
+    await flush();
+    h.setBeforeReturn(async (path) => {
+      if (path === "/api/admin/flags" && !held) {
+        held = true;
+        await new Promise<void>((r) => {
+          release = r;
+        });
+      }
+    });
+    fireEvent.click(
+      within(view.container).getByRole("button", {
+        name: t("common.refresh", "en"),
+      }),
+    );
+    await flush();
+    const firstSignal = h.requests
+      .filter((r) => r.path === "/api/admin/flags")
+      .at(-1)?.signal;
+    fireEvent.change(
+      within(view.container).getByLabelText(
+        t("featureFlagsAdmin.scopeField", "en"),
+      ),
+      { target: { value: tenantId } },
+    );
+    await flush();
+    expect(firstSignal?.aborted).toBe(true);
+    const label = `${t("featureFlagsAdmin.toggle", "en")} tenant-portal.booking`;
+    expect(
+      within(view.container).getByRole("button", { name: label }).parentElement
+        ?.textContent,
+    ).toContain("Disabled");
+    await act(async () => {
+      release();
+    });
+    await flush();
+    expect(
+      within(view.container).getByRole("button", { name: label }).parentElement
+        ?.textContent,
+    ).toContain("Disabled");
+    let finish!: () => void;
+    h.setBeforeReturn(async (path) => {
+      if (path === "/api/admin/flags")
+        await new Promise<void>((r) => {
+          finish = r;
+        });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    const latest = h.requests
+      .filter((r) => r.path === "/api/admin/flags")
+      .at(-1)!.signal;
+    const calls = h.requests.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(h.requests.length).toBe(calls);
+    view.unmount();
+    expect(latest?.aborted).toBe(true);
+    finish();
+    await flush();
+  });
+
+  it("actual flag form does not create a local success receipt after a no-row repository ACK", async () => {
+    const h = wireHarness();
+    const { Flags } = adminPages(h);
+    const view = render(<Flags />);
+    const label = `${t("featureFlagsAdmin.toggle", "en")} tenant-portal.booking`;
+    await waitFor(() =>
+      expect(
+        within(view.container).getByRole("button", { name: label }),
+      ).toBeTruthy(),
+    );
+    vi.spyOn(h.flags, "updateFlag").mockResolvedValueOnce(undefined);
+    fireEvent.click(
+      within(view.container).getByRole("button", { name: label }),
+    );
+    fireEvent.change(
+      within(view.container).getByLabelText(
+        t("featureFlagsAdmin.reasonLabel", "en"),
+      ),
+      { target: { value: "Regression" } },
+    );
+    fireEvent.click(
+      within(view.container).getByRole("button", {
+        name: t("featureFlagsAdmin.confirmDisable", "en"),
+      }),
+    );
+    await waitFor(() =>
+      expect(view.container.textContent).toContain("Global flag not found"),
+    );
+    expect(view.container.textContent).not.toContain(
+      t("featureFlagsAdmin.actionApplied", "en"),
+    );
+  });
+
+  it("mounted native driver banner uses the scoped route, acknowledges real outcome, and clears on identity change", async () => {
+    const h = wireHarness();
+    const client = h.client(principal("driver"));
+    const clearers = new Set<() => void>();
+    const load = createUiModuleLoader(resolve("apps/driver-app"), {
+      react: React,
+      "react/jsx-runtime": jsxRuntime,
+      "react-native": {
+        View: ({ children }: { children: React.ReactNode }) => (
+          <div>{children}</div>
+        ),
+        Text: ({ children }: { children: React.ReactNode }) => (
+          <span>{children}</span>
+        ),
+        Pressable: ({
+          children,
+          onPress,
+          disabled,
+        }: {
+          children: React.ReactNode;
+          onPress: () => void;
+          disabled: boolean;
+        }) => (
+          <button disabled={disabled} onClick={onPress}>
+            {children}
+          </button>
+        ),
+      },
+      "../lib/api-client": {
+        getDriverClient: () => client,
+        registerProtectedCacheClearHandler: (fn: () => void) => {
+          clearers.add(fn);
+          return () => clearers.delete(fn);
+        },
+      },
+    });
+    const NativeBanner = load<{ PlatformNoticeBanner: React.ComponentType }>(
+      resolve("apps/driver-app/components/platform-notice-banner.tsx"),
+    ).PlatformNoticeBanner;
+    h.service.createPlatformNotice({
+      title: "Driver scoped",
+      body: "Native banner",
+      severity: "critical",
+      reason: "Incident",
+      confirmed: true,
+      targetAudience: "drivers",
+    });
+    const view = render(<NativeBanner />);
+    await waitFor(() => expect(screen.getByText("Driver scoped")).toBeTruthy());
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "標示已讀" }).at(-1)!,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "已讀" })).toBeTruthy(),
+    );
+    act(() => {
+      for (const fn of clearers) fn();
+    });
+    expect(screen.queryByText("Driver scoped")).toBeNull();
+    view.unmount();
+    expect(clearers.size).toBe(0);
+    expect(h.requests.every((r) => r.path !== "/api/notifications")).toBe(true);
+  });
+
   it.each(["ops", "tenant"] as const)(
     "mounted %s banner shows only legal available notices, posts an actual read, polls and cleans up",
     async (realm) => {

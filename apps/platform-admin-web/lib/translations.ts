@@ -4141,8 +4141,8 @@ const en = {
   "notices.col.severityShort": "SEV",
   "notices.history.subtitle": "Broadcast history · cross-app delivery outcomes",
   "notices.history.delivery.archived": "resolved delivery archived",
-  "notices.history.delivery.all": "delivered 3 / 3",
-  "notices.history.delivery.single": "delivered 1 / 1",
+  "notices.history.delivery.all": "No recorded recipient outcome",
+  "notices.history.delivery.single": "No recorded recipient outcome",
   "notices.noticeTitleRequired": "Notice title is required.",
   "notices.noticeBodyRequired": "Notice body is required.",
   "notices.warning.operationError":
@@ -7446,8 +7446,8 @@ const zh: typeof en = {
   "notices.col.severityShort": "SEV",
   "notices.history.subtitle": "廣播歷史 · 跨應用投遞結果",
   "notices.history.delivery.archived": "已封存的已解決投遞",
-  "notices.history.delivery.all": "已投遞 3 / 3",
-  "notices.history.delivery.single": "已投遞 1 / 1",
+  "notices.history.delivery.all": "尚無接收者結果",
+  "notices.history.delivery.single": "尚無接收者結果",
   "notices.noticeTitleRequired": "公告標題為必填。",
   "notices.noticeBodyRequired": "公告內容為必填。",
   "notices.warning.operationError": "公告/維護模式操作異常：{error}",
@@ -8280,6 +8280,7 @@ export function getNoticeHistoryDeliveryLabel(
   status: PlatformNoticeStatus,
   _audience: PlatformNoticeRecord["targetAudience"],
 ): string {
+  void _audience; // Audience membership cannot prove any delivery outcome.
   if (status === "resolved")
     return translateKey(locale, "notices.history.delivery.archived");
   if (status === "scheduled")
