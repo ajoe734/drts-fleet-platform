@@ -27,6 +27,11 @@ import {
   type CanvasTheme,
 } from "@drts/ui-web";
 
+import {
+  useCanonicalRead,
+  requireFlagAck,
+} from "../../lib/notice-flags-canonical-flow";
+
 type ActionIntent = "toggle" | "override";
 
 type ActionDescriptor = {
@@ -413,21 +418,24 @@ export default function FeatureFlagsPage() {
   const [auditReceipts, setAuditReceipts] = useState<AuditReceipt[]>([]);
   const [historyKey, setHistoryKey] = useState<string | null>(null);
 
-  const loadFlags = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const summary: FeatureFlagSummary = await client.getFeatureFlags(
-        selectedTenantId ? { tenantId: selectedTenantId } : undefined,
-      );
-      setFlags(summary.flags || []);
-      setNotes(summary.notes || []);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [client, selectedTenantId]);
+  const readFlags = useCallback(
+    (signal: AbortSignal) =>
+      client.get<FeatureFlagSummary>(
+        `/api/admin/flags${selectedTenantId ? `?tenantId=${encodeURIComponent(selectedTenantId)}` : ""}`,
+        { signal },
+      ),
+    [client, selectedTenantId],
+  );
+  const loadFlags = useCanonicalRead(
+    readFlags,
+    (summary) => {
+      setError(null);
+      setFlags(summary.flags);
+      setNotes(summary.notes ?? []);
+    },
+    (e) => setError(e instanceof Error ? e.message : String(e)),
+    () => setLoading(false),
+  );
 
   const loadTenants = useCallback(async () => {
     setTenantLoading(true);
@@ -442,10 +450,6 @@ export default function FeatureFlagsPage() {
       setTenantLoading(false);
     }
   }, [client]);
-
-  useEffect(() => {
-    void loadFlags();
-  }, [loadFlags]);
 
   useEffect(() => {
     void loadTenants();
@@ -629,7 +633,9 @@ export default function FeatureFlagsPage() {
     confirmToggleBody: t("featureFlagsAdmin.confirmToggleBody"),
     confirmOverrideTitle: t("featureFlagsAdmin.confirmOverrideTitle"),
     confirmOverrideBody: t("featureFlagsAdmin.confirmOverrideBody"),
-    confirmRemoveOverrideTitle: t("featureFlagsAdmin.confirmRemoveOverrideTitle"),
+    confirmRemoveOverrideTitle: t(
+      "featureFlagsAdmin.confirmRemoveOverrideTitle",
+    ),
     confirmRemoveOverrideBody: t("featureFlagsAdmin.confirmRemoveOverrideBody"),
     reasonLabel: t("featureFlagsAdmin.reasonLabel"),
     reasonPlaceholder: t("featureFlagsAdmin.reasonPlaceholder"),
@@ -650,7 +656,9 @@ export default function FeatureFlagsPage() {
     noFlags: t("flags.empty"),
     loading: t("flags.loading"),
     scopeMeta: t("featureFlagsAdmin.scopeMeta"),
-    resultMeta: t("featureFlagsAdmin.resultMeta", { count: filteredRows.length }),
+    resultMeta: t("featureFlagsAdmin.resultMeta", {
+      count: filteredRows.length,
+    }),
     enabledMeta: t("featureFlagsAdmin.enabledMeta", { count: enabledCount }),
     disabledMeta: t("featureFlagsAdmin.disabledMeta", { count: disabledCount }),
     overrideMeta: t("featureFlagsAdmin.overrideMeta", { count: overrideCount }),
@@ -823,9 +831,10 @@ export default function FeatureFlagsPage() {
     setActionError(null);
 
     try {
+      let ack: FeatureFlag | undefined;
       if (pendingAction.intent === "toggle") {
         if (pendingAction.tenantId) {
-          await client.post<FeatureFlag>(
+          ack = await client.post<FeatureFlag>(
             `/api/admin/flags/${encodeURIComponent(
               pendingAction.key,
             )}/tenant-overrides?tenantId=${encodeURIComponent(
@@ -839,13 +848,13 @@ export default function FeatureFlagsPage() {
             },
           );
         } else {
-          await client.updateFeatureFlag(
+          ack = await client.updateFeatureFlag(
             pendingAction.key,
             pendingAction.nextEnabled,
           );
         }
       } else {
-        await client.post<FeatureFlag>(
+        ack = await client.post<FeatureFlag>(
           `/api/admin/flags/${encodeURIComponent(
             pendingAction.key,
           )}/tenant-overrides?tenantId=${encodeURIComponent(
@@ -860,7 +869,15 @@ export default function FeatureFlagsPage() {
         );
       }
 
-      const requestedAt = new Date().toISOString();
+      const actual = requireFlagAck(
+        ack,
+        pendingAction.key,
+        pendingAction.intent === "toggle"
+          ? pendingAction.nextEnabled
+          : pendingAction.enabled,
+        pendingAction.tenantId || undefined,
+      );
+      const requestedAt = actual.updatedAt;
       const scopeLabel =
         pendingAction.intent === "toggle"
           ? pendingAction.scopeLabel

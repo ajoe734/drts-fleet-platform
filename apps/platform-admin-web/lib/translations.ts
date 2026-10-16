@@ -5942,8 +5942,7 @@ const zh: typeof en = {
   "adapterRegistry.registerModal.platformCode": "平台代碼",
   "adapterRegistry.registerModal.platformCodePlaceholder": "yoxi",
   "adapterRegistry.registerModal.description": "說明",
-  "adapterRegistry.registerModal.descriptionPlaceholder":
-    "合作車隊派遣轉接器",
+  "adapterRegistry.registerModal.descriptionPlaceholder": "合作車隊派遣轉接器",
   "adapterRegistry.registerModal.environment": "環境",
   "adapterRegistry.registerModal.rolloutStage": "部署階段",
   "adapterRegistry.registerModal.adapterType": "轉接器類型",
@@ -5951,8 +5950,7 @@ const zh: typeof en = {
   "adapterRegistry.registerModal.credReference": "憑證參照（非機密）",
   "adapterRegistry.registerModal.credReferencePlaceholder":
     "vault://platform/adapters/key-ref",
-  "adapterRegistry.registerModal.credExpiresAt":
-    "憑證到期時間（ISO-8601）",
+  "adapterRegistry.registerModal.credExpiresAt": "憑證到期時間（ISO-8601）",
   "adapterRegistry.registerModal.credExpiresAtPlaceholder":
     "2026-11-15T00:00:00.000Z",
   "adapterRegistry.registerModal.serviceBucketsPlaceholder":
@@ -5976,8 +5974,7 @@ const zh: typeof en = {
   "adapterRegistry.configModal.submitting": "儲存中...",
   "adapterRegistry.configSuccess":
     "{auditPrefix}{name} 設定已更新至版本 {revision}。{reasonClause}",
-  "adapterRegistry.credentialModal.title":
-    "編輯憑證參照與到期時間：{name}",
+  "adapterRegistry.credentialModal.title": "編輯憑證參照與到期時間：{name}",
   "adapterRegistry.credentialModal.subtitle":
     "更新非機密憑證參照中繼資料與伺服端評估之到期時間戳記（expectedRevision {revision}）。",
   "adapterRegistry.credentialModal.nonSecretNotice":
@@ -5996,8 +5993,7 @@ const zh: typeof en = {
     "啟用 Webhook 時必須填寫 Webhook 網址。",
   "adapterRegistry.validation.credReferenceRequired":
     "設定憑證到期中繼資料時必須填寫憑證參照。",
-  "adapterRegistry.validation.reasonRequired":
-    "此更新必須填寫治理原因。",
+  "adapterRegistry.validation.reasonRequired": "此更新必須填寫治理原因。",
   // ── Users ──
   "users.title": "使用者與角色",
   "users.subtitle": "共 {count} 位人員",
@@ -8282,14 +8278,17 @@ export function formatNoticeWindow(
 export function getNoticeHistoryDeliveryLabel(
   locale: Locale,
   status: PlatformNoticeStatus,
-  audience: PlatformNoticeRecord["targetAudience"],
+  _audience: PlatformNoticeRecord["targetAudience"],
 ): string {
-  if (status === "resolved") {
+  if (status === "resolved")
     return translateKey(locale, "notices.history.delivery.archived");
-  }
-  return audience === "all"
-    ? translateKey(locale, "notices.history.delivery.all")
-    : translateKey(locale, "notices.history.delivery.single");
+  if (status === "scheduled")
+    return locale === "zh"
+      ? "已排程，尚未開放"
+      : "Scheduled; not yet available";
+  return locale === "zh"
+    ? "請查閱實際受眾回執"
+    : "See recorded audience receipts";
 }
 
 export function getNoticesPageCopy(locale: Locale) {

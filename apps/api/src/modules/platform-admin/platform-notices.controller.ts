@@ -54,7 +54,7 @@ export class PlatformNoticesController {
   ) {
     return this.list(identity, "ops", requestId);
   }
-  @Get("tenant/platform-notices")
+  @Get("tenant/notifications/platform-notices")
   @RequireRealms("tenant")
   @RequireScopes("tenant:read")
   tenant(
@@ -94,7 +94,7 @@ export class PlatformNoticesController {
       requestId,
     );
   }
-  @Post("tenant/platform-notices/:noticeId/read")
+  @Post("tenant/notifications/platform-notices/:noticeId/read")
   @RequireRealms("tenant")
   @RequireScopes("tenant:read")
   readTenant(
