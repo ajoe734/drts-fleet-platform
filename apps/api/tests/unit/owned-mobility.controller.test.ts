@@ -227,6 +227,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
 
   it("passes includeIneligible through candidate queries before wrapping the API envelope", async () => {
     const service = {
+      prepareOrderAction: vi.fn().mockResolvedValue(undefined),
       listDispatchCandidates: vi.fn().mockResolvedValue([
         {
           driverId: "drv-demo-001",
@@ -260,6 +261,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
 
   it("awaits dispatch assignment before wrapping the API envelope", async () => {
     const service = {
+      prepareOrderAction: vi.fn().mockResolvedValue(undefined),
       assignDispatch: vi.fn().mockResolvedValue({
         assignmentId: "assignment-e2e-001",
         status: "assigned",
@@ -288,6 +290,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
 
   it("awaits dispatch reassignment before wrapping the API envelope", async () => {
     const service = {
+      prepareOrderAction: vi.fn().mockResolvedValue(undefined),
       reassignDispatch: vi.fn().mockResolvedValue({
         assignmentId: "assignment-e2e-002",
         status: "assigned",
@@ -367,6 +370,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
 describe("OwnedMobilityController updateDriverTaskEta", () => {
   it("rejects when caller identity does not match task.driverId", async () => {
     const service = {
+      prepareOrderAction: vi.fn().mockResolvedValue(undefined),
       getDriverTask: vi.fn().mockReturnValue({
         taskId: "task-001",
         driverId: "dr-some-other-guy",

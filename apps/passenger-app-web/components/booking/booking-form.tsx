@@ -14,6 +14,9 @@ import { P5Btn, P5Card, inputStyle } from "../auth/ui";
 import { BOOK_T as T } from "../../lib/booking/translations";
 import { DEMO_ADDRESSES, isDemoMode } from "../../lib/demo/store";
 import { DEMO_T } from "../../lib/demo/translations";
+import { PAX_REVIEW_STOPS } from "@drts/api-client";
+import { useReviewDemo } from "../review-demo/review-context";
+import { CurrentLocationButton } from "./current-location-button";
 
 export interface BookingDraft {
   origin: AddressPayload | null;
@@ -50,6 +53,7 @@ export function BookingForm({
   // Optional provider health/evaluator operations are deliberately omitted.
   // Real search/resolve/reverse failures surface through the real shared picker.
   const router = useRouter();
+  const review = useReviewDemo();
   const [demo, setDemo] = useState<boolean | null>(null);
   useEffect(() => setDemo(isDemoMode()), []);
   const provider = useMemo(() => {
@@ -73,9 +77,14 @@ export function BookingForm({
   }, [client, router]);
   if (demo === null) return <p>{DEMO_T.addressLoading}</p>;
   function demoAddress(field: "origin" | "destination") {
+    const addresses = review ? PAX_REVIEW_STOPS : DEMO_ADDRESSES;
     return (
       <>
-        <p>{DEMO_T.addressHint}</p>
+        <p>
+          {review
+            ? "模擬新北選址；試算與建單仍呼叫真 API，費率與服務範圍由後端判定。"
+            : DEMO_T.addressHint}
+        </p>
         <select
           aria-label={field === "origin" ? DEMO_T.pickup : DEMO_T.dropoff}
           style={inputStyle}
@@ -85,14 +94,14 @@ export function BookingForm({
             onChange({
               ...draft,
               [field]:
-                DEMO_ADDRESSES.find(
+                addresses.find(
                   (address) => address.addressId === event.target.value,
                 ) ?? null,
             })
           }
         >
           <option value="">{DEMO_T.selectAddress}</option>
-          {DEMO_ADDRESSES.map((address) => (
+          {addresses.map((address) => (
             <option key={address.addressId} value={address.addressId ?? ""}>
               {address.address}
             </option>
@@ -104,28 +113,36 @@ export function BookingForm({
   return (
     <>
       <P5Card title={T.pickup}>
-        {demo ? (
+        {demo || review ? (
           demoAddress("origin")
         ) : (
-          <AddressMapPicker
-            id="booking-origin"
-            provider={provider}
-            surface="passenger_entry"
-            theme={theme}
-            labels={labels}
-            value={draft.origin}
-            onChange={(change) =>
-              onChange({
-                ...draft,
-                origin: change.dispatchReady ? change.address : null,
-              })
-            }
-            enableServiceabilityPreview={false}
-          />
+          <>
+            <CurrentLocationButton
+              value={draft.origin}
+              reverse={provider.reverse}
+              disabled={busy}
+              onSelect={(origin) => onChange({ ...draft, origin })}
+            />
+            <AddressMapPicker
+              id="booking-origin"
+              provider={provider}
+              surface="passenger_entry"
+              theme={theme}
+              labels={labels}
+              value={draft.origin}
+              onChange={(change) =>
+                onChange({
+                  ...draft,
+                  origin: change.dispatchReady ? change.address : null,
+                })
+              }
+              enableServiceabilityPreview={false}
+            />
+          </>
         )}
       </P5Card>
       <P5Card title={T.dropoff}>
-        {demo ? (
+        {demo || review ? (
           demoAddress("destination")
         ) : (
           <AddressMapPicker

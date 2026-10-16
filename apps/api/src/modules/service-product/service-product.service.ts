@@ -201,11 +201,36 @@ export class ServiceProductService implements OnModuleInit {
       this.sequence = this.deriveNextSequence(state.records);
     } catch (error) {
       this.repository.reportPersistenceFailure(error, "module init");
+      if (this.repository.isEnabled()) throw error;
     }
   }
 
   listServiceProducts() {
     return this.records.map((record) => this.cloneRecord(record));
+  }
+
+  /** Authoritative admin read. The synchronous listServiceProducts snapshot is
+   * retained for the accepted Demo prepare -> snapshot consumer only. */
+  readServiceProducts():
+    | ServiceProductRecord[]
+    | Promise<ServiceProductRecord[]> {
+    if (!this.repository?.isEnabled()) return this.listServiceProducts();
+    return this.repository
+      .loadState()
+      .then((state) =>
+        state.records.map((record) =>
+          this.cloneRecord(this.hydrateRecord(record)),
+        ),
+      );
+  }
+
+  readRuntimeProfilePolicies():
+    | RuntimeProfileServiceProductPolicy[]
+    | Promise<RuntimeProfileServiceProductPolicy[]> {
+    if (!this.repository?.isEnabled()) return this.listRuntimeProfilePolicies();
+    return this.repository
+      .loadState()
+      .then((state) => state.runtimePolicies.map((policy) => ({ ...policy })));
   }
 
   listRuntimeServiceProducts() {
@@ -226,9 +251,37 @@ export class ServiceProductService implements OnModuleInit {
     return this.runtimePolicies.map((policy) => ({ ...policy }));
   }
 
+  /** Refresh only the requested booking context. A failed authoritative read
+   * must reject the command, never authorize it from this instance's cache.
+   * Keep the synchronous readers for existing in-process callers.
+   */
+  prepareRuntimeProfileServiceProduct(
+    runtimeProfileCode: RuntimeProfileServiceProductPolicy["runtimeProfileCode"],
+    serviceProductCode: ServiceProductType,
+  ) {
+    if (!this.repository?.isEnabled()) return;
+    return this.repository
+      .findRuntimeContext(runtimeProfileCode, serviceProductCode)
+      .then((context) => {
+        const record = context.record
+          ? this.hydrateRecord(context.record)
+          : null;
+        this.records = this.records.filter(
+          (candidate) => candidate.serviceProductType !== serviceProductCode,
+        );
+        if (record) this.records.unshift(record);
+        this.runtimePolicies = this.runtimePolicies.filter(
+          (candidate) =>
+            candidate.runtimeProfileCode !== runtimeProfileCode ||
+            candidate.serviceProductCode !== serviceProductCode,
+        );
+        if (context.policy) this.runtimePolicies.unshift({ ...context.policy });
+      });
+  }
+
   upsertRuntimeProfilePolicy(
     command: UpsertRuntimeProfileServiceProductPolicyCommand,
-  ) {
+  ): RuntimeProfileServiceProductPolicy {
     if (
       !["ordinary_taxi", "multi_taxi_direct", "business_dispatch"].includes(
         command.runtimeProfileCode,
@@ -274,16 +327,28 @@ export class ServiceProductService implements OnModuleInit {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
-    this.runtimePolicies = [
-      policy,
-      ...this.runtimePolicies.filter(
-        (candidate) =>
-          candidate.runtimeProfileCode !== policy.runtimeProfileCode ||
-          candidate.serviceProductCode !== policy.serviceProductCode,
-      ),
-    ];
-    this.persist({ runtimePolicies: [policy] }, "upsert runtime policy");
-    return { ...policy };
+    const commitPolicy = (): RuntimeProfileServiceProductPolicy => {
+      this.runtimePolicies = [
+        policy,
+        ...this.runtimePolicies.filter(
+          (candidate) =>
+            candidate.runtimeProfileCode !== policy.runtimeProfileCode ||
+            candidate.serviceProductCode !== policy.serviceProductCode,
+        ),
+      ];
+      return { ...policy };
+    };
+
+    if (!this.repository?.isEnabled()) {
+      return commitPolicy();
+    }
+
+    return this.persist(
+      { runtimePolicies: [policy] },
+      "upsert runtime policy",
+    ).then(() =>
+      commitPolicy(),
+    ) as unknown as RuntimeProfileServiceProductPolicy;
   }
 
   assertRuntimeProfileServiceProductActive(
@@ -323,8 +388,23 @@ export class ServiceProductService implements OnModuleInit {
     return record ? this.cloneRecord(this.hydrateRecord(record)) : null;
   }
 
-  getServiceProduct(serviceProductId: string) {
-    return this.cloneRecord(this.require(serviceProductId));
+  getServiceProduct(serviceProductId: string): ServiceProductRecord {
+    const normalizedId = this.normalizeRequiredString(
+      serviceProductId,
+      "serviceProductId",
+    );
+    if (!this.repository?.isEnabled())
+      return this.cloneRecord(this.require(normalizedId));
+    return this.repository.findById(normalizedId).then((record) => {
+      if (!record)
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "NOT_FOUND",
+          "Service product not found.",
+          { serviceProductId: normalizedId },
+        );
+      return this.cloneRecord(this.hydrateRecord(record));
+    }) as unknown as ServiceProductRecord;
   }
 
   createServiceProduct(
@@ -349,7 +429,228 @@ export class ServiceProductService implements OnModuleInit {
 
     const serviceProductType =
       normalizedCommand.serviceProductType as ServiceProductType;
-    const serviceProductId = this.resolveServiceProductId(normalizedCommand);
+    const defaults = this.getDefaultRecord(serviceProductType);
+    const displayName = this.normalizeRequiredString(
+      normalizedCommand.displayName,
+      "displayName",
+    );
+    const description = this.normalizeOptionalString(
+      normalizedCommand.description,
+    );
+    const allowedLicenseTypes = this.resolveAllowedLicenseTypes(
+      serviceProductType,
+      normalizedCommand.allowedLicenseTypes ?? defaults.allowedLicenseTypes,
+    );
+    const defaultProofRequirements = this.normalizeProofRequirements(
+      normalizedCommand.defaultProofRequirements,
+    );
+    const { serviceProductId, generated, nextSequence } =
+      this.resolveServiceProductId(normalizedCommand);
+    if (!this.repository?.isEnabled())
+      this.assertUniqueServiceProduct(serviceProductId, serviceProductType);
+
+    const now = new Date().toISOString();
+    const record: ServiceProductRecord = {
+      serviceProductId,
+      serviceProductType,
+      displayName,
+      description,
+      timing: normalizedCommand.timing as ServiceTiming,
+      active: normalizedCommand.active ?? true,
+      allowedLicenseTypes,
+      meterRequired: normalizedCommand.meterRequired ?? defaults.meterRequired,
+      fixedFareAllowed:
+        normalizedCommand.fixedFareAllowed ?? defaults.fixedFareAllowed,
+      defaultBillingMode:
+        normalizedCommand.defaultBillingMode as ServiceProductBillingMode,
+      defaultProofRequirements,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const hydratedRecord = this.hydrateRecord(record);
+    const commitCreate = (committed = hydratedRecord) => {
+      const hydratedRecord = this.hydrateRecord(committed);
+      this.records = [
+        hydratedRecord,
+        ...this.records.filter(
+          (current) =>
+            current.serviceProductId !== hydratedRecord.serviceProductId &&
+            current.serviceProductType !== hydratedRecord.serviceProductType,
+        ),
+      ];
+      if (generated && nextSequence !== undefined) {
+        this.sequence = Math.max(this.sequence, nextSequence);
+      }
+
+      const auditLog = this.recordAudit(
+        {
+          actorId: null,
+          actorType: "platform_admin",
+          tenantId: null,
+          moduleName: "service-product",
+          actionName: "create_service_product",
+          resourceType: "service_product",
+          resourceId: hydratedRecord.serviceProductId,
+          newValuesSummary: {
+            serviceProductType: hydratedRecord.serviceProductType,
+            timing: hydratedRecord.timing,
+            active: hydratedRecord.active,
+            allowedLicenseTypes: [...hydratedRecord.allowedLicenseTypes],
+            meterRequired: hydratedRecord.meterRequired,
+            fixedFareAllowed: hydratedRecord.fixedFareAllowed,
+            defaultBillingMode: hydratedRecord.defaultBillingMode,
+            defaultProofRequirements: [
+              ...hydratedRecord.defaultProofRequirements,
+            ],
+          },
+        },
+        requestId,
+      );
+
+      const snapshot = this.cloneRecord(hydratedRecord);
+      if (options?.captureAudit) {
+        return { data: snapshot, auditLog };
+      }
+
+      return snapshot;
+    };
+
+    if (!this.repository?.isEnabled()) {
+      return commitCreate();
+    }
+
+    return this.repository
+      .createCanonical(this.cloneRecord(hydratedRecord), generated)
+      .then((committed) => commitCreate(committed));
+  }
+
+  updateServiceProduct(
+    serviceProductId: string,
+    command: UpdateServiceProductCommand,
+    requestId: string | undefined,
+    options: { captureAudit: true },
+  ): AuditedActionResult<ServiceProductRecord>;
+  updateServiceProduct(
+    serviceProductId: string,
+    command: UpdateServiceProductCommand,
+    requestId?: string,
+    options?: { captureAudit?: false },
+  ): ServiceProductRecord;
+  updateServiceProduct(
+    serviceProductId: string,
+    command: UpdateServiceProductCommand,
+    requestId?: string,
+    options?: { captureAudit?: boolean },
+  ) {
+    const normalizedCommand = this.normalizeUpdateCommand(command);
+    const normalizedId = this.normalizeRequiredString(
+      serviceProductId,
+      "serviceProductId",
+    );
+
+    if (normalizedCommand.timing !== undefined) {
+      this.assertValidTiming(normalizedCommand.timing);
+    }
+    if (normalizedCommand.defaultBillingMode !== undefined) {
+      this.assertValidBillingMode(normalizedCommand.defaultBillingMode);
+    }
+
+    const apply = (current: ServiceProductRecord): ServiceProductRecord => {
+      const record = this.hydrateRecord(current);
+      return this.hydrateRecord({
+        ...record,
+        displayName:
+          normalizedCommand.displayName !== undefined
+            ? this.normalizeRequiredString(
+                normalizedCommand.displayName,
+                "displayName",
+              )
+            : record.displayName,
+        description:
+          normalizedCommand.description !== undefined
+            ? this.normalizeOptionalString(normalizedCommand.description)
+            : record.description,
+        timing:
+          (normalizedCommand.timing as ServiceTiming | undefined) ??
+          record.timing,
+        active: normalizedCommand.active ?? record.active,
+        allowedLicenseTypes:
+          normalizedCommand.allowedLicenseTypes !== undefined
+            ? this.resolveAllowedLicenseTypes(
+                record.serviceProductType,
+                normalizedCommand.allowedLicenseTypes,
+              )
+            : [...record.allowedLicenseTypes],
+        meterRequired: normalizedCommand.meterRequired ?? record.meterRequired,
+        fixedFareAllowed:
+          normalizedCommand.fixedFareAllowed ?? record.fixedFareAllowed,
+        defaultBillingMode:
+          (normalizedCommand.defaultBillingMode as
+            | ServiceProductBillingMode
+            | undefined) ?? record.defaultBillingMode,
+        defaultProofRequirements:
+          normalizedCommand.defaultProofRequirements !== undefined
+            ? this.normalizeProofRequirements(
+                normalizedCommand.defaultProofRequirements,
+              )
+            : [...record.defaultProofRequirements],
+        updatedAt: new Date().toISOString(),
+      });
+    };
+    const commitUpdate = (updated: ServiceProductRecord) => {
+      this.records = this.records.some(
+        (candidate) => candidate.serviceProductId === updated.serviceProductId,
+      )
+        ? this.records.map((candidate) =>
+            candidate.serviceProductId === updated.serviceProductId
+              ? updated
+              : candidate,
+          )
+        : [updated, ...this.records];
+      const auditLog = this.recordAudit(
+        {
+          actorId: null,
+          actorType: "platform_admin",
+          tenantId: null,
+          moduleName: "service-product",
+          actionName: "update_service_product",
+          resourceType: "service_product",
+          resourceId: updated.serviceProductId,
+          newValuesSummary: {
+            timing: updated.timing,
+            active: updated.active,
+            allowedLicenseTypes: [...updated.allowedLicenseTypes],
+            meterRequired: updated.meterRequired,
+            fixedFareAllowed: updated.fixedFareAllowed,
+            defaultBillingMode: updated.defaultBillingMode,
+            defaultProofRequirements: [...updated.defaultProofRequirements],
+          },
+        },
+        requestId,
+      );
+
+      const snapshot = this.cloneRecord(updated);
+      if (options?.captureAudit) {
+        return { data: snapshot, auditLog };
+      }
+
+      return snapshot;
+    };
+
+    if (!this.repository?.isEnabled()) {
+      return commitUpdate(apply(this.require(normalizedId)));
+    }
+
+    return this.repository
+      .updateCanonical(normalizedId, apply)
+      .then(commitUpdate);
+  }
+
+  private assertUniqueServiceProduct(
+    serviceProductId: string,
+    serviceProductType: ServiceProductType,
+  ) {
     if (
       this.records.some(
         (record) => record.serviceProductId === serviceProductId,
@@ -374,171 +675,6 @@ export class ServiceProductService implements OnModuleInit {
         { serviceProductType },
       );
     }
-
-    const defaults = this.getDefaultRecord(serviceProductType);
-    const now = new Date().toISOString();
-    const record: ServiceProductRecord = {
-      serviceProductId,
-      serviceProductType,
-      displayName: this.normalizeRequiredString(
-        normalizedCommand.displayName,
-        "displayName",
-      ),
-      description: this.normalizeOptionalString(normalizedCommand.description),
-      timing: normalizedCommand.timing as ServiceTiming,
-      active: normalizedCommand.active ?? true,
-      allowedLicenseTypes: this.resolveAllowedLicenseTypes(
-        serviceProductType,
-        normalizedCommand.allowedLicenseTypes ?? defaults.allowedLicenseTypes,
-      ),
-      meterRequired: normalizedCommand.meterRequired ?? defaults.meterRequired,
-      fixedFareAllowed:
-        normalizedCommand.fixedFareAllowed ?? defaults.fixedFareAllowed,
-      defaultBillingMode:
-        normalizedCommand.defaultBillingMode as ServiceProductBillingMode,
-      defaultProofRequirements: this.normalizeProofRequirements(
-        normalizedCommand.defaultProofRequirements,
-      ),
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    const hydratedRecord = this.hydrateRecord(record);
-    this.records = [hydratedRecord, ...this.records];
-    this.persist({ records: [hydratedRecord] }, "create_service_product");
-    const auditLog = this.recordAudit(
-      {
-        actorId: null,
-        actorType: "platform_admin",
-        tenantId: null,
-        moduleName: "service-product",
-        actionName: "create_service_product",
-        resourceType: "service_product",
-        resourceId: hydratedRecord.serviceProductId,
-        newValuesSummary: {
-          serviceProductType: hydratedRecord.serviceProductType,
-          timing: hydratedRecord.timing,
-          active: hydratedRecord.active,
-          allowedLicenseTypes: [...hydratedRecord.allowedLicenseTypes],
-          meterRequired: hydratedRecord.meterRequired,
-          fixedFareAllowed: hydratedRecord.fixedFareAllowed,
-          defaultBillingMode: hydratedRecord.defaultBillingMode,
-          defaultProofRequirements: [
-            ...hydratedRecord.defaultProofRequirements,
-          ],
-        },
-      },
-      requestId,
-    );
-
-    const snapshot = this.cloneRecord(hydratedRecord);
-    if (options?.captureAudit) {
-      return { data: snapshot, auditLog };
-    }
-
-    return snapshot;
-  }
-
-  updateServiceProduct(
-    serviceProductId: string,
-    command: UpdateServiceProductCommand,
-    requestId: string | undefined,
-    options: { captureAudit: true },
-  ): AuditedActionResult<ServiceProductRecord>;
-  updateServiceProduct(
-    serviceProductId: string,
-    command: UpdateServiceProductCommand,
-    requestId?: string,
-    options?: { captureAudit?: false },
-  ): ServiceProductRecord;
-  updateServiceProduct(
-    serviceProductId: string,
-    command: UpdateServiceProductCommand,
-    requestId?: string,
-    options?: { captureAudit?: boolean },
-  ) {
-    const normalizedCommand = this.normalizeUpdateCommand(command);
-    const record = this.require(serviceProductId);
-
-    if (normalizedCommand.timing !== undefined) {
-      this.assertValidTiming(normalizedCommand.timing);
-    }
-    if (normalizedCommand.defaultBillingMode !== undefined) {
-      this.assertValidBillingMode(normalizedCommand.defaultBillingMode);
-    }
-
-    const updated: ServiceProductRecord = this.hydrateRecord({
-      ...record,
-      displayName:
-        normalizedCommand.displayName !== undefined
-          ? this.normalizeRequiredString(
-              normalizedCommand.displayName,
-              "displayName",
-            )
-          : record.displayName,
-      description:
-        normalizedCommand.description !== undefined
-          ? this.normalizeOptionalString(normalizedCommand.description)
-          : record.description,
-      timing:
-        (normalizedCommand.timing as ServiceTiming | undefined) ??
-        record.timing,
-      active: normalizedCommand.active ?? record.active,
-      allowedLicenseTypes:
-        normalizedCommand.allowedLicenseTypes !== undefined
-          ? this.resolveAllowedLicenseTypes(
-              record.serviceProductType,
-              normalizedCommand.allowedLicenseTypes,
-            )
-          : [...record.allowedLicenseTypes],
-      meterRequired: normalizedCommand.meterRequired ?? record.meterRequired,
-      fixedFareAllowed:
-        normalizedCommand.fixedFareAllowed ?? record.fixedFareAllowed,
-      defaultBillingMode:
-        (normalizedCommand.defaultBillingMode as
-          | ServiceProductBillingMode
-          | undefined) ?? record.defaultBillingMode,
-      defaultProofRequirements:
-        normalizedCommand.defaultProofRequirements !== undefined
-          ? this.normalizeProofRequirements(
-              normalizedCommand.defaultProofRequirements,
-            )
-          : [...record.defaultProofRequirements],
-      updatedAt: new Date().toISOString(),
-    });
-
-    this.records = this.records.map((candidate) =>
-      candidate.serviceProductId === serviceProductId ? updated : candidate,
-    );
-    this.persist({ records: [updated] }, "update_service_product");
-    const auditLog = this.recordAudit(
-      {
-        actorId: null,
-        actorType: "platform_admin",
-        tenantId: null,
-        moduleName: "service-product",
-        actionName: "update_service_product",
-        resourceType: "service_product",
-        resourceId: serviceProductId,
-        newValuesSummary: {
-          timing: updated.timing,
-          active: updated.active,
-          allowedLicenseTypes: [...updated.allowedLicenseTypes],
-          meterRequired: updated.meterRequired,
-          fixedFareAllowed: updated.fixedFareAllowed,
-          defaultBillingMode: updated.defaultBillingMode,
-          defaultProofRequirements: [...updated.defaultProofRequirements],
-        },
-      },
-      requestId,
-    );
-
-    const snapshot = this.cloneRecord(updated);
-    if (options?.captureAudit) {
-      return { data: snapshot, auditLog };
-    }
-
-    return snapshot;
   }
 
   private require(serviceProductId: string) {
@@ -590,12 +726,28 @@ export class ServiceProductService implements OnModuleInit {
   ) {
     const providedId = this.normalizeOptionalString(command.serviceProductId);
     if (providedId) {
-      return providedId;
+      return {
+        serviceProductId: providedId,
+        generated: false,
+        nextSequence: undefined,
+      };
     }
-    return `SVP-${String(this.sequence++).padStart(6, "0")}`;
+    let nextSeq = this.sequence;
+    let candidateId = `SVP-${String(nextSeq).padStart(6, "0")}`;
+    while (
+      this.records.some((record) => record.serviceProductId === candidateId)
+    ) {
+      nextSeq += 1;
+      candidateId = `SVP-${String(nextSeq).padStart(6, "0")}`;
+    }
+    return {
+      serviceProductId: candidateId,
+      generated: true,
+      nextSequence: nextSeq + 1,
+    };
   }
 
-  private persist(
+  private async persist(
     changes: {
       records?: readonly ServiceProductRecord[];
       runtimePolicies?: readonly RuntimeProfileServiceProductPolicy[];
@@ -621,9 +773,12 @@ export class ServiceProductService implements OnModuleInit {
       }));
     }
 
-    void this.repository.persistChanges(payload).catch((error: unknown) => {
-      this.repository!.reportPersistenceFailure(error, context);
-    });
+    try {
+      await this.repository.persistChanges(payload);
+    } catch (error: unknown) {
+      this.repository.reportPersistenceFailure(error, context);
+      throw error;
+    }
   }
 
   private recordAudit(

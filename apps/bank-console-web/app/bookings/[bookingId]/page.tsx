@@ -5,11 +5,12 @@ import { REALM_COLORS } from "@drts/ui-tokens";
 import { CanvasPill } from "@drts/ui-web";
 import { CalloutPanel, PageHero } from "@/components/page-primitives";
 import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
-import { loadBankBookingsData } from "@/lib/bank-dev-read-models";
+import { loadBankBookingsData } from "@/lib/bank-bookings-data";
 import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
-import { tenantDisplayText, tenantIssuerVars } from "@/lib/tenant-display";
+import { tenantIssuerVars } from "@/lib/tenant-display";
 import {
   type BookingActorRealm,
+  bookingReturnFilters,
   type BookingDirection,
   type BookingOpsLinkState,
   type BookingState,
@@ -139,8 +140,16 @@ export default async function BookingDetailPage({
     locale,
     resolvedSearchParams.role,
   );
-  const bookingData = await loadBankBookingsData(tenant.tenantId, session.role);
+  const bookingData = await loadBankBookingsData();
   const booking = bookingData.data.detailById.get(bookingId);
+
+  if (bookingData.status !== "ready") {
+    return (
+      <div className="page-shell bank-booking-detail-page">
+        <p role="alert">{bookingData.degradedMessage}</p>
+      </div>
+    );
+  }
 
   if (!booking) {
     notFound();
@@ -154,7 +163,13 @@ export default async function BookingDetailPage({
     <div className="page-shell bank-booking-detail-page" style={issuerVars}>
       <Link
         className="text-link"
-        href={bankConsoleHref("/bookings", tenant, locale, session.role)}
+        href={bankConsoleHref(
+          "/bookings",
+          tenant,
+          locale,
+          session.role,
+          bookingReturnFilters(resolvedSearchParams),
+        )}
       >
         {t("bookings.detail.back", locale)}
       </Link>
@@ -177,15 +192,14 @@ export default async function BookingDetailPage({
           <span className="eyebrow">
             {t("bookings.detail.header.order", locale)}
           </span>
-          <strong>{tenantDisplayText(booking.orderId, tenant)}</strong>
+          <strong>{booking.orderId}</strong>
         </div>
         <div>
           <span className="eyebrow">
             {t("bookings.detail.header.program", locale)}
           </span>
           <strong>
-            {tenantDisplayText(booking.programLabel, tenant)} ·{" "}
-            {tenantDisplayText(booking.programCode, tenant)}
+            {booking.programLabel} · {booking.programCode}
           </strong>
         </div>
         <div>
@@ -372,13 +386,12 @@ export default async function BookingDetailPage({
             <dl className="booking-summary-list">
               <div className="booking-summary-item">
                 <dt>{t("bookings.detail.header.order", locale)}</dt>
-                <dd>{tenantDisplayText(booking.orderId, tenant)}</dd>
+                <dd>{booking.orderId}</dd>
               </div>
               <div className="booking-summary-item">
                 <dt>{t("bookings.detail.header.program", locale)}</dt>
                 <dd>
-                  {tenantDisplayText(booking.programLabel, tenant)} ·{" "}
-                  {tenantDisplayText(booking.programCode, tenant)}
+                  {booking.programLabel} · {booking.programCode}
                 </dd>
               </div>
               <div className="booking-summary-item">
@@ -410,8 +423,7 @@ export default async function BookingDetailPage({
               <div className="booking-summary-item">
                 <dt>{t("bookings.detail.benefit.program", locale)}</dt>
                 <dd>
-                  {tenantDisplayText(booking.programLabel, tenant)} ·{" "}
-                  {tenantDisplayText(booking.programCode, tenant)}
+                  {booking.programLabel} · {booking.programCode}
                 </dd>
               </div>
               <div className="booking-summary-item">

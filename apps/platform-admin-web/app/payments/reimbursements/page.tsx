@@ -24,14 +24,13 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import type { CanvasTableColumn } from "@drts/ui-web";
+import {
+  deriveReimbursementWorkflowState,
+  formatReimbursementMoney,
+  type ReimbursementWorkflowState,
+} from "./reimbursement-readback";
 
-type QueueStatus =
-  | "draft"
-  | "pending_approval"
-  | "approved"
-  | "exported"
-  | "paid"
-  | "reconciled";
+type QueueStatus = ReimbursementWorkflowState;
 
 type QueueFilter = "all" | "pending_approval" | "exported" | "done";
 
@@ -152,13 +151,7 @@ const FILTERS: Array<{
   },
 ];
 
-function formatMoney(
-  amount?: { amountMinor: number; currency: string } | null,
-): string {
-  if (!amount) return "—";
-
-  return `${amount.amountMinor.toLocaleString()} ${amount.currency}`;
-}
+const formatMoney = formatReimbursementMoney;
 
 function getScopeLabel(batch: ReimbursementBatchRecord): string {
   const counts = new Map<string, number>();
@@ -186,25 +179,12 @@ function getScopeLabel(batch: ReimbursementBatchRecord): string {
   }
 }
 
+// Prefer the backend's authoritative `workflowState` (C080) over the
+// display-task's heuristic, which has no notion of the real export/
+// reconcile actions this task adds -- see the batch detail page's own
+// `getWorkflowState` for the full rationale.
 function deriveQueueStatus(batch: ReimbursementBatchRecord): QueueStatus {
-  if (batch.status === "paid") {
-    if (batch.paidAt) {
-      const ageHours =
-        (Date.now() - new Date(batch.paidAt).getTime()) / (1000 * 60 * 60);
-      return ageHours >= 72 ? "reconciled" : "paid";
-    }
-    return "paid";
-  }
-
-  if (!batch.approvedAt) {
-    return batch.items.length === 0 ? "draft" : "pending_approval";
-  }
-
-  if (batch.remittanceProofId) {
-    return "exported";
-  }
-
-  return "approved";
+  return batch.workflowState ?? deriveReimbursementWorkflowState(batch);
 }
 
 function getSubmittedAt(

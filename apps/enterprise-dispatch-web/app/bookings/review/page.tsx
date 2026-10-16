@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import Link from "next/link";
 import { BookingSubmitButton } from "./booking-submit-button";
 import {
@@ -9,9 +10,9 @@ import {
   ERow,
   EStepper,
   entBtnStyle,
-} from "@/components/ent-kit";
-import { EntParty, EntRoute } from "@/components/ent-screen-bits";
-import { EntPageHead } from "@/components/enterprise-shell";
+} from "../../../components/ent-kit";
+import { EntParty, EntRoute } from "../../../components/ent-screen-bits";
+import { EntPageHead } from "../../../components/enterprise-shell";
 import {
   formatDefaultPlacard,
   getEnterpriseBookingPreview,
@@ -21,10 +22,14 @@ import {
   resolveCopyByLocale,
   serializeEnterpriseBookingDraft,
   validateReservationWindow,
-} from "@/lib/enterprise-booking-draft";
-import { tenantEnterpriseTheme as t } from "@/components/booking-form/theme";
-import { getServerLocale } from "@/lib/server-locale";
-import { type TranslationKey, t as translate } from "@/lib/translations";
+} from "../../../lib/enterprise-booking-draft";
+import {
+  ENTERPRISE_TENANT_SESSION_COOKIE,
+  verifyEnterpriseTenantSession,
+} from "../../../lib/enterprise-session.server";
+import { tenantEnterpriseTheme as t } from "../../../components/booking-form/theme";
+import { getServerLocale } from "../../../lib/server-locale";
+import { type TranslationKey, t as translate } from "../../../lib/translations";
 
 type ReviewSearchParams = Record<string, string | string[] | undefined>;
 
@@ -53,6 +58,16 @@ export default async function ReviewBookingPage({
   const locale = await getServerLocale();
   const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
     translate(key, params, locale);
+  let verifiedTenantId: string | undefined;
+  try {
+    const cookieStore = await cookies();
+    const verified = await verifyEnterpriseTenantSession(
+      cookieStore.get(ENTERPRISE_TENANT_SESSION_COOKIE)?.value,
+    );
+    verifiedTenantId = verified.session?.tenantId;
+  } catch {
+    verifiedTenantId = undefined;
+  }
   const resolvedSearchParams = (await searchParams) ?? {};
   const draft = parseEnterpriseBookingDraft(resolvedSearchParams, locale);
   const bookingId = Array.isArray(resolvedSearchParams.bookingId)
@@ -363,6 +378,7 @@ export default async function ReviewBookingPage({
                 draft={draft}
                 locale={locale}
                 approvalRequired={preview.approvalRequired}
+                {...(verifiedTenantId ? { tenantId: verifiedTenantId } : {})}
                 {...(bookingId ? { bookingId } : {})}
               />
             ) : (

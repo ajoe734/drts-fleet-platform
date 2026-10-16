@@ -18,6 +18,10 @@ export function resolveAuthoritativeFleetShellEnv(
 type Dict = Record<string, string>;
 
 const en: Dict = {
+  "trips.pagination": "Trip pages",
+  "trips.paginationSummary": "{totalItems} items · page {page} / {totalPages}",
+  "trips.previous": "Previous",
+  "trips.next": "Next",
   "cases.action.export": "Export case (JSON)",
   "cases.exportFailed":
     "The case file could not be downloaded. Please try again.",
@@ -599,6 +603,10 @@ const en: Dict = {
 };
 
 const zh: Dict = {
+  "trips.pagination": "行程分頁",
+  "trips.paginationSummary": "共 {totalItems} 筆 · 第 {page} / {totalPages} 頁",
+  "trips.previous": "上一頁",
+  "trips.next": "下一頁",
   "cases.action.export": "匯出案件（JSON）",
   "cases.exportFailed": "無法下載案件檔案，請再試一次。",
   "cases.errorGuide": "案件錯誤指引",

@@ -1,6 +1,9 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
-import type { VehicleEligibilityMatrixRecord } from "@drts/contracts";
+import type {
+  VehicleEligibilityMatrixRecord,
+  VehicleLicenseType,
+} from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
 import type { RuntimeEligibilityDecisionRecord } from "./runtime-eligibility.types";
@@ -38,6 +41,102 @@ export class VehicleEligibilityRepository {
         "admin.phase1_vehicle_eligibility_matrix",
       ),
     );
+  }
+
+  async findByLicenseTypes(licenseTypes: readonly VehicleLicenseType[]) {
+    const result = await this.databaseService!.query<{
+      configured: boolean;
+      records: unknown[];
+    }>(
+      `
+      SELECT EXISTS (SELECT 1 FROM admin.phase1_vehicle_eligibility_matrix) AS configured,
+        COALESCE((SELECT jsonb_agg(record ORDER BY license_type, effective_from DESC, updated_at DESC)
+          FROM admin.phase1_vehicle_eligibility_matrix
+          WHERE license_type = ANY($1::text[])), '[]'::jsonb) AS records
+    `,
+      [licenseTypes],
+    );
+    const context = result.rows[0]!;
+    return {
+      configured: context.configured,
+      items: context.records.map((record) =>
+        this.parseRecord<VehicleEligibilityMatrixRecord>(
+          record,
+          "admin.phase1_vehicle_eligibility_matrix",
+        ),
+      ),
+    };
+  }
+
+  /** Serialize a configuration amendment with the existing replace-all writer.
+   * Only new/changed capabilities are upserted; other configuration is retained.
+   * The caller commits its cache/audit only after this transaction acknowledges.
+   */
+  async amendMatrix(
+    amend: (
+      current: VehicleEligibilityMatrixRecord[],
+    ) => VehicleEligibilityMatrixRecord[],
+  ) {
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "LOCK TABLE admin.phase1_vehicle_eligibility_matrix IN SHARE ROW EXCLUSIVE MODE",
+      );
+      const result = await client.query<JsonRecordRow>(
+        "SELECT record FROM admin.phase1_vehicle_eligibility_matrix",
+      );
+      const current = result.rows.map((row) =>
+        this.parseRecord<VehicleEligibilityMatrixRecord>(
+          row.record,
+          "admin.phase1_vehicle_eligibility_matrix",
+        ),
+      );
+      const next = amend(structuredClone(current));
+      for (const item of next) {
+        const previous = current.find(
+          (row) => row.capabilityId === item.capabilityId,
+        );
+        if (previous && JSON.stringify(previous) === JSON.stringify(item))
+          continue;
+        await client.query(
+          `
+          INSERT INTO admin.phase1_vehicle_eligibility_matrix (
+            capability_id, license_type, active, effective_from, effective_until,
+            conditionally_allowed, required_documents, training_required, permit_required,
+            created_at, updated_at, record
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12::jsonb)
+          ON CONFLICT (capability_id) DO UPDATE SET
+            license_type=EXCLUDED.license_type, active=EXCLUDED.active,
+            effective_from=EXCLUDED.effective_from, effective_until=EXCLUDED.effective_until,
+            conditionally_allowed=EXCLUDED.conditionally_allowed,
+            required_documents=EXCLUDED.required_documents, training_required=EXCLUDED.training_required,
+            permit_required=EXCLUDED.permit_required, updated_at=EXCLUDED.updated_at, record=EXCLUDED.record
+        `,
+          [
+            item.capabilityId,
+            item.licenseType,
+            item.active,
+            item.effectiveFrom,
+            item.effectiveUntil,
+            item.conditionallyAllowed,
+            JSON.stringify(item.requiredDocuments),
+            item.trainingRequired,
+            item.permitRequired,
+            item.createdAt,
+            item.updatedAt,
+            JSON.stringify(item),
+          ],
+        );
+      }
+      await client.query("COMMIT");
+      return next;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async replaceAll(items: readonly VehicleEligibilityMatrixRecord[]) {

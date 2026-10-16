@@ -71,6 +71,68 @@ class ClaudeCLIAdapterTests(unittest.TestCase):
         self.assertEqual(command[0], str(local_cli))
         self.assertEqual(command[command.index("--model") + 1], "claude-sonnet-5")
 
+    def _deliver_with_runtime(self, runtime_overrides: dict) -> list:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            status_file = tmp / "canonical" / "ai-status.json"
+            status_file.parent.mkdir()
+            status_file.write_text('{"tasks":[]}', encoding="utf-8")
+            local_cli = status_file.parent / ".orchestrator" / "bin" / "claude"
+            local_cli.parent.mkdir(parents=True)
+            local_cli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            local_cli.chmod(0o755)
+            runtime = {"cli": "claude", "output_format": "stream-json"}
+            runtime.update(runtime_overrides)
+            config = {
+                "paths": {"status_file": str(status_file)},
+                "agents": {
+                    "claude2": {
+                        "id": "claude2",
+                        "display_name": "Claude2",
+                        "provider": "claude2",
+                        "adapter": "claude_cli",
+                    }
+                },
+                "providers": {
+                    "claude2": {
+                        "delivery_mode": "claude_cli",
+                        "runtime": runtime,
+                    }
+                },
+            }
+            request = DeliveryRequest(
+                agent_id="claude2",
+                provider="claude2",
+                delivery_mode="claude_cli",
+                message="wake up",
+                task_id="OPS-CLAUDE-001",
+            )
+            process = mock.Mock()
+            process.pid = 43210
+            with (
+                mock.patch.dict(os.environ, {"PATH": ""}),
+                mock.patch("adapters.claude_cli._claude_auth_ready", return_value=True),
+                mock.patch("adapters.claude_cli.spawn_background_process", return_value=(process, Path("/tmp/claude.log"))) as spawn,
+                mock.patch("adapters.claude_cli.runtime_log_path", return_value=Path("/tmp/claude.log")),
+                mock.patch("adapters.claude_cli.new_runtime_id", return_value="claude2-test"),
+            ):
+                ClaudeCLIAdapter(config=config, provider_capabilities={}).deliver(request)
+            return spawn.call_args.args[0]
+
+    def test_configured_permission_prompt_tool_is_passed_to_initial_launch(self) -> None:
+        command = self._deliver_with_runtime(
+            {"permission_prompt_tool": "mcp__orchestrator_approval_broker__approval_prompt"}
+        )
+        self.assertIn("--permission-prompt-tool", command)
+        self.assertEqual(
+            command[command.index("--permission-prompt-tool") + 1],
+            "mcp__orchestrator_approval_broker__approval_prompt",
+        )
+
+    def test_unset_permission_prompt_tool_omits_flag_for_backward_compatibility(self) -> None:
+        command = self._deliver_with_runtime({})
+        self.assertNotIn("--permission-prompt-tool", command)
+
 
 if __name__ == "__main__":
     unittest.main()

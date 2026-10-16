@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  filterTripsForService,
+  scopeTripRows,
   loadDashboard,
   loadTrips,
 } from "../../../lib/fleet-portal-data.server";
@@ -138,24 +140,11 @@ export async function GET(request: NextRequest) {
         { status: 500 },
       );
     }
-    const filteredRows = rows.filter((r) => {
-      if (svcFilter && svcFilter !== "all" && r.svc !== svcFilter) {
-        return false;
-      }
-      if (statusFilter && statusFilter !== "all" && r.status !== statusFilter) {
-        return false;
-      }
-      if (qFilter) {
-        const match =
-          r.id.toLowerCase().includes(qFilter) ||
-          (r.driver || "").toLowerCase().includes(qFilter) ||
-          (r.pickup || "").toLowerCase().includes(qFilter);
-        if (!match) {
-          return false;
-        }
-      }
-      return true;
-    });
+    // Export the entire matching scope, regardless of the page in the URL.
+    const filteredRows = filterTripsForService(
+      scopeTripRows(rows, { q: qFilter, status: statusFilter }),
+      svcFilter ?? "all",
+    );
 
     const csvRows = [
       [

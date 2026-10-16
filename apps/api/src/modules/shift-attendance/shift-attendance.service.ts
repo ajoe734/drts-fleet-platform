@@ -290,7 +290,19 @@ export class ShiftAttendanceService implements OnModuleInit {
     };
   }
 
-  listShifts(driverId?: string) {
+  /**
+   * Canonical read: when a repository-backed DB is enabled, reads go to the
+   * shared table directly so an independent reader (another instance, or
+   * the same instance after a restart) sees committed writes rather than
+   * this instance's local cache. A failed canonical read propagates as a
+   * failure — it is never reported as an ordinary empty list.
+   */
+  async listShifts(driverId?: string): Promise<ShiftRecord[]> {
+    if (this.repository?.isEnabled()) {
+      const rows = await this.repository.listShifts(driverId);
+      return rows.map((s) => this.cloneShift(s));
+    }
+
     let result = this.shifts.map((s) => this.cloneShift(s));
     if (driverId) {
       result = result.filter((s) => s.driverId === driverId);
@@ -298,7 +310,12 @@ export class ShiftAttendanceService implements OnModuleInit {
     return result;
   }
 
-  listAttendance(driverId?: string) {
+  async listAttendance(driverId?: string): Promise<AttendanceRecord[]> {
+    if (this.repository?.isEnabled()) {
+      const rows = await this.repository.listAttendance(driverId);
+      return rows.map((a) => this.cloneAttendance(a));
+    }
+
     let result = this.attendance.map((a) => this.cloneAttendance(a));
     if (driverId) {
       result = result.filter((a) => a.driverId === driverId);
@@ -306,31 +323,61 @@ export class ShiftAttendanceService implements OnModuleInit {
     return result;
   }
 
-  getShift(shiftId: string) {
+  async getShift(shiftId: string): Promise<ShiftRecord> {
+    if (this.repository?.isEnabled()) {
+      const row = await this.repository.getShiftById(shiftId);
+      if (!row) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "NOT_FOUND",
+          "Shift not found.",
+          { shiftId },
+        );
+      }
+      return this.cloneShift(row);
+    }
+
     return this.cloneShift(this.requireShift(shiftId));
   }
 
-  abandonShift(shiftId: string, reason: string, requestId?: string) {
-    const shift = this.requireShift(shiftId);
-    if (shift.status !== "active") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "SHIFT_NOT_ACTIVE",
-        "Only active shifts can be abandoned.",
-        { shiftId, currentStatus: shift.status },
-      );
-    }
-
-    const updated: ShiftRecord = {
+  async abandonShift(
+    shiftId: string,
+    reason: string,
+    requestId?: string,
+  ): Promise<ShiftRecord> {
+    const buildAbandoned = (shift: ShiftRecord): ShiftRecord => ({
       ...shift,
       status: "abandoned",
       clockedOutAt: new Date().toISOString(),
       notes: reason,
       updatedAt: new Date().toISOString(),
-    };
+    });
+
+    let updated: ShiftRecord;
+
+    if (this.repository?.isEnabled()) {
+      // Wait for the durable commit ACK before touching local cache/audit.
+      // A rejected write (not found / already terminal) throws here and
+      // leaves this instance's cache and audit trail untouched.
+      updated = await this.repository.executeAbandonTransaction(
+        shiftId,
+        buildAbandoned,
+      );
+    } else {
+      const shift = this.requireShift(shiftId);
+      if (shift.status !== "active") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "SHIFT_NOT_ACTIVE",
+          "Only active shifts can be abandoned.",
+          { shiftId, currentStatus: shift.status },
+        );
+      }
+      updated = buildAbandoned(shift);
+      this.persist({ shifts: [updated] }, "abandon_shift");
+    }
 
     this.replaceShift(updated);
-    this.persist({ shifts: [updated] }, "abandon_shift");
     this.recordAudit(
       {
         actorId: null,

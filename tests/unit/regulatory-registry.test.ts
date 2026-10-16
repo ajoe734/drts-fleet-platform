@@ -14,12 +14,23 @@ function createRegulatoryRegistryService(
   repository?: RegulatoryRegistryRepository,
 ) {
   const auditService = new AuditNotificationService();
-  return new RegulatoryRegistryService(
+  const service = new RegulatoryRegistryService(
     new OpsDispatchEventsService(new EventEmitter() as never),
     auditService,
     new DriverProfileService(auditService),
     repository,
   );
+  // Existing heartbeat fixtures model the external repository. Keep their
+  // initialized master rows available to the new targeted reader as well.
+  if (repository && typeof repository.lockDriver !== "function") {
+    const rows = service.listDrivers();
+    repository.lockDriver = vi.fn(async (driverId) =>
+      structuredClone(
+        rows.find((driver) => driver.driverId === driverId) ?? null,
+      ),
+    );
+  }
+  return service;
 }
 
 describe("regulatory registry service", () => {

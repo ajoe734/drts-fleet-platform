@@ -523,7 +523,7 @@ describe("FleetPartnerController portal routes", () => {
     expect(approvedDriver.data.canonicalDriverId).toBeTruthy();
 
     const canonicalDriverId = approvedDriver.data.canonicalDriverId!;
-    const driverAffiliation = controller.createDriverFleetAffiliation(
+    const driverAffiliation = await controller.createDriverFleetAffiliation(
       canonicalDriverId,
       {
         fleetPartnerId: "fleet-demo-001",

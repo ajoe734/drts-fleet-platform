@@ -17,15 +17,18 @@ const mockListFleetDriverRoster = vi.fn();
 const mockGetFleetDriverQuizAttempt = vi.fn();
 
 vi.mock(
-  "../../../../apps/fleet-partner-portal-web/lib/api-client.server",
+  "../../../../apps/fleet-partner-portal-web/lib/academy-api.server",
   () => ({
-    getServerFleetPartnerClient: vi.fn(async () => ({
+    getServerFleetTrainingClient: vi.fn(async () => ({
       client: {
         getFleetTrainingSummary: mockGetFleetTrainingSummary,
         listFleetDriverRoster: mockListFleetDriverRoster,
         getFleetDriverQuizAttempt: mockGetFleetDriverQuizAttempt,
       },
       fleetPartnerId: "fp-test-academy",
+      principalSource: "jwt_bearer_header",
+      fleetSelectorSource: "tenant_id_claim",
+      realm: "tenant",
     })),
   }),
 );

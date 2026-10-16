@@ -63,14 +63,39 @@ async function drain(stream: NodeJS.ReadableStream): Promise<Buffer> {
 
 function extractPdfTextLines(bytes: Buffer): string[] {
   const content = bytes.toString("latin1");
+  const cmap = new Map<string, string>();
+  const bfcharPattern = /<([0-9A-Fa-f]{4})>\s*<([0-9A-Fa-f]{4,8})>/g;
+  let bfMatch: RegExpExecArray | null;
+  while ((bfMatch = bfcharPattern.exec(content)) !== null) {
+    const src = (bfMatch[1] ?? "").toUpperCase();
+    const dstHex = (bfMatch[2] ?? "").toUpperCase();
+    const codeUnits: number[] = [];
+    for (let i = 0; i < dstHex.length; i += 4) {
+      codeUnits.push(Number.parseInt(dstHex.slice(i, i + 4), 16));
+    }
+    cmap.set(src, String.fromCharCode(...codeUnits));
+  }
+
   const lines: string[] = [];
-  const tjPattern = /\(((?:\\.|[^\\)])*)\)\s*Tj/g;
+  const tjPattern = /(?:\(((?:\\.|[^\\)])*)\)|<([0-9A-Fa-f]+)>)\s*Tj/g;
   let match: RegExpExecArray | null;
   while ((match = tjPattern.exec(content)) !== null) {
-    const raw = match[1] ?? "";
-    lines.push(
-      raw.replace(/\\\(/g, "(").replace(/\\\)/g, ")").replace(/\\\\/g, "\\"),
-    );
+    if (match[1] !== undefined) {
+      const raw = match[1];
+      lines.push(
+        raw.replace(/\\\(/g, "(").replace(/\\\)/g, ")").replace(/\\\\/g, "\\"),
+      );
+    } else if (match[2] !== undefined) {
+      const hex = match[2].toUpperCase();
+      let decoded = "";
+      for (let i = 0; i < hex.length; i += 4) {
+        const codeHex = hex.slice(i, i + 4);
+        decoded +=
+          cmap.get(codeHex) ??
+          String.fromCharCode(Number.parseInt(codeHex, 16));
+      }
+      lines.push(decoded);
+    }
   }
   return lines;
 }
@@ -173,7 +198,7 @@ describe("SR-PLACARD-001: vehicle placard renders a real, parseable PDF", () => 
     ).toBe(true);
   });
 
-  it("safely encodes non-ASCII characters without corrupting PDF syntax or byte stream", async () => {
+  it("safely encodes non-ASCII Chinese characters as readable Unicode text without corrupting PDF syntax or byte stream", async () => {
     const store = new InMemoryDocumentArtifactStore();
     const { platformAdminService } = createService(store);
 
@@ -210,22 +235,23 @@ describe("SR-PLACARD-001: vehicle placard renders a real, parseable PDF", () => 
     }
 
     const pdfLines = extractPdfTextLines(stored!.bytes);
-    // Non-ASCII characters are replaced with '?' rather than corrupting PDF literal strings
-    expect(pdfLines.join("\n")).toContain(
-      `Version Code: ${placard.versionCode}`,
+    const joinedText = pdfLines.join("\n");
+    expect(joinedText).toContain(`Version Code: ${placard.versionCode}`);
+    expect(joinedText).toContain(
+      `Public Info Source: 花蓮偏遠地區彈性運輸服務 (${publicInfo.versionId})`,
     );
-    expect(pdfLines.join("\n")).toContain(
-      "Booking / Dispatch Phone: 0800-888-999",
-    );
-    expect(pdfLines.join("\n")).toContain(
-      "Customer Complaint Hotline: 0800-111-222",
-    );
-    expect(pdfLines.join("\n")).toContain(
+    expect(joinedText).toContain("Booking / Dispatch Phone: 0800-888-999");
+    expect(joinedText).toContain("Customer Complaint Hotline: 0800-111-222");
+    expect(joinedText).toContain("Call Rate: 全票依公告里程計費，博愛票半價");
+    expect(joinedText).toContain("Fare Rule: 夜間偏遠加成 20%");
+    expect(joinedText).toContain("Payment Methods: 現金與電子票證");
+    expect(joinedText).toContain(
       `Effective Period: 2026-07-01T00:00:00.000Z to indefinite`,
     );
+    expect(joinedText).not.toContain("????");
   });
 
-  it("preserves seed placard bytes in store so demo placard is immediately downloadable", async () => {
+  it("preserves seed placard bytes in store so demo placard is immediately downloadable with readable Chinese disclosures", async () => {
     const store = new InMemoryDocumentArtifactStore();
     const { platformAdminService } = createService(store);
     // Seed placards are materialised in onModuleInit (not the constructor,
@@ -254,5 +280,15 @@ describe("SR-PLACARD-001: vehicle placard renders a real, parseable PDF", () => 
     expect(createHash("sha256").update(bytes).digest("hex")).toBe(
       demoPlacard!.artifactManifestHash,
     );
+
+    const pdfLines = extractPdfTextLines(bytes);
+    const joinedText = pdfLines.join("\n");
+    expect(joinedText).toContain(
+      "Public Info Source: 2026 Q2 公開資訊版 (public-info-demo-001)",
+    );
+    expect(joinedText).toContain("Call Rate: 依表計費");
+    expect(joinedText).toContain("Fare Rule: 夜間與偏遠加成依公告");
+    expect(joinedText).toContain("Payment Methods: 現金、信用卡、企業簽單");
+    expect(joinedText).not.toContain("????");
   });
 });
