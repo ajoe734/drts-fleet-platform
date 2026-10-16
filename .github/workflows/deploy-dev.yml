@@ -1119,6 +1119,8 @@ jobs:
           echo "vars=${env_vars}" >> "$GITHUB_OUTPUT"
 
       - name: Deploy — api
+        env:
+          API_ENV_VARS: ${{ steps.api_env.outputs.vars }}
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/api:${{ needs.build-push.outputs.image_tag }}"
           api_secrets="${{ steps.api_secrets.outputs.api }}"
@@ -1135,7 +1137,7 @@ jobs:
             --set-cloudsql-instances "${{ needs.prepare.outputs.cloudsql }}" \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "$api_secrets" \
-            --set-env-vars "${{ steps.api_env.outputs.vars }}" \
+            --set-env-vars "$API_ENV_VARS" \
             ${{ needs.prepare.outputs.api_exposure_flag }} \
             --min-instances 0 \
             --max-instances 1 \
