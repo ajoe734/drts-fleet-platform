@@ -10,7 +10,7 @@ R6 history-preserving delivery continues on the registered r3 branch from accept
 `a967ddcab875fdaa29f7b024d01020b72a1ac51a` / PR #2719 failed the published
 commit subject gate; its objects, authors, refs, PR and dated evidence remain
 unchanged. R5 author/committer mismatch is resolved by the explicit R6 process-only
-Codex Git invocation; shared configuration is untouched. Current checks and the
+Codex Git invocation; shared identity settings are unchanged. Current checks and the
 full per-hunk lineage are recorded below. Earlier passing results are historical;
 new candidate review, hosted CI, protected merge and all four acceptance records
 remain required. No runtime or live provider success is claimed.
@@ -390,7 +390,7 @@ no production writer overlap; the only overlap is the already qualified broad
 Actual worker cwd/dispatch actor/branch were checked. Both Git identities use the
 explicit authorized `git -c user.name=Codex -c user.email=codex@openai.com
 -c user.useConfigOnly=true` prefix and literally resolve Codex <codex@openai.com>.
-No shared config, old ref/object, old PR head or history was changed.
+No shared identity setting, old ref/object, old PR head or history was changed.
 
 Read all original changed files and compared each hunk with accepted base
 `b726c5cd08c932502d768e5766bbdf4753e4a1f4`. Existing proxy, IAM client,
@@ -450,3 +450,67 @@ A fresh full run after the compatibility fix and with fewer parallel checks is
 required before handoff. Initial API typecheck also failed on absent worktree-local
 contracts/control-plane dist declarations and stale canonical dependency types;
 normal local build prerequisites and rerun are recorded separately.
+
+### R6 final validation and original acceptance map v1
+
+Checked production/test checkpoint:
+`5432a0228ccd330225d3f822081001bba57cb115`. All subsequent closeout changes are
+UAT documentation only. Exact checked production/test blob identities are in the
+manifest; the final candidate must retain them. Both original defect assertions
+were re-run on these final blobs and pass within the full suite. Every launched
+check has completed and its result was read. Node v22.23.2, pnpm 10.33.0,
+Vitest 4.1.4; jsdom is socket-free and no browser/server/PG runtime was started.
+
+| Original finding / required acceptance                                   | Source / actual production chain                                                                                                                                                   | Before → final local result                                                                                                                                                                                                                                                                                                                                       | Remaining external evidence                                                                                                                                                                     |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `platform-session_browser-csrf-issuance-and-boundary`                    | Mounted IAM client → local GET supplier → host-only signed cookie/token → proxy Origin/validated Referer and constant-time verification before upstream                            | Accepted b726c5c missing-proof JSON returns 200 with one upstream call; final returns 403 with zero calls. Issuance, cookie binding, no-store, secret outage and proof reuse controls pass                                                                                                                                                                        | Independent exact-SHA Claude2 review and normal acceptance record pending; no live provider success claimed                                                                                     |
+| `platform-session_mounted-lawful-revoke-and-canonical-readback`          | Actual UserDetailDrawer → real client/handlers/IAP verification/registered principal/guard/controller → unchanged production noDB repository → same-session wire-envelope readback | HTTP true loses selected revoked row before; final 14 query controls plus mounted lawful chain pass. Selected session and its refresh family revoked by actual registered principal, unselected session active, same row read back and Revoke action absent                                                                                                       | Controlled socket/context boundary only; no live browser/IAP/PG execution claimed; external candidate gates and acceptance record pending                                                       |
+| `platform-session_origin-token-denials-and-original-session-regressions` | Full original r05, API cookie-CSRF rejection, IAP/realm/scope/step-up, masking/list envelopes, exact tenant/target authorization retained                                          | Missing/mismatched/forged/tampered/duplicate/cross-host proof, wrong/missing Origin plus missing/unvalidated Referer, cross-origin form shape denied before upstream. Lawful Referer/reuse/bearer and Cloud Run credential separation pass. Mounted inventory 403 does not retry; mutation/proof/storage errors remain truthful. Unchanged app IAM regression 4/4 | Hosted exact-SHA regression and normal acceptance record pending; no cross-site exploit or provider claim                                                                                       |
+| `platform-session_exact-candidate-validation`                            | Isolated r3 branch, task-only commits, per-hunk lineage, literal actual Codex attribution, normal non-force pushes, full-range subject/trailer gate                                | Exact-source full regression 178 PASS / 0 FAIL / 0 SKIP in 13 files; relevant checks below pass except explicitly failed standard root check                                                                                                                                                                                                                      | New candidate SHA/PR head equality, independent review, matching required hosted CI, protected merge and all four own nonempty v1 acceptance records are lifecycle gates, not local test credit |
+
+Final full command is unchanged from the original R4 full command above, with the
+whole task directory retained. `exact-source-full.log`: exit 0, 178/178; the extra
+case versus the original 177 is the accepted-before upstream-call diagnostic.
+`final-full.log` is an earlier 178/178 pass after the compatibility repair; counts
+are not added together. Initial timeout/failure logs remain in the same bundle.
+
+| Check                                                            | Exit / result                                                                                                                           | Log                                                                         |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| App typecheck (Next typegen, no server)                          | 0 PASS; generated next-env import removed                                                                                               | `app-typecheck.log`                                                         |
+| Final app tsc / client lint after compatibility repair           | Both 0 PASS                                                                                                                             | `app-final-tsc.log`, `client-final-lint.log`                                |
+| App lint / root lint / exact API controller lint                 | All 0 PASS                                                                                                                              | `app-lint.log`, `root-lint.log`, `controller-lint.log`                      |
+| Standard `pnpm typecheck:root`                                   | 2 FAIL, 78 shared dependency resolution diagnostics; stale canonical private ApiClient.baseUrl and tenant-auth/passenger-client exports | `root-typecheck.log`                                                        |
+| Full root Source-mapped overlay                                  | 0 PASS; full root include set retained, only current worktree aliases added                                                             | `root-local-paths.log`, `root-local-paths.tsconfig.json`                    |
+| API typecheck before local declaration builds                    | 2 FAIL, 371 stale/missing declaration diagnostics                                                                                       | `api-typecheck.log`                                                         |
+| Local contracts build → control-plane-auth build → API typecheck | All 0 PASS; only ignored worktree-local dist outputs created                                                                            | `contracts-build.log`, `control-plane-build.log`, `api-typecheck-built.log` |
+| Original app IAM tests                                           | Initial 3 PASS / 1 FAIL → unchanged assertions 4 PASS, exit 0                                                                           | `app-iam-regression.log`, `app-iam-fixed.log`                               |
+| Task app files/r05/tests Prettier check                          | 0 PASS                                                                                                                                  | `format.log`                                                                |
+| Full-range subject/trailers gate                                 | All task commits PASS; rerun after final closeout                                                                                       | Normal Git/CLI evidence, no bypass                                          |
+
+The standard root check is still a failed result. The passing overlay extends the
+normal root config, keeps every include, preserves contracts/control-plane aliases,
+and adds local api-client, passenger-client and tenant-auth aliases (including its
+real route-handlers export and subpaths). No shared node_modules, canonical Source
+or production compiler config was edited to change resolution.
+
+Config audit precision: required normal `git push -u` changed this task branch's
+upstream from `dev` to its published r3 branch. Therefore common config bytes are
+not identical. An in-memory reversal of only that merge tracking value exactly
+reconstructs the initial SHA-256. The default Gemini2 name/email and both explicit
+scoped Codex name/email values remain unchanged; no manual config command or disk
+reversal occurred. Full observation: `config-tracking-observation.json`.
+
+Durable machine-specific evidence bundle (outside the disposable worker tree):
+
+`/home/lupin/workspace/drts-fleet-platform/.local/platform-session-csrf-owner-audits/20261016T034157Z-r6-delivery`.
+
+Manifest: `validation.v1.json`, SHA-256
+`5d1a5f5ab57edd9cc617f0ab66a6754449d271f998c7c8cc6f79cab17421bd6a`. It records each exact command, exit code, version, log hash,
+old candidate/generation custody and final production/test blob identities.
+The full accepted-vs-old per-hunk ledger is `per-hunk-lineage.v1.json`.
+
+No old CI result or approval supplies new candidate credit. Old candidate a967,
+its generation, delivery-r2 refs and OPEN PR #2719 stay preserved. The new normal
+handoff supplies full candidate SHA, r3 branch and new PR; reviewer/CI/merge/four
+acceptance records must all bind to that new candidate. This is implementation
+handoff evidence, not a full-system/capability completion or deployment claim.
