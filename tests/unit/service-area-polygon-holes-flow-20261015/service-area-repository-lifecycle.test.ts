@@ -251,11 +251,15 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
     await freshAreaService.onModuleInit();
 
     const freshAreas = freshAreaService.listServiceAreas();
-    expect(
-      freshAreas.find(
-        (a) => a.areaCode === "KHH_DONUT_CORE" && a.status === "active",
-      )?.geometry,
-    ).toMatchObject({ holes: [KHH_DONUT_HOLE] });
+    // Full equality against the real mutation ACK (`publishedArea.record`),
+    // not just a `holes`-only geometry subset: any field the fresh
+    // onModuleInit readback silently dropped or diverged on (e.g. metadata,
+    // timestamps, serviceProductTypes) would have stayed invisible to a
+    // `toMatchObject` check on `geometry` alone but is caught here.
+    const freshActiveArea = freshAreas.find(
+      (a) => a.areaCode === "KHH_DONUT_CORE" && a.status === "active",
+    );
+    expect(freshActiveArea).toEqual(publishedArea.record);
     expect(freshAreas.some((a) => a.areaCode === "TAIPEI_CORE")).toBe(true);
     expect(freshAreas.some((a) => a.areaCode === "TAOYUAN_AIRPORT")).toBe(
       true,
@@ -331,6 +335,18 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
         requestedAt: "2026-05-15T00:00:00.000Z",
       }),
     ).toMatchObject({ decision: "not_serviceable", serviceAreaCodes: [] });
+    // Pre-effective operational export: `evaluate`'s exclusion above is
+    // driven by a distinct `activeServiceAreas` filter and does not exercise
+    // `exportOperationalGeoJson`'s own `recordIsEffective` gate
+    // (service-area.service.ts's `exportOperationalGeoJson`, which filters
+    // the real feature-export path, not the evaluation path). Assert that
+    // path independently so a regression there cannot hide behind a passing
+    // `evaluate` check.
+    expect(
+      freshAreaService
+        .exportOperationalGeoJson(new Date("2026-05-15T00:00:00.000Z"))
+        .features.some((f) => f.id === publishedArea.record.serviceAreaId),
+    ).toBe(false);
     // HOLE-EVAL-3 (mixed-leg form, matching apps/api/tests/unit/service-area.service.test.ts's
     // "HOLE-EVAL-3 (outer-inside pickup, hole-inside dropoff)" -- previously
     // mislabeled "HOLE-EVAL-6" here): a real (non-null) dropoff landing
@@ -539,21 +555,11 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
       ],
     });
     const policyRecord = JSON.parse(policyInsertParams[15] as string); // $16
-    expect(policyRecord).toMatchObject({
-      stopPolicyId: policy.record.stopPolicyId,
-      policyCode: "KHH_CURB_DONUT_POLICY",
-      status: "active",
-      version: 1,
-      serviceAreaCodes: ["KHH_DONUT_CORE"],
-      reasonCode: "KHH_CURB_RESTRICTED",
-    });
-    // The prior subset check above never asserted geometry at all; a lost or
-    // corrupted hole on the policy JSONB record would have stayed green.
-    expect(policyRecord.geometry).toEqual({
-      type: "polygon",
-      coordinates: KHH_CURB_DONUT_POLICY_OUTER,
-      holes: [KHH_CURB_DONUT_POLICY_HOLE],
-    });
+    // Full equality against the real mutation ACK (`publishedPolicy.record`),
+    // not a field-subset-plus-geometry check: a field the service forgot to
+    // persist (or persisted stale) -- e.g. `reasonMessage` -- would have
+    // stayed invisible to the prior `toMatchObject` check but is caught here.
+    expect(policyRecord).toEqual(publishedPolicy.record);
 
     const freshPolicyService = new ServiceAreaService(
       new ServiceAreaRepository(databaseService),
@@ -561,6 +567,18 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
       new MapGeofenceObservabilityService(),
     );
     await freshPolicyService.onModuleInit();
+
+    // Full equality against the real mutation ACK (`publishedPolicy.record`),
+    // not just a fresh sourceGeometry/ring-count check: a field the fresh
+    // onModuleInit readback silently dropped or diverged on (e.g.
+    // `reasonMessage`, `effectiveUntil`) would have stayed invisible but is
+    // caught here.
+    const freshActivePolicy = freshPolicyService
+      .listStopPolicies()
+      .find(
+        (p) => p.policyCode === "KHH_CURB_DONUT_POLICY" && p.status === "active",
+      );
+    expect(freshActivePolicy).toEqual(publishedPolicy.record);
 
     const operationalExport =
       freshPolicyService.exportOperationalGeoJson(FIXED_REQUESTED_AT);
@@ -573,7 +591,14 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
       (f) => f.id === publishedPolicy.record.stopPolicyId,
     )!;
     expect(policyFeature).toBeDefined();
-    expect(policyFeature.geometry.coordinates).toHaveLength(2);
+    // Exact fresh GeoJSON ring coordinates against the already-literal
+    // expected SQL rings (`policyGeoJson`, asserted above against the real
+    // $7 bind parameter), not just a ring-count check: a hole silently
+    // dropped, duplicated, or re-wound on fresh readback would have stayed
+    // green under `toHaveLength(2)` but is caught here.
+    expect(policyFeature.geometry.coordinates).toEqual(
+      policyGeoJson.coordinates,
+    );
     // The prior check only asserted `holes: expect.any(Array)`, which stays
     // green even if a hole is silently dropped or replaced on fresh
     // readback; assert the exact fresh sourceGeometry instead.
@@ -582,6 +607,16 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
       coordinates: KHH_CURB_DONUT_POLICY_OUTER,
       holes: [KHH_CURB_DONUT_POLICY_HOLE],
     });
+    // Exact fresh version/effective fields, not merely their presence: a
+    // version bumped on persist but not on readback (or a dropped/garbled
+    // effective window) would have gone unchecked here before.
+    expect(policyFeature.properties.version).toBe(publishedPolicy.record.version);
+    expect(policyFeature.properties.effectiveFrom).toBe(
+      publishedPolicy.record.effectiveFrom,
+    );
+    expect(policyFeature.properties.effectiveUntil).toBe(
+      publishedPolicy.record.effectiveUntil,
+    );
 
     // HOLE-EVAL-7a: inside policy outer ring, outside its hole -> denied.
     const denied = freshPolicyService.evaluate({
@@ -631,5 +666,26 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
         requestedAt: "2026-05-15T00:00:00.000Z",
       }),
     ).toMatchObject({ decision: "not_serviceable", serviceAreaCodes: [] });
+    // Pre-effective operational export: `evaluate`'s exclusion above cannot
+    // isolate the policy's own date filtering (both the area and the policy
+    // are pre-effective at this timestamp, and the area's absence alone
+    // would already block this area-scoped policy match regardless of the
+    // policy's effectiveness). Assert `exportOperationalGeoJson`'s real
+    // `recordIsEffective` gate directly for both the area and the policy
+    // feature so a regression in either's export-time filtering cannot hide
+    // behind a passing `evaluate` check.
+    const preEffectiveExport = freshPolicyService.exportOperationalGeoJson(
+      new Date("2026-05-15T00:00:00.000Z"),
+    );
+    expect(
+      preEffectiveExport.features.some(
+        (f) => f.id === publishedArea.record.serviceAreaId,
+      ),
+    ).toBe(false);
+    expect(
+      preEffectiveExport.features.some(
+        (f) => f.id === publishedPolicy.record.stopPolicyId,
+      ),
+    ).toBe(false);
   });
 });
