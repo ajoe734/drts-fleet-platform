@@ -1110,7 +1110,14 @@ _STATUS_CLI_MENTION = re.compile(r"(?:ai-status\.sh|ai_status\.py)(?![A-Za-z0-9_
 
 
 def _mentions_status_cli(command: str) -> bool:
-    return bool(_STATUS_CLI_MENTION.search(command))
+    if _STATUS_CLI_MENTION.search(command):
+        return True
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        return any(Path(token).name in {"ai-status.sh", "ai_status.py"} for token in lexer)
+    except ValueError:
+        return False
 
 
 def _visible_status_shell(command: str) -> str | None:
@@ -2246,6 +2253,14 @@ def hook_mode(config: dict[str, Any], event_name: str, payload: dict[str, Any]) 
             tool_input,
             config,
         )
+        # Recognition is not permission to replay an already refused/pending
+        # status request. Keep that exact request on its existing approval path.
+        command = str(tool_input.get("command") or tool_input.get("cmd") or tool_input.get("raw_command") or "")
+        if tool_name == "Bash" and _mentions_status_cli(command) and decision["decision"] == "allow":
+            if history_match and history_match.get("decision") == "deny":
+                decision = {**decision, "decision": "deny", "reason": history_match.get("note") or "This exact status request was denied."}
+            elif pending_match:
+                decision = {**decision, "decision": "defer", "reason": "This exact status request is still pending approval."}
         effective_decision = decision["decision"]
         effective_reason = decision["reason"]
         matched_approval_id = None

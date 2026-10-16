@@ -25,7 +25,18 @@ class LoadedRuntimeStatusCliTests(unittest.TestCase):
     Saved lifecycle commands below are data, including their full original argv.
     """
 
-    SAVED_LIVE_COMMANDS = ['\\\nAI_NAME=Claude2 \\\nACCEPTANCE_REVIEW_SNAPSHOT_JSON=\'{"candidate_generation": "4c7fac61222c46ca871adb36b79c3f73", "candidate_sha": "67a425d77e037f29e8c1053a01e8c7a2b6780e14", "merge_sha": "e323b9424f46bd9bcdfa684a61fbcad77c4eb4a4", "reviewed_sha": "67a425d77e037f29e8c1053a01e8c7a2b6780e14", "reviewer": "Claude2", "task_id": "PAX-RECEIPT-E04-CAPTURE-20261015"}\' \\\nACCEPTANCE_REVIEW_REQUEST_ID=\'551ea296bdcf4ab5b08b38ae7021fcea\' \\\n/home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-4da15372d696/tools/development-orchestrator/bin/ai-status.sh decline-acceptance-review PAX-RECEIPT-E04-CAPTURE-20261015 551ea296bdcf4ab5b08b38ae7021fcea "E04-SHARED-OPS-CONFIG-401非本候選缺陷：候選67a425d77僅變更review-supply.service.ts(fleet-partner/driver-profile wiring)，未觸及control-plane-proxy/control-plane-auth/ops-console-web；401發生在Ops /review GET config經control-plane-proxy issueControlPlaneRequestAuth轉upstream，該路徑最後修改於cd9cae5d3(PAX-REVIEW-SHARED-ORDER-DEMO-20261015)與993d246d4(ENTRY-IAP-WORKFORCE-AUTH-20261005)，皆非本task write_scopes，E2E在prepare按鈕出現前即因401於line532 timeout，根本未進入候選prepare()邏輯；屬既有shared-dev auth/transport責任邊界，應由擁有該路徑的task追蹤修復，不弱化auth/validator不加timeout；decline，不reopen本候選。"\n', 'AI_NAME=Claude2 REVIEWED_SHA=cdde4ca010ccea87917155edbd51d10e771cb167 /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-4da15372d696/tools/development-orchestrator/bin/ai-status.sh approve ORCH-CI-RECOVERY-INDEPENDENT-REVIEW-PHASE-20261016 "獨立複驗：HEAD=candidate cdde4ca010cc；本機重跑57(native)+84(policy/gateway/github)+1085(全orchestrator)測試全綠，git diff --check exit0，diff僅觸及write_scopes三檔。candidate_review_handoff_is_current邏輯正確恢復legacy C073與新handoff於queued/running/success CI-only情境之review路由，owner repair/reopen/closed/conflict/changed-head均正確要求重新handoff而非復活舊審查；未寫reviewed_sha外的偽造核准，未動product/workflow/dispatch policy。核准。"']
+    SAVED_LIVE_COMMANDS = [
+        (
+            '\\\n'
+            'AI_NAME=Claude2 \\\n'
+            'ACCEPTANCE_REVIEW_SNAPSHOT_JSON=\'{"candidate_generation": "4c7fac61222c46ca871adb36b79c3f73", "candidate_sha": "67a425d77e037f29e8c1053a01e8c7a2b6780e14", "merge_sha": "e323b9424f46bd9bcdfa684a61fbcad77c4eb4a4", "reviewed_sha": "67a425d77e037f29e8c1053a01e8c7a2b6780e14", "reviewer": "Claude2", "task_id": "PAX-RECEIPT-E04-CAPTURE-20261015"}\' \\\n'
+            "ACCEPTANCE_REVIEW_REQUEST_ID='551ea296bdcf4ab5b08b38ae7021fcea' \\\n"
+            '/home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-4da15372d696/tools/development-orchestrator/bin/ai-status.sh decline-acceptance-review PAX-RECEIPT-E04-CAPTURE-20261015 551ea296bdcf4ab5b08b38ae7021fcea "E04-SHARED-OPS-CONFIG-401非本候選缺陷：候選67a425d77僅變更review-supply.service.ts(fleet-partner/driver-profile wiring)，未觸及control-plane-proxy/control-plane-auth/ops-console-web；401發生在Ops /review GET config經control-plane-proxy issueControlPlaneRequestAuth轉upstream，該路徑最後修改於cd9cae5d3(PAX-REVIEW-SHARED-ORDER-DEMO-20261015)與993d246d4(ENTRY-IAP-WORKFORCE-AUTH-20261005)，皆非本task write_scopes，E2E在prepare按鈕出現前即因401於line532 timeout，根本未進入候選prepare()邏輯；屬既有shared-dev auth/transport責任邊界，應由擁有該路徑的task追蹤修復，不弱化auth/validator不加timeout；decline，不reopen本候選。"\n'
+        ),
+        (
+            'AI_NAME=Claude2 REVIEWED_SHA=cdde4ca010ccea87917155edbd51d10e771cb167 /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-4da15372d696/tools/development-orchestrator/bin/ai-status.sh approve ORCH-CI-RECOVERY-INDEPENDENT-REVIEW-PHASE-20261016 "獨立複驗：HEAD=candidate cdde4ca010cc；本機重跑57(native)+84(policy/gateway/github)+1085(全orchestrator)測試全綠，git diff --check exit0，diff僅觸及write_scopes三檔。candidate_review_handoff_is_current邏輯正確恢復legacy C073與新handoff於queued/running/success CI-only情境之review路由，owner repair/reopen/closed/conflict/changed-head均正確要求重新handoff而非復活舊審查；未寫reviewed_sha外的偽造核准，未動product/workflow/dispatch policy。核准。"'
+        ),
+    ]
 
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
@@ -150,11 +161,108 @@ class LoadedRuntimeStatusCliTests(unittest.TestCase):
                 with self.subTest(entrypoint=entrypoint, assignment=assignment):
                     self.assertEqual(self.broker.classify_command(assignment + " " + entrypoint + " show TEST-001"), "defer")
 
+    def test_quoted_or_escaped_entrypoint_cannot_fall_through_to_python_allow(self) -> None:
+        path = str(self.loaded / "bin/ai_status.py")
+        for spelling in (path.replace("ai_status.py", "ai_status.p\\y"),
+                         path.replace("ai_status.py", 'ai_"status".py')):
+            self.assertEqual(self.broker.classify_command("python3 " + spelling + " show TEST-001"), "allow")
+            self.assertEqual(self.broker.classify_command("python3 " + spelling + " show TEST-001; sudo id"), "deny")
+            fake = spelling.replace("loaded-reviewed", "other-reviewed")
+            self.assertEqual(self.broker.classify_command("python3 " + fake + " show TEST-001"), "defer")
+
+    def test_recognition_keeps_existing_denial_and_pending_approval_binding(self) -> None:
+        command = self.forms()[3] + " show TEST-001"
+        self.assertEqual(self.broker.classify_command(command), "allow")
+        for event in ("PreToolUse", "PermissionRequest"):
+            for pending, history in ((None, {"approval_id": "denied-status", "decision": "deny", "note": "Original refusal"}),
+                                     ({"approval_id": "pending-status"}, None)):
+                output = io.StringIO()
+                with (mock.patch.object(self.broker, "is_orchestrated_session", return_value=True),
+                      mock.patch.object(self.broker, "_maybe_apply_chatbox_tree_guard", return_value=False),
+                      mock.patch.object(self.broker, "find_resume_override", return_value=None),
+                      mock.patch.object(self.broker, "_matching_approval", return_value=(pending, history)),
+                      mock.patch.object(self.broker, "_check_claude_allow_rules", return_value=False),
+                      mock.patch.object(self.broker, "create_approval") as create,
+                      mock.patch.object(self.broker, "log_event"),
+                      redirect_stdout(output)):
+                    self.broker.hook_mode({}, event, {"tool_name": "Bash", "tool_input": {"command": command},
+                                                     "cwd": str(self.canonical), "session_id": "fixture-only"})
+                create.assert_not_called()
+                if history:
+                    reply = json.loads(output.getvalue())["hookSpecificOutput"]
+                    self.assertEqual(reply.get("permissionDecision") if event == "PreToolUse" else reply["decision"]["behavior"], "deny")
+                    self.assertIn("Original refusal", output.getvalue())
+                    self.assertEqual(history["decision"], "deny")
+                elif event == "PreToolUse":
+                    self.assertEqual(json.loads(output.getvalue())["hookSpecificOutput"]["permissionDecision"], "ask")
+                else:
+                    self.assertEqual(output.getvalue(), "")
+
+    def test_recognition_does_not_replace_real_native_actor_candidate_request_guards(self) -> None:
+        from control_plane.tests.acceptance_review_routing.fixtures import requested_task
+        from control_plane.domain.dispatch_policy import acceptance_review_snapshot
+        from control_plane.usecases.task_board_commands import run_task_board_command
+
+        root = self.canonical / "isolated-native-board"
+        root.mkdir()
+        status = root / "ai-status.json"
+        task = requested_task()
+        task.update(id="STATUS-GUARD-TEST", owner="Codex", reviewer="Claude2",
+                    eligible_agents={"owner": ["Codex"], "reviewer": ["Claude2"]})
+        snapshot = acceptance_review_snapshot(task)
+        task["acceptance_review_request"].update(snapshot)
+        state = {"sprint": "test", "objective": "Offline status guard regression", "tasks": [task], "blockers": [], "handoffs": []}
+        env = {"AI_NAME": "Claude2", "ORCH_RUN_ID": "fixture-only-review",
+               "ORCH_DISPATCH_ROLE": "reviewer", "ORCH_DISPATCH_TASK_ID": task["id"],
+               "ORCH_DISPATCH_AGENT": "Claude2", "ORCH_DISPATCH_CANDIDATE_SHA": task["candidate_sha"],
+               "ORCH_DISPATCH_CANDIDATE_GENERATION": task["candidate_generation"],
+               "ACCEPTANCE_REVIEW_SNAPSHOT_JSON": json.dumps(snapshot),
+               "ACCEPTANCE_REVIEW_REQUEST_ID": "request-1"}
+        args = [task["id"], "request-1", "Fixture decision"]
+        cases = [({"AI_NAME": "Supervisor"}, args, "actor must match"),
+                 ({"AI_NAME": "Codex"}, args, "actor must match"),
+                 ({"ORCH_DISPATCH_ROLE": "owner", "ORCH_DISPATCH_AGENT": "Codex", "AI_NAME": "Codex"}, args, "Only a reviewer dispatch"),
+                 ({}, ["ANOTHER-TASK", *args[1:]], "different task"),
+                 ({"ORCH_DISPATCH_AGENT": "Gemini"}, args, "assignment changed"),
+                 ({"ORCH_DISPATCH_CANDIDATE_SHA": "f" * 40}, args, "candidate changed"),
+                 ({"ORCH_DISPATCH_CANDIDATE_GENERATION": "stale"}, args, "candidate changed"),
+                 ({"ACCEPTANCE_REVIEW_SNAPSHOT_JSON": json.dumps({**snapshot, "merge_sha": "f" * 40})}, args, "exactly match"),
+                 ({}, [task["id"], "stale-request", args[2]], "request changed")]
+        # Only the test process environment and filesystem root are isolated.
+        # Native gateway, transaction, snapshot, dispatch and handlers are real.
+        isolated_env = {key: value for key, value in os.environ.items()
+                        if key != "ORCH_RUN_ID" and not key.startswith("ORCH_DISPATCH_")}
+        with mock.patch.dict(os.environ, isolated_env, clear=True):
+            for changes, attempted_args, error in cases:
+                status.write_text(json.dumps(state))
+                before = status.read_bytes()
+                supplied = {**env, **changes}
+                invocation = ("AI_NAME=" + supplied["AI_NAME"] + " " + self.forms()[3]
+                              + " decline-acceptance-review " + shlex.join(attempted_args))
+                self.assertEqual(self.broker.classify_command(invocation), "allow")
+                result = run_task_board_command({"paths": {"status_file": str(status)}},
+                                                "decline-acceptance-review", attempted_args, environ=supplied)
+                with self.subTest(changes=changes, error=error):
+                    self.assertFalse(result.ok)
+                    self.assertIn(error, result.error)
+                    self.assertEqual(status.read_bytes(), before)
+                    self.assertFalse((root / "ai-activity-log.jsonl").exists())
+            # A valid synthetic decision demonstrates that the fixture itself is
+            # executable; no real pending task/request or CLI process is used.
+            status.write_text(json.dumps(state))
+            result = run_task_board_command({"paths": {"status_file": str(status)}},
+                                            "decline-acceptance-review", args, environ=env)
+            self.assertTrue(result.ok, result.error)
+            after = json.loads(status.read_text())["tasks"][0]
+            self.assertEqual(after["status"], "acceptance")
+            self.assertEqual(after["acceptance_review_request"]["state"], "declined")
+            self.assertEqual(after["acceptance_evidence"], task["acceptance_evidence"])
+
     def test_single_invocation_recognizer_does_not_accept_a_status_prefix(self) -> None:
         for entrypoint in self.forms():
             self.assertFalse(self.broker._is_safe_status_sync_command(entrypoint + " show TEST-001; docker ps"))
             self.assertFalse(self.broker._is_safe_status_sync_command(entrypoint + " show TEST-001 && git status"))
-            self.assertTrue(self.broker.classify_command(entrypoint + " show TEST-001 && git status") == "allow")
+            self.assertEqual(self.broker.classify_command(entrypoint + " show TEST-001 && git status"), "allow")
 
 
 class WorkerCwdMergeTests(unittest.TestCase):
