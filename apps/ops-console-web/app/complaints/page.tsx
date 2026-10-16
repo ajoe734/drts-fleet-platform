@@ -1862,9 +1862,11 @@ export default function ComplaintsPage() {
           style={{
             position: "fixed",
             right: 24,
-            bottom: 24,
-            zIndex: 60,
-            maxWidth: 360,
+            // Keep the real audit link clear of the assistant launcher and
+            // above an expanded assistant panel until the receipt is dismissed.
+            bottom: 96,
+            zIndex: 5001,
+            width: "min(360px, calc(100vw - 48px))",
           }}
         >
           <Banner
@@ -1874,7 +1876,13 @@ export default function ComplaintsPage() {
             title={receipt.message}
             body={
               <span
-                style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+                style={{
+                  display: "inline-flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: 8,
+                  overflowWrap: "anywhere",
+                }}
               >
                 <span style={{ fontFamily: theme.monoFamily, fontSize: 11 }}>
                   {receipt.actionId}
