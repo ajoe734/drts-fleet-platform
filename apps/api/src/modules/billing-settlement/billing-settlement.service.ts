@@ -773,6 +773,11 @@ export class BillingSettlementService implements OnModuleInit {
     this.cloneReconciliationIssue(issue),
   );
 
+  private readonly reconciliationIssueUpdates = new Map<
+    string,
+    Promise<void>
+  >();
+
   private readonly downloadHost = DEFAULT_CONTROLLED_DOWNLOAD_HOST;
 
   private readonly downloadSigningKeyId = DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID;
@@ -2616,16 +2621,16 @@ export class BillingSettlementService implements OnModuleInit {
       updatedAt: now,
     };
 
-    this.reconciliationIssues = [
-      this.cloneReconciliationIssue(issue),
-      ...this.reconciliationIssues,
-    ];
     await this.persistChanges(
       {
         reconciliationIssues: [this.cloneReconciliationIssue(issue)],
       },
       "create_reconciliation_issue",
     );
+    this.reconciliationIssues = [
+      this.cloneReconciliationIssue(issue),
+      ...this.reconciliationIssues,
+    ];
     this.recordAudit(
       {
         actorId: command.openedBy.trim(),
@@ -2656,52 +2661,56 @@ export class BillingSettlementService implements OnModuleInit {
     this.assertNonBlank(command.assigneeId, "assigneeId");
     this.assertNonBlank(command.actorId, "actorId");
 
-    const issue = this.requireReconciliationIssue(issueId);
-    if (issue.status === "resolved") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "RECONCILIATION_ISSUE_RESOLVED",
-        "Resolved reconciliation issues must be reopened before reassignment.",
-        { issueId },
-      );
-    }
+    return this.serializeReconciliationIssueUpdate(issueId, async () => {
+      const issue = this.requireReconciliationIssue(issueId);
+      if (issue.status === "resolved") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "RECONCILIATION_ISSUE_RESOLVED",
+          "Resolved reconciliation issues must be reopened before reassignment.",
+          { issueId },
+        );
+      }
 
-    const now = new Date().toISOString();
-    issue.ownerId = command.assigneeId.trim();
-    issue.status = "assigned";
-    issue.updatedAt = now;
+      const now = new Date().toISOString();
+      const draft = this.cloneReconciliationIssue(issue);
+      draft.ownerId = command.assigneeId.trim();
+      draft.status = "assigned";
+      draft.updatedAt = now;
 
-    const note = command.note?.trim();
-    if (note) {
-      issue.comments.push(
-        this.createIssueComment(command.actorId.trim(), note, [], now),
-      );
-    }
+      const note = command.note?.trim();
+      if (note) {
+        draft.comments.push(
+          this.createIssueComment(command.actorId.trim(), note, [], now),
+        );
+      }
 
-    await this.persistChanges(
-      {
-        reconciliationIssues: [this.cloneReconciliationIssue(issue)],
-      },
-      "assign_reconciliation_issue",
-    );
-    this.recordAudit(
-      {
-        actorId: command.actorId.trim(),
-        actorType: "platform_admin",
-        tenantId: issue.tenantId,
-        moduleName: "billing-settlement",
-        actionName: "assign_reconciliation_issue",
-        resourceType: "reconciliation_issue",
-        resourceId: issue.issueId,
-        newValuesSummary: {
-          ownerId: issue.ownerId,
-          status: issue.status,
+      await this.persistChanges(
+        {
+          reconciliationIssues: [this.cloneReconciliationIssue(draft)],
         },
-      },
-      requestId,
-    );
+        "assign_reconciliation_issue",
+      );
+      Object.assign(issue, draft);
+      this.recordAudit(
+        {
+          actorId: command.actorId.trim(),
+          actorType: "platform_admin",
+          tenantId: issue.tenantId,
+          moduleName: "billing-settlement",
+          actionName: "assign_reconciliation_issue",
+          resourceType: "reconciliation_issue",
+          resourceId: issue.issueId,
+          newValuesSummary: {
+            ownerId: issue.ownerId,
+            status: issue.status,
+          },
+        },
+        requestId,
+      );
 
-    return this.cloneReconciliationIssue(issue);
+      return this.cloneReconciliationIssue(issue);
+    });
   }
 
   async addReconciliationIssueComment(
@@ -2712,46 +2721,50 @@ export class BillingSettlementService implements OnModuleInit {
     this.assertNonBlank(command.actorId, "actorId");
     this.assertNonBlank(command.message, "message");
 
-    const issue = this.requireReconciliationIssue(issueId);
-    const now = new Date().toISOString();
-    issue.comments.push(
-      this.createIssueComment(
-        command.actorId.trim(),
-        command.message.trim(),
+    return this.serializeReconciliationIssueUpdate(issueId, async () => {
+      const issue = this.requireReconciliationIssue(issueId);
+      const now = new Date().toISOString();
+      const draft = this.cloneReconciliationIssue(issue);
+      draft.comments.push(
+        this.createIssueComment(
+          command.actorId.trim(),
+          command.message.trim(),
+          command.artifactIds,
+          now,
+        ),
+      );
+      draft.evidenceArtifactIds = this.mergeArtifactIds(
+        draft.evidenceArtifactIds,
         command.artifactIds,
-        now,
-      ),
-    );
-    issue.evidenceArtifactIds = this.mergeArtifactIds(
-      issue.evidenceArtifactIds,
-      command.artifactIds,
-    );
-    issue.updatedAt = now;
+      );
+      draft.updatedAt = now;
 
-    await this.persistChanges(
-      {
-        reconciliationIssues: [this.cloneReconciliationIssue(issue)],
-      },
-      "add_reconciliation_issue_comment",
-    );
-    this.recordAudit(
-      {
-        actorId: command.actorId.trim(),
-        actorType: "platform_admin",
-        tenantId: issue.tenantId,
-        moduleName: "billing-settlement",
-        actionName: "add_reconciliation_issue_comment",
-        resourceType: "reconciliation_issue",
-        resourceId: issue.issueId,
-        newValuesSummary: {
-          commentCount: issue.comments.length,
-          evidenceArtifactIds: issue.evidenceArtifactIds,
+      await this.persistChanges(
+        {
+          reconciliationIssues: [this.cloneReconciliationIssue(draft)],
         },
-      },
-      requestId,
-    );
+        "add_reconciliation_issue_comment",
+      );
+      Object.assign(issue, draft);
+      this.recordAudit(
+        {
+          actorId: command.actorId.trim(),
+          actorType: "platform_admin",
+          tenantId: issue.tenantId,
+          moduleName: "billing-settlement",
+          actionName: "add_reconciliation_issue_comment",
+          resourceType: "reconciliation_issue",
+          resourceId: issue.issueId,
+          newValuesSummary: {
+            commentCount: issue.comments.length,
+            evidenceArtifactIds: issue.evidenceArtifactIds,
+          },
+        },
+        requestId,
+      );
 
-    return this.cloneReconciliationIssue(issue);
+      return this.cloneReconciliationIssue(issue);
+    });
   }
 
   async resolveReconciliationIssue(
@@ -2762,51 +2775,55 @@ export class BillingSettlementService implements OnModuleInit {
     this.assertNonBlank(command.actorId, "actorId");
     this.assertNonBlank(command.resolutionSummary, "resolutionSummary");
 
-    const issue = this.requireReconciliationIssue(issueId);
-    const now = new Date().toISOString();
-    issue.status = "resolved";
-    issue.resolutionCode = command.resolutionCode;
-    issue.resolutionSummary = command.resolutionSummary.trim();
-    issue.resolvedAt = now;
-    issue.updatedAt = now;
-    issue.comments.push(
-      this.createIssueComment(
-        command.actorId.trim(),
-        command.resolutionSummary.trim(),
+    return this.serializeReconciliationIssueUpdate(issueId, async () => {
+      const issue = this.requireReconciliationIssue(issueId);
+      const now = new Date().toISOString();
+      const draft = this.cloneReconciliationIssue(issue);
+      draft.status = "resolved";
+      draft.resolutionCode = command.resolutionCode;
+      draft.resolutionSummary = command.resolutionSummary.trim();
+      draft.resolvedAt = now;
+      draft.updatedAt = now;
+      draft.comments.push(
+        this.createIssueComment(
+          command.actorId.trim(),
+          command.resolutionSummary.trim(),
+          command.artifactIds,
+          now,
+        ),
+      );
+      draft.evidenceArtifactIds = this.mergeArtifactIds(
+        draft.evidenceArtifactIds,
         command.artifactIds,
-        now,
-      ),
-    );
-    issue.evidenceArtifactIds = this.mergeArtifactIds(
-      issue.evidenceArtifactIds,
-      command.artifactIds,
-    );
+      );
 
-    await this.persistChanges(
-      {
-        reconciliationIssues: [this.cloneReconciliationIssue(issue)],
-      },
-      "resolve_reconciliation_issue",
-    );
-    this.recordAudit(
-      {
-        actorId: command.actorId.trim(),
-        actorType: "platform_admin",
-        tenantId: issue.tenantId,
-        moduleName: "billing-settlement",
-        actionName: "resolve_reconciliation_issue",
-        resourceType: "reconciliation_issue",
-        resourceId: issue.issueId,
-        newValuesSummary: {
-          status: issue.status,
-          resolutionCode: issue.resolutionCode,
-          resolvedAt: issue.resolvedAt,
+      await this.persistChanges(
+        {
+          reconciliationIssues: [this.cloneReconciliationIssue(draft)],
         },
-      },
-      requestId,
-    );
+        "resolve_reconciliation_issue",
+      );
+      Object.assign(issue, draft);
+      this.recordAudit(
+        {
+          actorId: command.actorId.trim(),
+          actorType: "platform_admin",
+          tenantId: issue.tenantId,
+          moduleName: "billing-settlement",
+          actionName: "resolve_reconciliation_issue",
+          resourceType: "reconciliation_issue",
+          resourceId: issue.issueId,
+          newValuesSummary: {
+            status: issue.status,
+            resolutionCode: issue.resolutionCode,
+            resolvedAt: issue.resolvedAt,
+          },
+        },
+        requestId,
+      );
 
-    return this.cloneReconciliationIssue(issue);
+      return this.cloneReconciliationIssue(issue);
+    });
   }
 
   async reopenReconciliationIssue(
@@ -2817,60 +2834,64 @@ export class BillingSettlementService implements OnModuleInit {
     this.assertNonBlank(command.actorId, "actorId");
     this.assertNonBlank(command.reason, "reason");
 
-    const issue = this.requireReconciliationIssue(issueId);
-    if (issue.status !== "resolved") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "RECONCILIATION_ISSUE_NOT_RESOLVED",
-        "Only resolved reconciliation issues can be reopened.",
-        { issueId },
+    return this.serializeReconciliationIssueUpdate(issueId, async () => {
+      const issue = this.requireReconciliationIssue(issueId);
+      if (issue.status !== "resolved") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "RECONCILIATION_ISSUE_NOT_RESOLVED",
+          "Only resolved reconciliation issues can be reopened.",
+          { issueId },
+        );
+      }
+
+      const now = new Date().toISOString();
+      const draft = this.cloneReconciliationIssue(issue);
+      draft.status = "reopened";
+      draft.resolutionCode = null;
+      draft.resolutionSummary = null;
+      draft.resolvedAt = null;
+      draft.reopenCount += 1;
+      draft.updatedAt = now;
+      draft.comments.push(
+        this.createIssueComment(
+          command.actorId.trim(),
+          command.reason.trim(),
+          command.artifactIds,
+          now,
+        ),
       );
-    }
-
-    const now = new Date().toISOString();
-    issue.status = "reopened";
-    issue.resolutionCode = null;
-    issue.resolutionSummary = null;
-    issue.resolvedAt = null;
-    issue.reopenCount += 1;
-    issue.updatedAt = now;
-    issue.comments.push(
-      this.createIssueComment(
-        command.actorId.trim(),
-        command.reason.trim(),
+      draft.evidenceArtifactIds = this.mergeArtifactIds(
+        draft.evidenceArtifactIds,
         command.artifactIds,
-        now,
-      ),
-    );
-    issue.evidenceArtifactIds = this.mergeArtifactIds(
-      issue.evidenceArtifactIds,
-      command.artifactIds,
-    );
+      );
 
-    await this.persistChanges(
-      {
-        reconciliationIssues: [this.cloneReconciliationIssue(issue)],
-      },
-      "reopen_reconciliation_issue",
-    );
-    this.recordAudit(
-      {
-        actorId: command.actorId.trim(),
-        actorType: "platform_admin",
-        tenantId: issue.tenantId,
-        moduleName: "billing-settlement",
-        actionName: "reopen_reconciliation_issue",
-        resourceType: "reconciliation_issue",
-        resourceId: issue.issueId,
-        newValuesSummary: {
-          status: issue.status,
-          reopenCount: issue.reopenCount,
+      await this.persistChanges(
+        {
+          reconciliationIssues: [this.cloneReconciliationIssue(draft)],
         },
-      },
-      requestId,
-    );
+        "reopen_reconciliation_issue",
+      );
+      Object.assign(issue, draft);
+      this.recordAudit(
+        {
+          actorId: command.actorId.trim(),
+          actorType: "platform_admin",
+          tenantId: issue.tenantId,
+          moduleName: "billing-settlement",
+          actionName: "reopen_reconciliation_issue",
+          resourceType: "reconciliation_issue",
+          resourceId: issue.issueId,
+          newValuesSummary: {
+            status: issue.status,
+            reopenCount: issue.reopenCount,
+          },
+        },
+        requestId,
+      );
 
-    return this.cloneReconciliationIssue(issue);
+      return this.cloneReconciliationIssue(issue);
+    });
   }
 
   async approveReimbursementBatch(
@@ -4346,6 +4367,30 @@ export class BillingSettlementService implements OnModuleInit {
       );
     }
     return batch;
+  }
+
+  // Serialize only edits of the same reconciliation issue, so a queued
+  // partial edit starts from the last acknowledged state instead of a
+  // stale pre-write snapshot. A failed edit releases the queue immediately.
+  private async serializeReconciliationIssueUpdate<T>(
+    issueId: string,
+    update: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.reconciliationIssueUpdates.get(issueId);
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.reconciliationIssueUpdates.set(issueId, current);
+    try {
+      if (previous) await previous;
+      return await update();
+    } finally {
+      if (this.reconciliationIssueUpdates.get(issueId) === current) {
+        this.reconciliationIssueUpdates.delete(issueId);
+      }
+      release();
+    }
   }
 
   private requireReconciliationIssue(issueId: string) {
