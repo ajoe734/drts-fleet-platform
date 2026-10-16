@@ -5261,6 +5261,8 @@ export type FleetRevenueShareFormula =
 
 export interface FleetPartnerRecord {
   fleetPartnerId: string;
+  /** Explicit operating-authority operator IDs; never inferred from affiliation. */
+  multiTaxiOperatorIds?: string[];
   legalName: string;
   displayName: string;
   businessRegistrationNo: string;
@@ -5271,6 +5273,7 @@ export interface FleetPartnerRecord {
 }
 
 export interface CreateFleetPartnerCommand {
+  multiTaxiOperatorIds?: string[];
   legalName: string;
   displayName: string;
   businessRegistrationNo: string;
@@ -5281,6 +5284,7 @@ export interface CreateFleetPartnerCommand {
 }
 
 export interface UpdateFleetPartnerCommand {
+  multiTaxiOperatorIds?: string[];
   legalName?: string;
   displayName?: string;
   businessRegistrationNo?: string;

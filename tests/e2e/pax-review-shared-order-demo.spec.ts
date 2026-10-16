@@ -385,6 +385,53 @@ async function finish(
 }
 
 async function download(pax: Page, orderId: string, info: TestInfo) {
+  await expect
+    .poll(
+      async () =>
+        (await authority(pax, orderId)).receipt?.record?.e04Snapshot
+          ?.fleetOperatorName,
+    )
+    .toBe("虛構演練派遣業者（合成・非正式）");
+  const ride = await authority(pax, orderId);
+  const snapshot = ride.receipt.record.e04Snapshot;
+  expect(ride.receipt.orderId).toBe(orderId);
+  expect(snapshot.driverSurname).toBe("演練");
+  expect(snapshot.driverRegistrationMasked).toMatch(/^[•*●Xx]{4,}900[12]$/);
+  expect(snapshot.paymentMethodDisplay).toMatch(/••••[0-9]{4}$/);
+  expect(snapshot.fareBreakdown).toEqual(
+    ride.receipt.record.actualFareBreakdown,
+  );
+  for (const field of [
+    "startMinor",
+    "distanceMinor",
+    "delayMinor",
+    "nightMinor",
+  ])
+    expect(Number.isSafeInteger(snapshot.fareBreakdown[field])).toBe(true);
+  // Read the normal passenger E04 API and actual receipt UI, as well as the
+  // existing explicitly nonformal rehearsal record below.
+  const downloads = await pax.request.get(
+    `${PAX}/api/passenger-app/rides/${orderId}/receipt/downloads`,
+  );
+  expect(downloads.status()).toBe(200);
+  const metadata = camel(await downloads.json()).data;
+  expect(metadata.orderId).toBe(orderId);
+  const e04 = await pax.request.get(`${PAX}${metadata.htmlUrl}`);
+  expect(e04.status()).toBe(200);
+  const e04Html = await e04.text();
+  expect(e04Html).toContain("合成・非正式");
+  expect(e04Html).toContain(snapshot.driverRegistrationMasked);
+  await info.attach(`same-order-${orderId}-e04`, {
+    body: e04Html,
+    contentType: "text/html",
+  });
+  await pax.goto(`${PAX}/rides/${orderId}/receipt`);
+  await expect(
+    pax.getByText(snapshot.fleetOperatorName, { exact: true }),
+  ).toBeVisible();
+  await expect(
+    pax.getByText("PASSENGER_RECEIPT_LEGAL_FIELDS_MISSING", { exact: true }),
+  ).toHaveCount(0);
   await pax.goto(`${PAX}/review/records/${orderId}`);
   const waiting = pax.waitForEvent("download");
   await pax.getByRole("button", { name: "下載演練紀錄 HTML" }).click();

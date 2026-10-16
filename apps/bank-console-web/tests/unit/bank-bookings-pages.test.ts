@@ -4,7 +4,46 @@ import * as tokens from "@drts/ui-tokens";
 import * as contracts from "@drts/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import ts from "typescript";
 import { createUiModuleLoader } from "../../../../tests/unit/system-remediation/sr-wire-001/ui-module-loader";
+
+it("production TypeScript graph keeps bank sources without repository test helpers", () => {
+  const appRoot = resolve(__dirname, "../..");
+  const repositoryTests = `${resolve(appRoot, "../../tests")}/`;
+  // Docker copies the app and packages, but does not copy repository-root tests.
+  // Only that filesystem boundary is simulated; TypeScript builds the real graph.
+  const system = {
+    ...ts.sys,
+    fileExists: (file: string) =>
+      !file.startsWith(repositoryTests) && ts.sys.fileExists(file),
+    readFile: (file: string) =>
+      file.startsWith(repositoryTests) ? undefined : ts.sys.readFile(file),
+  };
+  const config = ts.readConfigFile(
+    resolve(appRoot, "tsconfig.json"),
+    system.readFile,
+  );
+  expect(config.error).toBeUndefined();
+  const parsed = ts.parseJsonConfigFileContent(config.config, system, appRoot);
+  expect(parsed.errors).toEqual([]);
+  const host = ts.createCompilerHost(parsed.options);
+  host.fileExists = system.fileExists;
+  host.readFile = system.readFile;
+  const program = ts.createProgram(parsed.fileNames, parsed.options, host);
+  const files = program.getSourceFiles().map((file) => file.fileName);
+  for (const source of [
+    "app/bookings/page.tsx",
+    "app/bookings/[bookingId]/page.tsx",
+    "lib/bank-bookings-data.ts",
+    "proxy.ts",
+  ]) {
+    expect(files).toContain(resolve(appRoot, source));
+  }
+  expect(files.filter((file) => file.startsWith(`${appRoot}/tests/`))).toEqual(
+    [],
+  );
+  expect(files.filter((file) => file.startsWith(repositoryTests))).toEqual([]);
+});
 
 const identity = {
   accessToken: "private-session-token",

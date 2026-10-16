@@ -1,59 +1,31 @@
 import { describe, expect, it } from "vitest";
 
 import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
-import type { DatabaseService } from "../../../apps/api/src/common/db";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { ServiceProductController } from "../../../apps/api/src/modules/service-product/service-product.controller";
 import { ServiceProductRepository } from "../../../apps/api/src/modules/service-product/service-product.repository";
 import { ServiceProductService } from "../../../apps/api/src/modules/service-product/service-product.service";
 
-interface DeferredQuery {
-  sql: string;
-  params: unknown[];
-  resolve: (value?: { rows: unknown[]; rowCount: number }) => void;
-  reject: (error: unknown) => void;
-}
+import {
+  ProductSqlBoundary,
+  flushProductMicrotasks,
+  productInstance,
+} from "../service-product-canonical-concurrency-readback-20261016/sql-boundary";
 
 function createDeferredHarness() {
-  const pendingQueries: DeferredQuery[] = [];
-  let nextMode: "defer" | "resolve" | { reject: Error } = "defer";
-
-  const databaseService: Pick<DatabaseService, "isEnabled" | "query"> = {
-    isEnabled: () => true,
-    query: (async (sql: string, params: unknown[] = []) => {
-      if (nextMode === "resolve") {
-        return { rows: [], rowCount: 1 };
-      }
-      if (typeof nextMode === "object" && "reject" in nextMode) {
-        throw nextMode.reject;
-      }
-      return await new Promise<{ rows: unknown[]; rowCount: number }>(
-        (resolve, reject) => {
-          pendingQueries.push({
-            sql,
-            params,
-            resolve: (value = { rows: [], rowCount: 1 }) => resolve(value),
-            reject,
-          });
-        },
-      );
-    }) as DatabaseService["query"],
-  };
-
-  const auditNotificationService = new AuditNotificationService();
-  const repository = new ServiceProductRepository(
-    databaseService as DatabaseService,
-  );
-  const service = new ServiceProductService(
-    auditNotificationService,
+  const db = new ProductSqlBoundary();
+  db.mode = "defer";
+  const {
+    audit: auditNotificationService,
     repository,
-  );
-  const controller = new ServiceProductController(service);
-
+    service,
+    controller,
+  } = productInstance(db);
   return {
-    pendingQueries,
+    db,
+    pendingQueries: db.pendingQueries,
     setMode(mode: "defer" | "resolve" | { reject: Error }) {
-      nextMode = mode;
+      db.mode = mode;
     },
     listProductAuditLogs() {
       return auditNotificationService
@@ -66,12 +38,7 @@ function createDeferredHarness() {
     controller,
   };
 }
-
-async function flushMicrotasks(turns = 4) {
-  for (let i = 0; i < turns; i += 1) {
-    await Promise.resolve();
-  }
-}
+const flushMicrotasks = flushProductMicrotasks;
 
 describe("SERVICE-PRODUCT-PERSISTENCE-ACK-20261015: canonical write ACK and error propagation", () => {
   it("withholds createServiceProduct registry state, audit log, and controller receipt until repository write ACK", async () => {
@@ -107,7 +74,8 @@ describe("SERVICE-PRODUCT-PERSISTENCE-ACK-20261015: canonical write ACK and erro
     expect(settled).toBe(false);
     expect(service.listServiceProducts()).toEqual([]);
     expect(
-      controller.listServiceProducts("req-list-while-pending").data.items,
+      (await controller.listServiceProducts("req-list-while-pending")).data
+        .items,
     ).toEqual([]);
     expect(listProductAuditLogs()).toEqual([]);
 
@@ -121,8 +89,8 @@ describe("SERVICE-PRODUCT-PERSISTENCE-ACK-20261015: canonical write ACK and erro
     expect(receipt.data.resourceId).toBe("SVP-ACK-CREATE-01");
     expect(receipt.meta.requestId).toBe("req-ack-create-01");
 
-    const listed =
-      controller.listServiceProducts("req-list-after-ack").data.items;
+    const listed = (await controller.listServiceProducts("req-list-after-ack"))
+      .data.items;
     expect(listed).toHaveLength(1);
     expect(listed[0]?.serviceProductId).toBe("SVP-ACK-CREATE-01");
     expect(listed[0]?.description).toBe("Airport charter");
@@ -179,10 +147,12 @@ describe("SERVICE-PRODUCT-PERSISTENCE-ACK-20261015: canonical write ACK and erro
 
     expect(pendingQueries).toHaveLength(1);
     expect(updateSettled).toBe(false);
-    expect(service.getServiceProduct("SVP-ACK-UPDATE-01").displayName).toBe(
-      "Initial Enterprise Dispatch",
+    expect(
+      (await service.getServiceProduct("SVP-ACK-UPDATE-01")).displayName,
+    ).toBe("Initial Enterprise Dispatch");
+    expect((await service.getServiceProduct("SVP-ACK-UPDATE-01")).active).toBe(
+      true,
     );
-    expect(service.getServiceProduct("SVP-ACK-UPDATE-01").active).toBe(true);
     expect(
       listProductAuditLogs().filter(
         (entry) => entry.actionName === "update_service_product",
@@ -201,7 +171,7 @@ describe("SERVICE-PRODUCT-PERSISTENCE-ACK-20261015: canonical write ACK and erro
         (entry) => entry.actionName === "update_service_product",
       ),
     ).toBe(true);
-    const updated = service.getServiceProduct("SVP-ACK-UPDATE-01");
+    const updated = await service.getServiceProduct("SVP-ACK-UPDATE-01");
     expect(updated.displayName).toBe("Updated Enterprise Dispatch");
     expect(updated.active).toBe(false);
     expect(updated.timing).toBe("realtime");
@@ -240,7 +210,8 @@ describe("SERVICE-PRODUCT-PERSISTENCE-ACK-20261015: canonical write ACK and erro
     expect(policySettled).toBe(false);
     expect(service.listRuntimeProfilePolicies()).toEqual([]);
     expect(
-      controller.listRuntimePolicies("req-policy-list-pending").data.items,
+      (await controller.listRuntimePolicies("req-policy-list-pending")).data
+        .items,
     ).toEqual([]);
     expect(() =>
       service.assertRuntimeProfileServiceProductActive(
@@ -257,7 +228,7 @@ describe("SERVICE-PRODUCT-PERSISTENCE-ACK-20261015: canonical write ACK and erro
     expect(envelope.data.serviceProductCode).toBe("taxi_reservation");
     expect(envelope.data.active).toBe(true);
     expect(
-      controller.listRuntimePolicies("req-policy-list-ack").data.items,
+      (await controller.listRuntimePolicies("req-policy-list-ack")).data.items,
     ).toEqual([envelope.data]);
     expect(
       service.assertRuntimeProfileServiceProductActive(
@@ -323,10 +294,10 @@ describe("SERVICE-PRODUCT-PERSISTENCE-ACK-20261015: canonical write ACK and erro
       ),
     ).rejects.toThrow("pg_update_write_failed");
 
-    expect(service.getServiceProduct("SVP-RETRY-01").displayName).toBe(
+    expect((await service.getServiceProduct("SVP-RETRY-01")).displayName).toBe(
       "Airport Transfer VIP",
     );
-    expect(service.getServiceProduct("SVP-RETRY-01").active).toBe(true);
+    expect((await service.getServiceProduct("SVP-RETRY-01")).active).toBe(true);
     expect(listProductAuditLogs()).toHaveLength(1);
 
     setMode("resolve");
@@ -339,10 +310,12 @@ describe("SERVICE-PRODUCT-PERSISTENCE-ACK-20261015: canonical write ACK and erro
       "req-update-retry-ok",
     );
     expect(retryUpdateReceipt.data.message).toBe("Service product updated.");
-    expect(service.getServiceProduct("SVP-RETRY-01").displayName).toBe(
+    expect((await service.getServiceProduct("SVP-RETRY-01")).displayName).toBe(
       "Airport Transfer Executive",
     );
-    expect(service.getServiceProduct("SVP-RETRY-01").active).toBe(false);
+    expect((await service.getServiceProduct("SVP-RETRY-01")).active).toBe(
+      false,
+    );
     expect(listProductAuditLogs()).toHaveLength(2);
 
     // 3. Failed runtime-policy upsert followed by ordinary retry
@@ -384,7 +357,7 @@ describe("SERVICE-PRODUCT-PERSISTENCE-ACK-20261015: canonical write ACK and erro
   });
 
   it("handles concurrent pending/rejected mutations and preserves duplicate/conflict rules without state corruption", async () => {
-    const { pendingQueries, listProductAuditLogs, service, controller } =
+    const { db, pendingQueries, listProductAuditLogs, service, controller } =
       createDeferredHarness();
 
     // Two concurrent creates of distinct products: first rejects, second resolves
@@ -414,13 +387,16 @@ describe("SERVICE-PRODUCT-PERSISTENCE-ACK-20261015: canonical write ACK and erro
     );
 
     await flushMicrotasks();
-    expect(pendingQueries).toHaveLength(2);
+    expect(pendingQueries).toHaveLength(1);
     expect(service.listServiceProducts()).toEqual([]);
 
+    const rejectedA = expect(p1).rejects.toThrow("concurrent_write_a_failed");
     pendingQueries[0]!.reject(new Error("concurrent_write_a_failed"));
+    await flushMicrotasks();
+    expect(pendingQueries).toHaveLength(2);
     pendingQueries[1]!.resolve();
 
-    await expect(p1).rejects.toThrow("concurrent_write_a_failed");
+    await rejectedA;
     const receiptB = await p2;
     expect(receiptB.data.resourceId).toBe("SVP-CONC-B");
 
@@ -474,9 +450,8 @@ describe("SERVICE-PRODUCT-PERSISTENCE-ACK-20261015: canonical write ACK and erro
     );
 
     await flushMicrotasks();
-    expect(pendingQueries).toHaveLength(2);
+    expect(pendingQueries).toHaveLength(1);
     pendingQueries[0]!.resolve();
-    pendingQueries[1]!.resolve();
 
     const settledDups = await Promise.allSettled([dup1, dup2]);
     const fulfilledDups = settledDups.filter((r) => r.status === "fulfilled");
@@ -488,6 +463,18 @@ describe("SERVICE-PRODUCT-PERSISTENCE-ACK-20261015: canonical write ACK and erro
         .listServiceProducts()
         .filter((r) => r.serviceProductType === "taxi_realtime"),
     ).toHaveLength(1);
+    expect(
+      [...db.products.values()].filter(
+        (r) => r.serviceProductType === "taxi_realtime",
+      ),
+    ).toHaveLength(1);
+    expect(db.products.size).toBe(2);
+    const restarted = productInstance(db);
+    await restarted.service.onModuleInit();
+    expect(
+      (await restarted.controller.listServiceProducts()).data.items,
+    ).toHaveLength(2);
+    expect(pendingQueries).toHaveLength(1);
   });
 
   it("preserves cold-start empty registry, no-database in-memory mode, and validation/denial boundaries", async () => {

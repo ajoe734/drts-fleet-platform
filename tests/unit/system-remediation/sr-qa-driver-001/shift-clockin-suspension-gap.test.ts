@@ -81,9 +81,9 @@ describe("SR-QA-DRIVER-001 C051: shift clock-in vs. driver suspension (fixed beh
 
     // Read-back through an independent surface: no active shift created.
     expect(
-      shiftService
-        .listShifts("drv-demo-003")
-        .some((s) => s.status === "active"),
+      (await shiftService.listShifts("drv-demo-003")).some(
+        (s) => s.status === "active",
+      ),
     ).toBe(false);
   });
 
@@ -112,9 +112,9 @@ describe("SR-QA-DRIVER-001 C051: shift clock-in vs. driver suspension (fixed beh
     );
 
     expect(
-      shiftService
-        .listShifts("drv-demo-004")
-        .some((s) => s.status === "active"),
+      (await shiftService.listShifts("drv-demo-004")).some(
+        (s) => s.status === "active",
+      ),
     ).toBe(false);
   });
 });

@@ -19,6 +19,9 @@ type PersistShiftAttendanceChanges = {
   attendance?: readonly AttendanceRecord[];
 };
 
+const UNIQUE_VIOLATION_CODE = "23505";
+const MAX_ID_ALLOCATION_ATTEMPTS = 5;
+
 @Injectable()
 export class ShiftAttendanceRepository {
   private readonly logger = new Logger(ShiftAttendanceRepository.name);
@@ -27,6 +30,87 @@ export class ShiftAttendanceRepository {
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  /**
+   * Canonical cross-reader shift listing. Reads the shared table directly so
+   * independent readers (and the same reader after a restart) see writes
+   * committed by any instance, rather than one instance's local cache.
+   */
+  async listShifts(driverId?: string): Promise<ShiftRecord[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+
+    const result = driverId
+      ? await this.databaseService!.query<JsonRecordRow>(
+          `
+            SELECT record
+            FROM ops.phase1_driver_shifts
+            WHERE driver_id = $1
+            ORDER BY clock_in_at DESC
+          `,
+          [driverId],
+        )
+      : await this.databaseService!.query<JsonRecordRow>(
+          `
+            SELECT record
+            FROM ops.phase1_driver_shifts
+            ORDER BY clock_in_at DESC
+          `,
+        );
+
+    return result.rows.map((row) =>
+      this.parseRecord<ShiftRecord>(row.record, "ops.phase1_driver_shifts"),
+    );
+  }
+
+  /** Canonical cross-reader attendance listing; see {@link listShifts}. */
+  async listAttendance(driverId?: string): Promise<AttendanceRecord[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+
+    const result = driverId
+      ? await this.databaseService!.query<JsonRecordRow>(
+          `
+            SELECT record
+            FROM ops.phase1_driver_attendance
+            WHERE driver_id = $1
+            ORDER BY date DESC, clock_in_at DESC
+          `,
+          [driverId],
+        )
+      : await this.databaseService!.query<JsonRecordRow>(
+          `
+            SELECT record
+            FROM ops.phase1_driver_attendance
+            ORDER BY date DESC, clock_in_at DESC
+          `,
+        );
+
+    return result.rows.map((row) =>
+      this.parseRecord<AttendanceRecord>(
+        row.record,
+        "ops.phase1_driver_attendance",
+      ),
+    );
+  }
+
+  /** Canonical single-shift read by id; returns null when genuinely absent. */
+  async getShiftById(shiftId: string): Promise<ShiftRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_driver_shifts WHERE shift_id = $1`,
+      [shiftId],
+    );
+    const row = result.rows[0];
+    return row
+      ? this.parseRecord<ShiftRecord>(row.record, "ops.phase1_driver_shifts")
+      : null;
   }
 
   async loadState(): Promise<ShiftAttendanceState> {
@@ -177,29 +261,55 @@ export class ShiftAttendanceRepository {
         );
       }
 
-      const shift = await verifyEligibilityAndBuildShift();
+      let shift = await verifyEligibilityAndBuildShift();
 
-      await client.query(
-        `
-          INSERT INTO ops.phase1_driver_shifts (
-            shift_id, shift_no, driver_id, vehicle_id, status,
-            clock_in_at, clock_out_at,
-            created_at, updated_at, record
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
-        `,
-        [
-          shift.shiftId,
-          shift.shiftId,
-          shift.driverId,
-          shift.vehicleId ?? null,
-          shift.status,
-          shift.clockedInAt,
-          shift.clockedOutAt ?? null,
-          shift.clockedInAt,
-          shift.clockedOutAt ?? shift.clockedInAt,
-          JSON.stringify(shift),
-        ],
-      );
+      for (let attempt = 0; ; attempt += 1) {
+        await client.query("SAVEPOINT shift_insert_attempt");
+        try {
+          await client.query(
+            `
+              INSERT INTO ops.phase1_driver_shifts (
+                shift_id, shift_no, driver_id, vehicle_id, status,
+                clock_in_at, clock_out_at,
+                created_at, updated_at, record
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+            `,
+            [
+              shift.shiftId,
+              shift.shiftId,
+              shift.driverId,
+              shift.vehicleId ?? null,
+              shift.status,
+              shift.clockedInAt,
+              shift.clockedOutAt ?? null,
+              shift.clockedInAt,
+              shift.clockedOutAt ?? shift.clockedInAt,
+              JSON.stringify(shift),
+            ],
+          );
+          break;
+        } catch (error) {
+          if (
+            this.isUniqueViolation(error) &&
+            attempt < MAX_ID_ALLOCATION_ATTEMPTS
+          ) {
+            // Two distinct, otherwise-valid clock-in commands derived the
+            // same shift_id/shift_no (e.g. two processes started with the
+            // same persisted-state snapshot). The failed INSERT has left the
+            // surrounding transaction aborted (Postgres rejects every later
+            // statement with 25P02 until a ROLLBACK), so first roll back to
+            // the savepoint taken before this attempt to restore a usable
+            // transaction, then re-derive a fresh id from the canonical
+            // table — by now the colliding row is either committed (visible
+            // to this query) or gone — and retry instead of failing the
+            // command.
+            await client.query("ROLLBACK TO SAVEPOINT shift_insert_attempt");
+            shift = { ...shift, shiftId: await this.allocateNextShiftId(client) };
+            continue;
+          }
+          throw error;
+        }
+      }
 
       await client.query("COMMIT");
       return shift;
@@ -264,8 +374,9 @@ export class ShiftAttendanceRepository {
         "ops.phase1_driver_shifts",
       );
 
-      const { shift: updated, attendance } =
+      const { shift: updated, attendance: builtAttendance } =
         buildUpdatedShiftAndAttendance(activeShift);
+      let attendance = builtAttendance;
 
       await client.query(
         `
@@ -285,27 +396,134 @@ export class ShiftAttendanceRepository {
         ],
       );
 
+      for (let attempt = 0; ; attempt += 1) {
+        await client.query("SAVEPOINT attendance_insert_attempt");
+        try {
+          await client.query(
+            `
+              INSERT INTO ops.phase1_driver_attendance (
+                attendance_id, driver_id, shift_id, date, status,
+                clock_in_at, clock_out_at, record
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+            `,
+            [
+              attendance.attendanceId,
+              attendance.driverId,
+              attendance.shiftId,
+              attendance.date,
+              attendance.status,
+              attendance.clockedInAt,
+              attendance.clockedOutAt ?? null,
+              JSON.stringify(attendance),
+            ],
+          );
+          break;
+        } catch (error) {
+          if (
+            this.isUniqueViolation(error) &&
+            attempt < MAX_ID_ALLOCATION_ATTEMPTS
+          ) {
+            // Same collision-safety as the shift id above, applied to the
+            // attendance id derived by the same clock-out call. Roll back to
+            // the savepoint first so the aborted INSERT doesn't leave the
+            // transaction rejecting the re-allocation query with 25P02.
+            await client.query(
+              "ROLLBACK TO SAVEPOINT attendance_insert_attempt",
+            );
+            attendance = {
+              ...attendance,
+              attendanceId: await this.allocateNextAttendanceId(client),
+            };
+            continue;
+          }
+          throw error;
+        }
+      }
+
+      await client.query("COMMIT");
+      return { shift: updated, attendance };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // ignore rollback failure
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Canonical durable abandon: locks the shift row, re-validates its current
+   * status against the committed table (not a caller's cached copy), and
+   * only reports success once the row+status update is committed. A shift
+   * that raced to "completed"/"abandoned" via clock-out in the meantime is
+   * read as terminal here and rejected — the caller never gets a success
+   * ACK for a write that didn't durably happen.
+   */
+  async executeAbandonTransaction(
+    shiftId: string,
+    buildAbandonedShift: (activeShift: ShiftRecord) => ShiftRecord,
+  ): Promise<ShiftRecord> {
+    if (!this.isEnabled()) {
+      throw new Error("DatabaseService not enabled");
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+
+      const shiftRes = await client.query<JsonRecordRow>(
+        `SELECT record FROM ops.phase1_driver_shifts WHERE shift_id = $1 FOR UPDATE`,
+        [shiftId],
+      );
+      const firstRow = shiftRes.rows[0];
+      if (!firstRow) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "NOT_FOUND",
+          "Shift not found.",
+          { shiftId },
+        );
+      }
+
+      const currentShift = this.parseRecord<ShiftRecord>(
+        firstRow.record,
+        "ops.phase1_driver_shifts",
+      );
+
+      if (currentShift.status !== "active") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "SHIFT_NOT_ACTIVE",
+          "Only active shifts can be abandoned.",
+          { shiftId, currentStatus: currentShift.status },
+        );
+      }
+
+      const updated = buildAbandonedShift(currentShift);
+
       await client.query(
         `
-          INSERT INTO ops.phase1_driver_attendance (
-            attendance_id, driver_id, shift_id, date, status,
-            clock_in_at, clock_out_at, record
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+          UPDATE ops.phase1_driver_shifts
+          SET status = $2,
+              clock_out_at = $3,
+              updated_at = $4,
+              record = $5::jsonb
+          WHERE shift_id = $1
         `,
         [
-          attendance.attendanceId,
-          attendance.driverId,
-          attendance.shiftId,
-          attendance.date,
-          attendance.status,
-          attendance.clockedInAt,
-          attendance.clockedOutAt ?? null,
-          JSON.stringify(attendance),
+          updated.shiftId,
+          updated.status,
+          updated.clockedOutAt,
+          updated.updatedAt ?? updated.clockedOutAt,
+          JSON.stringify(updated),
         ],
       );
 
       await client.query("COMMIT");
-      return { shift: updated, attendance };
+      return updated;
     } catch (error) {
       try {
         await client.query("ROLLBACK");
@@ -323,6 +541,50 @@ export class ShiftAttendanceRepository {
     this.logger.warn(
       `Shift/Attendance persistence skipped during ${context}: ${detail}`,
     );
+  }
+
+  private isUniqueViolation(error: unknown): boolean {
+    return (
+      !!error &&
+      typeof error === "object" &&
+      (error as { code?: unknown }).code === UNIQUE_VIOLATION_CODE
+    );
+  }
+
+  private async allocateNextShiftId(
+    client: Awaited<ReturnType<DatabaseService["connect"]>>,
+  ): Promise<string> {
+    const result = await client.query<{ shift_id: string }>(
+      `
+        SELECT shift_id FROM ops.phase1_driver_shifts
+        WHERE shift_id ~ '^SFT-[0-9]{6}$'
+        ORDER BY shift_id DESC
+        LIMIT 1
+      `,
+    );
+    return this.formatSequentialId("SFT", result.rows[0]?.shift_id);
+  }
+
+  private async allocateNextAttendanceId(
+    client: Awaited<ReturnType<DatabaseService["connect"]>>,
+  ): Promise<string> {
+    const result = await client.query<{ attendance_id: string }>(
+      `
+        SELECT attendance_id FROM ops.phase1_driver_attendance
+        WHERE attendance_id ~ '^ATT-[0-9]{6}$'
+        ORDER BY attendance_id DESC
+        LIMIT 1
+      `,
+    );
+    return this.formatSequentialId("ATT", result.rows[0]?.attendance_id);
+  }
+
+  private formatSequentialId(prefix: string, lastId: string | undefined) {
+    const lastNum = lastId
+      ? Number.parseInt(lastId.replace(`${prefix}-`, ""), 10)
+      : 0;
+    const next = Number.isInteger(lastNum) ? lastNum + 1 : 1;
+    return `${prefix}-${String(next).padStart(6, "0")}`;
   }
 
   private parseRecord<T>(record: unknown, source: string): T {

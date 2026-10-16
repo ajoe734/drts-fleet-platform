@@ -1,3 +1,5 @@
+import { FleetPartnerService } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.service";
+import { FleetPartnerRepository } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.repository";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { RegulatoryRegistryService } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
@@ -96,6 +98,17 @@ function productPeers() {
         if (writeError) throw writeError;
         records.set(values[0] as string, JSON.parse(values[11] as string));
       }
+      if (
+        sql.trimStart().startsWith("UPDATE ops.phase1_service_products SET")
+      ) {
+        writeEntered?.();
+        await writeGate;
+        if (writeError) throw writeError;
+        const id = values[0] as string;
+        if (!records.has(id)) return { rows: [], rowCount: 0 };
+        records.set(id, JSON.parse(values[11] as string));
+        return { rows: [], rowCount: 1 };
+      }
       if (sql.trimStart().startsWith("SELECT record")) {
         if (readError) throw readError;
         if (sql.includes("ops.phase1_service_products")) {
@@ -181,6 +194,16 @@ function rehearsal(p: ReturnType<typeof productPeers>) {
       audit,
       new VehicleEligibilityRepository(p.database as never),
       p.a,
+    ),
+    new FleetPartnerService(
+      {} as never,
+      {} as never,
+      registry,
+      new FleetPartnerRepository(p.database as never),
+    ),
+    new DriverProfileService(
+      audit,
+      new DriverProfileRepository(p.database as never),
     ),
   );
 }
