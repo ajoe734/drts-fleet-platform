@@ -162,6 +162,7 @@ function AuditPageContent() {
   const client = usePlatformAdminClient();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const linkedAuditId = searchParams.get("auditId")?.trim() ?? "";
   const [records, setRecords] = useState<AuditLogRecord[]>([]);
   const [policies, setPolicies] = useState<EvidenceRetentionPolicyRecord[]>([]);
   const [legalHolds, setLegalHolds] = useState<EvidenceLegalHoldRecord[]>([]);
@@ -214,7 +215,9 @@ function AuditPageContent() {
     try {
       const [result, policyList, holdList, deletionExceptionList] =
         await Promise.all([
-          client.listAuditLogs(),
+          client.listAuditLogs(
+            linkedAuditId ? { auditId: linkedAuditId } : undefined,
+          ),
           client.listEvidencePolicies(),
           client.listEvidenceLegalHolds(),
           client.listEvidenceDeletionExceptions(),
@@ -243,7 +246,7 @@ function AuditPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [client]);
+  }, [client, linkedAuditId]);
 
   useEffect(() => {
     void loadRecords();
