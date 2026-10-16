@@ -127,3 +127,46 @@ The existing PAX task continues its own ten-service and fresh-three-UUID
 acceptance. This source task adds no whole-diagnostic or whole-demo DONE gate,
 does not duplicate root publication, and does not change provider/worker
 controls or other held candidates.
+
+## ENV-001: existing CI wiring assertion follow-up
+
+Previous candidate: `e6d085775406618857caa074236dd3aae1df2c05`, generation
+`d0e0ec18183340e888951ca658335358`, PR #2726. Its actual CI runs
+`38842679024` / job `116786243834` and `38842679046` / job `116786270751`
+failed at `tools/ci/test_dev_artifact_providers.py:284`,
+`DevArtifactProvidersTest.test_workflow_wires_outputs_into_existing_api_arguments_only`.
+That assertion still required the broken direct JSON interpolation in Bash.
+The earlier cancelled runs `38842672126` / `38842672187` are historical;
+neither cancellations nor these failures provide CI pass evidence.
+
+The extra exact test-file scope was granted by Supervisor. Only the obsolete
+assertion changes: require the actual API step `env` mapping immediately before
+`run`, and the quoted `--set-env-vars "$API_ENV_VARS"` argument. All other
+provider/output/argument assertions and all real Bash/original-reader
+regressions remain intact. No workflow, reader, provider, validator, timeout or
+runtime setting changes in this follow-up.
+
+| Finding / required acceptance                                     | Source and repair                                                              | Old → repaired result                                                                                                                                                                                  | Command / version / evidence                                                                                                                                                                                                                                                                                                                                        | Remaining requirement                                                                           |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| ENV-001, obsolete API wiring assertion                            | `tools/ci/test_dev_artifact_providers.py`, existing wiring test                | At `e6d085775406618857caa074236dd3aae1df2c05`, the single test fails (exit 1); at repair anchor `fb89dece6e13b8493cf03b4180ed2c98af5ce847`, all 39 tests in the existing file pass (exit 0), no skips. | `python3 -m unittest tools.ci.test_dev_artifact_providers.DevArtifactProvidersTest.test_workflow_wires_outputs_into_existing_api_arguments_only` before repair; `python3 -m unittest tools/ci/test_dev_artifact_providers.py` after repair. Python 3.12.3; `env-001/old-e6d-wiring.log` and `env-001/fixed-python.log` under the existing evidence directory above. | Fresh exact-candidate review, full own hosted CI and protected merge remain required.           |
+| `dev-pax-env-transport_real-shell-and-original-reader-regression` | Unchanged committed real workflow Bash / wrapper / original reader regressions | At repair anchor, the same broad command above passes 6 files / 89 tests (exit 0), no skips, including old-source negative control and corrected transport positive cases.                             | `env-001/fixed-vitest.log`, Node v22.23.2, pnpm 10.33.0, Vitest 4.1.4.                                                                                                                                                                                                                                                                                              | This local pass does not close the full acceptance key; fresh review / CI / merge are pending.  |
+| `dev-pax-env-transport_actual-immutable-API-startup`              | Existing root sole immutable publisher                                         | NOT RUN; no startup or deployment credit.                                                                                                                                                              | No worker dispatch/rerun/deployment or VM product service.                                                                                                                                                                                                                                                                                                          | New immutable API revision startup and actual full-SHA health/runtime readback remain required. |
+
+Independent Claude2 review source:
+`/home/lupin/workspace/drts-fleet-platform/.orchestrator/logs/20261016T025517525189Z-claude2-claude2-368d99.log`.
+The reviewer independently reran the 89 tests and identified ENV-001 in actual
+CI logs, then attempted the normal `reopen`. Its final report explicitly says
+that approval broker `CONNECT_TIMEOUT` / deferred calls prevented that
+transaction. The canonical activity log, checked on this owner dispatch,
+contains no successful reviewer `reopen`; Supervisor's scope assignment and
+current `in_progress` owner dispatch are present. The owner does not impersonate
+Claude2 or claim that attempted transaction succeeded. Repair anchors preserve
+the narrow change and completed checks; formal new-candidate handoff awaits
+the original reviewer's normal lifecycle decision, as required by this brief.
+
+Root CI diagnosis:
+`api-env-transport-hosted-results/actual-e6d-first-CI-failure-obsolete-API-env-wiring-test-scope-diagnosis.json`
+under the prior evidence root, SHA-256
+`8fded31926d047dc2d3aadbfe85c4ce48c427609bea48f4281ec83bcb47990ed`.
+Repair test-file SHA-256:
+`30f5cc3c665a79858b7ba3c3db3770805b12c578126ab102b89279dd75898bb4`.
