@@ -191,3 +191,56 @@ under the prior evidence root, SHA-256
 `8fded31926d047dc2d3aadbfe85c4ce48c427609bea48f4281ec83bcb47990ed`.
 Repair test-file SHA-256:
 `30f5cc3c665a79858b7ba3c3db3770805b12c578126ab102b89279dd75898bb4`.
+
+## Accepted Phone source integration and fresh candidate (07:32 UTC)
+
+Previous candidate `bcda359776c7fcc64d478624174c93d6649932d7`, generation
+`7f5f5cb76edd4579a8e80c56a38fcc8c`, remains historical failure evidence.
+The pre-merge live PR #2726 readback confirmed its unchanged head and terminal
+checks: CI `38844365748` succeeded; integration `38844365857` failed, including
+`cross-surface-e2e` job `116792538725`, `e2e` job `116796749854` and `ci-integ`
+job `116797044445`. No old green shard or separate task's CI substitutes for
+that failed aggregate. The original E2E-003 trigger and original Claude2
+review observations are retained in
+`codex-env-transport-20261016/bcda-ci-followup-readonly.json` under the evidence
+root above. This is a separate integration finding from ENV-001.
+
+Root's accepted Phone source handoff is
+`actual-Phone-original-review-fullCI-normal-protected-merge-and-precise-API-source-handoff.json`
+under that same evidence root, verified SHA-256
+`004250de0a6981ccc9f10117cb66fc88f66b3cc21260b0570fd5de6d9593a8bb`.
+It records independent Claude2 review of Phone candidate
+`da68100c9712b57a0e2b32597d591b99648f61a3`, own full CI and protected PR #2732
+merge `155710faaf18598332d5aa0ecbe2c41a1761d360` at `07:28:18Z`.
+The current owner fetched that exact accepted `origin/dev` and merged it
+normally, without conflicts, into the published task branch. Integration anchor
+`25edae54406cb936c175eb304cd296cb3c2ae13b` preserves both the old API candidate
+and accepted Phone/E04 ancestry. No published commit was rewritten.
+
+Compared with accepted dev, this task still changes only the three-line API
+consumer binding, the existing ENV-001 assertion, its portable regression and
+this UAT. `git diff --exit-code bcda359776c7fcc64d478624174c93d6649932d7 HEAD --
+.github/workflows/deploy-dev.yml tests/unit/dev-pax-review-env-transport-20261016
+tools/ci/test_dev_artifact_providers.py` exited 0 at the integration anchor:
+the already-correct repair source and tests are unchanged. Original production
+reader hashes still match the three hashes recorded above. Other source
+changes enter solely through the accepted dev merge, not new owner edits.
+
+Fresh local evidence is in
+`codex-env-transport-20261016/accepted-phone-integration/` under the existing
+evidence root. All checks below ran at the integration anchor and terminated;
+the final candidate additionally records this UAT. Versions remain Node
+v22.23.2, pnpm 10.33.0, Vitest 4.1.4 and Python 3.12.3.
+
+| Finding / required acceptance                                     | Source / repair                                                                                         | Old → integrated result                                                                                                                                                                                              | Command / exit / evidence                                                                                                                                                                                                           | Remaining requirement                                                                                                                                          |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JSON transport and ENV-001 regression                             | Actual workflow Bash producer/consumer, real wrapper, original payment readers; existing CI wiring test | Historical Bash again loses JSON quotes and throws the original cipher/capture errors; integrated repair preserves both JSON values and passes the real cipher/policy. Python 39/39 and Vitest 89/89 pass, no skips. | Same six-file broad command above, exit 0: `vitest.log`, `vitest-results.json`; `python3 -m unittest tools/ci/test_dev_artifact_providers.py`, exit 0: `python.log`.                                                                | New exact-SHA independent review and own full hosted CI still required.                                                                                        |
+| E2E-003 Phone create ACK followed by canonical GET 404            | Accepted Phone PR #2732 source incorporated via normal merge                                            | Old bcda aggregate fails; Root's accepted Phone source receipt records its own full CI success. This API candidate's hosted E2E is NOT RUN locally and its result is pending.                                        | `git merge-base --is-ancestor 155710faaf18598332d5aa0ecbe2c41a1761d360 HEAD`, exit 0; accepted source handoff above.                                                                                                                | Original strict reader, HTTP assertions and all hosted gates unchanged; fresh API candidate must pass its own full CI.                                         |
+| `dev-pax-env-transport_real-shell-and-original-reader-regression` | Unchanged portable regression against integrated workflow/readers                                       | Fresh six-file 89/89 run passes, including negative control, ordinary values, partial/absent/complete provider groups and original 60000ms capture policy.                                                           | Scoped `pnpm exec tsc -p <existing-evidence-directory>/tsconfig.scoped.json --noEmit`, exit 0: `typecheck-scoped.log`; `pnpm exec eslint tests/unit/dev-pax-review-env-transport-20261016/transport.test.ts`, exit 0: `eslint.log`. | Full key remains pending new candidate review, own full CI and protected merge; previous root typecheck limitation remains historical, not a fresh broad pass. |
+| `dev-pax-env-transport_actual-immutable-API-startup`              | Root sole immutable publisher and automatic shared Cloud Run deployment                                 | NOT RUN; no API boot or health credit claimed.                                                                                                                                                                       | No worker workflow dispatch, rerun, publication, deployment, product server, browser or DB runtime.                                                                                                                                 | Root must verify live dev variables, then obtain new immutable API revision startup and actual full-SHA health/runtime readback.                               |
+
+The normal handoff records the final pushed full SHA and fresh generation.
+PR #2726 is reused; no duplicate PR, worker CI polling or deployment is added.
+Fresh candidate CI and independent review belong to this new SHA. Both full
+acceptance keys remain required; Phone/Tool/E04/Demo overall DONE or runtime
+delivery is not an added prerequisite.
