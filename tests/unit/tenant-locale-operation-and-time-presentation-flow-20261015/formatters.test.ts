@@ -46,6 +46,9 @@ describe(`C121 canonical presentation (host TZ=${process.env.TZ})`, () => {
     expect(formatDateTime(null, "zh")).toBe("無資料");
     expect(formatDateTime(undefined, "en")).toBe("No data");
     expect(formatDateInput(null)).toBe("");
+    expect(() => formatDateInput("invalid")).toThrow(RangeError);
+    expect(() => formatDateInput("2026-13-01")).toThrow(RangeError);
+    expect(() => formatDateTime("invalid", "zh")).toThrow(RangeError);
     expect(formatRelativeTime("invalid", "en")).toBeNull();
     for (const locale of ["en", "zh"] as const) {
       for (const currency of ["TWD", "USD", "JPY"]) {
