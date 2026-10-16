@@ -12,7 +12,7 @@ import type * as BillingModule from "../../../apps/tenant-console-web/app/billin
 import { createUiModuleLoader } from "../system-remediation/sr-wire-001/ui-module-loader";
 
 const instant = "2026-12-31T16:05:00Z";
-const booking = {
+const booking: contracts.BookingRecord = {
   bookingId: "booking-c121",
   orderId: "order-c121",
   tenantId: "tenant-c121",
@@ -31,12 +31,11 @@ const booking = {
   recurrenceRule: null,
   modifiableUntil: null,
   cancelableUntil: null,
-  pickup: { address: "Sample pickup", latitude: 25, longitude: 121 },
-  dropoff: { address: "Sample dropoff", latitude: 25.1, longitude: 121.1 },
+  pickup: { address: "Sample pickup", lat: 25, lng: 121 },
+  dropoff: { address: "Sample dropoff", lat: 25.1, lng: 121.1 },
   passenger: {
     name: "Example Rider",
     phone: "0900000000",
-    email: "rider@example.test",
   },
   bookedBy: null,
   onsiteContact: null,
@@ -58,7 +57,7 @@ const booking = {
   createdAt: instant,
   updatedAt: instant,
 };
-const invoice = {
+const invoice: contracts.TenantInvoiceRuntimeRecord = {
   invoiceId: "invoice-c121",
   tenantId: "tenant-c121",
   periodStart: "2026-12-01",
@@ -73,7 +72,7 @@ const invoice = {
   availableActions: [],
   deepLinks: [],
 };
-const profile = {
+const profile: contracts.TenantBillingProfile = {
   tenantId: "tenant-c121",
   invoiceTitle: "Example Transit",
   taxId: null,
