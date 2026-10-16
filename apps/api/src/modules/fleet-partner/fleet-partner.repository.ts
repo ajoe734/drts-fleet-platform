@@ -57,6 +57,33 @@ export class FleetPartnerRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
+  /** An absent or ambiguous explicit mapping cannot identify a receipt issuer. */
+  async findReceiptOperatorName(operatorId: string): Promise<string | null> {
+    const partners = await this.findReceiptOperatorFleets(operatorId);
+    if (partners.length !== 1) return null;
+    const record = partners[0]!;
+    return typeof record.legalName === "string" && record.legalName.trim()
+      ? record.legalName.trim()
+      : null;
+  }
+
+  async findReceiptOperatorFleets(
+    operatorId: string,
+  ): Promise<FleetPartnerRecord[]> {
+    if (!this.isEnabled() || !operatorId) return [];
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_fleet_partners
+       WHERE record->'multiTaxiOperatorIds' @> $1::jsonb LIMIT 2`,
+      [JSON.stringify([operatorId])],
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<FleetPartnerRecord>(
+        row.record,
+        "admin.phase1_fleet_partners",
+      ),
+    );
+  }
+
   async loadState(): Promise<FleetPartnerState> {
     if (!this.isEnabled()) {
       return {

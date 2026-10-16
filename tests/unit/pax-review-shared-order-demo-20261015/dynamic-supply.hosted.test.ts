@@ -1,3 +1,5 @@
+import { FleetPartnerService } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.service";
+import { FleetPartnerRepository } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.repository";
 import { EventEmitter } from "node:events";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { DatabaseService } from "../../../apps/api/src/common/db/database.service";
@@ -186,6 +188,13 @@ describe.skipIf(!hostedPaymentEnabled)(
         a.multi,
         a.products,
         a.eligibility,
+        new FleetPartnerService(
+          {} as never,
+          a.owned,
+          a.registry,
+          new FleetPartnerRepository(h.database),
+        ),
+        a.profiles,
       ).prepare();
       expect(
         (

@@ -1,4 +1,5 @@
 import { HttpStatus, Injectable } from "@nestjs/common";
+import type { CallSessionRecord } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { CallcenterService } from "./callcenter.service";
@@ -8,11 +9,40 @@ import {
   type SandboxWebhookPayload,
 } from "./sandbox.fixtures";
 
+type SessionOperation = {
+  legacy: () => CallSessionRecord;
+  durable: () => CallSessionRecord | Promise<CallSessionRecord>;
+};
+
 @Injectable()
 export class SandboxWebhookAdapter {
   constructor(private readonly callcenterService: CallcenterService) {}
 
   ingest(payload: SandboxWebhookPayload, requestId?: string) {
+    // Preserve the original synchronous in-memory integration contract. The
+    // HTTP endpoint uses ingestForWrite and waits for the same operation plan.
+    const { eventType, callId, operations } = this.prepareIngest(
+      payload,
+      requestId,
+    );
+    let session!: CallSessionRecord;
+    for (const operation of operations) session = operation.legacy();
+    return { accepted: true, eventType, callId, session };
+  }
+
+  async ingestForWrite(payload: SandboxWebhookPayload, requestId?: string) {
+    const { eventType, callId, operations } = this.prepareIngest(
+      payload,
+      requestId,
+    );
+    let session!: CallSessionRecord;
+    // Each step reads the committed session produced by its predecessor. A
+    // rejected upsert must never start a close/recording mutation or ACK.
+    for (const operation of operations) session = await operation.durable();
+    return { accepted: true, eventType, callId, session };
+  }
+
+  private prepareIngest(payload: SandboxWebhookPayload, requestId?: string) {
     const eventType = this.requireEventType(payload.event_type);
     const callId = payload.provider_call_id?.trim();
     if (!callId) {
@@ -23,157 +53,135 @@ export class SandboxWebhookAdapter {
       );
     }
 
+    if (eventType === "recording.ready" && !payload.recording_id?.trim()) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "RECORDING_ID_REQUIRED",
+        "recording_id is required for recording.ready.",
+      );
+    }
+    const input = {
+      callId,
+      callType: payload.call_type ?? "booking",
+      callerPhone: payload.caller_phone ?? null,
+      agentId: payload.agent_extension ?? null,
+      startedAt: payload.started_at ?? null,
+      ...(eventType.startsWith("recording.")
+        ? { endedAt: payload.ended_at ?? null }
+        : {}),
+    };
+    const operations: SessionOperation[] = [
+      {
+        legacy: () =>
+          this.callcenterService.upsertExternalSession(input, requestId),
+        durable: () =>
+          this.callcenterService.upsertExternalSessionForWrite(
+            input,
+            requestId,
+          ),
+      },
+    ];
+    const stateCommand = {
+      agentId: payload.agent_extension ?? null,
+      startedAt: payload.started_at ?? null,
+      endedAt: payload.ended_at ?? null,
+    };
     switch (eventType) {
       case "call.started":
-        return {
-          accepted: true,
-          eventType,
-          callId,
-          session: this.callcenterService.upsertExternalSession(
-            {
+        break;
+      case "call.ended": {
+        const command = payload.ended_at ? { endedAt: payload.ended_at } : {};
+        operations.push({
+          legacy: () =>
+            this.callcenterService.closeCallSession(callId, command, requestId),
+          durable: () =>
+            this.callcenterService.closeCallSessionForWrite(
               callId,
-              callType: payload.call_type ?? "booking",
-              callerPhone: payload.caller_phone ?? null,
-              agentId: payload.agent_extension ?? null,
-              startedAt: payload.started_at ?? null,
-            },
-            requestId,
-          ),
-        };
-      case "call.ended":
-        this.callcenterService.upsertExternalSession(
-          {
-            callId,
-            callType: payload.call_type ?? "booking",
-            callerPhone: payload.caller_phone ?? null,
-            agentId: payload.agent_extension ?? null,
-            startedAt: payload.started_at ?? null,
-          },
-          requestId,
-        );
-        return {
-          accepted: true,
-          eventType,
-          callId,
-          session: this.callcenterService.closeCallSession(
-            callId,
-            payload.ended_at
-              ? {
-                  endedAt: payload.ended_at,
-                }
-              : {},
-            requestId,
-          ),
-        };
+              command,
+              requestId,
+            ),
+        });
+        break;
+      }
       case "recording.pending":
-        this.callcenterService.upsertExternalSession(
-          {
-            callId,
-            callType: payload.call_type ?? "booking",
-            callerPhone: payload.caller_phone ?? null,
-            agentId: payload.agent_extension ?? null,
-            startedAt: payload.started_at ?? null,
-            endedAt: payload.ended_at ?? null,
-          },
-          requestId,
-        );
-        return {
-          accepted: true,
-          eventType,
-          callId,
-          session: this.callcenterService.markRecordingPending(
-            callId,
-            {
-              agentId: payload.agent_extension ?? null,
-              startedAt: payload.started_at ?? null,
-              endedAt: payload.ended_at ?? null,
-            },
-            requestId,
-          ),
+        operations.push({
+          legacy: () =>
+            this.callcenterService.markRecordingPending(
+              callId,
+              stateCommand,
+              requestId,
+            ),
+          durable: () =>
+            this.callcenterService.markRecordingPendingForWrite(
+              callId,
+              stateCommand,
+              requestId,
+            ),
+        });
+        break;
+      case "recording.ready": {
+        const command = {
+          recordingId: payload.recording_id!.trim(),
+          ...(payload.provider_recording_ref
+            ? {
+                providerRecordingRef: payload.provider_recording_ref,
+              }
+            : {}),
+          ...(payload.recording_url
+            ? {
+                recordingUrl: payload.recording_url,
+              }
+            : {}),
+          ...(payload.started_at
+            ? {
+                startedAt: payload.started_at,
+              }
+            : {}),
+          ...(payload.ended_at
+            ? {
+                endedAt: payload.ended_at,
+              }
+            : {}),
+          ...(payload.agent_extension
+            ? {
+                agentId: payload.agent_extension,
+              }
+            : {}),
         };
-      case "recording.ready":
-        if (!payload.recording_id?.trim()) {
-          throw new ApiRequestError(
-            HttpStatus.BAD_REQUEST,
-            "RECORDING_ID_REQUIRED",
-            "recording_id is required for recording.ready.",
-          );
-        }
-        this.callcenterService.upsertExternalSession(
-          {
-            callId,
-            callType: payload.call_type ?? "booking",
-            callerPhone: payload.caller_phone ?? null,
-            agentId: payload.agent_extension ?? null,
-            startedAt: payload.started_at ?? null,
-            endedAt: payload.ended_at ?? null,
-          },
-          requestId,
-        );
-        return {
-          accepted: true,
-          eventType,
-          callId,
-          session: this.callcenterService.attachRecordingCallback(
-            callId,
-            {
-              recordingId: payload.recording_id.trim(),
-              ...(payload.provider_recording_ref
-                ? {
-                    providerRecordingRef: payload.provider_recording_ref,
-                  }
-                : {}),
-              ...(payload.recording_url
-                ? {
-                    recordingUrl: payload.recording_url,
-                  }
-                : {}),
-              ...(payload.started_at
-                ? {
-                    startedAt: payload.started_at,
-                  }
-                : {}),
-              ...(payload.ended_at
-                ? {
-                    endedAt: payload.ended_at,
-                  }
-                : {}),
-              ...(payload.agent_extension
-                ? {
-                    agentId: payload.agent_extension,
-                  }
-                : {}),
-            },
-            requestId,
-          ),
-        };
+        operations.push({
+          legacy: () =>
+            this.callcenterService.attachRecordingCallback(
+              callId,
+              command,
+              requestId,
+            ),
+          durable: () =>
+            this.callcenterService.attachRecordingCallbackForWrite(
+              callId,
+              command,
+              requestId,
+            ),
+        });
+        break;
+      }
       case "recording.failed":
-        this.callcenterService.upsertExternalSession(
-          {
-            callId,
-            callType: payload.call_type ?? "booking",
-            callerPhone: payload.caller_phone ?? null,
-            agentId: payload.agent_extension ?? null,
-            startedAt: payload.started_at ?? null,
-            endedAt: payload.ended_at ?? null,
-          },
-          requestId,
-        );
-        return {
-          accepted: true,
-          eventType,
-          callId,
-          session: this.callcenterService.markRecordingFailed(
-            callId,
-            {
-              agentId: payload.agent_extension ?? null,
-              startedAt: payload.started_at ?? null,
-              endedAt: payload.ended_at ?? null,
-            },
-            requestId,
-          ),
-        };
+        operations.push({
+          legacy: () =>
+            this.callcenterService.markRecordingFailed(
+              callId,
+              stateCommand,
+              requestId,
+            ),
+          durable: () =>
+            this.callcenterService.markRecordingFailedForWrite(
+              callId,
+              stateCommand,
+              requestId,
+            ),
+        });
+        break;
     }
+    return { eventType, callId, operations };
   }
 
   private requireEventType(value: string): SandboxWebhookEventType {

@@ -7,6 +7,8 @@ import { MultiTaxiService } from "../../multi-taxi/multi-taxi.service";
 import { MultiTaxiRepository } from "../../multi-taxi/multi-taxi.repository";
 import { ServiceProductService } from "../../service-product/service-product.service";
 import { VehicleEligibilityService } from "../../vehicle-eligibility/vehicle-eligibility.service";
+import { FleetPartnerService } from "../../fleet-partner/fleet-partner.service";
+import { DriverProfileService } from "../../driver-profile/driver-profile.service";
 import { reviewDemoEnabled } from "./review-demo.config";
 
 const AUTHORIZATION_ID = "bc39e4f3-72d8-4383-bdc1-2426c1330dfa";
@@ -28,6 +30,8 @@ export class ReviewSupplyService {
     private readonly multi: MultiTaxiService,
     private readonly products: ServiceProductService,
     private readonly eligibility: VehicleEligibilityService,
+    private readonly fleets: FleetPartnerService,
+    private readonly profiles: DriverProfileService,
   ) {}
 
   async prepare() {
@@ -88,6 +92,23 @@ export class ReviewSupplyService {
     const now = new Date().toISOString();
     const start = "2026-01-01T00:00:00.000Z";
     const end = "2099-01-01T00:00:00.000Z";
+    const operatorId = "review-synthetic-operator";
+    let fleet =
+      await this.fleets.findFleetPartnerForMultiTaxiOperator(operatorId);
+    if (!fleet) {
+      fleet = await this.fleets.createFleetPartner({
+        legalName: "虛構演練派遣業者（合成・非正式）",
+        displayName: "虛構演練車隊",
+        businessRegistrationNo: "SIMULATED-NOT-A-REGISTRATION",
+        contactName: "合成演練來源",
+        contactPhone: "SIMULATED-NOT-A-PHONE",
+        partnershipType: "business_dispatch_fleet",
+      });
+      // Preserve the actual writer-issued Fleet ID and await the mapping ACK.
+      fleet = await this.fleets.updateFleetPartner(fleet.fleetPartnerId, {
+        multiTaxiOperatorIds: [operatorId],
+      });
+    }
     for (const fixture of REVIEW_SUPPLY) {
       if (!state.drivers.some((d) => d.driverId === fixture.driverId)) {
         await this.registry.createDriver({
@@ -177,24 +198,34 @@ export class ReviewSupplyService {
               updatedAt: now,
             },
           ],
-          driverCredentials: [
-            {
-              driverId: fixture.driverId,
-              registrationNo: `SIMULATED-${fixture.driverId}`,
-              registrationArea: "演練・非真實證照",
-              effectiveFrom: start,
-              effectiveUntil: end,
-              status: "verified_active",
-              maskedDisplay: "演練 SIM-***",
-              verifiedByActorId: "review-synthetic-source",
-              verifiedAt: now,
-              sourceSubmissionId: null,
-              version: 1,
-              updatedAt: now,
-            },
-          ],
         });
       }
+      await this.profiles.prepareProfileAuthority(fixture.driverId);
+      await this.profiles.updateProfile(fixture.driverId, {
+        driverSurname: "演練",
+      });
+      // Refresh even existing rehearsal supply: older preparation used an
+      // incomplete display. Both the raw value and public mask are synthetic.
+      await repository.persistChanges({
+        driverCredentials: [
+          {
+            driverId: fixture.driverId,
+            registrationNo: `SIMULATED-NOT-REAL-${fixture.driverId.endsWith("a") ? "9001" : "9002"}`,
+            registrationArea: "演練・非真實證照",
+            effectiveFrom: start,
+            effectiveUntil: end,
+            status: "verified_active",
+            maskedDisplay: fixture.driverId.endsWith("a")
+              ? "••••9001"
+              : "••••9002",
+            verifiedByActorId: "review-synthetic-source",
+            verifiedAt: now,
+            sourceSubmissionId: null,
+            version: 1,
+            updatedAt: now,
+          },
+        ],
+      });
     }
     const authorizations = await taxi.loadState();
     if (
@@ -273,6 +304,8 @@ export class ReviewSupplyService {
     }
     return {
       simulated: true,
+      fleetPartnerId: fleet.fleetPartnerId,
+      receiptSource: "合成演練資料・非正式憑證",
       authorizationId: AUTHORIZATION_ID,
       supply: REVIEW_SUPPLY,
     };
