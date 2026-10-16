@@ -277,6 +277,41 @@ async function submitLostItemForCompletedRide(
     }),
     contentType: "application/json",
   });
+  const listTimelineRequest = ops.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/complaints/${caseNo}/timeline`) &&
+      response.request().method() === "GET",
+  );
+  await ops.goto(`${OPS}/complaints?caseNo=${encodeURIComponent(caseNo)}`);
+  const listTimelineResponse = await listTimelineRequest;
+  expect(listTimelineResponse.status()).toBe(200);
+  const listTimeline = camel(await listTimelineResponse.json()).data.items;
+  expect(listTimeline).toEqual(timeline);
+  await expect(
+    ops.locator(`a[href="/dispatch?orderId=${orderId}"]`).first(),
+  ).toBeVisible();
+  await expect(
+    ops
+      .getByTestId("complaint-list-activity")
+      .getByText(timeline[0].note, { exact: true }),
+  ).toBeVisible();
+  await info.attach("A-lost-item-case-list-ops", {
+    body: await ops.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await info.attach("A-lost-item-case-list-facts", {
+    body: JSON.stringify({
+      orderId,
+      caseNo,
+      timelineActions: listTimeline.map(
+        (entry: { action: string }) => entry.action,
+      ),
+      displayedNote: timeline[0].note,
+      scope: "ordinary complaints workspace, actual SDK/BFF timeline and DOM",
+      resolvedOrReturned: false,
+    }),
+    contentType: "application/json",
+  });
   await pax.getByRole("button", { name: "返回行程", exact: true }).click();
   await ops.goto(`${OPS}/review`);
   await readCompletedByOps(ops, orderId);

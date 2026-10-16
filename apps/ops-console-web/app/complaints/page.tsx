@@ -32,6 +32,7 @@ import type {
   ComplaintCategory,
   ComplaintExportViewRecord,
   ComplaintResolutionCode,
+  ComplaintTimelineEntry,
   CreateComplaintCaseCommand,
   EscalateComplaintToIncidentCommand,
   EmptyReason,
@@ -73,13 +74,6 @@ type Translate = (
   params?: Record<string, string | number>,
 ) => string;
 type ComplaintSlaStatus = "within_sla" | "warning" | "breached";
-type ComplaintActivityEntry = {
-  entryId: string;
-  actor: string;
-  action: string;
-  note?: string | null;
-  createdAt: string;
-};
 type ComplaintCaseUiRecord = ComplaintCaseRecord & {
   slaStatus?: ComplaintSlaStatus;
   slaBreachedAt?: string | null;
@@ -439,7 +433,7 @@ export default function ComplaintsPage() {
     error instanceof Error ? error.message : t("common.unknown");
 
   const [records, setRecords] = useState<ComplaintCaseUiRecord[]>([]);
-  const [activityItems, setActivityItems] = useState<ComplaintActivityEntry[]>(
+  const [activityItems, setActivityItems] = useState<ComplaintTimelineEntry[]>(
     [],
   );
   const [exportView, setExportView] =
@@ -599,11 +593,8 @@ export default function ComplaintsPage() {
     void (async () => {
       try {
         const client = getOpsClient();
-        const loadComplaintActivity = client[
-          `getComplaint${"Time"}${"line"}` as keyof typeof client
-        ] as (caseNo: string) => Promise<ComplaintActivityEntry[]>;
         const [nextActivityItems, nextExportView] = await Promise.all([
-          loadComplaintActivity(selectedCaseNo),
+          client.getComplaintTimeline(selectedCaseNo),
           client.getComplaintExportView(selectedCaseNo),
         ]);
         if (cancelled) {
@@ -1742,6 +1733,7 @@ export default function ComplaintsPage() {
               <Card theme={theme} title={t("complaints.activityFeed")}>
                 {activityItems.length > 0 ? (
                   <div
+                    data-testid="complaint-list-activity"
                     style={{
                       display: "flex",
                       flexDirection: "column",
