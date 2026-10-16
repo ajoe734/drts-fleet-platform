@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition, type CSSProperties } from "react";
+import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import type {
   ResourceActionDescriptor,
@@ -45,26 +45,47 @@ function profileValues(profile: TenantBillingProfile | null) {
   };
 }
 
-export function BillingProfileForm({
-  profile,
-  descriptor,
-  locale,
-}: {
+type BillingProfileFormProps = {
   profile: TenantBillingProfile | null;
   descriptor: ResourceActionDescriptor | null;
   locale: Locale;
-}) {
+};
+
+export function BillingProfileForm(props: BillingProfileFormProps) {
+  const { profile, descriptor } = props;
+  // RSC refresh serializes a new object even when the resource is unchanged.
+  // Keep that editor mounted across locale-only refreshes; a real resource or
+  // capability change creates a fresh editor, including its in-flight boundary.
+  const resourceKey = JSON.stringify([
+    profile?.tenantId,
+    profile?.updatedAt,
+    profile?.invoiceTitle,
+    profile?.taxId,
+    profile?.contactName,
+    profile?.email,
+    profile?.address,
+    descriptor?.action,
+    descriptor?.enabled,
+    descriptor?.disabledReasonCode,
+    descriptor?.requiresReason,
+    descriptor?.riskLevel,
+  ]);
+  return <BillingProfileEditor key={resourceKey} {...props} />;
+}
+
+function BillingProfileEditor({ profile, descriptor, locale }: BillingProfileFormProps) {
   const router = useRouter();
   const [values, setValues] = useState(() => profileValues(profile));
   const [savedProfile, setSavedProfile] = useState(profile);
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<BillingProfileResult | null>(null);
   const enabled = descriptor?.enabled !== false;
+  const active = useRef(true);
 
   useEffect(() => {
-    setValues(profileValues(profile));
-    setSavedProfile(profile);
-  }, [profile]);
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
 
   return (
     <form
@@ -78,6 +99,7 @@ export function BillingProfileForm({
         startTransition(async () => {
           try {
             const saved = await saveBillingProfile(formData);
+            if (!active.current) return;
             setResult(saved);
             if (saved.ok) {
               setSavedProfile(saved.profile);
@@ -85,6 +107,7 @@ export function BillingProfileForm({
               router.refresh();
             }
           } catch {
+            if (!active.current) return;
             setResult({ ok: false, message: t("billing.form.failed", locale) });
           }
         });

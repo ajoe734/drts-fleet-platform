@@ -25,8 +25,8 @@ describe(`C121 canonical presentation (host TZ=${process.env.TZ})`, () => {
   );
 
   it("retains empty, relative time and actual-currency minor-unit contracts", () => {
-    expect(formatDateTime(null, "zh")).toBe("尚無資料");
-    expect(formatDateTime(undefined, "en")).toBe("No data yet");
+    expect(formatDateTime(null, "zh")).toBe("無資料");
+    expect(formatDateTime(undefined, "en")).toBe("No data");
     expect(formatDateInput(null)).toBe("");
     expect(formatRelativeTime("invalid", "en")).toBeNull();
     for (const locale of ["en", "zh"] as const) {

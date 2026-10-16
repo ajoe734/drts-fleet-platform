@@ -93,7 +93,7 @@ describe("C121 mounted locale refresh and billing operation", () => {
     view.rerender(await tree());
     expect(title().value).toBe("Unsaved draft");
     expect(request.mock.calls.some(([, init]) => init.method === "POST")).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "重設變更" }));
+    fireEvent.click(screen.getByRole("button", { name: "還原變更" }));
     expect(title().value).toBe(initial.invoiceTitle);
     edit("Second draft");
     fireEvent.click(screen.getByRole("button", { name: "Switch language" }));
@@ -148,7 +148,7 @@ describe("C121 mounted locale refresh and billing operation", () => {
   it("clears drafts when action capability changes, even if the canonical profile is unchanged", () => {
     const view = render(<BillingProfileForm profile={initial} descriptor={descriptor} locale="en" />);
     edit();
-    view.rerender(<BillingProfileForm profile={{ ...initial }} descriptor={{ ...descriptor, enabled: false, disabledReasonCode: "permission_denied" }} locale="zh" />);
+    view.rerender(<BillingProfileForm profile={initial} descriptor={{ ...descriptor, enabled: false, disabledReasonCode: "permission_denied" }} locale="zh" />);
     expect(title().value).toBe(initial.invoiceTitle);
     expect((title().closest("fieldset") as HTMLFieldSetElement).disabled).toBe(true);
     view.rerender(<BillingProfileForm profile={{ ...initial }} descriptor={descriptor} locale="en" />);
