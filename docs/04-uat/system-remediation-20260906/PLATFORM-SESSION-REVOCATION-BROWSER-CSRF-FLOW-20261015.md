@@ -5,13 +5,15 @@ Owner: Codex. Independent reviewer: Claude2. Evidence version: v1.
 
 ## Delivery state
 
-R4 continuation: machine truth now includes the exact controller write scope.
+R4 implementation validated: machine truth includes the exact controller scope.
 `IdentityController.listAdminSessions` normalizes only exact HTTP `"true"` or
 boolean `true` before the unchanged repository. The original mounted canonical
-readback assertion remains intact. Full validation and candidate handoff are in
-progress; no review, hosted CI, merge, provider, deployment or live browser success
-is claimed. Earlier checkpoint failures and scope holds below remain historical
-evidence, not the current scope decision.
+readback assertion remains intact and now passes in the complete 177-case
+socket-free regression. Candidate handoff to Claude2 is next. Independent review,
+required hosted CI, protected merge and normal post-merge acceptance records remain
+pending. No provider, deployment or live browser success is claimed. Earlier
+checkpoint failures and scope holds below remain historical evidence, not the
+current scope decision. The latest evidence is in the R4 section below.
 
 ## Source and historical lineage
 
@@ -276,3 +278,103 @@ boundary; it adds no passing readback, candidate or acceptance credit. Ordinary
 Supervisor conflict check and the exact controller scope grant remain necessary
 before the original owner can perform the documented normalization and full
 regression. No runtime was started.
+
+## R4 delivery evidence v1 — 2026-10-16
+
+The new dispatch's single-task machine-truth slice includes the controller as the
+ninth write scope. Resumed the original clean execution branch at published
+`22c8fc0ae96c2490e7a67e76356bc4f2ab8cc21a`; no candidate or PR existed. The
+original owner/reviewer and all four required keys are retained. No old ref or
+published history was rewritten. Current fetched `origin/dev` was
+`2aed20cee7c80fca77aeb326ab6c8b8377fee0dd`; no intervening change to the three
+existing production caller/controller surfaces required synchronization.
+
+### Repair and execution identity
+
+The only API production change is `IdentityController.listAdminSessions`:
+represent the untrusted `includeRevoked` query member as `unknown`, then normalize
+exact boolean `true` or exact string `"true"` into the existing repository query.
+All other values become false. The repository, auth/roles/scopes, tenant filter,
+masking, envelope, revoke transaction and bearer behavior remain unchanged.
+The existing explicit `status` filter semantics are also unchanged.
+
+- Before: exact published `22c8fc0ae96c2490e7a67e76356bc4f2ab8cc21a`, minimal
+  production controller/repository test, exit 1, 4 PASS / 1 FAIL. HTTP `"true"`
+  loses the canonical revoked row; the four controls pass (`r4-before.log`).
+- Repair anchor: `1a9298947010726df7eac85c0418a34921a3b28c`; the same five
+  assertions plus nine invalid/repeated-value controls pass, 14/14, exit 0
+  (`r4-query-fixed.log`). The full original command also passes 177/177, exit 0,
+  12 files, no skips (`r4-full.log`).
+- Final production Source: `fea80c7f7e150d3cb8667ddb48511bcfa47f3273` removes an
+  incidental formatter-only edit outside the authorized method. The retained
+  controller blob is `8a6bcf9556bb6b43ffb38ee271d5fca32e5b92dd`; query regression
+  blob is `d7786e057b4faf8ff268f68bcc20e5af1644ec54`. Re-ran the full original
+  regression at this exact head: **177 PASS / 0 FAIL / 0 SKIP, 12 files**, exit 0,
+  `r4-final-full.log`. Controller lint also passes at this head.
+- The closeout commit only updates this evidence document. These production/test
+  blobs are unchanged in the candidate; its full SHA and PR head are recorded by
+  the normal handoff, avoiding a self-referential document commit hash.
+- Tools: Node v22.23.2, pnpm 10.33.0, Vitest 4.1.4. All launched checks completed
+  and their results were read. No server, browser, PG or Docker runtime started.
+
+### Finding and original acceptance map
+
+| Finding / required key                                                                                        | Production basis and retained behavior                                                                                                                              | Before → fixed result / command evidence                                                                                                                                                                                                                                                           | Remaining boundary                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `platform-session_browser-csrf-issuance-and-boundary`                                                         | Real `PlatformAdminIamClient.revokeSession` → `identitySessionCsrfHeaders` → local GET route → signed host cookie / Origin check → proxy before upstream auth/fetch | Historical accepted-before missing-proof JSON request proceeds (expected 403, got 200); fixed boundary cases pass in `r4-final-full.log`, exit 0                                                                                                                                                   | Same-candidate independent review and hosted gates pending; no live provider or attack claim                                                             |
+| HTTP `includeRevoked=true` loses revoked row; `platform-session_mounted-lawful-revoke-and-canonical-readback` | Exact controller query normalization before unchanged production repository; mounted real drawer/client/proof/proxy/IAP guard/controller/repository chain           | `r4-before.log`: 4 PASS / 1 FAIL, exit 1 → `r4-query-fixed.log`: 14 PASS, exit 0. Full mounted assertion now passes in `r4-final-full.log`: selected session and refresh family revoked, unselected session active, same selected row read back and Revoke action removed                          | Socket boundary and context hooks doubled; controlled signed IAP fixture and production noDB repository; no hosted browser/PG execution claimed          |
+| `platform-session_origin-token-denials-and-original-session-regressions`                                      | Original r05, IAP/step-up, masking/session, CSRF negative boundary and mounted error/retry tests retained                                                           | Full original regression: 177 PASS, exit 0. Missing/mismatched/forged proof, wrong/missing Origin, unvalidated Referer, cross-origin form shape stop before upstream; valid Referer/reuse/bearer and IAP transport separation preserved; inventory 403 stops retry, failure states remain truthful | IAP cookie/provider cross-site behavior and live attacks were not executed in this audit                                                                 |
+| `platform-session_exact-candidate-validation`                                                                 | Assigned isolated branch, scoped commits, ordinary non-force push, unchanged final Source/test blobs; full command and checks below                                 | Full regression, app typecheck/lint, root lint, controller lint, API typecheck after build prerequisites and full root Source-mapped typecheck PASS; standard root typecheck remains FAIL as separately recorded                                                                                   | Claude2 same-SHA review, required hosted CI, protected merge and all four normal v1 acceptance records pending; local passes do not supply these credits |
+
+Full final regression command (exit 0):
+
+```sh
+pnpm exec vitest run tests/unit/platform-session-revocation-browser-csrf-flow-20261015 tests/unit/system-remediation/sr-iam-001 tests/unit/control-plane-auth.test.ts tests/unit/iap-subject-adapter.test.ts tests/unit/step-up-iap-path.test.ts tests/unit/identity-session.test.ts tests/unit/identity-session-context.test.ts tests/unit/system-remediation/sr-qa-identity-001/c006-c007-c008-invitation-session-and-tenant-rbac.test.ts tests/unit/cross-app/sr-partner-notify-fix-admin-20260927.integration.test.ts
+```
+
+### Completed check results
+
+| Command                                                                                                                              | Result                                                                                                                                                               | Evidence log                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `pnpm --filter @drts/platform-admin-web typecheck`                                                                                   | PASS, exit 0; Next typegen only, generated next-env import removed                                                                                                   | `r4-app-typecheck.log`                                                               |
+| `pnpm --filter @drts/platform-admin-web lint`                                                                                        | PASS, exit 0                                                                                                                                                         | `r4-app-lint.log`                                                                    |
+| `pnpm lint:root`                                                                                                                     | PASS, exit 0                                                                                                                                                         | `r4-root-lint.log`                                                                   |
+| `pnpm --filter @drts/api exec eslint src/modules/identity/identity.controller.ts --max-warnings=0`                                   | PASS, exit 0, including final controller-only scope                                                                                                                  | `r4-final-controller-lint.log`                                                       |
+| `pnpm typecheck:root`                                                                                                                | FAIL, exit 2; 78 diagnostics from shared dependency resolution (stale private `ApiClient.baseUrl`, missing tenant-auth/passenger-client exports and cascading types) | `r4-root-typecheck.log`                                                              |
+| `pnpm exec tsc -p .local/platform-session-csrf/root-local-paths.tsconfig.json --noEmit`                                              | PASS, exit 0, complete root include set, same documented local Source mappings; no includes excluded                                                                 | `r4-root-local-paths.log`                                                            |
+| `pnpm --filter @drts/api typecheck` before package builds                                                                            | FAIL, exit 2; 371 diagnostics from missing local dist declarations / stale shared contracts, including missing `IdentitySessionContext` and old actor enums          | `r4-api-typecheck.log`                                                               |
+| `pnpm --filter @drts/contracts build`, then `pnpm --filter @drts/control-plane-auth build`, then `pnpm --filter @drts/api typecheck` | All PASS, exit 0; normal existing build prerequisites create ignored worktree-local dist output; no shared/canonical dependency mutation                             | `r4-contracts-build.log`, `r4-control-plane-build.log`, `r4-api-typecheck-built.log` |
+| `git diff --check`                                                                                                                   | PASS, exit 0                                                                                                                                                         | Checked before commit                                                                |
+
+The Source-mapped root overlay extends `../../tsconfig.json`, retains its full
+includes and contracts/control-plane aliases, and adds only current worktree
+`@drts/api-client`, `@drts/passenger-client`, `@drts/tenant-auth` (actual export
+`packages/tenant-auth/src/route-handlers.ts`) and `@drts/tenant-auth/*` paths.
+It is a distinct check; standard root typecheck is not reported green.
+
+Evidence logs and overlay are under the assigned owner worktree's absolute path
+`/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-platform-session-revocation-browser-csrf-flow-20261015/.local/platform-session-csrf/`.
+SHA-256 values:
+
+```text
+efb8278940ea21b39331eb55b50d2b87ca68b15bcefecf2d55d2aa669b7f0723  r4-before.log
+80adc4f98e0f6b449d19040242c6f2e2c3a0462a78080f6fc7dcf81bccf156cb  r4-query-fixed.log
+a4a5cf6ea37cfd9fe078828d580a99dd8261d7c2819f1a7d7825319eba387ed1  r4-full.log
+55db3e728250e3b5fd88d22f2685f6b45b3e9c402d70879d8b1d00c1bb203708  r4-final-full.log
+acecf8b14a55bc58f94005b923e064a70a2b98d317d0cdebde57302b089ad503  r4-app-typecheck.log
+cba69d0d270537b1475641cf034ce04ac62a461a788e7a5117942390b22c7f01  r4-app-lint.log
+eb3f3067067e4f6c5871ec40fbb6cce8a0708ea9265382afcafce9c10eafffdc  r4-root-lint.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  r4-final-controller-lint.log
+4b660dd02ca0d92c35a2430e10c92ee3d5b983fa3b5ed712d09bf909aaccf204  r4-root-typecheck.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  r4-root-local-paths.log
+b7b9a5b5f32150dd15075c2b6df58607b75c93eef51ecdeceb8d1429c58dce7b  root-local-paths.tsconfig.json
+4a7f875b54ea7c3e064a3e5996505a909a024cec746bbdf6057310daf91ed16e  r4-api-typecheck.log
+ec5d3157a4633f638f90715685f588bb9f7b08c59d5b011b67424665b4f6d74a  r4-contracts-build.log
+3b9319b45828fab6ceac351ca08d784350eb93979ae614ad80c7a45134b79112  r4-control-plane-build.log
+44b99d02f9ad743611853f1cbe9305ef591a3bf0e29a808d5ca90b021280e4c5  r4-api-typecheck-built.log
+```
+
+This v1 document prepares evidence for every original required key. It does not
+record acceptance prematurely or substitute for the new candidate's independent
+review, hosted CI or protected merge. Preserve the candidate unchanged after
+handoff and let the existing lifecycle collect those results.
