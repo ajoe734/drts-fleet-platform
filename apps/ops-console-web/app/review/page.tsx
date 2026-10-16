@@ -39,7 +39,7 @@ export default function SharedOrderReviewOps() {
       new URLSearchParams(window.location.search).get("orderId") ?? "",
     );
     void client
-      .get<{ enabled: boolean }>("/api/passenger-app/review-demo/config")
+      .get<{ enabled: boolean }>("/api/ops/review-demo/config")
       .then((r) => setEnabled(r.enabled))
       .catch(() => setEnabled(false));
   }, [client]);
