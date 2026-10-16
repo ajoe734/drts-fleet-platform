@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync } from "node:crypto";
 import * as jwt from "jsonwebtoken";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IdentityContext } from "@drts/contracts";
@@ -26,7 +26,6 @@ const issuer = "https://accounts.google.com";
 const email = "elevated-consumer@example.org";
 const tenantId = "tenant-privileged-grant-consumer-test";
 const clientId = "123-test.apps.googleusercontent.com";
-const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
 class CaptureDelivery extends TenantInvitationDeliveryService {
   token = "";
