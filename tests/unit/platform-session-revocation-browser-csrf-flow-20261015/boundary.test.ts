@@ -8,7 +8,6 @@ import { IDENTITY_SESSION_CSRF_COOKIE as cookieName } from "../../../apps/platfo
 
 const origin = "https://platform.example";
 const path = ["identity", "sessions", "test-own-session", "revoke"];
-const context = { params: Promise.resolve({ path }) };
 
 beforeEach(() => {
   vi.stubEnv("NODE_ENV", "development");

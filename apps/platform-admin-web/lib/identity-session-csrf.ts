@@ -25,7 +25,7 @@ export async function identitySessionCsrfHeaders(
       code: "CSRF_PROOF_UNAVAILABLE",
       message: "Unable to acquire session revocation CSRF proof.",
       retryable: false,
-      rawBody: "",
+      rawBody: "Unable to acquire session revocation CSRF proof.",
     });
   }
   const body: unknown = await response.json();
