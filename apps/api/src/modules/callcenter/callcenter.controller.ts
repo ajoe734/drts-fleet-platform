@@ -31,12 +31,15 @@ export class CallcenterController {
   ) {}
 
   @Post("webhooks/sandbox")
-  ingestSandboxWebhook(
+  async ingestSandboxWebhook(
     @Body() payload: Record<string, unknown>,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.sandboxWebhookAdapter.ingest(payload as never, requestId),
+      await this.sandboxWebhookAdapter.ingestForWrite(
+        payload as never,
+        requestId,
+      ),
       requestId,
     );
   }

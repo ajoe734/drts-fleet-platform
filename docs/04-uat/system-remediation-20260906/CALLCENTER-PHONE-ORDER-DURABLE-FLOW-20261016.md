@@ -46,3 +46,35 @@ Local evidence directory (machine-specific): `/home/lupin/workspace/drts-fleet-p
 - Formal PG, original HTTP E2E-003 full recording-index/report/filing/audit chain, all22, mandatory role gates, same-SHA independent review, hosted CI and protected merge: pending. No project server, browser/E2E server, Docker infrastructure or PG service has been started on the worker VM.
 
 The additional exact-source test results, test hashes, final checkpoint and scope decision will be appended before candidate handoff. Do not infer completion from this checkpoint document.
+
+## 2026-10-16 continued implementation
+
+Supervisor granted the exact sandbox adapter path through R3 specification
+`/home/lupin/workspace/drts-fleet-platform/.local/passenger-transport-bureau-review-20261015/CALLCENTER-PHONE-ORDER-DURABLE-FLOW-20261016-R3-sandbox-ACK-scope.json`,
+SHA256 `6951a98fc6de6e0a39087ae523e89d01c505583dd02f5361f76f706406018364`.
+This supersedes the F6 scope wait above. Anchor `026bb5a8a` adds durable external
+session/close helpers and the close controller await. The sandbox controller now
+awaits `ingestForWrite`; it and the original synchronous `ingest` execute the same
+validated operation plan. Synchronous callers keep their existing contract;
+the HTTP entry awaits each durable step in order, including order propagation.
+
+- F6 old behavior reproduced at `026bb5a8a` with the unchanged sandbox adapter
+  and controller: all five event cases fail because success settles while the
+  production repository executor is held (`sandbox-before.log`, exit 1).
+  The probe calls the real controller/adapter/service/repositories without an
+  HTTP listener; only SQL completion and row storage are simulated.
+- First continued regression: 80 pass / 1 fail, exit 1
+  (`dispatch-baseline.log`). The failure was a probe assertion counting its own
+  read-access audit as a successful session mutation. The test now checks
+  `open_call_session` audits specifically; the product's access audit remains.
+- Ordinary API typecheck: exit 2 (`api-typecheck.log`), with existing shared
+  built declaration/source mismatches. API source-alias typecheck: exit 0
+  (`api-source-typecheck.log`); this uses an ignored local configuration and
+  does not rewrite shared package build outputs.
+- New create-response consistency probes cover a late missing-recording call
+  and initial ready recording flags. Results and fixes are recorded next.
+
+Earlier checkpoint logs were not present in this dispatch's isolated worktree.
+Fresh logs above and subsequent historical reproductions are retained under
+the same documented `.local/callcenter-phone-order-durable-flow-20261016/`
+directory. Earlier reported passes remain historical, not new-source credit.

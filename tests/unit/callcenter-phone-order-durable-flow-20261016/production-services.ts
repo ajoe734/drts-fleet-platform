@@ -6,6 +6,7 @@ import { AuditNotificationService } from "../../../apps/api/src/modules/audit-no
 import { CallcenterController } from "../../../apps/api/src/modules/callcenter/callcenter.controller";
 import { CallcenterRepository } from "../../../apps/api/src/modules/callcenter/callcenter.repository";
 import { CallcenterService } from "../../../apps/api/src/modules/callcenter/callcenter.service";
+import { SandboxWebhookAdapter } from "../../../apps/api/src/modules/callcenter/sandbox-webhook.adapter";
 import { OwnedMobilityRepository } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 import { OwnedMobilityService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import { OwnedMobilityController } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.controller";
@@ -41,7 +42,7 @@ export function productionServices(database: DatabaseService) {
     calls,
     {} as never,
     {} as never,
-    {} as never,
+    new SandboxWebhookAdapter(calls),
   );
   const idempotency = new IdempotencyRepository(database);
   const orderController = new OwnedMobilityController(

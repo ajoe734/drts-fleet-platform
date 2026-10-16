@@ -7,6 +7,8 @@ import { AuditNotificationService } from "../../../apps/api/src/modules/audit-no
 import { CallcenterController } from "../../../apps/api/src/modules/callcenter/callcenter.controller";
 import { CallcenterRepository } from "../../../apps/api/src/modules/callcenter/callcenter.repository";
 import { CallcenterService } from "../../../apps/api/src/modules/callcenter/callcenter.service";
+import { SandboxWebhookAdapter } from "../../../apps/api/src/modules/callcenter/sandbox-webhook.adapter";
+import type { SandboxWebhookEventType } from "../../../apps/api/src/modules/callcenter/sandbox.fixtures";
 import { OwnedMobilityRepository } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 import { OwnedMobilityService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import { OwnedMobilityTaskEventsService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
@@ -105,7 +107,7 @@ export function fixture() {
     calls,
     {} as never,
     {} as never,
-    {} as never,
+    new SandboxWebhookAdapter(calls),
   );
   return {
     calls,
@@ -137,6 +139,103 @@ export const phoneCommand = (callId: string) => ({
 });
 
 describe("phone durable acknowledgement", () => {
+  const webhookEvents: SandboxWebhookEventType[] = [
+    "call.started",
+    "call.ended",
+    "recording.pending",
+    "recording.ready",
+    "recording.failed",
+  ];
+  const webhookPayload = (
+    event_type: SandboxWebhookEventType,
+    callId: string,
+  ) => ({
+    event_type,
+    provider_call_id: callId,
+    recording_id: "synthetic-webhook-recording",
+    recording_url: "https://recordings.example.com/synthetic-webhook-recording",
+    caller_phone: "+886900000203",
+    agent_extension: "synthetic-agent",
+    ...(event_type === "call.ended"
+      ? { ended_at: "2026-10-16T00:01:00Z" }
+      : {}),
+  });
+
+  it.each(webhookEvents)(
+    "sandbox %s HTTP ACK waits for the actual final write",
+    async (eventType) => {
+      const h = fixture();
+      const callId = `synthetic-webhook-${eventType}`;
+      const order = await h.owned.createCallCenterOrder(phoneCommand(callId));
+      const gate = h.hold(
+        eventType === "call.started"
+          ? "INSERT INTO crm.phase1_call_sessions"
+          : "INSERT INTO ops.phase1_owned_orders",
+      );
+      let settled = false;
+      const pending = Promise.resolve(
+        h.controller.ingestSandboxWebhook(webhookPayload(eventType, callId)),
+      ).then((result) => {
+        settled = true;
+        return result;
+      });
+      await h.entered.promise;
+      await Promise.resolve();
+      const early = settled;
+      gate.resolve();
+      const result = await pending;
+      expect(early).toBe(false);
+      expect(result.data).toMatchObject({ accepted: true, callId, eventType });
+      const expectedRecording =
+        eventType === "recording.ready" ? "synthetic-webhook-recording" : null;
+      expect(await h.owned.getOrderForRead(order.orderId)).toMatchObject({
+        callId,
+        recordingId: expectedRecording,
+      });
+      expect(await h.calls.getCallSessionForRead(callId)).toMatchObject({
+        linkedOrderId: order.orderId,
+        recordingId: expectedRecording,
+      });
+    },
+  );
+
+  it.each(webhookEvents)(
+    "sandbox %s propagates final-write rejection and permits the same payload retry",
+    async (eventType) => {
+      const h = fixture();
+      const callId = `synthetic-webhook-reject-${eventType}`;
+      const order = await h.owned.createCallCenterOrder(phoneCommand(callId));
+      const gate = h.hold(
+        eventType === "call.started"
+          ? "INSERT INTO crm.phase1_call_sessions"
+          : "INSERT INTO ops.phase1_owned_orders",
+      );
+      const payload = webhookPayload(eventType, callId);
+      const pending = Promise.resolve(
+        h.controller.ingestSandboxWebhook(payload),
+      );
+      const rejected = expect(pending).rejects.toThrow(
+        "synthetic webhook failure",
+      );
+      await h.entered.promise;
+      gate.reject(new Error("synthetic webhook failure"));
+      await rejected;
+      expect(await h.owned.getOrderForRead(order.orderId)).toMatchObject({
+        recordingId: null,
+        status: "recording_pending",
+      });
+      h.release();
+      const retried = await h.controller.ingestSandboxWebhook(payload);
+      expect(retried.data).toMatchObject({ accepted: true, callId, eventType });
+      if (eventType === "recording.ready") {
+        expect(await h.owned.getOrderForRead(order.orderId)).toMatchObject({
+          recordingId: payload.recording_id,
+          status: "ready_for_dispatch",
+        });
+      }
+    },
+  );
+
   it("does not envelope session success or publish it before its SQL write finishes", async () => {
     const h = fixture();
     const gate = h.hold("INSERT INTO crm.phase1_call_sessions");
@@ -383,6 +482,27 @@ describe("phone durable acknowledgement", () => {
     expect(await h.calls.getCallSessionForRead(command.callId)).toMatchObject({
       linkedOrderId: created.orderId,
     });
+  });
+
+  it("late phone creation returns the final committed missing-recording state without overwriting it in cache", async () => {
+    const h = fixture();
+    const callId = "synthetic-late-missing-call";
+    await h.calls.upsertExternalSessionForWrite({ callId });
+    await h.calls.markRecordingFailedForWrite(callId);
+    const created = await h.owned.createCallCenterOrder(phoneCommand(callId));
+    const persisted = await h.owned.getOrderForRead(created.orderId);
+    expect(created).toEqual(persisted);
+    expect(h.owned.getOrder(created.orderId)).toEqual(persisted);
+    expect(persisted.complianceFlags).toEqual(["recording_missing"]);
+  });
+
+  it("phone creation with an existing recording does not duplicate recording flags", async () => {
+    const h = fixture();
+    const created = await h.owned.createCallCenterOrder({
+      ...phoneCommand("synthetic-ready-create"), recordingId: "synthetic-existing-rec",
+    });
+    expect(created.complianceFlags).toEqual(["recording_bound"]);
+    expect(created).toEqual(await h.owned.getOrderForRead(created.orderId));
   });
   it("rejected open does not publish a phantom session or successful audit", async () => {
     const h = fixture();
