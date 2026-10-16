@@ -19,6 +19,7 @@ import { FeatureFlagsController } from "../../../apps/api/src/modules/feature-fl
 import { TenantFeatureFlagsController } from "../../../apps/api/src/modules/feature-flags/tenant-feature-flags.controller";
 import { NotificationsController } from "../../../apps/api/src/modules/audit-notification/notifications.controller";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { getIamActorScopePreset } from "@drts/contracts";
 const { Reflector } = createRequire(resolve("apps/api/package.json"))(
   "@nestjs/core",
 );
@@ -51,7 +52,9 @@ export function principal(
         ? ["tenant:read", "tenant:write"]
         : realm === "platform"
           ? ["foundation:read", "foundation:write"]
-          : ["notifications:read", "notifications:write"]),
+          : realm === "driver"
+            ? [...getIamActorScopePreset("driver_user")]
+            : ["notifications:read", "notifications:write"]),
     authTime: new Date().toISOString(),
     amr: ["mfa"],
     sessionId: `session-${actorId}`,

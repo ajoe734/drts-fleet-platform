@@ -73,7 +73,7 @@ export class PlatformNoticesController {
   }
   @Get("driver/platform-notices")
   @RequireRealms("driver")
-  @RequireScopes("notifications:read")
+  @RequireScopes("driver:read")
   driver(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
@@ -83,7 +83,7 @@ export class PlatformNoticesController {
 
   @Get("driver/platform-notices/notifications")
   @RequireRealms("driver")
-  @RequireScopes("notifications:read")
+  @RequireScopes("driver:read")
   driverNotifications(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
@@ -133,7 +133,7 @@ export class PlatformNoticesController {
   }
   @Post("driver/platform-notices/:noticeId/read")
   @RequireRealms("driver")
-  @RequireScopes("notifications:read")
+  @RequireScopes("driver:read")
   readDriver(
     @Param("noticeId") id: string,
     @Body() command: { outcomeId: string },

@@ -82,7 +82,11 @@ export function noticePrincipal(
   audience: NoticeAudience,
 ) {
   const realm = { ops: "ops", tenants: "tenant", drivers: "driver" }[audience];
-  const scope = audience === "tenants" ? "tenant:read" : "notifications:read";
+  const scope = {
+    tenants: "tenant:read",
+    drivers: "driver:read",
+    ops: "notifications:read",
+  }[audience];
   if (
     !identity?.actorId ||
     identity.realm !== realm ||

@@ -3,6 +3,8 @@ import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname, relative, resolve } from "node:path";
 import ts from "typescript";
+import * as contracts from "@drts/contracts";
+import * as controlPlaneAuth from "@drts/control-plane-auth";
 
 /** Bounded git-object reads for original-before reproduction; no checkout,
  * history rewrite or copied business implementation. Unchanged dependencies
@@ -45,6 +47,11 @@ export function sourceModuleLoader(
     const moduleDirectory = dirname(path);
     function requireSource(id: string): unknown {
       if (Object.hasOwn(mocks, id)) return mocks[id];
+      // Use the real workspace packages through Vitest's source aliases, as
+      // ordinary production imports in these tests do. Native require would
+      // depend on unbuilt dist files in a clean CI checkout.
+      if (id === "@drts/contracts") return contracts;
+      if (id === "@drts/control-plane-auth") return controlPlaneAuth;
       if (id.endsWith(".css")) return {};
       if (id.startsWith("@/"))
         return load(resolve("apps/platform-admin-web", id.slice(2)));

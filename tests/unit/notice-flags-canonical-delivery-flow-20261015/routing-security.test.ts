@@ -2,6 +2,7 @@ import { postNoticeFlagsWithStepUp } from "../../../apps/platform-admin-web/lib/
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { wireHarness, principal } from "./wire-harness";
 import type { RecipientNotice } from "../../../apps/api/src/modules/platform-admin/platform-notice-lifecycle";
+import { getIamActorPolicy } from "@drts/contracts";
 
 beforeEach(() => {
   vi.stubEnv("JWT_SECRET", "notice-unit-secret-at-least-thirty-two-characters");
@@ -21,6 +22,49 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("real guarded commands, wire casing and scoped notification production", () => {
+  it("the canonical driver scope preset permits own notice reads and receipts without global notification read privilege", async () => {
+    const h = wireHarness();
+    const preset = getIamActorPolicy("driver_user");
+    const driverIdentity = principal("driver", "catalogue-driver", "A", [
+      ...preset.scopes,
+    ]);
+    driverIdentity.roles = [...preset.defaultRoles];
+    driverIdentity.roleFamilies = [...preset.roleFamilies];
+    const client = h.client(driverIdentity);
+    const notice = h.service.createPlatformNotice({
+      title: "Canonical driver authorization",
+      body: "Own notice only",
+      severity: "info",
+      targetAudience: "drivers",
+    });
+    const own = (
+      await client.getList<RecipientNotice>("/api/driver/platform-notices")
+    ).find((item) => item.noticeId === notice.noticeId)!;
+    expect(own.outcome.state).toBe("available");
+    const notifications = await client.getList<{ notificationId: string }>(
+      "/api/driver/platform-notices/notifications",
+    );
+    expect(
+      notifications.some(
+        (item) => item.notificationId === own.outcome.notificationId,
+      ),
+    ).toBe(true);
+    const ack = await client.post<{ readAt: string }>(
+      `/api/driver/platform-notices/${notice.noticeId}/read`,
+      {
+        body: { outcomeId: own.outcome.outcomeId },
+      },
+    );
+    expect(ack.readAt).toBeTruthy();
+    await expect(client.listNotifications()).rejects.toThrow();
+    await expect(
+      h
+        .client(
+          principal("driver", "notification-only", "A", ["notifications:read"]),
+        )
+        .getList("/api/driver/platform-notices"),
+    ).rejects.toThrow();
+  });
   it("selected admin A query and typed own-tenant projection use the same flags authority", async () => {
     const h = wireHarness();
     const admin = h.client(principal("platform"));
