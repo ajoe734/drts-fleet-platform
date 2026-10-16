@@ -326,13 +326,6 @@ UNSAFE_PYTHON_ONE_LINER_MARKERS = (
     "socket.",
 )
 
-STATUS_SYNC_BASH_PATTERNS = (
-    re.compile(r"^(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+)\s+)*(?:bash\s+)?tools/development-orchestrator/bin/ai-status\.sh(?:\s|$)"),
-    re.compile(r"^(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+)\s+)*python3\s+tools/development-orchestrator/bin/ai_status\.py(?:\s|$)"),
-    re.compile(r"^cd\s+.+\s+&&\s+(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+)\s+)*python3\s+tools/development-orchestrator/bin/ai_status\.py(?:\s|$)"),
-    re.compile(r"^cd\s+.+\s+&&\s+(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+)\s+)*(?:bash\s+)?tools/development-orchestrator/bin/ai-status\.sh(?:\s|$)"),
-)
-
 SAFE_PYTEST_VERIFY_PATTERNS = (
     re.compile(r"^python3 -m pytest(\s|$)"),
     re.compile(r"^pytest(\s|$)"),
@@ -1004,8 +997,8 @@ def classify_command(shell_command: str, *, _depth: int = 0) -> str:
     # like, if a program arrives through a pipe then nothing here has seen it.
     if _pipes_program_into_interpreter(shell_command):
         return "defer"
-    if _is_safe_status_sync_command(shell_command):
-        return "allow"
+    if _mentions_status_cli(shell_command):
+        return _classify_status_command(shell_command, _depth=_depth)
     if _is_safe_python_one_liner(shell_command):
         return "allow"
     if _is_safe_test_dependency_install_command(shell_command):
@@ -1111,39 +1104,180 @@ def _requires_review_dependency_command(shell_command: str) -> bool:
     return False
 
 
-def _is_safe_status_sync_command(shell_command: str) -> bool:
-    command = _normalize_shell_command(shell_command)
-    try:
-        parts = shlex.split(command)
-    except ValueError:
-        return any(pattern.search(command) for pattern in STATUS_SYNC_BASH_PATTERNS)
-    if "&&" in parts:
-        try:
-            amp_index = parts.index("&&")
-        except ValueError:
-            amp_index = -1
-        if amp_index == 2 and parts[0] == "cd":
-            cd_target = parts[1]
-            if not _paths_within_workspace([Path(cd_target)]):
-                return False
-            parts = parts[amp_index + 1 :]
+# This is a routing predicate, never a trust predicate. In particular a fake
+# status script must not fall through to the broad Python/Bash allow patterns.
+_STATUS_CLI_MENTION = re.compile(r"(?:ai-status\.sh|ai_status\.py)(?![A-Za-z0-9_.-])")
+
+
+def _mentions_status_cli(command: str) -> bool:
+    return bool(_STATUS_CLI_MENTION.search(command))
+
+
+def _visible_status_shell(command: str) -> str | None:
+    """Keep real separators, refuse expansions, and preserve literal arguments.
+
+    The general normalizer folds newlines, and its splitter treats double quoted
+    substitutions as opaque text. Neither is sufficient for granting a status
+    invocation. Single quoted JSON and escaped/double quoted literal text remain
+    inert. This stricter scan is confined to commands mentioning the status CLI.
+    """
+    command = command.replace("\r\n", "\n").replace("\\\n", "")
+    result: list[str] = []
+    quote: str | None = None
     index = 0
-    while index < len(parts) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=.*$", parts[index]):
+    while index < len(command):
+        char = command[index]
+        if quote == "'":
+            result.append(char)
+            if char == quote:
+                quote = None
+        elif char == "\\" and index + 1 < len(command):
+            result.append(command[index:index + 2])
+            index += 1
+        elif char in ("$", "`"):
+            return None
+        elif quote == '"':
+            result.append(char)
+            if char == quote:
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+            result.append(char)
+        elif char in "()<{}*?[]~":
+            # Includes process substitution, input/heredoc programs, grouping,
+            # globbing and brace/tilde expansion. No unseen program/path grants.
+            return None
+        elif char == "#" and (index == 0 or command[index - 1].isspace()):
+            newline = command.find("\n", index)
+            if newline < 0:
+                break
+            index = newline - 1
+        else:
+            result.append(";" if char == "\n" else char)
         index += 1
-    if index >= len(parts):
+    return None if quote else "".join(result).strip()
+
+
+def _matches_status_script(path_token: str, name: str, cwd: Path) -> bool:
+    """Only canonical source or the peer of this actually loaded release.
+
+    Runtime discovery never consults a caller-supplied release name, a glob of
+    installed releases, or a status-root script. Both lexical and resolved paths
+    must match so an escaping symlink cannot inherit canonical/bundle authority.
+    """
+    canonical = workspace_root()
+    expected = [canonical / "tools" / "development-orchestrator" / "bin" / name]
+    release = THIS_DIR.parent.parent
+    if (release.parent == canonical / ".artifacts" / "releases"
+            and THIS_DIR == release / "tools" / "development-orchestrator"):
+        expected.append(THIS_DIR / "bin" / name)
+    candidate = Path(os.path.abspath(cwd / path_token))
+    try:
+        return any(candidate == path and path.resolve(strict=True) == path
+                   and path.is_file() for path in expected)
+    except (OSError, RuntimeError):
         return False
+
+
+def _is_safe_status_sync_command(shell_command: str, *, cwd: Path | None = None) -> bool:
+    """Recognize one complete literal invocation; lifecycle authority stays native."""
+    visible = _visible_status_shell(shell_command)
+    if visible is None:
+        return False
+    segments = _split_shell_segments(visible)
+    if segments is None or len(segments) != 1:
+        return False
+    try:
+        lexer = shlex.shlex(visible, posix=True, punctuation_chars=";&|<>")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        parts = list(lexer)
+    except ValueError:
+        return False
+    # Validate all redirections, including adjacent fd forms the general
+    # redirection regex does not see (e.g. 2>/etc/file). Input is refused above.
+    redirect_operands: set[int] = set()
+    for index, token in enumerate(parts):
+        if index in redirect_operands:
+            continue
+        if token in {">", ">>", ">&"}:
+            if index + 1 == len(parts):
+                return False
+            target = parts[index + 1]
+            redirect_operands.update((index, index + 1))
+            if token == ">&":
+                if not target.isdigit():
+                    return False
+            elif _writes_outside_workspace("> " + shlex.quote(str((cwd or worker_cwd()) / target))):
+                return False
+        elif token and all(char in ";&|<>" for char in token):
+            return False
+    operands = [part for index, part in enumerate(parts) if index not in redirect_operands]
+    if _reads_outside_workspace(shlex.join(operands)):
+        return False
+    index = 0
+    if parts and parts[0] == "env":
+        index += 1
+        if index < len(parts) and parts[index] == "--":
+            index += 1
+    while index < len(parts) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", parts[index]):
+        name = parts[index].split("=", 1)[0]
+        # These are execution/fence overrides, not inert lifecycle arguments.
+        if (name in {"PATH", "BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS",
+                     "ORCH_RUN_ID", "ORCH_STATUS_ROOT", "AI_STATUS_ROOT",
+                     "ORCH_CANONICAL_ROOT", "ORCH_WORKSPACE_ROOT"}
+                or name.startswith(("LD_", "PYTHON", "ORCH_DISPATCH_"))):
+            return False
+        index += 1
     remaining = parts[index:]
-    if len(remaining) >= 2 and remaining[0] == "python3" and (
-        remaining[1] == "tools/development-orchestrator/bin/ai_status.py" or _matches_workspace_script(remaining[1], "tools/development-orchestrator/bin/ai_status.py")
-    ):
-        return True
-    if len(remaining) >= 2 and remaining[0] == "bash" and (
-        remaining[1] == "tools/development-orchestrator/bin/ai-status.sh" or _matches_workspace_script(remaining[1], "tools/development-orchestrator/bin/ai-status.sh")
-    ):
-        return True
-    if remaining[0] == "tools/development-orchestrator/bin/ai-status.sh" or _matches_workspace_script(remaining[0], "tools/development-orchestrator/bin/ai-status.sh"):
-        return True
-    return any(pattern.search(command) for pattern in STATUS_SYNC_BASH_PATTERNS)
+    if not remaining:
+        return False
+    name = "ai-status.sh"
+    if remaining[0] in {"python3", "bash"}:
+        name = "ai_status.py" if remaining[0] == "python3" else name
+        remaining = remaining[1:]
+    return bool(remaining and _matches_status_script(remaining[0], name, cwd or worker_cwd()))
+
+
+def _classify_status_command(shell_command: str, *, _depth: int) -> str:
+    """Apply the original shell guards to the entire status command composition."""
+    command = _visible_status_shell(shell_command)
+    if command is None:
+        return "defer"
+    segments = _split_shell_segments(command)
+    if not segments:
+        return "defer"
+    for segment in segments:
+        for form in _segment_forms(segment):
+            if any(pattern.search(form) for pattern in DENY_BASH_PATTERNS):
+                return "deny"
+    if _moves_head_in_the_canonical_checkout(command):
+        return "defer"
+    cwd = worker_cwd()
+    # Support one inert cwd wrapper. Other control flow involving cd cannot
+    # establish the cwd of a relative trusted entrypoint statically.
+    if segments[0].startswith("cd "):
+        prefix = command.split("&&", 1)
+        try:
+            tokens = shlex.split(segments[0])
+        except ValueError:
+            return "defer"
+        if (len(prefix) != 2 or prefix[0].strip() != segments[0]
+                or len(tokens) != 2):
+            return "defer"
+        cwd = _resolve_workspace_path(cwd, tokens[1])
+        if not _paths_within_workspace([cwd]):
+            return "defer"
+        segments = segments[1:]
+    for segment in segments:
+        if _writes_outside_workspace(segment):
+            return "defer"
+        if _mentions_status_cli(segment):
+            if not _is_safe_status_sync_command(segment, cwd=cwd):
+                return "defer"
+        elif segment.startswith("cd ") or not _segment_is_safe(segment, _depth=_depth):
+            return "defer"
+    return "allow" if segments else "defer"
 
 
 def _is_safe_workspace_mkdir_command(shell_command: str) -> bool:
