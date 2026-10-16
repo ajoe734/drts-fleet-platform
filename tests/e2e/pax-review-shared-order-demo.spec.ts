@@ -371,9 +371,144 @@ async function submitLostItemForCompletedRide(
     }),
     contentType: "application/json",
   });
+  await completeInternalLostItemCase(ops, info, orderId, caseNo);
   await pax.getByRole("button", { name: "返回行程", exact: true }).click();
   await ops.goto(`${OPS}/review`);
   await readCompletedByOps(ops, orderId);
+}
+
+async function completeInternalLostItemCase(
+  ops: Page,
+  info: TestInfo,
+  orderId: string,
+  caseNo: string,
+) {
+  const assigneeId = "AGENT-OPS-002";
+  const steps = [
+    {
+      action: "assign",
+      label: "指派 / 重新指派",
+      status: "assigned",
+      event: "case_assigned",
+      note: `演練指派：既有示範處理人核對同單 ${orderId}，未通知真人。`,
+    },
+    {
+      action: "resolve",
+      label: "結案處理",
+      status: "resolved",
+      event: "case_resolved",
+      note: "演練處理完成：虛構雨傘案例；沒有真人聯絡或實物返還。",
+    },
+    {
+      action: "close",
+      label: "關閉案件",
+      status: "closed",
+      event: "case_closed",
+      note: "關閉內部演練案件：未致電、未取回實物，不代表真實失物結案。",
+    },
+  ];
+  const expectedEvents = ["case_created", "case_note_added"];
+  const observed = [];
+  for (const step of steps) {
+    await ops
+      .getByTestId("complaint-list-actions")
+      .getByRole("button", { name: step.label, exact: true })
+      .click();
+    if (step.action === "assign") {
+      await ops.getByLabel("負責人 ID", { exact: true }).fill(assigneeId);
+      await ops.getByLabel("指派備註", { exact: true }).fill(step.note);
+    } else {
+      await ops
+        .getByLabel("處理代碼", { exact: true })
+        .selectOption("resolved_other");
+      await ops.getByLabel("結案備註", { exact: true }).fill(step.note);
+    }
+    const write = ops.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/complaints/${caseNo}/${step.action}`) &&
+        response.request().method() === "POST",
+    );
+    await ops.getByRole("button", { name: "確認", exact: true }).click();
+    expect((await write).status()).toBeLessThan(300);
+    // Do not navigate or reload: every action must update this same workspace.
+    await expect(
+      ops
+        .getByTestId("complaint-list-activity")
+        .getByText(step.note, { exact: true }),
+    ).toBeVisible();
+    const read = await ops.request.get(
+      `${OPS}/control-plane-proxy/complaints/${caseNo}`,
+    );
+    expect(read.status()).toBe(200);
+    const record = camel(await read.json()).data;
+    expect(record).toMatchObject({
+      caseNo,
+      relatedOrderId: orderId,
+      assigneeId,
+      status: step.status,
+    });
+    if (step.action !== "assign") {
+      expect(record).toMatchObject({
+        resolutionCode: "resolved_other",
+        closingNote: step.note,
+      });
+    }
+    const timelineResponse = await ops.request.get(
+      `${OPS}/control-plane-proxy/complaints/${caseNo}/timeline`,
+    );
+    expect(timelineResponse.status()).toBe(200);
+    const timeline = camel(await timelineResponse.json()).data.items;
+    expectedEvents.push(step.event);
+    expect(timeline.map((entry: { action: string }) => entry.action)).toEqual(
+      expectedEvents,
+    );
+    expect(timeline.at(-1).note).toBe(step.note);
+    observed.push({ action: step.action, record, timeline });
+  }
+  await expect(
+    ops
+      .getByTestId("complaint-list-actions")
+      .getByRole("button", { name: "新增備註", exact: true }),
+  ).toHaveCount(0);
+  const exportResponse = await ops.request.get(
+    `${OPS}/control-plane-proxy/complaints/${caseNo}/export`,
+  );
+  expect(exportResponse.status()).toBe(200);
+  const exported = camel(await exportResponse.json()).data;
+  expect(exported.readyForAudit).toBe(true);
+  expect(exported.complaintCase).toMatchObject({
+    caseNo,
+    relatedOrderId: orderId,
+    status: "closed",
+  });
+  expect(
+    exported.timeline.map((entry: { action: string }) => entry.action),
+  ).toEqual(expectedEvents);
+  await expect(ops.getByText("可生成審計封包", { exact: true })).toBeVisible();
+  await expect(
+    ops.locator(`a[href="/dispatch?orderId=${orderId}"]`).first(),
+  ).toBeVisible();
+  await info.attach("A-lost-item-internal-case-closed-ops", {
+    body: await ops.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await info.attach("A-lost-item-internal-case-lifecycle-facts", {
+    body: JSON.stringify({
+      orderId,
+      caseNo,
+      observed,
+      finalTimelineActions: expectedEvents,
+      readyForAudit: exported.readyForAudit,
+      samePageWithoutReload: true,
+      internalStatus: "closed",
+      humanContacted: false,
+      physicalItemReturned: false,
+      auditReceiptOrLinkVerified: false,
+      scope:
+        "real ordinary Ops forms and persisted API; external outcome is explicitly fictional",
+    }),
+    contentType: "application/json",
+  });
 }
 
 async function createDispatch(ops: Page, orderId: string) {
