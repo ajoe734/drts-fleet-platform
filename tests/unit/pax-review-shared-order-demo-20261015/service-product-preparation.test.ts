@@ -96,7 +96,9 @@ function productPeers() {
         if (writeError) throw writeError;
         records.set(values[0] as string, JSON.parse(values[11] as string));
       }
-      if (sql.trimStart().startsWith("UPDATE ops.phase1_service_products SET")) {
+      if (
+        sql.trimStart().startsWith("UPDATE ops.phase1_service_products SET")
+      ) {
         writeEntered?.();
         await writeGate;
         if (writeError) throw writeError;
