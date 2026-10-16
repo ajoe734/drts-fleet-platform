@@ -19,9 +19,33 @@ export class FakeUniqueViolationError extends Error {
   }
 }
 
+/**
+ * Real Postgres rejects every statement in a transaction with SQLSTATE
+ * 25P02 ("current transaction is aborted, commands ignored until end of
+ * transaction block") once any earlier statement in that transaction has
+ * failed — until a ROLLBACK or ROLLBACK TO SAVEPOINT clears the aborted
+ * state. A fixture that silently let later statements (e.g. a retry's
+ * re-allocation SELECT) succeed after a failed INSERT would hide exactly
+ * the bug this file exists to catch.
+ */
+export class FakeAbortedTransactionError extends Error {
+  code = "25P02";
+  constructor() {
+    super(
+      "current transaction is aborted, commands ignored until end of transaction block",
+    );
+  }
+}
+
 type QueuedFailure = {
   match: string;
   error: Error;
+};
+
+type Snapshot = {
+  shifts: Map<string, Row>;
+  shiftNos: Set<string>;
+  attendance: Map<string, Row>;
 };
 
 export function createFakeShiftDatabase(seedDriverIds: readonly string[] = []) {
@@ -34,11 +58,29 @@ export function createFakeShiftDatabase(seedDriverIds: readonly string[] = []) {
   // Real transactional semantics, so a mid-transaction failure followed by
   // ROLLBACK actually undoes earlier statements in the same BEGIN block —
   // matching what the repository relies on from real Postgres.
-  let txSnapshot: {
-    shifts: Map<string, Row>;
-    shiftNos: Set<string>;
-    attendance: Map<string, Row>;
-  } | null = null;
+  let txSnapshot: Snapshot | null = null;
+  // Mirrors Postgres's aborted-transaction state: set whenever a statement
+  // fails inside an open transaction, cleared only by ROLLBACK or
+  // ROLLBACK TO SAVEPOINT.
+  let aborted = false;
+  const savepoints = new Map<string, Snapshot>();
+
+  function cloneSnapshot(): Snapshot {
+    return {
+      shifts: new Map(shifts),
+      shiftNos: new Set(shiftNos),
+      attendance: new Map(attendance),
+    };
+  }
+
+  function restoreSnapshot(snapshot: Snapshot) {
+    shifts.clear();
+    for (const [k, v] of snapshot.shifts) shifts.set(k, v);
+    shiftNos.clear();
+    for (const v of snapshot.shiftNos) shiftNos.add(v);
+    attendance.clear();
+    for (const [k, v] of snapshot.attendance) attendance.set(k, v);
+  }
 
   function normalize(sql: string) {
     return sql.replace(/\s+/g, " ").trim();
@@ -65,39 +107,81 @@ export function createFakeShiftDatabase(seedDriverIds: readonly string[] = []) {
   ): Promise<{ rows: Row[] }> {
     const text = normalize(sql);
 
-    const queuedError = takeQueuedFailure(text);
-    if (queuedError) {
-      throw queuedError;
-    }
-
     if (text === "BEGIN") {
-      txSnapshot = {
-        shifts: new Map(shifts),
-        shiftNos: new Set(shiftNos),
-        attendance: new Map(attendance),
-      };
+      txSnapshot = cloneSnapshot();
+      aborted = false;
+      savepoints.clear();
       return { rows: [] };
     }
 
     if (text === "COMMIT") {
+      if (aborted) {
+        // Real Postgres implicitly rolls back and errors a COMMIT issued
+        // against an already-aborted transaction.
+        if (txSnapshot) restoreSnapshot(txSnapshot);
+        txSnapshot = null;
+        aborted = false;
+        savepoints.clear();
+        throw new FakeAbortedTransactionError();
+      }
       txSnapshot = null;
+      savepoints.clear();
       return { rows: [] };
     }
 
     if (text === "ROLLBACK") {
       if (txSnapshot) {
-        const snapshot = txSnapshot;
-        shifts.clear();
-        for (const [k, v] of snapshot.shifts) shifts.set(k, v);
-        shiftNos.clear();
-        for (const v of snapshot.shiftNos) shiftNos.add(v);
-        attendance.clear();
-        for (const [k, v] of snapshot.attendance) attendance.set(k, v);
+        restoreSnapshot(txSnapshot);
         txSnapshot = null;
       }
+      aborted = false;
+      savepoints.clear();
       return { rows: [] };
     }
 
+    if (text.startsWith("SAVEPOINT ")) {
+      if (aborted) {
+        throw new FakeAbortedTransactionError();
+      }
+      const name = text.slice("SAVEPOINT ".length).trim();
+      savepoints.set(name, cloneSnapshot());
+      return { rows: [] };
+    }
+
+    if (text.startsWith("ROLLBACK TO SAVEPOINT ")) {
+      const name = text.slice("ROLLBACK TO SAVEPOINT ".length).trim();
+      const snapshot = savepoints.get(name);
+      if (snapshot) {
+        restoreSnapshot(snapshot);
+      }
+      aborted = false;
+      return { rows: [] };
+    }
+
+    if (aborted) {
+      throw new FakeAbortedTransactionError();
+    }
+
+    const queuedError = takeQueuedFailure(text);
+    if (queuedError) {
+      if (txSnapshot) aborted = true;
+      throw queuedError;
+    }
+
+    try {
+      return executeStatement(text, params);
+    } catch (error) {
+      if (txSnapshot) {
+        aborted = true;
+      }
+      throw error;
+    }
+  }
+
+  function executeStatement(
+    text: string,
+    params: readonly unknown[],
+  ): { rows: Row[] } {
     if (text.includes("FROM reg.phase1_registry_drivers")) {
       const driverId = param(params, 0);
       return { rows: drivers.has(driverId) ? [{ driver_id: driverId }] : [] };

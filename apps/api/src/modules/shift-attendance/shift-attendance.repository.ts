@@ -264,6 +264,7 @@ export class ShiftAttendanceRepository {
       let shift = await verifyEligibilityAndBuildShift();
 
       for (let attempt = 0; ; attempt += 1) {
+        await client.query("SAVEPOINT shift_insert_attempt");
         try {
           await client.query(
             `
@@ -294,10 +295,15 @@ export class ShiftAttendanceRepository {
           ) {
             // Two distinct, otherwise-valid clock-in commands derived the
             // same shift_id/shift_no (e.g. two processes started with the
-            // same persisted-state snapshot). Re-derive a fresh id from the
-            // canonical table — by now the colliding row is either
-            // committed (visible to this query) or gone — and retry instead
-            // of failing the command.
+            // same persisted-state snapshot). The failed INSERT has left the
+            // surrounding transaction aborted (Postgres rejects every later
+            // statement with 25P02 until a ROLLBACK), so first roll back to
+            // the savepoint taken before this attempt to restore a usable
+            // transaction, then re-derive a fresh id from the canonical
+            // table — by now the colliding row is either committed (visible
+            // to this query) or gone — and retry instead of failing the
+            // command.
+            await client.query("ROLLBACK TO SAVEPOINT shift_insert_attempt");
             shift = { ...shift, shiftId: await this.allocateNextShiftId(client) };
             continue;
           }
@@ -391,6 +397,7 @@ export class ShiftAttendanceRepository {
       );
 
       for (let attempt = 0; ; attempt += 1) {
+        await client.query("SAVEPOINT attendance_insert_attempt");
         try {
           await client.query(
             `
@@ -417,7 +424,12 @@ export class ShiftAttendanceRepository {
             attempt < MAX_ID_ALLOCATION_ATTEMPTS
           ) {
             // Same collision-safety as the shift id above, applied to the
-            // attendance id derived by the same clock-out call.
+            // attendance id derived by the same clock-out call. Roll back to
+            // the savepoint first so the aborted INSERT doesn't leave the
+            // transaction rejecting the re-allocation query with 25P02.
+            await client.query(
+              "ROLLBACK TO SAVEPOINT attendance_insert_attempt",
+            );
             attendance = {
               ...attendance,
               attendanceId: await this.allocateNextAttendanceId(client),

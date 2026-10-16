@@ -147,6 +147,32 @@ describe("C051-F2: collision-safe shift id allocation", () => {
     expect(await instance.service.listShifts("drv-col-005")).toHaveLength(0);
   });
 
+  it("re-derives the id after a collision without the surrounding transaction going aborted (SQLSTATE 25P02)", async () => {
+    // Real Postgres aborts the whole transaction after any statement fails
+    // (e.g. the unique-violation INSERT below) and rejects every later
+    // statement with 25P02 until a ROLLBACK or ROLLBACK TO SAVEPOINT is
+    // issued. `fake-shift-db.ts` reproduces that: once a statement fails
+    // inside BEGIN...COMMIT, the next statement throws
+    // `FakeAbortedTransactionError` (code 25P02) unless the retry loop
+    // first rolls back to its savepoint. If the repository ever drops the
+    // SAVEPOINT/ROLLBACK TO SAVEPOINT around the retry, the re-allocation
+    // SELECT below fails with 25P02 instead of returning a fresh id, and
+    // this clock-in rejects instead of succeeding.
+    const db = createFakeShiftDatabase(["drv-col-007", "drv-col-008"]);
+    db.seedShift({
+      shiftId: "SFT-000001",
+      driverId: "drv-col-007",
+      status: "completed",
+      record: { shiftId: "SFT-000001" },
+    });
+
+    const instance = createInstance(db);
+    const shift = await instance.service.clockIn({ driverId: "drv-col-008" });
+
+    expect(shift.shiftId).not.toBe("SFT-000001");
+    expect(shift.shiftId).toMatch(/^SFT-\d{6}$/);
+  });
+
   it("atomically rolls back the shift update if the attendance insert cannot be committed", async () => {
     const db = createFakeShiftDatabase(["drv-col-006"]);
     const instance = createInstance(db);
