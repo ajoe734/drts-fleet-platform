@@ -1263,6 +1263,251 @@ describe("ServiceAreaService", () => {
         radiusMeters: 1000,
       });
     });
+
+    it("rejects an outer ring with a duplicate consecutive vertex (zero-length edge)", async () => {
+      const { service, context } = createMutationService();
+
+      try {
+        await service.createServiceArea(
+          {
+            areaCode: "KHH_BAD_DUP_VERTEX",
+            displayName: "Bad duplicate vertex",
+            geometry: {
+              type: "polygon",
+              coordinates: [
+                { lat: 25.0, lng: 121.5 },
+                { lat: 25.0, lng: 121.5 },
+                { lat: 25.1, lng: 121.6 },
+                { lat: 25.0, lng: 121.6 },
+              ],
+            },
+            serviceProductTypes: ["taxi_realtime"],
+          },
+          context,
+        );
+        expect.unreachable("expected duplicate consecutive vertex to be rejected");
+      } catch (error) {
+        expect((error as ApiRequestError).getResponse()).toMatchObject({
+          error: { code: "INVALID_GEOMETRY" },
+        });
+      }
+    });
+
+    it("rejects an outer ring that pinches at two non-adjacent vertices", async () => {
+      const { service, context } = createMutationService();
+
+      try {
+        // P1 and P3 coincide; they are non-adjacent in this 5-vertex ring,
+        // so the path crosses back through the same point without sharing
+        // an edge.
+        await service.createServiceArea(
+          {
+            areaCode: "KHH_BAD_PINCH",
+            displayName: "Bad pinch",
+            geometry: {
+              type: "polygon",
+              coordinates: [
+                { lat: 25.0, lng: 121.5 },
+                { lat: 25.05, lng: 121.52 },
+                { lat: 25.0, lng: 121.54 },
+                { lat: 25.05, lng: 121.52 },
+                { lat: 25.05, lng: 121.48 },
+              ],
+            },
+            serviceProductTypes: ["taxi_realtime"],
+          },
+          context,
+        );
+        expect.unreachable("expected a pinched ring to be rejected");
+      } catch (error) {
+        expect((error as ApiRequestError).getResponse()).toMatchObject({
+          error: { code: "INVALID_GEOMETRY_SELF_INTERSECTION" },
+        });
+      }
+    });
+
+    it("rejects an outer ring with an adjacent 180-degree foldback (spike)", async () => {
+      const { service, context } = createMutationService();
+
+      try {
+        // P1 is the spike tip; P2 sits on the segment between P0 and P1, so
+        // the path folds straight back on itself at P1 instead of turning.
+        await service.createServiceArea(
+          {
+            areaCode: "KHH_BAD_FOLDBACK",
+            displayName: "Bad foldback",
+            geometry: {
+              type: "polygon",
+              coordinates: [
+                { lat: 25.0, lng: 121.5 },
+                { lat: 25.1, lng: 121.5 },
+                { lat: 25.05, lng: 121.5 },
+                { lat: 25.05, lng: 121.6 },
+              ],
+            },
+            serviceProductTypes: ["taxi_realtime"],
+          },
+          context,
+        );
+        expect.unreachable("expected a foldback ring to be rejected");
+      } catch (error) {
+        expect((error as ApiRequestError).getResponse()).toMatchObject({
+          error: { code: "INVALID_GEOMETRY_SELF_INTERSECTION" },
+        });
+      }
+    });
+
+    it("rejects an outer ring where two non-adjacent edges touch without crossing", async () => {
+      const { service, context } = createMutationService();
+
+      try {
+        // P4 lands exactly on the interior of edge P0-P1 (a T-junction): the
+        // two edges touch at one point but never cross.
+        await service.createServiceArea(
+          {
+            areaCode: "KHH_BAD_EDGE_TOUCH",
+            displayName: "Bad edge touch",
+            geometry: {
+              type: "polygon",
+              coordinates: [
+                { lat: 25.0, lng: 121.5 },
+                { lat: 25.0, lng: 121.7 },
+                { lat: 25.05, lng: 121.7 },
+                { lat: 25.05, lng: 121.55 },
+                { lat: 25.0, lng: 121.6 },
+                { lat: 25.02, lng: 121.5 },
+              ],
+            },
+            serviceProductTypes: ["taxi_realtime"],
+          },
+          context,
+        );
+        expect.unreachable("expected a touching (non-crossing) ring to be rejected");
+      } catch (error) {
+        expect((error as ApiRequestError).getResponse()).toMatchObject({
+          error: { code: "INVALID_GEOMETRY_SELF_INTERSECTION" },
+        });
+      }
+    });
+
+    it("rejects two holes that merely touch at a shared boundary point (distinct from crossing or nesting)", async () => {
+      const { service, context } = createMutationService();
+      const outer = [
+        { lat: 22.58, lng: 120.25 },
+        { lat: 22.58, lng: 120.35 },
+        { lat: 22.68, lng: 120.35 },
+        { lat: 22.68, lng: 120.25 },
+      ];
+      const hole1 = [
+        { lat: 22.61, lng: 120.28 },
+        { lat: 22.61, lng: 120.32 },
+        { lat: 22.65, lng: 120.32 },
+        { lat: 22.65, lng: 120.28 },
+      ];
+      // hole2 shares exactly the (22.65, 120.32) corner with hole1.
+      const hole2 = [
+        { lat: 22.65, lng: 120.32 },
+        { lat: 22.65, lng: 120.34 },
+        { lat: 22.67, lng: 120.34 },
+        { lat: 22.67, lng: 120.32 },
+      ];
+
+      try {
+        await service.createServiceArea(
+          {
+            areaCode: "KHH_BAD_HOLE_TOUCH",
+            displayName: "Bad touching holes",
+            geometry: { type: "polygon", coordinates: outer, holes: [hole1, hole2] },
+            serviceProductTypes: ["taxi_realtime"],
+          },
+          context,
+        );
+        expect.unreachable("expected touching holes to be rejected");
+      } catch (error) {
+        expect((error as ApiRequestError).getResponse()).toMatchObject({
+          error: { code: "INVALID_GEOMETRY_HOLE_OVERLAP" },
+        });
+      }
+    });
+
+    it("rejects a hole nested entirely inside another hole", async () => {
+      const { service, context } = createMutationService();
+      const outer = [
+        { lat: 22.58, lng: 120.25 },
+        { lat: 22.58, lng: 120.35 },
+        { lat: 22.68, lng: 120.35 },
+        { lat: 22.68, lng: 120.25 },
+      ];
+      const outerHole = [
+        { lat: 22.61, lng: 120.28 },
+        { lat: 22.61, lng: 120.32 },
+        { lat: 22.65, lng: 120.32 },
+        { lat: 22.65, lng: 120.28 },
+      ];
+      // innerHole is fully inside outerHole, not merely overlapping it.
+      const innerHole = [
+        { lat: 22.62, lng: 120.29 },
+        { lat: 22.62, lng: 120.31 },
+        { lat: 22.64, lng: 120.31 },
+        { lat: 22.64, lng: 120.29 },
+      ];
+
+      try {
+        await service.createServiceArea(
+          {
+            areaCode: "KHH_BAD_HOLE_NESTED",
+            displayName: "Bad nested holes",
+            geometry: {
+              type: "polygon",
+              coordinates: outer,
+              holes: [outerHole, innerHole],
+            },
+            serviceProductTypes: ["taxi_realtime"],
+          },
+          context,
+        );
+        expect.unreachable("expected a nested hole to be rejected");
+      } catch (error) {
+        expect((error as ApiRequestError).getResponse()).toMatchObject({
+          error: { code: "INVALID_GEOMETRY_HOLE_OVERLAP" },
+        });
+      }
+    });
+
+    it("accepts two holes that are genuinely disjoint (not touching, not nested)", async () => {
+      const { service, context } = createMutationService();
+      const outer = [
+        { lat: 22.58, lng: 120.25 },
+        { lat: 22.58, lng: 120.35 },
+        { lat: 22.68, lng: 120.35 },
+        { lat: 22.68, lng: 120.25 },
+      ];
+      const hole1 = [
+        { lat: 22.61, lng: 120.28 },
+        { lat: 22.61, lng: 120.32 },
+        { lat: 22.65, lng: 120.32 },
+        { lat: 22.65, lng: 120.28 },
+      ];
+      const hole2 = [
+        { lat: 22.59, lng: 120.26 },
+        { lat: 22.59, lng: 120.27 },
+        { lat: 22.6, lng: 120.27 },
+        { lat: 22.6, lng: 120.26 },
+      ];
+
+      const created = await service.createServiceArea(
+        {
+          areaCode: "KHH_GOOD_DISJOINT_HOLES",
+          displayName: "Good disjoint holes",
+          geometry: { type: "polygon", coordinates: outer, holes: [hole1, hole2] },
+          serviceProductTypes: ["taxi_realtime"],
+        },
+        context,
+      );
+      expect(created.record.geometry).toMatchObject({
+        holes: [hole1, hole2],
+      });
+    });
   });
 
   describe("polygon holes: seed-isolated evaluation matrix (HOLE-EVAL-1..7)", () => {
@@ -1375,7 +1620,32 @@ describe("ServiceAreaService", () => {
         geometryVersionRefs: [],
       });
 
-      // HOLE-EVAL-4 (hole-edge: bottom edge + top-left vertex of the hole are serviceable)
+      // HOLE-EVAL-4 (hole-edge/vertex: all four edge midpoints and all four
+      // vertices of the hole boundary are serviceable, not just one sample
+      // of each).
+      const holeBoundaryPoints = [
+        { label: "bottom edge midpoint", lat: 22.61, lng: 120.3 },
+        { label: "right edge midpoint", lat: 22.63, lng: 120.32 },
+        { label: "top edge midpoint", lat: 22.65, lng: 120.3 },
+        { label: "left edge midpoint", lat: 22.63, lng: 120.28 },
+        { label: "bottom-left vertex", lat: 22.61, lng: 120.28 },
+        { label: "bottom-right vertex", lat: 22.61, lng: 120.32 },
+        { label: "top-right vertex", lat: 22.65, lng: 120.32 },
+        { label: "top-left vertex", lat: 22.65, lng: 120.28 },
+      ];
+      for (const point of holeBoundaryPoints) {
+        const result = service.evaluate({
+          serviceProductType: "taxi_realtime",
+          pickup: { lat: point.lat, lng: point.lng },
+          dropoff: null,
+          requestedAt: FIXED_REQUESTED_AT,
+        });
+        expect(result, point.label).toMatchObject({
+          decision: "serviceable",
+          serviceAreaCodes: ["KHH_DONUT_CORE"],
+          geometryVersionRefs: ["service_area:KHH_DONUT_CORE@1"],
+        });
+      }
       const holeEdge = service.evaluate({
         serviceProductType: "taxi_realtime",
         pickup: { lat: 22.61, lng: 120.3 },
@@ -1528,6 +1798,78 @@ describe("ServiceAreaService", () => {
         policyCodes: [],
         geometryVersionRefs: ["service_area:KHH_DONUT_CORE@1"],
       });
+    });
+
+    it("records observability outOfArea for a hole-inside pickup, distinct from policyDenial for a policy-denied pickup", async () => {
+      const observability = new MapGeofenceObservabilityService();
+      const { service, context } = createMutationService({}, observability);
+      await publishKhhDonutCore(service, context);
+
+      const policy = await service.createStopPolicy(
+        {
+          policyCode: "KHH_CURB_RESTRICT",
+          displayName: "Kaohsiung curb restriction",
+          direction: "pickup",
+          effect: "deny",
+          geometry: {
+            type: "polygon",
+            coordinates: [
+              { lat: 22.66, lng: 120.26 },
+              { lat: 22.66, lng: 120.28 },
+              { lat: 22.67, lng: 120.28 },
+              { lat: 22.67, lng: 120.26 },
+            ],
+          },
+          serviceAreaCodes: ["KHH_DONUT_CORE"],
+          serviceProductTypes: ["taxi_realtime"],
+          reasonCode: "KHH_CURB_RESTRICTED",
+          reasonMessage: "Curb pickup is restricted here.",
+          effectiveFrom: "2026-06-01T00:00:00.000Z",
+        },
+        context,
+      );
+      await service.submitStopPolicyForReview(policy.record.stopPolicyId, context);
+      await service.publishStopPolicy(
+        policy.record.stopPolicyId,
+        { effectiveFrom: "2026-06-01T00:00:00.000Z", reason: "activate curb restriction" },
+        context,
+      );
+
+      const beforeOutOfArea = observability.getSnapshot().serviceArea.outOfAreaCount;
+      const beforePolicyDenial =
+        observability.getSnapshot().serviceArea.policyDenialCount;
+
+      // Geometric exclusion: pickup is inside the donut hole, no policy involved.
+      const holeResult = service.evaluate({
+        serviceProductType: "taxi_realtime",
+        pickup: { lat: 22.63, lng: 120.3 },
+        dropoff: null,
+        requestedAt: FIXED_REQUESTED_AT,
+      });
+      expect(holeResult.decision).toBe("not_serviceable");
+      expect(holeResult.reasonCodes).toEqual(["PICKUP_AREA_NOT_SERVICEABLE"]);
+      expect(observability.getSnapshot().serviceArea.outOfAreaCount).toBe(
+        beforeOutOfArea + 1,
+      );
+      expect(observability.getSnapshot().serviceArea.policyDenialCount).toBe(
+        beforePolicyDenial,
+      );
+
+      // Policy exclusion: pickup is inside the outer ring and within a deny policy.
+      const policyResult = service.evaluate({
+        serviceProductType: "taxi_realtime",
+        pickup: { lat: 22.665, lng: 120.27 },
+        dropoff: null,
+        requestedAt: FIXED_REQUESTED_AT,
+      });
+      expect(policyResult.decision).toBe("not_serviceable");
+      expect(policyResult.reasonCodes).toEqual(["KHH_CURB_RESTRICTED"]);
+      expect(observability.getSnapshot().serviceArea.outOfAreaCount).toBe(
+        beforeOutOfArea + 1,
+      );
+      expect(observability.getSnapshot().serviceArea.policyDenialCount).toBe(
+        beforePolicyDenial + 1,
+      );
     });
   });
 });

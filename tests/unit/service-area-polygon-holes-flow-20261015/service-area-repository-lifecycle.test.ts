@@ -62,14 +62,21 @@ function createMockDatabaseService() {
   };
 }
 
-function lastInsertParams(
+function lastInsertCall(
   query: ReturnType<typeof vi.fn>,
   table: "ops.service_area_boundaries" | "ops.stop_policies",
 ) {
   const calls = query.mock.calls.filter(([sql]: [string]) =>
     sql.includes(`INSERT INTO ${table}`),
   );
-  return calls[calls.length - 1]![1] as unknown[];
+  return calls[calls.length - 1]! as [string, unknown[]];
+}
+
+function lastInsertParams(
+  query: ReturnType<typeof vi.fn>,
+  table: "ops.service_area_boundaries" | "ops.stop_policies",
+) {
+  return lastInsertCall(query, table)[1];
 }
 
 const KHH_DONUT_OUTER = [
@@ -119,10 +126,46 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
       context,
     );
 
-    const createParams = lastInsertParams(query, "ops.service_area_boundaries");
+    const [createSql, createParams] = lastInsertCall(
+      query,
+      "ops.service_area_boundaries",
+    );
+    // Area geometry is bound as $5 and wrapped in ST_Multi (MultiPolygon
+    // column), unlike stop-policy geometry ($7, plain Polygon, no ST_Multi).
+    expect(createSql).toContain("ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($5)");
     expect(createParams[3]).toBe("draft"); // $4
     const createdGeoJson = JSON.parse(createParams[4] as string); // $5
-    expect(createdGeoJson.coordinates).toHaveLength(2);
+    expect(createdGeoJson).toEqual({
+      type: "Polygon",
+      coordinates: [
+        [
+          [120.25, 22.58],
+          [120.35, 22.58],
+          [120.35, 22.68],
+          [120.25, 22.68],
+          [120.25, 22.58],
+        ],
+        [
+          [120.28, 22.61],
+          [120.28, 22.65],
+          [120.32, 22.65],
+          [120.32, 22.61],
+          [120.28, 22.61],
+        ],
+      ],
+    });
+    const createdRecord = JSON.parse(createParams[10] as string); // $11
+    expect(createdRecord).toMatchObject({
+      serviceAreaId: created.record.serviceAreaId,
+      areaCode: "KHH_DONUT_CORE",
+      status: "draft",
+      version: 1,
+      geometry: {
+        type: "polygon",
+        coordinates: KHH_DONUT_OUTER,
+        holes: [KHH_DONUT_HOLE],
+      },
+    });
 
     expect(
       writerService
@@ -270,6 +313,44 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
         requestedAt: FIXED_REQUESTED_AT.toISOString(),
       }),
     ).toMatchObject({ decision: "not_serviceable", serviceAreaCodes: [] });
+    // HOLE-EVAL-3: outer-boundary (on the outer ring's edge, not interior)
+    expect(
+      freshAreaService.evaluate({
+        serviceProductType: "taxi_realtime",
+        pickup: { lat: 22.58, lng: 120.3 },
+        dropoff: null,
+        requestedAt: FIXED_REQUESTED_AT.toISOString(),
+      }),
+    ).toMatchObject({
+      decision: "serviceable",
+      serviceAreaCodes: ["KHH_DONUT_CORE"],
+    });
+    // HOLE-EVAL-6: a real (non-null) dropoff landing inside the hole gets
+    // the exact uncovered-leg reason and empty area/policy/version refs,
+    // while the pickup leg (outer-interior) retains its own legitimate refs.
+    const mixedLegResult = freshAreaService.evaluate({
+      serviceProductType: "taxi_realtime",
+      pickup: { lat: 22.595, lng: 120.265 },
+      dropoff: { lat: 22.63, lng: 120.3 },
+      requestedAt: FIXED_REQUESTED_AT.toISOString(),
+    });
+    expect(mixedLegResult.decision).toBe("not_serviceable");
+    expect(mixedLegResult.stops).toEqual([
+      expect.objectContaining({
+        kind: "pickup",
+        decision: "serviceable",
+        serviceAreaCodes: ["KHH_DONUT_CORE"],
+        geometryVersionRefs: ["service_area:KHH_DONUT_CORE@1"],
+        reasonCodes: [],
+      }),
+      expect.objectContaining({
+        kind: "dropoff",
+        decision: "not_serviceable",
+        serviceAreaCodes: [],
+        geometryVersionRefs: [],
+        reasonCodes: ["DROPOFF_AREA_NOT_SERVICEABLE"],
+      }),
+    ]);
 
     const adminFeature = freshAreaService
       .exportGeoJson()
@@ -339,10 +420,44 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
       },
       context,
     );
-    const policyInsertParams = lastInsertParams(query, "ops.stop_policies");
+    const [policyInsertSql, policyInsertParams] = lastInsertCall(
+      query,
+      "ops.stop_policies",
+    );
+    // Stop-policy geometry is bound as $7, a plain Polygon column with no
+    // ST_Multi wrapper, unlike service-area geometry ($5, ST_Multi).
+    expect(policyInsertSql).toContain("ST_SetSRID(ST_GeomFromGeoJSON($7)");
+    expect(policyInsertSql).not.toContain("ST_Multi");
     expect(policyInsertParams[3]).toBe("active");
     const policyGeoJson = JSON.parse(policyInsertParams[6] as string); // $7
-    expect(policyGeoJson.coordinates).toHaveLength(2);
+    expect(policyGeoJson).toEqual({
+      type: "Polygon",
+      coordinates: [
+        [
+          [120.26, 22.66],
+          [120.275, 22.66],
+          [120.275, 22.675],
+          [120.26, 22.675],
+          [120.26, 22.66],
+        ],
+        [
+          [120.265, 22.665],
+          [120.265, 22.67],
+          [120.27, 22.67],
+          [120.27, 22.665],
+          [120.265, 22.665],
+        ],
+      ],
+    });
+    const policyRecord = JSON.parse(policyInsertParams[15] as string); // $16
+    expect(policyRecord).toMatchObject({
+      stopPolicyId: policy.record.stopPolicyId,
+      policyCode: "KHH_CURB_DONUT_POLICY",
+      status: "active",
+      version: 1,
+      serviceAreaCodes: ["KHH_DONUT_CORE"],
+      reasonCode: "KHH_CURB_RESTRICTED",
+    });
 
     const freshPolicyService = new ServiceAreaService(
       new ServiceAreaRepository(databaseService),

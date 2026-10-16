@@ -1,8 +1,11 @@
+// @vitest-environment jsdom
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  GeometryEditor,
   GeometryPreviewSurface,
   buildCanvasTheme,
   buildGeometryEditorSnapshot,
@@ -11,7 +14,58 @@ import {
   parseGeometryDraftGeoJson,
   validateGeometryDraft,
   type GeometryDraft,
+  type GeometryEditorSnapshot,
 } from "../../src/index";
+
+afterEach(() => {
+  cleanup();
+});
+
+const STAGE_WIDTH = 640;
+const STAGE_HEIGHT = 380;
+
+function stubStageRect(container: HTMLElement) {
+  const svg = container.querySelector(
+    `svg[viewBox="0 0 ${STAGE_WIDTH} ${STAGE_HEIGHT}"]`,
+  );
+  if (!svg) {
+    throw new Error("GeometryEditor stage <svg> not found.");
+  }
+  svg.getBoundingClientRect = () =>
+    ({
+      left: 0,
+      top: 0,
+      right: STAGE_WIDTH,
+      bottom: STAGE_HEIGHT,
+      width: STAGE_WIDTH,
+      height: STAGE_HEIGHT,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }) as DOMRect;
+  return svg;
+}
+
+function getVertexHandle(container: HTMLElement, index: number): Element {
+  const handle = container.querySelector(`rect[data-vertex-index="${index}"]`);
+  if (!handle) {
+    throw new Error(`Vertex handle ${index} not found.`);
+  }
+  return handle;
+}
+
+function getNumberFieldInput(container: HTMLElement, labelText: string): HTMLInputElement {
+  const labels = Array.from(container.querySelectorAll("label"));
+  for (const label of labels) {
+    if (label.textContent?.startsWith(labelText)) {
+      const input = label.querySelector("input");
+      if (input) {
+        return input as HTMLInputElement;
+      }
+    }
+  }
+  throw new Error(`Number field not found for label: ${labelText}`);
+}
 
 /** Planar shoelace signed area over a closed `[lng, lat][]` GeoJSON ring. */
 function signedShoelaceArea(ring: [number, number][]): number {
@@ -399,60 +453,236 @@ describe("ui-web geometry editor", () => {
     expect(snapshot.canSubmit).toBe(true);
   });
 
-  /**
-   * `handleStageClick`, `updateVertex`, and `removeVertex` in the live
-   * `<GeometryEditor>` component are closures reachable only through DOM
-   * click/input events; this repo's test setup has no jsdom/testing-library
-   * (checked: none configured anywhere under `apps/*` or `packages/*`), and
-   * the task's write scope forbids adding a new test dependency. All three
-   * handlers were verified by source inspection
-   * (packages/ui-web/src/geometry-editor.tsx:505-601) to spread
-   * `...(current.holes && current.holes.length > 0 ? { holes: current.holes } : {})`
-   * into the next draft, i.e. holes survive outer-vertex add/edit/remove.
-   * This test instead exercises the same draft-mutation shape those handlers
-   * produce, directly through the exported pure snapshot builder.
-   */
-  it("preserves holes across outer-vertex add/edit/remove draft mutations", () => {
-    const base: GeometryDraft = {
-      kind: "polygon",
-      points: DONUT_OUTER,
-      holes: [DONUT_HOLE],
+  describe("mounted <GeometryEditor> (real DOM events, holes)", () => {
+    const EDITOR_BOUNDS = {
+      minLat: 24.9,
+      maxLat: 25.2,
+      minLng: 121.4,
+      maxLng: 121.7,
     };
 
-    const afterAdd: GeometryDraft = {
-      kind: "polygon",
-      points: [...base.points, { lat: 25.05, lng: 121.605 }],
-      ...(base.holes && base.holes.length > 0 ? { holes: base.holes } : {}),
-    };
-    expect(buildGeometryEditorSnapshot(afterAdd).draft).toMatchObject({
-      holes: [DONUT_HOLE],
+    function findButton(container: HTMLElement, text: string): HTMLButtonElement {
+      const button = Array.from(container.querySelectorAll("button")).find((el) =>
+        el.textContent?.includes(text),
+      );
+      if (!button) {
+        throw new Error(`Button not found: ${text}`);
+      }
+      return button as HTMLButtonElement;
+    }
+
+    function mountEditor(initialDraft: GeometryDraft) {
+      const snapshots: GeometryEditorSnapshot[] = [];
+      const { container } = render(
+        createElement(GeometryEditor, {
+          initialDraft,
+          bounds: EDITOR_BOUNDS,
+          onChange: (snapshot: GeometryEditorSnapshot) => snapshots.push(snapshot),
+        }),
+      );
+      return { container, snapshots, latest: () => snapshots[snapshots.length - 1]! };
+    }
+
+    it("adds an outer vertex through a real stage click and keeps the hole intact", () => {
+      const { container, latest } = mountEditor({
+        kind: "polygon",
+        points: DONUT_OUTER,
+        holes: [DONUT_HOLE],
+      });
+
+      const svg = stubStageRect(container);
+      fireEvent.click(svg, { clientX: 600, clientY: 40 });
+
+      const draft = latest().draft;
+      expect(draft.kind).toBe("polygon");
+      if (draft.kind !== "polygon") {
+        throw new Error("expected polygon draft");
+      }
+      expect(draft.points).toHaveLength(DONUT_OUTER.length + 1);
+      expect(draft.points[draft.points.length - 1]).toEqual({
+        lat: 25.188889,
+        lng: 121.693836,
+      });
+      expect(draft.holes).toEqual([DONUT_HOLE]);
     });
 
-    const afterEdit: GeometryDraft = {
-      kind: "polygon",
-      points: afterAdd.points.map((point, index) =>
-        index === 0 ? { ...point, lat: 24.99 } : point,
-      ),
-      ...(afterAdd.kind === "polygon" && afterAdd.holes && afterAdd.holes.length > 0
-        ? { holes: afterAdd.holes }
-        : {}),
-    };
-    expect(buildGeometryEditorSnapshot(afterEdit).draft).toMatchObject({
-      holes: [DONUT_HOLE],
+    it("edits an outer vertex through the real Latitude field, keeping the hole intact and the polygon valid", () => {
+      const { container, latest } = mountEditor({
+        kind: "polygon",
+        points: DONUT_OUTER,
+        holes: [DONUT_HOLE],
+      });
+
+      fireEvent.click(getVertexHandle(container, 0));
+      const latitudeInput = getNumberFieldInput(container, "Latitude");
+      fireEvent.change(latitudeInput, { target: { value: "24.9" } });
+
+      const snapshot = latest();
+      const draft = snapshot.draft;
+      expect(draft.kind).toBe("polygon");
+      if (draft.kind !== "polygon") {
+        throw new Error("expected polygon draft");
+      }
+      expect(draft.points[0]).toEqual({ lat: 24.9, lng: 121.5 });
+      expect(draft.holes).toEqual([DONUT_HOLE]);
+      expect(snapshot.canSubmit).toBe(true);
     });
 
-    const afterRemove: GeometryDraft = {
-      kind: "polygon",
-      points: afterEdit.points.slice(0, -1),
-      ...(afterEdit.kind === "polygon" &&
-      afterEdit.holes &&
-      afterEdit.holes.length > 0
-        ? { holes: afterEdit.holes }
-        : {}),
-    };
-    const removedSnapshot = buildGeometryEditorSnapshot(afterRemove);
-    expect(removedSnapshot.draft).toMatchObject({ holes: [DONUT_HOLE] });
-    expect(removedSnapshot.canSubmit).toBe(true);
+    it("removes an outer vertex through the real Remove vertex button, keeping the hole intact", () => {
+      const pentagonOuter = [
+        DONUT_OUTER[0]!,
+        DONUT_OUTER[1]!,
+        DONUT_OUTER[2]!,
+        { lat: 25.1, lng: 121.55 },
+        DONUT_OUTER[3]!,
+      ];
+      const { container, latest } = mountEditor({
+        kind: "polygon",
+        points: pentagonOuter,
+        holes: [DONUT_HOLE],
+      });
+
+      fireEvent.click(getVertexHandle(container, 3));
+      fireEvent.click(findButton(container, "Remove vertex"));
+
+      const snapshot = latest();
+      const draft = snapshot.draft;
+      expect(draft.kind).toBe("polygon");
+      if (draft.kind !== "polygon") {
+        throw new Error("expected polygon draft");
+      }
+      expect(draft.points).toEqual(DONUT_OUTER);
+      expect(draft.holes).toEqual([DONUT_HOLE]);
+      expect(snapshot.canSubmit).toBe(true);
+    });
+
+    it("leaves the hole intact but marks the draft invalid once a real edit shrinks the outer boundary across it", () => {
+      const { container, latest } = mountEditor({
+        kind: "polygon",
+        points: DONUT_OUTER,
+        holes: [DONUT_HOLE],
+      });
+
+      fireEvent.click(getVertexHandle(container, 2));
+      const latitudeInput = getNumberFieldInput(container, "Latitude");
+      fireEvent.change(latitudeInput, { target: { value: "25.04" } });
+
+      const snapshot = latest();
+      expect(snapshot.canSubmit).toBe(false);
+      expect(snapshot.validation.errors.length).toBeGreaterThan(0);
+      const draft = snapshot.draft;
+      expect(draft.kind).toBe("polygon");
+      if (draft.kind !== "polygon") {
+        throw new Error("expected polygon draft");
+      }
+      expect(draft.holes).toEqual([DONUT_HOLE]);
+      expect(snapshot.backendPayloads.serviceAreaGeometry).toMatchObject({
+        holes: [DONUT_HOLE],
+      });
+    });
+
+    it("Undo restores the exact prior hole-bearing draft, and Discard resets to the initial hole-bearing draft", () => {
+      const initialDraft: GeometryDraft = {
+        kind: "polygon",
+        points: DONUT_OUTER,
+        holes: [DONUT_HOLE],
+      };
+      const { container, latest } = mountEditor(initialDraft);
+
+      fireEvent.click(getVertexHandle(container, 0));
+      const latitudeInput = getNumberFieldInput(container, "Latitude");
+      fireEvent.change(latitudeInput, { target: { value: "24.9" } });
+      expect(
+        latest().draft.kind === "polygon" && latest().draft.points[0]!.lat,
+      ).toBe(24.9);
+
+      fireEvent.click(findButton(container, "Undo"));
+      expect(latest().draft).toEqual(initialDraft);
+
+      fireEvent.click(getVertexHandle(container, 0));
+      fireEvent.change(getNumberFieldInput(container, "Latitude"), {
+        target: { value: "24.8" },
+      });
+      expect(
+        latest().draft.kind === "polygon" && latest().draft.points[0]!.lat,
+      ).toBe(24.8);
+
+      fireEvent.click(findButton(container, "Discard"));
+      expect(latest().draft).toEqual(initialDraft);
+    });
+
+    it("Apply import of a hole-bearing GeoJSON Polygon through the real import textarea renders a true evenodd cutout path", () => {
+      const { container, latest } = mountEditor(createEmptyGeometryDraft("polygon"));
+
+      const textareas = container.querySelectorAll("textarea");
+      const importTextarea = textareas[1]!;
+      const donutGeoJson = JSON.stringify({
+        type: "Polygon",
+        coordinates: [
+          [
+            [121.5, 25.0],
+            [121.6, 25.0],
+            [121.6, 25.1],
+            [121.5, 25.1],
+            [121.5, 25.0],
+          ],
+          [
+            [121.53, 25.03],
+            [121.57, 25.03],
+            [121.57, 25.07],
+            [121.53, 25.07],
+            [121.53, 25.03],
+          ],
+        ],
+      });
+      fireEvent.change(importTextarea, { target: { value: donutGeoJson } });
+      fireEvent.click(findButton(container, "Apply import"));
+
+      const snapshot = latest();
+      expect(snapshot.canSubmit).toBe(true);
+      const draft = snapshot.draft;
+      expect(draft.kind).toBe("polygon");
+      if (draft.kind !== "polygon") {
+        throw new Error("expected polygon draft");
+      }
+      expect(draft.holes).toHaveLength(1);
+      expect(draft.holes![0]).toHaveLength(4);
+
+      const cutoutPath = container.querySelector(
+        'path[data-geometry-polygon-cutout="true"]',
+      );
+      expect(cutoutPath).not.toBeNull();
+      expect(cutoutPath!.getAttribute("fill-rule")).toBe("evenodd");
+    });
+
+    it("Export then Apply import round-trips the current hole-bearing draft losslessly through the real GeoJSON textareas", () => {
+      const initialDraft: GeometryDraft = {
+        kind: "polygon",
+        points: DONUT_OUTER,
+        holes: [DONUT_HOLE],
+      };
+      const { container, latest } = mountEditor(initialDraft);
+
+      fireEvent.click(findButton(container, "Export"));
+      const textareas = container.querySelectorAll("textarea");
+      const readOnlyGeoJsonTextarea = textareas[0]!;
+      const importTextarea = textareas[1]!;
+      expect(importTextarea.value).toBe(readOnlyGeoJsonTextarea.value);
+
+      fireEvent.click(findButton(container, "Apply import"));
+
+      const snapshot = latest();
+      // The outer ring was already CCW, so it round-trips byte-identical.
+      // DONUT_HOLE is authored CCW; export canonicalizes every hole ring to
+      // CW, so re-import yields the same 4 vertices starting at the same
+      // point but walked in the opposite (canonical) direction.
+      expect(snapshot.draft).toEqual({
+        kind: "polygon",
+        points: DONUT_OUTER,
+        holes: [[DONUT_HOLE[0], DONUT_HOLE[3], DONUT_HOLE[2], DONUT_HOLE[1]]],
+      });
+      expect(snapshot.canSubmit).toBe(true);
+    });
   });
 
   it("flags a hole as invalid once an outer-boundary edit moves the boundary across it, without dropping the hole", () => {

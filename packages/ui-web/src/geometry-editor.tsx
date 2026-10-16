@@ -218,8 +218,18 @@ export function validateGeometryDraft(
 
   switch (draft.kind) {
     case "polygon": {
-      const unique = dedupeSequentialPoints(draft.points);
+      const unique = stripClosingDuplicatePoint(draft.points);
       errors.push(...validatePointCollection(unique, "Polygon vertex"));
+      const hasDuplicateConsecutive =
+        unique.length >= 2 &&
+        unique.some((point, index) =>
+          pointsEqual(point, unique[(index + 1) % unique.length]!),
+        );
+      if (hasDuplicateConsecutive) {
+        errors.push(
+          "Polygon cannot contain duplicate consecutive vertices or zero-length edges.",
+        );
+      }
       if (unique.length < 3) {
         errors.push("Polygon requires at least 3 vertices.");
       }
@@ -737,6 +747,7 @@ export function GeometryEditor({
                   return (
                     <rect
                       key={`vertex-${index}`}
+                      data-vertex-index={index}
                       x={point.x - 5}
                       y={point.y - 5}
                       width={10}
@@ -911,17 +922,19 @@ export function GeometryEditor({
 function buildBackendPayloads(draft: GeometryDraft): GeometryEditorBackendPayloads {
   switch (draft.kind) {
     case "polygon": {
-      const outerRing = closeOrientedGeoJsonRing(draft.points, "ccw");
-      const holeRings = (draft.holes ?? []).map((hole) =>
+      const canonicalPoints = stripClosingDuplicatePoint(draft.points);
+      const canonicalHoles = (draft.holes ?? []).map((hole) =>
+        stripClosingDuplicatePoint(hole),
+      );
+      const outerRing = closeOrientedGeoJsonRing(canonicalPoints, "ccw");
+      const holeRings = canonicalHoles.map((hole) =>
         closeOrientedGeoJsonRing(hole, "cw"),
       );
       return {
         serviceAreaGeometry: {
           type: "polygon",
-          coordinates: draft.points,
-          ...(draft.holes && draft.holes.length > 0
-            ? { holes: draft.holes }
-            : {}),
+          coordinates: canonicalPoints,
+          ...(canonicalHoles.length > 0 ? { holes: canonicalHoles } : {}),
         } satisfies GeoPolygon,
         sandboxAreaGeometry: {
           type: "MultiPolygon",
@@ -1087,12 +1100,12 @@ function geometryDraftFromGeometry(
       const rings = geometry.coordinates as number[][][] | undefined;
       const points = parsePolygonRingCoordinates(
         rings?.[0],
-        "Polygon ring must contain at least 4 coordinates.",
+        "Polygon ring must contain at least 3 coordinates.",
       );
       const holes = (rings?.slice(1) ?? []).map((holeRing) =>
         parsePolygonRingCoordinates(
           holeRing,
-          "Polygon hole ring must contain at least 4 coordinates.",
+          "Polygon hole ring must contain at least 3 coordinates.",
         ),
       );
       return holes.length > 0
@@ -1104,12 +1117,12 @@ function geometryDraftFromGeometry(
       const rings = polygons?.[0];
       const points = parsePolygonRingCoordinates(
         rings?.[0],
-        "MultiPolygon requires at least one closed ring.",
+        "MultiPolygon requires at least one ring with 3 or more coordinates.",
       );
       const holes = (rings?.slice(1) ?? []).map((holeRing) =>
         parsePolygonRingCoordinates(
           holeRing,
-          "Polygon hole ring must contain at least 4 coordinates.",
+          "Polygon hole ring must contain at least 3 coordinates.",
         ),
       );
       return holes.length > 0
@@ -1550,10 +1563,10 @@ function parsePolygonRingCoordinates(
   ring: unknown,
   errorMessage: string,
 ): GeoPoint[] {
-  if (!Array.isArray(ring) || ring.length < 4) {
+  if (!Array.isArray(ring) || ring.length < 3) {
     throw new Error(errorMessage);
   }
-  return ring.slice(0, -1).map(positionToPoint);
+  return stripClosingDuplicatePoint(ring.map(positionToPoint));
 }
 
 function numericProperty(value: unknown, fallback: number): number {

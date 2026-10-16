@@ -7,20 +7,17 @@ import {
 } from "../../../apps/ops-console-web/components/google-map-base-layer";
 
 /**
- * `GoogleMapBaseLayer`'s real `useEffect` (lines ~266-297) that constructs
- * `google.maps.Polygon` instances is only reachable through React's
- * commit/effect phase, which requires a DOM (`document`, refs attaching to
- * real nodes). This repo has no jsdom/testing-library configured anywhere
- * under `apps/*` or `packages/*`, and the task's write scope forbids adding
- * a new test dependency to introduce one. `buildFeaturePolygonPaths` is the
- * exact ring-grouping logic the effect calls before constructing each
- * `google.maps.Polygon`, extracted verbatim (no behavior change) so the
- * HCD-R3 fix — one Polygon instance per feature, paths = [outerRing,
- * ...holeRings] rather than one Polygon per ring — is directly unit
- * testable without the SDK/DOM boundary. Combined with the single
- * `features.flatMap(feature => [new google.maps.Polygon({ paths: buildFeaturePolygonPaths(feature), ... })])`
- * call site (one array entry per feature, confirmed by source read), this
- * demonstrates the fix without executing the effect itself.
+ * `buildFeaturePolygonPaths` and `polygonStyle` are the exact ring-grouping
+ * and style-mapping logic `GoogleMapBaseLayer`'s real `useEffect` calls
+ * before constructing each `google.maps.Polygon` (one instance per feature,
+ * paths = [outerRing, ...holeRings] rather than one Polygon per ring), kept
+ * here as pure-function regression coverage for that math. The effect
+ * itself — mounting the real component, mocking only `@googlemaps/js-api-loader`
+ * and the global `google.maps.*` constructors — is exercised in
+ * `apps/ops-console-web/tests/unit/google-map-base-layer.test.ts`: that
+ * package resolves `@googlemaps/js-api-loader` directly (it is one of its
+ * own dependencies), while this directory (run with cwd = repo root) cannot
+ * resolve that bare specifier, since it is not a root dependency.
  */
 describe("GoogleMapBaseLayer polygon ring grouping (HCD-R3)", () => {
   const donutFeature: ServiceAreaGeoJsonFeature = {
