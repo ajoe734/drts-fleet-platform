@@ -499,7 +499,8 @@ describe("phone durable acknowledgement", () => {
   it("phone creation with an existing recording does not duplicate recording flags", async () => {
     const h = fixture();
     const created = await h.owned.createCallCenterOrder({
-      ...phoneCommand("synthetic-ready-create"), recordingId: "synthetic-existing-rec",
+      ...phoneCommand("synthetic-ready-create"),
+      recordingId: "synthetic-existing-rec",
     });
     expect(created.complianceFlags).toEqual(["recording_bound"]);
     expect(created).toEqual(await h.owned.getOrderForRead(created.orderId));

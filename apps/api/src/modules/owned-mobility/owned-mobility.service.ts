@@ -1545,6 +1545,12 @@ export class OwnedMobilityService
     );
     Object.assign(order, this.stampServiceProductCode(order));
     const completeCreation = () => {
+      // A link listener can refine the staged recording state. Its commit
+      // hook publishes that exact final row before this creation hook runs.
+      const committed = this.orders.find(
+        (current) => current.orderId === order.orderId,
+      );
+      if (committed) Object.assign(order, committed);
       this.orders = [
         this.cloneOrder(order),
         ...this.orders.filter((current) => current.orderId !== order.orderId),
@@ -1588,18 +1594,24 @@ export class OwnedMobilityService
         recordingId,
       },
       (session, write) => {
+        order.complianceFlags = order.complianceFlags.filter(
+          (flag) =>
+            flag !== "recording_bound" &&
+            flag !== "recording_pending" &&
+            flag !== "recording_missing",
+        );
         if (session.recordingId) {
           order.recordingId = session.recordingId;
           order.status = "ready_for_dispatch";
-          order.complianceFlags = [
-            ...order.complianceFlags.filter(
-              (flag) => flag !== "recording_pending",
-            ),
-            "recording_bound",
-          ];
+          this.addComplianceFlag(order, "recording_bound");
         } else {
           order.status = "recording_pending";
-          this.addComplianceFlag(order, "recording_pending");
+          this.addComplianceFlag(
+            order,
+            session.recordingState === "missing"
+              ? "recording_missing"
+              : "recording_pending",
+          );
         }
         traceLog = this.buildPhoneTrace(
           order.orderId,
@@ -1694,6 +1706,21 @@ export class OwnedMobilityService
     const order = result.rows[0]?.record;
     if (!order)
       throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order was not found.");
+    // Phone recording writers share the order row lock with dispatch writers.
+    // Voice mutations retain their own authoritative transaction/lock order.
+    if (!order.voiceIntentId && this.ownedMobilityRepository?.isEnabled()) {
+      const locked = await this.ownedMobilityRepository.findOrderForUpdate(
+        write.executor,
+        orderId,
+      );
+      if (!locked)
+        throw new ApiRequestError(
+          404,
+          "ORDER_NOT_FOUND",
+          "Order was not found.",
+        );
+      return this.cloneOrder(locked.order);
+    }
     return this.cloneOrder(order);
   }
 
