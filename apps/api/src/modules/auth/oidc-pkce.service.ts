@@ -531,11 +531,26 @@ export class OidcPkceService {
     let effectiveRoleCode = existingUser.roleCode;
     let effectiveScopesList = scopesList;
     let tenantPrivilegedGrantId: string | null = null;
+    // The canonical principal/membership behind this legacy tenant user is
+    // the same identity the dual-approval flow revokes sessions for
+    // (revokeSessionsByPrincipal(targetUserId)) and the same identity any
+    // active grant targets. Every session issued for this legacy user must
+    // carry that canonical principalId/membershipId -- never the legacy
+    // existingUser.userId -- or a post-approval revocation silently misses
+    // sessions issued before (or without) this lookup succeeding.
+    let canonicalPrincipalId: string | null = null;
+    let canonicalMembershipId: string | null = null;
     const membershipId =
       await this.identityRepository?.findMembershipIdForLegacyTenantUser(
         existingUser.userId,
       );
     if (membershipId) {
+      const membership =
+        await this.identityRepository?.findMembershipById(membershipId);
+      if (membership?.principalId) {
+        canonicalPrincipalId = membership.principalId;
+        canonicalMembershipId = membershipId;
+      }
       const activeGrants =
         (await this.identityRepository?.findActivePrivilegedGrantsForMembership(
           membershipId,
@@ -571,9 +586,12 @@ export class OidcPkceService {
     const acr = claims.acr ?? "";
     const authTime = claims.auth_time ?? Math.floor(Date.now() / 1000);
     const mfaVerified = hasTrustedMfa({ amr, acr });
+    // The MFA gate must bind to the role actually being issued (which may
+    // be elevated by an active privileged-role grant), not the durable
+    // membership roleCode a grant deliberately leaves unchanged.
     const mfaRequired =
       isOrdinaryLoginMfaRequired() ||
-      ["tenant_admin", "tenant_ops_admin"].includes(existingUser.roleCode);
+      ["tenant_admin", "tenant_ops_admin"].includes(effectiveRoleCode);
     const mfaPolicy = resolveOrdinaryLoginMfaPolicy();
     const mfaWaived = mfaRequired && !mfaVerified && waiverConfigured;
     if (mfaWaived) {
@@ -623,7 +641,8 @@ export class OidcPkceService {
       authMode: "jwt_bearer" as const,
       actorType: "tenant_admin" as const,
       actorId: existingUser.userId,
-      principalId: existingUser.userId,
+      principalId: canonicalPrincipalId ?? existingUser.userId,
+      membershipId: canonicalMembershipId,
       subject: claims.sub,
       realm: "tenant" as const,
       tenantId: targetTenantId,

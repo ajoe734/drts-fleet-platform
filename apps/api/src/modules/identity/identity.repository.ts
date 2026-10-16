@@ -1529,9 +1529,12 @@ export class IdentityRepository implements OnModuleInit {
         if (isNaN(validToMs) || validToMs <= currentTimeMs) return false;
       }
 
-      const matchesTarget =
-        grant.targetMembershipId === membershipId ||
-        (membership && grant.targetUserId === membership.principalId);
+      // An explicit targetMembershipId scopes the grant to that membership
+      // only; it must never also leak into a different membership of the
+      // same principal via the targetUserId fallback below.
+      const matchesTarget = grant.targetMembershipId
+        ? grant.targetMembershipId === membershipId
+        : Boolean(membership && grant.targetUserId === membership.principalId);
 
       if (!matchesTarget) return false;
 

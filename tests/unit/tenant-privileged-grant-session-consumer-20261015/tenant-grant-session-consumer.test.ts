@@ -414,4 +414,146 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
       }),
     ).rejects.toThrow();
   });
+
+  // C011-F1 reopen (reviewer-reproduced regressions): the fixes above must
+  // not stop at "a grant changes the issued role". They must also (a) bind
+  // the MFA gate to the *effective* role being issued, not the durable one
+  // a grant deliberately leaves unchanged, (b) issue sessions under the
+  // same canonical principal/membership the dual-approval flow revokes by
+  // and any grant targets (never a legacy/manufactured identity), and (c)
+  // respect an explicit targetMembershipId instead of also matching every
+  // other membership of the same principal.
+
+  it("after fix: elevating to tenant_admin via a grant requires real MFA proof on the fresh login, closing the effective-role MFA bypass", async () => {
+    const f = await fixture();
+    await f.callback(f.delivery.token);
+    const membershipId = (await f.repo.findMembershipIdForLegacyTenantUser(
+      f.user.userId,
+    ))!;
+
+    const requester = createGovernanceIdentity({ actorId: "usr_requester_mfa" });
+    const approver = createGovernanceIdentity({ actorId: "usr_approver_mfa" });
+    const request = await f.governance.createRequest(
+      {
+        targetUserId: f.user.userId,
+        targetMembershipId: membershipId,
+        roleCode: "tenant_admin",
+        reason: "Temporary tenant_admin authority for an incident.",
+        tenantId,
+      },
+      requester,
+    );
+    const { grant } = await f.governance.approveRequest(request.requestId, approver, {
+      approvalRequestId: request.requestId,
+      mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+    });
+    expect(grant.roleCode).toBe("tenant_admin");
+
+    // A fresh ordinary-login callback carries no amr/acr trusted MFA proof,
+    // AUTH_REQUIRE_ORDINARY_LOGIN_MFA=false and DRTS_DEV_MFA_WAIVED=false.
+    // Issuing roles=[tenant_admin] into this session without MFA proof
+    // would be a privilege-escalation bypass of the existing high-privilege
+    // MFA rule; it must be denied instead.
+    await expect(f.callback()).rejects.toThrow();
+  });
+
+  it("after fix: dual approval revokes the pre-elevation session by canonical principal, and the fresh elevated session carries the canonical principal/membership (not a legacy/null identity)", async () => {
+    const f = await fixture();
+    const baseSession = await f.callback(f.delivery.token);
+
+    const membershipId = (await f.repo.findMembershipIdForLegacyTenantUser(
+      f.user.userId,
+    ))!;
+    const membership = (await f.repo.findMembershipById(membershipId))!;
+    const baseDecoded = jwt.decode(baseSession.accessToken) as jwt.JwtPayload;
+
+    // The base session already binds the canonical identity, not the
+    // legacy tenant-user id, and a real membershipId.
+    expect(baseDecoded.principalId).toBe(membership.principalId);
+    expect(baseDecoded.principalId).not.toBe(f.user.userId);
+    expect(baseDecoded.membershipId).toBe(membershipId);
+
+    const requester = createGovernanceIdentity({ actorId: "usr_requester_canonical" });
+    const approver = createGovernanceIdentity({ actorId: "usr_approver_canonical" });
+    const request = await f.governance.createRequest(
+      {
+        // A real caller targets the canonical principal, exactly like the
+        // identity the session above is now bound to.
+        targetUserId: membership.principalId,
+        targetMembershipId: membershipId,
+        roleCode: "tenant_finance_admin",
+        reason: "Quarter-end billing close requires temporary finance authority.",
+        tenantId,
+      },
+      requester,
+    );
+    const { grant } = await f.governance.approveRequest(request.requestId, approver, {
+      approvalRequestId: request.requestId,
+      mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+    });
+    expect(grant.status).toBe("active");
+
+    // No manual revokeCurrentSession call: approval alone, keyed on the
+    // canonical principal, must already have revoked the pre-elevation
+    // session's token.
+    expect(await f.signer.verifyAccessToken(baseSession.accessToken)).toBeNull();
+
+    const elevatedSession = await f.callback();
+    expect(elevatedSession.identity.roles).toEqual(["tenant_finance_admin"]);
+    const elevatedDecoded = jwt.decode(elevatedSession.accessToken) as jwt.JwtPayload;
+    expect(elevatedDecoded.principalId).toBe(membership.principalId);
+    expect(elevatedDecoded.membershipId).toBe(membershipId);
+  });
+
+  it("a grant explicitly scoped to a different membership of the same principal never elevates this membership", async () => {
+    const f = await fixture();
+    await f.callback(f.delivery.token);
+    const membershipId = (await f.repo.findMembershipIdForLegacyTenantUser(
+      f.user.userId,
+    ))!;
+    const membership = (await f.repo.findMembershipById(membershipId))!;
+
+    const now = new Date().toISOString();
+    const otherMembershipId = "membership_review_other";
+    await f.repo.ensureMembershipRecord({
+      membershipId: otherMembershipId,
+      sourceRef: "tenant_user_role:review_other:membership",
+      principalId: membership.principalId,
+      realm: "tenant",
+      scopeRef: membership.scopeRef,
+      tenantId,
+      partnerId: null,
+      status: "active",
+      invitedByPrincipalId: null,
+      invitationId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const requester = createGovernanceIdentity({ actorId: "usr_requester_other_membership" });
+    const approver = createGovernanceIdentity({ actorId: "usr_approver_other_membership" });
+    const request = await f.governance.createRequest(
+      {
+        targetUserId: membership.principalId,
+        // Explicitly scoped to the *other* membership (N), not this one (M).
+        targetMembershipId: otherMembershipId,
+        roleCode: "tenant_finance_admin",
+        reason: "Finance authority scoped to a different membership only.",
+        tenantId,
+      },
+      requester,
+    );
+    const { grant } = await f.governance.approveRequest(request.requestId, approver, {
+      approvalRequestId: request.requestId,
+      mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+    });
+    expect(grant.targetMembershipId).toBe(otherMembershipId);
+
+    const activeGrantsForThisMembership =
+      await f.repo.findActivePrivilegedGrantsForMembership(membershipId);
+    expect(activeGrantsForThisMembership).toHaveLength(0);
+
+    const session = await f.callback();
+    expect(session.identity.roles).toEqual(["tenant_viewer"]);
+  });
 });
