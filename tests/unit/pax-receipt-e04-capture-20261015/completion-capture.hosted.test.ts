@@ -111,12 +111,47 @@ describe.skipIf(!hostedPaymentEnabled)(
         paymentMethodTokenRef: method.paymentMethodId,
       });
       const report = ctx.service.getReportingSnapshot();
-      await h.owned.persistChanges({
-        orders: [ctx.service.getOrder(ctx.storedOrder.orderId as string)],
-        dispatchJobs: report.dispatchJobs,
-        dispatchAssignments: report.dispatchAssignments,
-        driverTasks: [ctx.service.getDriverTask(ctx.taskId)],
+      // V0091 requires both resources to be reserved when a live assignment
+      // commits. Use the production transaction/writers, including the same
+      // insert-before-reserve ordering as native dispatch; do not bypass the
+      // deferred constraint while preparing this precompletion fixture.
+      await h.owned.withTransaction(async (tx) => {
+        await h.owned.persistOrderWorkflow(tx, {
+          orders: [ctx.service.getOrder(ctx.storedOrder.orderId as string)],
+          dispatchJobs: report.dispatchJobs,
+          dispatchAssignments: report.dispatchAssignments,
+          driverTasks: [ctx.service.getDriverTask(ctx.taskId)],
+        });
+        for (const assignment of report.dispatchAssignments) {
+          await h.owned.reserveDispatchResources(tx, {
+            orderId: assignment.orderId,
+            assignmentId: assignment.assignmentId,
+            driverId: assignment.driverId,
+            vehicleId: assignment.vehicleId,
+            expiresAt: null,
+          });
+          await h.owned.occupyDispatchResourceReservations(
+            assignment.assignmentId,
+            tx,
+          );
+        }
       });
+      const capacity = await h.pool!.query(
+        "SELECT resource_type,status,reservation_group_id FROM ops.dispatch_resource_reservations WHERE order_id=$1 ORDER BY resource_type",
+        [ctx.storedOrder.orderId],
+      );
+      expect(capacity.rows).toEqual([
+        {
+          resource_type: "driver",
+          status: "occupied",
+          reservation_group_id: expect.any(String),
+        },
+        {
+          resource_type: "vehicle",
+          status: "occupied",
+          reservation_group_id: capacity.rows[0]?.reservation_group_id,
+        },
+      ]);
       Reflect.set(ctx.service, "ownedMobilityRepository", h.owned);
       Reflect.set(
         ctx.service,
@@ -170,6 +205,14 @@ describe.skipIf(!hostedPaymentEnabled)(
           "pg-e04-completion",
         );
         await Reflect.get(f.service, "driverCompletionOutboxDrainPromise");
+        const released = await h.pool!.query(
+          "SELECT resource_type,status FROM ops.dispatch_resource_reservations WHERE order_id=$1 ORDER BY resource_type",
+          [f.storedOrder.orderId],
+        );
+        expect(released.rows).toEqual([
+          { resource_type: "driver", status: "released" },
+          { resource_type: "vehicle", status: "released" },
+        ]);
         const outbox = await h.pool!.query(
           "SELECT status,payload FROM ops.driver_completion_outbox WHERE task_id=$1 AND effect_type='multi_taxi_certificate'",
           [f.taskId],
