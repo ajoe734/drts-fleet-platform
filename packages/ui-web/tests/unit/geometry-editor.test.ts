@@ -383,6 +383,415 @@ describe("ui-web geometry editor", () => {
     );
   });
 
+  describe("table-driven ring validity matrix: outer and hole triggers, touching/nested/disjoint holes, R1/R2 regressions", () => {
+    // A/B/C/D match apps/api/tests/unit/service-area.service.test.ts's
+    // KHH_DONUT_OUTER exactly, so these fixtures are directly comparable
+    // across the two independent (editor vs API) validation implementations.
+    const A = { lat: 22.58, lng: 120.25 };
+    const B = { lat: 22.58, lng: 120.35 };
+    const C = { lat: 22.68, lng: 120.35 };
+    const D = { lat: 22.68, lng: 120.25 };
+    const KHH_OUTER = [A, B, C, D];
+
+    it.each<{ name: string; points: GeoPoint[]; errorSubstring: string }>([
+      {
+        name: "a duplicate consecutive vertex (zero-length edge)",
+        points: [
+          { lat: 25.0, lng: 121.5 },
+          { lat: 25.0, lng: 121.5 },
+          { lat: 25.1, lng: 121.6 },
+          { lat: 25.0, lng: 121.6 },
+        ],
+        errorSubstring: "duplicate consecutive vertices",
+      },
+      {
+        name: "a pinch at two non-adjacent vertices",
+        points: [
+          { lat: 25.0, lng: 121.5 },
+          { lat: 25.05, lng: 121.52 },
+          { lat: 25.0, lng: 121.54 },
+          { lat: 25.05, lng: 121.52 },
+          { lat: 25.05, lng: 121.48 },
+        ],
+        errorSubstring: "cannot self-intersect",
+      },
+      {
+        name: "an adjacent 180-degree foldback (spike)",
+        points: [
+          { lat: 25.0, lng: 121.5 },
+          { lat: 25.1, lng: 121.5 },
+          { lat: 25.05, lng: 121.5 },
+          { lat: 25.05, lng: 121.6 },
+        ],
+        errorSubstring: "cannot self-intersect",
+      },
+      {
+        name: "two non-adjacent edges that touch without crossing",
+        points: [
+          { lat: 25.0, lng: 121.5 },
+          { lat: 25.0, lng: 121.7 },
+          { lat: 25.05, lng: 121.7 },
+          { lat: 25.05, lng: 121.55 },
+          { lat: 25.0, lng: 121.6 },
+          { lat: 25.02, lng: 121.5 },
+        ],
+        errorSubstring: "cannot self-intersect",
+      },
+      {
+        name: "a collinear overlap between non-adjacent edges",
+        points: [
+          { lat: 0, lng: 0 },
+          { lat: 0, lng: 10 },
+          { lat: 10, lng: 10 },
+          { lat: 10, lng: 3 },
+          { lat: 0, lng: 3 },
+          { lat: 0, lng: 7 },
+          { lat: -5, lng: 7 },
+          { lat: -5, lng: 0 },
+        ],
+        errorSubstring: "cannot self-intersect",
+      },
+    ])("rejects an OUTER ring with $name", ({ points, errorSubstring }) => {
+      const snapshot = buildGeometryEditorSnapshot({ kind: "polygon", points });
+      expect(snapshot.canSubmit).toBe(false);
+      expect(
+        snapshot.validation.errors.some((error) => error.includes(errorSubstring)),
+      ).toBe(true);
+    });
+
+    it.each<{ name: string; hole: GeoPoint[]; errorSubstring: string }>([
+      {
+        name: "a duplicate consecutive vertex",
+        hole: [
+          { lat: 22.6, lng: 120.28 },
+          { lat: 22.6, lng: 120.28 },
+          { lat: 22.63, lng: 120.3 },
+          { lat: 22.6, lng: 120.3 },
+        ],
+        errorSubstring: "at least 3 vertices",
+      },
+      {
+        name: "a pinch at two non-adjacent vertices",
+        hole: [
+          { lat: 22.6, lng: 120.28 },
+          { lat: 22.62, lng: 120.29 },
+          { lat: 22.6, lng: 120.3 },
+          { lat: 22.62, lng: 120.29 },
+          { lat: 22.62, lng: 120.27 },
+        ],
+        errorSubstring: "cannot self-intersect",
+      },
+      {
+        name: "an adjacent 180-degree foldback (spike)",
+        hole: [
+          { lat: 22.6, lng: 120.28 },
+          { lat: 22.64, lng: 120.28 },
+          { lat: 22.62, lng: 120.28 },
+          { lat: 22.62, lng: 120.3 },
+        ],
+        errorSubstring: "cannot self-intersect",
+      },
+      {
+        name: "two non-adjacent edges that touch without crossing",
+        hole: [
+          { lat: 22.62, lng: 120.29 },
+          { lat: 22.62, lng: 120.31 },
+          { lat: 22.625, lng: 120.31 },
+          { lat: 22.625, lng: 120.295 },
+          { lat: 22.62, lng: 120.3 },
+          { lat: 22.622, lng: 120.29 },
+        ],
+        errorSubstring: "cannot self-intersect",
+      },
+      {
+        name: "a collinear overlap between non-adjacent edges",
+        hole: [
+          { lat: 22.63, lng: 120.29 },
+          { lat: 22.63, lng: 120.32 },
+          { lat: 22.66, lng: 120.32 },
+          { lat: 22.66, lng: 120.299 },
+          { lat: 22.63, lng: 120.299 },
+          { lat: 22.63, lng: 120.311 },
+          { lat: 22.615, lng: 120.311 },
+          { lat: 22.615, lng: 120.29 },
+        ],
+        errorSubstring: "cannot self-intersect",
+      },
+    ])("rejects a HOLE with $name", ({ hole, errorSubstring }) => {
+      const snapshot = buildGeometryEditorSnapshot({
+        kind: "polygon",
+        points: KHH_OUTER,
+        holes: [hole],
+      });
+      expect(snapshot.canSubmit).toBe(false);
+      expect(
+        snapshot.validation.errors.some((error) => error.includes(errorSubstring)),
+      ).toBe(true);
+    });
+
+    it("rejects two holes that merely touch at a shared boundary point (distinct from the existing crossing-holes case)", () => {
+      const hole1 = [
+        { lat: 22.61, lng: 120.28 },
+        { lat: 22.61, lng: 120.32 },
+        { lat: 22.65, lng: 120.32 },
+        { lat: 22.65, lng: 120.28 },
+      ];
+      // hole2 shares exactly the (22.65, 120.32) corner with hole1.
+      const hole2 = [
+        { lat: 22.65, lng: 120.32 },
+        { lat: 22.65, lng: 120.34 },
+        { lat: 22.67, lng: 120.34 },
+        { lat: 22.67, lng: 120.32 },
+      ];
+      const snapshot = buildGeometryEditorSnapshot({
+        kind: "polygon",
+        points: KHH_OUTER,
+        holes: [hole1, hole2],
+      });
+      expect(snapshot.canSubmit).toBe(false);
+      expect(snapshot.validation.errors).toContain(
+        "Polygon holes cannot intersect, touch, or nest.",
+      );
+    });
+
+    it("rejects a hole nested entirely inside another hole", () => {
+      const outerHole = [
+        { lat: 22.61, lng: 120.28 },
+        { lat: 22.61, lng: 120.32 },
+        { lat: 22.65, lng: 120.32 },
+        { lat: 22.65, lng: 120.28 },
+      ];
+      // innerHole is fully inside outerHole, not merely overlapping it.
+      const innerHole = [
+        { lat: 22.62, lng: 120.29 },
+        { lat: 22.62, lng: 120.31 },
+        { lat: 22.64, lng: 120.31 },
+        { lat: 22.64, lng: 120.29 },
+      ];
+      const snapshot = buildGeometryEditorSnapshot({
+        kind: "polygon",
+        points: KHH_OUTER,
+        holes: [outerHole, innerHole],
+      });
+      expect(snapshot.canSubmit).toBe(false);
+      expect(snapshot.validation.errors).toContain(
+        "Polygon holes cannot intersect, touch, or nest.",
+      );
+    });
+
+    it("accepts two holes that are genuinely disjoint (not touching, not nested)", () => {
+      const hole1 = [
+        { lat: 22.61, lng: 120.28 },
+        { lat: 22.61, lng: 120.32 },
+        { lat: 22.65, lng: 120.32 },
+        { lat: 22.65, lng: 120.28 },
+      ];
+      const hole2 = [
+        { lat: 22.59, lng: 120.26 },
+        { lat: 22.59, lng: 120.27 },
+        { lat: 22.6, lng: 120.27 },
+        { lat: 22.6, lng: 120.26 },
+      ];
+      const snapshot = buildGeometryEditorSnapshot({
+        kind: "polygon",
+        points: KHH_OUTER,
+        holes: [hole1, hole2],
+      });
+      expect(snapshot.canSubmit).toBe(true);
+      expect(snapshot.validation.errors).toEqual([]);
+      expect(snapshot.backendPayloads.serviceAreaGeometry).toMatchObject({
+        holes: [hole1, hole2],
+      });
+    });
+
+    it("R1 regression: [A,B,B,C,D] on the outer ring is rejected, not silently canonicalized to [A,B,C,D]", () => {
+      const snapshot = buildGeometryEditorSnapshot({
+        kind: "polygon",
+        points: [A, B, B, C, D],
+      });
+      expect(snapshot.canSubmit).toBe(false);
+      expect(snapshot.validation.errors).toContain(
+        "Polygon cannot contain duplicate consecutive vertices or zero-length edges.",
+      );
+    });
+
+    it("R1 regression: a closed outer ring [A,B,C,D,A] canonicalizes to the 4-point open ring in the submitted payload", () => {
+      const snapshot = buildGeometryEditorSnapshot({
+        kind: "polygon",
+        points: [A, B, C, D, A],
+      });
+      expect(snapshot.canSubmit).toBe(true);
+      expect(snapshot.backendPayloads.serviceAreaGeometry).toEqual({
+        type: "polygon",
+        coordinates: [A, B, C, D],
+      });
+    });
+
+    it("R1 regression: a closed hole ring canonicalizes to 4 points in the submitted payload, same as the outer ring", () => {
+      const hole = [
+        { lat: 22.61, lng: 120.28 },
+        { lat: 22.61, lng: 120.32 },
+        { lat: 22.65, lng: 120.32 },
+        { lat: 22.65, lng: 120.28 },
+        { lat: 22.61, lng: 120.28 },
+      ];
+      const snapshot = buildGeometryEditorSnapshot({
+        kind: "polygon",
+        points: KHH_OUTER,
+        holes: [hole],
+      });
+      expect(snapshot.canSubmit).toBe(true);
+      expect(snapshot.backendPayloads.serviceAreaGeometry).toMatchObject({
+        holes: [hole.slice(0, -1)],
+      });
+    });
+
+    function importPolygonFeature(coordinates: unknown): GeometryDraft {
+      return parseGeometryDraftGeoJson(
+        JSON.stringify({
+          type: "Feature",
+          properties: { geometryEditorKind: "polygon" },
+          geometry: { type: "Polygon", coordinates },
+        }),
+      );
+    }
+
+    function importMultiPolygonFeature(coordinates: unknown): GeometryDraft {
+      return parseGeometryDraftGeoJson(
+        JSON.stringify({
+          type: "Feature",
+          properties: { geometryEditorKind: "polygon" },
+          geometry: { type: "MultiPolygon", coordinates: [coordinates] },
+        }),
+      );
+    }
+
+    const OPEN_OUTER_RING = [
+      [120.25, 22.58],
+      [120.35, 22.58],
+      [120.35, 22.68],
+      [120.25, 22.68],
+    ];
+    const CLOSED_OUTER_RING = [...OPEN_OUTER_RING, OPEN_OUTER_RING[0]];
+    const OPEN_HOLE_RING = [
+      [120.28, 22.61],
+      [120.32, 22.61],
+      [120.32, 22.65],
+      [120.28, 22.65],
+    ];
+    const CLOSED_HOLE_RING = [...OPEN_HOLE_RING, OPEN_HOLE_RING[0]];
+
+    it.each<{
+      name: string;
+      importFn: (coordinates: unknown) => GeometryDraft;
+      coordinates: unknown;
+    }>([
+      {
+        name: "Polygon, open outer ring (no closing duplicate)",
+        importFn: importPolygonFeature,
+        coordinates: [OPEN_OUTER_RING],
+      },
+      {
+        name: "Polygon, closed outer ring (one closing duplicate)",
+        importFn: importPolygonFeature,
+        coordinates: [CLOSED_OUTER_RING],
+      },
+      {
+        name: "MultiPolygon, open outer ring (no closing duplicate)",
+        importFn: importMultiPolygonFeature,
+        coordinates: [OPEN_OUTER_RING],
+      },
+      {
+        name: "MultiPolygon, closed outer ring (one closing duplicate)",
+        importFn: importMultiPolygonFeature,
+        coordinates: [CLOSED_OUTER_RING],
+      },
+    ])(
+      "R2 regression: importing a $name keeps all 4 real vertices",
+      ({ importFn, coordinates }) => {
+        const imported = importFn(coordinates);
+        expect(imported.kind).toBe("polygon");
+        if (imported.kind !== "polygon") {
+          throw new Error("expected polygon draft");
+        }
+        expect(imported.points).toHaveLength(4);
+      },
+    );
+
+    it.each<{
+      name: string;
+      importFn: (coordinates: unknown) => GeometryDraft;
+      coordinates: unknown;
+    }>([
+      {
+        name: "Polygon, open hole ring (no closing duplicate)",
+        importFn: importPolygonFeature,
+        coordinates: [OPEN_OUTER_RING, OPEN_HOLE_RING],
+      },
+      {
+        name: "Polygon, closed hole ring (one closing duplicate)",
+        importFn: importPolygonFeature,
+        coordinates: [OPEN_OUTER_RING, CLOSED_HOLE_RING],
+      },
+      {
+        name: "MultiPolygon, open hole ring (no closing duplicate)",
+        importFn: importMultiPolygonFeature,
+        coordinates: [OPEN_OUTER_RING, OPEN_HOLE_RING],
+      },
+      {
+        name: "MultiPolygon, closed hole ring (one closing duplicate)",
+        importFn: importMultiPolygonFeature,
+        coordinates: [OPEN_OUTER_RING, CLOSED_HOLE_RING],
+      },
+    ])(
+      "R2 regression: importing a $name keeps all 4 real hole vertices (not 3)",
+      ({ importFn, coordinates }) => {
+        const imported = importFn(coordinates);
+        expect(imported.kind).toBe("polygon");
+        if (imported.kind !== "polygon") {
+          throw new Error("expected polygon draft");
+        }
+        expect(imported.holes).toHaveLength(1);
+        expect(imported.holes![0]).toHaveLength(4);
+      },
+    );
+
+    it("keeps valid triangles, concave polygons, and no-hole deep equality unaffected by hole validation", () => {
+      const triangle = buildGeometryEditorSnapshot({
+        kind: "polygon",
+        points: [
+          { lat: 22.5, lng: 120.2 },
+          { lat: 22.5, lng: 120.3 },
+          { lat: 22.6, lng: 120.25 },
+        ],
+      });
+      expect(triangle.canSubmit).toBe(true);
+      expect(triangle.backendPayloads.serviceAreaGeometry).toEqual({
+        type: "polygon",
+        coordinates: [
+          { lat: 22.5, lng: 120.2 },
+          { lat: 22.5, lng: 120.3 },
+          { lat: 22.6, lng: 120.25 },
+        ],
+      });
+
+      const concave = buildGeometryEditorSnapshot({
+        kind: "polygon",
+        points: [
+          { lat: 22.5, lng: 120.2 },
+          { lat: 22.5, lng: 120.3 },
+          { lat: 22.55, lng: 120.25 },
+          { lat: 22.6, lng: 120.3 },
+          { lat: 22.6, lng: 120.2 },
+        ],
+      });
+      expect(concave.canSubmit).toBe(true);
+      expect(
+        "holes" in (concave.backendPayloads.serviceAreaGeometry as object),
+      ).toBe(false);
+    });
+  });
+
   it("round-trips a GeoJSON polygon with holes through export and re-import losslessly", () => {
     const draft: GeometryDraft = {
       kind: "polygon",

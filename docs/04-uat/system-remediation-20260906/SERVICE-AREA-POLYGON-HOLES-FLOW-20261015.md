@@ -239,3 +239,64 @@ pnpm exec vitest run tests/unit/service-area-repository-lifecycle.test.ts \
 | Scoped `eslint --max-warnings=0` on every file touched in R1+R2 (production + tests) | clean | `pnpm exec eslint <files> --max-warnings=0` (repo root) |
 
 **R2 scope summary**: modified `packages/ui-web/src/geometry-editor.tsx` (behavioral fixes: §7.1, §7.2; test-only attribute: §7.3), `packages/ui-web/tests/unit/geometry-editor.test.ts`, `apps/api/tests/unit/service-area.service.test.ts`, `tests/unit/service-area-polygon-holes-flow-20261015/service-area-repository-lifecycle.test.ts`, `tests/unit/service-area-polygon-holes-flow-20261015/google-map-base-layer-polygon-paths.test.ts`, this document. New file: `apps/ops-console-web/tests/unit/google-map-base-layer.test.ts` (§7.3 explains the path choice). No other files were touched in R2; `packages/contracts/dist` was rebuilt locally again to unblock `apps/api` typecheck (gitignored, not part of this diff, same as R1 §1/§3.3).
+
+---
+
+### 7.6 R3 Reopen (Codex, candidate `50fd9b3e1a8492ad23e32f1849b286ff00e59550`, generation `1e24bf2076d944bf89332213565058fe`): SAH-R4 continuation (R4a, R4b) — second consecutive round, same defect, bounded repair
+
+Codex's R3 review re-confirmed `SAH-R1`..`SAH-R3` as fixed (independently re-verified via an in-memory, socket-free before/after probe against the real `git show` `geometry-editor.tsx`) and kept `SAH-R4` open as P2, this time with two precisely-scoped sub-findings (`R4a`, `R4b`). Both are additive test-only repairs; **no production logic changed in this section**, matching the R2.4 pattern.
+
+#### R4a: `packages/ui-web/tests/unit/geometry-editor.test.ts` executed only one crossing-hole fixture; no outer-ring table, no touching/nested/disjoint-hole distinction, no R1/R2 regression coverage
+
+**Root cause**: the hole/self-intersection trigger set (duplicate-consecutive vertex, non-adjacent pinch, adjacent 180° foldback, non-adjacent edge-touch, collinear overlap) and the hole-pair relationships (touching, nested, disjoint) were each exercised exactly once in `apps/api/tests/unit/service-area.service.test.ts`, but not at all — or only once, via the single "overlapping" hole-pair case — against the editor's own, independently-implemented `validateGeometryDraft`/`polygonHasSelfIntersection`/`ringsIntersectOrTouch` (`packages/ui-web/src/geometry-editor.tsx`). A green API test cannot exercise the UI's own code path. Separately, the two R2 production fixes (SAH-R1's `[A,B,B,C,D]` duplicate rejection and single-closing-duplicate canonical-payload normalization; SAH-R2's open/closed-ring GeoJSON import) had no dedicated regression tests — the test cited in R2 §7.1 as "evidence" (the real-Latitude-field edit test) never actually supplies a duplicate vertex.
+
+**Fix**: added a new `describe("table-driven ring validity matrix: outer and hole triggers, touching/nested/disjoint holes, R1/R2 regressions")` block to `packages/ui-web/tests/unit/geometry-editor.test.ts`, all invoking the real exported `buildGeometryEditorSnapshot`/`parseGeometryDraftGeoJson` (not copies):
+- `it.each` table of 5 OUTER-ring triggers (duplicate-consecutive vertex, non-adjacent pinch, adjacent foldback, non-adjacent edge-touch, collinear overlap between non-adjacent edges) via `validateGeometryDraft`'s polygon case, each asserting `canSubmit: false` and the matching error substring.
+- `it.each` table of the same 5 triggers, each authored as a **hole** ring strictly inside a shared `KHH_OUTER` (identical coordinates to `apps/api/tests/unit/service-area.service.test.ts`'s `KHH_DONUT_OUTER`, for direct cross-file comparability), exercising the hole-specific validation branch (which, for duplicate-consecutive, surfaces as `"Polygon hole requires at least 3 vertices."` rather than outer ring's distinct duplicate message — confirmed by running the test, not assumed).
+- Three dedicated hole-pair tests: two holes that **merely touch** at one shared boundary point (distinct from the pre-existing crossing case and from nesting), a hole **nested entirely inside another hole**, and two holes that are **genuinely disjoint** (positive case, `canSubmit: true`, both holes preserved in order in `backendPayloads.serviceAreaGeometry`).
+- Three R1 regression tests: the exact annex `[A,B,B,C,D]` outer-ring duplicate rejection; a closed outer ring `[A,B,C,D,A]` canonicalizing to the 4-point `[A,B,C,D]` in `backendPayloads.serviceAreaGeometry`; and the same closed-ring canonicalization for a **hole** ring (5 positions → 4 in the payload).
+- Eight R2 regression tests (`it.each` × 2 tables) covering open-ring and closed-ring outer boundaries through both `Polygon` and `MultiPolygon` GeoJSON import (`parseGeometryDraftGeoJson`, the real exported parser), and the same four combinations for hole rings — each asserting the exact vertex count (4, never 3 or 5).
+- One retention test confirming valid triangles, a concave polygon, and no-hole canonical-payload shape are unaffected by any of the above.
+
+**Verification** (run from this worktree; no VM product/dev/preview/HTTP/browser/E2E/PG/Docker servers started):
+```
+pnpm exec vitest run tests/unit/geometry-editor.test.ts   (packages/ui-web)  -> 1 file, 51 tests, exit 0  (26 pre-existing + 25 new)
+pnpm exec vitest run                                      (packages/ui-web)  -> 4 files, 95 tests, exit 0
+pnpm exec tsc -p tsconfig.json --noEmit                    (packages/ui-web)  -> exit 0
+pnpm exec eslint tests/unit/geometry-editor.test.ts --max-warnings=0 (packages/ui-web) -> exit 0
+```
+All new fixtures were authored directly against the real `validateGeometryDraft`/`polygonHasSelfIntersection`/`ringsIntersectOrTouch`/`parsePolygonRingCoordinates` implementations and passed on the first run with no coordinate adjustment needed, confirming (rather than assuming) that the editor's independent implementation handles every trigger the same way the API's does.
+
+#### R4b: `tests/unit/service-area-polygon-holes-flow-20261015/service-area-repository-lifecycle.test.ts` asserted only a subset of persisted/fresh records; mislabeled matrix comments; missing pre-effective and HOLE-EVAL-6 coverage
+
+**Root cause**: `finalRecord` (the area's last persisted JSONB) was checked with `toMatchObject` against 4 fields, not full equality against the real mutation ACK (`publishedArea.record`); the admin/operational export features were checked with `toMatchObject`/`toHaveLength`, not exact ring coordinates or exact `sourceGeometry`; `policyRecord` (the policy's last persisted JSONB, `$16`) never asserted `geometry` at all; the fresh-readback policy feature's `sourceGeometry` only asserted `holes: expect.any(Array)`; `HOLE-EVAL-7a`/`7b` never asserted `stops[0].policyCodes`/`geometryVersionRefs`; there was no check at a timestamp before `effectiveFrom` (2026-06-01) proving pre-effective exclusion; and two comments mislabeled the matrix items they demonstrated — the line commented `"HOLE-EVAL-3: outer-boundary..."` actually tests an uncategorized supplementary case (none of the 7 canonical matrix items is "on the outer ring's own edge"), while the line commented `"HOLE-EVAL-6: a real (non-null) dropoff..."` actually reproduces `apps/api/tests/unit/service-area.service.test.ts`'s `"HOLE-EVAL-3 (outer-inside pickup, hole-inside dropoff)"` — the real `HOLE-EVAL-6` (a separate enclave area, `KHH_ENCLAVE_SHUTTLE`, covering the hole exclusively) was entirely absent from this file.
+
+**Fix** (all additive to the existing single `it(...)`, same mock/socket boundary and real lifecycle retained, no seeds retired):
+- `finalRecord` now asserted with `expect(finalRecord).toEqual(publishedArea.record)` (full equality against the real mutation ACK), in addition to the retained `holes` spot-check.
+- Corrected both mislabeled comments: the outer-boundary case is now labeled "Supplementary (not one of the matrix items below)"; the mixed-leg case is now labeled "HOLE-EVAL-3 (mixed-leg form, matching ... — previously mislabeled 'HOLE-EVAL-6' here)".
+- Added the real `HOLE-EVAL-6`: a fresh `KHH_ENCLAVE_SHUTTLE` service area created/submitted/published through the same real `writerService`/repository, then evaluated through a **separate fresh** `ServiceAreaService.onModuleInit()` readback, asserting it covers the hole exclusively and `KHH_DONUT_CORE` is absent from its `serviceAreaCodes` — not emulated with a deny `StopPolicy`.
+- Added a pre-effective check (`requestedAt: "2026-05-15T00:00:00.000Z"`, before `effectiveFrom: "2026-06-01T00:00:00.000Z"`) for the exact `HOLE-EVAL-1` pickup, asserting exclusion.
+- `adminFeature`/`operationalFeature`: added exact `version`/`serviceProductTypes` to the properties check, exact `sourceGeometry` equality (not `toMatchObject`), and exact closed/wound ring coordinates for both the outer ring (CCW) and the hole ring (CW) via `toEqual`, plus confirming the operational export's geometry is byte-identical to the admin export's.
+- `policyRecord`: added `expect(policyRecord.geometry).toEqual(...)` against the real policy outer+hole geometry (previously unchecked).
+- Fresh `policyFeature.properties.sourceGeometry`: changed from `{ holes: expect.any(Array) }` to exact equality against the real policy geometry.
+- Added a pre-effective check for the policy (`HOLE-EVAL-7a`'s pickup at `2026-05-15T00:00:00.000Z`), asserting exclusion.
+- `HOLE-EVAL-7a`/`7b`: added `expect(denied.stops[0]).toMatchObject({ policyCodes: [...], geometryVersionRefs: [...] })` and the equivalent for `excluded.stops[0]`, matching `apps/api/tests/unit/service-area.service.test.ts`'s per-stop assertions.
+
+**Verification**:
+```
+pnpm exec vitest run tests/unit/service-area-polygon-holes-flow-20261015/service-area-repository-lifecycle.test.ts  (repo root) -> 1 file, 1 test, exit 0
+pnpm exec vitest run tests/unit/service-area-polygon-holes-flow-20261015 tests/unit/system-remediation/sr-qa-governance-001/c106-service-area-governance.test.ts  (repo root) -> 3 files, 10 tests, exit 0
+pnpm exec eslint tests/unit/service-area-polygon-holes-flow-20261015/service-area-repository-lifecycle.test.ts --max-warnings=0  (repo root) -> exit 0
+```
+All new assertions (including the hand-derived exact ring coordinates) passed on the first run against the real repository/service, confirming the values rather than asserting a pre-decided expectation.
+
+#### 7.6.1 Non-regression re-run after R3
+
+| Suite | Result | Command (run from the directory shown) |
+| --- | --- | --- |
+| `packages/ui-web` full suite | `4 files / 95 tests` passed | `pnpm exec vitest run` (`packages/ui-web`) |
+| `packages/ui-web` typecheck | clean | `pnpm exec tsc -p tsconfig.json --noEmit` (`packages/ui-web`) |
+| `apps/api/tests/unit/service-area.service.test.ts` (untouched this round; confirms no collateral break) | `1 file / 38 tests` passed | `pnpm exec vitest run tests/unit/service-area.service.test.ts` (`apps/api`) |
+| `tests/unit/service-area-polygon-holes-flow-20261015/*` + `c106-service-area-governance.test.ts` | `3 files / 10 tests` passed | `pnpm exec vitest run tests/unit/service-area-polygon-holes-flow-20261015 tests/unit/system-remediation/sr-qa-governance-001/c106-service-area-governance.test.ts` (repo root) |
+
+**R3 scope summary**: modified `packages/ui-web/tests/unit/geometry-editor.test.ts` and `tests/unit/service-area-polygon-holes-flow-20261015/service-area-repository-lifecycle.test.ts` only (both test-only, additive); this document. No production file was touched in R3 — `SAH-R4` was a test-coverage/evidence gap, not a production defect. `apps/ops-console-web`, `apps/platform-admin-web`, and `packages/shared-test-fixtures` full suites and the full `apps/api` suite were **not** re-run in this round (unchanged from R2 §7.5, no files in those scopes touched); hosted CI, protected-branch merge, and independent `Codex` review happen after this candidate is handed off, same as every prior round.

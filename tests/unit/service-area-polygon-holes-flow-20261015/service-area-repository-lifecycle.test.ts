@@ -231,20 +231,15 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
     );
     const finalRecord = persistedServiceAreasById.get(
       publishedArea.record.serviceAreaId,
-    ) as {
-      status: string;
-      version: number;
-      effectiveFrom: string;
-      effectiveUntil: string | null;
-      geometry: { holes?: unknown[] };
-    };
-    expect(finalRecord).toMatchObject({
-      status: "active",
-      version: 1,
-      effectiveFrom: "2026-06-01T00:00:00.000Z",
-      effectiveUntil: null,
-    });
-    expect(finalRecord.geometry.holes).toEqual([KHH_DONUT_HOLE]);
+    );
+    // Full equality against the real mutation ACK (`publishedArea.record`),
+    // not just a status/version/date subset: a field the service forgot to
+    // persist (or persisted stale) would stay invisible to a `toMatchObject`
+    // check but is caught here.
+    expect(finalRecord).toEqual(publishedArea.record);
+    expect((finalRecord as { geometry: { holes?: unknown[] } }).geometry.holes).toEqual([
+      KHH_DONUT_HOLE,
+    ]);
 
     // --- Phase B: fresh loadState() + onModuleInit() active readback ---
     const freshAreaRepo = new ServiceAreaRepository(databaseService);
@@ -313,7 +308,8 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
         requestedAt: FIXED_REQUESTED_AT.toISOString(),
       }),
     ).toMatchObject({ decision: "not_serviceable", serviceAreaCodes: [] });
-    // HOLE-EVAL-3: outer-boundary (on the outer ring's edge, not interior)
+    // Supplementary (not one of the matrix items below): outer-boundary
+    // point on the outer ring's own edge, not its interior, is serviceable.
     expect(
       freshAreaService.evaluate({
         serviceProductType: "taxi_realtime",
@@ -325,9 +321,22 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
       decision: "serviceable",
       serviceAreaCodes: ["KHH_DONUT_CORE"],
     });
-    // HOLE-EVAL-6: a real (non-null) dropoff landing inside the hole gets
-    // the exact uncovered-leg reason and empty area/policy/version refs,
-    // while the pickup leg (outer-interior) retains its own legitimate refs.
+    // Pre-effective: the exact same outer-inside pickup as HOLE-EVAL-1, but
+    // requested before `effectiveFrom` (2026-06-01) -- must be excluded.
+    expect(
+      freshAreaService.evaluate({
+        serviceProductType: "taxi_realtime",
+        pickup: { lat: 22.595, lng: 120.265 },
+        dropoff: null,
+        requestedAt: "2026-05-15T00:00:00.000Z",
+      }),
+    ).toMatchObject({ decision: "not_serviceable", serviceAreaCodes: [] });
+    // HOLE-EVAL-3 (mixed-leg form, matching apps/api/tests/unit/service-area.service.test.ts's
+    // "HOLE-EVAL-3 (outer-inside pickup, hole-inside dropoff)" -- previously
+    // mislabeled "HOLE-EVAL-6" here): a real (non-null) dropoff landing
+    // inside the hole gets the exact uncovered-leg reason and empty
+    // area/policy/version refs, while the pickup leg (outer-interior)
+    // retains its own legitimate refs.
     const mixedLegResult = freshAreaService.evaluate({
       serviceProductType: "taxi_realtime",
       pickup: { lat: 22.595, lng: 120.265 },
@@ -352,25 +361,117 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
       }),
     ]);
 
+    // HOLE-EVAL-6: a separate enclave service area, published through the
+    // same real repository, that sits entirely inside KHH_DONUT_CORE's hole
+    // covers that hole exclusively (not emulated with a deny StopPolicy).
+    const enclave = await writerService.createServiceArea(
+      {
+        areaCode: "KHH_ENCLAVE_SHUTTLE",
+        displayName: "Kaohsiung donut-hole enclave shuttle",
+        geometry: {
+          type: "polygon",
+          coordinates: [
+            { lat: 22.62, lng: 120.29 },
+            { lat: 22.62, lng: 120.31 },
+            { lat: 22.64, lng: 120.31 },
+            { lat: 22.64, lng: 120.29 },
+          ],
+        },
+        serviceProductTypes: ["taxi_realtime"],
+        effectiveFrom: "2026-06-01T00:00:00.000Z",
+        effectiveUntil: null,
+      },
+      context,
+    );
+    await writerService.submitServiceAreaForReview(
+      enclave.record.serviceAreaId,
+      context,
+    );
+    await writerService.publishServiceArea(
+      enclave.record.serviceAreaId,
+      { effectiveFrom: "2026-06-01T00:00:00.000Z", reason: "activate enclave" },
+      context,
+    );
+    const freshEnclaveService = new ServiceAreaService(
+      new ServiceAreaRepository(databaseService),
+      undefined,
+      new MapGeofenceObservabilityService(),
+    );
+    await freshEnclaveService.onModuleInit();
+    const enclaveResult = freshEnclaveService.evaluate({
+      serviceProductType: "taxi_realtime",
+      pickup: { lat: 22.63, lng: 120.3 },
+      dropoff: null,
+      requestedAt: FIXED_REQUESTED_AT.toISOString(),
+    });
+    expect(enclaveResult).toMatchObject({
+      decision: "serviceable",
+      serviceAreaCodes: ["KHH_ENCLAVE_SHUTTLE"],
+      geometryVersionRefs: ["service_area:KHH_ENCLAVE_SHUTTLE@1"],
+    });
+    expect(enclaveResult.serviceAreaCodes).not.toContain("KHH_DONUT_CORE");
+
     const adminFeature = freshAreaService
       .exportGeoJson()
       .features.find((f) => f.id === publishedArea.record.serviceAreaId)!;
     expect(adminFeature.properties).toMatchObject({
       areaCode: "KHH_DONUT_CORE",
       status: "active",
+      version: 1,
+      serviceProductTypes: ["taxi_realtime"],
     });
-    expect(adminFeature.properties.sourceGeometry).toMatchObject({
+    expect(adminFeature.properties.sourceGeometry).toEqual({
+      type: "polygon",
+      coordinates: KHH_DONUT_OUTER,
       holes: [KHH_DONUT_HOLE],
     });
     expect(adminFeature.geometry.coordinates).toHaveLength(2);
+    expect(adminFeature.geometry.coordinates[0]).toEqual([
+      [120.25, 22.58],
+      [120.35, 22.58],
+      [120.35, 22.68],
+      [120.25, 22.68],
+      [120.25, 22.58],
+    ]);
+    expect(adminFeature.geometry.coordinates[1]).toEqual([
+      [120.28, 22.61],
+      [120.28, 22.65],
+      [120.32, 22.65],
+      [120.32, 22.61],
+      [120.28, 22.61],
+    ]);
 
     const operationalFeature = freshAreaService
       .exportOperationalGeoJson(FIXED_REQUESTED_AT)
       .features.find((f) => f.id === publishedArea.record.serviceAreaId)!;
     expect(operationalFeature).toBeDefined();
+    expect(operationalFeature.properties).toMatchObject({
+      areaCode: "KHH_DONUT_CORE",
+      status: "active",
+    });
+    expect(operationalFeature.properties.sourceGeometry).toEqual({
+      type: "polygon",
+      coordinates: KHH_DONUT_OUTER,
+      holes: [KHH_DONUT_HOLE],
+    });
     expect(operationalFeature.geometry.coordinates).toHaveLength(2);
+    expect(operationalFeature.geometry.coordinates).toEqual(
+      adminFeature.geometry.coordinates,
+    );
 
     // --- Phase C: separate stop-policy donut lifecycle + fresh readback (HOLE-EVAL-7) ---
+    const KHH_CURB_DONUT_POLICY_OUTER = [
+      { lat: 22.66, lng: 120.26 },
+      { lat: 22.66, lng: 120.275 },
+      { lat: 22.675, lng: 120.275 },
+      { lat: 22.675, lng: 120.26 },
+    ];
+    const KHH_CURB_DONUT_POLICY_HOLE = [
+      { lat: 22.665, lng: 120.265 },
+      { lat: 22.665, lng: 120.27 },
+      { lat: 22.67, lng: 120.27 },
+      { lat: 22.67, lng: 120.265 },
+    ];
     const policy = await writerService.createStopPolicy(
       {
         policyCode: "KHH_CURB_DONUT_POLICY",
@@ -379,20 +480,8 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
         effect: "deny",
         geometry: {
           type: "polygon",
-          coordinates: [
-            { lat: 22.66, lng: 120.26 },
-            { lat: 22.66, lng: 120.275 },
-            { lat: 22.675, lng: 120.275 },
-            { lat: 22.675, lng: 120.26 },
-          ],
-          holes: [
-            [
-              { lat: 22.665, lng: 120.265 },
-              { lat: 22.665, lng: 120.27 },
-              { lat: 22.67, lng: 120.27 },
-              { lat: 22.67, lng: 120.265 },
-            ],
-          ],
+          coordinates: KHH_CURB_DONUT_POLICY_OUTER,
+          holes: [KHH_CURB_DONUT_POLICY_HOLE],
         },
         serviceAreaCodes: ["KHH_DONUT_CORE"],
         serviceProductTypes: ["taxi_realtime"],
@@ -458,6 +547,13 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
       serviceAreaCodes: ["KHH_DONUT_CORE"],
       reasonCode: "KHH_CURB_RESTRICTED",
     });
+    // The prior subset check above never asserted geometry at all; a lost or
+    // corrupted hole on the policy JSONB record would have stayed green.
+    expect(policyRecord.geometry).toEqual({
+      type: "polygon",
+      coordinates: KHH_CURB_DONUT_POLICY_OUTER,
+      holes: [KHH_CURB_DONUT_POLICY_HOLE],
+    });
 
     const freshPolicyService = new ServiceAreaService(
       new ServiceAreaRepository(databaseService),
@@ -478,8 +574,13 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
     )!;
     expect(policyFeature).toBeDefined();
     expect(policyFeature.geometry.coordinates).toHaveLength(2);
-    expect(policyFeature.properties.sourceGeometry).toMatchObject({
-      holes: expect.any(Array),
+    // The prior check only asserted `holes: expect.any(Array)`, which stays
+    // green even if a hole is silently dropped or replaced on fresh
+    // readback; assert the exact fresh sourceGeometry instead.
+    expect(policyFeature.properties.sourceGeometry).toEqual({
+      type: "polygon",
+      coordinates: KHH_CURB_DONUT_POLICY_OUTER,
+      holes: [KHH_CURB_DONUT_POLICY_HOLE],
     });
 
     // HOLE-EVAL-7a: inside policy outer ring, outside its hole -> denied.
@@ -494,6 +595,13 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
       serviceAreaCodes: ["KHH_DONUT_CORE"],
       reasonCodes: ["KHH_CURB_RESTRICTED"],
     });
+    expect(denied.stops[0]).toMatchObject({
+      policyCodes: ["KHH_CURB_DONUT_POLICY"],
+      geometryVersionRefs: [
+        "service_area:KHH_DONUT_CORE@1",
+        "stop_policy:KHH_CURB_DONUT_POLICY@1",
+      ],
+    });
 
     // HOLE-EVAL-7b: inside the policy's own hole -> excluded from the policy.
     const excluded = freshPolicyService.evaluate({
@@ -507,5 +615,21 @@ describe("ServiceAreaRepository + ServiceAreaService: real SQL-routed lifecycle 
       serviceAreaCodes: ["KHH_DONUT_CORE"],
       reasonCodes: [],
     });
+    expect(excluded.stops[0]).toMatchObject({
+      policyCodes: [],
+      geometryVersionRefs: ["service_area:KHH_DONUT_CORE@1"],
+    });
+
+    // Pre-effective: the exact HOLE-EVAL-7a pickup, but requested before the
+    // policy's `effectiveFrom` (2026-06-01) -- the policy must not apply yet
+    // (area itself is also pre-effective at this timestamp).
+    expect(
+      freshPolicyService.evaluate({
+        serviceProductType: "taxi_realtime",
+        pickup: { lat: 22.662, lng: 120.262 },
+        dropoff: null,
+        requestedAt: "2026-05-15T00:00:00.000Z",
+      }),
+    ).toMatchObject({ decision: "not_serviceable", serviceAreaCodes: [] });
   });
 });
