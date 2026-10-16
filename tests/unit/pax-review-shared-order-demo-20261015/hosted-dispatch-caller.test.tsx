@@ -130,7 +130,7 @@ for (const reassign of [false, true]) {
           const upstream = new URL(url);
           expect(upstream.origin).toBe("https://api.example");
           switch (upstream.pathname) {
-            case "/api/passenger-app/review-demo/config":
+            case "/api/ops/review-demo/config":
               return success({ enabled: true });
             case `/api/orders/${orderId}`:
               return success({
