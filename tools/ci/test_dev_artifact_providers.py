@@ -281,7 +281,8 @@ class DevArtifactProvidersTest(unittest.TestCase):
         self.assertIn('if [[ -n "$passenger_secrets" ]]; then', api)
         self.assertIn('api_secrets="${api_secrets},${passenger_secrets}"', api)
         self.assertIn('--set-secrets "$api_secrets"', api)
-        self.assertIn('--set-env-vars "${{ steps.api_env.outputs.vars }}"', api)
+        self.assertIn("        env:\n          API_ENV_VARS: ${{ steps.api_env.outputs.vars }}\n        run: |\n", api)
+        self.assertIn('--set-env-vars "$API_ENV_VARS"', api)
         self.assertIn("WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS", workflow)
         self.assertIn("NOTIFICATION_OUTBOX_TYPE=postgres", workflow)
         for ci in ("ci.yml", "ci-integ.yml"):
