@@ -59,6 +59,17 @@ before log SHA256 `9796a2abbbefb430485d70228df67bb6245cb710c4bf62d10940eb54588fb
 
 ## Candidate / PR / 外部驗收
 
+### CI 退修：版本列 inline JSX（2026-10-16）
+
+- 相鄰舊候選：`0c02b25be1f7ea683d1db35a591c812be7a8342d`，generation `01e24789a4924d558bb60b577edc7277`；尚無獨立 review。正式 [PR CI i18n guard job](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38837839669/job/116771608012) exit 1，指出 `passenger-ride-page.tsx:881` 的「版本」與「· 生效日」兩項 `jsx-text`。
+- 呼叫路徑：A03 → `PublicFareCard` 的版本列。修正邊界限於該列及 `translations.ts` 的既有 `VersionInfo`：改成接受 API `version` / `effectiveAt` 的翻譯函式，取代未被引用的虛構版本常數；畫面、四列金額、API、夜間規則、取消、樣式及其他 lane 邏輯不變。
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、版本與證據位置 | 未驗項與具體限制 |
+| --- | --- | --- | --- | --- |
+| CI inline JSX 版本列 | `PublicFareCard` → `t.VersionInfo(fare.version, fare.effectiveAt)` | 舊 candidate 本機重現兩項 `jsx-text`，exit 1；修正版待下列檢查 | `pnpm run i18n:guard`；本 worktree `.local/pax-fare-copy-20261015/ci-repair/i18n-before.log` | 新 SHA 需重新 hosted CI／Claude2 review；原 key 未記錄 |
+
+本輪後續命令與結果會追加於此，保留前輪所有實際失敗及驗證，不借用舊 SHA 的 CI。
+
 - 分支：`codex/pax-fare-copy-20261015-delivery-r2-20261016`；[PR #2724](https://github.com/ajoe734/drts-fleet-platform/pull/2724)，base dev，正常 non-force push。
 - `30b763a681c2387eee13192a32e70cc655abfb17` 為已推送 source/checkpoint，**不是 review candidate**。最終 candidate 為包含本 UAT 的最終 HEAD；owner 在 native handoff 以完整 `CANDIDATE_SHA`、`CANDIDATE_BRANCH`、`PR_URL` 鎖定，與遠端 PR head 比對後記錄。後續文件 closeout 不改上述已驗 source/test bytes。
 - 獨立 reviewer：Claude2。CI run/job、reviewed SHA、merge SHA 與唯一 acceptance key 在 native lifecycle 綁定同一 candidate；目前未宣告 CI、review、merge、key 或整個 Goal 完成。

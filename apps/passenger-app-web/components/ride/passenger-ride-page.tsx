@@ -878,7 +878,7 @@ function PublicFareCard() {
             marginBottom: 6,
           }}
         >
-          版本 {fare.version} · 生效日 {fare.effectiveAt}
+          {t.VersionInfo(fare.version, fare.effectiveAt)}
         </div>
         {[
           [

@@ -59,7 +59,8 @@ export const t = {
   NoReviewsYet: "尚無乘車評價",
   CurrentFareTable: "現行計費表",
   AlreadyEffective: "已生效",
-  VersionInfo: "版本 F-2026-03 · 生效日 2026/07/01 · 備查",
+  VersionInfo: (version: string, effectiveAt: string) =>
+    `版本 ${version} · 生效日 ${effectiveAt}`,
   FareChangeRuleTitle: "車資變更規則",
   Cancel: "取消",
   AppTitle: "智行叫車",
