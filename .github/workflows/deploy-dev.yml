@@ -2401,6 +2401,23 @@ jobs:
           PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
           PAX_REVIEW_PLATFORM_ADMIN_ID_TOKEN: ${{ steps.id_token_platform_admin.outputs.id_token }}
         run: pnpm exec playwright test -c playwright.pax-review-shared-order.config.ts
+      - name: Exercise additional real shared-dev passenger branches
+        if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        env:
+          PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
+          PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
+          PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+        run: pnpm exec playwright test -c playwright.pax-review-additional-branches.config.ts
+      - name: Upload additional shared-dev passenger branch evidence
+        if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-dev-pax-additional-branches-${{ needs.build-push.outputs.candidate_sha }}
+          path: .artifacts/pax-review-additional-branches
+          include-hidden-files: true
+          if-no-files-found: ignore
       - name: Upload shared-dev rehearsal evidence
         if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
         uses: actions/upload-artifact@v4

@@ -880,6 +880,16 @@ jobs:
           pnpm exec tsc -p tests/unit/pax-review-shared-order-demo-20261015/tsconfig.driver-tests.json --noEmit
           pnpm exec vitest run --config tests/unit/pax-review-shared-order-demo-20261015/driver-vitest.config.ts
           pnpm exec playwright test -c playwright.pax-review-shared-order.config.ts
+      - name: Run additional real booking, accepted-cancellation and no-contact rating branches
+        run: pnpm exec playwright test -c playwright.pax-review-additional-branches.config.ts
+      - name: Upload additional passenger branch evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pax-review-additional-branches-${{ github.run_id }}
+          path: .artifacts/pax-review-additional-branches
+          include-hidden-files: true
+          if-no-files-found: ignore
       - name: Upload new shared-order rehearsal evidence
         if: always()
         uses: actions/upload-artifact@v4
