@@ -312,6 +312,65 @@ async function submitLostItemForCompletedRide(
     }),
     contentType: "application/json",
   });
+  const handlingNote = `演練處理備註：已核對同單 ${orderId}；真人聯繫另驗。`;
+  await ops
+    .getByTestId("complaint-list-actions")
+    .getByRole("button", { name: "新增備註", exact: true })
+    .click();
+  await ops.getByLabel("調查備註", { exact: true }).fill(handlingNote);
+  const noteRequest = ops.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/complaints/${caseNo}/notes`) &&
+      response.request().method() === "POST",
+  );
+  await ops.getByRole("button", { name: "確認", exact: true }).click();
+  expect((await noteRequest).status()).toBeLessThan(300);
+  // Keep this page mounted: a reload would hide a stale workspace defect.
+  await expect(
+    ops
+      .getByTestId("complaint-list-activity")
+      .getByText(handlingNote, { exact: true }),
+  ).toBeVisible();
+  const updatedCaseResponse = await ops.request.get(
+    `${OPS}/control-plane-proxy/complaints/${caseNo}`,
+  );
+  expect(updatedCaseResponse.status()).toBe(200);
+  const updatedCase = camel(await updatedCaseResponse.json()).data;
+  expect(updatedCase).toMatchObject({
+    caseNo,
+    relatedOrderId: orderId,
+    status: "under_investigation",
+  });
+  const updatedTimelineResponse = await ops.request.get(
+    `${OPS}/control-plane-proxy/complaints/${caseNo}/timeline`,
+  );
+  expect(updatedTimelineResponse.status()).toBe(200);
+  const updatedTimeline = camel(await updatedTimelineResponse.json()).data
+    .items;
+  expect(
+    updatedTimeline.map((entry: { action: string }) => entry.action),
+  ).toEqual(["case_created", "case_note_added"]);
+  expect(updatedTimeline[1].note).toBe(handlingNote);
+  await info.attach("A-lost-item-case-list-after-note-ops", {
+    body: await ops.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await info.attach("A-lost-item-case-list-after-note-facts", {
+    body: JSON.stringify({
+      orderId,
+      caseNo,
+      status: updatedCase.status,
+      relatedOrderId: updatedCase.relatedOrderId,
+      actualTimelineActions: updatedTimeline.map(
+        (entry: { action: string }) => entry.action,
+      ),
+      displayedNote: handlingNote,
+      samePageWithoutReload: true,
+      resolvedOrReturned: false,
+      scope: "real Ops note POST and same mounted ordinary case workspace",
+    }),
+    contentType: "application/json",
+  });
   await pax.getByRole("button", { name: "返回行程", exact: true }).click();
   await ops.goto(`${OPS}/review`);
   await readCompletedByOps(ops, orderId);

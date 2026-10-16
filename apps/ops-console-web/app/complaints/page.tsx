@@ -611,7 +611,7 @@ export default function ComplaintsPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedCaseNo]);
+  }, [selectedCaseNo, selectedRecord]);
 
   async function runAction<T>(key: string, action: () => Promise<T>) {
     setBusyKey(key);
@@ -1684,6 +1684,7 @@ export default function ComplaintsPage() {
 
               {/* availableActions-driven CTAs */}
               <div
+                data-testid="complaint-list-actions"
                 style={{
                   display: "flex",
                   gap: 8,
