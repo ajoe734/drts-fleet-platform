@@ -8,7 +8,7 @@ import type {
 } from "@drts/contracts";
 import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
 import { useMemo, useState } from "react";
-import { GoogleMapBaseLayer } from "@/components/google-map-base-layer";
+import { GoogleMapBaseLayer } from "../../components/google-map-base-layer";
 
 import {
   buildOpsMapTileViewport,

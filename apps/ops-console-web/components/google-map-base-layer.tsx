@@ -122,7 +122,30 @@ async function loadMapsLibrary(config: MapProviderConfig) {
   return importLibrary("maps") as Promise<google.maps.MapsLibrary>;
 }
 
-function polygonStyle(feature: ServiceAreaGeoJsonFeature) {
+/**
+ * Groups every ring of a feature's GeoJSON `Polygon` (exterior + holes) into
+ * the path list for a single `google.maps.Polygon`. Exported so the
+ * outer/hole grouping that fixes HCD-R3 (one Polygon instance per feature,
+ * not one per ring) is unit-testable without a `google.maps` SDK boundary.
+ */
+export function buildFeaturePolygonPaths(
+  feature: ServiceAreaGeoJsonFeature,
+): { lat: number; lng: number }[][] {
+  return feature.geometry.coordinates
+    .map((ring) =>
+      ring.flatMap(([lng, lat]) =>
+        typeof lat === "number" &&
+        typeof lng === "number" &&
+        Number.isFinite(lat) &&
+        Number.isFinite(lng)
+          ? [{ lat, lng }]
+          : [],
+      ),
+    )
+    .filter((ringPath) => ringPath.length >= 3);
+}
+
+export function polygonStyle(feature: ServiceAreaGeoJsonFeature) {
   if (feature.properties.recordKind === "service_area") {
     return {
       fillColor: "#0ea5e9",
@@ -270,18 +293,7 @@ export function GoogleMapBaseLayer({
       return;
     }
     polygonsRef.current = features.flatMap((feature) => {
-      const paths = feature.geometry.coordinates
-        .map((ring) =>
-          ring.flatMap(([lng, lat]) =>
-            typeof lat === "number" &&
-            typeof lng === "number" &&
-            Number.isFinite(lat) &&
-            Number.isFinite(lng)
-              ? [{ lat, lng }]
-              : [],
-          ),
-        )
-        .filter((ringPath) => ringPath.length >= 3);
+      const paths = buildFeaturePolygonPaths(feature);
       if (paths.length === 0) {
         return [];
       }

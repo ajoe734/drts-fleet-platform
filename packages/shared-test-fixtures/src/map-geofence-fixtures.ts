@@ -1583,4 +1583,11 @@ export {
   MAP_GEOFENCE_STOP_POLICY_SEEDS,
   PROVIDER_ID as MAP_GEOFENCE_PROVIDER_ID,
   PROVIDER_UNAVAILABLE_SENTINEL as MAP_GEOFENCE_PROVIDER_UNAVAILABLE_SENTINEL,
+  // None of the fixed service-area seeds above declare a polygon hole, so
+  // the hole-aware branches of these two functions are otherwise only
+  // exercised indirectly (by inspection); exporting them lets polygon-hole
+  // behavior be unit-tested directly against ad-hoc geometry without
+  // mutating the shared seed fixtures.
+  geometryContainsPoint as mapGeofenceGeometryContainsPoint,
+  geometryToGeoJson as mapGeofenceGeometryToGeoJson,
 };
