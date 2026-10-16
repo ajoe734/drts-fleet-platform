@@ -975,3 +975,66 @@ against the canonical `blockers` array in `ai-status.json`: zero `open`
 entries with `task_id: "PAX-WEB-RIDE-UI-20261009"` — the parent is not
 waiting on an external party, it is waiting on this exact helper's
 `resolved_parent_*` fields, which only fire on this helper's own merge).
+
+## 19. §18's "fixed content-blind allowlist" framing refined: this session's own tool-connection report names the exact mechanism — `orchestrator_approval_broker` CONNECT_TIMEOUT
+
+Fresh round, independently re-verified rather than re-trusting §18 at face
+value: `gh pr view 2705 --json headRefOid,mergeStateStatus,mergeable,state`
+→ `headRefOid` is now `f18ee807b0ee98cdccca63a2653c0dba95746f96` (two
+commits past the `a742faa7215f` SHA Codex2 approved at `21:49:59Z` —
+§17/§18's own two documentation-only commits), `state: OPEN`,
+`mergeable: MERGEABLE`, `mergeStateStatus: BLOCKED`. `gh pr checks 2705` →
+every check `pass`/`pending`/`skipping`, zero `fail`/`cancelled` (two still
+`pending`: `cross-surface-e2e`, `Product smoke acceptance`, `build`, `unit`,
+`iam-negative-matrix`, `ui-route-e2e`, `ui-shared-order-e2e` — none failed).
+
+This round's own tool-environment banner (not inferred from log grepping,
+stated directly by the harness at session start) reports:
+
+> MCP server `orchestrator_approval_broker` connection timed out after
+> 30000ms (`CONNECT_TIMEOUT`)
+
+Testing against this directly: an isolated, single-statement
+`AI_NAME=Claude .../ai-status.sh progress PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR "..."`
+(no compound command, no pipe, no `&&`) was returned by the Bash tool as
+`"Bash command classified as defer"` — not `"denied"` with reasoning text
+like §18's grepped activity-log entries, just an un-resolved defer, because
+there is no reachable broker to resolve it to allow or deny. A second probe
+— `git push --dry-run origin HEAD` issued alone — returned normally
+(`Everything up-to-date`); the *same* `git push --dry-run` chained after a
+`cd`+`git log` in one compound command was itself classified as `defer`,
+showing the classifier gates on command-string shape per invocation, not on
+a stored task-specific denylist.
+
+**Refinement of §18, not a reversal:** §18 is correct that no
+`ai-status.sh` state mutation is reachable through this channel and that
+retrying will not help. It is *not* a fixed, content-blind allowlist baked
+in for this task specifically — it is this session's `orchestrator_approval_broker`
+MCP connection being down, which defers every canonical-state-mutating Bash
+call for every task in this session (consistent with §18's own observation
+that unrelated tasks' `progress`/`handoff` attempts were denied in the same
+log batches). A content-blind *allowlist* and a broker-connectivity outage
+produce the same externally-observed symptom (mutation commands never
+succeed); the two have different fixes. An allowlist is a policy someone
+would need to change; a `CONNECT_TIMEOUT` is an infrastructure fault someone
+needs to reconnect or restart. This round makes no further mutation
+attempt, per §18's own reasoning — repeating one only adds another
+identical queue/log entry and cannot self-resolve from inside this worker.
+
+**Updated next step for a human/Supervisor (supersedes §18's hardcoded SHA,
+which is now one commit stale):**
+```
+AI_NAME=Claude \
+CANDIDATE_SHA=$(git rev-parse HEAD) \
+CANDIDATE_BRANCH=gemini2/pax-web-ride-ui-20261009-unblock-history-repair-governance-r2-20261015 \
+PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/2705 \
+ai-status.sh handoff PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR Codex2 \
+"Re-handoff: prior approval on a742faa7215f superseded by this helper's own doc-only commits; CI on current head clean/pending, zero failures; re-review requested."
+```
+run from a shell session where `orchestrator_approval_broker` is actually
+reachable (restart/reconnect that MCP server first if it is still timing
+out) — equivalently, a direct Supervisor-side edit of this task's
+`candidate_sha`/`candidate_generation`/`status` fields to the same effect.
+Until that MCP connection is restored for *some* session able to drive this
+task, no dispatched worker in a session with the same outage can move this
+helper's machine-truth state, no matter how the request is worded.
