@@ -425,7 +425,10 @@ async function completeInternalLostItemCase(
         resolutionField.locator('option[value="resolved_other"]'),
       ).toHaveCount(1);
       await resolutionField.selectOption("resolved_other");
-      await ops.getByLabel("結案備註", { exact: true }).fill(step.note);
+      // Closing reuses the resolution note, which is also implicit label text.
+      const closingNoteField = ops.getByLabel("結案備註");
+      await expect(closingNoteField).toBeVisible();
+      await closingNoteField.fill(step.note);
     }
     const write = ops.waitForResponse(
       (response) =>
