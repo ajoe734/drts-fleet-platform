@@ -250,3 +250,36 @@ deferred reservation constraint remains enabled. Precompletion dispatch/start
 is still an explicitly synthetic dependency fixture; it does not establish
 browser booking or real legal/PSP acceptance. Local validation and the next
 candidate's hosted outcome will be recorded below when finished.
+
+### Repair validation
+
+Repair source anchor: `e96180f1511f1413ce818c2908e63918f8f91c1a`.
+Node `v22.23.2`, pnpm `10.33.0`, Vitest `4.1.4`. Evidence directory:
+worker `.local/pax-receipt-e04-capture-20261015/dispatch-ci/`, copied with
+hashes to canonical
+`.local/passenger-transport-bureau-review-20261015/e04-codex-owner-20261016/ci-repair-e96180f15/`.
+
+| Check                                                                                                                                                                    | Result                                                                             | Evidence / limit                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pnpm exec tsc -p tests/unit/pax-receipt-e04-capture-20261015/tsconfig.json --noEmit`                                                                                    | Exit 0                                                                             | `scoped-typecheck.log`; includes the revised PG test and existing browser spec                                                                                                                                                                                     |
+| `pnpm exec eslint tests/unit/pax-receipt-e04-capture-20261015/completion-capture.hosted.test.ts --max-warnings=0`; Prettier on changed test/document; `git diff --check` | Exit 0                                                                             | Completed local checks; no product source was changed in this repair                                                                                                                                                                                               |
+| E04 + receipt/complaint + shared-order unit directories, default worker count                                                                                            | Exit 1: 357 passed, 5 failed, 5 hosted skipped                                     | `regression.log/json`: missing ignored Passenger Next dependency link caused review-context mock mismatch; booking DOM waits and two 60s subprocess probe failures occurred with concurrent repository checks. These failures are retained, not counted as a pass. |
+| Restore the existing ignored dependency link with `ln -s ../../node_modules apps/passenger-app-web/node_modules`; rerun the same three directories with `--maxWorkers=1` | **Exit 0: 362 passed, 5 hosted skipped; 35 files passed / 4 hosted files skipped** | `regression-linked.log/json`; 197.25 seconds. No timeout/retry/assertion or tracked dependency configuration changed. Both injection probes, booking caller and review context pass in this run.                                                                   |
+| Revised formal-PG fixture / immutable E04 readback                                                                                                                       | **Pending hosted CI**                                                              | Local hosted skips provide no PostgreSQL acceptance credit. The old candidate's fixture failure is precisely identified above.                                                                                                                                     |
+
+Reproducible revised local regression command:
+
+```sh
+pnpm exec vitest run \
+  tests/unit/pax-receipt-e04-capture-20261015 \
+  tests/unit/pax-receipt-complaint-20261009 \
+  tests/unit/pax-review-shared-order-demo-20261015 \
+  --maxWorkers=1 --reporter=default --reporter=json \
+  --outputFile.json=.local/pax-receipt-e04-capture-20261015/dispatch-ci/regression-linked.json
+```
+
+All started local checks have ended and their results have been read. The
+published candidate `2868dbc109df79a88c3c51806c033e949d815033` remains intact
+while its remaining integration/browser jobs finish. The revision needs a new
+same-SHA review/CI cycle after normal push and handoff; neither acceptance key,
+merge nor shared-dev delivery is claimed by these local checks.
