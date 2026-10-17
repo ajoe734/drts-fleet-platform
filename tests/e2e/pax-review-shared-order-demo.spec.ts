@@ -4,7 +4,9 @@ import {
   type BrowserContext,
   type Page,
   type TestInfo,
+  type Response as BrowserResponse,
 } from "@playwright/test";
+import type { ActionReceipt } from "@drts/contracts";
 import { readFile } from "node:fs/promises";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
@@ -16,6 +18,9 @@ type JourneyStep = ReturnType<typeof createJourneyProgress>["step"];
 const sharedDev = process.env.PAX_REVIEW_SHARED_DEV_SMOKE === "true";
 const PAX = process.env.PAX_REVIEW_PASSENGER_ORIGIN || "http://localhost:3319";
 const OPS = process.env.PAX_REVIEW_OPS_ORIGIN || "http://127.0.0.1:3202";
+const PLATFORM_ADMIN =
+  process.env.PAX_REVIEW_PLATFORM_ADMIN_ORIGIN ||
+  (sharedDev ? "" : "http://127.0.0.1:3204");
 const DRIVER = sharedDev ? `${PAX}/review-driver` : "http://127.0.0.1:3101";
 const camel = (value: any): any =>
   Array.isArray(value)
@@ -325,6 +330,15 @@ async function submitLostItemForCompletedRide(
   );
   await ops.getByRole("button", { name: "確認", exact: true }).click();
   expect((await noteRequest).status()).toBeLessThan(300);
+  await verifyRealCaseAudit(
+    ops,
+    await noteRequest,
+    info,
+    orderId,
+    caseNo,
+    "add_complaint_case_note",
+    "add-note",
+  );
   // Keep this page mounted: a reload would hide a stale workspace defect.
   await expect(
     ops
@@ -371,9 +385,334 @@ async function submitLostItemForCompletedRide(
     }),
     contentType: "application/json",
   });
+  await completeInternalLostItemCase(ops, info, orderId, caseNo);
   await pax.getByRole("button", { name: "返回行程", exact: true }).click();
   await ops.goto(`${OPS}/review`);
   await readCompletedByOps(ops, orderId);
+}
+
+async function completeInternalLostItemCase(
+  ops: Page,
+  info: TestInfo,
+  orderId: string,
+  caseNo: string,
+) {
+  const assigneeId = "AGENT-OPS-002";
+  const steps = [
+    {
+      action: "assign",
+      label: "指派 / 重新指派",
+      status: "assigned",
+      event: "case_assigned",
+      note: `演練指派：既有示範處理人核對同單 ${orderId}，未通知真人。`,
+    },
+    {
+      action: "resolve",
+      label: "結案處理",
+      status: "resolved",
+      event: "case_resolved",
+      note: "演練處理完成：虛構雨傘案例；沒有真人聯絡或實物返還。",
+    },
+    {
+      action: "close",
+      label: "關閉案件",
+      status: "closed",
+      event: "case_closed",
+      note: "關閉內部演練案件：未致電、未取回實物，不代表真實失物結案。",
+    },
+  ];
+  const expectedEvents = ["case_created", "case_note_added"];
+  const observed = [];
+  for (const step of steps) {
+    await ops
+      .getByTestId("complaint-list-actions")
+      .getByRole("button", { name: step.label, exact: true })
+      .click();
+    if (step.action === "assign") {
+      await ops.getByLabel("負責人 ID", { exact: true }).fill(assigneeId);
+      await ops.getByLabel("指派備註", { exact: true }).fill(step.note);
+    } else {
+      // Playwright includes option text in this implicit label's text.
+      const resolutionField = ops.getByLabel("處理代碼");
+      await expect(resolutionField).toBeVisible();
+      await expect(
+        resolutionField.locator('option[value="resolved_other"]'),
+      ).toHaveCount(1);
+      await resolutionField.selectOption("resolved_other");
+      // Closing reuses the resolution note, which is also implicit label text.
+      const closingNoteField = ops.getByLabel("結案備註");
+      await expect(closingNoteField).toBeVisible();
+      await closingNoteField.fill(step.note);
+    }
+    const write = ops.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/complaints/${caseNo}/${step.action}`) &&
+        response.request().method() === "POST",
+    );
+    await ops.getByRole("button", { name: "確認", exact: true }).click();
+    expect((await write).status()).toBeLessThan(300);
+    await verifyRealCaseAudit(
+      ops,
+      await write,
+      info,
+      orderId,
+      caseNo,
+      `${step.action}_complaint_case`,
+      step.action,
+    );
+    // Do not navigate or reload: every action must update this same workspace.
+    await expect(
+      ops
+        .getByTestId("complaint-list-activity")
+        .getByText(step.note, { exact: true }),
+    ).toBeVisible();
+    const read = await ops.request.get(
+      `${OPS}/control-plane-proxy/complaints/${caseNo}`,
+    );
+    expect(read.status()).toBe(200);
+    const record = camel(await read.json()).data;
+    expect(record).toMatchObject({
+      caseNo,
+      relatedOrderId: orderId,
+      assigneeId,
+      status: step.status,
+    });
+    if (step.action !== "assign") {
+      expect(record).toMatchObject({
+        resolutionCode: "resolved_other",
+        closingNote: step.note,
+      });
+    }
+    const timelineResponse = await ops.request.get(
+      `${OPS}/control-plane-proxy/complaints/${caseNo}/timeline`,
+    );
+    expect(timelineResponse.status()).toBe(200);
+    const timeline = camel(await timelineResponse.json()).data.items;
+    expectedEvents.push(step.event);
+    expect(timeline.map((entry: { action: string }) => entry.action)).toEqual(
+      expectedEvents,
+    );
+    expect(timeline.at(-1).note).toBe(step.note);
+    observed.push({ action: step.action, record, timeline });
+    await info.attach(`A-lost-item-internal-case-${step.action}-facts`, {
+      body: JSON.stringify({
+        orderId,
+        caseNo,
+        action: step.action,
+        status: record.status,
+        assigneeId: record.assigneeId,
+        timelineActions: timeline.map(
+          (entry: { action: string }) => entry.action,
+        ),
+      }),
+      contentType: "application/json",
+    });
+  }
+  await expect(
+    ops
+      .getByTestId("complaint-list-actions")
+      .getByRole("button", { name: "新增備註", exact: true }),
+  ).toHaveCount(0);
+  const exportResponse = await ops.request.get(
+    `${OPS}/control-plane-proxy/complaints/${caseNo}/export`,
+  );
+  expect(exportResponse.status()).toBe(200);
+  const exported = camel(await exportResponse.json()).data;
+  expect(exported.readyForAudit).toBe(true);
+  expect(exported.complaintCase).toMatchObject({
+    caseNo,
+    relatedOrderId: orderId,
+    status: "closed",
+  });
+  expect(
+    exported.timeline.map((entry: { action: string }) => entry.action),
+  ).toEqual(expectedEvents);
+  await expect(ops.getByText("可生成審計封包", { exact: true })).toBeVisible();
+  await expect(
+    ops.locator(`a[href="/dispatch?orderId=${orderId}"]`).first(),
+  ).toBeVisible();
+  const explicitExport = ops.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname.endsWith(`/complaints/${caseNo}/export`) &&
+      url.searchParams.get("action_receipt") === "true" &&
+      response.request().method() === "GET"
+    );
+  });
+  await ops
+    .getByTestId("complaint-list-actions")
+    .getByRole("button", { name: "匯出案件視圖", exact: true })
+    .click();
+  const exportReceipt = await verifyRealCaseAudit(
+    ops,
+    await explicitExport,
+    info,
+    orderId,
+    caseNo,
+    "export_complaint_case_view",
+    "export",
+  );
+  await visitActualAuditDestination(ops, info, orderId, caseNo, exportReceipt);
+  await info.attach("A-lost-item-internal-case-closed-ops", {
+    body: await ops.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await info.attach("A-lost-item-internal-case-lifecycle-facts", {
+    body: JSON.stringify({
+      orderId,
+      caseNo,
+      observed,
+      finalTimelineActions: expectedEvents,
+      readyForAudit: exported.readyForAudit,
+      samePageWithoutReload: true,
+      internalStatus: "closed",
+      humanContacted: false,
+      physicalItemReturned: false,
+      auditReceiptOrLinkVerified: true,
+      auditDestinationPageRendered: true,
+      scope:
+        "real ordinary Ops forms and persisted API; external outcome is explicitly fictional",
+    }),
+    contentType: "application/json",
+  });
+}
+
+async function verifyRealCaseAudit(
+  ops: Page,
+  response: BrowserResponse,
+  info: TestInfo,
+  orderId: string,
+  caseNo: string,
+  expectedAction: string,
+  label: string,
+): Promise<ActionReceipt> {
+  expect(response.ok()).toBe(true);
+  const envelope = camel(await response.json());
+  const receipt = envelope.meta.actionReceipt as ActionReceipt;
+  expect(receipt).toMatchObject({
+    resourceType: "complaint_case",
+    resourceId: caseNo,
+    status: "completed",
+  });
+  expect(receipt.auditId).toMatch(
+    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/,
+  );
+  expect(receipt.actionId).toBeTruthy();
+  let auditRecord: any;
+  await expect
+    .poll(async () => {
+      const read = await ops.request.get(
+        `${OPS}/control-plane-proxy/audit?auditId=${encodeURIComponent(receipt.auditId)}`,
+      );
+      expect(read.status()).toBe(200);
+      const records = camel(await read.json()).data.items;
+      auditRecord = records.find(
+        (record: { auditId: string }) => record.auditId === receipt.auditId,
+      );
+      return auditRecord?.auditId;
+    })
+    .toBe(receipt.auditId);
+  expect(auditRecord).toMatchObject({
+    auditId: receipt.auditId,
+    requestId: receipt.actionId,
+    moduleName: "complaint",
+    actionName: expectedAction,
+    resourceType: "complaint_case",
+    resourceId: caseNo,
+  });
+  const target = new URL("/audit", PLATFORM_ADMIN);
+  target.searchParams.set("auditId", receipt.auditId);
+  target.searchParams.set("resourceType", "complaint_case");
+  target.searchParams.set("resourceId", caseNo);
+  await expect(ops.getByTestId("complaint-action-audit-link")).toHaveAttribute(
+    "href",
+    target.toString(),
+  );
+  await info.attach(`A-lost-item-real-audit-${label}-facts`, {
+    body: JSON.stringify({
+      orderId,
+      caseNo,
+      receipt,
+      auditRecord: {
+        auditId: auditRecord.auditId,
+        requestId: auditRecord.requestId,
+        actionName: auditRecord.actionName,
+        resourceType: auditRecord.resourceType,
+        resourceId: auditRecord.resourceId,
+        createdAt: auditRecord.createdAt,
+      },
+      auditHref: target.toString(),
+      actualBackendRead: true,
+    }),
+    contentType: "application/json",
+  });
+  return receipt;
+}
+
+async function visitActualAuditDestination(
+  ops: Page,
+  info: TestInfo,
+  orderId: string,
+  caseNo: string,
+  receipt: ActionReceipt,
+) {
+  const request = ops.context().waitForEvent("response", {
+    timeout: 30_000,
+    predicate: (response) => {
+      const url = new URL(response.url());
+      return (
+        url.origin === new URL(PLATFORM_ADMIN).origin &&
+        url.pathname.endsWith("/control-plane-proxy/audit") &&
+        url.searchParams.get("auditId") === receipt.auditId
+      );
+    },
+  });
+  const opened = ops.context().waitForEvent("page", { timeout: 30_000 });
+  await ops.getByTestId("complaint-action-audit-link").click();
+  const audit = await opened;
+  try {
+    const actualRead = await request;
+    expect(actualRead.status()).toBe(200);
+    const items = camel(await actualRead.json()).data.items;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      auditId: receipt.auditId,
+      resourceId: caseNo,
+      actionName: "export_complaint_case_view",
+      requestId: receipt.actionId,
+    });
+    await expect(audit).toHaveURL(
+      (url) =>
+        url.pathname === "/audit" &&
+        url.searchParams.get("auditId") === receipt.auditId,
+    );
+    await expect(
+      audit
+        .getByRole("table")
+        .getByText("export_complaint_case_view", { exact: true }),
+    ).toBeVisible();
+    await expect(audit.locator("body")).toContainText(receipt.auditId);
+    await expect(audit.locator("body")).toContainText(caseNo);
+    await info.attach("A-lost-item-audit-destination-ops", {
+      body: await audit.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
+    await info.attach("A-lost-item-audit-destination-facts", {
+      body: JSON.stringify({
+        orderId,
+        caseNo,
+        auditId: receipt.auditId,
+        actionId: receipt.actionId,
+        actualURL: audit.url(),
+        actualPageRendered: true,
+        actualOwningAppAPIRead: true,
+        APIInstance: sharedDev ? "shared CloudRun" : "second real API instance",
+      }),
+      contentType: "application/json",
+    });
+  } finally {
+    await audit.close();
+  }
 }
 
 async function createDispatch(ops: Page, orderId: string) {
@@ -702,6 +1041,21 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           }
         : {}),
     });
+    if (role === "ops" && sharedDev) {
+      const platformToken = process.env.PAX_REVIEW_PLATFORM_ADMIN_ID_TOKEN;
+      if (!PLATFORM_ADMIN || !platformToken)
+        throw new Error(
+          "Missing existing Platform Admin URL or private-service access credential",
+        );
+      await c.route(`${PLATFORM_ADMIN}/**`, (route) =>
+        route.continue({
+          headers: {
+            ...route.request().headers(),
+            "x-serverless-authorization": `Bearer ${platformToken}`,
+          },
+        }),
+      );
+    }
     contexts.push(c);
     return c.newPage();
   };
