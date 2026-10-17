@@ -70,6 +70,23 @@ export class AuditLogRepository {
     return result.rows.map((row) => this.mapRow(row));
   }
 
+  async findById(auditId: string): Promise<AuditLogRecord | null> {
+    const normalizedId = normalizeUuidOrNull(auditId);
+    if (!normalizedId) return null;
+    if (!this.isEnabled()) {
+      const seed = this.getBootstrapSeed();
+      return seed.auditId === normalizedId ? seed : null;
+    }
+    const result = await this.databaseService!.query<AuditLogRow>(
+      `SELECT audit_id, actor_id, actor_type, tenant_id, module_name,
+              action_name, resource_type, resource_id, old_value, new_value,
+              request_id, created_at
+       FROM admin.audit_logs WHERE audit_id = $1`,
+      [normalizedId],
+    );
+    return result.rows[0] ? this.mapRow(result.rows[0]) : null;
+  }
+
   async loadEvidenceGovernanceTrail() {
     if (!this.isEnabled()) {
       return [this.getBootstrapSeed()];

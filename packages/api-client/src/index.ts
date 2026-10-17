@@ -2179,6 +2179,148 @@ export class ApiClient {
     );
   }
 
+  private async complaintActionWithReceipt<T>(
+    method: string,
+    path: string,
+    options?: RequestOptions,
+  ) {
+    const envelope = await this.requestEnvelope<T>(method, path, options);
+    const receipt = envelope.meta.actionReceipt;
+    if (!receipt?.auditId || !receipt.actionId) {
+      const error = new ApiClientError({
+        statusCode: 200,
+        code: "COMPLAINT_ACTION_COMPLETED_WITHOUT_RECEIPT",
+        message:
+          "Complaint action completed, but its audit receipt was not returned. Refresh the case before taking another action.",
+        retryable: false,
+        rawBody: "",
+      });
+      error.message = error.apiMessage;
+      throw error;
+    }
+    return { data: envelope.data, receipt };
+  }
+
+  async createComplaintWithReceipt(
+    command: CreateComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintCaseRecord>(
+      "POST",
+      "/api/complaints",
+      { ...options, body: command },
+    );
+  }
+
+  async assignComplaintWithReceipt(
+    caseNo: string,
+    command: AssignComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintCaseRecord>(
+      "POST",
+      `/api/complaints/${encodeURIComponent(caseNo)}/assign`,
+      { ...options, body: command },
+    );
+  }
+
+  async addComplaintNoteWithReceipt(
+    caseNo: string,
+    command: AddComplaintCaseNoteCommand,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintCaseRecord>(
+      "POST",
+      `/api/complaints/${encodeURIComponent(caseNo)}/notes`,
+      { ...options, body: command },
+    );
+  }
+
+  async reopenComplaintWithReceipt(
+    caseNo: string,
+    command: ReopenComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintCaseRecord>(
+      "POST",
+      `/api/complaints/${encodeURIComponent(caseNo)}/reopen`,
+      { ...options, body: command },
+    );
+  }
+
+  async resolveComplaintWithReceipt(
+    caseNo: string,
+    command: ResolveComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintCaseRecord>(
+      "POST",
+      `/api/complaints/${encodeURIComponent(caseNo)}/resolve`,
+      { ...options, body: command },
+    );
+  }
+
+  async closeComplaintWithReceipt(
+    caseNo: string,
+    command: ResolveComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintCaseRecord>(
+      "POST",
+      `/api/complaints/${encodeURIComponent(caseNo)}/close`,
+      { ...options, body: command },
+    );
+  }
+
+  async escalateComplaintToIncidentWithReceipt(
+    caseNo: string,
+    command: EscalateComplaintToIncidentCommand,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<{
+      complaintCase: ComplaintCaseRecord;
+      incident: IncidentRecord;
+    }>(
+      "POST",
+      `/api/complaints/${encodeURIComponent(caseNo)}/escalate-to-incident`,
+      { ...options, body: command },
+    );
+  }
+
+  async linkComplaintToIncidentWithReceipt(
+    caseNo: string,
+    command: LinkComplaintToIncidentCommand,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintCaseRecord>(
+      "POST",
+      `/api/complaints/${encodeURIComponent(caseNo)}/link-incident`,
+      { ...options, body: command },
+    );
+  }
+
+  async markComplaintSlaBreachWithReceipt(
+    caseNo: string,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintCaseRecord>(
+      "POST",
+      `/api/complaints/${encodeURIComponent(caseNo)}/sla-breach`,
+      options,
+    );
+  }
+
+  async getComplaintExportViewWithReceipt(
+    caseNo: string,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintExportViewRecord>(
+      "GET",
+      `/api/complaints/${encodeURIComponent(caseNo)}/export?action_receipt=true`,
+      options,
+    );
+  }
+
   // ── Billing ──
 
   async getBillingProfile(): Promise<TenantBillingProfile> {
@@ -3396,8 +3538,13 @@ export class ApiClient {
     return this.post(`/api/tenant/users/${userId}/role`, { body: command });
   }
 
-  async listAuditLogs(): Promise<AuditLogRecord[]> {
-    return this.getList<AuditLogRecord>("/api/audit");
+  async listAuditLogs(options?: {
+    auditId?: string;
+  }): Promise<AuditLogRecord[]> {
+    const suffix = options?.auditId
+      ? `?auditId=${encodeURIComponent(options.auditId)}`
+      : "";
+    return this.getList<AuditLogRecord>(`/api/audit${suffix}`);
   }
 
   async listTenantAuditLogs(options: { tenantId?: string } = {}) {

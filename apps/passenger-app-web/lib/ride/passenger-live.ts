@@ -128,7 +128,7 @@ export async function requestPassengerRideAction<T>(
         idempotencyKey,
       )) as unknown as T;
     } else if (action === "contact") {
-      return { contactUri: "tel:02-2944-0985" } as unknown as T;
+      return (await passengerClient.contactRide(idOrToken)) as unknown as T;
     }
     throw new PassengerAuthorityError(400, "INVALID_ACTION");
   }

@@ -107,8 +107,23 @@ export default defineConfig({
             ...apiEnvironment,
             DRTS_API_URL: apiOrigin,
             NEXT_PUBLIC_API_URL: "/control-plane-proxy",
+            NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN: "http://127.0.0.1:3204",
           },
           url: "http://127.0.0.1:3202/review",
+          reuseExistingServer: false,
+          timeout: 180_000,
+        },
+        {
+          command:
+            "pnpm --filter @drts/platform-admin-web exec next dev --webpack --hostname 127.0.0.1 --port 3204",
+          env: {
+            ...apiEnvironment,
+            // A second API instance must read the first one's committed audit.
+            DRTS_API_URL: "http://127.0.0.1:3002",
+            NEXT_PUBLIC_API_URL: "/control-plane-proxy",
+            NEXT_PUBLIC_OPS_CONSOLE_ORIGIN: "http://127.0.0.1:3202",
+          },
+          url: "http://127.0.0.1:3204/audit",
           reuseExistingServer: false,
           timeout: 180_000,
         },
