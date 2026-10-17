@@ -308,6 +308,11 @@ export function mapPassengerRideAuthorityToFixture(
   const view = (rawView as any)?.ride || rawView;
   const assignment = view.assignment;
   const screenId = resolveScreenId(view, kind, quoteAnomalyCode);
+  const showPickupEta = [
+    "assigned",
+    "driver_accepted",
+    "enroute_pickup",
+  ].includes(view.order.status);
   const fareMinor = assignment?.routeFare?.estimatedFareMinor ?? null;
   const payableFareMinor = assignment?.routeFare?.payableFareMinor ?? null;
   const distanceMeters = assignment?.routeFare?.estimatedDistanceMeters ?? null;
@@ -343,12 +348,12 @@ export function mapPassengerRideAuthorityToFixture(
     ...(view.order.status === "cancelled" && view.order.cancelledAt
       ? { cancelledAtText: formatDateTime(view.order.cancelledAt) }
       : {}),
-    ...(view.order.status === "cancelled" ||
+    ...(!showPickupEta ||
     assignment?.eta.minutes === null ||
     assignment?.eta.minutes === undefined
       ? {}
       : { etaMain: `預計 ${assignment.eta.minutes} 分鐘抵達` }),
-    ...(view.order.status === "cancelled" || !assignment?.eta.calculatedAt
+    ...(!showPickupEta || !assignment?.eta.calculatedAt
       ? {}
       : { etaSub: `更新於 ${formatDateTime(assignment.eta.calculatedAt)}` }),
     ...(distanceMeters === null
