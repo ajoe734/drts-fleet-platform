@@ -49,8 +49,10 @@ async function readDriverRoute(
         ) {
           nextRefreshAt = Date.now() + 30_000;
           await driver
-            .getByRole("button", { name: "重新整理", exact: true })
-            .click();
+            .getByRole("button")
+            .filter({ hasText: "重新整理" })
+            .first()
+            .click({ timeout: 15_000 });
           refreshes++;
         }
         return visible();
