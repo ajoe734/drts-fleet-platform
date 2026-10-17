@@ -44,6 +44,11 @@ export function mapNativePassengerRideAuthorityToFixture(
   const view = unwrapNativePassengerRideAuthority(rawView);
   const assignment = view.assignment;
   const screenId = resolveNativePassengerScreenId(view, kind, quoteAnomalyCode);
+  const showPickupEta = [
+    "assigned",
+    "driver_accepted",
+    "enroute_pickup",
+  ].includes(view.order.status);
   const fareMinor = assignment?.routeFare?.estimatedFareMinor ?? null;
   const payableFareMinor = assignment?.routeFare?.payableFareMinor ?? null;
   const distanceMeters = assignment?.routeFare?.estimatedDistanceMeters ?? null;
@@ -79,12 +84,12 @@ export function mapNativePassengerRideAuthorityToFixture(
     ...(view.order.status === "cancelled" && view.order.cancelledAt
       ? { cancelledAtText: formatDateTime(view.order.cancelledAt) }
       : {}),
-    ...(view.order.status === "cancelled" ||
+    ...(!showPickupEta ||
     assignment?.eta.minutes === null ||
     assignment?.eta.minutes === undefined
       ? {}
       : { etaMain: `預計 ${assignment.eta.minutes} 分鐘抵達` }),
-    ...(view.order.status === "cancelled" ||
+    ...(!showPickupEta ||
     !assignment?.eta.calculatedAt ||
     !Number.isFinite(Date.parse(assignment.eta.calculatedAt))
       ? {}

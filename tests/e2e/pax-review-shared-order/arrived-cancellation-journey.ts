@@ -87,6 +87,7 @@ export async function arrivedCancellationJourney(
         timeout: 10_000,
       });
       await expect(pax.getByTestId("review-order-id")).toHaveText(orderId);
+      await expect(pax.getByText(/^預計\s+\d+\s+分鐘抵達$/)).toHaveCount(0);
       await driver
         .getByRole("button", { name: "暫停模擬定位", exact: true })
         .click();
@@ -118,6 +119,7 @@ export async function arrivedCancellationJourney(
       expect(view.order.status).toBe("arrived_pickup");
       expect(view.actions.canCancel).toBe(true);
       await expect(pax.getByText("司機已抵達", { exact: true })).toBeVisible();
+      await expect(pax.getByText(/^預計\s+\d+\s+分鐘抵達$/)).toHaveCount(0);
       await opsRead(ops, orderId);
       await expect(ops.getByTestId("ops-review-order-status")).toHaveText(
         "arrived_pickup",
@@ -249,6 +251,7 @@ export async function arrivedCancellationJourney(
             actualDismissedConfirmationPOSTCount: 0,
             actualConfirmedCancellationPOSTCount: cancelRequests,
             actualMountedPassengerArrivalAndCancellationShown: true,
+            actualMountedPassengerArrivalHasNoPendingPickupETA: true,
             actualThreeRoleSameOrderReadback: true,
             actualInternalNetworkMocks: false,
             actualClockAdvanced: false,
