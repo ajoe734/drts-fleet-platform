@@ -37,6 +37,10 @@ import {
   exportReimbursementBatch,
   markReimbursementBatchReconciled,
 } from "../reimbursement-workflow-client";
+import {
+  financeStageRemittanceProofContent,
+  financeUploadRemittanceProof,
+} from "../remittance-finance-proof-client";
 
 const theme = buildCanvasTheme({
   surface: "platform",
@@ -403,6 +407,20 @@ function buildLineItemRows(
   }));
 }
 
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () =>
+      reject(reader.error ?? new Error("Could not read the selected file."));
+    reader.onload = () => {
+      const result = reader.result as string;
+      const commaIndex = result.indexOf(",");
+      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function actionButtonLinkStyle(primary = false) {
   return {
     display: "inline-flex",
@@ -463,6 +481,17 @@ export default function ReimbursementDetailPage() {
   const [readbackError, setReadbackError] = useState<string | null>(null);
   const [payWithProofError, setPayWithProofError] = useState<string | null>(
     null,
+  );
+  const [financeUploadFile, setFinanceUploadFile] = useState<File | null>(null);
+  const [financeUploading, setFinanceUploading] = useState(false);
+  const [financeUploadError, setFinanceUploadError] = useState<string | null>(
+    null,
+  );
+  const [financeStageKey, setFinanceStageKey] = useState(() =>
+    createIdempotencyKey("reimbursement-finance-stage"),
+  );
+  const [financeUploadKey, setFinanceUploadKey] = useState(() =>
+    createIdempotencyKey("reimbursement-finance-upload"),
   );
 
   const loadBatch = useCallback(async () => {
@@ -633,6 +662,46 @@ export default function ReimbursementDetailPage() {
       setPayWithProofError(nextError?.message ?? String(nextError));
     } finally {
       setSavingAction(null);
+    }
+  }
+
+  async function handleFinanceUpload() {
+    if (!batch) {
+      return;
+    }
+    if (!financeUploadFile) {
+      setFinanceUploadError(proofT("proof.financeUploadNoFile", locale));
+      return;
+    }
+    setFinanceUploading(true);
+    setFinanceUploadError(null);
+    try {
+      const contentBase64 = await fileToBase64(financeUploadFile);
+      const contentType = financeUploadFile.type || "application/octet-stream";
+      const staged = await financeStageRemittanceProofContent(
+        client,
+        { contentBase64, contentType },
+        { idempotencyKey: financeStageKey },
+      );
+      const uploaded = await financeUploadRemittanceProof(
+        client,
+        {
+          batchId: batch.batchId,
+          originalFilename: financeUploadFile.name,
+          contentType,
+          sizeBytes: financeUploadFile.size,
+          stagedContentRef: staged.stagedContentRef,
+        },
+        { idempotencyKey: financeUploadKey },
+      );
+      setProof(uploaded);
+      setFinanceUploadFile(null);
+      setFinanceStageKey(createIdempotencyKey("reimbursement-finance-stage"));
+      setFinanceUploadKey(createIdempotencyKey("reimbursement-finance-upload"));
+    } catch (nextError: any) {
+      setFinanceUploadError(nextError?.message ?? String(nextError));
+    } finally {
+      setFinanceUploading(false);
     }
   }
 
@@ -1216,12 +1285,73 @@ export default function ReimbursementDetailPage() {
               ) : null}
             </div>
           ) : (
-            <div style={{ display: "grid", gap: 6 }}>
+            <div style={{ display: "grid", gap: 10 }}>
               <Pill theme={theme} tone="neutral" dot>
                 {proofT("proof.notUploadedTitle", locale)}
               </Pill>
               <div style={{ fontSize: 11.5, color: theme.textMuted }}>
                 {proofT("proof.notUploadedBody", locale)}
+              </div>
+              <div
+                style={{
+                  marginTop: 4,
+                  paddingTop: 10,
+                  borderTop: `1px solid ${theme.border}`,
+                  display: "grid",
+                  gap: 8,
+                }}
+              >
+                <span style={{ fontSize: 12, fontWeight: 700 }}>
+                  {proofT("proof.financeUploadTitle", locale)}
+                </span>
+                <div style={{ fontSize: 11.5, color: theme.textMuted }}>
+                  {proofT("proof.financeUploadBody", locale)}
+                </div>
+                {financeUploadError ? (
+                  <Banner
+                    theme={theme}
+                    tone="danger"
+                    title={proofT("proof.financeUploadError", locale)}
+                    body={financeUploadError}
+                  />
+                ) : null}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                  }}
+                >
+                  <label
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      fontSize: 12,
+                    }}
+                  >
+                    <input
+                      type="file"
+                      disabled={financeUploading}
+                      onChange={(event) =>
+                        setFinanceUploadFile(event.target.files?.[0] ?? null)
+                      }
+                      style={{ fontSize: 12 }}
+                    />
+                  </label>
+                  <Btn
+                    theme={theme}
+                    size="sm"
+                    icon="plus"
+                    disabled={financeUploading || !financeUploadFile}
+                    onClick={() => void handleFinanceUpload()}
+                  >
+                    {financeUploading
+                      ? proofT("proof.financeUploadSaving", locale)
+                      : proofT("proof.financeUploadButton", locale)}
+                  </Btn>
+                </div>
               </div>
             </div>
           )}

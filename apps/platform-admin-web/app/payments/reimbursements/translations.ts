@@ -22,6 +22,14 @@ const DICTIONARY: Record<Locale, Record<string, string>> = {
     "proof.notUploadedTitle": "尚未上傳匯款證明",
     "proof.notUploadedBody":
       "司機（driver realm）尚未透過匯款證明上傳流程送出此批次的證明檔案。",
+    "proof.financeUploadTitle": "財務代為上傳 (出納)",
+    "proof.financeUploadBody":
+      "system/platform/ops 身份且具 billing:write 權限者可代為上傳此批次的匯款證明原檔；收款司機歸屬仍取自本批次,上傳者身份另行記錄。",
+    "proof.financeUploadChooseFile": "選擇檔案",
+    "proof.financeUploadButton": "上傳匯款證明",
+    "proof.financeUploadSaving": "上傳中…",
+    "proof.financeUploadError": "財務上傳失敗",
+    "proof.financeUploadNoFile": "請先選擇檔案",
     "proof.loadError": "無法載入匯款證明資訊",
     "proof.scanState.pending_scan": "掃描中",
     "proof.scanState.clean": "已確認",
@@ -93,6 +101,14 @@ const DICTIONARY: Record<Locale, Record<string, string>> = {
     "proof.notUploadedTitle": "No remittance proof uploaded yet",
     "proof.notUploadedBody":
       "The driver has not yet submitted a proof file for this batch through the upload flow.",
+    "proof.financeUploadTitle": "Upload on behalf of driver (cashier)",
+    "proof.financeUploadBody":
+      "A verified system/platform/ops caller with billing:write may upload this batch's remittance proof on the driver's behalf. The paid driver is still attributed from this batch; the uploader is recorded separately.",
+    "proof.financeUploadChooseFile": "Choose file",
+    "proof.financeUploadButton": "Upload remittance proof",
+    "proof.financeUploadSaving": "Uploading…",
+    "proof.financeUploadError": "Finance upload failed",
+    "proof.financeUploadNoFile": "Choose a file first",
     "proof.loadError": "Could not load remittance proof",
     "proof.scanState.pending_scan": "Scanning",
     "proof.scanState.clean": "Confirmed",

@@ -968,4 +968,109 @@ export class BillingSettlementController {
       );
     return toApiSuccessEnvelope(data, requestId);
   }
+
+  // ── Finance-only remittance proof upload (REMITTANCE-FINANCE-PROOF-UPLOAD-FLOW-20261015) ──
+  //
+  // Parallel to the driver-only staged-content/upload pair above, for a
+  // verified system/platform/ops caller with billing:write (the "出納"
+  // half of capabilities.json C081's cashier/reviewer role). See
+  // `.local/goal-continuation-20261015T0940-internal-frontier-root/REMITTANCE-PROOF-ACTOR-AUTHORITY-20261015.md`
+  // §3-5 for why this is a new parallel route rather than widening the
+  // driver-only route: `BootstrapAuthGuard.assertScopesAllowed` requires
+  // ALL of a route's `@RequireScopes(...)` regardless of realm, so one
+  // route cannot demand `driver:write` for a driver caller and
+  // `billing:write` for a finance caller. The driver route above, its RBAC
+  // and its existing tests are unchanged. `billingSettlementService`'s
+  // `uploadRemittanceProof` already denormalises `driverId` from the batch
+  // and records `uploadedByActorId` from `identity`, independent of realm;
+  // no service-layer change is needed for this caller to be attributed
+  // correctly.
+  @Post("reimbursements/proofs/finance-staged-content")
+  @HttpCode(HttpStatus.OK)
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:write")
+  async financeStageRemittanceProofContent(
+    @Body() body: { contentBase64?: string; contentType?: string },
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const contentType = body?.contentType?.trim();
+    if (!contentType) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "contentType is required.",
+      );
+    }
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(body?.contentBase64 ?? "", "base64");
+    } catch {
+      bytes = Buffer.alloc(0);
+    }
+    if (bytes.length === 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "contentBase64 must decode to non-empty bytes.",
+      );
+    }
+    const result = await this.idempotencyService.execute({
+      scope: "billing:remittance_proof:staged_content:finance_create",
+      idempotencyKey,
+      required: true,
+      payload: { contentType, contentBase64: body?.contentBase64 ?? "" },
+      execute: async () => {
+        const data =
+          await this.billingSettlementService.stageRemittanceProofContent(
+            bytes,
+            contentType,
+          );
+        return {
+          data,
+          statusCode: 200,
+        };
+      },
+    });
+    return toApiSuccessEnvelope(result.data, requestId);
+  }
+
+  @Post("reimbursements/proofs/finance-upload")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:write")
+  async financeUploadRemittanceProof(
+    @Body() command: UploadRemittanceProofCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const scope = `billing:remittance_proof:${command.batchId}:finance_upload`;
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: {
+        batchId: command.batchId,
+        originalFilename: command.originalFilename,
+        stagedContentRef: command.stagedContentRef,
+      },
+      execute: async () => {
+        const uploaded =
+          await this.billingSettlementService.uploadRemittanceProof(
+            command,
+            identity ?? null,
+            requestId,
+          );
+        // Scan actual persisted bytes, same as the driver path above.
+        const data = await this.billingSettlementService.scanRemittanceProof(
+          uploaded.proofId,
+          identity ?? null,
+          requestId,
+          true,
+        );
+        return { data, statusCode: 200 };
+      },
+    });
+    return toApiSuccessEnvelope(result.data, requestId);
+  }
 }
