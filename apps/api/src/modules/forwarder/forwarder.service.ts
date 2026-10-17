@@ -1778,6 +1778,17 @@ export class ForwarderService implements OnModuleInit {
       blockingReason,
       pickupSummary: order?.pickup.address ?? null,
       dropoffSummary: order?.dropoff.address ?? null,
+      orderSummary: order
+        ? {
+            orderId: order.orderId,
+            serviceBucket: order.serviceBucket,
+            serviceProductCode: order.serviceProductCode ?? null,
+            businessDispatchSubtype: order.businessDispatchSubtype,
+            dispatchSemantics: order.dispatchSemantics,
+            fixedPrice: order.fixedPrice,
+            quotedFare: order.quotedFare,
+          }
+        : null,
       deadlineAt:
         order?.dispatchTimeout?.timeoutAt ??
         order?.reservationWindowStart ??

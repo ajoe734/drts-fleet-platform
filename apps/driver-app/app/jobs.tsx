@@ -1,3 +1,4 @@
+import { loadDriverOrderSummaries } from "@/lib/task-order-summaries";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,7 +15,7 @@ import { Redirect, useRouter } from "expo-router";
 import type {
   DriverTaskAction,
   DriverTaskRecord,
-  OwnedOrderRecord,
+  DriverTaskOrderSummary,
   UnifiedDriverTaskView,
 } from "@drts/contracts";
 
@@ -606,7 +607,7 @@ function getDenseStatusColor(task: UnifiedDriverTaskView) {
   }
 }
 
-function buildTypeLabel(order: OwnedOrderRecord | null) {
+function buildTypeLabel(order: DriverTaskOrderSummary | null) {
   return formatDriverServiceProductLabel({
     serviceProductCode: readDriverServiceProductCode(order),
     serviceBucket: order?.serviceBucket ?? null,
@@ -920,7 +921,7 @@ function TaskCard({
   accepting,
 }: {
   task: UnifiedDriverTaskView;
-  order: OwnedOrderRecord | null;
+  order: DriverTaskOrderSummary | null;
   onOpen: () => void;
   onAccept: () => void;
   accepting: boolean;
@@ -1069,7 +1070,7 @@ function DenseTaskRow({
   onReject,
 }: {
   task: UnifiedDriverTaskView;
-  order: OwnedOrderRecord | null;
+  order: DriverTaskOrderSummary | null;
   busy: boolean;
   onOpen: () => void;
   onAccept: () => void;
@@ -1242,9 +1243,9 @@ function DenseTaskRow({
 
 export default function JobsScreen() {
   const [tasks, setTasks] = useState<UnifiedDriverTaskView[]>([]);
-  const [orderMap, setOrderMap] = useState<Record<string, OwnedOrderRecord>>(
-    {},
-  );
+  const [orderMap, setOrderMap] = useState<
+    Record<string, DriverTaskOrderSummary>
+  >({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1318,32 +1319,7 @@ export default function JobsScreen() {
       const pendingCompletion = await pendingCompletionPromise;
       setQueuedCompletionTaskId(pendingCompletion?.taskId ?? null);
 
-      const orderTasks = new Map(
-        fetchedTasks
-          .filter((task) => task.orderId)
-          .map((task) => [task.orderId, task]),
-      );
-      const orderResults = await Promise.all(
-        [...orderTasks].map(async ([orderId, task]) => {
-          try {
-            const order = isOwnedTask(task)
-              ? await client.getDriverTaskOrder(task.taskId)
-              : await client.getOrder(orderId);
-            return { orderId, order };
-          } catch {
-            return { orderId, order: null };
-          }
-        }),
-      );
-
-      const nextOrderMap: Record<string, OwnedOrderRecord> = {};
-      orderResults.forEach(({ orderId, order }) => {
-        if (order) {
-          nextOrderMap[orderId] = order;
-        }
-      });
-
-      setOrderMap(nextOrderMap);
+      setOrderMap(await loadDriverOrderSummaries(client, fetchedTasks));
       setError(null);
       setLastSyncedAt(new Date().toISOString());
     } catch (nextError: unknown) {
