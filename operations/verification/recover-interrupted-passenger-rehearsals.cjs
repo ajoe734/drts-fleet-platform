@@ -37,7 +37,9 @@ async function recoverOrders(orders, mode, ports, record) {
     };
     results.push(result);
     try {
+      result.stage = "owner_login";
       await ports.login(target.phone);
+      result.stage = "owner_read";
       const before = summarize(await ports.read(target.orderId));
       result.before = before;
       if (before.orderId !== target.orderId)
@@ -58,7 +60,9 @@ async function recoverOrders(orders, mode, ports, record) {
           throw new RecoveryOperationError(
             "Current assignment differs from the interrupted rehearsal",
           );
+        result.stage = "original_cancellation";
         await ports.cancel(target.orderId);
+        result.stage = "cancellation_readback";
         const after = summarize(await ports.read(target.orderId));
         result.after = after;
         if (after.orderId !== before.orderId || after.status !== "cancelled")
@@ -128,7 +132,7 @@ function passengerPageOperations(getPage, origin, outputDirectory) {
         throw new RecoveryOperationError(
           `Owner order read HTTP${response.status()}`,
         );
-      return camel(await response.json()).data;
+      return camel(await response.json()).data.ride;
     },
     async cancel(orderId) {
       const page = getPage();

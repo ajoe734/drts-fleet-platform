@@ -5,6 +5,7 @@ const require = createRequire(import.meta.url);
 const {
   recoverOrders,
   finalizeCreatedOrders,
+  passengerPageOperations,
   RecoveryOperationError,
 } = require("../../../operations/verification/recover-interrupted-passenger-rehearsals.cjs");
 const target = {
@@ -25,6 +26,33 @@ const ride = (status = "arrived_pickup") => ({
 const ports = () => ({ login: vi.fn(), read: vi.fn(), cancel: vi.fn() });
 
 describe("interrupted real rehearsal order lifecycle", () => {
+  it("unwraps the original Passenger ride response before reading the canonical order", async () => {
+    const get = vi.fn().mockResolvedValue({
+      ok: () => true,
+      json: async () => ({
+        data: {
+          ride: {
+            order: { order_id: target.orderId, status: "arrived_pickup" },
+            assignment: {
+              assignment_id: "existing-assignment",
+              driver: { driver_id: target.expectedDriverId },
+              vehicle: { vehicle_id: target.expectedVehicleId },
+            },
+          },
+        },
+      }),
+    });
+    const p = passengerPageOperations(
+      () => ({ request: { get } }),
+      "https://passenger.invalid",
+      "/unused",
+    );
+    const result = await p.read(target.orderId);
+    expect(result).toMatchObject(ride());
+    expect(get).toHaveBeenCalledExactlyOnceWith(
+      `https://passenger.invalid/api/passenger-app/rides/${target.orderId}`,
+    );
+  });
   it("inspects the original owner order without cancelling or replacing it", async () => {
     const p = ports();
     p.read.mockResolvedValue(ride());
