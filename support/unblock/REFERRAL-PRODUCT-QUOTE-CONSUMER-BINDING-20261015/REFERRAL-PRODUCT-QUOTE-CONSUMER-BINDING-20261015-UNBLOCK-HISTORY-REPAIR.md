@@ -90,13 +90,16 @@ coordination; this task records the safe operational correction below.
    ```json
    {
      "resolved_parent_status": "blocked",
-     "resolved_parent_waiting_for": "Supervisor",
+     "resolved_parent_waiting_for": "Codex",
      "resolved_parent_next": "History audit finds no divergent/published task history. Preserve original noncanonical report generation 8319227035cd4000956d0b3a9d19ad56 and Key2; await the five original monetary-authority inputs in approved report section 8.6, then normal same-task continuation. No reset/rebase/force-push or unchanged-report re-handoff."
    }
    ```
 
    `ai_status.apply_unblock_parent_resolution` defaults to `todo` without an
    explicit disposition; helper merge must not erase the actual policy hold.
+   `resolved_parent_waiting_for` must name a `KNOWN_AGENTS` lane: use the
+   existing parent owner Codex. Supervisor coordinates the authority input but
+   is a command actor, not a valid waiting-for lane in this release.
 3. Supervisor must use current-release `note` on the original parent to reference
    this artifact and the next step above. Preserve blocked status, full criteria,
    generation and existing acceptance; do not re-handoff the unchanged report.
@@ -130,11 +133,14 @@ Two actual CLI attempts on 2026-10-17 failed before writes:
 | Attempt | Result |
 | --- | --- |
 | `AI_NAME=Codex .../ai-status.sh progress REFERRAL-PRODUCT-QUOTE-CONSUMER-BINDING-20261015 <diagnosis>` | Exit 1: `Dispatched worker cannot mutate a different task` |
-| `AI_NAME=Codex TASK_METADATA_JSON=<three fields above> .../ai-status.sh assign REFERRAL-PRODUCT-QUOTE-CONSUMER-BINDING-20261015-UNBLOCK-HISTORY-REPAIR Codex Claude` | Exit 1: `Dispatched workers must use their assigned task lifecycle commands` |
+| `AI_NAME=Codex TASK_METADATA_JSON=<initial disposition payload> .../ai-status.sh assign REFERRAL-PRODUCT-QUOTE-CONSUMER-BINDING-20261015-UNBLOCK-HISTORY-REPAIR Codex Claude` | Exit 1: `Dispatched workers must use their assigned task lifecycle commands` |
 
 The exact executable is
 `/home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-4da15372d696/tools/development-orchestrator/bin/ai-status.sh`.
 Do not clear dispatch variables, impersonate Supervisor or edit status files.
+The rejected initial payload used waiting-for `Supervisor`; source validation
+subsequently established that actor is absent from `KNOWN_AGENTS`. The required
+payload above corrects it to Codex before any successful metadata transaction.
 The helper's lifecycle message must retain this coordination request. Acceptance
 item "Update the parent task" is **pending**, not passed. Keep PR draft and
 helper in progress until Supervisor applies the disposition and parent note;
