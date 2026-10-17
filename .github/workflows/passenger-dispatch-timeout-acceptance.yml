@@ -14,7 +14,10 @@ on:
       - playwright.pax-real-dispatch-timeout.config.ts
       - tests/e2e/pax-real-dispatch-timeout.spec.ts
       - apps/passenger-app-web/components/booking/**
+      - apps/passenger-app-web/components/ride/**
+      - apps/passenger-app-web/lib/ride/**
       - packages/passenger-client/src/booking/**
+      - packages/passenger-client/src/ride/**
       - apps/api/src/modules/passenger-app/booking/**
       - apps/api/src/modules/passenger-app/fare/**
       - apps/api/src/modules/owned-mobility/**

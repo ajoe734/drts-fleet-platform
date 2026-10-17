@@ -2530,11 +2530,11 @@ function RideContent({
         <MapCard fixture={fixture} />
         <StatusSubline fixture={fixture} />
         <ProgressCard
-          title={t.ArrangingVehicle}
+          title={fixture.status || t.ArrangingVehicle}
           detail={
             fixture.requestedPickupText
-              ? `${fixture.requestedPickupText} · 通常 1–3 分鐘完成指派`
-              : "通常 1–3 分鐘完成指派"
+              ? `${fixture.requestedPickupText} · ${fixture.statusSubline || "通常 1–3 分鐘完成指派"}`
+              : fixture.statusSubline || "通常 1–3 分鐘完成指派"
           }
         />
         <FareCard fixture={fixture} />

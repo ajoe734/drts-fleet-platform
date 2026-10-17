@@ -196,6 +196,14 @@ test("the real reservation acceptance deadline expires automatically, then recov
           await expect(
             pax.getByText("派車逾時", { exact: true }).first(),
           ).toBeVisible({ timeout: 15_000 });
+          await expect(
+            pax
+              .getByText(
+                "尚未有司機完成接單，請等待調度重新安排車輛，或取消行程。",
+                { exact: true },
+              )
+              .first(),
+          ).toBeVisible();
           await expect(pax.getByTestId("review-order-id")).toHaveText(orderId);
           await opsRead(ops, orderId);
           await expect(ops.getByTestId("ops-review-order-status")).toHaveText(
@@ -223,6 +231,12 @@ test("the real reservation acceptance deadline expires automatically, then recov
             await driver
               .getByRole("button", { name: "重新整理", exact: true })
               .click();
+            await expect(
+              driver.getByText(orderId, { exact: false }).first(),
+            ).toBeVisible();
+            await expect(
+              driver.getByText(/已取消|平台取消/).first(),
+            ).toBeVisible();
             await expect(
               driver.getByRole("button", { name: "接受任務", exact: true }),
             ).toHaveCount(0, { timeout: 15_000 });
@@ -313,6 +327,12 @@ test("the real reservation acceptance deadline expires automatically, then recov
           await driver
             .getByRole("button", { name: "重新整理", exact: true })
             .click();
+          await expect(
+            driver.getByText(orderId, { exact: false }).first(),
+          ).toBeVisible();
+          await expect(
+            driver.getByText(/已取消|平台取消/).first(),
+          ).toBeVisible();
           await expect(
             driver.getByRole("button", { name: "前往接送點", exact: true }),
           ).toHaveCount(0, { timeout: 15_000 });
