@@ -51,7 +51,7 @@ export async function outOfAreaRecoveryJourney(
     const outside = await step(
       "F original picker selects a real outside-area destination",
       async () => {
-        const selected = await selectDestination("台中車站");
+        const selected = await selectDestination("臺中市");
         expect(selected.point.lat).toBeLessThan(25);
         expect(selected.point.lat).toBeGreaterThan(23);
         expect(ridePOSTCount).toBe(0);
