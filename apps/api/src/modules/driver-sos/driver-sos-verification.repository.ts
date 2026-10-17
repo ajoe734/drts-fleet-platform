@@ -6,6 +6,7 @@ import type {
   DriverSosAlertRenderObservation,
   DriverSosAttachmentRecord,
   DriverSosAttachmentType,
+  DriverSosEventRecord,
   DriverSosTimelineEntry,
   DriverSosUrgentAlertOutboxRecord,
 } from "@drts/contracts";
@@ -74,6 +75,22 @@ type AlertObservationRow = QueryResultRow & {
   ops_alert_receipt_recorded_at: Date | string;
   alert_to_ops_latency_ms: number | string;
 };
+
+type DutyAckRow = QueryResultRow & {
+  duty_ack_snapshot: { acknowledgedByActorId: string; acknowledgedAt: string };
+};
+
+export interface DriverSosDutyAcknowledgementPersistResult {
+  /** False when a different writer already won at the database layer. */
+  accepted: boolean;
+  acknowledgedByActorId: string;
+  acknowledgedAt: string;
+}
+
+export interface DriverSosDutyAlertDispatchPlan {
+  event: DriverSosEventRecord;
+  timeline: DriverSosTimelineEntry;
+}
 
 type AlertLatencySummaryRow = QueryResultRow & {
   sample_count: number | string;
@@ -280,9 +297,10 @@ export class DriverSosVerificationRepository {
     outbox: DriverSosUrgentAlertOutboxRecord,
     timeline: DriverSosTimelineEntry,
     observation: DriverSosAlertRenderObservation,
-  ) {
+    dutyAlert: DriverSosDutyAlertDispatchPlan | null = null,
+  ): Promise<DriverSosAlertRenderObservation & { dutyAlertApplied: boolean }> {
     if (!this.isEnabled()) {
-      return observation;
+      return { ...observation, dutyAlertApplied: Boolean(dutyAlert) };
     }
 
     const client = await this.databaseService!.connect();
@@ -294,7 +312,9 @@ export class DriverSosVerificationRepository {
           SET ops_alert_rendered_at = $2::timestamptz,
               ops_alert_receipt_recorded_at = $3::timestamptz,
               alert_to_ops_latency_ms = $4::bigint,
-              payload = payload || $5::jsonb
+              payload = payload || $5::jsonb,
+              status = CASE WHEN status = 'failed' THEN status ELSE 'delivered' END,
+              delivered_at = COALESCE(delivered_at, $3::timestamptz)
           WHERE outbox_id = $1
             AND ops_alert_rendered_at IS NULL
           RETURNING
@@ -318,8 +338,29 @@ export class DriverSosVerificationRepository {
       );
       let row = updated.rows[0];
       let duplicate = false;
+      let dutyAlertApplied = false;
       if (row) {
         await this.appendTimelineWith(client, timeline);
+        if (dutyAlert) {
+          const dutyAlertUpdate = await client.query(
+            `
+              UPDATE safety.driver_sos_events
+              SET status = $2,
+                  updated_at = $3
+              WHERE sos_event_id = $1
+                AND status = 'submitted'
+            `,
+            [
+              dutyAlert.event.sosEventId,
+              dutyAlert.event.status,
+              dutyAlert.event.updatedAt,
+            ],
+          );
+          if ((dutyAlertUpdate.rowCount ?? 0) > 0) {
+            dutyAlertApplied = true;
+            await this.appendTimelineWith(client, dutyAlert.timeline);
+          }
+        }
       } else {
         duplicate = true;
         const existing = await client.query<AlertObservationRow>(
@@ -353,7 +394,129 @@ export class DriverSosVerificationRepository {
         ),
         alertToOpsLatencyMs: Number(row.alert_to_ops_latency_ms),
         duplicate,
+        dutyAlertApplied,
       };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Conditional first-writer-wins: the UPDATE only takes effect while no
+   * acknowledgment has been recorded yet, so two overlapping writers (across
+   * processes, not just in-process) cannot both commit a duty_acknowledged
+   * timeline entry for the same event.
+   */
+  async persistDutyAcknowledgement(
+    event: DriverSosEventRecord,
+    timeline: DriverSosTimelineEntry,
+  ): Promise<DriverSosDutyAcknowledgementPersistResult> {
+    if (!this.isEnabled()) {
+      return {
+        accepted: true,
+        acknowledgedByActorId: event.dutyAcknowledgement.acknowledgedByActorId!,
+        acknowledgedAt: event.dutyAcknowledgement.acknowledgedAt!,
+      };
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const claimed = await client.query<DutyAckRow>(
+        `
+          UPDATE safety.driver_sos_events
+          SET status = $2,
+              duty_ack_snapshot = $3::jsonb,
+              updated_at = $4
+          WHERE sos_event_id = $1
+            AND duty_ack_snapshot->>'acknowledgedByActorId' IS NULL
+          RETURNING duty_ack_snapshot
+        `,
+        [
+          event.sosEventId,
+          event.status,
+          JSON.stringify(event.dutyAcknowledgement),
+          event.updatedAt,
+        ],
+      );
+      let row = claimed.rows[0];
+      const accepted = Boolean(row);
+      if (accepted) {
+        await this.appendTimelineWith(client, timeline);
+        await client.query(
+          `
+            UPDATE safety.driver_sos_urgent_alert_outbox
+            SET status = 'delivered',
+                delivered_at = COALESCE(delivered_at, $2)
+            WHERE sos_event_id = $1
+              AND status <> 'failed'
+          `,
+          [event.sosEventId, event.updatedAt],
+        );
+      } else {
+        const existing = await client.query<DutyAckRow>(
+          `
+            SELECT duty_ack_snapshot
+            FROM safety.driver_sos_events
+            WHERE sos_event_id = $1
+          `,
+          [event.sosEventId],
+        );
+        row = existing.rows[0];
+      }
+      if (!row) {
+        throw new Error(
+          `Driver SOS event ${event.sosEventId} was not available for duty acknowledgment.`,
+        );
+      }
+      await client.query("COMMIT");
+      return {
+        accepted,
+        acknowledgedByActorId: row.duty_ack_snapshot.acknowledgedByActorId,
+        acknowledgedAt: row.duty_ack_snapshot.acknowledgedAt,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Reconciles the Incident module's own status progression (investigating /
+   * resolved / closed) onto the correlated DriverSosEvent + timeline. The
+   * caller (service layer) only invokes this once it has already determined,
+   * from in-memory state, that the transition is new -- this just makes that
+   * single transition durable alongside its timeline entries.
+   */
+  async persistStatusTransition(
+    event: DriverSosEventRecord,
+    timelineEntries: DriverSosTimelineEntry[],
+  ): Promise<void> {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `
+          UPDATE safety.driver_sos_events
+          SET status = $2,
+              updated_at = $3
+          WHERE sos_event_id = $1
+        `,
+        [event.sosEventId, event.status, event.updatedAt],
+      );
+      for (const entry of timelineEntries) {
+        await this.appendTimelineWith(client, entry);
+      }
+      await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;

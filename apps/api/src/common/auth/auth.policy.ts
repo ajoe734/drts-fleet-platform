@@ -827,6 +827,19 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (
+    /^driver\/sos-events\/[^/]+$/.test(routePath) &&
+    upperMethod === "GET"
+  ) {
+    return {
+      routeKey: "driver:sos-events:get",
+      requiredScopes: ["incident:write"],
+      allowedRealms: baseAllowedRealms("driver"),
+      description:
+        "Driver own SOS event canonical readback (incident:write per IAM catalogue: driver realm has no incident:read grant)",
+    };
+  }
+
   if (routePath.startsWith("driver/sos-events/")) {
     return {
       routeKey: `driver:sos-attachments:${upperMethod}`,
@@ -849,6 +862,30 @@ export function resolveRouteAuthPolicy(
   }
 
   if (
+    /^ops\/driver-sos\/[^/]+\/duty-ack$/.test(routePath) &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey: "ops:driver-sos:duty-ack",
+      requiredScopes: ["incident:write"],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Ops canonical SOS duty acknowledgment (first-writer-wins)",
+    };
+  }
+
+  if (
+    /^ops\/driver-sos\/by-incident\/[^/]+$/.test(routePath) &&
+    upperMethod === "GET"
+  ) {
+    return {
+      routeKey: "ops:driver-sos:get-by-incident",
+      requiredScopes: ["incident:read"],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Ops canonical SOS event readback by incident id",
+    };
+  }
+
+  if (
     routePath === "ops/driver-sos/metrics/alert-latency" &&
     upperMethod === "GET"
   ) {
@@ -857,6 +894,18 @@ export function resolveRouteAuthPolicy(
       requiredScopes: ["incident:read"],
       allowedRealms: baseAllowedRealms("ops"),
       description: "Ops driver SOS alert latency metrics",
+    };
+  }
+
+  if (
+    /^ops\/driver-sos\/[^/]+$/.test(routePath) &&
+    upperMethod === "GET"
+  ) {
+    return {
+      routeKey: "ops:driver-sos:get",
+      requiredScopes: ["incident:read"],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Ops canonical SOS event readback",
     };
   }
 

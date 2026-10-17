@@ -22,6 +22,7 @@ import {
   RequireScopes,
   type BootstrapRequestIdentity,
 } from "../../common/auth";
+import type { AcknowledgeDriverSosDutyCommand } from "./driver-sos.service";
 import { DriverSosService } from "./driver-sos.service";
 
 @RequireRealms("driver")
@@ -90,6 +91,18 @@ export class DriverSosController {
     );
   }
 
+  @Get(":sosEventId")
+  async getOwnSosEvent(
+    @Param("sosEventId") sosEventId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.driverSosService.getOwnEventForDriver(sosEventId, identity),
+      requestId,
+    );
+  }
+
   @Post(":sosEventId/attachments/:attachmentId/retry-scan")
   async retryAttachmentScan(
     @Param("sosEventId") sosEventId: string,
@@ -126,6 +139,54 @@ export class OpsDriverSosController {
         identity,
         requestId,
       ),
+      requestId,
+    );
+  }
+
+  @Post(":sosEventId/duty-ack")
+  @RequireScopes("incident:write")
+  async acknowledgeDuty(
+    @Param("sosEventId") sosEventId: string,
+    @Body() command: AcknowledgeDriverSosDutyCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.driverSosService.acknowledgeDuty(
+        sosEventId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("by-incident/:incidentId")
+  @RequireScopes("incident:read")
+  async getSosEventByIncidentId(
+    @Param("incidentId") incidentId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.driverSosService.getEventByIncidentIdForOps(
+        incidentId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Get(":sosEventId")
+  @RequireScopes("incident:read")
+  async getSosEvent(
+    @Param("sosEventId") sosEventId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.driverSosService.getEventForOps(sosEventId, identity),
       requestId,
     );
   }
