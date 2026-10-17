@@ -2261,10 +2261,10 @@ export class RegulatoryRegistryService
     return this.cloneExclusivity(exclusivity);
   }
 
-  initiateVehicleOffboarding(
+  async initiateVehicleOffboarding(
     vehicleId: string,
     command: InitiateVehicleOffboardingCommand,
-  ) {
+  ): Promise<VehicleRegistryRecord> {
     this.assertNonBlank(command.reason, "reason");
     const vehicle = this.requireVehicle(vehicleId);
     const occurredAt = new Date().toISOString();
@@ -2319,7 +2319,7 @@ export class RegulatoryRegistryService
       persistContext: null,
       touchUpdatedAt: true,
     });
-    this.persistChanges(
+    await this.persistFinalExitChangeOrThrow(
       {
         vehicles: [this.cloneVehicle(updated)],
       },
@@ -2329,10 +2329,10 @@ export class RegulatoryRegistryService
     return this.cloneVehicle(updated);
   }
 
-  completeVehicleDebranding(
+  async completeVehicleDebranding(
     vehicleId: string,
     command: CompleteVehicleDebrandingCommand,
-  ) {
+  ): Promise<VehicleRegistryRecord> {
     const vehicle = this.requireVehicle(vehicleId);
     const current = this.normalizeOffboarding(
       vehicle.supplyLifecycle.offboarding,
@@ -2378,7 +2378,7 @@ export class RegulatoryRegistryService
       persistContext: null,
       touchUpdatedAt: true,
     });
-    this.persistChanges(
+    await this.persistFinalExitChangeOrThrow(
       {
         vehicles: [this.cloneVehicle(updated)],
       },
@@ -3022,7 +3022,14 @@ export class RegulatoryRegistryService
       blockedReasons.push("exclusivity_rejected");
     }
 
-    if (offboarding.status !== "none" && offboarding.status !== "completed") {
+    // A final exit (offboarding closed out, with or without debranding work)
+    // is terminal: nothing in this service ever resets offboarding.status
+    // back to "none", so once it leaves "none" the vehicle must stay off
+    // every dispatch/candidate path for good, not just while debranding is
+    // still pending. This is distinct from the other blockedReasons above,
+    // which are derived fresh from live contract/insurance/exclusivity state
+    // and recover automatically once that state is restored.
+    if (offboarding.status !== "none") {
       blockedReasons.push("offboarding_pending_debranding");
     }
 
@@ -3887,6 +3894,28 @@ export class RegulatoryRegistryService
           context,
         );
       });
+  }
+
+  /**
+   * Final-exit (offboarding/debranding) canonical writes must be confirmed,
+   * not fire-and-forget: a success response here means the canonical
+   * registry actually recorded the terminal state, and a storage failure
+   * must reject the caller instead of only being logged.
+   */
+  private async persistFinalExitChangeOrThrow(
+    changes: PersistRegulatoryRegistryChanges,
+    context: string,
+  ): Promise<void> {
+    const repository = this.regulatoryRegistryRepository;
+    if (!repository) {
+      return;
+    }
+    try {
+      await repository.persistChanges(changes);
+    } catch (error) {
+      repository.reportPersistenceFailure(error, context);
+      throw error;
+    }
   }
 
   private recordAudit(

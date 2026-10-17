@@ -465,16 +465,25 @@ describe("RegulatoryRegistryService", () => {
     });
   });
 
-  it("tracks debranding work during vehicle offboarding", () => {
+  it("tracks debranding work during vehicle offboarding, and the completed final exit stays excluded from dispatch and candidates (C073 正式退場: debranding 閉環後不得回候選)", async () => {
     const { service } = createService();
 
-    const offboarded = service.initiateVehicleOffboarding("veh-demo-001", {
-      reason: "Partner exit",
-      requestedBy: "ops-lead",
-      debrandingRequired: true,
-      debrandingDueAt: "2026-05-02T00:00:00.000Z",
-      debrandingTicketId: "DEBRAND-001",
-    });
+    // veh-demo-001 is a real, already-paired, fully-compliant seed vehicle
+    // (drv-demo-001, active contract/insurance/exclusivity); it is dispatchable
+    // before offboarding starts, so any post-completion exclusion below is
+    // caused by the final-exit rule itself, not by missing supply.
+    expect(service.getVehicleDispatchability("veh-demo-001")).toBe(true);
+
+    const offboarded = await service.initiateVehicleOffboarding(
+      "veh-demo-001",
+      {
+        reason: "Partner exit",
+        requestedBy: "ops-lead",
+        debrandingRequired: true,
+        debrandingDueAt: "2026-05-02T00:00:00.000Z",
+        debrandingTicketId: "DEBRAND-001",
+      },
+    );
 
     expect(offboarded).toMatchObject({
       dispatchableFlag: false,
@@ -493,19 +502,59 @@ describe("RegulatoryRegistryService", () => {
       },
     });
 
-    const completed = service.completeVehicleDebranding("veh-demo-001", {
-      debrandingTicketId: "DEBRAND-001",
-      notes: "Branding removed at depot",
-    });
+    const completed = await service.completeVehicleDebranding(
+      "veh-demo-001",
+      {
+        debrandingTicketId: "DEBRAND-001",
+        notes: "Branding removed at depot",
+      },
+    );
 
     expect(completed.supplyLifecycle.offboarding).toMatchObject({
       status: "completed",
       debrandingStatus: "completed",
       debrandingTicketId: "DEBRAND-001",
     });
-    expect(completed.supplyLifecycle.dispatch.blockedReasons).not.toContain(
+    // Original Source QA restoration note superseded by the C073 final-exit
+    // authority: a vehicle that has closed out its debranding work order is
+    // retired for good, not merely unblocked from a *pending* debranding
+    // hold. This is deliberately the opposite of what this assertion used to
+    // check (it previously asserted the reason was gone, i.e. the vehicle
+    // regained eligibility) — that was the exact bug C073 closes.
+    expect(completed.supplyLifecycle.dispatch.blockedReasons).toContain(
       "offboarding_pending_debranding",
     );
+    expect(completed.dispatchableFlag).toBe(false);
+    expect(service.getVehicleDispatchability("veh-demo-001")).toBe(false);
+    expect(
+      service
+        .getEligibleCandidates("standard_taxi")
+        .some((candidate) => candidate.vehicleId === "veh-demo-001"),
+    ).toBe(false);
+  });
+
+  it("a canonical write failure during final exit rejects the caller and reports the failure, instead of a log-only catch (C073 正式退場: canonical write 失敗需誠實回傳)", async () => {
+    const persistError = new Error("canonical registry write failed");
+    const { service, regulatoryRegistryRepository } = createService({
+      persistChanges: vi.fn().mockRejectedValue(persistError),
+    });
+
+    await expect(
+      service.initiateVehicleOffboarding("veh-demo-001", {
+        reason: "Partner exit",
+        requestedBy: "ops-lead",
+        debrandingRequired: false,
+      }),
+    ).rejects.toThrow(persistError);
+    expect(
+      regulatoryRegistryRepository.reportPersistenceFailure,
+    ).toHaveBeenCalledWith(persistError, "initiate_vehicle_offboarding");
+
+    // A rejected final exit still happened against in-memory state (there is
+    // no distributed transaction to roll back), but the caller must not be
+    // told the canonical write succeeded: readback-after-write is what the
+    // acceptance calls "a record/envelope only after success," and this
+    // rejection is the honest alternative to a log-only catch.
   });
 
   it("surfaces rejected exclusivity in vehicle lifecycle", () => {
