@@ -313,6 +313,8 @@ export function mapPassengerRideAuthorityToFixture(
     "driver_accepted",
     "enroute_pickup",
   ].includes(view.order.status);
+  const pickupEta =
+    view.tracking === undefined ? assignment?.eta : view.tracking?.pickupEta;
   const fareMinor = assignment?.routeFare?.estimatedFareMinor ?? null;
   const payableFareMinor = assignment?.routeFare?.payableFareMinor ?? null;
   const distanceMeters = assignment?.routeFare?.estimatedDistanceMeters ?? null;
@@ -336,6 +338,13 @@ export function mapPassengerRideAuthorityToFixture(
         ? "Cancelled Ride"
         : screenTitle(screenId),
     status: statusLabel(view.order.status),
+    ...(view.tracking !== undefined
+      ? {
+          tracking: ["cancelled", "completed"].includes(view.order.status)
+            ? null
+            : view.tracking,
+        }
+      : {}),
     ...(quoteAnomalyCode && screenId === "A04" ? { quoteAnomalyCode } : {}),
     ...(view.order.status === "created"
       ? { statusSubline: "系統正在安排可派車輛" }
@@ -349,13 +358,13 @@ export function mapPassengerRideAuthorityToFixture(
       ? { cancelledAtText: formatDateTime(view.order.cancelledAt) }
       : {}),
     ...(!showPickupEta ||
-    assignment?.eta.minutes === null ||
-    assignment?.eta.minutes === undefined
+    pickupEta?.minutes === null ||
+    pickupEta?.minutes === undefined
       ? {}
-      : { etaMain: `預計 ${assignment.eta.minutes} 分鐘抵達` }),
-    ...(!showPickupEta || !assignment?.eta.calculatedAt
+      : { etaMain: `預計 ${pickupEta.minutes} 分鐘抵達` }),
+    ...(!showPickupEta || !pickupEta?.calculatedAt
       ? {}
-      : { etaSub: `更新於 ${formatDateTime(assignment.eta.calculatedAt)}` }),
+      : { etaSub: `更新於 ${formatDateTime(pickupEta.calculatedAt)}` }),
     ...(distanceMeters === null
       ? {}
       : { routeDistanceKm: `約 ${(distanceMeters / 1000).toFixed(1)} 公里` }),
@@ -396,11 +405,18 @@ export function mapPassengerRideAuthorityToFixture(
     mapState:
       view.order.status === "cancelled"
         ? "missing"
-        : assignment?.eta.locationFreshness === "fresh"
-          ? "fresh"
-          : assignment
-            ? "stale"
-            : "missing",
+        : view.tracking !== undefined
+          ? !view.tracking?.location ||
+            view.tracking.locationFreshness === "missing"
+            ? "missing"
+            : view.tracking.locationFreshness === "fresh"
+              ? "fresh"
+              : "stale"
+          : assignment?.eta.locationFreshness === "fresh"
+            ? "fresh"
+            : assignment
+              ? "stale"
+              : "missing",
     actionMode: view.actions.canContact
       ? "driver_contact_ready"
       : "support_only",

@@ -89,6 +89,7 @@ import type {
   OwnedOrderRecord,
   PartnerChannelEntryRecord,
   PassengerDispatchDisclosureSnapshot,
+  PassengerRideTracking,
   PassengerBookingFareDisclosure,
   PassengerProfile,
   QueueCheckInCommand,
@@ -2616,6 +2617,75 @@ export class OwnedMobilityService
         orderId,
       );
     return snapshot ? this.clonePassengerDisclosureSnapshot(snapshot) : null;
+  }
+
+  /** Read the assigned Driver's current values without rewriting the atomic
+   * disclosure captured by the assignment transaction. */
+  async resolvePassengerRideTracking(
+    order: OwnedOrderRecord,
+    assignment: PassengerDispatchDisclosureSnapshot | null,
+  ): Promise<PassengerRideTracking | null> {
+    if (
+      !assignment ||
+      !assignment.assignmentId ||
+      !assignment.driver?.driverId ||
+      !assignment.vehicle?.vehicleId ||
+      ![
+        "assigned",
+        "driver_accepted",
+        "enroute_pickup",
+        "arrived_pickup",
+        "on_trip",
+      ].includes(order.status)
+    )
+      return null;
+    const missing: PassengerRideTracking = {
+      assignmentId: assignment.assignmentId,
+      driverId: assignment.driver.driverId,
+      vehicleId: assignment.vehicle.vehicleId,
+      locationFreshness: "missing",
+      location: null,
+      pickupEta: null,
+    };
+    const current = await this.regulatoryRegistryService
+      .getDriverTrackingStatus?.(assignment.driver.driverId)
+      .catch(() => null);
+    if (!current) return missing;
+    const location = current.currentLocation;
+    const waitingForPickup = [
+      "assigned",
+      "driver_accepted",
+      "enroute_pickup",
+    ].includes(order.status);
+    const pickup = assignment.routeFare?.pickup;
+    const eta =
+      waitingForPickup &&
+      current.locationFreshness === "fresh" &&
+      location &&
+      pickup &&
+      Number.isFinite(pickup.lat) &&
+      Number.isFinite(pickup.lng)
+        ? await this.regulatoryRegistryService
+            .getDriverEta?.(assignment.driver.driverId, pickup.lat, pickup.lng)
+            .catch(() => null)
+        : null;
+    return {
+      assignmentId: assignment.assignmentId,
+      driverId: assignment.driver.driverId,
+      vehicleId: assignment.vehicle.vehicleId,
+      locationFreshness: current.locationFreshness,
+      location: location
+        ? {
+            lat: location.lat,
+            lng: location.lng,
+            accuracyM: location.accuracyM,
+            recordedAt: location.recordedAt,
+          }
+        : null,
+      pickupEta: eta
+        ? { minutes: eta.etaMinutes, calculatedAt: eta.calculatedAt }
+        : null,
+    };
   }
 
   assertTenantAccessScope(

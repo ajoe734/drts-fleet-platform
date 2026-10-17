@@ -88,6 +88,12 @@ export async function arrivedCancellationJourney(
       });
       await expect(pax.getByTestId("review-order-id")).toHaveText(orderId);
       await expect(pax.getByText(/^預計\s+\d+\s+分鐘抵達$/)).toHaveCount(0);
+      await expect(pax.getByText(/^位置更新於 \d+ 秒前$/)).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(
+        pax.getByTestId("passenger-live-driver-position"),
+      ).toBeVisible();
       await driver
         .getByRole("button", { name: "暫停模擬定位", exact: true })
         .click();
@@ -100,6 +106,23 @@ export async function arrivedCancellationJourney(
       await expect
         .poll(() => Date.now(), { timeout: 180_000, intervals: [1000] })
         .toBeGreaterThanOrEqual(Date.parse(scheduledAt));
+      await expect
+        .poll(
+          async () =>
+            (await authority(pax, orderId)).tracking.locationFreshness,
+          {
+            timeout: 105_000,
+            intervals: [5000],
+          },
+        )
+        .toBe("stale");
+      await expect(
+        pax.getByText("司機位置更新稍有延遲", { exact: true }),
+      ).toBeVisible({ timeout: 10_000 });
+      await info.attach("H-real-GPS-paused-stale-pax", {
+        body: await pax.screenshot({ fullPage: true }),
+        contentType: "image/png",
+      });
       await driver
         .getByRole("button", { name: "恢復模擬定位", exact: true })
         .click();
@@ -116,6 +139,13 @@ export async function arrivedCancellationJourney(
         })
         .toBe("fresh");
       const view = await authority(pax, orderId);
+      expect(view.tracking.driverId).toBe(assigned.driverId);
+      expect(view.tracking.assignmentId).toBe(view.assignment.assignmentId);
+      expect(view.tracking.locationFreshness).toBe("fresh");
+      expect(view.tracking.location).toBeTruthy();
+      await expect(pax.getByText(/^位置更新於 \d+ 秒前$/)).toBeVisible({
+        timeout: 15_000,
+      });
       expect(view.order.status).toBe("arrived_pickup");
       expect(view.actions.canCancel).toBe(true);
       await expect(pax.getByText("司機已抵達", { exact: true })).toBeVisible();
@@ -252,6 +282,7 @@ export async function arrivedCancellationJourney(
             actualConfirmedCancellationPOSTCount: cancelRequests,
             actualMountedPassengerArrivalAndCancellationShown: true,
             actualMountedPassengerArrivalHasNoPendingPickupETA: true,
+            actualPassengerFreshBeforePauseStaleDuringRealPauseAndFreshAfterResume: true,
             actualThreeRoleSameOrderReadback: true,
             actualInternalNetworkMocks: false,
             actualClockAdvanced: false,
