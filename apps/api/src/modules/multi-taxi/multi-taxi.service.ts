@@ -1354,7 +1354,20 @@ export class MultiTaxiService implements OnModuleInit {
     requestId?: string,
   ): Promise<PassengerRideContactOption> {
     const token = await this.requireAccessToken(accessToken, "ride:contact");
-    const order = await this.requireMultiTaxiOrder(token.orderId);
+    return this.getPassengerContactById(
+      token.orderId,
+      token.passengerSubjectRef,
+      requestId,
+    );
+  }
+
+  /** Account callers first use the existing booking-owner check in the controller. */
+  async getPassengerContactById(
+    orderId: string,
+    passengerSubjectRef: string,
+    requestId?: string,
+  ): Promise<PassengerRideContactOption> {
+    const order = await this.requireMultiTaxiOrder(orderId);
     const assignment =
       await this.ownedMobilityService.resolvePersistedPassengerAssignmentDisclosure(
         order.orderId,
@@ -1372,7 +1385,7 @@ export class MultiTaxiService implements OnModuleInit {
       order.orderId,
       assignment.assignmentId,
       assignment.driver.driverId,
-      token.passengerSubjectRef,
+      passengerSubjectRef,
       requestId,
     );
     if (masked.session) {

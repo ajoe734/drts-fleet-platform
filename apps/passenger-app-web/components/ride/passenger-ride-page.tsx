@@ -2000,6 +2000,8 @@ function Actions({
   onFixtureUpdate?: ((fixture: PassengerRideFixture) => void) | undefined;
 }) {
   const [actionPending, setActionPending] = useState(false);
+  const [contactFallback, setContactFallback] = useState<string | null>(null);
+  useEffect(() => setContactFallback(null), [token]);
   if (fixture.status === "行程已取消") {
     return <CancelledActions token={token} authMode={authMode} />;
   }
@@ -2023,9 +2025,15 @@ function Actions({
       action === "cancel" && authMode !== "token" ? { rideId: token } : {};
     void requestPassengerRideAction(token, action, body, authMode === "token")
       .then((res: unknown) => {
-        const result = res as { contactUri?: string };
-        if (action === "contact" && result.contactUri) {
-          window.location.href = result.contactUri;
+        const result =
+          res as import("@drts/contracts").PassengerRideContactOption;
+        if (action === "contact") {
+          if (result.mode === "masked_call" && result.contactUri) {
+            window.location.href = result.contactUri;
+          } else {
+            setContactFallback(result.contactUri || "tel:02-2944-0985");
+          }
+          setActionPending(false);
           return;
         }
         window.location.reload();
@@ -2038,7 +2046,13 @@ function Actions({
       });
   };
   const cancel = () => runLiveAction("cancel", onCancel);
-  const contact = () => runLiveAction("contact", onContact);
+  const contact = () => {
+    if (fixture.actionMode === "support_only" && !onContact) {
+      window.location.href = "tel:02-2944-0985";
+      return;
+    }
+    runLiveAction("contact", onContact);
+  };
   const requote = () => {
     if (actionPending) return;
     setActionPending(true);
@@ -2279,10 +2293,21 @@ function Actions({
   }
 
   const contactLabel =
-    fixture.actionMode === "support_only" ? t.ContactSupport : "聯絡司機";
+    fixture.actionMode === "support_only"
+      ? t.ContactSupport
+      : contactFallback
+        ? t.RetryContactDriver
+        : "聯絡司機";
 
   return (
     <ActionGroup>
+      {contactFallback ? (
+        <div role="alert" style={{ padding: 12 }}>
+          <strong>{t.CannotContactDriver}</strong>
+          <p>{t.ContactSupportInstead}</p>
+          <a href={contactFallback}>{t.ContactSupport}</a>
+        </div>
+      ) : null}
       <button
         type="button"
         style={buttonStyle("primary")}

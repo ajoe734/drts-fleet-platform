@@ -335,6 +335,15 @@ export class PassengerClient implements PassengerViewModel {
     );
   }
 
+  async contactRide(
+    id: string,
+  ): Promise<import("@drts/contracts").PassengerRideContactOption> {
+    return this.request<import("@drts/contracts").PassengerRideContactOption>(
+      `/api/passenger-app/rides/${encodeURIComponent(id)}/contact`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  }
+
   async rateRide(
     id: string,
     command: import("./types.js").RatePassengerRideCommand,

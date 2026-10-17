@@ -20,7 +20,7 @@ import {
   assertCompletedFacts,
 } from "./pax-review-shared-order/additional-journey";
 
-test("additional real orders cover booking prerequisites, accepted cancellation, no-contact rating and standard geolocation", async ({
+test("additional real orders cover booking prerequisites, account contact fallback, accepted cancellation, no-contact rating and standard geolocation", async ({
   browser,
 }, info) => {
   const progress = createJourneyProgress(info.outputPath("safe-progress.json"));
@@ -131,6 +131,59 @@ test("additional real orders cover booking prerequisites, accepted cancellation,
       cancelled,
       step,
       cancelledAssignment.taskId,
+    );
+    await step(
+      "D real account contact reports absent external provider and offers support",
+      async () => {
+        await expect
+          .poll(async () => (await authority(pax, cancelled)).order.status)
+          .toBe("driver_accepted");
+        const [response] = await Promise.all([
+          pax.waitForResponse(
+            (r) =>
+              new URL(r.url()).pathname.endsWith(
+                `/passenger-app/rides/${cancelled}/contact`,
+              ) && r.request().method() === "POST",
+          ),
+          pax.getByRole("button", { name: "聯絡司機", exact: true }).click(),
+        ]);
+        expect(response.status()).toBe(201);
+        const option = camel(await response.json()).data;
+        expect(["unavailable", "support_fallback"]).toContain(option.mode);
+        expect(option.unavailableReason).toBe(
+          "masked_call_provider_not_configured",
+        );
+        await expect(
+          pax.getByText("目前無法直接聯絡司機", { exact: true }),
+        ).toBeVisible();
+        await expect(
+          pax.getByRole("link", { name: "聯絡客服", exact: true }),
+        ).toHaveAttribute("href", option.contactUri || "tel:02-2944-0985");
+        await expect(
+          pax.getByRole("button", { name: "重試聯絡司機", exact: true }),
+        ).toBeEnabled();
+        await expect(pax).toHaveURL(new RegExp(`/rides/${cancelled}$`));
+        await expect(pax.getByTestId("review-order-id")).toHaveText(cancelled);
+        expect((await authority(pax, cancelled)).order.status).toBe(
+          "driver_accepted",
+        );
+        await info.attach("D-account-contact-fallback-facts", {
+          body: JSON.stringify({
+            orderId: cancelled,
+            actualContactPOSTStatus: response.status(),
+            actualContactOption: option,
+            actualSupportLinkShown: true,
+            actualInternalNetworkMocks: false,
+            externalPhoneDialled: false,
+            sameOrderStatusAfterContact: "driver_accepted",
+          }),
+          contentType: "application/json",
+        });
+        await info.attach("D-account-contact-fallback-pax", {
+          body: await pax.screenshot({ fullPage: true }),
+          contentType: "image/png",
+        });
+      },
     );
     await step(
       "D original Passenger cancellation after Driver acceptance",
