@@ -1,6 +1,6 @@
 # Referral quote consumer binding: history audit and safe continuation
 
-Task: `REFERRAL-PRODUCT-QUOTE-CONSUMER-BINDING-20261015-UNBLOCK-HISTORY-REPAIR`  
+Task: `REFERRAL-PRODUCT-QUOTE-CONSUMER-BINDING-20261015-UNBLOCK-HISTORY-REPAIR`
 Owner: Codex; reviewer: Claude. Audit date: 2026-10-17 UTC.
 
 ## Disposition
@@ -167,7 +167,9 @@ Docker, deployment, DB changes, worker control or history rewrite were used.
 - Draft PR: [#2763](https://github.com/ajoe734/drts-fleet-platform/pull/2763),
   base `dev`. Initial PR head equalled the published anchor. This final receipt
   is a subsequent ordinary task commit, preserving that published anchor.
-- Read-only probe: **23/23 passed, exit 0**. `git diff --check` passed.
+- Read-only probe: **23/23 passed, exit 0**. Full-range whitespace check
+  (`git diff --check origin/dev`) identified one Markdown hard-break trailing
+  space in the anchor; removed in a subsequent ordinary commit, then rechecked.
   No parent report edits or new parent acceptance evidence.
 - Candidate handoff is held pending Supervisor metadata and parent note above.
   The final local, remote and PR head must match; record that full SHA in the
