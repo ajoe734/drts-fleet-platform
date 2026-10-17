@@ -61,6 +61,7 @@ function createHarness(options?: {
     createMultiTaxiRide: vi.fn(() => ({ ...order })),
     getOrder: vi.fn(() => ({ ...order })),
     resolvePersistedOrder: vi.fn(async () => ({ ...order })),
+    resolvePassengerRideTracking: async () => null,
     resolvePersistedPassengerAssignmentDisclosure: vi.fn(
       async () => assignment,
     ),

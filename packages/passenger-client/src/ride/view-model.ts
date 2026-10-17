@@ -11,6 +11,7 @@ import type {
   PassengerDispatchDisclosureSnapshot,
   PassengerPaymentStatus,
   PassengerRideSseEvent,
+  PassengerRideTracking,
 } from "@drts/contracts";
 
 export const PASSENGER_SCREEN_IDS = [
@@ -88,6 +89,7 @@ export interface PassengerRideFixture {
   pickupLabel: string;
   dropoffLabel?: string;
   mapState: PassengerMapState;
+  tracking?: PassengerRideTracking | null;
   actionMode: PassengerActionMode;
   canCancel?: boolean;
   canRate?: boolean;

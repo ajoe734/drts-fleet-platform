@@ -3,6 +3,7 @@ import { createJourneyProgress } from "./pax-review-shared-order/progress";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
 import { standardAddressJourney } from "./pax-review-shared-order/standard-address-journey";
 import { ownedRejectionJourney } from "./pax-review-shared-order/owned-rejection-journey";
+import { arrivedCancellationJourney } from "./pax-review-shared-order/arrived-cancellation-journey";
 import {
   OPS,
   PAX,
@@ -21,7 +22,7 @@ import {
   assertCompletedFacts,
 } from "./pax-review-shared-order/additional-journey";
 
-test("additional real orders cover booking prerequisites, contact fallback, cancellation, rating, standard geolocation and owned Driver rejection", async ({
+test("additional real orders cover booking prerequisites, contact fallback, accepted and arrived cancellation, rating, standard geolocation and owned Driver rejection", async ({
   browser,
 }, info) => {
   const progress = createJourneyProgress(info.outputPath("safe-progress.json"));
@@ -249,16 +250,51 @@ test("additional real orders cover booking prerequisites, contact fallback, canc
         }
       },
     );
+    const arrivalCancelled = await arrivedCancellationJourney(
+      pax,
+      ops,
+      driver,
+      driverBase,
+      method,
+      cancelled,
+      step,
+      info,
+    );
     const completed = await step(
       "E actual Passenger books a different order",
       () => book(pax, method),
     );
-    expect(new Set([cancelled, completed]).size).toBe(2);
+    expect(new Set([cancelled, arrivalCancelled.orderId, completed]).size).toBe(
+      3,
+    );
     const completedAssignment = await step(
       "E real dispatch and assignment",
       async () => {
         await createDispatch(ops, completed);
-        return assign(ops);
+        const assignment = await assign(ops);
+        const view = await authority(pax, completed);
+        expect(view.assignment.driver.driverId).toBe(arrivalCancelled.driverId);
+        expect(view.assignment.vehicle.vehicleId).toBe(
+          arrivalCancelled.vehicleId,
+        );
+        expect(assignment.taskId).not.toBe(arrivalCancelled.taskId);
+        expect(
+          (await authority(pax, arrivalCancelled.orderId)).order.status,
+        ).toBe("cancelled");
+        await info.attach("H-cancelled-supply-reused-in-E-facts", {
+          body: JSON.stringify({
+            cancelledOrderId: arrivalCancelled.orderId,
+            cancelledDriverTaskId: arrivalCancelled.taskId,
+            nextOrderId: completed,
+            newDriverTaskId: assignment.taskId,
+            actualNextAssignment: view.assignment,
+            actualSameDriverAndVehicleAssignedAfterArrivalCancellation: true,
+            actualSupplyPreparedAgain: false,
+            actualInternalNetworkMocks: false,
+          }),
+          contentType: "application/json",
+        });
+        return assignment;
       },
     );
     await finish(
@@ -376,7 +412,7 @@ test("additional real orders cover booking prerequisites, contact fallback, canc
       pax,
       ops,
       method,
-      [cancelled, completed],
+      [cancelled, arrivalCancelled.orderId, completed],
       step,
       info,
     );
@@ -386,7 +422,7 @@ test("additional real orders cover booking prerequisites, contact fallback, canc
       driver,
       driverBase,
       method,
-      [cancelled, completed, standardCancelled],
+      [cancelled, arrivalCancelled.orderId, completed, standardCancelled],
       step,
       info,
     );

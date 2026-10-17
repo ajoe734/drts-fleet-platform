@@ -631,9 +631,9 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
     );
   }, [controlled, value]);
 
-  const selectedAddress = controlled
-    ? (selection?.address ?? value ?? null)
-    : (selection?.address ?? null);
+  // A local clear must stay null until the controlled parent accepts it.
+  // Falling back to its previous value would suppress the null onChange.
+  const selectedAddress = selection?.address ?? null;
 
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
