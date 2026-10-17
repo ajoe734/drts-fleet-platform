@@ -392,6 +392,9 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
         await form();
         await selectAddress(0, "上車");
         await selectAddress(1, "下車");
+        fireEvent.change(screen.getByLabelText("預約時間"), {
+          target: { value: "2099-10-11T12:00" },
+        });
         f.errors.set("POST /api/passenger-app/quotes", {
           status: 401,
           code: "unauthorized",
@@ -410,6 +413,9 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
     await form();
     await selectAddress(0, "上車");
     await selectAddress(1, "下車");
+    fireEvent.change(screen.getByLabelText("預約時間"), {
+      target: { value: "2099-10-11T12:00" },
+    });
     click("試算車資");
     await screen.findByText("目前無法取得正式報價");
     expect(
