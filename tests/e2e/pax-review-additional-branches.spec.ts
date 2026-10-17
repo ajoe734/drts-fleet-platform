@@ -139,6 +139,9 @@ test("additional real orders cover booking prerequisites, contact fallback, canc
         await expect
           .poll(async () => (await authority(pax, cancelled)).order.status)
           .toBe("driver_accepted");
+        await expect(
+          pax.getByText("司機已接受行程", { exact: true }),
+        ).toBeVisible({ timeout: 10_000 });
         const [response] = await Promise.all([
           pax.waitForResponse(
             (r) =>
@@ -177,6 +180,7 @@ test("additional real orders cover booking prerequisites, contact fallback, canc
             actualInternalNetworkMocks: false,
             externalPhoneDialled: false,
             sameOrderStatusAfterContact: "driver_accepted",
+            actualMountedPassengerDriverAcceptanceShown: true,
           }),
           contentType: "application/json",
         });

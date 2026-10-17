@@ -111,6 +111,15 @@ export async function ownedRejectionJourney(
       await expect(ops.getByTestId("ops-review-order-status")).toHaveText(
         "redispatch_required",
       );
+      // The authority API can advance before the mounted Passenger SSE view.
+      // Wait for the real screen as well, without reloading or mocking events.
+      await expect(pax.getByText("正在為您改派", { exact: true })).toBeVisible({
+        timeout: 10_000,
+      });
+      await expect(pax.getByText("已取消指派", { exact: true })).toBeVisible();
+      await expect(
+        pax.getByRole("button", { name: "聯絡司機", exact: true }),
+      ).toHaveCount(0);
       await expect(
         driver.getByRole("button", { name: "婉拒任務", exact: true }),
       ).toHaveCount(0);
@@ -135,6 +144,8 @@ export async function ownedRejectionJourney(
           actualRejectedTask: rejectedTask,
           actualPOSTStatus: 201,
           actualPassengerAndOpsStatus: "redispatch_required",
+          actualMountedPassengerRedispatchShown: true,
+          actualMountedPassengerOldAssignmentMarkedUnassigned: true,
           originalDriverDialogUsed: true,
           keepTaskDidNotReject: true,
           actualInternalNetworkMocks: false,
@@ -169,6 +180,12 @@ export async function ownedRejectionJourney(
             (await authority(pax, orderId)).assignment?.driver.driverId,
         )
         .toBe("pax-review-driver-b");
+      await expect(pax.getByText("SIM-1002", { exact: true })).toBeVisible({
+        timeout: 10_000,
+      });
+      await expect(pax.getByText("正在為您改派", { exact: true })).toHaveCount(
+        0,
+      );
       return result;
     },
   );
@@ -188,6 +205,7 @@ export async function ownedRejectionJourney(
           .click(),
       ]);
       expect(response.status()).toBe(201);
+      await expect(pax.getByText("行程已取消", { exact: true })).toBeVisible();
       await expect
         .poll(async () => (await authority(pax, orderId)).order.status)
         .toBe("cancelled");
@@ -229,6 +247,8 @@ export async function ownedRejectionJourney(
           rejectedTaskId: first.taskId,
           newDriverTaskId: second.taskId,
           actualNewDriver: "pax-review-driver-b",
+          actualMountedPassengerNewPlateShownBeforeCancel: true,
+          actualMountedPassengerCancellationShown: true,
           finalOrderStatus: ride.order.status,
           actualCancelPOSTStatus: 201,
           actualInternalNetworkMocks: false,
