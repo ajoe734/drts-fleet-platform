@@ -2627,6 +2627,9 @@ export class OwnedMobilityService
   ): Promise<PassengerRideTracking | null> {
     if (
       !assignment ||
+      !assignment.assignmentId ||
+      !assignment.driver?.driverId ||
+      !assignment.vehicle?.vehicleId ||
       ![
         "assigned",
         "driver_accepted",
@@ -2654,11 +2657,12 @@ export class OwnedMobilityService
       "driver_accepted",
       "enroute_pickup",
     ].includes(order.status);
-    const pickup = assignment.routeFare.pickup;
+    const pickup = assignment.routeFare?.pickup;
     const eta =
       waitingForPickup &&
       current.locationFreshness === "fresh" &&
       location &&
+      pickup &&
       Number.isFinite(pickup.lat) &&
       Number.isFinite(pickup.lng)
         ? await this.regulatoryRegistryService

@@ -185,6 +185,35 @@ it("a pickup ETA calculation failure keeps the actual position and does not reus
   expect(result.assignment).toEqual(f.original);
 });
 
+it.each(["driver", "vehicle"] as const)(
+  "a persisted disclosure missing %s stays readable without inventing tracking identity",
+  async (field) => {
+    const f = fixture();
+    Reflect.deleteProperty(f.view.assignment!, field);
+    const result = await f.service.getPassengerRideById(
+      "ETA-ORDER",
+      "test-owner",
+    );
+    expect(result.order.orderId).toBe("ETA-ORDER");
+    expect(result.assignment).toBe(f.view.assignment);
+    expect(result.tracking).toBeNull();
+    expect(result.actions.canCancel).toBe(true);
+    expect(f.registry.getDriverTrackingStatus).not.toHaveBeenCalled();
+  },
+);
+
+it("missing route data preserves actual Driver location without inventing a pickup estimate", async () => {
+  const f = fixture();
+  Reflect.deleteProperty(f.view.assignment!, "routeFare");
+  const result = await f.service.getPassengerRideById(
+    "ETA-ORDER",
+    "test-owner",
+  );
+  expect(result.tracking?.location).toEqual(tracking().location);
+  expect(result.tracking?.pickupEta).toBeNull();
+  expect(f.registry.getDriverEta).not.toHaveBeenCalled();
+});
+
 it("the existing token entry receives live tracking and named location updates too", async () => {
   const f = fixture();
   // Exercise the real existing token grant/validation without an HTTP server.
