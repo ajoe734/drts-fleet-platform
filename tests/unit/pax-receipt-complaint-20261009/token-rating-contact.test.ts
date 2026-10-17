@@ -253,6 +253,7 @@ function fixture() {
         passenger: { passengerId: authority.subject },
       };
     },
+    resolvePassengerRideTracking: async () => null,
     resolvePersistedPassengerAssignmentDisclosure: async () =>
       authority.assigned
         ? {
