@@ -87,16 +87,58 @@ function changeMode(value: "fixed" | "standard") {
 function click(name: string) {
   fireEvent.click(screen.getByRole("button", { name, exact: true }));
 }
-async function selectDestination() {
+async function selectDestination(query = "下車") {
   const input = screen.getAllByPlaceholderText("請輸入街道、地點或地標")[1]!;
   const picker = input.closest("[data-address-map-picker]") as HTMLElement;
-  fireEvent.change(input, { target: { value: "下車" } });
+  fireEvent.change(input, { target: { value: query } });
   fireEvent.click(
     within(picker).getByRole("button", { name: "搜尋", exact: true }),
   );
   fireEvent.click(await within(picker).findByRole("button", { name: /下車/ }));
   await within(picker).findByRole("button", { name: "清除選點", exact: true });
 }
+
+it("clears a controlled destination before showing replacement search results and requoting", async () => {
+  await open();
+  changeMode("standard");
+  click("使用目前位置");
+  await act(async () =>
+    success({
+      coords: { latitude: 25.0142, longitude: 121.4636, accuracy: 8 },
+      timestamp: Date.now(),
+    } as GeolocationPosition),
+  );
+  await screen.findAllByText("台北市圖釘測試位置");
+  await selectDestination();
+  fireEvent.change(screen.getByLabelText("預約時間"), {
+    target: { value: "2099-10-11T12:00" },
+  });
+  const input = screen.getAllByPlaceholderText("請輸入街道、地點或地標")[1]!;
+  const picker = input.closest("[data-address-map-picker]") as HTMLElement;
+  fireEvent.click(
+    within(picker).getByRole("button", { name: "清除選點", exact: true }),
+  );
+  expect(
+    within(picker).queryByRole("button", { name: "清除選點", exact: true }),
+  ).toBeNull();
+  expect(
+    (screen.getByRole("button", { name: "試算車資" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(
+    fixture.calls.some(
+      (c) => c.path.endsWith("/quotes") || c.path.endsWith("/rides"),
+    ),
+  ).toBe(false);
+  await selectDestination("新的下車");
+  await within(picker).findByText("台北市新的下車測試路1號");
+  click("試算車資");
+  await screen.findByLabelText("我已確認費用與優惠說明");
+  expect(fixture.calls.filter((c) => c.path.endsWith("/quotes"))).toHaveLength(
+    1,
+  );
+  expect(fixture.calls.some((c) => c.path.endsWith("/rides"))).toBe(false);
+});
 
 it("keeps fixed points as the review default and clears both selected addresses when changing mode", async () => {
   await open();

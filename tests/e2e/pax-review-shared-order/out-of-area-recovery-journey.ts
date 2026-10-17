@@ -24,6 +24,9 @@ export async function outOfAreaRecoveryJourney(
   const picker = pax.locator("[data-address-map-picker]").nth(1);
   async function selectDestination(query: string) {
     await picker.getByRole("button", { name: "清除選點", exact: true }).click();
+    await expect(
+      picker.getByRole("button", { name: "清除選點", exact: true }),
+    ).toHaveCount(0);
     await picker.getByPlaceholder("請輸入街道、地點或地標").fill(query);
     const searched = pax.waitForResponse(
       (response) =>
