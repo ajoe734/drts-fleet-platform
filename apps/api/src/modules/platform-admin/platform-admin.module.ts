@@ -16,6 +16,7 @@ import { TenantsController } from "./tenants.controller";
 import { TenantsService } from "./tenants.service";
 import { PlatformAdminRepository } from "./platform-admin.repository";
 import { PlatformAdminService } from "./platform-admin.service";
+import { PlatformNoticesController } from "./platform-notices.controller";
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { PlatformAdminService } from "./platform-admin.service";
   ],
   controllers: [
     PlatformAdminController,
+    PlatformNoticesController,
     PlatformAdminComplianceController,
     TenantsController,
     PlatformTenantGovernanceController,
