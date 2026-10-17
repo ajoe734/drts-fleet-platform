@@ -2,6 +2,7 @@ import { expect, test, type BrowserContext } from "@playwright/test";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
 import { standardAddressJourney } from "./pax-review-shared-order/standard-address-journey";
+import { ownedRejectionJourney } from "./pax-review-shared-order/owned-rejection-journey";
 import {
   OPS,
   PAX,
@@ -20,7 +21,7 @@ import {
   assertCompletedFacts,
 } from "./pax-review-shared-order/additional-journey";
 
-test("additional real orders cover booking prerequisites, account contact fallback, accepted cancellation, no-contact rating and standard geolocation", async ({
+test("additional real orders cover booking prerequisites, contact fallback, cancellation, rating, standard geolocation and owned Driver rejection", async ({
   browser,
 }, info) => {
   const progress = createJourneyProgress(info.outputPath("safe-progress.json"));
@@ -138,6 +139,9 @@ test("additional real orders cover booking prerequisites, account contact fallba
         await expect
           .poll(async () => (await authority(pax, cancelled)).order.status)
           .toBe("driver_accepted");
+        await expect(
+          pax.getByText("司機已接受行程", { exact: true }),
+        ).toBeVisible({ timeout: 10_000 });
         const [response] = await Promise.all([
           pax.waitForResponse(
             (r) =>
@@ -176,6 +180,7 @@ test("additional real orders cover booking prerequisites, account contact fallba
             actualInternalNetworkMocks: false,
             externalPhoneDialled: false,
             sameOrderStatusAfterContact: "driver_accepted",
+            actualMountedPassengerDriverAcceptanceShown: true,
           }),
           contentType: "application/json",
         });
@@ -367,11 +372,21 @@ test("additional real orders cover booking prerequisites, account contact fallba
         }
       },
     );
-    await standardAddressJourney(
+    const standardCancelled = await standardAddressJourney(
       pax,
       ops,
       method,
       [cancelled, completed],
+      step,
+      info,
+    );
+    await ownedRejectionJourney(
+      pax,
+      ops,
+      driver,
+      driverBase,
+      method,
+      [cancelled, completed, standardCancelled],
       step,
       info,
     );
