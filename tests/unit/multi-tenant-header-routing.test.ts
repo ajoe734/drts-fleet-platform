@@ -199,6 +199,8 @@ describe("multi-tenant header controller routing", () => {
 
   it("forwards a trimmed x-tenant-id through tenant partner endpoints", () => {
     const tenantPartnerService = {
+      assertTenantAccessScope:
+        TenantPartnerService.prototype.assertTenantAccessScope,
       listPassengers: vi.fn(() => [
         {
           passengerId: "psg-tenant-alpha-001",

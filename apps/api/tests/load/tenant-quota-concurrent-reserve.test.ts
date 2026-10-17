@@ -199,6 +199,11 @@ class ContendedQuotaRepository {
     );
   }
 
+  async persistConfigurationChanges(changes: PersistTenantPartnerChanges) {
+    // Configuration setup commits before the measured reservation transactions.
+    await this.persistChanges(changes);
+  }
+
   reportPersistenceFailure(error: unknown, context?: string) {
     void error;
     void context;
@@ -332,7 +337,10 @@ class ContendedQuotaRepository {
     for (const entry of [...entries].sort((left, right) =>
       left.ledgerEntryId.localeCompare(right.ledgerEntryId),
     )) {
-      await this.acquireLock(transaction, `ledger-claim:${entry.ledgerEntryId}`);
+      await this.acquireLock(
+        transaction,
+        `ledger-claim:${entry.ledgerEntryId}`,
+      );
       if (this.hasVisibleQuotaLedgerEntry(transaction, entry.ledgerEntryId)) {
         continue;
       }
@@ -438,7 +446,10 @@ class ContendedQuotaRepository {
 
   private visibleQuotaLedger(transaction: RepositoryTransaction) {
     const visible = new Map(
-      this.state.quotaLedger.map((entry) => [entry.ledgerEntryId, clone(entry)]),
+      this.state.quotaLedger.map((entry) => [
+        entry.ledgerEntryId,
+        clone(entry),
+      ]),
     );
 
     for (const [key, entry] of transaction.pendingQuotaLedger) {
@@ -675,7 +686,7 @@ describe("tenant quota concurrent reserve load", () => {
   it("lets exactly one caller claim the last booking-count unit", async () => {
     const { repository, service } = createService();
 
-    service.upsertTenantQuotaPolicy(TENANT_ID, {
+    await service.upsertTenantQuotaPolicy(TENANT_ID, {
       period: "monthly",
       limit: {
         bookingCountLimit: 1,
@@ -731,7 +742,7 @@ describe("tenant quota concurrent reserve load", () => {
   it("lets exactly one caller reserve the final amount_minor capacity", async () => {
     const { repository, service } = createService();
 
-    service.upsertTenantQuotaPolicy(TENANT_ID, {
+    await service.upsertTenantQuotaPolicy(TENANT_ID, {
       period: "monthly",
       limit: {
         bookingCountLimit: null,
@@ -793,7 +804,7 @@ describe("tenant quota concurrent reserve load", () => {
   it("prefers the tenant hard block over a cost-center warn-only policy", async () => {
     const { repository, service } = createService();
 
-    service.upsertTenantQuotaPolicy(TENANT_ID, {
+    await service.upsertTenantQuotaPolicy(TENANT_ID, {
       period: "monthly",
       limit: {
         bookingCountLimit: 1,
@@ -802,7 +813,7 @@ describe("tenant quota concurrent reserve load", () => {
         enforcementMode: "hard_block",
       },
     });
-    service.upsertTenantQuotaPolicy(TENANT_ID, {
+    await service.upsertTenantQuotaPolicy(TENANT_ID, {
       costCenterCode: COST_CENTER_CODE,
       period: "monthly",
       limit: {
@@ -892,7 +903,7 @@ describe("tenant quota concurrent reserve load", () => {
       enforcementMode: "hard_block" as const,
     };
 
-    service.upsertTenantQuotaPolicy(TENANT_ID, {
+    await service.upsertTenantQuotaPolicy(TENANT_ID, {
       period: "monthly",
       limit,
     });
