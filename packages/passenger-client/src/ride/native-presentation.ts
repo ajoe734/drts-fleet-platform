@@ -54,9 +54,22 @@ export function mapNativePassengerRideAuthorityToFixture(
     view.tracking === undefined ? assignment?.eta : view.tracking?.pickupEta;
   const fareMinor = assignment?.routeFare?.estimatedFareMinor ?? null;
   const payableFareMinor = assignment?.routeFare?.payableFareMinor ?? null;
-  const distanceMeters = assignment?.routeFare?.estimatedDistanceMeters ?? null;
+  const bookedQuote = view.bookingQuote;
+  const bookedFareText = bookedQuote
+    ? `預估 ${formatMoney(bookedQuote.estimatedMin * 100)}${
+        bookedQuote.estimatedMin === bookedQuote.estimatedMax
+          ? ""
+          : `–${formatMoney(bookedQuote.estimatedMax * 100)}`
+      }`
+    : null;
+  const distanceMeters =
+    assignment?.routeFare?.estimatedDistanceMeters ??
+    bookedQuote?.route.distanceMeters ??
+    null;
   const durationSeconds =
-    assignment?.routeFare?.estimatedDurationSeconds ?? null;
+    assignment?.routeFare?.estimatedDurationSeconds ??
+    bookedQuote?.route.durationSeconds ??
+    null;
   const payment = mapNativePassengerPayment(view.payment);
   const certificate =
     view.order?.status === "completed" || view.receipt
@@ -130,7 +143,7 @@ export function mapNativePassengerRideAuthorityToFixture(
               : payableFareMinor !== null
                 ? `應付 ${formatMoney(payableFareMinor)}`
                 : fareMinor === null
-                  ? "依計費表實際金額收費"
+                  ? (bookedFareText ?? "依計費表實際金額收費")
                   : `預估 ${formatMoney(fareMinor)}`,
         }),
     ...(screenId === "A04"
