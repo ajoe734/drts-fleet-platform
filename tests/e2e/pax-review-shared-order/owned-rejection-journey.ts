@@ -180,13 +180,28 @@ export async function ownedRejectionJourney(
             (await authority(pax, orderId)).assignment?.driver.driverId,
         )
         .toBe("pax-review-driver-b");
-      await expect(pax.getByText("SIM-1002", { exact: true })).toBeVisible({
+      const assignedRide = await authority(pax, orderId);
+      expect(assignedRide.order.orderId).toBe(orderId);
+      expect(assignedRide.assignment?.driver.driverId).toBe(
+        "pax-review-driver-b",
+      );
+      expect(assignedRide.assignment?.vehicle.vehicleId).toBe(
+        "pax-review-vehicle-b",
+      );
+      const assignedPlate = assignedRide.assignment?.vehicle.plateNo;
+      expect(typeof assignedPlate).toBe("string");
+      expect(assignedPlate).toBeTruthy();
+      await expect(pax.getByText(assignedPlate, { exact: true })).toBeVisible({
         timeout: 10_000,
       });
       await expect(pax.getByText("正在為您改派", { exact: true })).toHaveCount(
         0,
       );
-      return result;
+      await info.attach("G-redispatched-new-vehicle-pax", {
+        body: await pax.screenshot({ fullPage: true }),
+        contentType: "image/png",
+      });
+      return { ...result, passengerObservedPlate: assignedPlate };
     },
   );
   await step(
@@ -248,6 +263,7 @@ export async function ownedRejectionJourney(
           newDriverTaskId: second.taskId,
           actualNewDriver: "pax-review-driver-b",
           actualMountedPassengerNewPlateShownBeforeCancel: true,
+          actualMountedPassengerNewPlate: second.passengerObservedPlate,
           actualMountedPassengerCancellationShown: true,
           finalOrderStatus: ride.order.status,
           actualCancelPOSTStatus: 201,
