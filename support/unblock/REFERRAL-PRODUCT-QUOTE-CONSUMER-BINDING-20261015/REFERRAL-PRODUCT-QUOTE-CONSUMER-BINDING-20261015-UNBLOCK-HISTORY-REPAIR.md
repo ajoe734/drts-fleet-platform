@@ -162,6 +162,16 @@ Docker, deployment, DB changes, worker control or history rewrite were used.
 
 ## Publication receipt
 
-Pending first anchor publication. Final receipt will record the published anchor
-and PR. Candidate SHA belongs in lifecycle handoff and must equal local HEAD,
-remote branch head and PR head.
+- Published anchor: `20f109948237c01cf6b1e83a6c6486965fe2cee8`, ordinary
+  `git push -u origin codex/referral-product-quote-consumer-binding-20261015-unblock-history-repair`, exit 0.
+- Draft PR: [#2763](https://github.com/ajoe734/drts-fleet-platform/pull/2763),
+  base `dev`. Initial PR head equalled the published anchor. This final receipt
+  is a subsequent ordinary task commit, preserving that published anchor.
+- Read-only probe: **23/23 passed, exit 0**. `git diff --check` passed.
+  No parent report edits or new parent acceptance evidence.
+- Candidate handoff is held pending Supervisor metadata and parent note above.
+  The final local, remote and PR head must match; record that full SHA in the
+  helper's progress, then use it unchanged for handoff after coordination.
+- Hosted CI is tracked by the PR at its exact head; no CI pass is inferred from
+  the earlier anchor or from this local probe. Review/CI/merge remain separate
+  lifecycle gates. Keep draft until the parent disposition is safely recorded.
