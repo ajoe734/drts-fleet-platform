@@ -1,7 +1,9 @@
 # PAX-DESIGN-V2-20261015：AU-04 來源補稿路由
 
-2026-10-15。Helper owner／reviewer：Codex2／Codex；母任務仍由 Codex
-實作、Codex2 審查。本文件只交付規劃與來源補稿要求。
+2026-10-15 建立；2026-10-17 續辦。現行 helper owner／reviewer：Codex／Claude
+（本次 dispatch）；母任務仍由 Codex 實作、Codex2 審查。本文件只交付規劃與來源
+補稿要求。下方 2026-10-15 的 Codex2／Codex、舊 release、PENDING 與 draft
+描述保留為歷史，現況以文末「2026-10-17 續辦」及 current-release CLI 回讀為準。
 
 ## 決定與待辦
 
@@ -189,3 +191,94 @@ support/unblock/PAX-DESIGN-V2-20261015/PAX-DESIGN-V2-20261015-UNBLOCK-PLANNING-D
   null；parent-next 寫入 acceptance 仍未滿足。需要 Supervisor 按上節執行與回讀，
   才能將本 helper 以最終完整 SHA handoff 指定 reviewer Codex。來源補稿和母任務驗收
   仍分開追蹤。未取得寫入前保留 draft PR，既不 handoff 也不呼叫 done。
+
+## 2026-10-17 續辦：保留決策、確認處置與重新交審
+
+本次為 helper 重派後的文件更新，不是母任務第二輪產品退修。沿用上面的
+SRC-AU04 定位、補稿表與恢復步驟。沒有新產品決策、scope cut 或可用來源補稿；
+保留原兩個 acceptance keys、原母任務 Codex／Codex2 分工及全部修正邊界。
+
+### 現行 machine truth 與父任務下一步
+
+使用本次指定 release：
+
+```text
+/home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-4da15372d696/tools/development-orchestrator/bin/ai-status.sh
+```
+
+以 `AI_NAME=Codex` 執行本 helper `start`：exit 0。透過 `show` 單 task 回讀並
+核對：parent `status: blocked`、`waiting_for: Claude`，helper
+`resolved_parent_status: blocked`、`resolved_parent_waiting_for: Claude` 已存在；
+parent `next` 與 helper `resolved_parent_next` 逐字相同，UTF-8 SHA256 為
+`e74ea4eb0b804177ea66e8c0400d362a9f3386727996520c59106fcb16cca502`。
+`resolved_parent_at` 未預填，parent 未取得 acceptance credit。
+
+因此前輪「Supervisor 尚需寫入 parent next／helper disposition」的 PENDING
+已由現行機器紀錄補足，不再是等待項。本輪未越過 worker fence 改父任務，也不
+重設已正確的處置。**父任務下一步仍是 Supervisor／Claude 取得原操作者三框
+補稿，然後由原 Codex 在 PR #2657 原樣匯入並交原 Codex2 審查。** 未取得補稿
+前不得自動恢復父任務；helper 文件合併也不表示畫板或產品驗收完成。
+
+### 最新證據與舊 CI 的結束狀態
+
+已核對本次三份 `read_dependencies`：2026-10-16 的 Design terminal adoption、
+Root context plan 均保留三框來源缺口及 blocked 處置；E04 reviewer 授權 packet
+屬另一任務的待決權限，沒有授權本 helper 操作 E04 或縮減設計要求。
+
+本輪重跑既有 `probe-source.py`：兩個原母任務 SHA 各 29 檔仍與唯讀來源 bytes
+相同，AU-04 與 canvas hash 仍為上列原值。實際狀態仍只有已填寫／格式錯誤，
+缺空白／傳送中／傳送太頻繁；exit 1 是既有缺陷重現，SRC-AU04 **仍 OPEN**。
+已讀 generator `board(...)`、設計規格與原 UAT，並核對正式
+`RequestOtpCommand` → `PassengerClient.requestOtp` →
+`PassengerOtpController.request` → `PassengerOtpService.request`；本輪不改契約。
+
+已讀 [舊 CI run 38811283734](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38811283734)：
+attempt 2、head `e47dbd7faff42d37eed7d0a21a43701fcf1c8f90`、completed/cancelled；
+unit cancelled，ci-integ failure，其餘 13 jobs success、2 skipped。unit annotation
+明訂 `The job has exceeded the maximum execution time of 20m0s`。它已結束，
+不能再記為等待中；逾時不等於產品斷言失敗，也不給此輪候選 CI 信用。本輪不重試
+舊 run 或改 workflow／timeout／驗收。
+
+### Finding／驗收與本輪證據
+
+機器相關證據在 canonical root 的
+`.local/pax-design-v2-unblock-planning-20261015/owner-resume-20261017/`。
+完整新 candidate SHA、PR URL 與 local／remote／PR head 一致性由本輪 CLI handoff
+固定；舊 PR #2668／e47 的 commits 完整保留在新分支歷史中，不 rebase／force push。
+指定新分支為 `codex/pax-design-v2-20261015-unblock-planning-decision`，起點
+`3186ed27eb176acadd7c25d7013d6a55a12ff783`；正常 merge anchor
+`9c780fc91` 已 commit／普通 push，exit 0。本輪 review 由指定 Claude 執行，
+不沿用舊 owner/reviewer 配對或 e47 的批准。
+
+| Finding／驗收項                                | 原依據與修改位置                                              | 舊版 → 本輪結果／命令、退出碼、證據                                                                      | 未驗項與限制                                                                     |
+| ---------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Resolve or route missing decision              | 原 spec、generator、原 UAT；本文件及 Q-PAX-DESIGN-V2-20261015 | 保留原來源補稿路徑，重讀來源與最新指定紀錄，無新決策                                                     | 原操作者尚未補稿，實際畫框審查待交付                                             |
+| Record decision／scope cut／explicit follow-up | 本文件補稿表、恢復步驟與本節                                  | 明列原來源三框交付、版本/hash、原 owner 原樣匯入；無 scope cut                                           | 不授予父任務驗收信用                                                             |
+| Update parent with concrete next step          | 已落盤 parent.next 及 helper disposition                      | `python3 <本證據目錄>/check-routing.py` exit 0；`routing.log`、兩份 show JSON，逐字相同且 SHA256 如上    | 父任務維持 blocked/Claude；不預填 resolved_parent_at                             |
+| SRC-AU04／pax-design-v2_artboards_imported     | 退修 8e20b183、owner anchor 2ebdcae5、原來源                  | `python3 <上層證據目錄>/probe-source.py` exit 1；`source-probe.log`：兩版各 29 檔 bytes 一致，仍缺三狀態 | Finding OPEN，沒有修正版通過結果                                                 |
+| pax-design-v2_policy_text_aligned              | 原 UAT 的政策與 PM-04／Geo 限制                               | 本輪只改兩個規劃文件，不改父任務；未重跑政策/Babel                                                       | 父任務新 SHA 仍需原回歸與獨立 review                                             |
+| Task-scoped commit／push／PR                   | 已發布 e47、merge anchor 9c780fc91、本輪同路徑續記            | 正常 merge/commit/push 保留歷史；最終 SHA/PR 由 CLI handoff 回讀                                         | 新 candidate review、hosted CI、merge 由原 lifecycle/bus 收錄，pending 不算 pass |
+
+本輪是兩份規劃文件變更，採引用、差異、格式、trailer 與 canonical consistency
+檢查，完整命令／結果在本證據目錄及 CLI 交接摘要續記。不新增鏡像單元測試。
+未啟動 VM runtime／browser／Docker，未執行 PG、外部 provider 或部署。
+
+本輪已結束的文件檢查如下（Python 3.12.3、Node v22.23.2、pnpm 10.33.0）：
+
+```bash
+pnpm exec prettier --check support/unblock/PAX-DESIGN-V2-20261015/PAX-DESIGN-V2-20261015-UNBLOCK-PLANNING-DECISION.md
+python3 /home/lupin/workspace/drts-fleet-platform/.local/pax-design-v2-unblock-planning-20261015/owner-resume-20261017/check-document-links.py
+python3 tools/ci/git/check_canonical_consistency.py --ci --base 3186ed27eb176acadd7c25d7013d6a55a12ff783 --head HEAD
+python3 tools/ci/git/check_commit_trailers.py --base 3186ed27eb176acadd7c25d7013d6a55a12ff783 --head HEAD
+git diff --check 3186ed27eb176acadd7c25d7013d6a55a12ff783
+node tools/ci/check-repo-classification.mjs
+python3 tools/ci/git/check_staged_generated_files.py --staged
+```
+
+格式、引用、consistency、trailer、diff、classification 在 merge anchor 與本輪
+工作檔核對均 exit 0：只含兩個 task-owned 路徑；去除 Q entry 後其餘問題 bytes
+不變，9 個本地引用／3 個固定 SHA 路徑存在，四類 consistency 零 findings，
+分類 6850 檔。anchor 前 generated-file guard 也 exit 0。正式提交後對新 HEAD
+重跑相同 gates 並讀完，結果固定於 `checks-final.log`；若有失敗不 handoff。
+commit 使用 `HUSKY=0` 避免自動重排共用 open-question 全文，手動執行原 guard
+及上述適用 gates；不以此省略驗證。最終 head／PR 的精確 identity 不預填於本文件。

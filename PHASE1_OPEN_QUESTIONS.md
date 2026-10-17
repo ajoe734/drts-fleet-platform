@@ -23,13 +23,14 @@ to parent reviewer Codex2. Both parent acceptance keys remain binding. A new
 product decision is unnecessary for this repair; only an explicit user decision
 could change the state requirement. No such decision is recorded here.
 
-Keep the parent blocked, waiting for Claude. The dispatched helper's attempts
-to update parent next and helper disposition were rejected by the release CLI
-guard. Before helper handoff/merge, Supervisor must write and read back the
-concrete parent next step and `resolved_parent_status: blocked`,
-`resolved_parent_waiting_for: Claude`, `resolved_parent_next` on the helper;
-let the lifecycle write `resolved_parent_at`. A planning merge must not resume
-the parent without the source delivery. See the [original finding, supplement
+Keep the parent blocked, waiting for Claude. On 2026-10-17 the assigned helper
+owner Codex read back the current release CLI: parent.next already equals the
+helper's resolved_parent_next, with resolved_parent_status blocked and
+resolved_parent_waiting_for Claude. The former guarded-write PENDING is
+historical; source delivery remains pending. Current helper reviewer is Claude;
+parent owner/reviewer remain Codex/Codex2. Let the lifecycle write
+resolved_parent_at. A planning merge must not resume the parent without the
+source delivery. See the [original finding, supplement
 requirements, exact state-write request and verification evidence](support/unblock/PAX-DESIGN-V2-20261015/PAX-DESIGN-V2-20261015-UNBLOCK-PLANNING-DECISION.md).
 
 ### Q-SR-OPS-CAPACITY-FAILCLOSED-20261012 — publication disposition and background-worker evidence
