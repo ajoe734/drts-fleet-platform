@@ -21,7 +21,16 @@
 > §1-§10a/§10b/§0.7a/§0.7b or their draft Supervisor commands — those are
 > stale. Read **Sections 11-16** for the current state.
 
-Owner: Claude · Reviewer: Codex2 · 2026-10-15
+Current dispatch: Owner Codex · Reviewer Claude · 2026-10-17.
+Previous rounds: Owner Claude · Reviewer Codex2 · 2026-10-15.
+
+> [!IMPORTANT]
+> **Current evidence and permitted next action: §20.** Sections 0.7 and
+> 11-19 retain dated observations; their references to "this round" do not
+> describe the 2026-10-17 dispatch. In particular, §18/§19's direct
+> `ai-status.json` edit alternative is withdrawn and must not be used.
+> §18's claim that helper completion takes the parent out of `blocked` is
+> also withdrawn: the persisted disposition explicitly preserves `blocked`.
 
 ## 0.7 Acceptance Evidence Itemized — current round (supersedes §0.7a/§0.7b
 below, which are both kept for audit)
@@ -800,6 +809,9 @@ attempting it.
 
 ## 17. Root cause of this helper's own stuck `ci_status=failure` (not history, not the parent) — fixed by re-handoff, not by waiting
 
+> Historical diagnosis on an earlier release/SHA. It is not current CI
+> evidence; see §20 for this dispatch's CLI, candidate and CI observations.
+
 Three prior rounds this session (`claude-20261015T230605Z-ec721e73` 23:10:49Z,
 `claude-20261015T232831Z-a271f3ac` 23:31:11Z, and the probe before this
 section) treated this helper's own stored `ci_status: "failure"` as "a stale
@@ -875,6 +887,11 @@ read GitHub's current (already fully green) state and record
 accompanies this round's commit for the exact new SHA.
 
 ## 18. The §17 handoff was attempted and denied — the real blocker is a Bash-approval allowlist, not CI, not message wording, not command syntax
+
+> **SUPERSEDED operational instructions.** Preserve the following as the
+> previous owner's report, not a restriction on future sessions. Its
+> retry prohibition, old-role handoff example, manual machine-truth edit
+> alternative and parent-resume conclusion must not be acted on. See §20.
 
 This round re-verified §17's facts fresh (unchanged): `git log -1 --format=%H`
 on this branch → `98e4936165a116108a30e6f9fd85d64d02f7cc83` (pushed; `gh pr
@@ -978,6 +995,11 @@ waiting on an external party, it is waiting on this exact helper's
 
 ## 19. §18's "fixed content-blind allowlist" framing refined: this session's own tool-connection report names the exact mechanism — `orchestrator_approval_broker` CONNECT_TIMEOUT
 
+> **SUPERSEDED operational instructions.** This reports a previous
+> session's tool connection. It does not establish this dispatch's tool
+> availability. The old-role command and direct metadata-edit alternative
+> below are withdrawn; use only the dispatched release CLI and roles (§20).
+
 Fresh round, independently re-verified rather than re-trusting §18 at face
 value: `gh pr view 2705 --json headRefOid,mergeStateStatus,mergeable,state`
 → `headRefOid` is now `f18ee807b0ee98cdccca63a2653c0dba95746f96` (two
@@ -1038,3 +1060,94 @@ out) — equivalently, a direct Supervisor-side edit of this task's
 Until that MCP connection is restored for *some* session able to drive this
 task, no dispatched worker in a session with the same outage can move this
 helper's machine-truth state, no matter how the request is worded.
+
+## 20. Codex continuation — 2026-10-17, current evidence and next step
+
+This dispatch assigns **Codex / Claude**, retaining the same isolated
+worktree, published branch
+`gemini2/pax-web-ride-ui-20261009-unblock-history-repair-governance-r2-20261015`
+and [PR #2705](https://github.com/ajoe734/drts-fleet-platform/pull/2705).
+The initial local, fetched remote and PR head were all
+`ea78a31d89ec72a20f01a402d299c5dd57794d43`; local/remote divergence was `0/0`
+and the worktree was clean. The PR's reported base is
+`7b30ce6a3df4a9a9638cfc824e09b3f60f6baf93`. `origin/dev` advanced to
+`d88c9feee` at fetch time; that alone requires no branch rewrite or merge.
+Only this artifact changes in the entire PR range.
+
+### Repair boundary and previous review
+
+The last independent approval is **only** for
+`a742faa7215ffca4b40942497f7582cbd3d516fc`, generation
+`78bee8a8fac94677aef89c388913a30b`, Codex2 at 2026-10-15T21:49:59Z.
+The three subsequent commits (`98e4936165`, `f18ee807b0`, `ea78a31d89`)
+were never covered by that approval. This round adds an ordinary commit
+and requests fresh review from the currently assigned Claude; the new
+identity/generation is recorded by the normal handoff, not inferred from
+the old approval. The prior failed H3 rounds remain in §14, and the
+approved historical body from §0.7a through §16 is preserved unchanged.
+
+The immediate defect in `ea78a31d89` was stale operational guidance:
+§18/§19 prohibited further CLI attempts, suggested direct machine-truth
+edits and used previous owner/reviewer identities. §18 also claimed this
+helper would move the parent out of `blocked`, contradicting §15 and the
+persisted H4 disposition. These instructions are now explicitly withdrawn
+in place, retaining the historical account. No direct metadata edit is an
+authorized alternative to the CLI.
+
+The dispatched release is
+`/home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-4da15372d696/tools/development-orchestrator/bin/ai-status.sh`.
+`AI_NAME=Codex <release-cli> start PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR
+"核對既有 history repair 候選、PR/CI 與 H3/H4 disposition；保留 published refs，只在原 artifact 補可驗證證據。"`
+completed with **exit 0**, and `show` read back `in_progress`, owner Codex,
+reviewer Claude. This session can use the authorized lifecycle; no broker
+restart, policy change, impersonation or manual state-file mutation is needed.
+
+### Finding and acceptance evidence
+
+Git 2.43.0, Python 3.12.3, gh 2.100.0. The reproducible read-only probe and
+complete command/output/exit records are machine-specific evidence under
+`/home/lupin/workspace/drts-fleet-platform/.local/pax-ride-history-repair-20261017-codex/`
+(`verify.py`, `commands.before.json`, `summary.before.json`, final
+`commands.json` / `summary.json`, and publication/handoff readbacks).
+Run `python3 <that-directory>/verify.py` from this task worktree. It calls
+the official trailer checker and real git/CLI/gh queries; no mocks or new
+product tests. The following results were read to completion before handoff.
+
+| Finding / original acceptance | Source and change | Old result → current result; command / exit evidence | Remaining limits |
+| --- | --- | --- | --- |
+| R1; acceptance 1 exact contamination, 2 non-destructive path | §1, §10a/§10b, §11; current fix only adds historical warnings and this section | `git diff --numstat d36ca2f807b70cb94564c023bfe07b02dc70abde 1ad9f340583c137322f5ec5f246d06622fb0e8df -- <five §0.7a paths>` exit 0 reproduces four deleted cleanup files and voice-test rollback. `git diff --exit-code <PR-base> HEAD -- <same five paths>` exit 0, empty. #2526/#2529/#2530/#2541/#2566/#2538/#2535/#2539 all CLOSED, unmerged via `gh pr view` exit 0. | Old refs preserved. Parent source was already repaired independently by #2622; no product reconstruction is needed. |
+| H1; acceptance 1, 3 commit evidence | Official `tools/ci/git/check_commit_trailers.py` | `--base 5b11155d33fd4d6c345e01cb9730012d3b3d08d1 --head 96102377ac86e71887e63f82df695183796834ab`: expected exit 1, missing Reviewer. Base `0875806698c022674217a3aee12bd89cb5fce27b`, heads `fdc24d7150ea96f59681fc6c23fa5b49f825707d` / `94307fe0287658dea4074db6c1ddeba399d2a462`: expected exit 1, three / five noncompliant commits; head `94195322681ede1962659216f1c624c0ec164a0e`: exit 0, two commits. Current PR base / HEAD: exit 0. No bypass. | Current commit identity comes from handoff and publication readback. Old passes do not approve new commits. |
+| H2; acceptance 2, 3 scope and publication | Full PR range against reported base | `git diff --name-only <PR-base> HEAD` exit 0, exactly the sole allowed artifact; published head verified against remote and PR. Adds commits to existing branch / #2705 with ordinary push. | No force push, rebase, amend, reset, transplant, product edit or new helper. |
+| H3; acceptance 1–3 traceability | Original `94195322681e` and sibling `bca5cc068a4c`; §0.7a/b, §10a/b, §14 | Probe exit 0 verifies both original §0.7 bodies and both complete §10 bodies (only two explicitly annotated stale heading pointers mapped), plus unchanged approved §0.7a–§16 body. Original artifact hashes remain `70f79a022779590a7f379b99e1d8224536ff931dd83747caafb5d6b56ed3811a` / `452acb9ac7b3f2bb07ca8bb27324b456d11152882668cdfa3f806af256f48204`. | `git diff --check <PR-base> HEAD` remains exit 2 for exactly one trailing space preserved verbatim in original §10a; previous reviewer explicitly recorded this historical-fidelity exception. No new whitespace warning. |
+| H4; acceptance 4 parent concrete next | Fresh helper/parent slices; release `apply_unblock_parent_resolution` | Probe exit 0: parent `blocked`, helper disposition `blocked` / Gemini, full 3223-character parent NEXT prefix retained in 4097-character helper NEXT, no `resolved_parent_at`. Parent `last_update=2026-10-16T00:30:35Z`; NEXT SHA256 `7c6d047588159a83cc4ca1e1c874693750a5642faf705eaebecb256154e79783`; helper NEXT SHA256 `3460dd80ff29783ec446bbf0e5562ff4aa05224f5dec9872f5089c1871bbd848`. Hashes and actual gate state match the previous binding. | No fresh rebinding needed for an unchanged prefix/gates. Recheck before review/merge; actual parent changes require genuine Supervisor rebinding. Do not shorten NEXT, fabricate resolution time or directly update another task. |
+| Stale §17–§19 guidance; acceptance 3, 4 | Warnings beside old instructions and current §20 | Old `ea78a31d89` says CLI attempts cannot succeed and helper completion leaves parent unblocked. Actual release `start` exit 0 and readback `in_progress`; `apply_unblock_parent_resolution` selects stored `resolved_parent_status=blocked`. Updated text withdraws those conclusions and the manual-state-edit alternative. | Fresh handoff still requires independent Claude review and matching CI/merge. |
+
+### CI and parent next action
+
+The pre-change head `ea78a31d89` does **not** have passing CI overall.
+Read-only `gh run view` exit 0 shows run
+[38831594316](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38831594316)
+conclusion `cancelled`: `unit` cancelled at its `Run unit tests` step and
+`ci-integ` failed at `Aggregate`. Run
+[38831594298](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38831594298)
+also concluded `cancelled`: `Product smoke acceptance` cancelled during
+`API unit tests`, then `Smoke acceptance` failed its aggregate step.
+The cancellation cause is unproven; these are not passing results or proof
+of a source defect. No old green CI is credited to the new candidate.
+PR-triggered CI for the new pushed SHA is pending GitHub-bus collection;
+this round starts no manual workflow or VM runtime checks.
+
+The parent remains **blocked with both required acceptance keys 0/2**.
+`gh pr view 2622` confirms MERGED, candidate
+`0660ce29d219d6757ed975618d39f9eba7498804`, merge
+`f37843e08b9b23e4877c3692ff62021076a8ef35`, 2026-10-14T10:44:29Z;
+`git merge-base --is-ancestor <merge> origin/dev` exits 0. This is source
+credit only. The concrete next action, already stored in the preserved
+parent NEXT and helper disposition, remains independent design-canvas and
+hosted PAX-QA witnessing for `pax-web-ride_p5_live_page` and
+`pax-web-ride_rating_receipt_history_complaint` with the required browser,
+SSE and PostgreSQL/CRM conditions. Those witnesses are not supplied here.
+Helper integration must retain that blocked disposition, not resume the
+parent or grant acceptance. The owner now hands this document's exact
+pushed SHA to Claude through the dispatched CLI. Review, same-SHA hosted
+CI and protected merge remain outstanding; `done` is never called here.
