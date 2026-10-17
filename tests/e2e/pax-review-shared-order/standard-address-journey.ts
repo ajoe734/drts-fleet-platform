@@ -1,6 +1,7 @@
 import { expect, type Page, type TestInfo } from "@playwright/test";
 import { recordOrderEvidence } from "./evidence";
 import { authority, camel, opsRead, PAX } from "./additional-journey";
+import { outOfAreaRecoveryJourney } from "./out-of-area-recovery-journey";
 
 type Step = <T>(name: string, operation: () => Promise<T>) => Promise<T>;
 
@@ -166,8 +167,15 @@ export async function standardAddressJourney(
         ).toBeVisible();
       },
     );
+    const outOfArea = await outOfAreaRecoveryJourney(pax, position, step, info);
+    destination = outOfArea.restoredDestination;
     await step("F real quote and modify preserve standard mode", async () => {
       firstQuoteId = await quote();
+      await expect(
+        pax
+          .getByRole("alert")
+          .filter({ hasText: "您選擇的地點超出目前服務範圍" }),
+      ).toHaveCount(0);
       await pax.getByRole("button", { name: "返回修改", exact: true }).click();
       await expect(pax.getByLabel("演練選址方式", { exact: true })).toHaveValue(
         "standard",
@@ -271,6 +279,18 @@ export async function standardAddressJourney(
             actualPassengerAndOpsCancelledRead: true,
             scope:
               "ordinary address picker/current-location UI and original BFF/API create/cancel; no dispatch or Driver task is fabricated",
+          }),
+        });
+        await info.attach("F-out-of-area-refusal-and-recovery-facts", {
+          contentType: "application/json",
+          body: JSON.stringify({
+            orderId,
+            ...outOfArea,
+            actualServiceableQuoteAfterRecovery: firstQuoteId,
+            actualBookedQuoteAfterRecovery: bookedQuoteId,
+            actualRecoveryOrderCancelledReadByPassengerAndOps: true,
+            scope:
+              "Original picker and real BFF service-area refusal before any ride POST; restore valid destination, then original F quote/modify/book/cancel. External geo provider follows the environment; no internal network mocks or fabricated orders.",
           }),
         });
       },
