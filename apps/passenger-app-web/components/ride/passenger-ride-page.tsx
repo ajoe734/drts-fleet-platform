@@ -620,12 +620,13 @@ function VehicleCard({
       <div
         style={{
           display: "flex",
+          flexWrap: "wrap",
           gap: 12,
           alignItems: "center",
           marginBottom: 10,
         }}
       >
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: "1 1 120px", minWidth: 0 }}>
           <div style={{ fontSize: 14.5, fontWeight: 700 }}>
             {assignment.vehicle.make} {assignment.vehicle.model}
           </div>
@@ -639,7 +640,13 @@ function VehicleCard({
             {vehicleDetails.join(" · ")}
           </div>
         </div>
-        <div style={{ textAlign: "center" }}>
+        <div
+          style={{
+            textAlign: "center",
+            maxWidth: "100%",
+            marginLeft: "auto",
+          }}
+        >
           <div
             style={{
               fontFamily: monoFont,
