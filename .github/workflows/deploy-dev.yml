@@ -2468,6 +2468,26 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      - name: Exercise real shared-dev Ops declined-command recovery
+        if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        env:
+          PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          OPS_REVIEW_RECOVERY_SOURCE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
+          PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
+          PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
+          PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+        run: pnpm exec playwright test -c playwright.ops-review-recovery.config.ts
+      - name: Upload shared-dev Ops declined-command recovery evidence
+        if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-dev-ops-review-recovery-${{ needs.build-push.outputs.candidate_sha }}
+          path: .artifacts/ops-review-recovery
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
   # A red run used to mean two very different things that looked identical in the
   # run list: images never reached Artifact Registry and nothing was deployed, or
   # the deploy succeeded and a post-deploy check failed. Between 2026-08-09 and
