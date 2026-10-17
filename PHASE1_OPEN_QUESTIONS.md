@@ -27,7 +27,8 @@ Keep the parent blocked, waiting for Claude. On 2026-10-17 the assigned helper
 owner Codex read back the current release CLI: parent.next already equals the
 helper's resolved_parent_next, with resolved_parent_status blocked and
 resolved_parent_waiting_for Claude. The former guarded-write PENDING is
-historical; source delivery remains pending. Current helper reviewer is Claude;
+historical; source delivery remains pending. Chairman reassigned the current
+helper reviewer from Claude to Pi during this run;
 parent owner/reviewer remain Codex/Codex2. Let the lifecycle write
 resolved_parent_at. A planning merge must not resume the parent without the
 source delivery. See the [original finding, supplement

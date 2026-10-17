@@ -1,7 +1,7 @@
 # PAX-DESIGN-V2-20261015：AU-04 來源補稿路由
 
-2026-10-15 建立；2026-10-17 續辦。現行 helper owner／reviewer：Codex／Claude
-（本次 dispatch）；母任務仍由 Codex 實作、Codex2 審查。本文件只交付規劃與來源
+2026-10-15 建立；2026-10-17 續辦。現行 helper owner／reviewer：Codex／Pi
+（Chairman 於本輪執行中更新 reviewer）；母任務仍由 Codex 實作、Codex2 審查。本文件只交付規劃與來源
 補稿要求。下方 2026-10-15 的 Codex2／Codex、舊 release、PENDING 與 draft
 描述保留為歷史，現況以文末「2026-10-17 續辦」及 current-release CLI 回讀為準。
 
@@ -247,8 +247,14 @@ unit cancelled，ci-integ failure，其餘 13 jobs success、2 skipped。unit an
 固定；舊 PR #2668／e47 的 commits 完整保留在新分支歷史中，不 rebase／force push。
 指定新分支為 `codex/pax-design-v2-20261015-unblock-planning-decision`，起點
 `3186ed27eb176acadd7c25d7013d6a55a12ff783`；正常 merge anchor
-`9c780fc91` 已 commit／普通 push，exit 0。本輪 review 由指定 Claude 執行，
+`9c780fc91` 已 commit／普通 push，exit 0。本輪 review 由現行指定 Pi 執行，
 不沿用舊 owner/reviewer 配對或 e47 的批准。
+
+執行中 Chairman 在 `2026-10-17T00:39:32Z` 將 helper reviewer 從 Claude
+改派 Pi，owner Codex 與 worker guard 保留；父任務仍由 Codex／Codex2 負責。
+第一輪 final checks 的角色斷言偵測此改派而 exit 1，其餘 gates exit 0；完整失敗
+結果保留 `checks-before-reviewer-update.log`。已依最新 machine truth 同步文件
+及角色斷言，不修改舊 commits 或冒用 reviewer；重新檢查後才向 Pi handoff。
 
 | Finding／驗收項                                | 原依據與修改位置                                              | 舊版 → 本輪結果／命令、退出碼、證據                                                                      | 未驗項與限制                                                                     |
 | ---------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
