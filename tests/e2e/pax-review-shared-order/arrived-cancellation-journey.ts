@@ -13,6 +13,58 @@ import {
   type JourneyStep,
 } from "./additional-journey";
 
+async function readDriverRoute(
+  driver: Page,
+  order: {
+    pickup: { lat: number; lng: number };
+    dropoff: { lat: number; lng: number };
+  },
+  allowRefresh = false,
+) {
+  const coordinates = [order.pickup, order.dropoff].map(
+    (point) => `${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`,
+  );
+  const visible = async () =>
+    (
+      await Promise.all(
+        coordinates.map((text) =>
+          driver.getByText(text, { exact: true }).first().isVisible(),
+        ),
+      )
+    ).every(Boolean);
+  let refreshes = 0;
+  let nextRefreshAt = Date.now() + 30_000;
+  await expect
+    .poll(
+      async () => {
+        if (await visible()) return true;
+        if (
+          allowRefresh &&
+          Date.now() >= nextRefreshAt &&
+          (await driver
+            .getByText("行程資料暫時無法更新，請稍後重新整理。", {
+              exact: true,
+            })
+            .isVisible())
+        ) {
+          nextRefreshAt = Date.now() + 30_000;
+          await driver
+            .getByRole("button", { name: "重新整理", exact: true })
+            .click();
+          refreshes++;
+        }
+        return visible();
+      },
+      {
+        timeout: allowRefresh ? 90_000 : 15_000,
+        intervals: [1000, 5000],
+      },
+    )
+    .toBe(true);
+  await expect(driver.getByText("座標缺失", { exact: true })).toHaveCount(0);
+  return refreshes;
+}
+
 /** Real arrival and Passenger cancellation, including the actual scheduled
  * instant. Only the existing external GPS producer is paused; no internal
  * requests, clocks, task records or availability are replaced.
@@ -157,6 +209,12 @@ export async function arrivedCancellationJourney(
       await expect(
         driver.getByText(orderId, { exact: false }).first(),
       ).toBeVisible();
+      await readDriverRoute(driver, view.order);
+      await expect(
+        driver.getByText("完單前需先載入訂單佐證需求，請重新整理後再送出。", {
+          exact: true,
+        }),
+      ).toHaveCount(0);
       const rows = await recordOrderEvidence(
         orderId,
         "H-arrived-before-cancel",
@@ -239,6 +297,11 @@ export async function arrivedCancellationJourney(
         await expect(
           driver.getByText("目前沒有可執行動作", { exact: true }).first(),
         ).toBeVisible();
+        const driverRouteRefreshes = await readDriverRoute(
+          driver,
+          after.order,
+          true,
+        );
         for (const name of [
           "接受任務",
           "前往接送點",
@@ -273,6 +336,8 @@ export async function arrivedCancellationJourney(
         await info.attach("H-arrived-cancellation-original-UI-facts", {
           body: JSON.stringify({
             orderId,
+            actualDriverPickupAndDropoffLoadedBeforeAndAfterCancellation: true,
+            actualDriverUserRefreshesAfterCancellation: driverRouteRefreshes,
             ...assigned,
             requestedPickupAt: arrived.scheduledAt,
             beforeCancellation: arrived.view,
