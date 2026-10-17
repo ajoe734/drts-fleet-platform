@@ -18,6 +18,7 @@ function harness(
       runtimeProfileCode: "multi_taxi_direct",
       status,
     })),
+    resolvePassengerRideTracking: async () => null,
     resolvePersistedPassengerAssignmentDisclosure: vi.fn(async () =>
       assigned
         ? {

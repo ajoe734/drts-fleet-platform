@@ -372,6 +372,42 @@ describe("actual Native P5 rendered terminal and active screens", () => {
     expect(count(renderer, "native-cancel-ride")).toBe(1);
   });
 
+  it("uses the actual GPS position for the map fallback and prefers the installed native map", async () => {
+    const view = authority();
+    view.tracking = {
+      assignmentId: view.assignment!.assignmentId,
+      driverId: view.assignment!.driver.driverId,
+      vehicleId: view.assignment!.vehicle.vehicleId,
+      locationFreshness: "fresh",
+      location: {
+        lat: 25.05,
+        lng: 121.05,
+        accuracyM: 8,
+        recordedAt: new Date(NOW - 5000).toISOString(),
+      },
+      pickupEta: { minutes: 3, calculatedAt: new Date(NOW).toISOString() },
+    };
+    const presentation = project(view);
+    const renderer = await mount(presentation, ports());
+    expect(count(renderer, "native-live-driver-position")).toBe(1);
+    expect(text(renderer)).toContain("位置示意");
+    expect(presentation.location.elapsedSeconds).toBe(5);
+    const renderMap = vi.fn(() => React.createElement("InstalledMap"));
+    const native = await mount(presentation, ports(), { renderMap });
+    expect(renderMap).toHaveBeenCalledWith(presentation);
+    expect(count(native, "native-live-position-diagram")).toBe(0);
+  });
+
+  it("a completed ride does not invoke the live map renderer", async () => {
+    const view = authority();
+    view.order.status = "completed";
+    view.tracking = null;
+    const renderMap = vi.fn(() => React.createElement("InstalledMap"));
+    const renderer = await mount(project(view), ports(), { renderMap });
+    expect(renderMap).not.toHaveBeenCalled();
+    expect(count(renderer, "native-trip-map")).toBe(0);
+  });
+
   it("renders stale rather than fresh location after stream disconnect", async () => {
     const renderer = await mount(project());
     expect(text(renderer)).toContain("位置更新於 ");
