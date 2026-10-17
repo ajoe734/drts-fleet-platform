@@ -37,6 +37,7 @@ import DriverTripMap, {
   type DriverTripMapLocation,
 } from "@/components/driver-trip-map";
 import { getPlatformDisplayLabel } from "@/components/platform-task-badge";
+import { OwnedTaskRejectionDialog } from "@/components/owned-task-rejection-dialog";
 import {
   appendProofPhotos,
   buildCompletionExpenseItem,
@@ -102,7 +103,11 @@ import {
   type TripExperienceState,
   type TripPrimaryActionKey,
 } from "@/lib/trip-workflow";
-import { driverStrings, driverTripActionSuccessLabels } from "@/lib/strings";
+import {
+  driverStrings,
+  driverTaskActionLabels,
+  driverTripActionSuccessLabels,
+} from "@/lib/strings";
 import { usePendingCompletionReplay } from "@/lib/use-pending-completion-replay";
 
 function ActionButton({
@@ -795,6 +800,11 @@ export default function TripScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submittingAction, setSubmittingAction] = useState<string | null>(null);
+  const [ownedRejectionOpen, setOwnedRejectionOpen] = useState(false);
+  const [ownedRejectionError, setOwnedRejectionError] = useState<string | null>(
+    null,
+  );
+  const ownedRejectionInFlight = useRef(false);
   const [forwardedActionResult, setForwardedActionResult] =
     useState<ForwardedDriverActionResponse | null>(null);
   const [taskViewDetail, setTaskViewDetail] =
@@ -948,6 +958,10 @@ export default function TripScreen() {
   const forwardedRejectAllowed =
     tripExperienceState === "forwarded_offered" &&
     (taskViewDetail?.allowedActions.includes("reject") ?? true);
+  const ownedRejectAllowed =
+    !isForwardedTrip &&
+    taskDetail?.status === "pending_acceptance" &&
+    (taskViewDetail?.allowedActions.includes("reject") ?? true);
   const forwardedOfferOfflineBlocked =
     tripExperienceState === "forwarded_offered" && sourcePlatformOffline;
   const disabledForwardedAcceptReason = forwardedOfferOfflineBlocked
@@ -1063,7 +1077,7 @@ export default function TripScreen() {
         disabled:
           primaryTripAction.action === "complete"
             ? completeActionDisabled
-            : submittingAction !== null,
+            : submittingAction !== null || ownedRejectionOpen,
       }
     : tripExperienceState === "forwarded_offered" &&
         forwardedActionResult === null
@@ -1077,10 +1091,19 @@ export default function TripScreen() {
             !forwardedAcceptAllowed,
         }
       : undefined;
-  const bottomSecondaryAction =
-    tripExperienceState === "forwarded_offered" &&
-    forwardedActionResult === null &&
-    (forwardedRejectAllowed || forwardedOfferOfflineBlocked)
+  const bottomSecondaryAction = ownedRejectAllowed
+    ? {
+        title: driverTaskActionLabels.reject,
+        onPress: () => {
+          setOwnedRejectionError(null);
+          setOwnedRejectionOpen(true);
+        },
+        loading: submittingAction === "owned_reject",
+        disabled: submittingAction !== null,
+      }
+    : tripExperienceState === "forwarded_offered" &&
+        forwardedActionResult === null &&
+        (forwardedRejectAllowed || forwardedOfferOfflineBlocked)
       ? {
           title: forwardedRejectAllowed ? "婉拒平台訂單" : "平台不支援婉拒",
           onPress: () => void handleForwardedReject(),
@@ -1279,6 +1302,11 @@ export default function TripScreen() {
     resetCompletionDraft();
     setForwardedActionResult(null);
   }, [taskDetail?.taskId]);
+
+  useEffect(() => {
+    setOwnedRejectionOpen(false);
+    setOwnedRejectionError(null);
+  }, [taskDetail?.taskId, taskDetail?.status]);
 
   useEffect(() => {
     syncTripMetricsFromTask(taskDetail);
@@ -1647,6 +1675,39 @@ export default function TripScreen() {
     }
   }
 
+  async function handleOwnedReject(reasonNote?: string) {
+    if (
+      !taskDetail?.taskId ||
+      !ownedRejectAllowed ||
+      submittingAction !== null ||
+      ownedRejectionInFlight.current
+    ) {
+      return;
+    }
+    ownedRejectionInFlight.current = true;
+    setSubmittingAction("owned_reject");
+    setOwnedRejectionError(null);
+    try {
+      await getDriverClient().rejectTask(taskDetail.taskId, {
+        reasonCode: "driver_rejected",
+        ...(reasonNote ? { reasonNote } : {}),
+      });
+      setOwnedRejectionOpen(false);
+      await loadTrip(false);
+      Alert.alert("婉拒已送出", "任務結果已儲存，可由調度重新派遣。");
+    } catch (actionError) {
+      if (getDriverIdentityIssue()) {
+        await routeToOnboardingAfterSessionFailure();
+        return;
+      }
+      setOwnedRejectionError(getErrorMessage(actionError));
+      await loadTrip(false);
+    } finally {
+      ownedRejectionInFlight.current = false;
+      setSubmittingAction(null);
+    }
+  }
+
   async function handleForwardedAccept() {
     if (
       !taskDetail?.taskId ||
@@ -1770,6 +1831,14 @@ export default function TripScreen() {
         ) : undefined
       }
     >
+      <OwnedTaskRejectionDialog
+        taskId={taskDetail?.taskId ?? null}
+        visible={ownedRejectionOpen && ownedRejectAllowed}
+        busy={submittingAction === "owned_reject"}
+        error={ownedRejectionError}
+        onCancel={() => setOwnedRejectionOpen(false)}
+        onConfirm={(reasonNote) => void handleOwnedReject(reasonNote)}
+      />
       <PageHeader
         title={driverStrings.trip.title}
         subtitle={headerSubtitle}
