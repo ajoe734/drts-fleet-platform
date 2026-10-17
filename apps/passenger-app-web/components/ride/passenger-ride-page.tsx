@@ -478,7 +478,7 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
             color: passengerChrome.muted,
           }}
         >
-          位置示意
+          {t.LocationDiagram}
         </span>
       ) : null}
       <div
