@@ -1,0 +1,106 @@
+name: Ops declined-command recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Full commit SHA containing the Ops command recovery acceptance case"
+        required: true
+        type: string
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - .github/workflows/deploy-dev.yml
+      - .github/workflows/ops-review-recovery-acceptance.yml
+      - playwright.ops-review-recovery.config.ts
+      - tests/e2e/ops-review-recovery.spec.ts
+      - apps/ops-console-web/app/review/**
+      - packages/api-client/src/**
+      - apps/passenger-app-web/components/booking/**
+      - apps/passenger-app-web/components/ride/**
+      - apps/passenger-app-web/lib/ride/**
+      - packages/passenger-client/src/booking/**
+      - packages/passenger-client/src/ride/**
+      - apps/api/src/modules/passenger-app/booking/**
+      - apps/api/src/modules/passenger-app/fare/**
+      - apps/api/src/modules/owned-mobility/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-review-recovery-${{ inputs.candidate_sha || github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  CI: true
+  OPS_REVIEW_RECOVERY_SOURCE_SHA: ${{ inputs.candidate_sha || github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  real-ops-recovery:
+    runs-on: ubuntu-latest
+    # Exercise the original dispatch eligibility response and Ops correction.
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_ops_review_recovery
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_ops_review_recovery
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_sha || github.event.pull_request.head.sha || github.sha }}
+      - name: Record the actual candidate checkout
+        run: |
+          test "$(git rev-parse HEAD)" = "$OPS_REVIEW_RECOVERY_SOURCE_SHA"
+          mkdir -p .artifacts/ops-review-recovery
+          git rev-parse HEAD > .artifacts/ops-review-recovery/actual-checkout-sha.txt
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Migrate and seed the disposable hosted database
+        run: |
+          pnpm db:migrate
+          pnpm db:seed
+      - name: Build the original API and Passenger application
+        run: |
+          pnpm --filter @drts/api build
+          EXPO_PUBLIC_API_URL=/api/review-driver-api \
+            EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH=/review-driver \
+            pnpm --filter @drts/driver-app exec expo export -p web --output-dir dist
+          mkdir -p apps/passenger-app-web/public/review-driver
+          cp -R apps/driver-app/dist/. apps/passenger-app-web/public/review-driver/
+          pnpm --filter @drts/passenger-app-web... build
+      - name: Install Chromium in the hosted runner
+        run: |
+          sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \
+            \( -iname "*google*" -o -iname "*chrome*" \) \
+            -exec mv "{}" "{}.disabled" \; || true
+          pnpm exec playwright install --with-deps chromium
+      - name: Verify real refusal, original Ops correction, same-order assignment and cancellation
+        run: pnpm exec playwright test -c playwright.ops-review-recovery.config.ts
+      - name: Upload the actual Ops recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-review-recovery-${{ env.OPS_REVIEW_RECOVERY_SOURCE_SHA }}
+          path: .artifacts/ops-review-recovery
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

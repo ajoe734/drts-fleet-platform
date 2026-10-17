@@ -1,0 +1,99 @@
+name: Passenger interrupted rehearsal recovery
+
+on:
+  push:
+    branches: [dev, codex/review-interrupted-recovery-20261017]
+    paths:
+      - .github/workflows/passenger-interrupted-rehearsal-recovery.yml
+      - operations/verification/recover-interrupted-passenger-rehearsals.cjs
+      - operations/verification/interrupted-passenger-rehearsals-20261017.json
+      - tests/unit/passenger-interrupted-rehearsal-recovery-20261017/**
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - .github/workflows/passenger-interrupted-rehearsal-recovery.yml
+      - operations/verification/recover-interrupted-passenger-rehearsals.cjs
+      - operations/verification/interrupted-passenger-rehearsals-20261017.json
+      - tests/unit/passenger-interrupted-rehearsal-recovery-20261017/**
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Read owned interrupted orders, or cancel them through the original Passenger UI
+        type: choice
+        default: inspect
+        options: [inspect, cancel]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: passenger-interrupted-rehearsal-recovery
+  cancel-in-progress: false
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vitest run tests/unit/passenger-interrupted-rehearsal-recovery-20261017
+  recover:
+    needs: unit
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER || secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT || secrets.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Resolve the existing shared dev services
+        id: urls
+        env:
+          PROJECT: ${{ vars.DEV_GCP_PROJECT_ID }}
+          REGION: ${{ vars.DEV_GCP_REGION }}
+          PAX_SERVICE: ${{ vars.DEV_GCP_PASSENGER_APP_SERVICE || 'drts-dev-passenger-app-web' }}
+          API_SERVICE: ${{ vars.DEV_GCP_API_SERVICE || 'drts-dev-api' }}
+        run: |
+          echo "passenger=$(gcloud run services describe "$PAX_SERVICE" --project "$PROJECT" --region "$REGION" --format='value(status.url)')" >> "$GITHUB_OUTPUT"
+          echo "api=$(gcloud run services describe "$API_SERVICE" --project "$PROJECT" --region "$REGION" --format='value(status.url)')" >> "$GITHUB_OUTPUT"
+      - uses: google-github-actions/auth@v2
+        id: passenger
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER || secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT || secrets.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.passenger }}
+          id_token_include_email: true
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Inspect on the candidate; recover the two explicit orders after normal dev merge
+        env:
+          PAX_REVIEW_PASSENGER_ORIGIN: ${{ steps.urls.outputs.passenger }}
+          PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.passenger.outputs.id_token }}
+          DRTS_DEV_API_BASE_URL: ${{ steps.urls.outputs.api }}
+          RECOVERY_MODE: ${{ inputs.mode || (github.ref == 'refs/heads/dev' && 'cancel' || 'inspect') }}
+        run: node operations/verification/recover-interrupted-passenger-rehearsals.cjs "$RECOVERY_MODE" operations/verification/interrupted-passenger-rehearsals-20261017.json .artifacts/passenger-interrupted-rehearsal-recovery
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: passenger-interrupted-rehearsal-recovery-${{ github.sha }}
+          path: .artifacts/passenger-interrupted-rehearsal-recovery
+          if-no-files-found: warn
+          retention-days: 14
