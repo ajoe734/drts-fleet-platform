@@ -326,7 +326,11 @@ describe("clamd-entrypoint.sh freshness provenance (R8, round 3)", () => {
     expect(existsSync(harness.readyVersionFile)).toBe(true);
     setMode(harness, "fail");
     const removed = await waitUntil(
-      () => !existsSync(harness.readyMarker),
+      // One rm invocation still unlinks its two arguments separately. Wait
+      // for the complete outcome instead of observing between those unlinks.
+      () =>
+        !existsSync(harness.readyMarker) &&
+        !existsSync(harness.readyVersionFile),
       5000,
     );
     expect(removed).toBe(true);
