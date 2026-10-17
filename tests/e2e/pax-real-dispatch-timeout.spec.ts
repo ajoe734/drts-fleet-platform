@@ -122,6 +122,8 @@ test("the real reservation acceptance deadline expires automatically, then recov
           return id;
         },
       );
+      const originalBookingQuote = (await authority(pax, orderId)).bookingQuote;
+      expect(originalBookingQuote?.fareSnapshotId).toBeTruthy();
       const job = await step(
         `${label} Ops creates a real reservation dispatch`,
         async () => {
@@ -204,6 +206,38 @@ test("the real reservation acceptance deadline expires automatically, then recov
               )
               .first(),
           ).toBeVisible();
+          const timedOutRide = await authority(pax, orderId);
+          expect(timedOutRide.bookingQuote).toEqual(originalBookingQuote);
+          const money = (amount: number) =>
+            `NT$ ${Math.round(amount).toLocaleString("zh-TW")}`;
+          const expectedFare = `預估 ${money(originalBookingQuote.estimatedMin)}${
+            originalBookingQuote.estimatedMin ===
+            originalBookingQuote.estimatedMax
+              ? ""
+              : `–${money(originalBookingQuote.estimatedMax)}`
+          }`;
+          await expect(
+            pax.getByText(expectedFare, { exact: true }).first(),
+          ).toBeVisible();
+          await expect(
+            pax
+              .getByText(
+                `約 ${(originalBookingQuote.route.distanceMeters / 1000).toFixed(1)} 公里`,
+                { exact: false },
+              )
+              .first(),
+          ).toBeVisible();
+          await expect(
+            pax
+              .getByText(
+                `約 ${Math.ceil(originalBookingQuote.route.durationSeconds / 60)} 分鐘`,
+                { exact: false },
+              )
+              .first(),
+          ).toBeVisible();
+          await expect(
+            pax.getByRole("button", { name: "取消行程", exact: true }).first(),
+          ).toBeEnabled();
           await expect(pax.getByTestId("review-order-id")).toHaveText(orderId);
           await opsRead(ops, orderId);
           await expect(ops.getByTestId("ops-review-order-status")).toHaveText(
@@ -395,6 +429,8 @@ test("the real reservation acceptance deadline expires automatically, then recov
             actualRecoveredOrderCancelled: true,
             actualManualTimeoutPOSTCount: manualTimeoutPOSTs,
             actualOriginalDriverRefreshActionUsed: true,
+            actualBookingQuotePreservedAtTimeout: true,
+            actualAcceptedBookingQuote: originalBookingQuote,
             matching90secondScenarioClaimed: false,
             actualInternalNetworkMocks: false,
             actualClockAdvanced: false,
