@@ -21,7 +21,8 @@
 > §1-§10a/§10b/§0.7a/§0.7b or their draft Supervisor commands — those are
 > stale. Read **Sections 11-16** for the current state.
 
-Current dispatch: Owner Codex · Reviewer Claude · 2026-10-17.
+Dispatch snapshot: Owner Codex · Reviewer Claude · 2026-10-17.
+Current reviewer: Pi, reassigned by Chairman at 2026-10-17T00:39:30Z (§20).
 Previous rounds: Owner Claude · Reviewer Codex2 · 2026-10-15.
 
 > [!IMPORTANT]
@@ -1063,7 +1064,7 @@ helper's machine-truth state, no matter how the request is worded.
 
 ## 20. Codex continuation — 2026-10-17, current evidence and next step
 
-This dispatch assigns **Codex / Claude**, retaining the same isolated
+This dispatch initially assigned **Codex / Claude**, retaining the same isolated
 worktree, published branch
 `gemini2/pax-web-ride-ui-20261009-unblock-history-repair-governance-r2-20261015`
 and [PR #2705](https://github.com/ajoe734/drts-fleet-platform/pull/2705).
@@ -1081,7 +1082,7 @@ The last independent approval is **only** for
 `78bee8a8fac94677aef89c388913a30b`, Codex2 at 2026-10-15T21:49:59Z.
 The three subsequent commits (`98e4936165`, `f18ee807b0`, `ea78a31d89`)
 were never covered by that approval. This round adds an ordinary commit
-and requests fresh review from the currently assigned Claude; the new
+and requests fresh review from the currently assigned reviewer; the new
 identity/generation is recorded by the normal handoff, not inferred from
 the old approval. The prior failed H3 rounds remain in §14, and the
 approved historical body from §0.7a through §16 is preserved unchanged.
@@ -1120,7 +1121,7 @@ product tests. The following results were read to completion before handoff.
 | H2; acceptance 2, 3 scope and publication | Full PR range against reported base | `git diff --name-only <PR-base> HEAD` exit 0, exactly the sole allowed artifact; published head verified against remote and PR. Adds commits to existing branch / #2705 with ordinary push. | No force push, rebase, amend, reset, transplant, product edit or new helper. |
 | H3; acceptance 1–3 traceability | Original `94195322681e` and sibling `bca5cc068a4c`; §0.7a/b, §10a/b, §14 | Probe exit 0 verifies both original §0.7 bodies and both complete §10 bodies (only two explicitly annotated stale heading pointers mapped), plus unchanged approved §0.7a–§16 body. Original artifact hashes remain `70f79a022779590a7f379b99e1d8224536ff931dd83747caafb5d6b56ed3811a` / `452acb9ac7b3f2bb07ca8bb27324b456d11152882668cdfa3f806af256f48204`. | `git diff --check <PR-base> HEAD` remains exit 2 for exactly one trailing space preserved verbatim in original §10a; previous reviewer explicitly recorded this historical-fidelity exception. No new whitespace warning. |
 | H4; acceptance 4 parent concrete next | Fresh helper/parent slices; release `apply_unblock_parent_resolution` | Probe exit 0: parent `blocked`, helper disposition `blocked` / Gemini, full 3223-character parent NEXT prefix retained in 4097-character helper NEXT, no `resolved_parent_at`. Parent `last_update=2026-10-16T00:30:35Z`; NEXT SHA256 `7c6d047588159a83cc4ca1e1c874693750a5642faf705eaebecb256154e79783`; helper NEXT SHA256 `3460dd80ff29783ec446bbf0e5562ff4aa05224f5dec9872f5089c1871bbd848`. Hashes and actual gate state match the previous binding. | No fresh rebinding needed for an unchanged prefix/gates. Recheck before review/merge; actual parent changes require genuine Supervisor rebinding. Do not shorten NEXT, fabricate resolution time or directly update another task. |
-| Stale §17–§19 guidance; acceptance 3, 4 | Warnings beside old instructions and current §20 | Old `ea78a31d89` says CLI attempts cannot succeed and helper completion leaves parent unblocked. Actual release `start` exit 0 and readback `in_progress`; `apply_unblock_parent_resolution` selects stored `resolved_parent_status=blocked`. Updated text withdraws those conclusions and the manual-state-edit alternative. | Fresh handoff still requires independent Claude review and matching CI/merge. |
+| Stale §17–§19 guidance; acceptance 3, 4 | Warnings beside old instructions and current §20 | Old `ea78a31d89` says CLI attempts cannot succeed and helper completion leaves parent unblocked. Actual release `start` exit 0 and readback `in_progress`; `apply_unblock_parent_resolution` selects stored `resolved_parent_status=blocked`. Updated text withdraws those conclusions and the manual-state-edit alternative. | Fresh handoff still requires independent review by the assigned reviewer and matching CI/merge. |
 
 ### CI and parent next action
 
@@ -1149,5 +1150,19 @@ hosted PAX-QA witnessing for `pax-web-ride_p5_live_page` and
 SSE and PostgreSQL/CRM conditions. Those witnesses are not supplied here.
 Helper integration must retain that blocked disposition, not resume the
 parent or grant acceptance. The owner now hands this document's exact
-pushed SHA to Claude through the dispatched CLI. Review, same-SHA hosted
+pushed SHA to the assigned reviewer through the dispatched CLI. Review, same-SHA hosted
 CI and protected merge remain outstanding; `done` is never called here.
+
+### Reviewer reassignment during this dispatch
+
+After normal push of `bfc0776ce2316214a69bda11ed8a731914f5677a`, handoff
+to the dispatched reviewer Claude returned **exit 1**: assigned reviewer
+is now Pi. Fresh `show` confirms Chairman reassigned Claude → Pi at
+`2026-10-17T00:39:30Z`, preserving the active Codex owner and guard.
+The recorded reason cites Claude lane availability and Pi's dispatch
+capability; this worker did not change roles. No candidate was locked by
+that rejected handoff. This follow-up ordinary commit records the change,
+preserving the first published commit and its dispatch-era `Reviewer:
+Claude` trailer. Final publication/handoff readbacks identify the new full
+SHA, current Pi target and new generation. Original H3/H4, independent
+review, matching CI and parent acceptance protections all remain binding.
