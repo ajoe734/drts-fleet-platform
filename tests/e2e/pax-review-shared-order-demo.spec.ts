@@ -6,6 +6,7 @@ import {
   type TestInfo,
   type Response as BrowserResponse,
 } from "@playwright/test";
+import { trackInterruptedRehearsal } from "./pax-review-shared-order/interrupted-rehearsal-finalizer";
 import type { ActionReceipt } from "@drts/contracts";
 import { readFile } from "node:fs/promises";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
@@ -1063,6 +1064,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
     ops = await step("Ops browser context", () => newRole("ops")),
     driver = await step("Driver browser context", () => newRole("driver"));
   let activeDriver = { page: driver, base: DRIVER };
+  const finalizeInterruptedOrders = trackInterruptedRehearsal(pax, info, PAX);
   const requests: {
     role: string;
     method: string;
@@ -1490,6 +1492,14 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           })
           .catch(() => undefined);
     }
+    await finalizeInterruptedOrders().catch(() =>
+      info
+        .attach("interrupted-rehearsal-finalization-unavailable", {
+          body: "Original journey remains failed; the original owner finalization could not finish.",
+          contentType: "text/plain",
+        })
+        .catch(() => undefined),
+    );
     await Promise.allSettled(contexts.map((c) => c.close()));
     throw error;
   }
