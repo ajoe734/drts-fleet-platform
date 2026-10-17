@@ -1,7 +1,7 @@
 import { defineConfig } from "@playwright/test";
 import base from "./playwright.pax-review-shared-order.config";
 
-// Original90second matching and60second acceptance timers run in the actual API.
+// The original60second reservation-offer acceptance timer runs in the actual API.
 export default defineConfig({
   ...base,
   testMatch: /pax-real-dispatch-timeout\.spec\.ts/,

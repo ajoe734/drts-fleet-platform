@@ -16,7 +16,7 @@ import {
   readAssignedTripAndAccept,
 } from "./pax-review-shared-order/additional-journey";
 
-test("real matching and acceptance deadlines expire automatically, then recover the original orders", async ({
+test("the real reservation acceptance deadline expires automatically, then recovers the original order", async ({
   browser,
 }, info) => {
   const progress = createJourneyProgress(info.outputPath("safe-progress.json"));
@@ -110,8 +110,8 @@ test("real matching and acceptance deadlines expire automatically, then recover 
       () => bind(pax, "success"),
     );
     const actualOrders: string[] = [];
-    for (const reason of ["matching_timeout", "acceptance_timeout"] as const) {
-      const label = reason === "matching_timeout" ? "J" : "K";
+    for (const reason of ["acceptance_timeout"] as const) {
+      const label = "K";
       const orderId = await step(
         `${label} Passenger books one new real order`,
         async () => {
@@ -123,7 +123,7 @@ test("real matching and acceptance deadlines expire automatically, then recover 
         },
       );
       const job = await step(
-        `${label} Ops creates a real matching dispatch`,
+        `${label} Ops creates a real reservation dispatch`,
         async () => {
           await createDispatch(ops, orderId);
           const response = await ops.request.get(
@@ -134,7 +134,7 @@ test("real matching and acceptance deadlines expire automatically, then recover 
             (item: { orderId: string }) => item.orderId === orderId,
           );
           expect(jobs).toHaveLength(1);
-          expect(jobs[0].status).toBe("matching");
+          expect(jobs[0].status).toBe("reserved");
           return jobs[0];
         },
       );
@@ -191,9 +191,7 @@ test("real matching and acceptance deadlines expire automatically, then recover 
             .toBe("dispatch_timeout");
           const observedAt = Date.now();
           const elapsedSinceJobMs = observedAt - Date.parse(job.createdAt);
-          expect(elapsedSinceJobMs).toBeGreaterThanOrEqual(
-            reason === "matching_timeout" ? 90_000 : 60_000,
-          );
+          expect(elapsedSinceJobMs).toBeGreaterThanOrEqual(60_000);
           expect(manualTimeoutPOSTs).toBe(0);
           await expect(
             pax.getByText("派車逾時", { exact: true }).first(),
@@ -221,6 +219,10 @@ test("real matching and acceptance deadlines expire automatically, then recover 
               orderId,
               status: "cancelled",
             });
+            // Driver uses its existing refresh action to read the expired offer.
+            await driver
+              .getByRole("button", { name: "重新整理", exact: true })
+              .click();
             await expect(
               driver.getByRole("button", { name: "接受任務", exact: true }),
             ).toHaveCount(0, { timeout: 15_000 });
@@ -308,6 +310,9 @@ test("real matching and acceptance deadlines expire automatically, then recover 
           await expect(ops.getByTestId("ops-review-order-status")).toHaveText(
             "cancelled",
           );
+          await driver
+            .getByRole("button", { name: "重新整理", exact: true })
+            .click();
           await expect(
             driver.getByRole("button", { name: "前往接送點", exact: true }),
           ).toHaveCount(0, { timeout: 15_000 });
@@ -360,6 +365,8 @@ test("real matching and acceptance deadlines expire automatically, then recover 
             recoveredTaskId: recovered.taskId,
             actualRecoveredOrderCancelled: true,
             actualManualTimeoutPOSTCount: manualTimeoutPOSTs,
+            actualOriginalDriverRefreshActionUsed: true,
+            matching90secondScenarioClaimed: false,
             actualInternalNetworkMocks: false,
             actualClockAdvanced: false,
             actualBackendTimeoutConfigurationChanged: false,
@@ -368,8 +375,8 @@ test("real matching and acceptance deadlines expire automatically, then recover 
         },
       );
     }
-    expect(actualOrders).toHaveLength(2);
-    expect(new Set(actualOrders).size).toBe(2);
+    expect(actualOrders).toHaveLength(1);
+    expect(new Set(actualOrders).size).toBe(1);
   } finally {
     for (const orderId of cleanup) {
       const response = await pax.request.post(

@@ -33,7 +33,7 @@ env:
 jobs:
   real-dispatch-timeout:
     runs-on: ubuntu-latest
-    # The original90second matching and60second acceptance deadlines are unchanged.
+    # The original60second reservation-offer acceptance deadline is unchanged.
     timeout-minutes: 25
     services:
       postgres:
