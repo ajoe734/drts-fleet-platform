@@ -146,7 +146,21 @@ export async function ownedRejectionJourney(
   const second = await step(
     "G Ops redispatches the original order to Driver B",
     async () => {
-      await createDispatch(ops, orderId);
+      await opsRead(ops, orderId);
+      // A rejected offer already has a dispatch job. The original Ops page
+      // disables initial dispatch in that state and exposes redispatch instead.
+      const [response] = await Promise.all([
+        ops.waitForResponse(
+          (r) =>
+            r.request().method() === "POST" &&
+            new URL(r.url()).pathname.endsWith(`/orders/${orderId}/redispatch`),
+          { timeout: 30_000 },
+        ),
+        ops
+          .getByRole("button", { name: "依原流程重新派遣", exact: true })
+          .click({ timeout: 30_000 }),
+      ]);
+      expect(response.status()).toBeLessThan(300);
       const result = await assign(ops, "pax-review-driver-b");
       expect(result.taskId).not.toBe(first.taskId);
       await expect
