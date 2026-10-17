@@ -1,5 +1,6 @@
 import { expect, test, type BrowserContext } from "@playwright/test";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
+import { trackInterruptedRehearsal } from "./pax-review-shared-order/interrupted-rehearsal-finalizer";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
 import { standardAddressJourney } from "./pax-review-shared-order/standard-address-journey";
 import { ownedRejectionJourney } from "./pax-review-shared-order/owned-rejection-journey";
@@ -64,6 +65,8 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
   const ops = await step("Additional Ops context", () => role("ops"));
   const driver = await step("Additional Driver context", () => role("driver"));
   const driverBase = `${PAX}/review-driver`;
+  const finalizeInterruptedOrders = trackInterruptedRehearsal(pax, info, PAX);
+  let interrupted = false;
   try {
     await step("Prepare existing real synthetic supply", async () => {
       await ops.goto(`${OPS}/review`);
@@ -426,7 +429,19 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
       step,
       info,
     );
+  } catch (error) {
+    interrupted = true;
+    throw error;
   } finally {
+    if (interrupted)
+      await finalizeInterruptedOrders().catch(() =>
+        info
+          .attach("interrupted-rehearsal-finalization-unavailable", {
+            body: "Original journey remains failed; the original owner finalization could not finish.",
+            contentType: "text/plain",
+          })
+          .catch(() => undefined),
+      );
     await Promise.allSettled(contexts.map((context) => context.close()));
   }
 });
