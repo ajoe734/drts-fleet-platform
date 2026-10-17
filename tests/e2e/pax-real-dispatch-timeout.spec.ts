@@ -227,19 +227,26 @@ test("the real reservation acceptance deadline expires automatically, then recov
               orderId,
               status: "cancelled",
             });
-            // Driver uses its existing refresh action to read the expired offer.
-            await driver
-              .getByRole("button", { name: "重新整理", exact: true })
-              .click();
-            await expect(
-              driver.getByText(orderId, { exact: false }).first(),
-            ).toBeVisible();
-            await expect(
-              driver.getByText(/已取消|平台取消/).first(),
-            ).toBeVisible();
-            await expect(
-              driver.getByRole("button", { name: "接受任務", exact: true }),
-            ).toHaveCount(0, { timeout: 15_000 });
+            await step(
+              "K Driver refreshes its actual cancelled offer",
+              async () => {
+                // The visible refresh label shares its button with a font icon.
+                await driver
+                  .getByRole("button")
+                  .filter({ hasText: "重新整理" })
+                  .first()
+                  .click({ timeout: 15_000 });
+                await expect(
+                  driver.getByText(orderId, { exact: false }).first(),
+                ).toBeVisible();
+                await expect(
+                  driver.getByText(/已取消|平台取消/).first(),
+                ).toBeVisible();
+                await expect(
+                  driver.getByRole("button", { name: "接受任務", exact: true }),
+                ).toHaveCount(0, { timeout: 15_000 });
+              },
+            );
           }
           const rows = await recordOrderEvidence(
             orderId,
@@ -325,8 +332,10 @@ test("the real reservation acceptance deadline expires automatically, then recov
             "cancelled",
           );
           await driver
-            .getByRole("button", { name: "重新整理", exact: true })
-            .click();
+            .getByRole("button")
+            .filter({ hasText: "重新整理" })
+            .first()
+            .click({ timeout: 15_000 });
           await expect(
             driver.getByText(orderId, { exact: false }).first(),
           ).toBeVisible();
@@ -404,6 +413,7 @@ test("the real reservation acceptance deadline expires automatically, then recov
         {
           headers: { Origin: new URL(PAX).origin },
           data: { reason: "dispatch_timeout_acceptance_own_order_cleanup" },
+          timeout: 15_000,
         },
       );
       await info.attach("timeout-own-created-order-cleanup", {

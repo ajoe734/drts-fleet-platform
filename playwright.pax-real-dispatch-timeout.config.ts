@@ -6,6 +6,7 @@ export default defineConfig({
   ...base,
   testMatch: /pax-real-dispatch-timeout\.spec\.ts/,
   timeout: 10 * 60_000,
+  use: { ...base.use, actionTimeout: 30_000, navigationTimeout: 30_000 },
   outputDir: ".artifacts/pax-real-dispatch-timeout/results",
   reporter: [
     ["list"],
