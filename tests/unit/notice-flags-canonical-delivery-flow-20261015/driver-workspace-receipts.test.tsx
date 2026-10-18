@@ -120,6 +120,9 @@ function workspace(h: ReturnType<typeof wireHarness>) {
       "@/lib/driver-workspace-cockpit": pure(
         resolve(root, "lib/driver-workspace-cockpit.ts"),
       ),
+      "@/lib/task-order-summaries": pure(
+        resolve(root, "lib/task-order-summaries.ts"),
+      ),
       "@/lib/money": pure(resolve(root, "lib/money.ts")),
       "@/lib/strings": pure(resolve(root, "lib/strings.ts")),
       // The separate banner has its own mounted coverage; exercise the original
