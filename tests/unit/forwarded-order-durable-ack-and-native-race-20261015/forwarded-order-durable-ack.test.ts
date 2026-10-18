@@ -237,6 +237,85 @@ function createGatedDatabaseService(gatedStatus: string) {
   };
 }
 
+/**
+ * Real-shaped `DatabaseService` double backed by an actual table keyed by
+ * mirror_order_id (same shape as `createGatedDatabaseService`, without the
+ * gate), used where a test only needs to toggle whether forwarded-order
+ * writes/readbacks succeed or fail and then assert on the durable row and a
+ * genuine restart — not just the in-memory service cache.
+ */
+function createRecordingDatabaseService() {
+  const table = new Map<string, unknown>();
+  let rejectOrderWrites = false;
+  let rejectReadback = false;
+
+  const query = vi.fn(
+    async (
+      text: string,
+      values?: readonly unknown[],
+    ): Promise<{ rows: unknown[]; rowCount: number }> => {
+      const isForwardedOrdersTable = text.includes(
+        "ops.phase1_forwarded_orders",
+      );
+
+      if (isForwardedOrdersTable && text.includes("INSERT")) {
+        if (rejectOrderWrites) {
+          throw new Error("order write not acknowledged");
+        }
+        const params = values as unknown[];
+        const [mirrorOrderId, , , , , , recordJson] = params;
+        table.set(mirrorOrderId as string, JSON.parse(recordJson as string));
+        return { rows: [], rowCount: 1 };
+      }
+
+      if (isForwardedOrdersTable && text.includes("WHERE platform_code")) {
+        if (rejectReadback) {
+          throw new Error("readback query timed out");
+        }
+        const [platformCode, externalOrderId] = values as [string, string];
+        const match = [...table.values()].find((record) => {
+          const typed = record as {
+            platformCode: string;
+            externalOrderId: string;
+          };
+          return (
+            typed.platformCode === platformCode &&
+            typed.externalOrderId === externalOrderId
+          );
+        });
+        return match
+          ? { rows: [{ record: match }], rowCount: 1 }
+          : { rows: [], rowCount: 0 };
+      }
+
+      if (isForwardedOrdersTable) {
+        const rows = [...table.values()].map((record) => ({ record }));
+        return { rows, rowCount: rows.length };
+      }
+
+      if (text.includes("ops.phase1_adapter_health")) {
+        return { rows: [], rowCount: 0 };
+      }
+
+      return { rows: [], rowCount: 0 };
+    },
+  );
+
+  return {
+    databaseService: { isEnabled: () => true, query } as unknown as DatabaseService,
+    setRejectOrderWrites: (value: boolean) => {
+      rejectOrderWrites = value;
+    },
+    setRejectReadback: (value: boolean) => {
+      rejectReadback = value;
+    },
+    readDurableOrder: (mirrorOrderId: string) =>
+      table.get(mirrorOrderId) as
+        | { status: string; acceptedDriverId: string | null; candidateDriverIds: string[] }
+        | undefined,
+  };
+}
+
 function createHarness(options?: {
   adapter?: ForwarderAdapterInterface;
   repository?: ForwarderRepository;
@@ -1125,6 +1204,67 @@ describe("FORWARDED-ORDER-DURABLE-ACK-AND-NATIVE-RACE-FLOW-20261015: C033-F1 dur
       );
     });
 
+    it("never creates a durable accept row while the order stays uncertain, and a cold restart recovers the true pre-accept canonical state (not the in-memory guess)", async () => {
+      const { databaseService, setRejectOrderWrites, readDurableOrder } =
+        createRecordingDatabaseService();
+      const repository = new ForwarderRepository(databaseService);
+      const { service, controller } = createHarness({ repository });
+
+      const order = await service.ingestExternalOrder({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-accept-repeat-restart-001",
+        payload: { serviceBucket: "standard_taxi" },
+      });
+      await service.broadcastOrder(order.mirrorOrderId, {
+        candidateDriverIds: ["driver-ack-001"],
+      });
+
+      // Every order write from here on (the accept_pending write AND
+      // markSyncFailed's own fallback write) is rejected, through the real
+      // ForwarderRepository/DatabaseService path, not a repository-level
+      // fake.
+      setRejectOrderWrites(true);
+
+      await expect(
+        controller.acceptForwardedOrder(
+          order.mirrorOrderId,
+          driverIdentity("driver-ack-001"),
+          {},
+        ),
+      ).rejects.toMatchObject({
+        response: { error: { code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN" } },
+      });
+      await expect(
+        controller.acceptForwardedOrder(
+          order.mirrorOrderId,
+          driverIdentity("driver-ack-001"),
+          {},
+        ),
+      ).rejects.toMatchObject({
+        response: { error: { code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN" } },
+      });
+
+      // Neither failed accept ever durably landed: canonical storage still
+      // has the pre-accept broadcasted state from the earlier, successfully
+      // ACKed broadcast — not the in-memory sync_failed guess this process
+      // is carrying.
+      const durable = readDurableOrder(order.mirrorOrderId);
+      expect(durable?.status).toBe("broadcasted");
+      expect(durable?.acceptedDriverId).toBeNull();
+
+      const restartedRepository = new ForwarderRepository(databaseService);
+      const restartedService = new ForwarderService(
+        { getEligibleCandidates: vi.fn(() => []) } as never,
+        { recordAuditLog: vi.fn() } as never,
+        [createAdapter()],
+        restartedRepository,
+      );
+      await restartedService.onModuleInit();
+      const restarted = restartedService.getOrder(order.mirrorOrderId);
+      expect(restarted.status).toBe("broadcasted");
+      expect(restarted.acceptedDriverId).toBeNull();
+    });
+
     it("still returns the sync_failed success envelope once that degraded state is itself durably ACKed", async () => {
       const { repository, persistChanges } = createControllableRepository();
       const { service, controller } = createHarness({ repository });
@@ -1285,6 +1425,57 @@ describe("FORWARDED-ORDER-DURABLE-ACK-AND-NATIVE-RACE-FLOW-20261015: C033-F1 dur
       expect(retried.platformCode).toBe(GRAB_TAIWAN_PLATFORM_CODE);
       expect(retried.externalOrderId).toBe("grab-order-readback-failure-001");
     });
+
+    it("never fabricates a durable row out of a failed readback, and a cold restart finds the mirror genuinely absent (not a ghost 'received' row)", async () => {
+      const {
+        databaseService,
+        setRejectOrderWrites,
+        setRejectReadback,
+        readDurableOrder,
+      } = createRecordingDatabaseService();
+      const repository = new ForwarderRepository(databaseService);
+      const { service } = createHarness({ repository });
+
+      setRejectOrderWrites(true);
+      await expect(
+        service.ingestExternalOrder({
+          platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+          externalOrderId: "grab-order-readback-restart-001",
+          payload: { serviceBucket: "standard_taxi" },
+        }),
+      ).rejects.toMatchObject({
+        response: { error: { code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN" } },
+      });
+      const mirrorOrderId = service.listOrders()[0]!.mirrorOrderId;
+      expect(readDurableOrder(mirrorOrderId)).toBeUndefined();
+
+      setRejectReadback(true);
+      await expect(
+        service.ingestExternalOrder({
+          platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+          externalOrderId: "grab-order-readback-restart-001",
+          payload: { serviceBucket: "standard_taxi" },
+        }),
+      ).rejects.toMatchObject({
+        response: { error: { code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN" } },
+      });
+
+      // The failed readback must not fabricate a row: canonical storage
+      // never actually received a write for this mirror.
+      expect(readDurableOrder(mirrorOrderId)).toBeUndefined();
+
+      const restartedRepository = new ForwarderRepository(databaseService);
+      const restartedService = new ForwarderService(
+        { getEligibleCandidates: vi.fn(() => []) } as never,
+        { recordAuditLog: vi.fn() } as never,
+        [createAdapter()],
+        restartedRepository,
+      );
+      await restartedService.onModuleInit();
+      // A cold restart reading the same canonical storage finds nothing for
+      // this mirror either — there is no stale/ghost order to serve.
+      expect(restartedService.listOrders()).toHaveLength(0);
+    });
   });
 
   describe("F3: a late accept must not ignore a durably changed candidate set while status stays broadcasted", () => {
@@ -1424,6 +1615,82 @@ describe("FORWARDED-ORDER-DURABLE-ACK-AND-NATIVE-RACE-FLOW-20261015: C033-F1 dur
       expect(finalOrder.acceptedDriverId).toBeNull();
       expect(finalOrder.lastSyncError).toBeNull();
     });
+
+    it("does not revive a driver dropped by a durable rebroadcast to a different candidate set (late success), verified through the real repository and a restart", async () => {
+      const { databaseService, readDurableOrder } =
+        createRecordingDatabaseService();
+      const repository = new ForwarderRepository(databaseService);
+      const { adapter, acceptInvoked, resolveLate } =
+        createDeferredAcceptAdapter();
+      const { service, controller } = createHarness({
+        repository,
+        adapter,
+        eligibleDriverIds: ["driver-f3-003", "driver-f3-004"],
+      });
+
+      const order = await service.ingestExternalOrder({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-f3-rebroadcast-001",
+        payload: { serviceBucket: "standard_taxi" },
+      });
+      await service.broadcastOrder(order.mirrorOrderId, {
+        candidateDriverIds: ["driver-f3-003"],
+      });
+
+      const acceptPromise = controller.acceptForwardedOrder(
+        order.mirrorOrderId,
+        driverIdentity("driver-f3-003"),
+        {},
+      );
+      await acceptInvoked;
+
+      // A legitimate rebroadcast durably replaces the candidate set with a
+      // different driver while the first driver's adapter call is still
+      // in flight (the adapter call runs outside the order lock); status
+      // stays "broadcasted" throughout.
+      await service.broadcastOrder(order.mirrorOrderId, {
+        candidateDriverIds: ["driver-f3-004"],
+      });
+      expect(
+        service.getOrder(order.mirrorOrderId).candidateDriverIds,
+      ).toEqual(["driver-f3-004"]);
+
+      resolveLate();
+
+      // The old status-only guard would have seen status still "broadcasted"
+      // and committed accept_pending/acceptedDriverId for a driver who was
+      // durably dropped from the candidate set by the rebroadcast.
+      await expect(acceptPromise).rejects.toMatchObject({
+        response: { error: { code: "DRIVER_TASK_VIEW_NOT_FOUND" } },
+      });
+
+      const finalOrder = service.getOrder(order.mirrorOrderId);
+      expect(finalOrder.status).toBe("broadcasted");
+      expect(finalOrder.acceptedDriverId).toBeNull();
+      expect(finalOrder.candidateDriverIds).toEqual(["driver-f3-004"]);
+
+      // The durable row (not just the in-memory cache) must agree, and a
+      // cold restart reading that same row must reconstruct the identical
+      // canonical state — the rebroadcast's candidate set, never the first
+      // driver's stale late-success accept.
+      const durable = readDurableOrder(order.mirrorOrderId);
+      expect(durable?.status).toBe("broadcasted");
+      expect(durable?.acceptedDriverId).toBeNull();
+      expect(durable?.candidateDriverIds).toEqual(["driver-f3-004"]);
+
+      const restartedRepository = new ForwarderRepository(databaseService);
+      const restartedService = new ForwarderService(
+        { getEligibleCandidates: vi.fn(() => []) } as never,
+        { recordAuditLog: vi.fn() } as never,
+        [createAdapter()],
+        restartedRepository,
+      );
+      await restartedService.onModuleInit();
+      const restarted = restartedService.getOrder(order.mirrorOrderId);
+      expect(restarted.status).toBe("broadcasted");
+      expect(restarted.acceptedDriverId).toBeNull();
+      expect(restarted.candidateDriverIds).toEqual(["driver-f3-004"]);
+    });
   });
 
   describe("F4: a zero-row conditional UPSERT must not be treated as a durable ACK", () => {
@@ -1535,6 +1802,101 @@ describe("FORWARDED-ORDER-DURABLE-ACK-AND-NATIVE-RACE-FLOW-20261015: C033-F1 dur
       const cached = service.getOrder(order.mirrorOrderId);
       expect(cached.lastSyncError?.code).toBe(
         "FORWARDER_PERSISTENCE_ACK_UNCERTAIN",
+      );
+    });
+
+    it("never overwrites a newer canonical row (a legitimate native correction) that already won the conditional UPSERT race, confirmed via durable storage and a restart", async () => {
+      const table = new Map<string, { updatedAt: string; record: unknown }>();
+      const databaseService = {
+        isEnabled: () => true,
+        query: vi.fn(
+          async (
+            text: string,
+            values?: readonly unknown[],
+          ): Promise<{ rows: unknown[]; rowCount: number }> => {
+            if (
+              text.includes("ops.phase1_forwarded_orders") &&
+              text.includes("INSERT")
+            ) {
+              const params = values as unknown[];
+              const [mirrorOrderId, , , , , updatedAt, recordJson] = params;
+              const existing = table.get(mirrorOrderId as string);
+              if (existing && (updatedAt as string) < existing.updatedAt) {
+                // Same conditional guard as the real repository SQL: an
+                // older write than the row currently in place is a no-op,
+                // not an ACK of the attempted (stale) draft.
+                return { rows: [], rowCount: 0 };
+              }
+              table.set(mirrorOrderId as string, {
+                updatedAt: updatedAt as string,
+                record: JSON.parse(recordJson as string),
+              });
+              return { rows: [], rowCount: 1 };
+            }
+            if (text.includes("ops.phase1_forwarded_orders")) {
+              const rows = [...table.values()].map((row) => ({
+                record: row.record,
+              }));
+              return { rows, rowCount: rows.length };
+            }
+            return { rows: [], rowCount: 0 };
+          },
+        ),
+      } as unknown as DatabaseService;
+
+      const repository = new ForwarderRepository(databaseService);
+      const { service } = createHarness({
+        repository,
+        eligibleDriverIds: ["driver-f4-003"],
+      });
+
+      const order = await service.ingestExternalOrder({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-f4-restart-001",
+        payload: { serviceBucket: "standard_taxi" },
+      });
+
+      // Simulates a legitimate native correction that already landed with a
+      // later updatedAt than the stale broadcast attempt below will use
+      // (e.g. a concurrent process/pod applying a canonical write this
+      // in-memory instance never saw).
+      const existing = table.get(order.mirrorOrderId)!;
+      const newerUpdatedAt = new Date(
+        Date.parse(order.updatedAt) + 60_000,
+      ).toISOString();
+      table.set(order.mirrorOrderId, {
+        updatedAt: newerUpdatedAt,
+        record: {
+          ...(existing.record as Record<string, unknown>),
+          status: "cancelled_by_platform",
+        },
+      });
+
+      await expect(
+        service.broadcastOrder(order.mirrorOrderId, {
+          candidateDriverIds: ["driver-f4-003"],
+        }),
+      ).rejects.toMatchObject({
+        response: { error: { code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN" } },
+      });
+
+      // The newer canonical row (the native correction) is untouched by the
+      // stale broadcast attempt's lost conditional UPSERT.
+      const durable = table.get(order.mirrorOrderId)?.record as
+        | { status: string }
+        | undefined;
+      expect(durable?.status).toBe("cancelled_by_platform");
+
+      const restartedRepository = new ForwarderRepository(databaseService);
+      const restartedService = new ForwarderService(
+        { getEligibleCandidates: vi.fn(() => []) } as never,
+        { recordAuditLog: vi.fn() } as never,
+        [createAdapter()],
+        restartedRepository,
+      );
+      await restartedService.onModuleInit();
+      expect(restartedService.getOrder(order.mirrorOrderId).status).toBe(
+        "cancelled_by_platform",
       );
     });
   });
