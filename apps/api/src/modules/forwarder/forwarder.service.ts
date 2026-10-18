@@ -327,8 +327,24 @@ export class ForwarderService implements OnModuleInit {
         // A failed readback query is not evidence of absence. Treating it as
         // "nothing durable exists yet" would let this retry overwrite a row
         // we simply failed to see; stay uncertain and let a later retry or
-        // reconciliation resolve it instead.
-        return this.cloneOrder(canonical);
+        // reconciliation resolve it instead. Returning the still-uncertain
+        // order as a normal value here (instead of throwing) would let the
+        // ingress command report a success envelope for a mirror whose last
+        // write was never durably ACKed and whose current canonical state we
+        // just failed to confirm, so this must propagate as an honest
+        // failure — not just carry an uncertain field inside a 200 response.
+        throw new ApiRequestError(
+          HttpStatus.BAD_GATEWAY,
+          "FORWARDER_PERSISTENCE_ACK_UNCERTAIN",
+          "Forwarded order identity could not be read back from canonical storage; manual readback/reconciliation is required before retrying this ingress.",
+          {
+            orderId: canonical.mirrorOrderId,
+            platformCode: canonical.platformCode,
+            externalOrderId: canonical.externalOrderId,
+            persisted: false,
+          },
+          true,
+        );
       }
 
       const retryDraft = this.cloneOrder(canonical);
@@ -583,6 +599,28 @@ export class ForwarderService implements OnModuleInit {
       throw this.driverTaskViewNotFound(taskId);
     }
 
+    // A cached status is not proof its own write landed (see
+    // `isPersistenceUncertainError`'s doc comment): a *first* failed accept
+    // is already caught above, but a *repeated* accept call for the same
+    // still-uncertain order never goes through that catch at all (its
+    // status is no longer "broadcasted"), so it must be checked again here
+    // before this fall-through path reports success off the same
+    // unconfirmed cache entry.
+    if (
+      forwardedOrder.lastSyncError?.code === "FORWARDER_PERSISTENCE_ACK_UNCERTAIN"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_GATEWAY,
+        "FORWARDER_PERSISTENCE_ACK_UNCERTAIN",
+        "Forwarded order mirror state has not been durably acknowledged; manual readback/reconciliation is required before treating this accept as complete.",
+        {
+          orderId: taskId,
+          persisted: false,
+        },
+        true,
+      );
+    }
+
     return this.buildForwardedDriverActionResponse(
       "accept",
       this.resolveForwardedOutcomeFromStatus(forwardedOrder.status),
@@ -773,7 +811,15 @@ export class ForwarderService implements OnModuleInit {
     if (!adapter) {
       return this.withLock(orderId, async () => {
         const fresh = this.requireOrder(orderId);
-        if (fresh.status !== "broadcasted") {
+        if (
+          fresh.status !== "broadcasted" ||
+          !fresh.candidateDriverIds.includes(command.driverId)
+        ) {
+          // A newer authoritative outcome, or a legitimate opt-out/
+          // rebroadcast that already dropped this driver from the current
+          // candidate set, landed before this relay command's own guard
+          // check was re-evaluated. Either way that outcome is canonical
+          // and must not be overwritten below.
           return {
             status: fresh.status,
             acceptedDriverId: fresh.acceptedDriverId,
@@ -837,12 +883,17 @@ export class ForwarderService implements OnModuleInit {
     if (!adapterAcknowledged) {
       return this.withLock(orderId, async () => {
         const fresh = this.requireOrder(orderId);
-        if (fresh.status !== "broadcasted") {
+        if (
+          fresh.status !== "broadcasted" ||
+          !fresh.candidateDriverIds.includes(command.driverId)
+        ) {
           // A newer authoritative outcome (native sync/reconciliation, or a
-          // competing accept that already claimed the order) landed while
-          // this relay call was awaiting the adapter. That outcome is
-          // canonical; this local relay failure is moot and must not
-          // reconstruct sync_failed over it.
+          // competing accept that already claimed the order), or a
+          // legitimate opt-out/rebroadcast that already dropped this driver
+          // from the current candidate set, landed while this relay call was
+          // awaiting the adapter. That outcome is canonical; this local
+          // relay failure is moot and must not reconstruct sync_failed over
+          // it.
           return {
             status: fresh.status,
             acceptedDriverId: fresh.acceptedDriverId,
@@ -884,10 +935,15 @@ export class ForwarderService implements OnModuleInit {
 
     return this.withLock(orderId, async () => {
       const fresh = this.requireOrder(orderId);
-      if (fresh.status !== "broadcasted") {
+      if (
+        fresh.status !== "broadcasted" ||
+        !fresh.candidateDriverIds.includes(command.driverId)
+      ) {
         // Same race as above, but the adapter call itself succeeded (late
-        // success): a newer native/competing outcome already landed during
-        // the await and must survive instead of being overwritten below.
+        // success): a newer native/competing outcome, or a legitimate
+        // opt-out/rebroadcast that already dropped this driver from the
+        // current candidate set, already landed during the await and must
+        // survive instead of being overwritten below.
         return {
           status: fresh.status,
           acceptedDriverId: fresh.acceptedDriverId,

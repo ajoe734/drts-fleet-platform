@@ -112,7 +112,24 @@ export class ForwarderRepository {
             order.updatedAt,
             JSON.stringify(order),
           ],
-        ),
+        ).then((result) => {
+          // rowCount === 0 only happens when the row already existed and the
+          // WHERE guard above rejected the update (an equal-or-newer
+          // canonical row is already in place). The query still *resolves*
+          // in that case — Postgres does not treat a no-op conditional
+          // UPDATE as an error — so without this check the caller would see
+          // a fulfilled promise and conclude this draft was durably ACKed
+          // when it was actually silently discarded in favor of the
+          // existing row. Surfacing it as a rejection routes it through the
+          // same honest-uncertain/markSyncFailed handling as any other
+          // write failure instead of letting a conflicting canonical row be
+          // reported as if the attempted draft had landed.
+          if ((result.rowCount ?? 0) === 0) {
+            throw new Error(
+              `forwarded order ${order.mirrorOrderId} write did not apply: an equal-or-newer canonical row already exists for this mirror identity`,
+            );
+          }
+        }),
       );
     }
 
