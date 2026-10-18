@@ -2,7 +2,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { Injectable, Optional } from "@nestjs/common";
 import { ApiRequestError } from "../../common/api-envelope";
 import { DatabaseService } from "../../common/db";
-import { type ContactRole } from "./voice-contact.service";
+import { VoiceContactService, type ContactRole } from "./voice-contact.service";
 import { VoiceSessionRepository } from "./voice-session.repository";
 import type { VoiceQueryExecutor } from "./voice-booking.repository";
 import { readVoiceRecordingContext } from "./voice-recording-context";
@@ -279,6 +279,12 @@ export class VoiceCallbackService {
     // The runtime entry points below use PostgreSQL when configured. Legacy
     // synchronous methods remain available to memory-only component callers.
     @Optional() private readonly databaseService?: DatabaseService,
+    // AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C/D: resolves the
+    // durable, sealed callbackRecipient contact/consent for DB-backed task
+    // projection (`loadDbTask`). Optional so every pre-existing in-memory
+    // test construction of this service (`new VoiceCallbackService()`)
+    // keeps working unchanged -- those paths never call `loadDbTask`.
+    @Optional() private readonly contactService?: VoiceContactService,
   ) {}
 
   /**
@@ -1384,6 +1390,16 @@ export class VoiceCallbackService {
       brandId: "",
       callId: "",
       contactRole: "callbackRecipient",
+      // AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C/D: honest
+      // defaults, overridden by `loadDbTask` with the durable, sealed
+      // VoiceContactService projection when one exists for this session.
+      // `contact_phone_encrypted` is caller-supplied ciphertext in a format
+      // apps/api does not control or decrypt (unlike
+      // voice.contact_role_revision's own envelope) -- it is NOT the real
+      // phone number, and this field name staying `contactPhone` while
+      // holding ciphertext is a pre-existing, precisely-identified
+      // remaining boundary (see this task's UAT doc), not something this
+      // change resolves.
       contactName: "",
       contactPhone: row.contact_phone_encrypted,
       consentRef: "",
@@ -1439,11 +1455,27 @@ export class VoiceCallbackService {
         "VOICE_SESSION_NOT_FOUND",
         "Callback voice session was not found.",
       );
+    // AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C/D: resolve the
+    // durable, server-sealed callbackRecipient contact/consent for this
+    // session (voice.contact_role_revision via VoiceContactService), rather
+    // than the hardcoded "" `mapDbTaskRow` defaults. Honestly falls back to
+    // those defaults (not a fabricated value) when no contact state has
+    // ever been recorded for this session -- true for every call today,
+    // since nothing in the live dialogue/booking flow yet calls
+    // `VoiceContactService.initializeContacts` (see this task's UAT doc,
+    // Package C "not started" note on VoiceContactService's prior mounted-
+    // caller gap); this projection is correct as soon as something does.
+    const effectiveContacts = await this.contactService?.getEffectiveContactsDurable(
+      row.voice_session_id,
+    );
+
     return {
       ...this.mapDbTaskRow(row),
       brandId: context.brandId,
       callId: context.callId,
       linkedOrderId: context.linkedOrderId,
+      contactName: effectiveContacts?.callbackRecipient.name ?? "",
+      consentRef: effectiveContacts?.callbackRecipientConsentRef ?? "",
     };
   }
 

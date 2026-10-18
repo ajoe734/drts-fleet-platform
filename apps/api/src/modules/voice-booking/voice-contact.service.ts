@@ -2,7 +2,17 @@ import { randomUUID } from "node:crypto";
 import { Injectable, Optional } from "@nestjs/common";
 import { type BookingRequirements } from "@drts/contracts";
 import { ApiRequestError } from "../../common/api-envelope";
-import { VoiceSessionRepository } from "./voice-session.repository";
+import {
+  VoiceSessionRepository,
+  type ContactRoleRevisionRow,
+  type VoiceQueryExecutor,
+} from "./voice-session.repository";
+import {
+  decryptDialogueSnapshotContent,
+  encryptDialogueSnapshotContent,
+  resolveDialogueSnapshotEncryptionKey,
+  type DialogueSnapshotEncryptionKey,
+} from "./voice-dialogue-snapshot-crypto";
 
 export type ContactRole =
   | "caller"
@@ -75,6 +85,17 @@ export interface EffectiveContactsResult {
   callbackRecipientRole: "booker" | "passenger" | "custom";
   activeRevisions: Record<ContactRole, ContactRevision | null>;
   totalRevisions: number;
+  /**
+   * AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C/D: the consent
+   * reference backing the CURRENT effective `callbackRecipient` contact --
+   * resolved from `activeRevisions.callbackRecipient` when
+   * `callbackRecipientRole === "custom"`, otherwise from
+   * `activeRevisions[callbackRecipientRole]` (the booker/passenger revision
+   * the recipient currently defaults to). Centralized here so a caller
+   * (e.g. `VoiceCallbackService`) never has to re-derive the custom/default
+   * pointer rule itself.
+   */
+  callbackRecipientConsentRef: string | null;
 }
 
 /**
@@ -105,10 +126,231 @@ export class VoiceContactService {
   ) {}
 
   /**
+   * AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C: this service
+   * only persists to `voice.contact_role_revision`
+   * (V0122__voice_contact_role_revision.sql) when it was constructed with a
+   * real, DB-enabled `VoiceSessionRepository` -- a repository mock lacking
+   * `isEnabled` (e.g. the plain `{ invalidateActiveConfirmationForSession
+   * }` fixture `tests/unit/uv-exec-018.test.ts` uses) safely falls through
+   * to the original process-local RAM-only behavior, not an exception.
+   */
+  private isDbBacked(): boolean {
+    return (
+      typeof this.sessionRepository?.isEnabled === "function" &&
+      this.sessionRepository.isEnabled()
+    );
+  }
+
+  private requireEncryptionKey(): DialogueSnapshotEncryptionKey {
+    const key = resolveDialogueSnapshotEncryptionKey();
+    if (!key) {
+      throw new ApiRequestError(
+        503,
+        "VOICE_CONTACT_REVISION_ENCRYPTION_UNCONFIGURED",
+        "Contact-role revision encryption key is not configured; refusing to persist unencrypted contact data.",
+      );
+    }
+    return key;
+  }
+
+  /**
+   * Binds a revision's ciphertext to its own identity (same rationale as
+   * `voice-dialogue-snapshot-crypto.ts`'s own AAD doc): a row substitution
+   * (e.g. splicing session B's ciphertext into session A's row) fails the
+   * authenticated-tag check the same way a tamper would.
+   */
+  private contactRevisionAssociatedData(
+    voiceSessionId: string,
+    role: ContactRole,
+    revisionNumber: number,
+  ): string {
+    return JSON.stringify([
+      "voice.contact_role_revision.v1",
+      voiceSessionId,
+      role,
+      revisionNumber,
+    ]);
+  }
+
+  private async persistRevision(
+    voiceSessionId: string,
+    revision: ContactRevision,
+    key: DialogueSnapshotEncryptionKey,
+    tx: VoiceQueryExecutor,
+  ): Promise<void> {
+    const encrypted = encryptDialogueSnapshotContent(
+      { phone: revision.phone },
+      key,
+      this.contactRevisionAssociatedData(
+        voiceSessionId,
+        revision.role,
+        revision.revision,
+      ),
+    );
+    await this.sessionRepository!.insertContactRoleRevision(
+      {
+        voiceSessionId,
+        role: revision.role,
+        revisionNumber: revision.revision,
+        name: revision.name,
+        phoneKeyVersion: encrypted.keyVersion,
+        phoneNonce: encrypted.nonce,
+        phoneCiphertext: encrypted.ciphertext,
+        phoneAuthTag: encrypted.authTag,
+        consentRef: revision.consentRef,
+        reason: revision.reason,
+        replacedRevision: revision.replacedRevision,
+      },
+      tx,
+    );
+  }
+
+  private decryptRevisionPhone(row: ContactRoleRevisionRow): string {
+    const decrypted = decryptDialogueSnapshotContent(
+      {
+        keyVersion: row.phoneKeyVersion,
+        nonce: row.phoneNonce,
+        ciphertext: row.phoneCiphertext,
+        authTag: row.phoneAuthTag,
+      },
+      (version) => {
+        const key = resolveDialogueSnapshotEncryptionKey();
+        return key && key.version === version ? key.key : null;
+      },
+      this.contactRevisionAssociatedData(
+        row.voiceSessionId,
+        row.role,
+        row.revisionNumber,
+      ),
+    ) as { phone: string };
+    return decrypted.phone;
+  }
+
+  /**
+   * Cold reconstruction (C-P1): rebuilds the full in-memory
+   * `VoiceContactState` from every `voice.contact_role_revision` row ever
+   * written for this session -- the only durable source of truth, since a
+   * process restart loses the `states` Map entirely. `driverContactRole`
+   * and `callbackRecipientRole` are NOT separately stored columns (adding
+   * them would duplicate what `reason` already encodes); instead every
+   * `driverContact`/`callbackRecipient` revision's `reason` is either
+   * `"default_role:booker"`/`"default_role:passenger"` (an informational
+   * pointer snapshot written at init time, see `initializeContacts`) or an
+   * explicit override reason supplied to `updateContactRole` -- the LATEST
+   * revision for that role tells us which case currently applies, exactly
+   * mirroring the RAM model's `driverContactRole` vs `customDriverContact`
+   * split.
+   */
+  private async coldReconstructState(
+    voiceSessionId: string,
+  ): Promise<VoiceContactState | undefined> {
+    const rows =
+      await this.sessionRepository!.listContactRoleRevisions(voiceSessionId);
+    if (rows.length === 0) return undefined;
+
+    const revisions: ContactRevision[] = rows.map((row) => ({
+      revision: row.revisionNumber,
+      role: row.role,
+      name: row.name,
+      phone: this.decryptRevisionPhone(row),
+      consentRef: row.consentRef,
+      reason: row.reason,
+      updatedAt: row.createdAt,
+      replacedRevision: row.replacedRevision,
+    }));
+
+    const latestOf = (role: ContactRole) =>
+      [...revisions].reverse().find((r) => r.role === role);
+
+    const callerRev = latestOf("caller");
+    const bookerRev = latestOf("booker");
+    const passengerRev = latestOf("passenger");
+    if (!callerRev || !bookerRev || !passengerRev) {
+      throw new Error(
+        `voice_contact_role_revision_incomplete: session '${voiceSessionId}' is missing one of its mandatory caller/booker/passenger seed revisions.`,
+      );
+    }
+
+    const defaultPointer = /^default_role:(booker|passenger)$/;
+
+    let driverContactRole: "booker" | "passenger" = "booker";
+    let customDriverContact: ContactInfo | null = null;
+    for (const rev of revisions) {
+      if (rev.role !== "driverContact") continue;
+      const pointer = defaultPointer.exec(rev.reason);
+      if (pointer) {
+        driverContactRole = pointer[1] as "booker" | "passenger";
+        customDriverContact = null;
+      } else {
+        customDriverContact = { name: rev.name, phone: rev.phone };
+      }
+    }
+
+    let callbackRecipientRole: "booker" | "passenger" | "custom" = "booker";
+    let customCallbackRecipient: ContactInfo | null = null;
+    for (const rev of revisions) {
+      if (rev.role !== "callbackRecipient") continue;
+      const pointer = defaultPointer.exec(rev.reason);
+      if (pointer) {
+        callbackRecipientRole = pointer[1] as "booker" | "passenger";
+        customCallbackRecipient = null;
+      } else {
+        callbackRecipientRole = "custom";
+        customCallbackRecipient = { name: rev.name, phone: rev.phone };
+      }
+    }
+
+    const latestRevisionNumber = revisions.reduce(
+      (max, r) => Math.max(max, r.revision),
+      0,
+    );
+
+    const state: VoiceContactState = {
+      voiceSessionId,
+      assertedCallerPhone: callerRev.phone,
+      bookerContact: { name: bookerRev.name, phone: bookerRev.phone },
+      passengerContact: { name: passengerRev.name, phone: passengerRev.phone },
+      driverContactRole,
+      callbackRecipientRole,
+      customDriverContact,
+      customCallbackRecipient,
+      revisions,
+      latestRevisionNumber,
+      updatedAt: revisions[revisions.length - 1]!.updatedAt,
+    };
+    this.states.set(voiceSessionId, state);
+    return state;
+  }
+
+  /**
+   * Durable-aware read for callers (e.g. `VoiceCallbackService`) that run
+   * in a different process/request than whatever originally called
+   * `initializeContacts` -- attempts cold reconstruction before giving up,
+   * and returns `null` instead of throwing when no contact state has ever
+   * been recorded for this session (an honest "not yet known" boundary,
+   * never a fabricated default).
+   */
+  async getEffectiveContactsDurable(
+    voiceSessionId: string,
+  ): Promise<EffectiveContactsResult | null> {
+    let state = this.states.get(voiceSessionId);
+    if (!state && this.isDbBacked()) {
+      state = await this.coldReconstructState(voiceSessionId);
+    }
+    if (!state) return null;
+    return this.getEffectiveContacts(voiceSessionId);
+  }
+
+  /**
    * Initializes or registers contact roles for a voice session.
    */
-  initializeContacts(input: InitializeContactsInput): VoiceContactState {
-    const existing = this.states.get(input.voiceSessionId);
+  async initializeContacts(
+    input: InitializeContactsInput,
+  ): Promise<VoiceContactState> {
+    let existing = this.states.get(input.voiceSessionId);
+    if (!existing && this.isDbBacked()) {
+      existing = await this.coldReconstructState(input.voiceSessionId);
+    }
     if (existing) {
       // Validate caller phone immutability if re-asserted
       if (existing.assertedCallerPhone !== input.callerPhone.trim()) {
@@ -189,6 +431,50 @@ export class VoiceContactService {
       replacedRevision: null,
     });
 
+    // AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C: when durably
+    // backed, also seed informational "default_role:X" pointer revisions
+    // for driverContact/callbackRecipient (or an immediate custom-override
+    // revision when the caller already asked for one) -- see
+    // `coldReconstructState`'s own doc for why this is the only way a
+    // future cold read can recover these two enum fields, which the RAM-
+    // only legacy path below never persists anywhere and so does not need.
+    if (this.isDbBacked()) {
+      revisions.push({
+        revision: ++revCounter,
+        role: "driverContact",
+        name: driverContactRole === "booker" ? bookerName : passengerName,
+        phone: driverContactRole === "booker" ? callerPhone : passengerPhone,
+        consentRef: null,
+        reason: `default_role:${driverContactRole}`,
+        updatedAt: now,
+        replacedRevision: null,
+      });
+
+      if (callbackRecipientRole === "custom" && customCallbackRecipient) {
+        revisions.push({
+          revision: ++revCounter,
+          role: "callbackRecipient",
+          name: customCallbackRecipient.name,
+          phone: customCallbackRecipient.phone,
+          consentRef: input.consentRef ?? null,
+          reason: "initial_custom_callback_recipient",
+          updatedAt: now,
+          replacedRevision: null,
+        });
+      } else if (callbackRecipientRole !== "custom") {
+        revisions.push({
+          revision: ++revCounter,
+          role: "callbackRecipient",
+          name: callbackRecipientRole === "booker" ? bookerName : passengerName,
+          phone: callbackRecipientRole === "booker" ? callerPhone : passengerPhone,
+          consentRef: null,
+          reason: `default_role:${callbackRecipientRole}`,
+          updatedAt: now,
+          replacedRevision: null,
+        });
+      }
+    }
+
     const state: VoiceContactState = {
       voiceSessionId: input.voiceSessionId,
       assertedCallerPhone: callerPhone,
@@ -203,12 +489,27 @@ export class VoiceContactService {
       updatedAt: now,
     };
 
+    if (this.isDbBacked()) {
+      const key = this.requireEncryptionKey();
+      await this.sessionRepository!.withTransaction(async (tx) => {
+        for (const revision of revisions) {
+          await this.persistRevision(input.voiceSessionId, revision, key, tx);
+        }
+      });
+    }
+
     this.states.set(input.voiceSessionId, state);
     return this.cloneState(state);
   }
 
   /**
-   * Asserts the caller's phone number. Cannot overwrite an already asserted caller phone.
+   * Asserts the caller's phone number. Cannot overwrite an already asserted
+   * caller phone. Has no production caller today (`CallcenterService`
+   * defines its own unrelated private `assertCallerPhone`) -- kept
+   * deliberately synchronous and RAM-only (no cold reconstruction, no
+   * durable seed) rather than forced async to match `initializeContacts`,
+   * since a sync caller somewhere relying on its current signature is a
+   * worse regression than this method staying process-local.
    */
   assertCallerPhone(voiceSessionId: string, callerPhone: string): VoiceContactState {
     const normalized = callerPhone.trim();
@@ -222,10 +523,33 @@ export class VoiceContactService {
 
     const state = this.states.get(voiceSessionId);
     if (!state) {
-      return this.initializeContacts({
+      const now = new Date().toISOString();
+      const freshState: VoiceContactState = {
         voiceSessionId,
-        callerPhone: normalized,
-      });
+        assertedCallerPhone: normalized,
+        bookerContact: { name: "代叫聯絡人", phone: normalized },
+        passengerContact: { name: "代叫聯絡人", phone: normalized },
+        driverContactRole: "booker",
+        callbackRecipientRole: "booker",
+        customDriverContact: null,
+        customCallbackRecipient: null,
+        revisions: [
+          {
+            revision: 1,
+            role: "caller",
+            name: "代叫聯絡人",
+            phone: normalized,
+            consentRef: null,
+            reason: "initial_asserted_caller_phone",
+            updatedAt: now,
+            replacedRevision: null,
+          },
+        ],
+        latestRevisionNumber: 1,
+        updatedAt: now,
+      };
+      this.states.set(voiceSessionId, freshState);
+      return this.cloneState(freshState);
     }
 
     if (state.assertedCallerPhone !== normalized) {
@@ -247,7 +571,10 @@ export class VoiceContactService {
   async updateContactRole(
     input: UpdateContactRoleInput,
   ): Promise<{ state: VoiceContactState; newRevision: ContactRevision; confirmationInvalidated: boolean }> {
-    const state = this.states.get(input.voiceSessionId);
+    let state = this.states.get(input.voiceSessionId);
+    if (!state && this.isDbBacked()) {
+      state = await this.coldReconstructState(input.voiceSessionId);
+    }
     if (!state) {
       throw new ApiRequestError(
         404,
@@ -302,6 +629,35 @@ export class VoiceContactService {
       replacedRevision: replacedRevisionNumber,
     };
 
+    // SD §6.4: "允許新 revision 取代有效值並使相關確認失效。"
+    let confirmationInvalidated = false;
+
+    if (this.isDbBacked()) {
+      // AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C: the durable
+      // revision insert and the selective confirmation invalidation run in
+      // ONE transaction -- a crash between the two could otherwise leave a
+      // new contact revision durably committed while a confirmation built
+      // on the now-stale contact remains active. `invalidateUnconsumedConfirmationForContactChange`
+      // (not the blanket `invalidateActiveConfirmationForSession`) is the
+      // one that preserves an already-`commit_status = 'pending'`
+      // confirmation's sealed proof -- see that repository method's own
+      // doc. The RAM switch-case/push below only runs AFTER this commits,
+      // so a failed durable write never leaves in-memory state ahead of
+      // what is actually persisted.
+      const key = this.requireEncryptionKey();
+      await this.sessionRepository!.withTransaction(async (tx) => {
+        await this.persistRevision(input.voiceSessionId, newRevision, key, tx);
+        if (input.invalidateConfirmation !== false) {
+          const invalidated =
+            await this.sessionRepository!.invalidateUnconsumedConfirmationForContactChange(
+              input.voiceSessionId,
+              tx,
+            );
+          confirmationInvalidated = invalidated !== null;
+        }
+      });
+    }
+
     // Apply the update to the active state
     switch (input.role) {
       case "booker":
@@ -322,9 +678,7 @@ export class VoiceContactService {
     state.revisions.push(newRevision);
     state.updatedAt = now;
 
-    // SD §6.4: "允許新 revision 取代有效值並使相關確認失效。"
-    let confirmationInvalidated = false;
-    if (input.invalidateConfirmation !== false && this.sessionRepository) {
+    if (!this.isDbBacked() && input.invalidateConfirmation !== false && this.sessionRepository) {
       try {
         await this.sessionRepository.invalidateActiveConfirmationForSession(
           input.voiceSessionId,
@@ -388,6 +742,11 @@ export class VoiceContactService {
       callbackRecipient: [...state.revisions].reverse().find((r) => r.role === "callbackRecipient") ?? null,
     };
 
+    const callbackRecipientConsentRef =
+      state.callbackRecipientRole === "custom"
+        ? (activeRevisions.callbackRecipient?.consentRef ?? null)
+        : (activeRevisions[state.callbackRecipientRole]?.consentRef ?? null);
+
     return {
       voiceSessionId: state.voiceSessionId,
       assertedCallerPhone: state.assertedCallerPhone,
@@ -399,6 +758,7 @@ export class VoiceContactService {
       callbackRecipientRole: state.callbackRecipientRole,
       activeRevisions,
       totalRevisions: state.revisions.length,
+      callbackRecipientConsentRef,
     };
   }
 

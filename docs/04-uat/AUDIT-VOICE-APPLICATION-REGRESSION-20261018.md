@@ -5,11 +5,16 @@ Owner: Claude2. Reviewer: Codex. Priority: P2.
 Required acceptance: `composed_turn_and_recording_path`, `authority_epoch_consent_fences`,
 `precise_unimplemented_and_external_boundaries`, `same_sha_review_ci`.
 
-This document records the state of this task at the point of this session's handoff. It is a
-**partial** candidate: work packages A (tools) and B (recording finalization) each received one
-confirmed, scoped repair; C (durable contact/consent) and D (workbench) were not started this
-session because C's durable persistence is explicitly gated on Root allocating a migration number
-(see "Open work" below), which was not available before this session ended.
+This document records the state of this task across two sessions. Session 1 delivered one
+confirmed, scoped repair each to packages A (tools) and B (recording finalization), and left C
+(durable contact/consent) and D (workbench) not started, gated on Root allocating a migration
+number. Root allocated `V0122__voice_contact_role_revision.sql` on 2026-10-18T23:19:25Z (see
+`.local/passenger-bureau-gap-correction-20261018/Voice-C-V0122-exact-root-allocation-20261018/result.json`).
+Session 2 (this one) implements Package C's durable backend and Package D's DTO/workbench
+projection on top of that allocation. This remains a **partial** candidate overall: A's two
+remaining tools and B's adapter/call-authority gate are still open exactly as Session 1 described
+them, and Package C's new durable store has no mounted production caller yet (see Package C's own
+section below for the precise boundary this leaves).
 
 ## Package A — actual tools / qualified booking continuation (partial)
 
@@ -85,51 +90,128 @@ unverifiable scaffolding, not a functional change in system behavior, until the 
 is separately closed. Left open per this task's own explicit instruction not to enable a
 false-success branch "merely to make the queue drain."
 
-## Package C — durable contact/consent backend (not started)
+## Package C — durable contact/consent backend (done: durable store; mounted caller still open)
 
-`VoiceContactService` remains exactly as found: a RAM-only `Map`-backed service with no durable
-persistence and no mounted HTTP consumer. Making it durable requires a new migration, which this
-task's own coordination rules require Root to number before any migration file is written
-("Formal contact schema is required functional code... Root allocates exact actual free migration
-and ledger/guard paths through normal task metadata before any migration write").
+`infra/migrations/V0122__voice_contact_role_revision.sql` creates `voice.contact_role_revision`
+(append-only, `UNIQUE (voice_session_id, revision_number)` -- a single counter shared across every
+role for a session, matching `VoiceContactService.updateContactRole`'s existing
+`++state.latestRevisionNumber` contract; NOT re-scoped per role, unlike the schema-preparation
+report's draft). `phone_key_version`/`phone_nonce`/`phone_ciphertext`/`phone_auth_tag` reuse the
+SAME AES-256-GCM envelope `voice-dialogue-snapshot-crypto.ts` already produces for
+`voice.dialogue_snapshot` (same key, same module, different AAD binding each row to its own
+`(voice_session_id, role, revision_number)`) -- not a bare ciphertext column, closing the
+schema-preparation report's "C-P2" gap. `docs/04-uat/system-remediation-20260906/schema-allocation.json`
+and `tests/unit/push-channel-sd-20261006/push-channel-sd-20261006.test.ts`'s length-one guard are
+both updated to register/preserve this allocation alongside the existing V0106 entry.
 
-Proposed schema (not yet allocated a migration number as of this handoff):
+`VoiceContactService` (`apps/api/src/modules/voice-booking/voice-contact.service.ts`) is now
+durable when constructed with a DB-enabled `VoiceSessionRepository` (`isDbBacked()`), while staying
+byte-for-byte backward compatible with every existing RAM-only call site and test (a repository
+double lacking `isEnabled`, like `tests/unit/uv-exec-018.test.ts`'s own mock, safely falls through
+to the original process-local behavior):
 
-```sql
--- infra/migrations/V0NNN__voice_contact_role_revision.sql (NNN pending Root allocation; V0121 is the latest existing migration at this handoff)
-CREATE TABLE voice.contact_role_revision (
-  revision_id       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  voice_session_id  uuid NOT NULL REFERENCES voice.session(voice_session_id),
-  role              text NOT NULL CHECK (role IN ('caller','booker','passenger','driverContact','callbackRecipient')),
-  revision_number   integer NOT NULL,
-  name              text NOT NULL,
-  phone_ciphertext  text NOT NULL,
-  consent_ref       text,
-  reason            text NOT NULL,
-  replaced_revision integer,
-  created_at        timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (voice_session_id, role, revision_number)
-);
-CREATE INDEX ON voice.contact_role_revision (voice_session_id);
-```
+- **Cold reconstruction (C-P1)**: `coldReconstructState` rebuilds `assertedCallerPhone`,
+  `bookerContact`/`passengerContact`, and -- the part the schema-preparation report flagged as
+  unresolved -- `driverContactRole`/`callbackRecipientRole` and any custom override, purely from
+  the append-only revision history. Since neither enum is its own column (adding one would
+  duplicate what the revisions already encode), `initializeContacts` seeds TWO additional
+  informational revisions when DB-backed (`driverContact`/`callbackRecipient`, reason
+  `"default_role:booker"`/`"default_role:passenger"`), beyond the three RAM-only mode has always
+  written; a later `updateContactRole` override for either role carries whatever caller-supplied
+  `reason` it always did. `coldReconstructState` tells a default-pointer revision from a genuine
+  override purely by that reason prefix -- see that method's own doc. The RAM-only legacy path
+  (no `VoiceSessionRepository.isEnabled`) is untouched and still seeds exactly 3 revisions, matching
+  every existing test's revision-count assertions exactly.
+- **Transactional append + selective invalidation (C-P3)**: `updateContactRole`'s DB-backed branch
+  inserts the new encrypted revision and calls the new
+  `VoiceSessionRepository.invalidateUnconsumedConfirmationForContactChange` in ONE transaction --
+  deliberately NOT the existing blanket `invalidateActiveConfirmationForSession` (which the
+  schema-preparation report explicitly called insufficient on its own), since that preserves an
+  already-`commit_status = 'pending'` confirmation's sealed proof (same "preservedPendingProof"
+  rule `VoiceConfirmationService.invalidate` applies per-intent; this is the session-wide
+  equivalent for a contact correction that is not scoped to one intent). Encryption key absence
+  fails closed (`VOICE_CONTACT_REVISION_ENCRYPTION_UNCONFIGURED`, 503), same convention as
+  `persistDialogueSnapshot`.
+- **Durable read (`getEffectiveContactsDurable`)**: returns `null` (never throws, never fabricates)
+  when no contact state has ever been recorded for a session -- the honest answer for every real
+  call today (see the open boundary below).
 
-`phone_ciphertext` follows the same encrypted-at-rest convention as
-`voice.dialogue_snapshot.content_ciphertext` (`voice-dialogue-snapshot-crypto.ts`), not plaintext.
-The exact repository transaction shape (append-only insert keyed by
-`(voice_session_id, role, revision_number)`, matching `VoiceContactService.updateContactRole`'s
-existing revision-numbering contract) was designed but not implemented pending the migration
-number.
+New socket-free coverage:
+`tests/unit/audit-voice-application-regression-20261018/voice-contact-durable.test.ts` (5 cases:
+fail-closed on missing key, 5-revision durable seed including both default pointers, cold
+reconstruction after a simulated process restart, honest `null` on an unknown session, and
+transactional append + selective invalidation). Ran directly this session: 5/5 passed. Real
+Postgres execution of the new migration itself remains the existing
+`tests/integration/unattended-voice-postgres.integration.test.ts` HOSTED-only lane, not run in
+this VM (same boundary every prior session in this task documented).
 
-Binding this to `voice-callback.service.ts`'s existing durable callback task/receipt (currently
-accepting an unauthenticated `consentSnapshotHash` with no sealed contact-role revision reference)
-and projecting it into the UV019 workbench (Package D) both depend on this landing first, per the
-task spec's own `depends_on` for work packages C and D.
+**Precise remaining boundary:** nothing in the live dialogue/booking flow calls
+`VoiceContactService.initializeContacts`/`updateContactRole` today -- confirmed by a repo-wide
+search finding zero callers outside this service's own tests both before and after this session's
+changes. The durable store above is correct and ready, but a real call today still cannot produce
+any `voice.contact_role_revision` row, because nothing invokes it yet. Deciding WHERE in the
+dialogue/qualify-booking flow contact assertion belongs is a separate design question this task's
+`read_dependencies` do not fix, and is not attempted here to avoid inventing an unreviewed call
+site for a production write path.
 
-## Package D — mounted contact/consent workbench projection (not started)
+## Package D — mounted contact/consent workbench projection (done: DTO + UI; data is empty until Package C gets a caller)
 
-Depends on Package C's backend DTO/read contract; not started.
+`VoiceCallbackService.loadDbTask` (the DB-backed callback projection path) now resolves the
+session's durable, sealed `callbackRecipient` contact via the new
+`VoiceContactService.getEffectiveContactsDurable`, replacing the previous hardcoded
+`contactName: ""`/`consentRef: ""`. `EffectiveContactsResult` gained a `callbackRecipientConsentRef`
+field so this resolution (custom override vs. booker/passenger default pointer) lives once in
+`VoiceContactService`, not duplicated in the callback service. `packages/contracts/src/voice-callback-operations.ts`'s
+`VoiceCallbackTaskView` now declares `contactName`/`consentRef` (previously present on the internal
+service record but absent from the typed contract the UI/api-client/OpenAPI consume). The ops
+console workbench (`apps/ops-console-web/app/callcenter/voice-callbacks/page.tsx`) renders both
+fields in the task detail panel with a "not yet recorded" fallback (zh/en translations added).
 
-## Validation evidence (this session)
+This wiring is honest-by-construction: until Package C's open boundary above is closed (something
+actually calls `initializeContacts` during a real call), `getEffectiveContactsDurable` returns
+`null` for every session, and the UI legitimately shows "not yet recorded" -- not a regression, the
+same empty state the prior hardcoded `""` produced, now sourced from a real (currently-unpopulated)
+lookup instead of a literal.
+
+**Not touched, and precisely out of scope for this allocation:** `contact_phone_encrypted`'s
+pre-existing exposure under the `contactPhone` field name (it is caller-supplied ciphertext in a
+format apps/api does not control, not a decryptable phone number) -- flagged in the
+schema-preparation report ("Cold projection currently ... exposes the stored encrypted value as
+contactPhone") and left as-is with an explanatory code comment, since renaming/resolving it was not
+part of the four scoped mappings (C-P1..C-P4) and would need its own caller-side envelope design
+decision. No `voice.callback_task` DDL change was made or needed, per the Root allocation's explicit
+boundary.
+
+## Validation evidence (session 2: Package C/D)
+
+- `pnpm --filter @drts/api typecheck`, `pnpm --filter @drts/voice-media-worker typecheck`,
+  `pnpm --filter @drts/ops-console-web typecheck`, `pnpm --filter @drts/api-client typecheck`,
+  `pnpm --filter @drts/contracts build`: all clean after this session's changes.
+- `eslint --max-warnings=0` on every file touched this session: clean.
+- `tests/unit/push-channel-sd-20261006/push-channel-sd-20261006.test.ts`,
+  `tests/unit/system-remediation/sr-recovery-contracts-20260911/sr-recovery-contracts-20260911.test.ts`,
+  `tests/unit/system-remediation/sr-partner-notify-con-20260917/sr-partner-notify-con-20260917.test.ts`
+  (the three ledger-guard files V0122's allocation touches or must not break): 80/80 passed.
+- `tests/unit/audit-voice-application-regression-20261018/voice-contact-durable.test.ts` (new, 5
+  cases): 5/5 passed.
+- Full targeted voice/ledger suite re-run after all Package C/D changes (41 files, 689 tests,
+  `--testTimeout=20000`): 678 passed, 11 skipped (the pre-existing HOSTED-only
+  `*.postgres.hosted.test.ts`/`*.spec.ts` files), 0 failed -- including `uv-exec-018.test.ts`'s
+  RAM-only `VoiceContactService` coverage (unchanged behavior confirmed) and
+  `voice-dialogue-snapshot-persistence.test.ts` (the `[R34-F2 regression]` timing flake Session 1
+  documented did not reproduce in this run).
+- `VoiceCallbackService`'s new `contactService` constructor parameter and `VoiceCallbackTaskView`'s
+  new `contactName`/`consentRef` fields were verified by code inspection against every existing
+  `.postgres.hosted.test.ts` call site (`new VoiceCallbackService(undefined, h.database)`, omitting
+  the new optional 3rd argument) to confirm they fall back to the exact same `""` values those tests
+  already expect; these HOSTED-only files were not re-run in this VM (no Postgres available here),
+  so this is a static-inspection claim, not an executed-test claim.
+- No product/local HTTP/browser/DB/Compose servers were run. No real transactions or calls were
+  made. `tests/integration/unattended-voice-postgres.integration.test.ts` and the other
+  `*.postgres.hosted.test.ts`/`*.spec.ts` files in this task's write_scopes remain HOSTED-only and
+  were not executed in this VM.
+
+## Validation evidence (session 1: Package A/B)
 
 - `pnpm --filter @drts/api typecheck` and `pnpm --filter @drts/voice-media-worker typecheck`: clean
   after every commit in this session.
@@ -171,9 +253,11 @@ Depends on Package C's backend DTO/read contract; not started.
 
 ## Candidate identity
 
-Branch: `claude2/audit-voice-application-regression-20261018`, pushed. Commits this session (in
-order): `2d948ac01` (Package A partial), `ffb035979` (Package B partial). This document's own commit
-is the final commit of this session's partial candidate; see `git log` on that branch for the exact
-SHA. Codex should independently review this exact candidate's real orchestration and the precise
-remaining boundaries above — green CI/typecheck alone is not functional completion, and this is not
-a request to treat A/B as fully done or to close any original archived verdict.
+Branch: `claude2/audit-voice-application-regression-20261018`, pushed. Commits, in order:
+`2d948ac01` (Package A partial, session 1), `ffb035979` (Package B partial, session 1), `213bc3908`
+(session 1 UAT handoff), `d450668fb` (V0122 allocation: migration + ledger + guard, session 2), and
+this document's own commit (Package C/D implementation, session 2) is the final commit of this
+candidate; see `git log` on that branch for the exact SHA. Codex should independently review this
+exact candidate's real orchestration and the precise remaining boundaries above — green CI/typecheck
+alone is not functional completion, and this is not a request to treat A, B, or Package C's "mount a
+production caller" boundary as fully done, or to close any original archived verdict.
