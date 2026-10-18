@@ -4,6 +4,8 @@ import { VoiceCallbackService } from "../../../apps/api/src/modules/voice-bookin
 import { VoiceBookingRepository } from "../../../apps/api/src/modules/voice-booking/voice-booking.repository";
 import { VoiceBookingCommandService } from "../../../apps/api/src/modules/voice-booking/voice-booking-command.service";
 import { VoiceCommandRunnerService } from "../../../apps/api/src/modules/voice-booking/voice-command-runner.service";
+import { VoiceSessionService } from "../../../apps/api/src/modules/voice-booking/voice-session.service";
+import { VoiceSessionRepository } from "../../../apps/api/src/modules/voice-booking/voice-session.repository";
 import { OwnedMobilityRepository } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 import { seedVoiceDispatchWorkFixture } from "../../support/voice-dispatch-workitem-postgres-fixture";
 import {
@@ -64,7 +66,11 @@ describe.skipIf(!hostedPaymentEnabled)(
       );
       expect(
         await runner.runOnce({ supportedTypes: ["execute_callback"] }),
-      ).toMatchObject({ workType: "execute_callback", status: "failed" });
+      ).toMatchObject({
+        workType: "execute_callback",
+        success: false,
+        error: "Callback task unavailable",
+      });
       expect(
         (
           await h.pool!.query(
@@ -349,10 +355,20 @@ describe.skipIf(!hostedPaymentEnabled)(
 
     it("the existing runner claims the persisted task on a cold instance after the call closes", async () => {
       const { fixture, a, b, task } = await setup();
-      await h.pool!.query(
-        "UPDATE voice.session SET media_state = 'closed', dialog_state = 'closed' WHERE voice_session_id = $1",
-        [fixture.request.voiceSessionId],
+      const sessions = new VoiceSessionRepository(h.peerDatabase());
+      const currentSession = await sessions.findSessionById(
+        fixture.request.voiceSessionId,
       );
+      expect(currentSession).not.toBeNull();
+      const closed = await new VoiceSessionService(sessions).closeSession(
+        fixture.request.voiceSessionId,
+        currentSession!.sessionVersion,
+      );
+      expect(closed).toMatchObject({
+        mediaState: "ended",
+        dialogState: "closed",
+        recordingState: "finalizing",
+      });
       const repository = new VoiceBookingRepository(h.peerDatabase());
       const commands = new VoiceBookingCommandService(
         repository,
@@ -380,8 +396,16 @@ describe.skipIf(!hostedPaymentEnabled)(
       });
       expect(result).toMatchObject({
         workType: "execute_callback",
-        status: "completed",
+        success: true,
       });
+      expect(
+        (
+          await h.pool!.query(
+            "SELECT status FROM voice.work_item WHERE work_id = $1",
+            [result!.workId],
+          )
+        ).rows[0],
+      ).toMatchObject({ status: "completed" });
       expect(await a.getTaskForRead(task.taskId)).toMatchObject({
         taskId: task.taskId,
         status: "claimed",

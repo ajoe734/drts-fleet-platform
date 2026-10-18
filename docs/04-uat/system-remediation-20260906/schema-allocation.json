@@ -137,6 +137,12 @@
       "amended_at": "2026-10-06",
       "scope": "Appended `passenger_push_channel_allocations` only; all prior allocations, amendments, additional_allocations, launch_allocations, voice_application_allocations and partner_notification_allocations entries above are unchanged",
       "reason": "PUSH-CHANNEL-SD-20261006 finalizes per-order passenger notification channel routing and a dormant first-party push receiver (docs/02-architecture/passenger-notification-channel-routing-20261006.md; docs/01-decisions/SD-DP-20261006-001-passenger-notification-channel-routing.md), and allocates migration numbers for its two new first-party push tables. At inspected base (origin/dev, fixed baseline 446228cbc771a4ced774126a7d4aaddea4db73e6) the highest migration registered in this ledger is V0106__voice_dialogue_snapshot.sql (voice_application_allocations, added by AUDIT-VOICE-APPLICATION-WIRING-20261003). V0107-V0108 below were unclaimed by any allocation entry in this file at allocation time. Per the SR-CONTRACT-001 / SR-RECOVERY-CONTRACTS-20260911 / SR-PARTNER-NOTIFY-CON-20260917 precedent, this task supplies typed contracts (packages/contracts/src/passenger-notification-channel.ts) and migration allocation only; it does not write the infra/migrations/*.sql files themselves, does not implement the channel router, the device registry service, or the FCM transport, and does not change DI wiring. The two tables are grouped into two migration files by which downstream backend task owns their write path: V0107 (first-party device registry + first-party order route) for PUSH-FIRST-PARTY-REGISTRY-20261006, and V0108 (first-party delivery context) for PUSH-FIRST-PARTY-FCM-20261006, mirroring how V0104-V0105 were grouped by consuming task."
+    },
+    {
+      "amended_by_task_id": "VOICE-CALLBACK-DB-OPERATIONS-20261018",
+      "amended_at": "2026-10-18",
+      "scope": "Appended voice_callback_allocations V0120 only; existing allocation entries remain unchanged",
+      "reason": "Registers the callback attempt-details migration at accepted parent f5baad9d641f2bbace6ae5376acd40d88fcc1254, whose existing reservation range ends at V0119. Existing collision, exact filename and highest-migration checks include this added group without changing their assertions."
     }
   ],
   "voice_application_allocations": [
@@ -162,6 +168,23 @@
       ],
       "description": "Versioned encrypted candidate-dialogue snapshots for trusted voice persistence/restoration, reserved by the original audit execution scope; no booking-draft or consent authority is introduced. V0106 also carries a bounded, non-content purge-receipt table so a governed purge cannot be mistaken for proof a write never landed, plus a session-level floor so that receipt's own governed metadata retention can age it out without either reopening its key for write reuse or being mistaken for proof the write never landed.",
       "downstream_tasks": ["AUDIT-SHARED-DEV-VERIFY-20261002"]
+    }
+  ],
+  "voice_callback_allocations": [
+    {
+      "task_id": "VOICE-CALLBACK-DB-OPERATIONS-20261018",
+      "version": "V0120",
+      "migration_filename": "V0120__voice_callback_attempt_details.sql",
+      "domain": "voice_callback_attempt_details",
+      "target_schema": "voice",
+      "primary_tables": ["voice.callback_attempt", "voice.callback_task"],
+      "referenced_tables": ["voice.session"],
+      "table_invariants": [
+        "voice.callback_attempt retains dial_operation_key, dial_status, hangup_confirmed and notes on the same existing task/attempt rows.",
+        "Existing ended_at values backfill dial_status and hangup_confirmed; no task, attempt or customer data is deleted.",
+        "voice.callback_task retains cancellation_reason; existing task/session/order relationships and terminal states are preserved."
+      ],
+      "description": "Persist existing voice callback attempt details and cancellation reason for cold readers and the current runner; no additional telephone provider or consent claim."
     }
   ],
   "additional_allocations": [

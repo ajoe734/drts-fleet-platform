@@ -1011,8 +1011,8 @@ export class VoiceCallbackService {
           ? "unreachable"
           : "pending";
       await tx.query(
-        `UPDATE voice.callback_task SET status = $2,
-          owner_claim_lease = CASE WHEN $2 = 'in_progress' THEN owner_claim_lease ELSE NULL END,
+        `UPDATE voice.callback_task SET status = $2::varchar(20),
+          owner_claim_lease = CASE WHEN $2::varchar(20) = 'in_progress' THEN owner_claim_lease ELSE NULL END,
           version = version + 1, updated_at = now() WHERE task_id = $1`,
         [input.taskId, status],
       );
