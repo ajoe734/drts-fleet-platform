@@ -109,6 +109,7 @@ export interface CreateVoiceCallbackInput {
 }
 
 export interface CreateVoiceCallbackDurableInput {
+  actionKey?: string | undefined;
   voiceSessionId: string;
   contactPhoneEncrypted: string;
   contactPhoneLookupToken: string;
@@ -162,6 +163,10 @@ export interface CancelVoiceCallbackResult {
 }
 
 interface CallbackDbTaskRow {
+  create_command_id?: string | null;
+  create_action_key?: string | null;
+  create_payload_hash?: string | null;
+  contact_phone_lookup_token: string;
   task_id: string;
   voice_session_id: string;
   contact_phone_encrypted: string;
@@ -394,6 +399,21 @@ export class VoiceCallbackService {
       receipt: { ...receipt },
       task: task ? this.cloneTask(task) : null,
     };
+  }
+
+  async getReceiptByActionKeyForRead(actionKey: string): Promise<{
+    receipt: CallbackCommandReceipt | null;
+    task: VoiceCallbackTaskRecord | null;
+  }> {
+    if (!this.isDbBacked()) return this.getReceiptByActionKey(actionKey);
+    const result = await this.databaseService!.query<CallbackDbTaskRow>(
+      "SELECT * FROM voice.callback_task WHERE create_action_key = $1",
+      [actionKey.trim()],
+    );
+    const row = result.rows[0];
+    if (!row) return { receipt: null, task: null };
+    const task = await this.loadDbTask(row.task_id);
+    return { receipt: this.mapDbCreateReceipt(row, task), task };
   }
 
   /**
@@ -1074,7 +1094,7 @@ export class VoiceCallbackService {
       attemptCount: Number(row.attempt_count ?? 0),
       maxAttempts: 3,
       lastOutcome: row.last_outcome ?? null,
-      actionKey: "",
+      actionKey: row.create_action_key ?? "",
       createdAt: toIso(row.created_at)!,
       updatedAt: toIso(row.updated_at)!,
       closedAt: this.isTerminalStatus(row.status)
@@ -1133,22 +1153,76 @@ export class VoiceCallbackService {
     return result.rows[0] ?? null;
   }
 
-  /**
-   * Durable, real-PostgreSQL create for `voice.callback_task` (UV-EXEC-024
-   * durable-API parity with `completeCallbackDurable`/`cancelCallbackDurable`
-   * below): all fields are real, caller-supplied consent/contact evidence --
-   * SD §12.5 "沒有同意不能補造" applies here exactly as it does to the
-   * in-memory `createCallback` above, so nothing here may be filled by a
-   * fabricated default. `uq_voice_callback_task_active_session` is the real
-   * concurrency control: a lost-response retry for a session that already
-   * has an active task hits the unique violation and replays that existing
-   * row instead of racing a second one into existence, the same
-   * receipt-recovery shape used by the accept/commit command path elsewhere
-   * in this suite.
-   */
-  async createCallbackDurable(
+  private callbackCreatePayloadHash(
     input: CreateVoiceCallbackDurableInput,
-  ): Promise<{ task: VoiceCallbackTaskRecord; replayed: boolean }> {
+  ): string {
+    const time = (value: string | null | undefined) =>
+      value == null ? null : new Date(value).toISOString();
+    return this.sha256(
+      JSON.stringify({
+        voiceSessionId: input.voiceSessionId,
+        contactPhoneEncrypted: input.contactPhoneEncrypted.trim(),
+        contactPhoneLookupToken: input.contactPhoneLookupToken,
+        consentSnapshotHash: input.consentSnapshotHash.trim(),
+        reason: input.reason ?? null,
+        resourceScopeId: input.resourceScopeId ?? null,
+        priority: input.priority ?? "normal",
+        scheduledAt: time(input.scheduledAt),
+        dueAt: time(input.dueAt),
+      }),
+    );
+  }
+
+  private mapDbCreateReceipt(
+    row: CallbackDbTaskRow,
+    task: VoiceCallbackTaskRecord,
+  ): CallbackCommandReceipt | null {
+    if (
+      !row.create_command_id ||
+      !row.create_action_key ||
+      !row.create_payload_hash
+    )
+      return null;
+    return {
+      commandId: row.create_command_id,
+      brandId: task.brandId,
+      callId: task.callId,
+      actionKey: row.create_action_key,
+      payloadHash: row.create_payload_hash,
+      status: "succeeded",
+      taskId: task.taskId,
+      errorReason: null,
+      createdAt: task.createdAt,
+      updatedAt: task.createdAt,
+    };
+  }
+
+  private async replayDbCallbackCreate(actionKey: string, payloadHash: string) {
+    const saved = await this.getReceiptByActionKeyForRead(actionKey);
+    if (!saved.task) return null;
+    if (!saved.receipt)
+      throw new Error("Persisted callback create receipt is incomplete.");
+    if (saved.receipt.payloadHash !== payloadHash) {
+      throw new ApiRequestError(
+        409,
+        "VOICE_ACTION_PAYLOAD_CONFLICT",
+        "Callback action was already accepted with different contact, consent or scheduling details.",
+      );
+    }
+    return { task: saved.task, receipt: saved.receipt, replayed: true };
+  }
+
+  /** Consent snapshot, task and accepted-create receipt share the same INSERT.
+   * Retrying the same action returns its saved task even after call closure or
+   * a terminal callback. A genuinely new callback uses a new action key.
+   * Legacy rows without a saved command retain their task identity; no command
+   * receipt or missing consent is fabricated for them.
+   */
+  async createCallbackDurable(input: CreateVoiceCallbackDurableInput): Promise<{
+    task: VoiceCallbackTaskRecord;
+    receipt: CallbackCommandReceipt | null;
+    replayed: boolean;
+  }> {
     if (!this.isDbBacked()) {
       throw new Error(
         "createCallbackDurable requires a DB-enabled databaseService.",
@@ -1170,15 +1244,20 @@ export class VoiceCallbackService {
         "Contact phone is required for callback.",
       );
     }
+    const actionKey =
+      input.actionKey?.trim() || `${input.voiceSessionId}:create_callback`;
+    const payloadHash = this.callbackCreatePayloadHash(input);
+    const previous = await this.replayDbCallbackCreate(actionKey, payloadHash);
+    if (previous) return previous;
 
     const db = this.databaseService!;
     try {
-      const result = await db.query<{ task_id: string }>(
+      const inserted = await db.query<CallbackDbTaskRow>(
         `INSERT INTO voice.callback_task (
-           voice_session_id, contact_phone_encrypted, contact_phone_lookup_token,
-           consent_snapshot_hash, reason, resource_scope_id, priority, scheduled_at, due_at
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING task_id`,
+          voice_session_id, contact_phone_encrypted, contact_phone_lookup_token,
+          consent_snapshot_hash, reason, resource_scope_id, priority, scheduled_at, due_at,
+          create_command_id, create_action_key, create_payload_hash
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
         [
           input.voiceSessionId,
           contactPhoneEncrypted,
@@ -1189,29 +1268,62 @@ export class VoiceCallbackService {
           input.priority ?? null,
           input.scheduledAt ?? null,
           input.dueAt ?? null,
+          randomUUID(),
+          actionKey,
+          payloadHash,
         ],
       );
+      const row = inserted.rows[0]!;
+      const task = await this.loadDbTask(row.task_id);
       return {
-        task: await this.loadDbTask(result.rows[0]!.task_id),
+        task,
+        receipt: this.mapDbCreateReceipt(row, task),
         replayed: false,
       };
-    } catch (err: unknown) {
-      if ((err as { code?: string }).code === "23505") {
-        const existing = await db.query<{ task_id: string }>(
-          `SELECT task_id FROM voice.callback_task
-           WHERE voice_session_id = $1
-             AND status NOT IN ('completed', 'cancelled', 'unreachable')`,
-          [input.voiceSessionId],
+    } catch (error: unknown) {
+      if ((error as { code?: string }).code !== "23505") throw error;
+      const replay = await this.replayDbCallbackCreate(actionKey, payloadHash);
+      if (replay) return replay;
+
+      const active = await db.query<CallbackDbTaskRow>(
+        `SELECT * FROM voice.callback_task WHERE voice_session_id = $1
+          AND status NOT IN ('completed','cancelled','unreachable')`,
+        [input.voiceSessionId],
+      );
+      const row = active.rows[0];
+      if (!row) throw error;
+      if (row.create_action_key || input.actionKey?.trim()) {
+        throw new ApiRequestError(
+          409,
+          "CALLBACK_TASK_ALREADY_ACTIVE",
+          "This call already has a different active callback action.",
         );
-        const existingTaskId = existing.rows[0]?.task_id;
-        if (existingTaskId) {
-          return {
-            task: await this.loadDbTask(existingTaskId),
-            replayed: true,
-          };
-        }
       }
-      throw err;
+      const time = (value: Date | string | null) =>
+        value === null ? null : new Date(value).toISOString();
+      const legacyHash = this.callbackCreatePayloadHash({
+        voiceSessionId: row.voice_session_id,
+        contactPhoneEncrypted: row.contact_phone_encrypted,
+        contactPhoneLookupToken: row.contact_phone_lookup_token,
+        consentSnapshotHash: row.consent_snapshot_hash,
+        reason: row.reason ?? undefined,
+        resourceScopeId: row.resource_scope_id,
+        priority: (row.priority as CallbackPriority | null) ?? "normal",
+        scheduledAt: time(row.scheduled_at),
+        dueAt: time(row.due_at),
+      });
+      if (legacyHash !== payloadHash) {
+        throw new ApiRequestError(
+          409,
+          "VOICE_ACTION_PAYLOAD_CONFLICT",
+          "The existing callback has different contact, consent or scheduling details.",
+        );
+      }
+      return {
+        task: await this.loadDbTask(row.task_id),
+        receipt: null,
+        replayed: true,
+      };
     }
   }
 

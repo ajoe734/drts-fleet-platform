@@ -143,6 +143,12 @@
       "amended_at": "2026-10-18",
       "scope": "Appended voice_callback_allocations V0120 only; existing allocation entries remain unchanged",
       "reason": "Registers the callback attempt-details migration at accepted parent f5baad9d641f2bbace6ae5376acd40d88fcc1254, whose existing reservation range ends at V0119. Existing collision, exact filename and highest-migration checks include this added group without changing their assertions."
+    },
+    {
+      "amended_by_task_id": "VOICE-CALLBACK-CREATE-RECEIPT-20261018",
+      "amended_at": "2026-10-18",
+      "scope": "Append V0121 to voice_callback_allocations; original allocation entries unchanged",
+      "reason": "Extends the callback functionality on exact parent48bf70e, whose highest reserved migration is V0120. Existing allocation collectors already include voice_callback_allocations; no guard or assertion is changed."
     }
   ],
   "voice_application_allocations": [
@@ -185,6 +191,21 @@
         "voice.callback_task retains cancellation_reason; existing task/session/order relationships and terminal states are preserved."
       ],
       "description": "Persist existing voice callback attempt details and cancellation reason for cold readers and the current runner; no additional telephone provider or consent claim."
+    },
+    {
+      "task_id": "VOICE-CALLBACK-CREATE-RECEIPT-20261018",
+      "version": "V0121",
+      "migration_filename": "V0121__voice_callback_create_receipt.sql",
+      "domain": "voice_callback_create_receipt",
+      "target_schema": "voice",
+      "primary_tables": ["voice.callback_task"],
+      "referenced_tables": ["voice.session"],
+      "table_invariants": [
+        "The existing callback task row stores its create_command_id, create_action_key and create_payload_hash with the supplied consent_snapshot_hash in the same INSERT.",
+        "The existing one-active-task-per-session constraint remains; the create action key additionally identifies retries after task completion or cancellation.",
+        "Existing rows retain null create-receipt fields; no missing historical command or consent evidence is fabricated."
+      ],
+      "description": "Recover a committed callback create result after a lost response or closed call while retaining the original task and terminal state."
     }
   ],
   "additional_allocations": [
