@@ -2332,6 +2332,7 @@ const en = {
   "dispatch.detail.overrideSummary.candidateCanBeAssigned":
     "Candidate can be assigned",
   "dispatch.detail.headerAction.contactRider": "Contact rider",
+  "dispatch.detail.headerAction.createDispatch": "Create dispatch",
   "dispatch.detail.headerAction.assignTopCandidate": "Assign #1",
   "dispatch.detail.headerAction.releaseDriver": "Release driver",
   "dispatch.detail.headerAction.fareOverride": "Fare override",
@@ -6775,6 +6776,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.overrideSummary.candidateCanBeAssigned":
     "可直接指派或重派候選",
   "dispatch.detail.headerAction.contactRider": "聯絡乘客",
+  "dispatch.detail.headerAction.createDispatch": "建立派遣",
   "dispatch.detail.headerAction.assignTopCandidate": "指派候選 #1",
   "dispatch.detail.headerAction.releaseDriver": "釋放司機",
   "dispatch.detail.headerAction.fareOverride": "車資覆寫",
