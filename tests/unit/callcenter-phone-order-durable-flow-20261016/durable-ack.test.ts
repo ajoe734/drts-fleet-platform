@@ -15,6 +15,7 @@ import { OwnedMobilityTaskEventsService } from "../../../apps/api/src/modules/ow
 import { OpsDispatchEventsService } from "../../../apps/api/src/common/ops-dispatch-events.service";
 import { DriverProfileService } from "../../../apps/api/src/modules/driver-profile/driver-profile.service";
 import { RegulatoryRegistryService } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
+import { productionServices } from "./production-services";
 
 export function deferred() {
   let resolve!: () => void;
@@ -56,6 +57,26 @@ export function fixture() {
       target.set(`${table}:${values[0]}`, JSON.parse(String(values.at(-1))));
     }
     if (table && /SELECT record/.test(sql)) {
+      if (sql.includes("WHERE record->'callbackTask'")) {
+        const records = [...target.entries()]
+          .filter(([key]) => key.startsWith(`${table}:`))
+          .map(
+            ([, value]) =>
+              value as {
+                callbackTask?: { callbackTaskId: string };
+                callbackTaskHistory?: Array<{ callbackTaskId: string }>;
+              },
+          )
+          .filter((record) =>
+            [record.callbackTask, ...(record.callbackTaskHistory ?? [])].some(
+              (task) => task?.callbackTaskId === values[0],
+            ),
+          );
+        return {
+          rows: records.map((record) => ({ record: structuredClone(record) })),
+          rowCount: records.length,
+        };
+      }
       if (values.length === 0) {
         return {
           rows: [...target.entries()]
@@ -136,6 +157,172 @@ export const phoneCommand = (callId: string) => ({
   passenger: { name: "Synthetic Caller", phone: "+886900000203" },
   pickup: { address: "Synthetic pickup" },
   dropoff: { address: "Synthetic dropoff" },
+});
+
+describe("callback durable acknowledgement", () => {
+  it.each(["completed", "cancelled"] as const)(
+    "a replacement preserves the %s task and the original order",
+    async (terminalStatus) => {
+      const h = fixture();
+      const callId = `synthetic-callback-history-${terminalStatus}`;
+      const order = await h.owned.createCallCenterOrder(phoneCommand(callId));
+      const created = await h.controller.createCallbackTask(callId, {
+        dueAt: "2026-10-19T00:00:00Z",
+      });
+      const old =
+        terminalStatus === "completed"
+          ? await h.controller.completeCallbackTask(
+              created.data.callbackTaskId,
+              {},
+            )
+          : await h.controller.cancelCallbackTask(created.data.callbackTaskId, {
+              reason: "Synthetic cancel",
+            });
+      const peer = productionServices(h.database as never);
+      const replacement = await peer.controller.createCallbackTask(callId, {
+        dueAt: "2026-10-20T00:00:00Z",
+      });
+      expect(replacement.data.callbackTaskId).not.toBe(old.data.callbackTaskId);
+      expect(replacement.data.linkedOrderId).toBe(order.orderId);
+      const replay =
+        terminalStatus === "completed"
+          ? await peer.controller.completeCallbackTask(
+              old.data.callbackTaskId,
+              {},
+            )
+          : await peer.controller.cancelCallbackTask(old.data.callbackTaskId, {
+              reason: "Replay",
+            });
+      expect(replay.data).toEqual(old.data);
+      expect((await peer.controller.listCallbackTasks()).data.items).toEqual([
+        old.data,
+        replacement.data,
+      ]);
+      expect(
+        (await h.calls.getCallSessionForRead(callId)).callbackTask,
+      ).toEqual(replacement.data);
+    },
+  );
+
+  const actions = ["create", "claim", "attempt", "complete", "cancel"] as const;
+  const invoke = (
+    controller: CallcenterController,
+    action: (typeof actions)[number],
+    callId: string,
+    taskId: string,
+  ) => {
+    switch (action) {
+      case "create":
+        return controller.createCallbackTask(callId, {
+          dueAt: "2026-10-19T00:00:00Z",
+        });
+      case "claim":
+        return controller.claimCallbackTask(taskId, {
+          operatorId: "synthetic-operator",
+        });
+      case "attempt":
+        return controller.recordCallbackAttempt(taskId, {
+          operatorId: "synthetic-operator",
+          outcome: "busy",
+          notes: "Synthetic line busy",
+          hangupConfirmed: false,
+        });
+      case "complete":
+        return controller.completeCallbackTask(taskId, {});
+      case "cancel":
+        return controller.cancelCallbackTask(taskId, {
+          reason: "Synthetic cancellation",
+        });
+    }
+  };
+
+  it.each(actions)(
+    "%s waits for COMMIT and is immediately readable by a cold peer",
+    async (action) => {
+      const h = fixture();
+      const callId = `synthetic-callback-${action}`;
+      const order = await h.owned.createCallCenterOrder(phoneCommand(callId));
+      const taskId =
+        action === "create"
+          ? ""
+          : (
+              await h.controller.createCallbackTask(callId, {
+                dueAt: "2026-10-19T00:00:00Z",
+              })
+            ).data.callbackTaskId;
+      const before = h.calls.getCallSession(callId);
+      h.auditWrite.mockClear();
+      const gate = h.hold("COMMIT");
+      let acknowledged = false;
+      const pending = invoke(h.controller, action, callId, taskId).then(
+        (result) => {
+          acknowledged = true;
+          return result;
+        },
+      );
+      await h.entered.promise;
+      expect(acknowledged).toBe(false);
+      expect(h.calls.getCallSession(callId)).toEqual(before);
+      expect(
+        h.auditWrite.mock.calls.filter(
+          ([row]) => row.resourceType === "callback_task",
+        ),
+      ).toEqual([]);
+      gate.resolve();
+      const result = await pending;
+      const peer = productionServices(h.database as never);
+      expect(
+        (await peer.controller.listCallbackTasks()).data.items,
+      ).toContainEqual(result.data);
+      expect(result.data.linkedOrderId).toBe(order.orderId);
+      expect(
+        (await peer.calls.getCallSessionForRead(callId)).linkedOrderId,
+      ).toBe(order.orderId);
+      expect(
+        h.auditWrite.mock.calls.filter(
+          ([row]) => row.resourceType === "callback_task",
+        ),
+      ).toHaveLength(1);
+      if (action === "attempt")
+        expect(result.data.attempts).toEqual([
+          expect.objectContaining({ outcome: "busy", hangupConfirmed: false }),
+        ]);
+    },
+  );
+
+  it.each(actions)(
+    "failed %s does not acknowledge or publish uncommitted callback changes",
+    async (action) => {
+      const h = fixture();
+      const callId = `synthetic-callback-reject-${action}`;
+      await h.owned.createCallCenterOrder(phoneCommand(callId));
+      const taskId =
+        action === "create"
+          ? ""
+          : (
+              await h.controller.createCallbackTask(callId, {
+                dueAt: "2026-10-19T00:00:00Z",
+              })
+            ).data.callbackTaskId;
+      const before = await h.calls.getCallSessionForRead(callId);
+      h.auditWrite.mockClear();
+      const gate = h.hold("COMMIT");
+      const pending = invoke(h.controller, action, callId, taskId);
+      const rejected = expect(pending).rejects.toThrow(
+        "synthetic callback commit failure",
+      );
+      await h.entered.promise;
+      gate.reject(new Error("synthetic callback commit failure"));
+      await rejected;
+      expect(h.calls.getCallSession(callId)).toEqual(before);
+      expect(await h.calls.getCallSessionForRead(callId)).toEqual(before);
+      expect(
+        h.auditWrite.mock.calls.filter(
+          ([row]) => row.resourceType === "callback_task",
+        ),
+      ).toEqual([]);
+    },
+  );
 });
 
 describe("phone durable acknowledgement", () => {

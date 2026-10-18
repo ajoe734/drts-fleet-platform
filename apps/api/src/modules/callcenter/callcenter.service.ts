@@ -1071,79 +1071,195 @@ export class CallcenterService implements OnModuleInit {
 
   listCallbackTasks() {
     return this.callSessions
-      .flatMap((session) =>
-        session.callbackTask
-          ? [this.cloneCallbackTask(session.callbackTask)]
-          : [],
-      )
+      .flatMap((session) => this.callbacksForSession(session))
       .sort((left, right) => left.dueAt.localeCompare(right.dueAt));
+  }
+
+  async listCallbackTasksForRead() {
+    if (!this.callcenterRepository?.isEnabled())
+      return this.listCallbackTasks();
+    const sessions = await this.callcenterRepository.loadSessions();
+    return sessions
+      .flatMap((session) => this.callbacksForSession(session))
+      .sort((left, right) => left.dueAt.localeCompare(right.dueAt));
+  }
+
+  createCallbackTaskForWrite(
+    callId: string,
+    command: CreateCallbackTaskCommand,
+    requestId?: string,
+  ) {
+    return this.runPhoneSessionWrite(callId, (write) =>
+      this.createCallbackTask(callId, command, requestId, write),
+    );
+  }
+
+  completeCallbackTaskForWrite(
+    taskId: string,
+    command: CompleteCallbackTaskCommand,
+    requestId?: string,
+  ) {
+    return this.runCallbackTaskWrite(taskId, (write) =>
+      this.completeCallbackTask(taskId, command, requestId, write),
+    );
+  }
+
+  claimCallbackTaskForWrite(
+    taskId: string,
+    operatorId: string,
+    expectedVersion?: number,
+    requestId?: string,
+  ) {
+    return this.runCallbackTaskWrite(taskId, (write) =>
+      this.claimCallbackTask(
+        taskId,
+        operatorId,
+        expectedVersion,
+        requestId,
+        write,
+      ),
+    );
+  }
+
+  recordCallbackAttemptForWrite(
+    taskId: string,
+    command: {
+      operatorId: string;
+      outcome: string;
+      notes?: string;
+      hangupConfirmed?: boolean;
+    },
+    requestId?: string,
+  ) {
+    return this.runCallbackTaskWrite(taskId, (write) =>
+      this.recordCallbackAttempt(taskId, command, requestId, write),
+    );
+  }
+
+  cancelCallbackTaskForWrite(
+    taskId: string,
+    command: { reason: string; expectedVersion?: number; operatorId?: string },
+    requestId?: string,
+  ) {
+    return this.runCallbackTaskWrite(taskId, (write) =>
+      this.cancelCallbackTask(taskId, command, requestId, write),
+    );
+  }
+
+  private async runCallbackTaskWrite<T>(
+    taskId: string,
+    mutate: (write?: PhoneSessionWrite) => T | Promise<T>,
+  ) {
+    if (!this.callcenterRepository?.isEnabled()) return mutate();
+    const session = await this.callcenterRepository.findCallbackSession(taskId);
+    if (!session)
+      throw new ApiRequestError(
+        404,
+        "CALLBACK_TASK_NOT_FOUND",
+        "Callback task not found.",
+        { callbackTaskId: taskId },
+      );
+    return this.runPhoneSessionWrite(session.callId, mutate);
+  }
+
+  private finishCallbackMutation(
+    session: CallSessionRecord,
+    write: PhoneSessionWrite | undefined,
+    context: string,
+    audit: () => void,
+  ) {
+    this.finishPhoneSessionMutation(session, write, context, audit, () => {});
+    return this.cloneCallbackTask(session.callbackTask!);
   }
 
   createCallbackTask(
     callId: string,
     command: CreateCallbackTaskCommand,
     requestId?: string,
+    write?: PhoneSessionWrite,
   ) {
-    const session = this.requireSession(callId);
+    const session = write
+      ? this.cloneSession(this.requireWriteSession(callId, write))
+      : this.requireSession(callId);
     this.assertTimestamp(command.dueAt, "dueAt");
 
     const now = new Date().toISOString();
-    const callbackTask: CallbackTaskRecord = session.callbackTask
-      ? {
-          ...session.callbackTask,
-          dueAt: command.dueAt,
-          note: this.normalizeNullableText(command.note),
-          status: "pending",
-          updatedAt: now,
-        }
-      : {
-          callbackTaskId: `callback-${randomUUID()}`,
-          callId: session.callId,
-          callerPhone: session.callerPhone,
-          agentId: session.agentId,
-          linkedOrderId: session.linkedOrderId,
-          linkedCaseNo: session.linkedCaseNo,
-          dueAt: command.dueAt,
-          note: this.normalizeNullableText(command.note),
-          status: "pending",
-          createdAt: now,
-          updatedAt: now,
-        };
+    const callbackTask: CallbackTaskRecord =
+      session.callbackTask &&
+      !["completed", "cancelled", "unreachable"].includes(
+        session.callbackTask.status,
+      )
+        ? {
+            ...session.callbackTask,
+            dueAt: command.dueAt,
+            note: this.normalizeNullableText(command.note),
+            status: "pending",
+            updatedAt: now,
+            version: (session.callbackTask.version ?? 1) + 1,
+          }
+        : {
+            callbackTaskId: `callback-${randomUUID()}`,
+            callId: session.callId,
+            callerPhone: session.callerPhone,
+            agentId: session.agentId,
+            linkedOrderId: session.linkedOrderId,
+            linkedCaseNo: session.linkedCaseNo,
+            dueAt: command.dueAt,
+            note: this.normalizeNullableText(command.note),
+            status: "pending",
+            createdAt: now,
+            updatedAt: now,
+            version: 1,
+            attempts: [],
+          };
 
+    if (
+      session.callbackTask &&
+      session.callbackTask.callbackTaskId !== callbackTask.callbackTaskId
+    ) {
+      session.callbackTaskHistory = [
+        ...(session.callbackTaskHistory ?? []),
+        this.cloneCallbackTask(session.callbackTask),
+      ];
+    }
     session.callbackTask = callbackTask;
     this.addFlag(session, "callback_pending");
     this.removeFlag(session, "callback_completed");
-    this.persistSessions([session], "create_callback_task");
 
-    this.recordAudit(
-      {
-        actorId: session.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "create_callback_task",
-        resourceType: "callback_task",
-        resourceId: callbackTask.callbackTaskId,
-        newValuesSummary: {
-          callId: session.callId,
-          linkedOrderId: callbackTask.linkedOrderId,
-          linkedCaseNo: callbackTask.linkedCaseNo,
-          dueAt: callbackTask.dueAt,
-          status: callbackTask.status,
-        },
-      },
-      requestId,
+    return this.finishCallbackMutation(
+      session,
+      write,
+      "create_callback_task",
+      () =>
+        this.recordAudit(
+          {
+            actorId: session.agentId,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "callcenter",
+            actionName: "create_callback_task",
+            resourceType: "callback_task",
+            resourceId: callbackTask.callbackTaskId,
+            newValuesSummary: {
+              callId: session.callId,
+              linkedOrderId: callbackTask.linkedOrderId,
+              linkedCaseNo: callbackTask.linkedCaseNo,
+              dueAt: callbackTask.dueAt,
+              status: callbackTask.status,
+            },
+          },
+          requestId,
+        ),
     );
-
-    return this.cloneCallbackTask(callbackTask);
   }
 
   completeCallbackTask(
     callbackTaskId: string,
     command: CompleteCallbackTaskCommand,
     requestId?: string,
+    write?: PhoneSessionWrite,
   ) {
-    const session = this.findSessionByCallbackTaskId(callbackTaskId);
+    const session = this.findSessionByCallbackTaskId(callbackTaskId, write);
     if (!session.callbackTask) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -1159,6 +1275,14 @@ export class CallcenterService implements OnModuleInit {
       return this.cloneCallbackTask(session.callbackTask);
     }
 
+    if (["cancelled", "unreachable"].includes(session.callbackTask.status)) {
+      throw new ApiRequestError(
+        409,
+        "CALLBACK_TERMINAL",
+        "Cannot complete a terminal callback task.",
+      );
+    }
+
     this.assertOptionalTimestamp(command.completedAt, "completedAt");
     const updatedAt = command.completedAt ?? new Date().toISOString();
     session.callbackTask = {
@@ -1167,30 +1291,35 @@ export class CallcenterService implements OnModuleInit {
         this.normalizeNullableText(command.note) ?? session.callbackTask.note,
       status: "completed",
       updatedAt,
+      version: (session.callbackTask.version ?? 1) + 1,
     };
     this.removeFlag(session, "callback_pending");
     this.addFlag(session, "callback_completed");
-    this.persistSessions([session], "complete_callback_task");
+    const completedTask = session.callbackTask;
 
-    this.recordAudit(
-      {
-        actorId: session.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "complete_callback_task",
-        resourceType: "callback_task",
-        resourceId: session.callbackTask.callbackTaskId,
-        newValuesSummary: {
-          callId: session.callId,
-          status: session.callbackTask.status,
-          updatedAt,
-        },
-      },
-      requestId,
+    return this.finishCallbackMutation(
+      session,
+      write,
+      "complete_callback_task",
+      () =>
+        this.recordAudit(
+          {
+            actorId: session.agentId,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "callcenter",
+            actionName: "complete_callback_task",
+            resourceType: "callback_task",
+            resourceId: completedTask.callbackTaskId,
+            newValuesSummary: {
+              callId: session.callId,
+              status: completedTask.status,
+              updatedAt,
+            },
+          },
+          requestId,
+        ),
     );
-
-    return this.cloneCallbackTask(session.callbackTask);
   }
 
   claimCallbackTask(
@@ -1198,8 +1327,9 @@ export class CallcenterService implements OnModuleInit {
     operatorId: string,
     expectedVersion?: number,
     requestId?: string,
+    write?: PhoneSessionWrite,
   ) {
-    const session = this.findSessionByCallbackTaskId(callbackTaskId);
+    const session = this.findSessionByCallbackTaskId(callbackTaskId, write);
     if (!session.callbackTask) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -1211,7 +1341,8 @@ export class CallcenterService implements OnModuleInit {
 
     if (
       session.callbackTask.status === "completed" ||
-      (session.callbackTask.status as string) === "cancelled"
+      session.callbackTask.status === "cancelled" ||
+      session.callbackTask.status === "unreachable"
     ) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -1225,13 +1356,14 @@ export class CallcenterService implements OnModuleInit {
       ...session.callbackTask,
       agentId: operatorId,
       assignedOperatorId: operatorId,
-      status: "claimed" as any,
+      status: "claimed",
       updatedAt: now,
+      version: (session.callbackTask.version ?? 1) + 1,
     };
+    this.assertCallbackVersion(session.callbackTask, expectedVersion);
     session.callbackTask = updatedTask;
-    this.persistSessions([session], "claim_callback_task");
 
-    if (this.voiceCallbackService) {
+    if (!write && this.voiceCallbackService) {
       try {
         this.voiceCallbackService.claimCallback({
           taskId: callbackTaskId,
@@ -1243,25 +1375,29 @@ export class CallcenterService implements OnModuleInit {
       }
     }
 
-    this.recordAudit(
-      {
-        actorId: operatorId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "claim_callback_task",
-        resourceType: "callback_task",
-        resourceId: updatedTask.callbackTaskId,
-        newValuesSummary: {
-          callId: session.callId,
-          status: updatedTask.status,
-          operatorId,
-        },
-      },
-      requestId,
+    return this.finishCallbackMutation(
+      session,
+      write,
+      "claim_callback_task",
+      () =>
+        this.recordAudit(
+          {
+            actorId: operatorId,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "callcenter",
+            actionName: "claim_callback_task",
+            resourceType: "callback_task",
+            resourceId: updatedTask.callbackTaskId,
+            newValuesSummary: {
+              callId: session.callId,
+              status: updatedTask.status,
+              operatorId,
+            },
+          },
+          requestId,
+        ),
     );
-
-    return this.cloneCallbackTask(updatedTask);
   }
 
   recordCallbackAttempt(
@@ -1273,8 +1409,9 @@ export class CallcenterService implements OnModuleInit {
       hangupConfirmed?: boolean;
     },
     requestId?: string,
+    write?: PhoneSessionWrite,
   ) {
-    const session = this.findSessionByCallbackTaskId(callbackTaskId);
+    const session = this.findSessionByCallbackTaskId(callbackTaskId, write);
     if (!session.callbackTask) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -1286,7 +1423,8 @@ export class CallcenterService implements OnModuleInit {
 
     if (
       session.callbackTask.status === "completed" ||
-      (session.callbackTask.status as string) === "cancelled"
+      session.callbackTask.status === "cancelled" ||
+      session.callbackTask.status === "unreachable"
     ) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -1300,20 +1438,30 @@ export class CallcenterService implements OnModuleInit {
       command.outcome === "succeeded" || command.outcome === "answered"
         ? "in_progress"
         : "pending";
-    const currentAttemptCount =
-      ((session.callbackTask as any).attemptCount ?? 0) + 1;
+    const currentAttemptCount = (session.callbackTask.attemptCount ?? 0) + 1;
     const updatedTask: CallcenterCallbackTaskRecord = {
       ...session.callbackTask,
       note: command.notes ?? session.callbackTask.note,
-      status: newStatus as any,
+      status: newStatus,
       attemptCount: currentAttemptCount,
       lastOutcome: command.outcome,
       updatedAt: now,
+      version: (session.callbackTask.version ?? 1) + 1,
+      attempts: [
+        ...(session.callbackTask.attempts ?? []),
+        {
+          attemptId: randomUUID(),
+          operatorId: command.operatorId,
+          outcome: command.outcome,
+          notes: command.notes ?? null,
+          recordedAt: now,
+          hangupConfirmed: command.hangupConfirmed ?? false,
+        },
+      ],
     };
     session.callbackTask = updatedTask;
-    this.persistSessions([session], "record_callback_attempt");
 
-    if (this.voiceCallbackService) {
+    if (!write && this.voiceCallbackService) {
       try {
         this.voiceCallbackService.recordAttempt({
           taskId: callbackTaskId,
@@ -1328,33 +1476,38 @@ export class CallcenterService implements OnModuleInit {
       }
     }
 
-    this.recordAudit(
-      {
-        actorId: command.operatorId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "record_callback_attempt",
-        resourceType: "callback_task",
-        resourceId: updatedTask.callbackTaskId,
-        newValuesSummary: {
-          callId: session.callId,
-          outcome: command.outcome,
-          status: updatedTask.status,
-        },
-      },
-      requestId,
+    return this.finishCallbackMutation(
+      session,
+      write,
+      "record_callback_attempt",
+      () =>
+        this.recordAudit(
+          {
+            actorId: command.operatorId,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "callcenter",
+            actionName: "record_callback_attempt",
+            resourceType: "callback_task",
+            resourceId: updatedTask.callbackTaskId,
+            newValuesSummary: {
+              callId: session.callId,
+              outcome: command.outcome,
+              status: updatedTask.status,
+            },
+          },
+          requestId,
+        ),
     );
-
-    return this.cloneCallbackTask(updatedTask);
   }
 
   cancelCallbackTask(
     callbackTaskId: string,
     command: { reason: string; expectedVersion?: number; operatorId?: string },
     requestId?: string,
+    write?: PhoneSessionWrite,
   ) {
-    const session = this.findSessionByCallbackTaskId(callbackTaskId);
+    const session = this.findSessionByCallbackTaskId(callbackTaskId, write);
     if (!session.callbackTask) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -1364,7 +1517,12 @@ export class CallcenterService implements OnModuleInit {
       );
     }
 
-    if (session.callbackTask.status === "completed") {
+    if (session.callbackTask.status === "cancelled")
+      return this.cloneCallbackTask(session.callbackTask);
+    if (
+      session.callbackTask.status === "completed" ||
+      session.callbackTask.status === "unreachable"
+    ) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "CALLBACK_TERMINAL",
@@ -1376,14 +1534,15 @@ export class CallcenterService implements OnModuleInit {
     const updatedTask: CallcenterCallbackTaskRecord = {
       ...session.callbackTask,
       note: command.reason ?? session.callbackTask.note,
-      status: "cancelled" as any,
+      status: "cancelled",
       updatedAt: now,
+      version: (session.callbackTask.version ?? 1) + 1,
     };
+    this.assertCallbackVersion(session.callbackTask, command.expectedVersion);
     session.callbackTask = updatedTask;
     this.removeFlag(session, "callback_pending");
-    this.persistSessions([session], "cancel_callback_task");
 
-    if (this.voiceCallbackService) {
+    if (!write && this.voiceCallbackService) {
       try {
         this.voiceCallbackService.cancelCallback({
           taskId: callbackTaskId,
@@ -1396,25 +1555,29 @@ export class CallcenterService implements OnModuleInit {
       }
     }
 
-    this.recordAudit(
-      {
-        actorId: command.operatorId ?? session.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "cancel_callback_task",
-        resourceType: "callback_task",
-        resourceId: updatedTask.callbackTaskId,
-        newValuesSummary: {
-          callId: session.callId,
-          status: updatedTask.status,
-          reason: command.reason,
-        },
-      },
-      requestId,
+    return this.finishCallbackMutation(
+      session,
+      write,
+      "cancel_callback_task",
+      () =>
+        this.recordAudit(
+          {
+            actorId: command.operatorId ?? session.agentId,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "callcenter",
+            actionName: "cancel_callback_task",
+            resourceType: "callback_task",
+            resourceId: updatedTask.callbackTaskId,
+            newValuesSummary: {
+              callId: session.callId,
+              status: updatedTask.status,
+              reason: command.reason,
+            },
+          },
+          requestId,
+        ),
     );
-
-    return this.cloneCallbackTask(updatedTask);
   }
 
   takeoverAiCallSession(
@@ -1779,6 +1942,13 @@ export class CallcenterService implements OnModuleInit {
       callbackTask: session.callbackTask
         ? this.cloneCallbackTask(session.callbackTask)
         : null,
+      ...(session.callbackTaskHistory
+        ? {
+            callbackTaskHistory: session.callbackTaskHistory.map((task) =>
+              this.cloneCallbackTask(task),
+            ),
+          }
+        : {}),
       recordingState: this.deriveRecordingState(session),
       flags: [...session.flags],
     };
@@ -1842,15 +2012,29 @@ export class CallcenterService implements OnModuleInit {
   private cloneCallbackTask<T extends CallbackTaskRecord>(callbackTask: T): T {
     return {
       ...callbackTask,
+      ...(callbackTask.attempts
+        ? { attempts: callbackTask.attempts.map((attempt) => ({ ...attempt })) }
+        : {}),
     };
   }
 
-  private findSessionByCallbackTaskId(callbackTaskId: string) {
-    const session = this.callSessions.find(
-      (candidateSession) =>
-        candidateSession.callbackTask?.callbackTaskId === callbackTaskId,
-    );
-    if (!session) {
+  private findSessionByCallbackTaskId(
+    callbackTaskId: string,
+    write?: PhoneSessionWrite,
+  ) {
+    const session = write
+      ? write.current
+      : this.callSessions.find((candidateSession) =>
+          this.callbacksForSession(candidateSession).some(
+            (task) => task.callbackTaskId === callbackTaskId,
+          ),
+        );
+    const task =
+      session &&
+      this.callbacksForSession(session).find(
+        (candidate) => candidate.callbackTaskId === callbackTaskId,
+      );
+    if (!session || !task) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
         "CALLBACK_TASK_NOT_FOUND",
@@ -1860,7 +2044,32 @@ export class CallcenterService implements OnModuleInit {
         },
       );
     }
-    return session;
+    if (session.callbackTask?.callbackTaskId !== callbackTaskId)
+      return { ...this.cloneSession(session), callbackTask: task };
+    return write ? this.cloneSession(session) : session;
+  }
+
+  private callbacksForSession(session: CallSessionRecord) {
+    return [
+      ...(session.callbackTaskHistory ?? []),
+      ...(session.callbackTask ? [session.callbackTask] : []),
+    ].map((task) => this.cloneCallbackTask(task));
+  }
+
+  private assertCallbackVersion(
+    task: CallbackTaskRecord,
+    expectedVersion?: number,
+  ) {
+    if (
+      expectedVersion !== undefined &&
+      expectedVersion !== (task.version ?? 1)
+    ) {
+      throw new ApiRequestError(
+        409,
+        "CALLBACK_TASK_VERSION_MISMATCH",
+        "Callback task changed; read its current version and retry.",
+      );
+    }
   }
 
   private normalizeNullableText(value: string | null | undefined) {

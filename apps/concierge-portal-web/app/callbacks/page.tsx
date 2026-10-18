@@ -256,7 +256,10 @@ export default function CallbacksPage() {
                     </p>
                   </div>
                 </div>
-                {callSession.callbackTask?.status !== "completed" ? (
+                {callSession.callbackTask &&
+                !["completed", "cancelled", "unreachable"].includes(
+                  callSession.callbackTask.status,
+                ) ? (
                   <form
                     className="form-grid"
                     onSubmit={async (event) => {
