@@ -605,10 +605,11 @@ export class ForwarderService implements OnModuleInit {
     // still-uncertain order never goes through that catch at all (its
     // status is no longer "broadcasted"), so it must be checked again here
     // before this fall-through path reports success off the same
-    // unconfirmed cache entry.
-    if (
-      forwardedOrder.lastSyncError?.code === "FORWARDER_PERSISTENCE_ACK_UNCERTAIN"
-    ) {
+    // unconfirmed cache entry. This must use `isMirrorWriteAckUncertain`,
+    // not a `lastSyncError.code` comparison: a confirmed degraded order
+    // whose fallback write actually landed still carries that same code as
+    // its recorded cause and must not be re-rejected on every repeat call.
+    if (this.isMirrorWriteAckUncertain(forwardedOrder)) {
       throw new ApiRequestError(
         HttpStatus.BAD_GATEWAY,
         "FORWARDER_PERSISTENCE_ACK_UNCERTAIN",
@@ -641,6 +642,24 @@ export class ForwarderService implements OnModuleInit {
       if (canonical.status !== "broadcasted") {
         if (!this.isForwardedOrderVisibleToDriver(canonical, driverId)) {
           throw this.driverTaskViewNotFound(taskId);
+        }
+        // Same honesty requirement as the equivalent repeated-accept check
+        // in `acceptForwardedOrder`: a cached non-broadcasted status (e.g.
+        // sync_failed) is not proof its own write landed. A driver command
+        // that lands on this already-resolved order must not report success
+        // off a mirror write that was never durably ACKed just because the
+        // caller happened to send "reject" instead of "accept" this time.
+        if (this.isMirrorWriteAckUncertain(canonical)) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_GATEWAY,
+            "FORWARDER_PERSISTENCE_ACK_UNCERTAIN",
+            "Forwarded order mirror state has not been durably acknowledged; manual readback/reconciliation is required before treating this reject as complete.",
+            {
+              orderId: taskId,
+              persisted: false,
+            },
+            true,
+          );
         }
         return this.buildForwardedDriverActionResponse(
           "reject",
@@ -1540,6 +1559,13 @@ export class ForwarderService implements OnModuleInit {
         ...lastSyncError,
         code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN",
         message: `Durable persistence ACK was not received for mark_forwarder_sync_failed (original ${command.errorCode}: ${command.errorMessage}): ${detail}`,
+        // `code` alone cannot distinguish this from a cause that merely
+        // *describes itself* as ACK-uncertain (see `persistOrFail`, which
+        // always passes that same code as the reason it is falling back to
+        // sync_failed) but whose fallback write here actually landed. This
+        // marker is set only when *this* write itself failed to durably
+        // commit, so `isMirrorWriteAckUncertain` can tell the two apart.
+        payload: { ...lastSyncError.payload, mirrorWriteAckUncertain: true },
       };
       draft.lastSyncError = lastSyncError;
       draft.manualFallback = {
@@ -2583,6 +2609,22 @@ export class ForwarderService implements OnModuleInit {
     const details = (response as { error?: { details?: Record<string, unknown> } })
       .error?.details;
     return details?.persisted === false;
+  }
+
+  /**
+   * Whether `order`'s cached `lastSyncError` reflects a write that itself
+   * was never durably ACKed. This is deliberately *not* `lastSyncError?.code
+   * === "FORWARDER_PERSISTENCE_ACK_UNCERTAIN"`: `persistOrFail`'s fallback
+   * always records that same code as the *cause* it is falling back to
+   * sync_failed for, even when that fallback write goes on to land
+   * successfully. Reusing the code for both meanings would make an already
+   * durably-confirmed sync_failed order look permanently uncertain on every
+   * later read. The explicit `mirrorWriteAckUncertain` payload marker (set
+   * only inside `markSyncFailed`'s own failure branch) tracks just the
+   * write's own outcome, independent of why it was attempted.
+   */
+  private isMirrorWriteAckUncertain(order: ForwardedOrderRecord): boolean {
+    return order.lastSyncError?.payload?.mirrorWriteAckUncertain === true;
   }
 
   /**

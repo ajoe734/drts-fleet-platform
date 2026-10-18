@@ -247,6 +247,7 @@ function createGatedDatabaseService(gatedStatus: string) {
 function createRecordingDatabaseService() {
   const table = new Map<string, unknown>();
   let rejectOrderWrites = false;
+  let rejectOrderWritesRemaining = 0;
   let rejectReadback = false;
 
   const query = vi.fn(
@@ -259,7 +260,10 @@ function createRecordingDatabaseService() {
       );
 
       if (isForwardedOrdersTable && text.includes("INSERT")) {
-        if (rejectOrderWrites) {
+        if (rejectOrderWrites || rejectOrderWritesRemaining > 0) {
+          if (rejectOrderWritesRemaining > 0) {
+            rejectOrderWritesRemaining -= 1;
+          }
           throw new Error("order write not acknowledged");
         }
         const params = values as unknown[];
@@ -305,6 +309,13 @@ function createRecordingDatabaseService() {
     databaseService: { isEnabled: () => true, query } as unknown as DatabaseService,
     setRejectOrderWrites: (value: boolean) => {
       rejectOrderWrites = value;
+    },
+    // Rejects exactly the next `count` forwarded-order writes (e.g. just the
+    // accept_pending write), then lets later writes (e.g. markSyncFailed's
+    // own fallback write) land normally — unlike `setRejectOrderWrites`,
+    // which rejects every write unconditionally.
+    setRejectOrderWritesOnce: (count: number) => {
+      rejectOrderWritesRemaining = count;
     },
     setRejectReadback: (value: boolean) => {
       rejectReadback = value;
@@ -1294,6 +1305,129 @@ describe("FORWARDED-ORDER-DURABLE-ACK-AND-NATIVE-RACE-FLOW-20261015: C033-F1 dur
       expect(service.getOrder(order.mirrorOrderId).status).toBe(
         "sync_failed",
       );
+    });
+
+    it("still returns the sync_failed success envelope on a repeated mounted accept once that degraded state is durably ACKed, confirmed via the real repository and a cold restart", async () => {
+      const {
+        databaseService,
+        setRejectOrderWritesOnce,
+        readDurableOrder,
+      } = createRecordingDatabaseService();
+      const repository = new ForwarderRepository(databaseService);
+      const { service, controller } = createHarness({ repository });
+
+      const order = await service.ingestExternalOrder({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-accept-confirmed-fallback-repeat-001",
+        payload: { serviceBucket: "standard_taxi" },
+      });
+      await service.broadcastOrder(order.mirrorOrderId, {
+        candidateDriverIds: ["driver-ack-001"],
+      });
+
+      // Only the accept_pending write fails; markSyncFailed's own fallback
+      // write that records the degraded state durably succeeds. The cached
+      // lastSyncError.code still reads "FORWARDER_PERSISTENCE_ACK_UNCERTAIN"
+      // afterwards (that is `persistOrFail`'s fixed description of *why* it
+      // fell back to sync_failed), but the write that actually landed was
+      // genuinely ACKed — a later identical accept must not re-reject off
+      // that historical cause code.
+      setRejectOrderWritesOnce(1);
+
+      const first = await controller.acceptForwardedOrder(
+        order.mirrorOrderId,
+        driverIdentity("driver-ack-001"),
+        {},
+      );
+      expect(first.data.outcome).toBe("sync_failed");
+
+      const second = await controller.acceptForwardedOrder(
+        order.mirrorOrderId,
+        driverIdentity("driver-ack-001"),
+        {},
+      );
+      expect(second.data.outcome).toBe("sync_failed");
+
+      const durable = readDurableOrder(order.mirrorOrderId);
+      expect(durable?.status).toBe("sync_failed");
+      expect(durable?.acceptedDriverId).toBe("driver-ack-001");
+
+      const restartedRepository = new ForwarderRepository(databaseService);
+      const restartedService = new ForwarderService(
+        { getEligibleCandidates: vi.fn(() => []) } as never,
+        { recordAuditLog: vi.fn() } as never,
+        [createAdapter()],
+        restartedRepository,
+      );
+      await restartedService.onModuleInit();
+      const restarted = restartedService.getOrder(order.mirrorOrderId);
+      expect(restarted.status).toBe("sync_failed");
+      expect(restarted.acceptedDriverId).toBe("driver-ack-001");
+    });
+
+    it("does not let a mounted reject on the same still-uncertain order report success off an unACKed cache (both the accept write and its own markSyncFailed fallback write were rejected)", async () => {
+      const {
+        databaseService,
+        setRejectOrderWrites,
+        readDurableOrder,
+      } = createRecordingDatabaseService();
+      const repository = new ForwarderRepository(databaseService);
+      const { service, controller } = createHarness({ repository });
+
+      const order = await service.ingestExternalOrder({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-reject-after-double-failure-001",
+        payload: { serviceBucket: "standard_taxi" },
+      });
+      await service.broadcastOrder(order.mirrorOrderId, {
+        candidateDriverIds: ["driver-ack-001"],
+      });
+
+      // Every order write from here on (the accept_pending write AND
+      // markSyncFailed's own fallback write) is rejected: this order's
+      // cached sync_failed state is doubly uncertain, not durably confirmed.
+      setRejectOrderWrites(true);
+
+      await expect(
+        controller.acceptForwardedOrder(
+          order.mirrorOrderId,
+          driverIdentity("driver-ack-001"),
+          {},
+        ),
+      ).rejects.toMatchObject({
+        response: { error: { code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN" } },
+      });
+
+      // The same unACKed cache must not turn into a success just because the
+      // next command is "reject" instead of a repeated "accept".
+      await expect(
+        controller.rejectForwardedOrder(
+          order.mirrorOrderId,
+          driverIdentity("driver-ack-001"),
+          {},
+        ),
+      ).rejects.toMatchObject({
+        response: { error: { code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN" } },
+      });
+
+      // Durable storage never recorded either write: canonical state is
+      // still the pre-accept broadcasted order, not the in-memory
+      // sync_failed guess.
+      const durable = readDurableOrder(order.mirrorOrderId);
+      expect(durable?.status).toBe("broadcasted");
+      expect(durable?.acceptedDriverId).toBeNull();
+
+      const restartedRepository = new ForwarderRepository(databaseService);
+      const restartedService = new ForwarderService(
+        { getEligibleCandidates: vi.fn(() => []) } as never,
+        { recordAuditLog: vi.fn() } as never,
+        [createAdapter()],
+        restartedRepository,
+      );
+      await restartedService.onModuleInit();
+      const restarted = restartedService.getOrder(order.mirrorOrderId);
+      expect(restarted.status).toBe("broadcasted");
+      expect(restarted.acceptedDriverId).toBeNull();
     });
   });
 
