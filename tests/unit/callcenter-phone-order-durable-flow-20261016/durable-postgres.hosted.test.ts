@@ -26,6 +26,47 @@ describe.skipIf(!hostedPaymentEnabled)(
     afterAll(() => h.close(), 30000);
     const response = () => ({ setHeader: vi.fn(), status: vi.fn() });
 
+    it("cold and stale session-list readers observe committed callback changes on the original order", async () => {
+      const writer = productionServices(h.database);
+      const peer = productionServices(h.peerDatabase());
+      const callId = "synthetic-hosted-current-session-list";
+      const order = await writer.owned.createCallCenterOrder(
+        phoneCommand(callId),
+      );
+      const created = await peer.controller.createCallbackTask(callId, {
+        dueAt: "2026-10-19T00:00:00Z",
+      });
+      const claimed = await peer.controller.claimCallbackTask(
+        created.data.callbackTaskId,
+        { operatorId: "synthetic-list-operator" },
+      );
+      expect(writer.calls.listCallSessions()[0]!.callbackTask).toBeNull();
+      const cold = productionServices(h.peerDatabase());
+      expect(cold.calls.listCallSessions()).toEqual([]);
+      for (const controller of [writer.controller, cold.controller]) {
+        expect(
+          (await controller.listCallSessions(null)).data.items,
+        ).toContainEqual(
+          expect.objectContaining({
+            callId,
+            linkedOrderId: order.orderId,
+            callbackTask: claimed.data,
+          }),
+        );
+      }
+      await peer.controller.closeCallSession(callId, {});
+      expect(
+        (await cold.controller.listCallSessions(null)).data.items,
+      ).toContainEqual(
+        expect.objectContaining({
+          callId,
+          status: "closed",
+          linkedOrderId: order.orderId,
+          callbackTask: claimed.data,
+        }),
+      );
+    });
+
     it.each<SandboxWebhookEventType>([
       "call.started",
       "call.ended",

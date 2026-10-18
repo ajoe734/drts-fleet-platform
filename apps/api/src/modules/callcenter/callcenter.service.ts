@@ -597,11 +597,22 @@ export class CallcenterService implements OnModuleInit {
     return session;
   }
 
-  listCallSessions(
+  async listCallSessionsForRead(
     requestId?: string,
     identity?: (EvidenceAccessIdentity & { roles?: string[] }) | null,
   ) {
-    let sourceSessions = this.callSessions;
+    const sessions = this.callcenterRepository?.isEnabled()
+      ? await this.callcenterRepository.loadSessions()
+      : undefined;
+    return this.listCallSessions(requestId, identity, sessions);
+  }
+
+  listCallSessions(
+    requestId?: string,
+    identity?: (EvidenceAccessIdentity & { roles?: string[] }) | null,
+    persistedSessions?: readonly CallSessionRecord[],
+  ) {
+    let sourceSessions = persistedSessions ?? this.callSessions;
     if (identity?.tenantId) {
       sourceSessions = sourceSessions.filter(
         (session) =>
