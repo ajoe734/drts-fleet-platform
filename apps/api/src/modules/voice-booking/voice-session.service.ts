@@ -914,7 +914,14 @@ export class VoiceSessionService {
       const eventType = closeEvent?.eventType ?? "call.ended";
       const sequence =
         closeEvent?.sequence ?? session.lastAppliedControlSequence + 1;
-      const mediaEpoch = closeEvent?.mediaEpoch ?? 1;
+      const mediaEpoch =
+        closeEvent?.mediaEpoch ??
+        (typeof this.repository.findAppliedMediaEpoch === "function"
+          ? ((await this.repository.findAppliedMediaEpoch(
+              session.voiceSessionId,
+              tx,
+            )) ?? 0)
+          : 0);
       const occurredAt = closeEvent?.occurredAt ?? new Date().toISOString();
       const source = closeEvent?.source ?? "media_worker";
       const sourceEventId =

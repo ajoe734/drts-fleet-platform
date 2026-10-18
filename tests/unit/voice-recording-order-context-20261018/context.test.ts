@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { VoiceSessionService } from "../../../apps/api/src/modules/voice-booking/voice-session.service";
 import { VoiceCommandRunnerService } from "../../../apps/api/src/modules/voice-booking/voice-command-runner.service";
 
-function fixture() {
+function fixture(appliedMediaEpoch = 0) {
   const session = {
     voiceSessionId: "original-session",
     callId: "original-call",
@@ -73,6 +73,7 @@ function fixture() {
   const repository = {
     isEnabled: () => true,
     findSessionById: async () => session,
+    findAppliedMediaEpoch: async () => appliedMediaEpoch,
     casUpdateSessionControl: async (...args: [string, number, object]) => ({
       ...session,
       ...args[2],
@@ -108,6 +109,22 @@ function fixture() {
 }
 
 describe("the original voice recording brand and order", () => {
+  it.each([0, 7])(
+    "retains applied media epoch%s when closing",
+    async (epoch) => {
+      const h = fixture(epoch);
+      await h.service.closeSession(
+        h.session.voiceSessionId,
+        h.session.sessionVersion,
+      );
+      const event = h.query.mock.calls.find(([sql]) =>
+        sql.includes("INSERT INTO voice.session_event"),
+      );
+      expect(event![1]![7]).toBe(epoch);
+      expect(event![1]![4]).toBe(`session-close:${h.session.voiceSessionId}`);
+    },
+  );
+
   it("enqueues close work with the actual brand and the original bound order", async () => {
     const h = fixture();
     await h.service.closeSession(
