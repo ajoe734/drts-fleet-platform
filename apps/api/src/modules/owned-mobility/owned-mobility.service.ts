@@ -4092,113 +4092,14 @@ export class OwnedMobilityService
 
     if (candidates.length === 0) {
       shouldPersistOrder = true;
-      order.updatedAt = now;
-      if (isReservation && !exceptionHoldEval.shouldHold) {
-        order.status = "redispatch_required";
-        this.transitionReservationHold(order, "redispatch_queue");
-        traceLogs.push(
-          this.buildTraceLog(orderId, "dispatch.failed", {
-            dispatchJobId: dispatchJob.dispatchJobId,
-            reasonCode: exceptionHoldEval.reasonCode,
-          }),
-        );
-        traceLogs.push(
-          this.buildTraceLog(orderId, "queue.entry.created", {
-            dispatchJobId: dispatchJob.dispatchJobId,
-            queueType: "redispatch",
-            reasonCode: exceptionHoldEval.reasonCode,
-          }),
-        );
-      } else if (isReservation) {
-        shouldPersistOrder = true;
-        order.status = "exception_hold";
-        this.transitionReservationHold(order, "exception_hold");
-        order.exceptionHold = this.createExceptionHoldRecord(
-          exceptionHoldEval.reasonCode,
-          dispatchJob.dispatchJobId,
+      traceLogs.push(
+        ...this.applyDispatchNoSupplyPolicy(
+          order,
+          dispatchJob,
           now,
-          {
-            isReservation: true,
-            isWithinConfirmationWindow: true,
-            hasEligibleSupply: false,
-            reasonCode: exceptionHoldEval.reasonCode,
-          },
-        );
-        traceLogs.push(
-          this.buildTraceLog(orderId, "dispatch.failed", {
-            dispatchJobId: dispatchJob.dispatchJobId,
-            reasonCode: exceptionHoldEval.reasonCode,
-          }),
-        );
-        traceLogs.push(
-          this.buildTraceLog(orderId, "order.exception_hold", {
-            dispatchJobId: dispatchJob.dispatchJobId,
-            reasonCode: exceptionHoldEval.reasonCode,
-            exceptionHoldCriteria: {
-              isReservation: true,
-              isWithinConfirmationWindow: true,
-              hasEligibleSupply: false,
-            },
-          }),
-        );
-      } else {
-        const escalationAction = this.resolveNoSupplyEscalation(order);
-        if (escalationAction === "move_to_delayed_queue") {
-          order.status = "delayed_queue";
-          order.queueFamily = "delayed_retry_queue";
-          order.queueEntryReason = "no_supply_delayed_retry";
-          dispatchJob.status = "no_supply";
-          order.noSupplyEscalation = {
-            orderId,
-            dispatchJobId: dispatchJob.dispatchJobId,
-            attemptCount: order.dispatchAttemptCount + 1,
-            lastAttemptAt: now,
-            escalationAction,
-            escalatedAt: now,
-            resolvedAt: null,
-          };
-          traceLogs.push(
-            this.buildTraceLog(orderId, "dispatch.no_supply_delayed", {
-              dispatchJobId: dispatchJob.dispatchJobId,
-              reasonCode: exceptionHoldEval.reasonCode,
-              escalationAction,
-              attemptCount: order.dispatchAttemptCount + 1,
-            }),
-          );
-        } else if (escalationAction === "escalate_to_ops") {
-          order.status = "no_supply";
-          order.queueFamily = "manual_review_queue";
-          order.queueEntryReason = "no_supply_escalated_to_ops";
-          dispatchJob.status = "no_supply";
-          order.noSupplyEscalation = {
-            orderId,
-            dispatchJobId: dispatchJob.dispatchJobId,
-            attemptCount: order.dispatchAttemptCount + 1,
-            lastAttemptAt: now,
-            escalationAction,
-            escalatedAt: now,
-            resolvedAt: null,
-          };
-          traceLogs.push(
-            this.buildTraceLog(orderId, "dispatch.no_supply_escalated", {
-              dispatchJobId: dispatchJob.dispatchJobId,
-              reasonCode: exceptionHoldEval.reasonCode,
-              escalationAction,
-              attemptCount: order.dispatchAttemptCount + 1,
-            }),
-          );
-        } else {
-          order.status = "dispatch_failed";
-          traceLogs.push(
-            this.buildTraceLog(orderId, "dispatch.failed", {
-              dispatchJobId: dispatchJob.dispatchJobId,
-              reasonCode: exceptionHoldEval.reasonCode,
-            }),
-          );
-        }
-        order.dispatchAttemptCount += 1;
-        order.lastDispatchFailureReason = exceptionHoldEval.reasonCode;
-      }
+          exceptionHoldEval,
+        ),
+      );
     } else if (isReservation) {
       shouldPersistOrder = true;
       order.status = "preassigned";
@@ -4269,6 +4170,240 @@ export class OwnedMobilityService
         };
       },
     };
+  }
+
+  /** Complete an exhausted autonomous round through the existing no-supply policy. */
+  async completeAutonomousNoSupply(
+    orderId: string,
+    dispatchJobId: string,
+    reasonCode: "no_eligible_candidate" | "reservation_conflicts_exhausted",
+    requestId?: string,
+  ): Promise<void> {
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      await Promise.all([...this.pendingWorkflowWrites]);
+    }
+    const afterCommit: (() => void)[] = [];
+    const apply = async (tx?: OwnedMobilityQueryExecutor) => {
+      const current = tx
+        ? await this.ownedMobilityRepository!.loadOrderCancellationForUpdate(
+            tx,
+            orderId,
+          )
+        : null;
+      const order = this.cloneOrder(
+        current?.order ?? this.requireOrder(orderId),
+      );
+      const jobs =
+        current?.dispatchJobs ??
+        this.dispatchJobs.filter((j) => j.orderId === orderId);
+      const currentJob = jobs.find((j) => j.dispatchJobId === dispatchJobId);
+      const activeAssignment = current
+        ? current.assignment
+        : this.getActiveDispatchAssignmentForOrder(orderId);
+      if (
+        !currentJob ||
+        activeAssignment ||
+        jobs.some(
+          (j) =>
+            j.dispatchJobId !== dispatchJobId &&
+            ["matching", "assigned", "reserved"].includes(j.status),
+        ) ||
+        [
+          "cancelled",
+          "completed",
+          "driver_accepted",
+          "enroute_pickup",
+          "arrived_pickup",
+          "on_trip",
+        ].includes(order.status)
+      ) {
+        throw new ApiRequestError(
+          409,
+          "DISPATCH_ROUND_SUPERSEDED",
+          "The dispatch round has changed; reload the original order.",
+          { orderId, dispatchJobId },
+        );
+      }
+      // An initial dispatch or a previous worker already committed this result.
+      // Replaying that work must not consume another no-supply attempt.
+      if (["no_supply", "failed", "queued"].includes(currentJob.status)) return;
+      const dispatchJob = { ...currentJob };
+      const now = new Date().toISOString();
+      const traceLogs = this.applyDispatchNoSupplyPolicy(
+        order,
+        dispatchJob,
+        now,
+        this.evaluateExceptionHoldCriteria(order, false, now),
+      );
+      dispatchJob.updatedAt = now;
+      const changes = {
+        orders: [order],
+        dispatchJobs: [dispatchJob],
+        dispatchTraceLogs: traceLogs,
+      };
+      if (tx)
+        await this.ownedMobilityRepository!.persistOrderWorkflow(tx, changes);
+      else await this.persistChangesRequired(changes, "autonomous_no_supply");
+      afterCommit.push(() => {
+        this.applyAuthoritativeOrder(order);
+        this.dispatchJobs = [
+          dispatchJob,
+          ...this.dispatchJobs.filter((j) => j.dispatchJobId !== dispatchJobId),
+        ];
+        this.dispatchTraceLogs = [...traceLogs, ...this.dispatchTraceLogs];
+        if (order.dispatchSemantics === "reservation")
+          this.recordReservationEscalationNotifications(order, dispatchJobId);
+        this.opsDispatchEventsService?.publishDispatchJobUpdated(
+          orderId,
+          dispatchJob,
+          requestId,
+        );
+        this.recordAudit(
+          {
+            actorId: null,
+            actorType: "system",
+            tenantId: order.tenantId,
+            moduleName: "dispatch",
+            actionName: "autonomous_no_supply",
+            resourceType: "dispatch_job",
+            resourceId: dispatchJobId,
+            newValuesSummary: {
+              orderId,
+              status: dispatchJob.status,
+              reasonCode,
+            },
+          },
+          requestId,
+        );
+      });
+    };
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      await this.ownedMobilityRepository.withTransaction((tx) => apply(tx));
+    } else await apply();
+    for (const publish of afterCommit) publish();
+  }
+
+  private applyDispatchNoSupplyPolicy(
+    order: OwnedOrderRecord,
+    dispatchJob: DispatchJobRecord,
+    now: string,
+    exceptionHoldEval: {
+      shouldHold: boolean;
+      reasonCode: ExceptionHoldReasonCode;
+    },
+  ): DispatchTraceLogRecord[] {
+    const orderId = order.orderId;
+    const isReservation = order.dispatchSemantics === "reservation";
+    const traceLogs: DispatchTraceLogRecord[] = [];
+    dispatchJob.status =
+      isReservation && !exceptionHoldEval.shouldHold ? "queued" : "failed";
+    order.updatedAt = now;
+    if (isReservation && !exceptionHoldEval.shouldHold) {
+      order.status = "redispatch_required";
+      this.transitionReservationHold(order, "redispatch_queue");
+      traceLogs.push(
+        this.buildTraceLog(orderId, "dispatch.failed", {
+          dispatchJobId: dispatchJob.dispatchJobId,
+          reasonCode: exceptionHoldEval.reasonCode,
+        }),
+      );
+      traceLogs.push(
+        this.buildTraceLog(orderId, "queue.entry.created", {
+          dispatchJobId: dispatchJob.dispatchJobId,
+          queueType: "redispatch",
+          reasonCode: exceptionHoldEval.reasonCode,
+        }),
+      );
+    } else if (isReservation) {
+      order.status = "exception_hold";
+      this.transitionReservationHold(order, "exception_hold");
+      order.exceptionHold = this.createExceptionHoldRecord(
+        exceptionHoldEval.reasonCode,
+        dispatchJob.dispatchJobId,
+        now,
+        {
+          isReservation: true,
+          isWithinConfirmationWindow: true,
+          hasEligibleSupply: false,
+          reasonCode: exceptionHoldEval.reasonCode,
+        },
+      );
+      traceLogs.push(
+        this.buildTraceLog(orderId, "dispatch.failed", {
+          dispatchJobId: dispatchJob.dispatchJobId,
+          reasonCode: exceptionHoldEval.reasonCode,
+        }),
+      );
+      traceLogs.push(
+        this.buildTraceLog(orderId, "order.exception_hold", {
+          dispatchJobId: dispatchJob.dispatchJobId,
+          reasonCode: exceptionHoldEval.reasonCode,
+          exceptionHoldCriteria: {
+            isReservation: true,
+            isWithinConfirmationWindow: true,
+            hasEligibleSupply: false,
+          },
+        }),
+      );
+    } else {
+      const escalationAction = this.resolveNoSupplyEscalation(order);
+      if (escalationAction === "move_to_delayed_queue") {
+        order.status = "delayed_queue";
+        order.queueFamily = "delayed_retry_queue";
+        order.queueEntryReason = "no_supply_delayed_retry";
+        dispatchJob.status = "no_supply";
+        order.noSupplyEscalation = {
+          orderId,
+          dispatchJobId: dispatchJob.dispatchJobId,
+          attemptCount: order.dispatchAttemptCount + 1,
+          lastAttemptAt: now,
+          escalationAction,
+          escalatedAt: now,
+          resolvedAt: null,
+        };
+        traceLogs.push(
+          this.buildTraceLog(orderId, "dispatch.no_supply_delayed", {
+            dispatchJobId: dispatchJob.dispatchJobId,
+            reasonCode: exceptionHoldEval.reasonCode,
+            escalationAction,
+            attemptCount: order.dispatchAttemptCount + 1,
+          }),
+        );
+      } else if (escalationAction === "escalate_to_ops") {
+        order.status = "no_supply";
+        order.queueFamily = "manual_review_queue";
+        order.queueEntryReason = "no_supply_escalated_to_ops";
+        dispatchJob.status = "no_supply";
+        order.noSupplyEscalation = {
+          orderId,
+          dispatchJobId: dispatchJob.dispatchJobId,
+          attemptCount: order.dispatchAttemptCount + 1,
+          lastAttemptAt: now,
+          escalationAction,
+          escalatedAt: now,
+          resolvedAt: null,
+        };
+        traceLogs.push(
+          this.buildTraceLog(orderId, "dispatch.no_supply_escalated", {
+            dispatchJobId: dispatchJob.dispatchJobId,
+            reasonCode: exceptionHoldEval.reasonCode,
+            escalationAction,
+            attemptCount: order.dispatchAttemptCount + 1,
+          }),
+        );
+      } else {
+        order.status = "dispatch_failed";
+        traceLogs.push(
+          this.buildTraceLog(orderId, "dispatch.failed", {
+            dispatchJobId: dispatchJob.dispatchJobId,
+            reasonCode: exceptionHoldEval.reasonCode,
+          }),
+        );
+      }
+      order.dispatchAttemptCount += 1;
+      order.lastDispatchFailureReason = exceptionHoldEval.reasonCode;
+    }
+    return traceLogs;
   }
 
   redispatchOrder(
