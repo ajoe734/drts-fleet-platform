@@ -1625,7 +1625,25 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
             payloadRef: null,
           },
           {
-            scope: { brandId: "default", callId: "call-no-audit" },
+            // AUDIT-VOICE-APPLICATION-REGRESSION-20261018: this test's own
+            // point is that a legacy schema missing
+            // voice.phase1_work_item_attempt_audits still completes --
+            // completeWorkItemWithDomainState now additionally requires a
+            // verified manifestRef for ANY finalize_recording completion
+            // (see that method's own doc), which is orthogonal to the
+            // audit-table tolerance this case actually exercises, so a
+            // real manifestRef/recordingId is supplied here same as the
+            // other direct-call cases in this file (e.g. line ~821).
+            scope: {
+              brandId: "default",
+              callId: "call-no-audit",
+              recordingId: "rec-call-no-audit",
+            },
+            manifestRef: {
+              objectKey: "obj-no-audit-001",
+              checksum: "sha256-no-audit-001",
+            },
+            recordingId: "rec-call-no-audit",
           },
         ),
       ).resolves.not.toThrow();

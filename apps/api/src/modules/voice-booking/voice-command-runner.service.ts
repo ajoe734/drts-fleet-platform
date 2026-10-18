@@ -563,6 +563,28 @@ export class VoiceCommandRunnerService
         finalResult.manifestRef?.checksum ??
         null;
 
+      // AUDIT-VOICE-APPLICATION-REGRESSION-20261018: this is the single
+      // choke point every finalize_recording completion actually reaches
+      // (handleFinalizeRecording's own real-adapter result, any future
+      // registered custom handler, and direct test callers alike) --
+      // require a real, verified manifest/recording identity here rather
+      // than in any one upstream caller. A missing manifestRef is NOT the
+      // same as "no audit table" or "no linked order": those are optional,
+      // honestly-absent context this method already tolerates; a recording
+      // finalize result with no object/version/checksum evidence at all is
+      // never a legitimate completion, so this throws instead of silently
+      // substituting `recordingId` as its own "evidence". Thrown inside the
+      // same transaction as the lease-fencing `status = 'completed'` update
+      // above, so a real rollback (see `VoiceBookingRepository.
+      // withTransaction`) leaves the work item exactly as `leased` for
+      // `executeNextWorkItem`'s own existing retry/fencing catch to handle,
+      // the same as any other execution failure.
+      if (!manifestEvidenceRef) {
+        throw new Error(
+          "voice_recording_manifest_unverified: finalize_recording completion has no verified manifestRef evidence",
+        );
+      }
+
       if (voiceSessionId) {
         // Booking commits hold the original session before touching the call.
         // Use that same ordering, then read the now-current bound order.
@@ -1330,13 +1352,22 @@ export class VoiceCommandRunnerService
       this.mediaAdapter !== undefined ||
       this.evidenceService?.hasMediaAdapter() === true;
     if (!hasAdapter) {
-      return {
-        handled: true,
-        type: "finalize_recording",
-        voiceSessionId: work.voiceSessionId,
-        recordingId: (payload.recordingId as string | undefined) ?? null,
-        finalizedAt: new Date().toISOString(),
-      };
+      // AUDIT-VOICE-APPLICATION-REGRESSION-20261018: a missing adapter used
+      // to return a fabricated `handled: true` success here, which
+      // `executeNextWorkItem` then fed straight into
+      // `completeWorkItemWithDomainState` -- marking this work item
+      // "completed" and writing CRM/session/order "recording_bound"/
+      // "finalized" state with no manifest/object/checksum ever verified
+      // (see this method's own doc). Throwing instead leaves the real
+      // `voice.work_item` row exactly where `executeNextWorkItem`'s
+      // existing catch block already puts any other failure: retried with
+      // backoff, then `failed` after `maxAttempts`, with
+      // `completeWorkItemWithDomainState` never reached for it. A genuinely
+      // missing recorder/call-authority provider stays honestly
+      // incomplete/retryable, never a fake recorded/finalized domain write.
+      throw new Error(
+        "voice_recording_adapter_unavailable: no VOICE_MEDIA_RECORDING_ADAPTER is configured; finalize_recording cannot be honestly completed",
+      );
     }
 
     let callId =
