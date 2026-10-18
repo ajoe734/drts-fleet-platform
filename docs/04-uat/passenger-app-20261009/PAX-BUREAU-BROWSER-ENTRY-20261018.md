@@ -23,7 +23,13 @@
 的新步驟都是 opt-in（只在 repo variable `DEV_PAX_BUREAU_ENTRY_HOST` 設定後才會
 執行），對既有部署與 domain-mapping 行為沒有副作用。
 
-本機元件測試（`tests/unit/pax-bureau-browser-entry-20261018/`，共 22 項）涵蓋：
+本機元件測試（`tests/unit/pax-bureau-browser-entry-20261018/`，共 26 項）涵蓋：
+`domain-mappings-dev.yml` 新增的 `target` input 讓 passenger 公開前門可獨立
+provisioning（`passenger-public-entry` job 完全不呼叫任何一個既有十個 legacy
+`map-domain-service.sh`），不受無關既有網域驗證/對應成敗影響，同時
+`target=all` 預設行為與既有十個網域 fail-closed 順序不變
+（回歸 `entry-675363-source-review/assigned-reviewer-675363-R9-integration-finding.json`
+的 `ENTRY-R9-UNRELATED-DOMAIN-MAINTENANCE-GATE`）；
 `grant-passenger-app-iap-invoker.sh` 在授權前先以冪等呼叫確保 Cloud IAP
 service agent 本身存在、若該建立呼叫失敗則不嘗試授權（回歸
 `entry-R6-first-activation-review/findings.json` 的

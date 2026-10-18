@@ -42,7 +42,7 @@ if [[ "$1 $2" == "projects describe" ]]; then
 fi
 
 if [[ "$*" == *"backend-services list"* ]]; then
-  # \$MOCK_EXISTING_BACKENDS: space-separated backend names that should be
+  # $MOCK_EXISTING_BACKENDS: space-separated backend names that should be
   # reported as already existing (simulating a create that already
   # succeeded in an earlier partial run). Anything else: empty = does not
   # exist yet.
@@ -56,8 +56,8 @@ if [[ "$*" == *"backend-services list"* ]]; then
 fi
 
 if [[ "$*" == *"backend-services describe"* ]]; then
-  # \$MOCK_PUBLIC_BACKEND / \$MOCK_GUARD_BACKEND name which backend is being
-  # described; \$MOCK_PUBLIC_BACKEND_GROUPS / \$MOCK_GUARD_BACKEND_GROUPS is
+  # $MOCK_PUBLIC_BACKEND / $MOCK_GUARD_BACKEND name which backend is being
+  # described; $MOCK_PUBLIC_BACKEND_GROUPS / $MOCK_GUARD_BACKEND_GROUPS is
   # the simulated 'backends[].group' value (empty = NEG not attached yet).
   if [[ -n "\${MOCK_PUBLIC_BACKEND:-}" && "$*" == *"backend-services describe \${MOCK_PUBLIC_BACKEND} "* ]]; then
     if [[ "\${MOCK_PUBLIC_DESCRIBE_EXIT_CODE:-0}" != "0" ]]; then

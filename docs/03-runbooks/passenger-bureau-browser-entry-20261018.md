@@ -81,10 +81,21 @@ URL map 對不符任何 `hostRules` 的 Host（包含直接用 IP 或偽造 Host
     「Grant Cloud IAP service agent run.invoker — passenger-app-web」步驟，
     只在 `DEV_PAX_BUREAU_ENTRY_HOST` 有值時執行 `grant-passenger-app-iap-invoker.sh`。
 - `.github/workflows/domain-mappings-dev.yml`：
-  - 同樣讀入 `DEV_PAX_BUREAU_ENTRY_HOST`；在既有
+  - 同樣讀入 `DEV_PAX_BUREAU_ENTRY_HOST`；新增 `target` workflow input
+    （`all`，預設／`passenger-entry-only`）。`target=all` 時行為不變：在既有
     `ride.smarttransport.tw` domain mapping 之後（不是取代它——既有直接
     Cloud Run domain mapping 仍保留給帶 identity token 的既有呼叫者），
-    若此變數有值則呼叫 `setup-passenger-public-entry.sh`。
+    若此變數有值則呼叫 `setup-passenger-public-entry.sh`；此 job 的
+    `set -euo pipefail` 仍會在任何一個既有十個 legacy 網域中途失敗時中止，
+    維持既有 fail-closed 行為與全量 inventory 預設不變。
+  - `target=passenger-entry-only` 啟用獨立的 `passenger-public-entry` job：
+    只驗證 passenger app service 在審查過的 inventory 內、只呼叫
+    `setup-passenger-public-entry.sh`，完全不執行其餘十個 legacy
+    `map-domain-service.sh` 呼叫，因此不受任何無關既有網域驗證/對應失敗影響
+    （`ENTRY-R9-UNRELATED-DOMAIN-MAINTENANCE-GATE`）。不新增 IAM、不新增
+    VM 服務、不繞過既有 pause（`DEV_PARTNER_BOOKING_STATE`）或 private
+    exposure guard——這些只存在於 `target=all` 的既有 job，`passenger-entry-only`
+    單純是同一個既有 `setup-passenger-public-entry.sh` 的獨立呼叫路徑。
 
 兩個 workflow 的呼叫都是 **opt-in**：在對應 repo variable 設定之前，既有
 部署與 domain-mapping 行為完全不變。
@@ -98,7 +109,11 @@ gh variable set DEV_PAX_BUREAU_ENTRY_HOST --body "bureau.smarttransport.tw"
 # 2. 正常 reviewed/merge 流程把本 task 變更帶到 immutable publish snapshot。
 
 # 3. 用該 publish ref 跑現有 domain-maintenance workflow：
-gh workflow run domain-mappings-dev.yml --ref "$PUBLISH_REF" -f confirm=apply
+# 3a. 預設：連同既有十個 legacy 網域一起重新驗證/對應（維持既有全量行為）。
+gh workflow run domain-mappings-dev.yml --ref "$PUBLISH_REF" -f confirm=apply -f target=all
+# 3b. 或者：只建立這個 passenger 公開前門，不受任何既有十個 legacy 網域
+#     驗證/對應成功與否影響（ENTRY-R9-UNRELATED-DOMAIN-MAINTENANCE-GATE）。
+gh workflow run domain-mappings-dev.yml --ref "$PUBLISH_REF" -f confirm=apply -f target=passenger-entry-only
 # 腳本輸出會包含新 host 要加的 DNS A 記錄（靜態 IP）。
 
 # 4. 使用者在 smarttransport.tw zone 新增該 A 記錄；受管憑證在 DNS 生效、
