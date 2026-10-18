@@ -30,7 +30,7 @@ export async function seedVoiceDispatchWorkFixture(
   const snapshotHash = voiceSnapshotHash(snapshot);
 
   await pool.query(
-    "INSERT INTO crm.phase1_call_sessions (call_id,status,created_at,updated_at,record) VALUES ($1,'active',now(),now(),$2::jsonb)",
+    "INSERT INTO crm.phase1_call_sessions (call_id,status,started_at,updated_at,record) VALUES ($1,'active',now(),now(),$2::jsonb)",
     [f.callId, JSON.stringify({ callId: f.callId })],
   );
 
