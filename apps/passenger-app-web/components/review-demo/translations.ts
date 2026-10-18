@@ -76,8 +76,6 @@ export const t = {
   realOrderId: "真實訂單 UUID：",
   rideNotice:
     "調度與司機視窗必須核對同一 UUID。付款結果由模擬 PSP 寫入真實演練付款紀錄。",
-  retryQueued:
-    "已交由原付款程序處理；未到重試時間不會提早扣款。請等待行程付款狀態更新。",
   retryFailed: "補繳未完成，請確認登入與付款配置後重試。",
   retryPayment: "依既有政策重試演練付款",
   downloadRecord: "下載同單演練紀錄（非正式憑證）",
