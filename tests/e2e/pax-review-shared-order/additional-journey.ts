@@ -1,7 +1,8 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page, type TestInfo } from "@playwright/test";
 import { createJourneyProgress } from "./progress";
 import { bookingResponseDiagnostic } from "./booking-diagnostic";
 import { dispatchResponseDiagnostic } from "./dispatch-diagnostic";
+import { verifyFutureShortLeadRefusal } from "./short-lead-prerequisite";
 
 export type JourneyStep = ReturnType<typeof createJourneyProgress>["step"];
 export const sharedDev = process.env.PAX_REVIEW_SHARED_DEV_SMOKE === "true";
@@ -96,6 +97,7 @@ export async function book(
   paymentMethodId: string,
   unpaidRejection = false,
   verifyPrerequisites = false,
+  prerequisiteInfo?: TestInfo,
 ) {
   await page.goto(`${PAX}/`);
   const ack = page.getByRole("button", { name: "我已閱讀並同意", exact: true });
@@ -137,6 +139,7 @@ export async function book(
     } finally {
       page.off("request", observe);
     }
+    await verifyFutureShortLeadRefusal(page, prerequisiteInfo);
   }
   const localTime = await page.evaluate(() => {
     const date = new Date(Math.ceil((Date.now() + 120_000) / 60_000) * 60_000);
