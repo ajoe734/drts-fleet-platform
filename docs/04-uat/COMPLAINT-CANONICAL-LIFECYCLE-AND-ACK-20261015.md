@@ -336,3 +336,76 @@ $ pnpm exec eslint apps/api/src/modules/complaint/complaint.service.ts \
 ### 9.5 未解的第六項 finding：restart/replica 下的 durable command identity（明列，不冒充已交付）
 
 Reviewer 在 ca237 review 中列出的六項 unknown-COMMIT findings，本輪連同前一 session 的 WIP 共修完五項（readback reconciliation、link/SLA 重試、escalation precheck 順序、unknown-then-failed 保留原身分、note/assign 去重）。第六項——`pendingUncertainCommits` 目前僅是 service 行程內的 `Map`，API 行程重啟或請求落在另一個 replica 時會遺失待對帳的身分，使得「同一指令重試應沿用同一 caseNo/entryId」這個保證在跨行程/跨重啟時失效——**本輪未修**。這需要把待對帳身分改為跨行程可讀（例如一張新的 durable pending-commit 表或在既有 `crm.phase1_complaint_cases` 列上加一個欄位記錄「嘗試中但未確認」狀態），屬於需要新 migration 的 schema 變更，超出本任務 15 個 write_scopes 且不應憑空猜測 migration 編號；需先提出精確方案與原 task owner/reviewer 協調後才能實作。在此之前，重啟或跨 replica 的重試仍只能依賴 `reconcilePendingCase` 對 durable store 的最終對帳（`refreshSettlementCases()` 持續輪詢），而非即時沿用同一身分重送。
+
+## 10. Root b96 review（`request_changes`）修復：note/assign 假 ACK（P1）＋ restart/replica durable identity 精確方案
+
+Reviewer 對 `b96ba708a` 的正式 review（`.local/goal-continuation-20261018T2246Z-.../Root-Complaint-b96-original-assigned-review-request-changes.json`，sha256 `365f4ef3...`）提出一項新 P1（`b96-unknown-note-assignment-false-success`）與一項延續的「original required functional gap」（`b96-retained-restart-replica-command-identity`，即本文件 9.5 已列的第六項）。
+
+### 10.1 根因：9.3 為了讓測試不逾時，引入了會真正發出假 ACK 的 `acknowledgePendingUncertainCommit`
+
+9.3 的推論前提有誤：它認為 note/assign 的「內容相同重試」若真的重送 `persistChanges`，一旦原始 commit 事後落地，會「造出第二筆列」。但 `complaint.repository.ts` 的 `persistChanges` 對 case 與 timeline 都是 `INSERT ... ON CONFLICT (case_no) DO UPDATE` / `ON CONFLICT (entry_id) DO UPDATE`（`complaint.repository.ts:163`、`:195`）——重送的是 `pending.complaintCase`/`pending.complaintTimelines` 這組與原始嘗試完全相同的 `case_no`/`entry_id`，upsert 是冪等的，不會造出第二筆列。這與 `retryUncertainComplaintWrite` 已經在 create/resolve/close/reopen/escalate/link/sla-breach 七種動作上安全使用的機制完全相同。
+
+9.3 真正卡住的是測試寫法：舊測試在 `await controller.addComplaintCaseNote(...)` 這一行**之後**才呼叫 `retryGate.resolve()`，若呼叫真的觸發第二次 `persistChanges` 並卡在 gate 上，`await` 永遠不會完成。9.3 選擇讓生產碼遷就這個測試寫法（新增同步、不等待任何寫入確認就發 audit 的 `acknowledgePendingUncertainCommit`），而不是修正測試本身依照 `LINK-SLA-RETRY`/`TypeError regression` 兩類案例已經示範過的正確 async 模式（先用 `vi.waitFor` 確認 mock 真的被呼叫，再 resolve gate，再 await 結果）。後果正是 Root 這次抓到的：`acknowledgePendingUncertainCommit` 對任何「內容相同的重試」一律立刻回傳 pending 快照＋發新 audit，完全不管這次重試（或原始嘗試）的 commit 究竟落地與否——controller 可能對一個從未真正確認過的寫入回 200。
+
+### 10.2 修法
+
+- `complaint.service.ts`：`assignComplaintCase`（:752-776）與 `addComplaintCaseNoteInternal`（:878-902）命中相同內容的 pending 重試時，改呼叫既有的 `retryUncertainComplaintWrite`（與其餘七種動作一致），不再呼叫 `acknowledgePendingUncertainCommit`；該方法本身（原 :1960-1972）連同其基於錯誤前提的文件註解一併移除，沒有其他呼叫點。
+- `retryUncertainComplaintWrite` 本身不變：仍是重送 `pending.complaintCase`/`pending.complaintTimelines`（同一 caseNo/entryId，交由 repository 的 `ON CONFLICT DO UPDATE` 冪等 upsert），並透過既有的 `finishOrdinaryComplaintAction` 只在這次重試真正 `persistChanges` 解析後才組出 `{ data, auditLog }`；若這次重試本身又拋出（含再次 `ComplaintCommitOutcomeUnknownError`），promise 直接 reject，controller 對外回應的是真正的錯誤，不是假 200。
+- `tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-terminal-state-and-ack.test.ts`：兩個既有的 `NOTE-REPLAY`（note/assign）案例改為 `LINK-SLA-RETRY` 同款的非同步模式——先 `await vi.waitFor(() => expect(persistChanges).toHaveBeenCalledTimes(3))` 確認重試真的發起了新的 `persistChanges` 呼叫，再 `retryGate.resolve()`，再 `await` 取得結果；斷言（timeline 長度不重複、assigneeId/status 正確）不變。新增一案例 `C045-F3-20261018-NOTE-FALSE-ACK`：第一次 note 回 unknown，對帳用的 `loadCaseByCaseNo` 本身也失敗一次（連線問題），重試本身的 `persistChanges` 又回 unknown；斷言 controller 呼叫整體 reject（而非回假成功），且 timeline 沒有多出重複的 note/audit。
+
+### 10.3 驗證
+
+```bash
+$ pnpm exec vitest run tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-terminal-state-and-ack.test.ts
+ Test Files  1 passed (1)
+      Tests  23 passed (23)
+
+$ pnpm exec vitest run tests/unit/complaint.test.ts tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-ops-ui-actions.test.tsx \
+    tests/unit/system-remediation/sr-qa-call-001/c045-complaint-lifecycle-sla.test.ts \
+    tests/unit/system-remediation/sr-fleet-case-001/sr-fleet-case-001.test.ts
+ Test Files  4 passed (4)
+      Tests  36 passed (36)
+
+$ cd apps/api && pnpm exec vitest run tests/unit/complaint-taxonomy-reopen-sla.test.ts tests/unit/complaint-incident-escalation.test.ts
+ Test Files  2 passed (2)
+      Tests  24 passed (24)
+
+$ cd apps/api && pnpm exec tsc --noEmit   # exit 0
+$ pnpm exec eslint apps/api/src/modules/complaint/complaint.service.ts \
+    tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-terminal-state-and-ack.test.ts \
+    --max-warnings=0   # exit 0
+
+$ pnpm exec vitest run tests/unit/fleet-statement-decisions-20261013 tests/unit/pax-postride-same-order-20261016 \
+    tests/unit/pax-receipt-complaint-20261009 tests/unit/system-remediation/sr-fleet-case-001
+ Test Files  15 passed (15)
+      Tests  275 passed (275)
+```
+
+### 10.4 restart/replica durable command identity 精確方案（未實作，待 migration 編號協調；非替代方案列舉）
+
+Reviewer 明確要求不要只列「新表／舊欄位」兩個 alternative，而要寫出可直接據以實作的單一方案：
+
+**1) 既有 logical command key 來源與真正重送的 caller**：目前的「重試」判定不是靠一個顯式 idempotency key，而是靠 `stableStringify(command)` 與 `action` 的組合比對（`findPendingUncertainCreate`、:752-756 的 `pendingAssign`、:878-882 的 `pendingNote`，以及 resolve/close/reopen/escalate/link/sla-breach 各自在 :987/1094/1190/1306/1415/1526 以 `pendingUncertainCommits.get(caseNo)` 直接比對 `action`）。真正會重送相同內容的 caller：Ops Console 逾時後使用者重按同一按鈕（create/assign/note，無顯式 idempotency key，純靠 command 內容相同）；`fleet-partner-case.service.ts` 的 `createReply`（有顯式 `idempotencyKey`，但目前映射到 Fleet 自己的 `repliesByIdempotencyKey`，與 Complaint 側的 `pendingUncertainCommits` 是两层不同的去重，Fleet 重送時仍是呼叫 `addComplaintCaseNote` 走 command-content 比對）；`callcenter.controller.ts` 的 `transferCallToComplaint`（通話逾時後 callcenter 重送同一通話/案件的轉案指令）。新 schema 的 command key 應直接採用「`action` + `stableStringify(matchCommand)` 的 sha256」，與現行比對邏輯完全對齊，不需要呼叫端額外傳遞新的顯式 ID。
+
+**2) caseNo/entryId 何時持久分配**：目前兩者都是在呼叫當下、持久化嘗試**之前**於記憶體中同步分配（`caseSequence++`／`appendTimelineEntry` 產生的 `entryId`），而不是由 DB 預設值/序列分配；也就是說「身分」在第一次嘗試時就已決定，問題只在於這個「command key → caseNo/entryId」的映射目前只存在於行程內的 `Map`。新 schema 必須保留「身分在首次嘗試即分配、於 DB 落地前就已固定」這個既有語意，只把映射本身改成跨行程可讀。
+
+**3) pending/confirmed/unknown 與 TX/reconcile/cold-read 語意**：
+   - `pending`：`persistChanges` 拋出 `ComplaintCommitOutcomeUnknownError`（COMMIT 送出後連線中斷等，無法判斷是否落地）。
+   - `confirmed`：同一 caseNo 的後續 `persistChanges` 正常 resolve（含重試自己的 commit 成功），或 `reconcilePendingCase` 的 `loadCaseByCaseNo` 讀到與 `pending.complaintCase` 逐位元組相同的 durable 列。
+   - `failed`（確定未落地）：對 `create_complaint_case` 而言是 `loadCaseByCaseNo` 回 `null`；對既有案件的 update 而言，`null` 或讀到的列與 pending 快照不同，都不能確定未落地（`reconcilePendingCase` 現有的「update 查無列不代表未 commit」規則必須原樣保留），只有讀到「存在但內容不同」才能判定未落地並 rollback。
+   - `cold-read`（跨行程/重啟）：目前完全沒有——這正是本項要新增的能力：下一個收到相同 command key 的 replica（或重啟後的同一行程）必須能從 durable pending-commit 紀錄還原 `complaintCase`/`complaintTimelines` 快照與 `rollback` 所需的「之前狀態」，才能重建 `PendingUncertainComplaintCommit` 並走既有的 `retryUncertainComplaintWrite`/`reconcilePendingCase` 路徑。`rollback` 閉包本身無法序列化，跨行程還原後必須改用「讀取 `previousCaseSnapshot` 欄位 + 呼叫既有的 `revertComplaintCaseMutation`」取代原本捕捉在閉包裡的 in-memory 還原。
+
+**4) 確切新 migration/table/columns/index**（單一方案，非 alternative）：新增 `crm.phase1_complaint_pending_commits`：
+   - `command_key TEXT PRIMARY KEY`（`sha256(action || ':' || stableStringify(matchCommand))`）
+   - `case_no TEXT NOT NULL`
+   - `action TEXT NOT NULL`
+   - `case_snapshot JSONB NOT NULL`（即 `pending.complaintCase`）
+   - `timeline_snapshot JSONB NOT NULL`（即 `pending.complaintTimelines`，陣列）
+   - `previous_case_snapshot JSONB`（update 類動作的還原快照；create 類為 `NULL`，還原時等同現行「整列刪除」）
+   - `status TEXT NOT NULL DEFAULT 'pending'`（`CHECK (status IN ('pending','confirmed','failed'))`）
+   - `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`
+   - `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`
+   - `CREATE INDEX idx_phase1_complaint_pending_commits_case_no ON crm.phase1_complaint_pending_commits (case_no);`（供 `reconcilePendingCase` 依 caseNo 掃描）
+   寫入時機：僅在 `persistChanges` catch 到 `ComplaintCommitOutcomeUnknownError` 之後，用獨立的一次 `INSERT ... ON CONFLICT (command_key) DO UPDATE`（非原本那個結果未知的交易）盡力登記；若這次登記本身也失敗，則該次重試退回目前的「僅行程內 `Map`」保底行為，不視為新的回歸。確認／清除時機：`reconcilePendingCase` 判定 `confirmed`/`failed` 後，刪除對應 `command_key` 列（或視覺化稽核需求改為 `status` 更新而非刪除，兩者皆可，建議刪除以維持表的小體積）。
+
+**5) 超 scope 的必要 caller hunk**：`complaint.repository.ts` 需新增 `recordPendingCommit`/`loadPendingCommitsByCaseNo`/`clearPendingCommit` 三個方法（已在本任務 15 個 write_scopes 內，可隨 P1 一併實作）；但新 migration 檔本身（`infra/migrations/` 下的新檔案）**不在**本任務 write_scopes 內，需要 Root 協調的新 migration 編號與獨立 review/scope 擴充後才能落地，本輪不猜測編號、不建立該檔案。

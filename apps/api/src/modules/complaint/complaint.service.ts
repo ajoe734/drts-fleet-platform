@@ -746,16 +746,18 @@ export class ComplaintService implements OnModuleInit {
 
     const complaintCase = this.requireComplaintCase(caseNo);
     // A retry of the exact same assignment while its earlier commit outcome
-    // is still unknown must recover that attempt's entryId instead of
-    // appending a second timeline row for one assignment intent. A genuinely
-    // different assignment is not a retry and falls through unaffected.
+    // is still unknown must actually re-attempt the write (same caseNo/
+    // entryId, idempotent via ON CONFLICT DO UPDATE) and only acknowledge
+    // once that retry resolves, instead of fabricating success for a commit
+    // that is still unverified. A genuinely different assignment is not a
+    // retry and falls through unaffected.
     const pendingAssign = this.pendingUncertainCommits.get(caseNo);
     if (
       pendingAssign?.action === "assign_complaint_case" &&
       this.stableStringify(pendingAssign.matchCommand) ===
         this.stableStringify(command)
     ) {
-      return this.acknowledgePendingUncertainCommit(
+      return this.retryUncertainComplaintWrite(
         pendingAssign,
         {
           actorId: pendingAssign.complaintCase.assigneeId,
@@ -871,17 +873,18 @@ export class ComplaintService implements OnModuleInit {
 
     const complaintCase = this.requireComplaintCase(caseNo);
     // A retry of the exact same note while its earlier commit outcome is
-    // still unknown must recover that attempt's entryId instead of
-    // appending a second canonical timeline row for one reply intent (e.g. a
-    // Fleet idempotency-key retry). A genuinely different note still falls
-    // through to a fresh mutation below.
+    // still unknown must actually re-attempt the write (same entryId,
+    // idempotent via ON CONFLICT DO UPDATE) and only acknowledge once that
+    // retry resolves, instead of fabricating success for a commit that is
+    // still unverified (e.g. a Fleet idempotency-key retry). A genuinely
+    // different note still falls through to a fresh mutation below.
     const pendingNote = this.pendingUncertainCommits.get(caseNo);
     if (
       pendingNote?.action === "add_complaint_case_note" &&
       this.stableStringify(pendingNote.matchCommand) ===
         this.stableStringify(command)
     ) {
-      return this.acknowledgePendingUncertainCommit(
+      return this.retryUncertainComplaintWrite(
         pendingNote,
         {
           actorId: pendingNote.complaintCase.assigneeId,
@@ -1946,29 +1949,6 @@ export class ComplaintService implements OnModuleInit {
       options,
       onCommitted,
     );
-  }
-
-  /** Acknowledges a retry whose content exactly matches an already-attempted
-   * uncertain-commit note/assignment: unlike a terminal-state mutation
-   * (resolve/close/reopen/escalate/link/sla-breach), a duplicate append-only
-   * note or an identical reassignment carries no additional information to
-   * commit, so resending it would only risk minting a second canonical row
-   * once the original commit lands. Returns the pending attempt's own
-   * snapshot immediately instead of starting another canonical write, and
-   * leaves the pending marker untouched for refreshSettlementCases() to
-   * resolve against the durable store whenever it next can. */
-  private acknowledgePendingUncertainCommit<Capture extends boolean = false>(
-    pending: PendingUncertainComplaintCommit,
-    auditInput: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
-    requestId?: string,
-    options?: { captureAudit?: Capture },
-  ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
-    return this.finishComplaintAction(
-      this.cloneComplaintCase(pending.complaintCase),
-      auditInput,
-      requestId,
-      options,
-    ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
   }
 
   /** Finds an uncertain-commit create (createComplaintCase /

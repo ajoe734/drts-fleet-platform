@@ -1018,14 +1018,20 @@ describe("Root ca237 follow-up: readback reconciliation, link/SLA/escalation ret
     gate.reject(failure);
     expect(await firstAttempt).toBe(failure);
 
-    // A same-content retry (e.g. a Fleet idempotency-key resend) recovers
-    // the same pending entry instead of appending a second canonical row.
+    // A same-content retry (e.g. a Fleet idempotency-key resend) actually
+    // re-attempts the write (recovering the same pending entry instead of
+    // appending a second canonical row) and only acknowledges once that
+    // retry itself commits.
     const retryGate = context.pauseWrite();
-    const retry = await context.controller.addComplaintCaseNote(
+    const retryPromise = context.controller.addComplaintCaseNote(
       complaintCase.caseNo,
       { note: "Called driver" },
     );
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(3),
+    );
     retryGate.resolve();
+    const retry = await retryPromise;
     expect(retry.data.status).toBe("under_investigation");
     expect(
       context.complaintService.getComplaintTimeline(complaintCase.caseNo),
@@ -1069,16 +1075,79 @@ describe("Root ca237 follow-up: readback reconciliation, link/SLA/escalation ret
     gate.reject(failure);
     expect(await firstAttempt).toBe(failure);
 
+    // A same-content retry actually re-attempts the write (recovering the
+    // same pending entry instead of appending a second canonical row) and
+    // only acknowledges once that retry itself commits.
     const retryGate = context.pauseWrite();
-    const retry = await context.controller.assignComplaintCase(
+    const retryPromise = context.controller.assignComplaintCase(
       complaintCase.caseNo,
       { assigneeId: "AGENT-OPS-001" },
     );
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(3),
+    );
     retryGate.resolve();
+    const retry = await retryPromise;
     expect(retry.data.assigneeId).toBe("AGENT-OPS-001");
     expect(
       context.complaintService.getComplaintTimeline(complaintCase.caseNo),
     ).toHaveLength(2); // case_created + the single assignment, not two
+  });
+
+  it("C045-F3-20261018-NOTE-FALSE-ACK: a note retry whose own commit is still unknown rejects instead of returning a fabricated success receipt", async () => {
+    const context = fixture();
+    const complaintCase = context.complaintService.createComplaintCase({
+      caseSource: "ops",
+      category: "driver_service",
+      severity: "normal",
+      description: "Note false-ACK regression",
+    });
+    await context.complaintService.awaitSettlementPersistence(
+      complaintCase.caseNo,
+    );
+
+    const gate = context.pauseWrite();
+    const failure = new ComplaintCommitOutcomeUnknownError(
+      new Error("note COMMIT outcome unknown"),
+    );
+    const firstAttempt = context.controller
+      .addComplaintCaseNote(complaintCase.caseNo, { note: "Called driver" })
+      .catch((error: unknown) => error);
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(2),
+    );
+    gate.reject(failure);
+    expect(await firstAttempt).toBe(failure);
+
+    // The durable read used to reconcile the pending marker also fails (e.g.
+    // a connectivity blip), so the retry cannot prove either outcome.
+    context.loadCaseByCaseNo.mockRejectedValueOnce(
+      new Error("read failed during reconciliation"),
+    );
+
+    // An identical replay must not be acknowledged as a success while its
+    // own commit is unresolved: before the ca237/root fix,
+    // acknowledgePendingUncertainCommit returned the pending snapshot
+    // synchronously (with a fresh audit entry) with no new write and no
+    // confirmation the original commit ever landed.
+    const retryGate = context.pauseWrite();
+    const retryPromise = context.controller.addComplaintCaseNote(
+      complaintCase.caseNo,
+      { note: "Called driver" },
+    );
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(3),
+    );
+    const retryFailure = new ComplaintCommitOutcomeUnknownError(
+      new Error("note retry COMMIT outcome unknown"),
+    );
+    retryGate.reject(retryFailure);
+
+    await expect(retryPromise).rejects.toBe(retryFailure);
+    // No duplicate note/audit was minted for the still-unresolved retry.
+    expect(
+      context.complaintService.getComplaintTimeline(complaintCase.caseNo),
+    ).toHaveLength(2); // case_created + the single pending note
   });
 
   it("TypeError regression (Root ca237 review): a controller-driven resolve retry after an unknown commit returns a real action receipt instead of crashing on an undefined auditLog", async () => {
