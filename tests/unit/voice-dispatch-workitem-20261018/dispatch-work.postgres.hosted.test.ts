@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { createRequire } from "node:module";
 import {
   afterAll,
   afterEach,
@@ -15,6 +16,7 @@ import {
 } from "../../../apps/api/src/common/idempotency";
 import { OpsDispatchEventsService } from "../../../apps/api/src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { AuditLogRepository } from "../../../apps/api/src/modules/audit-notification/audit-log.repository";
 import { DriverProfileRepository } from "../../../apps/api/src/modules/driver-profile/driver-profile.repository";
 import { DriverProfileService } from "../../../apps/api/src/modules/driver-profile/driver-profile.service";
 import { OwnedMobilityRepository } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
@@ -33,6 +35,13 @@ import { VehicleEligibilityService } from "../../../apps/api/src/modules/vehicle
 import { VoiceBookingCommandService } from "../../../apps/api/src/modules/voice-booking/voice-booking-command.service";
 import { VoiceBookingRepository } from "../../../apps/api/src/modules/voice-booking/voice-booking.repository";
 import { VoiceCommandRunnerService } from "../../../apps/api/src/modules/voice-booking/voice-command-runner.service";
+import {
+  createVoiceBookingResultDelivery,
+  type VoiceBookingResultDelivery,
+} from "../../../apps/api/src/modules/voice-booking/voice-booking-result-delivery";
+import { VoiceSessionService } from "../../../apps/api/src/modules/voice-booking/voice-session.service";
+import { VoiceSessionRepository } from "../../../apps/api/src/modules/voice-booking/voice-session.repository";
+import type { VoiceMediaRecordingAdapter } from "../../../apps/api/src/modules/voice-booking/voice-evidence.service";
 import { seedVoiceDispatchWorkFixture } from "../../support/voice-dispatch-workitem-postgres-fixture";
 import {
   hostedPaymentEnabled,
@@ -206,6 +215,9 @@ describe.skipIf(!hostedPaymentEnabled)(
     function runnerFor(
       p: ReturnType<typeof makePeer>,
       f: Awaited<ReturnType<typeof seedVoiceDispatchWorkFixture>>,
+      audit?: AuditNotificationService,
+      delivery?: VoiceBookingResultDelivery,
+      mediaAdapter?: VoiceMediaRecordingAdapter,
     ) {
       const commands = new VoiceBookingCommandService(
         p.voice,
@@ -218,6 +230,11 @@ describe.skipIf(!hostedPaymentEnabled)(
         commands,
         p.repository,
         p.owned.getAutonomousDispatchExecutor(),
+        undefined,
+        undefined,
+        mediaAdapter,
+        audit,
+        delivery,
       );
     }
 
@@ -237,6 +254,510 @@ describe.skipIf(!hostedPaymentEnabled)(
         )
       ).rows;
     }
+
+    async function pendingVoiceOrder(p: ReturnType<typeof makePeer>) {
+      const f = await seedVoiceDispatchWorkFixture(h.pool!);
+      const commands = new VoiceBookingCommandService(
+        p.voice,
+        f.makeEvidence(p.voice) as never,
+        f.products as never,
+        f.areas as never,
+        f.access,
+      );
+      const accepted = await commands.accept("fixture-provider", f.request);
+      const store = new VoiceSessionRepository(p.database);
+      const session = await store.findSessionById(f.request.voiceSessionId);
+      await new VoiceSessionService(store).closeSession(
+        f.request.voiceSessionId,
+        session!.sessionVersion,
+      );
+      return { f, commands, accepted };
+    }
+
+    function simulatedRecorder(
+      beforeAck?: (
+        params: Parameters<VoiceMediaRecordingAdapter["finalizeRecording"]>[0],
+      ) => Promise<void>,
+    ): VoiceMediaRecordingAdapter {
+      return {
+        async finalizeRecording(params) {
+          await beforeAck?.(params);
+          return {
+            recordingId: params.scope.recordingId,
+            manifestRef: {
+              objectKey: "simulation/original-call-manifest",
+              objectVersion: "simulation-v1",
+              checksum: "simulation-checksum",
+              byteLength: 0,
+              durableAt: new Date().toISOString(),
+            },
+            verifiedAt: new Date().toISOString(),
+          };
+        },
+      };
+    }
+
+    async function expectOriginalRecordingLink(
+      orderId: string,
+      callId: string,
+      evidenceRef: string,
+    ) {
+      const result = await h.pool!.query(
+        `SELECT o.order_id, o.record AS order_record, c.linked_order_id, c.record AS call_record
+         FROM ops.phase1_owned_orders o JOIN crm.phase1_call_sessions c ON c.call_id=o.call_id
+         WHERE o.order_id=$1 AND c.call_id=$2`,
+        [orderId, callId],
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0]).toMatchObject({
+        order_id: orderId,
+        linked_order_id: orderId,
+        order_record: { recordingEvidenceRef: evidenceRef },
+        call_record: {
+          linkedOrderId: orderId,
+          recordingEvidenceRef: evidenceRef,
+        },
+      });
+    }
+
+    it("persists an explicitly simulated notification receipt for the original booking result", async () => {
+      const { a, b } = await seededPeers();
+      const { f, committed } = await commitVoiceOrder(a);
+      const delivery = createVoiceBookingResultDelivery({
+        VOICE_BOOKING_RESULT_DELIVERY: "simulation",
+      })!;
+      const result = await runnerFor(
+        b,
+        f,
+        new AuditNotificationService(new AuditLogRepository(b.database)),
+        delivery,
+      ).runOnce({ supportedTypes: ["notify_booking_result"] });
+      expect(result).toMatchObject({
+        success: true,
+        result: {
+          status: "simulated",
+          orderId: committed.orderId,
+          provider: "simulation",
+        },
+      });
+      const rows = await h.pool!.query(
+        `SELECT a.audit_id, a.resource_id, a.new_value, w.status AS work_status
+         FROM admin.audit_logs a JOIN voice.work_item w
+         ON w.command_id::text=a.request_id AND w.work_type='notify_booking_result'
+         WHERE a.request_id=$1 AND a.action_name='voice.booking.result_notification'`,
+        [committed.commandId],
+      );
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0]).toMatchObject({
+        resource_id: committed.orderId,
+        work_status: "completed",
+        new_value: {
+          commandId: committed.commandId,
+          orderId: committed.orderId,
+          bookingStatus: "succeeded",
+          deliveryStatus: "simulated",
+          provider: "simulation",
+          simulated: true,
+        },
+      });
+      expect(result!.result).toMatchObject({
+        auditId: rows.rows[0].audit_id,
+        providerMessageId: rows.rows[0].new_value.providerMessageId,
+      });
+    }, 30000);
+
+    it("a fresh peer replays a lost notification acknowledgement without a duplicate durable receipt", async () => {
+      const { a, b } = await seededPeers();
+      const { f, committed } = await commitVoiceOrder(a);
+      const simulation = () =>
+        createVoiceBookingResultDelivery({
+          VOICE_BOOKING_RESULT_DELIVERY: "simulation",
+        })!;
+      const first = runnerFor(
+        b,
+        f,
+        new AuditNotificationService(new AuditLogRepository(b.database)),
+        simulation(),
+      );
+      first.completeWorkItemWithDomainState = async () => {
+        throw new Error("injected notification ACK loss");
+      };
+      expect(
+        await first.runOnce({ supportedTypes: ["notify_booking_result"] }),
+      ).toMatchObject({ success: false });
+      const before = await h.pool!.query(
+        `SELECT audit_id, new_value FROM admin.audit_logs WHERE request_id=$1 AND action_name='voice.booking.result_notification'`,
+        [committed.commandId],
+      );
+      expect(before.rows).toHaveLength(1);
+      const restarted = makePeer(h.peerDatabase());
+      peers.push(restarted);
+      await initialize(restarted);
+      await new Promise((resolve) => setTimeout(resolve, 2200));
+      expect(
+        await runnerFor(
+          restarted,
+          f,
+          new AuditNotificationService(
+            new AuditLogRepository(restarted.database),
+          ),
+          simulation(),
+        ).runOnce({ supportedTypes: ["notify_booking_result"] }),
+      ).toMatchObject({
+        success: true,
+        result: {
+          status: "simulated",
+          auditId: before.rows[0].audit_id,
+          providerMessageId: before.rows[0].new_value.providerMessageId,
+        },
+      });
+      const after = await h.pool!.query(
+        `SELECT audit_id, new_value FROM admin.audit_logs WHERE request_id=$1 AND action_name='voice.booking.result_notification'`,
+        [committed.commandId],
+      );
+      expect(after.rows).toEqual(before.rows);
+      const work = await h.pool!.query(
+        `SELECT status,attempt FROM voice.work_item WHERE command_id=$1 AND work_type='notify_booking_result'`,
+        [committed.commandId],
+      );
+      expect(work.rows).toEqual([{ status: "completed", attempt: 2 }]);
+    }, 30000);
+
+    it("Nest bootstrap continues booking work after a durable call close, without an HTTP listener or manual runOnce", async () => {
+      const { a, b } = await seededPeers();
+      const { f, committed } = await commitVoiceOrder(a);
+      const sessionStore = new VoiceSessionRepository(a.database);
+      const session = await sessionStore.findSessionById(
+        f.request.voiceSessionId,
+      );
+      const closed = await new VoiceSessionService(sessionStore).closeSession(
+        f.request.voiceSessionId,
+        session!.sessionVersion,
+      );
+      expect(closed.dialogState).toBe("closed");
+      expect(closed.mediaState).toBe("ended");
+      expect(closed.recordingState).toBe("finalizing");
+      const runner = runnerFor(
+        b,
+        f,
+        new AuditNotificationService(new AuditLogRepository(b.database)),
+        createVoiceBookingResultDelivery({
+          VOICE_BOOKING_RESULT_DELIVERY: "simulation",
+        })!,
+      );
+      const require = createRequire(
+        new URL("../../../apps/api/package.json", import.meta.url),
+      );
+      const { NestFactory } = require("@nestjs/core");
+      const previous = process.env.VOICE_BACKGROUND_RUNNER_ENABLED;
+      let app: { close(): Promise<void> } | undefined;
+      try {
+        process.env.VOICE_BACKGROUND_RUNNER_ENABLED = "true";
+        app = await NestFactory.createApplicationContext(
+          {
+            module: class HostedVoiceRunnerLifecycle {},
+            providers: [
+              { provide: VoiceCommandRunnerService, useValue: runner },
+            ],
+          },
+          { logger: false, abortOnError: false },
+        );
+        await expect
+          .poll(
+            async () => {
+              const result = await h.pool!.query(
+                `SELECT work_type,status FROM voice.work_item WHERE command_id=$1
+             AND work_type IN ('request_dispatch','publish_booking_audit','notify_booking_result') ORDER BY work_type`,
+                [committed.commandId],
+              );
+              return result.rows;
+            },
+            { timeout: 15000, interval: 100 },
+          )
+          .toEqual([
+            { work_type: "notify_booking_result", status: "completed" },
+            { work_type: "publish_booking_audit", status: "completed" },
+            { work_type: "request_dispatch", status: "completed" },
+          ]);
+        expect(await linkedRows(committed.orderId!)).toHaveLength(1);
+        const notImplemented = await h.pool!.query(
+          `SELECT status FROM voice.work_item WHERE voice_session_id=$1 AND work_type='finalize_recording'`,
+          [f.request.voiceSessionId],
+        );
+        expect(notImplemented.rows).toEqual([{ status: "pending" }]);
+        const audits = await h.pool!.query(
+          `SELECT action_name FROM admin.audit_logs WHERE request_id=$1 ORDER BY action_name`,
+          [committed.commandId],
+        );
+        expect(audits.rows).toEqual([
+          { action_name: "voice.booking.created" },
+          { action_name: "voice.booking.result_notification" },
+        ]);
+      } finally {
+        await app?.close();
+        if (previous === undefined)
+          delete process.env.VOICE_BACKGROUND_RUNNER_ENABLED;
+        else process.env.VOICE_BACKGROUND_RUNNER_ENABLED = previous;
+      }
+      expect(runner.running).toBe(false);
+      expect(await runner.runOnce()).toBeNull();
+    }, 30000);
+
+    it("a simulated recorder acknowledgement persists the canonical finalized voice state without duplicating close work", async () => {
+      const { a, b } = await seededPeers();
+      const { f, committed } = await commitVoiceOrder(a);
+      const sessionStore = new VoiceSessionRepository(a.database);
+      const session = await sessionStore.findSessionById(
+        f.request.voiceSessionId,
+      );
+      const service = new VoiceSessionService(sessionStore);
+      const closed = await service.closeSession(
+        f.request.voiceSessionId,
+        session!.sessionVersion,
+      );
+      expect(closed.recordingState).toBe("finalizing");
+      await service.closeSession(
+        f.request.voiceSessionId,
+        closed.sessionVersion,
+      );
+      let calls = 0;
+      const recorder: VoiceMediaRecordingAdapter = {
+        async finalizeRecording(params) {
+          calls += 1;
+          expect(params.voiceSessionId).toBe(f.request.voiceSessionId);
+          expect(params.scope.callId).toBe(f.callId);
+          expect(params.scope.brandId).toBe(f.authority.brandId);
+          expect(params.scope.brandId).not.toBe(f.scopeId);
+          expect(params.linkedOrderId).toBe(committed.orderId);
+          // Only the external recorder acknowledgement is simulated; the
+          // original close transaction, work item and state writes are real.
+          return {
+            recordingId: params.scope.recordingId,
+            manifestRef: {
+              objectKey: "simulation/recording-manifest",
+              objectVersion: "simulation-v1",
+              checksum: "simulation-checksum",
+              byteLength: 0,
+              durableAt: new Date().toISOString(),
+            },
+            verifiedAt: new Date().toISOString(),
+          };
+        },
+      };
+      expect(
+        await runnerFor(b, f, undefined, undefined, recorder).runOnce({
+          supportedTypes: ["finalize_recording"],
+        }),
+      ).toMatchObject({ success: true });
+      expect(calls).toBe(1);
+      await expectOriginalRecordingLink(
+        committed.orderId!,
+        f.callId,
+        "simulation/recording-manifest",
+      );
+      const rows = await h.pool!.query(
+        `SELECT s.recording_state, w.status AS work_status FROM voice.session s
+         JOIN voice.work_item w USING(voice_session_id)
+         WHERE s.voice_session_id=$1 AND w.work_type='finalize_recording'`,
+        [f.request.voiceSessionId],
+      );
+      expect(rows.rows).toEqual([
+        { recording_state: "finalized", work_status: "completed" },
+      ]);
+      expect(
+        await runnerFor(b, f, undefined, undefined, recorder).runOnce({
+          supportedTypes: ["finalize_recording"],
+        }),
+      ).toBeNull();
+      expect(calls).toBe(1);
+    }, 30000);
+
+    it("an accepted booking committed after recording finalization retains its original completed manifest", async () => {
+      const { a, b } = await seededPeers();
+      const { f, commands, accepted } = await pendingVoiceOrder(a);
+      expect(
+        await runnerFor(
+          b,
+          f,
+          undefined,
+          undefined,
+          simulatedRecorder(async (params) => {
+            expect(params.scope.brandId).toBe(f.authority.brandId);
+            expect(params.linkedOrderId).toBeNull();
+          }),
+        ).runOnce({ supportedTypes: ["finalize_recording"] }),
+      ).toMatchObject({ success: true });
+      const committed = await new VoiceCommandRunnerService(
+        commands,
+        a.repository,
+      ).execute(accepted.commandId);
+      expect(committed.status).toBe("succeeded");
+      await expectOriginalRecordingLink(
+        committed.orderId!,
+        f.callId,
+        "simulation/original-call-manifest",
+      );
+      const intent = await h.pool!.query(
+        `SELECT record FROM voice.booking_audit_intent WHERE command_id=$1`,
+        [committed.commandId],
+      );
+      expect(intent.rows[0].record.checkpointId).toBe(f.checkpointId);
+    }, 30000);
+
+    it("acknowledgement binds an order committed while the simulated external recorder was completing", async () => {
+      const { a, b } = await seededPeers();
+      const { f, commands, accepted } = await pendingVoiceOrder(a);
+      let orderId: string | null = null;
+      const recorder = simulatedRecorder(async (params) => {
+        expect(params.linkedOrderId).toBeNull();
+        const receipt = await new VoiceCommandRunnerService(
+          commands,
+          a.repository,
+        ).execute(accepted.commandId);
+        expect(receipt.status).toBe("succeeded");
+        orderId = receipt.orderId;
+      });
+      expect(
+        await runnerFor(b, f, undefined, undefined, recorder).runOnce({
+          supportedTypes: ["finalize_recording"],
+        }),
+      ).toMatchObject({ success: true });
+      expect(orderId).toBeTruthy();
+      await expectOriginalRecordingLink(
+        orderId!,
+        f.callId,
+        "simulation/original-call-manifest",
+      );
+    }, 30000);
+
+    it("a fresh historical recovery rebuilds the real brand and original-order link in missing close work", async () => {
+      const { a } = await seededPeers();
+      const { f, committed } = await commitVoiceOrder(a);
+      const store = new VoiceSessionRepository(a.database);
+      const session = await store.findSessionById(f.request.voiceSessionId);
+      await new VoiceSessionService(store).closeSession(
+        f.request.voiceSessionId,
+        session!.sessionVersion,
+      );
+      // Model an older deployment that durably closed the session without its
+      // queue producer. The original session, intent and order stay intact.
+      await h.pool!.query(
+        `DELETE FROM voice.work_item WHERE voice_session_id=$1 AND work_type='finalize_recording'`,
+        [f.request.voiceSessionId],
+      );
+      const fresh = new VoiceSessionService(
+        new VoiceSessionRepository(h.peerDatabase()),
+      );
+      expect(await fresh.recoverPendingRecordingSessions()).toEqual({
+        scanned: 1,
+        enqueued: 1,
+      });
+      const result = await h.pool!.query(
+        `SELECT payload_ref FROM voice.work_item WHERE voice_session_id=$1 AND work_type='finalize_recording'`,
+        [f.request.voiceSessionId],
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(JSON.parse(result.rows[0].payload_ref)).toMatchObject({
+        voiceSessionId: f.request.voiceSessionId,
+        callId: f.callId,
+        brandId: f.authority.brandId,
+        linkedOrderId: committed.orderId,
+      });
+    }, 30000);
+
+    it("publishes the original immutable booking audit into the canonical PostgreSQL audit feed", async () => {
+      const { a, b } = await seededPeers();
+      const { f, committed } = await commitVoiceOrder(a);
+      const sink = new AuditNotificationService(
+        new AuditLogRepository(b.database),
+      );
+      const result = await runnerFor(b, f, sink).runOnce({
+        supportedTypes: ["publish_booking_audit"],
+      });
+      expect(result).toMatchObject({
+        success: true,
+        result: {
+          status: "published",
+          commandId: committed.commandId,
+          orderId: committed.orderId,
+        },
+      });
+      const rows = await h.pool!.query(
+        `SELECT a.audit_id, a.resource_id, a.new_value, w.status AS work_status
+         FROM admin.audit_logs a
+         JOIN voice.work_item w ON w.command_id::text=a.request_id AND w.work_type='publish_booking_audit'
+         WHERE a.request_id=$1 AND a.action_name='voice.booking.created'`,
+        [committed.commandId],
+      );
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0]).toMatchObject({
+        resource_id: committed.orderId,
+        work_status: "completed",
+        new_value: {
+          actorType: "voice_agent",
+          actorId: f.authority.actorId,
+          commandId: committed.commandId,
+          orderId: committed.orderId,
+          resourceScopeId: f.scopeId,
+          snapshotHash: f.request.snapshotHash,
+        },
+      });
+      expect(result!.result).toMatchObject({ auditId: rows.rows[0].audit_id });
+    }, 30000);
+
+    it("lost audit-work acknowledgement replays on a fresh peer without duplicating the canonical audit", async () => {
+      const { a, b } = await seededPeers();
+      const { f, committed } = await commitVoiceOrder(a);
+      const intentBefore = await h.pool!.query(
+        `SELECT record FROM voice.booking_audit_intent WHERE command_id=$1`,
+        [committed.commandId],
+      );
+      const first = runnerFor(
+        b,
+        f,
+        new AuditNotificationService(new AuditLogRepository(b.database)),
+      );
+      first.completeWorkItemWithDomainState = async () => {
+        throw new Error("injected audit-work acknowledgement loss");
+      };
+      expect(
+        await first.runOnce({ supportedTypes: ["publish_booking_audit"] }),
+      ).toMatchObject({
+        success: false,
+        error: "injected audit-work acknowledgement loss",
+      });
+      const before = await h.pool!.query(
+        `SELECT audit_id FROM admin.audit_logs WHERE request_id=$1 AND action_name='voice.booking.created'`,
+        [committed.commandId],
+      );
+      expect(before.rows).toHaveLength(1);
+      const restarted = makePeer(h.peerDatabase());
+      peers.push(restarted);
+      await initialize(restarted);
+      await new Promise((resolve) => setTimeout(resolve, 2200));
+      expect(
+        await runnerFor(
+          restarted,
+          f,
+          new AuditNotificationService(
+            new AuditLogRepository(restarted.database),
+          ),
+        ).runOnce({ supportedTypes: ["publish_booking_audit"] }),
+      ).toMatchObject({
+        success: true,
+        result: { status: "published", auditId: before.rows[0].audit_id },
+      });
+      const after = await h.pool!.query(
+        `SELECT audit_id FROM admin.audit_logs WHERE request_id=$1 AND action_name='voice.booking.created'`,
+        [committed.commandId],
+      );
+      expect(after.rows).toEqual(before.rows);
+      const intentAfter = await h.pool!.query(
+        `SELECT record FROM voice.booking_audit_intent WHERE command_id=$1`,
+        [committed.commandId],
+      );
+      expect(intentAfter.rows).toEqual(intentBefore.rows);
+    }, 30000);
 
     it("a preinitialized peer consumes the committed work into the same persisted order, offer and task", async () => {
       const { a, b } = await seededPeers();

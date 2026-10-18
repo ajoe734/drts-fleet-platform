@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   MaskedSessionSummary,
@@ -46,6 +46,8 @@ const MOCK_ACTIVE_SESSION: MaskedSessionSummary = {
   createdAt: "2026-09-06T08:00:00.000Z",
   updatedAt: "2026-09-06T08:00:00.000Z",
 };
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", () => {
   it("enforces useMemo for createPlatformAdminIamClient across all governance panels", () => {
@@ -226,8 +228,12 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
   });
 
   it("handles session revocation failure cleanly on 403 Forbidden (missing identity:sessions:write)", async () => {
+    const proof = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ token: "a".repeat(43) }));
     let callCount = 0;
     const mockClient = {
+      baseUrl: "/control-plane-proxy",
       get: vi.fn(),
       post: vi.fn(async () => {
         callCount++;
@@ -270,13 +276,18 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
     }
 
     expect(callCount).toBe(1);
+    expect(proof).toHaveBeenCalledTimes(1);
     expect(revokingSid).toBeNull();
     expect(error).toContain("403");
     expect(error).toContain("identity:sessions:write");
   });
 
   it("successfully revokes a session when caller holds identity:sessions:write", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ token: "a".repeat(43) }),
+    );
     const mockClient = {
+      baseUrl: "/control-plane-proxy",
       get: vi.fn(),
       post: vi.fn(async () => ({
         revoked: true,
@@ -297,6 +308,7 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
       "/identity/sessions/sess_ops_101/revoke",
       {
         body: { reason: "security_incident_containment", isCompromised: true },
+        headers: { "x-csrf-token": "a".repeat(43) },
       },
     );
   });

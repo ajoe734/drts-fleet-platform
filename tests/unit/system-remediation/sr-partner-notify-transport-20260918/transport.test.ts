@@ -40,7 +40,7 @@ describe("partner transport and consumer retry owner", () => {
   });
 
   it("requires route readiness; missing binding never claims availability or uses legacy fallback", async () => {
-    const h = harness();
+    const h = await harness();
     expect(h.adapter.isAvailable()).toBe(false);
     expect(await h.adapter.isAvailableFor(h.row)).toBe(true);
     h.bindings.findByEntrySlug.mockResolvedValue(null);
@@ -57,7 +57,7 @@ describe("partner transport and consumer retry owner", () => {
   it.each(["assignment_disclosure_ready", "trip_cancelled"] as const)(
     "%s: persists context before one HTTP attempt, allowlists fields, and records only the real receipt",
     async (eventType) => {
-      const h = harness();
+      const h = await harness();
       h.row.eventType = eventType;
       if (eventType === "trip_cancelled") {
         h.relevance.status = "cancelled";
@@ -113,7 +113,7 @@ describe("partner transport and consumer retry owner", () => {
     "%s: partner enqueues then times out: retries identical bytes and accepts its duplicate receipt",
     async (eventType) => {
       vi.useFakeTimers();
-      const h = harness();
+      const h = await harness();
       h.row.eventType = eventType;
       if (eventType === "trip_cancelled") {
         h.relevance.status = "cancelled";
@@ -152,7 +152,7 @@ describe("partner transport and consumer retry owner", () => {
     "%s: ack then DB failure remains unknown; lease recovery reuses the delivery and payload",
     async (eventType) => {
       vi.useFakeTimers();
-      const h = harness();
+      const h = await harness();
       h.row.eventType = eventType;
       if (eventType === "trip_cancelled") {
         h.relevance.status = "cancelled";
@@ -182,7 +182,7 @@ describe("partner transport and consumer retry owner", () => {
   );
 
   it("two workers compete: only the claim winner sends", async () => {
-    const h = harness();
+    const h = await harness();
     const results = await Promise.allSettled([
       h.service.deliverPassengerNotification(h.row),
       h.service.deliverPassengerNotification(h.row),
@@ -194,7 +194,7 @@ describe("partner transport and consumer retry owner", () => {
 
   it("an expired lease cannot commit a returned ack", async () => {
     vi.useFakeTimers();
-    const h = harness();
+    const h = await harness();
     const normal = h.fetch.getMockImplementation()!;
     h.fetch.mockImplementationOnce(async (...args) => {
       const response = await normal(...args);
@@ -209,7 +209,7 @@ describe("partner transport and consumer retry owner", () => {
 
   it("five maxAttempts means five HTTP attempts; snapshot backoff is retained and no tenant timer restarts it", async () => {
     vi.useFakeTimers();
-    const h = harness();
+    const h = await harness();
     h.row.eventType = "receipt_ready";
     h.fetch.mockResolvedValue({ ok: false, status: 503, text: async () => "" });
     for (let i = 1; i <= 5; i++) {
@@ -241,14 +241,14 @@ describe("partner transport and consumer retry owner", () => {
     [
       "expiresAt",
       "notification_expired",
-      (h: ReturnType<typeof harness>) => {
+      (h: Awaited<ReturnType<typeof harness>>) => {
         h.row.payload.expiresAt = new Date(Date.now() - 1).toISOString();
       },
     ],
     [
       "old ETA after reassignment",
       "notification_superseded",
-      (h: ReturnType<typeof harness>) => {
+      (h: Awaited<ReturnType<typeof harness>>) => {
         h.row.eventType = "eta_changed";
         h.relevance.assignmentVersion = 2;
       },
@@ -256,7 +256,7 @@ describe("partner transport and consumer retry owner", () => {
     [
       "old arrival after cancellation",
       "notification_obsolete",
-      (h: ReturnType<typeof harness>) => {
+      (h: Awaited<ReturnType<typeof harness>>) => {
         h.row.eventType = "driver_arrived";
         h.relevance.status = "cancelled";
       },
@@ -264,26 +264,26 @@ describe("partner transport and consumer retry owner", () => {
     [
       "entry moved to another tenant",
       "owner_changed",
-      (h: ReturnType<typeof harness>) => {
+      (h: Awaited<ReturnType<typeof harness>>) => {
         h.entry.tenantId = "other-tenant";
       },
     ],
     [
       "identity revoked",
       "recipient_revoked",
-      (h: ReturnType<typeof harness>) => {
+      (h: Awaited<ReturnType<typeof harness>>) => {
         h.link.status = "revoked";
       },
     ],
     [
       "route missing",
       "route_missing",
-      (h: ReturnType<typeof harness>) => {
+      (h: Awaited<ReturnType<typeof harness>>) => {
         h.repository.findOrderPartnerNotificationRoute.mockResolvedValue(null);
       },
     ],
   ])("stops %s before remote IO", async (_case, reason, change) => {
-    const h = harness();
+    const h = await harness();
     change(h);
     expect(await h.service.deliverPassengerNotification(h.row)).toMatchObject({
       failureReason: reason,
@@ -303,7 +303,7 @@ describe("partner transport and consumer retry owner", () => {
   ])(
     "preserves HTTP %i classification",
     async (status, failureReason, retryDisposition) => {
-      const h = harness();
+      const h = await harness();
       h.fetch.mockResolvedValue({
         ok: Number(status) < 300,
         status: Number(status),
@@ -316,13 +316,14 @@ describe("partner transport and consumer retry owner", () => {
       expect(
         h.tenant
           .listWebhookDeliveriesByWebhook(h.route.tenantId, h.binding.webhookId)
+          .filter((delivery) => delivery.eventType.startsWith("passenger."))
           .some((delivery) => delivery.status === "delivered"),
       ).toBe(false);
     },
   );
 
   it("restart never schedules a pending passenger retry, and tenant manual retry is rejected", async () => {
-    const h = harness();
+    const h = await harness();
     h.fetch.mockResolvedValue({ ok: false, status: 503, text: async () => "" });
     await h.service.deliverPassengerNotification(h.row);
     const internal = h.tenant as unknown as {
@@ -344,7 +345,7 @@ describe("partner transport and consumer retry owner", () => {
 describe("immutable partner retry context", () => {
   it("policy changes cannot shorten the frozen attempt budget or replace its backoff", async () => {
     vi.useFakeTimers();
-    const h = harness();
+    const h = await harness();
     h.row.eventType = "receipt_ready";
     h.fetch.mockResolvedValue({ ok: false, status: 503, text: async () => "" });
     const first = await h.service.deliverPassengerNotification(h.row);
@@ -376,18 +377,21 @@ describe("immutable partner retry context", () => {
 
   it("changed endpoint/binding cannot silently retarget an already prepared notification", async () => {
     vi.useFakeTimers();
-    const h = harness();
+    const h = await harness();
     h.fetch.mockResolvedValue({ ok: false, status: 503, text: async () => "" });
     const first = await h.service.deliverPassengerNotification(h.row);
     const frozen = structuredClone(h.getContext());
     h.binding.webhookId = "another-webhook";
-    const nextEndpoint = h.tenant.createWebhookEndpoint(h.route.tenantId, {
-      url: "https://other.example.test/notify",
-      secret: "secret",
-      events: Object.values(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME),
-    });
-    h.tenant.updateWebhookEndpoint(h.route.tenantId, nextEndpoint.webhookId, {
-      status: "active",
+    const nextEndpoint = await h.tenant.createWebhookEndpoint(
+      h.route.tenantId,
+      {
+        url: "https://other.example.test/notify",
+        secret: "secret",
+        events: Object.values(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME),
+      },
+    );
+    await h.tenant.sendTestWebhook(h.route.tenantId, {
+      webhookId: nextEndpoint.webhookId,
     });
     h.binding.webhookId = nextEndpoint.webhookId;
     h.binding.validatedEndpointFingerprint = computeEndpointFingerprint(
@@ -409,7 +413,7 @@ describe("immutable partner retry context", () => {
 
   it("deliveredAt is local ack validation time, with no route/wire data on the returned outcome", async () => {
     vi.useFakeTimers();
-    const h = harness();
+    const h = await harness();
     const started = Date.now();
     const normal = h.fetch.getMockImplementation()!;
     h.fetch.mockImplementationOnce(async (...args) => {

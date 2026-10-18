@@ -86,6 +86,25 @@ export class CallcenterRepository {
     }
   }
 
+  async findCallbackSession(callbackTaskId: string) {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM crm.phase1_call_sessions
+       WHERE record->'callbackTask'->>'callbackTaskId' = $1
+          OR EXISTS (
+            SELECT 1 FROM jsonb_array_elements(COALESCE(record->'callbackTaskHistory', '[]'::jsonb)) AS task
+            WHERE task->>'callbackTaskId' = $1
+          )`,
+      [callbackTaskId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<CallSessionRecord>(
+          result.rows[0].record,
+          "crm.phase1_call_sessions",
+        )
+      : null;
+  }
+
   async lockCall(callId: string, executor: CallcenterQueryExecutor) {
     // Also serializes a call whose first session row has not been inserted yet.
     await executor.query(

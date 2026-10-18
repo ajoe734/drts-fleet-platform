@@ -694,6 +694,9 @@ export async function runPlan(plan, output, provenance, lifecycle = {}) {
       producerFailures,
       "Capacity scheduling/evidence failed",
     );
+  // Completing the last scheduled response does not complete the observation
+  // window. Keep the measured clock running through its original full duration.
+  await waitUntil(plan.durationSeconds * 1000, { wakeLatenessMs: 0 });
   const workflows = Object.fromEntries(
     Object.entries(baseline).map(([family, targets]) => {
       const rows = records.filter((row) => row.workload === family);

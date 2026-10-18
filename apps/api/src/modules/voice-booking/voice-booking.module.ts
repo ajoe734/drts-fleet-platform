@@ -15,8 +15,13 @@ import { VoiceEvidenceService } from "./voice-evidence.service";
 import { VoiceDispatchProjectionService } from "./voice-dispatch-projection.service";
 import { VoiceBookingCommandService } from "./voice-booking-command.service";
 import { VoiceCommandRunnerService } from "./voice-command-runner.service";
+import {
+  VOICE_BOOKING_RESULT_DELIVERY,
+  createVoiceBookingResultDelivery,
+} from "./voice-booking-result-delivery";
 import { OwnedMobilityRepository } from "../owned-mobility/owned-mobility.repository";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
+import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 
 import { VoiceHandoffService } from "./voice-handoff.service";
 import { VoiceSessionService } from "./voice-session.service";
@@ -30,6 +35,7 @@ import { VoiceRetentionService } from "./voice-retention.service";
 import { VoiceUsageService } from "./voice-usage.service";
 import { VoiceBookingMetricsService } from "../../observability/voice-booking-metrics.service";
 import { VoiceBookingController } from "./voice-booking.controller";
+import { VoiceCallbackController } from "./voice-callback.controller";
 import {
   VoiceCapabilityService,
   VoiceCapabilityGuard,
@@ -51,14 +57,19 @@ import {
     ServiceProductModule,
     IdempotencyModule,
     forwardRef(() => OwnedMobilityModule),
+    AuditNotificationModule,
   ],
-  controllers: [VoiceBookingController],
+  controllers: [VoiceBookingController, VoiceCallbackController],
   providers: [
     VoiceCapabilityService,
     VoiceCapabilityGuard,
     OwnedMobilityRepository,
     VoiceBookingCommandService,
     VoiceCommandRunnerService,
+    {
+      provide: VOICE_BOOKING_RESULT_DELIVERY,
+      useFactory: createVoiceBookingResultDelivery,
+    },
     VoiceBookingDraftService,
     VoiceConfirmationService,
     VoiceCheckpointRepository,

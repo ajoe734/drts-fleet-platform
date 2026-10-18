@@ -46,12 +46,17 @@ export class CallcenterController {
 
   @Get("sessions")
   @RequireRealms("platform", "ops")
-  listCallSessions(
+  async listCallSessions(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      { items: this.callcenterService.listCallSessions(requestId, identity) },
+      {
+        items: await this.callcenterService.listCallSessionsForRead(
+          requestId,
+          identity,
+        ),
+      },
       requestId,
     );
   }
@@ -157,35 +162,39 @@ export class CallcenterController {
   }
 
   @Get("callbacks")
-  listCallbackTasks(@Headers("x-request-id") requestId?: string) {
+  async listCallbackTasks(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       {
-        items: this.callcenterService.listCallbackTasks(),
+        items: await this.callcenterService.listCallbackTasksForRead(),
       },
       requestId,
     );
   }
 
   @Post("sessions/:callId/callbacks")
-  createCallbackTask(
+  async createCallbackTask(
     @Param("callId") callId: string,
     @Body() command: CreateCallbackTaskCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.createCallbackTask(callId, command, requestId),
+      await this.callcenterService.createCallbackTaskForWrite(
+        callId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
 
   @Post("callbacks/:callbackTaskId/complete")
-  completeCallbackTask(
+  async completeCallbackTask(
     @Param("callbackTaskId") callbackTaskId: string,
     @Body() command: CompleteCallbackTaskCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.completeCallbackTask(
+      await this.callcenterService.completeCallbackTaskForWrite(
         callbackTaskId,
         command,
         requestId,
@@ -195,13 +204,13 @@ export class CallcenterController {
   }
 
   @Post("callbacks/:callbackTaskId/claim")
-  claimCallbackTask(
+  async claimCallbackTask(
     @Param("callbackTaskId") callbackTaskId: string,
     @Body() command: { operatorId: string; expectedVersion?: number },
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.claimCallbackTask(
+      await this.callcenterService.claimCallbackTaskForWrite(
         callbackTaskId,
         command.operatorId,
         command.expectedVersion,
@@ -212,7 +221,7 @@ export class CallcenterController {
   }
 
   @Post("callbacks/:callbackTaskId/attempt")
-  recordCallbackAttempt(
+  async recordCallbackAttempt(
     @Param("callbackTaskId") callbackTaskId: string,
     @Body()
     command: {
@@ -224,7 +233,7 @@ export class CallcenterController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.recordCallbackAttempt(
+      await this.callcenterService.recordCallbackAttemptForWrite(
         callbackTaskId,
         command,
         requestId,
@@ -234,7 +243,7 @@ export class CallcenterController {
   }
 
   @Post("callbacks/:callbackTaskId/cancel")
-  cancelCallbackTask(
+  async cancelCallbackTask(
     @Param("callbackTaskId") callbackTaskId: string,
     @Body()
     command: {
@@ -245,7 +254,7 @@ export class CallcenterController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.cancelCallbackTask(
+      await this.callcenterService.cancelCallbackTaskForWrite(
         callbackTaskId,
         command,
         requestId,

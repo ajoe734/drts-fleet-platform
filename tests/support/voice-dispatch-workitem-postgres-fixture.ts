@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
-import type { Pool } from "pg";
-import type { VoiceBookingRepository } from "../../apps/api/src/modules/voice-booking/voice-booking.repository";
+import type {
+  VoiceBookingRepository,
+  VoiceQueryExecutor,
+} from "../../apps/api/src/modules/voice-booking/voice-booking.repository";
 import type { CommitVoiceBooking } from "../../apps/api/src/modules/voice-booking/voice-booking-command.service";
 import { voiceSnapshotHash } from "../../apps/api/src/modules/voice-booking/voice-confirmation.service";
 import { voiceCommandFixture } from "./voice-booking-command-fixture";
@@ -9,6 +11,7 @@ import { voiceCommandFixture } from "./voice-booking-command-fixture";
 // harness. Only provider/evidence/access prerequisite ports are synthetic.
 // Booking acceptance, order commit, queue, dispatch and tasks stay real.
 interface FixtureOptions {
+  existingCallId?: string;
   draftVersion?: number;
   confirmationState?: string;
   action?: string;
@@ -16,10 +19,11 @@ interface FixtureOptions {
 }
 
 export async function seedVoiceDispatchWorkFixture(
-  pool: Pick<Pool, "query">,
+  pool: VoiceQueryExecutor,
   opts: FixtureOptions = {},
 ) {
-  const f = voiceCommandFixture();
+  const original = voiceCommandFixture();
+  const f = { ...original, callId: opts.existingCallId ?? original.callId };
   const lineId = randomUUID();
   const profileId = randomUUID();
   const eventId = randomUUID();
@@ -29,10 +33,19 @@ export async function seedVoiceDispatchWorkFixture(
   const snapshot = (opts.overrideSnapshot as any) ?? f.snapshot;
   const snapshotHash = voiceSnapshotHash(snapshot);
 
-  await pool.query(
-    "INSERT INTO crm.phase1_call_sessions (call_id,status,started_at,updated_at,record) VALUES ($1,'active',now(),now(),$2::jsonb)",
-    [f.callId, JSON.stringify({ callId: f.callId })],
-  );
+  if (opts.existingCallId) {
+    const existing = await pool.query(
+      "SELECT call_id FROM crm.phase1_call_sessions WHERE call_id=$1",
+      [f.callId],
+    );
+    if (existing.rows.length !== 1)
+      throw new Error("The original API-created call must exist.");
+  } else {
+    await pool.query(
+      "INSERT INTO crm.phase1_call_sessions (call_id,status,started_at,updated_at,record) VALUES ($1,'active',now(),now(),$2::jsonb)",
+      [f.callId, JSON.stringify({ callId: f.callId })],
+    );
+  }
 
   await pool.query(
     `INSERT INTO voice.resource_scope (scope_id,brand_id,granted_by,runtime_mapping)
