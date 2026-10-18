@@ -10,7 +10,7 @@ import {
   waitFor,
   cleanup,
 } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ReviewRideControls } from "../../../apps/passenger-app-web/components/review-demo/ride-controls";
 
 vi.mock(

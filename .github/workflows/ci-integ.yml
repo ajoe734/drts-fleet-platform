@@ -901,9 +901,87 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # OTP/consent-gate branches (wrong code, lockout, real sixty-second resend,
+  # the real five-minute code expiry, and a returning session's
+  # consent-already-current skip) only need the API and Passenger web, not
+  # Ops/Driver/Platform Admin, so this runs as its own job instead of growing
+  # ui-shared-order-e2e's already-tight 25-minute envelope. The real
+  # five-minute expiry wait alone needs over five minutes inside this job, on
+  # top of install/build/browser-install and the other serial cases.
+  ui-bureau-acceptance-e2e:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_bureau_acceptance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - run: pnpm install --frozen-lockfile
+      - name: Migrate and seed the disposable hosted database
+        run: |
+          PGPASSWORD=postgres psql \
+            postgresql://postgres:postgres@localhost:5432/postgres \
+            -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS drts_bureau_acceptance;' \
+            -c 'CREATE DATABASE drts_bureau_acceptance;'
+          pnpm db:migrate
+          pnpm db:seed
+      - name: Build the original API and Passenger application
+        run: |
+          pnpm --filter @drts/api build
+          pnpm --filter @drts/passenger-app-web... build
+      - name: Install Chromium in the hosted runner
+        run: |
+          sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \
+            \( -iname "*google*" -o -iname "*chrome*" \) \
+            -exec mv "{}" "{}.disabled" \; || true
+          pnpm exec playwright install --with-deps chromium
+      - name: Run the real OTP/consent-gate bureau acceptance branches
+        run: pnpm exec playwright test -c playwright.pax-bureau-acceptance.config.ts
+      - name: Upload bureau acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pax-bureau-acceptance-${{ github.run_id }}
+          path: .artifacts/pax-bureau-acceptance
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
   e2e:
     needs:
-      [candidate, changes, cross-surface-e2e, ui-route-e2e, ui-shared-order-e2e]
+      [
+        candidate,
+        changes,
+        cross-surface-e2e,
+        ui-route-e2e,
+        ui-shared-order-e2e,
+        ui-bureau-acceptance-e2e,
+      ]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: always()
@@ -915,7 +993,7 @@ jobs:
             exit 0
           fi
           [ '${{ needs.changes.result }}' = 'success' ] || { echo "changes gate failed"; exit 1; }
-          for result in '${{ needs.cross-surface-e2e.result }}' '${{ needs.ui-route-e2e.result }}' '${{ needs.ui-shared-order-e2e.result }}'; do
+          for result in '${{ needs.cross-surface-e2e.result }}' '${{ needs.ui-route-e2e.result }}' '${{ needs.ui-shared-order-e2e.result }}' '${{ needs.ui-bureau-acceptance-e2e.result }}'; do
             case "$result" in
               success) ;;
               skipped) echo "E2E skipped: no changed path can exercise it." ;;
