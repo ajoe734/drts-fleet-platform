@@ -27,7 +27,8 @@ export const BOOK_T = {
   acknowledgementError: "無法更新費用確認紀錄，請重試。",
   acknowledge: "我已閱讀並同意",
   disclosureFooter: "下單前將再次顯示費用摘要供您確認",
-  unverifiedPhone: "聯絡手機尚未驗證（未驗證）；目前設定允許使用聯絡手機。",
+  unverifiedPhone:
+    "聯絡手機尚未驗證；此驗證與登入手機號碼驗證各自獨立，請前往帳號管理完成聯絡手機驗證。",
   account: "前往帳號管理",
   disclosure: "費用與優惠說明",
   rules: "費用規則",

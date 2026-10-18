@@ -14,6 +14,9 @@ describe("owned Driver trip rejection uses its existing same-order backend", () 
     "accepted",
     "forwarded",
     "not-allowed",
+    "terminal-completed",
+    "terminal-cancelled",
+    "terminal-rejected",
   ])(
     "actual trip and SDK: %s",
     (scenario) => {
