@@ -110,7 +110,7 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
     );
     const cancelled = await step(
       "D actual form rejects past time and unchecked fees, then books",
-      () => book(pax, method, false, true),
+      () => book(pax, method, false, true, info),
     );
     await info.attach("D-prebooking-prerequisites-facts", {
       body: JSON.stringify({
