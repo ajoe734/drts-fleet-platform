@@ -171,4 +171,70 @@ describe("DRV-SOS-001 End-to-End Platform Reporting & Idempotency", () => {
     expect(failed.receipt).toBeNull();
     expect(failed.lastError).toBe("網路連線中斷");
   });
+
+  it("honestly surfaces duty acknowledgment on a retry/replay submit that returns an already-acknowledged event", () => {
+    const activeCase = createDriverSosActiveCase({
+      situation: "medical_emergency",
+      description: "乘客身體不適，請求醫療救援",
+      attachments: [],
+      offlineAtTrigger: false,
+      location: null,
+      orderId: "order-998",
+      taskId: "task-998",
+    });
+
+    const alreadyAcknowledgedResult: SubmitDriverSosEventResult = {
+      event: {
+        sosEventId: "sos-db-2",
+        clientEventId: activeCase.clientEventId,
+        eventNo: "SOS-20260830-0098",
+        incidentId: "inc_med_02",
+        driverId: "drv-1",
+        vehicleId: null,
+        plateNo: null,
+        orderId: "order-998",
+        taskId: "task-998",
+        status: "acknowledged",
+        eventType: "passenger_medical",
+        severity: "major",
+        description: "乘客身體不適，請求醫療救援",
+        location: null,
+        originalTriggeredAt: activeCase.originalTriggeredAt,
+        serverReceivedAt: "2026-08-30T10:05:00.000Z",
+        fleetReportConfirmedAt: "2026-08-30T10:05:00.000Z",
+        offlineAtTrigger: false,
+        falseAlarm: { dismissed: false, dismissedAt: null, dismissedByDriverId: null, note: null },
+        dutyAcknowledgement: {
+          acknowledgedAt: "2026-08-30T10:04:30.000Z",
+          acknowledgedByActorId: "ops-already-claimed",
+        },
+        createdAt: "2026-08-30T10:00:02.000Z",
+        updatedAt: "2026-08-30T10:04:30.000Z",
+      },
+      receipt: {
+        sosEventId: "sos-db-2",
+        incidentId: "inc_med_02",
+        clientEventId: activeCase.clientEventId,
+        eventNo: "SOS-20260830-0098",
+        duplicate: true,
+        serverReceivedAt: "2026-08-30T10:05:00.000Z",
+        fleetReportConfirmedAt: "2026-08-30T10:05:00.000Z",
+      },
+    };
+
+    const replayedSubmission = markDriverSosCaseSubmitted(
+      activeCase,
+      alreadyAcknowledgedResult,
+    );
+
+    expect(replayedSubmission.dutyAcknowledgement.acknowledgedByActorId).toBe(
+      "ops-already-claimed",
+    );
+    expect(replayedSubmission.status).toBe("acknowledged");
+    expect(
+      replayedSubmission.timeline.some(
+        (entry) => entry.kind === "duty_acknowledged",
+      ),
+    ).toBe(true);
+  });
 });

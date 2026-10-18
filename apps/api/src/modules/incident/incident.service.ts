@@ -450,6 +450,360 @@ export class IncidentService implements OnModuleInit {
     return this.cloneIncident(decorated);
   }
 
+  /**
+   * Narrow, additive assignment facade for cross-module callers (currently
+   * DriverSos duty acknowledgment) that need both a race-free arbitration
+   * decision AND a durable persistence confirmation before reporting their
+   * own success -- `updateIncident`'s existing fire-and-forget persistence
+   * is deliberately left unchanged for every other caller.
+   *
+   * The win/lose decision commits synchronously, reusing the exact same
+   * assignedTo conflict rule as `updateIncident` (above): nothing in this
+   * method awaits before that decision is committed to `this.incidents`, so
+   * it is atomic with respect to every other synchronous mutation of
+   * incident state, including a concurrent direct `updateIncident` call.
+   * Only the durability confirmation after that point is asynchronous. If
+   * the durable write is rejected, the in-memory claim is rolled back so
+   * this method never reports a win the database did not actually accept
+   * -- the caller gets `accepted: false` and can retry (e.g. via the next
+   * idempotent acknowledgeDuty replay) instead of a false success.
+   */
+  async assignIncidentOwnerDurable(
+    incidentId: string,
+    owner: string,
+    requestId: string | undefined,
+    identity: BootstrapRequestIdentity | null,
+  ): Promise<{
+    accepted: boolean;
+    currentOwner: string | null;
+    wasNewClaim: boolean;
+  }> {
+    const incident = this.require(incidentId);
+    if (incident.assignedTo && incident.assignedTo !== owner) {
+      // The foreign value may itself be nothing more than an unconfirmed
+      // in-memory artifact of a concurrent fire-and-forget writer (e.g. the
+      // generic updateIncident path) whose own durable write is still
+      // pending or has already failed. Confirm it durably before reporting
+      // it as a real conflict -- otherwise this call (and the SOS
+      // acknowledgment it backs) would commit under an owner the database
+      // never actually accepted (F1 durability, foreign-owner branch).
+      // `currentOwner: null` reuses the same "unknown/unconfirmed, retry"
+      // signal the caller already treats as unavailable rather than a
+      // truthful conflict.
+      if (this.incidentRepository) {
+        try {
+          await this.incidentRepository.persistChanges({
+            incidents: [this.cloneIncident(incident)],
+          });
+        } catch (error) {
+          this.incidentRepository.reportPersistenceFailure(
+            error,
+            "assign_incident_owner_durable_confirm_foreign",
+          );
+          return { accepted: false, currentOwner: null, wasNewClaim: false };
+        }
+      }
+      return {
+        accepted: false,
+        currentOwner: incident.assignedTo,
+        wasNewClaim: false,
+      };
+    }
+    if (incident.assignedTo === owner) {
+      // This ownership may already be set only in memory by a
+      // fire-and-forget writer (e.g. the generic updateIncident path) whose
+      // own durable write is still pending or has already failed. Re-confirm
+      // durability here instead of trusting the in-memory value, so this
+      // call never reports a win the database did not actually accept (F1).
+      if (this.incidentRepository) {
+        try {
+          await this.incidentRepository.persistChanges({
+            incidents: [this.cloneIncident(incident)],
+          });
+        } catch (error) {
+          this.incidentRepository.reportPersistenceFailure(
+            error,
+            "assign_incident_owner_durable_confirm",
+          );
+          return { accepted: false, currentOwner: owner, wasNewClaim: false };
+        }
+      }
+      return { accepted: true, currentOwner: owner, wasNewClaim: false };
+    }
+
+    const now = new Date().toISOString();
+    const updated: IncidentRecord = {
+      ...incident,
+      assignedTo: owner,
+      updatedAt: now,
+    };
+    const timelineEntry = this.createTimelineEntry(
+      incidentId,
+      TIMELINE_ACTIONS.assigned,
+      `Assigned to ${owner}.`,
+      this.resolveActorId(identity, "ops_user"),
+      now,
+    );
+    const decorated = this.decorateIncident(updated, identity);
+
+    // Commit the claim now, before this method's first await: this is the
+    // atomic arbitration point.
+    this.replace(decorated);
+    this.timelines.set(incidentId, [
+      ...(this.timelines.get(incidentId) ?? []),
+      timelineEntry,
+    ]);
+
+    if (this.incidentRepository) {
+      try {
+        await this.incidentRepository.persistChanges({
+          incidents: [this.cloneIncident(decorated)],
+          timelines: [{ ...timelineEntry }],
+        });
+      } catch (error) {
+        this.incidentRepository.reportPersistenceFailure(
+          error,
+          "assign_incident_owner_durable",
+        );
+        // Roll back only the assignedTo claim this call made. Re-read the
+        // current state first so an unrelated concurrent mutation (e.g. a
+        // status change landed by another caller while this write was in
+        // flight) is preserved rather than clobbered by restoring the
+        // entire pre-claim snapshot captured before this method's first
+        // await (F5).
+        const current = this.require(incidentId);
+        let revertedOwner: string | null = current.assignedTo;
+        if (current.assignedTo === owner) {
+          const revertedAt = new Date().toISOString();
+          const reverted: IncidentRecord = {
+            ...current,
+            assignedTo: null,
+            updatedAt: revertedAt,
+          };
+          this.replace(this.decorateIncident(reverted, identity));
+          revertedOwner = null;
+          if (this.incidentRepository) {
+            // The rejected claim may already have been carried into durable
+            // state by an unrelated concurrent writer that read this
+            // record's in-memory snapshot (with `owner` still set) and
+            // persisted its own full upsert before this rollback ran, or
+            // may do so *after* this rollback runs (a deferred writer that
+            // started before the rollback but finishes later). Reverting
+            // via a column-scoped CAS (not a full-record re-persist built
+            // from this call's own possibly-stale snapshot) means this
+            // write can never itself clobber a status/suppression change
+            // that concurrent writer legitimately made -- the prior full
+            // UPSERT compensation could overwrite that status via its own
+            // stale snapshot the instant it ran after such a write (F5
+            // compensation order).
+            try {
+              await this.incidentRepository.revertAssignedToIfStillOwner(
+                incidentId,
+                owner,
+                null,
+                revertedAt,
+              );
+            } catch (compensationError) {
+              this.incidentRepository.reportPersistenceFailure(
+                compensationError,
+                "assign_incident_owner_durable_compensate",
+              );
+            }
+          }
+        }
+        this.timelines.set(
+          incidentId,
+          (this.timelines.get(incidentId) ?? []).filter(
+            (entry) => entry.entryId !== timelineEntry.entryId,
+          ),
+        );
+        return {
+          accepted: false,
+          currentOwner: revertedOwner,
+          wasNewClaim: false,
+        };
+      }
+    }
+
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType: this.resolveAuditActorType(identity, "ops_user"),
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "incident",
+        actionName: "assign_incident_owner_durable",
+        resourceType: "incident",
+        resourceId: incidentId,
+        newValuesSummary: { assignedTo: decorated.assignedTo },
+      },
+      requestId,
+    );
+    this.opsDispatchEventsService?.publishIncidentUpdated(decorated, requestId);
+
+    return { accepted: true, currentOwner: owner, wasNewClaim: true };
+  }
+
+  /**
+   * Reverts a fresh claim made by `assignIncidentOwnerDurable` (identified
+   * by `wasNewClaim: true`) when the caller's own subsequent write failed
+   * and the caller's contract (e.g. DriverSos duty acknowledgment) requires
+   * that a rejected write never leave the Incident mutated. Only reverts
+   * when the Incident is still assigned to exactly `owner` -- if anything
+   * else has since changed it, that is real state this rollback must not
+   * clobber.
+   */
+  async releaseIncidentOwnerClaim(
+    incidentId: string,
+    owner: string,
+    requestId: string | undefined,
+    identity: BootstrapRequestIdentity | null,
+  ): Promise<void> {
+    const incident = this.require(incidentId);
+    if (incident.assignedTo !== owner) {
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const reverted: IncidentRecord = {
+      ...incident,
+      assignedTo: null,
+      updatedAt: now,
+    };
+    const decorated = this.decorateIncident(reverted, identity);
+    this.replace(decorated);
+    if (this.incidentRepository) {
+      try {
+        // Column-scoped CAS, not a full-record re-persist of this call's
+        // own in-memory snapshot -- a concurrent status/suppression write
+        // legitimately landing before or after this release must survive
+        // it unclobbered (F5 compensation order), matching
+        // `assignIncidentOwnerDurable`'s own compensation write.
+        await this.incidentRepository.revertAssignedToIfStillOwner(
+          incidentId,
+          owner,
+          null,
+          now,
+        );
+      } catch (error) {
+        // Best-effort durable compensation: the in-memory claim is already
+        // released, and the next handover attempt (fresh claim or repair)
+        // retries this write. Report it instead of silently fire-and-forget
+        // so a persistent failure here is visible, not just assumed (F1).
+        this.incidentRepository.reportPersistenceFailure(
+          error,
+          "release_incident_owner_claim",
+        );
+      }
+    }
+  }
+
+  /**
+   * Force-converges the Incident's current owner to `owner`, bypassing the
+   * first-owner-wins arbitration in `assignIncidentOwnerDurable`. Used only
+   * by SOS's own repair path (`repairIncidentHandover`) once the SOS side
+   * has already durably decided `owner` as the real current truth -- an
+   * idempotent replay of an existing SOS acknowledgment, or the resolution
+   * of a cross-process SOS-side CAS race. In both cases the Incident is a
+   * mirror that must converge to that already-decided truth rather than
+   * re-arbitrate ownership a second time; `assignIncidentOwnerDurable`'s
+   * foreign-owner branch would otherwise durably confirm and then keep
+   * whatever unrelated owner the Incident currently holds forever, with no
+   * replay able to converge it (F1 competing-instance convergence).
+   *
+   * Throws instead of returning a false "accepted" so the existing
+   * best-effort call site (`repairIncidentHandover`) keeps its catch ->
+   * next-replay-retries semantics; it never silently discards a rejection.
+   */
+  async convergeIncidentOwnerDurable(
+    incidentId: string,
+    owner: string,
+    requestId: string | undefined,
+    identity: BootstrapRequestIdentity | null,
+  ): Promise<void> {
+    const incident = this.require(incidentId);
+    if (incident.assignedTo === owner) {
+      if (this.incidentRepository) {
+        await this.incidentRepository.persistChanges({
+          incidents: [this.cloneIncident(incident)],
+        });
+      }
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const updated: IncidentRecord = {
+      ...incident,
+      assignedTo: owner,
+      updatedAt: now,
+    };
+    const timelineEntry = this.createTimelineEntry(
+      incidentId,
+      TIMELINE_ACTIONS.assigned,
+      `Assigned to ${owner}.`,
+      this.resolveActorId(identity, "ops_user"),
+      now,
+    );
+    const decorated = this.decorateIncident(updated, identity);
+
+    this.replace(decorated);
+    this.timelines.set(incidentId, [
+      ...(this.timelines.get(incidentId) ?? []),
+      timelineEntry,
+    ]);
+
+    if (this.incidentRepository) {
+      try {
+        await this.incidentRepository.persistChanges({
+          incidents: [this.cloneIncident(decorated)],
+          timelines: [{ ...timelineEntry }],
+        });
+      } catch (error) {
+        // Roll back only the claim this call made, preserving any
+        // unrelated concurrent mutation the same way
+        // `assignIncidentOwnerDurable`'s own rollback does (F5).
+        const current = this.require(incidentId);
+        if (current.assignedTo === owner) {
+          this.replace(
+            this.decorateIncident(
+              {
+                ...current,
+                assignedTo: incident.assignedTo,
+                updatedAt: new Date().toISOString(),
+              },
+              identity,
+            ),
+          );
+        }
+        this.timelines.set(
+          incidentId,
+          (this.timelines.get(incidentId) ?? []).filter(
+            (entry) => entry.entryId !== timelineEntry.entryId,
+          ),
+        );
+        this.incidentRepository.reportPersistenceFailure(
+          error,
+          "converge_incident_owner_durable",
+        );
+        throw error;
+      }
+    }
+
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType: this.resolveAuditActorType(identity, "ops_user"),
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "incident",
+        actionName: "converge_incident_owner_durable",
+        resourceType: "incident",
+        resourceId: incidentId,
+        newValuesSummary: { assignedTo: decorated.assignedTo },
+      },
+      requestId,
+    );
+    this.opsDispatchEventsService?.publishIncidentUpdated(decorated, requestId);
+  }
+
   /** Both controller entrances must validate, commit the complaint side and
    * publish the incident side as one ordered operation for this incident. */
   async withComplaintLink<T>(
