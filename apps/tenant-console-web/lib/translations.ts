@@ -10,6 +10,10 @@ export function resolveAuthoritativeShellEnv(locale: Locale = "zh"): string {
 }
 
 const en = {
+  "platformNotice.section": "Platform notices",
+  "platformNotice.read": "Read",
+  "platformNotice.markRead": "Mark as read",
+  "platformNotice.readNotAcknowledged": "Read was not acknowledged",
   "passengers.form.reason": "Reason",
   "passengers.form.save": "Save",
   "passengers.form.saving": "Saving…",
@@ -4144,6 +4148,10 @@ const en = {
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
+  "platformNotice.section": "平台公告",
+  "platformNotice.read": "已讀",
+  "platformNotice.markRead": "標示已讀",
+  "platformNotice.readNotAcknowledged": "讀取未獲確認",
   "passengers.form.reason": "原因",
   "passengers.form.save": "儲存",
   "passengers.form.saving": "儲存中…",

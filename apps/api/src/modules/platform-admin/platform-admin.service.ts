@@ -1,3 +1,11 @@
+import {
+  PlatformNoticeLifecycle,
+  noticeTime,
+  type NoticeCommand,
+  type CanonicalNotice,
+  type NoticeAudience,
+} from "./platform-notice-lifecycle";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -25,7 +33,6 @@ import type {
   CanonicalIdentityRoleBindingRecord,
   CreatePlatformPricingRuleCommand,
   CreatePlatformAdminUserCommand,
-  CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
   CredentialExpiryWarningState,
   GeneratePlacardVersionCommand,
@@ -418,9 +425,7 @@ export class PlatformAdminService implements OnModuleInit {
     this.clonePlatformAdapter(adapter),
   );
 
-  private platformNotices: PlatformNoticeRecord[] = PLATFORM_NOTICES_SEED.map(
-    (n) => ({ ...n }),
-  );
+  private readonly noticeLifecycle: PlatformNoticeLifecycle;
 
   private maintenanceMode: PlatformMaintenanceModeRecord = {
     enabled: false,
@@ -459,6 +464,10 @@ export class PlatformAdminService implements OnModuleInit {
     @Inject(DOCUMENT_ARTIFACT_REBUILD_REGISTRY)
     documentArtifactRebuildRegistry?: DocumentArtifactRebuildRegistry,
   ) {
+    this.noticeLifecycle = new PlatformNoticeLifecycle(
+      this.auditNotificationService,
+      PLATFORM_NOTICES_SEED,
+    );
     // Materialising real PDF bytes requires awaiting `documentArtifactStore`,
     // which a constructor cannot do; seed placards start as plain clones here
     // and are actually rendered (via `clonePlacardVersion`) in `onModuleInit`,
@@ -1548,8 +1557,9 @@ export class PlatformAdminService implements OnModuleInit {
           : {
               reference: command.credentialExpiry.reference!.trim(),
               expiresAt:
-                this.normalizeNullableText(command.credentialExpiry.expiresAt) ??
-                null,
+                this.normalizeNullableText(
+                  command.credentialExpiry.expiresAt,
+                ) ?? null,
             }
         : (current.credentialExpiry ?? null);
 
@@ -1649,7 +1659,8 @@ export class PlatformAdminService implements OnModuleInit {
     const cloned = this.clonePlatformAdapter({
       ...adapter,
       id: adapter.id.trim(),
-      platformCode: adapter.platformCode.trim() as PlatformAdapter["platformCode"],
+      platformCode:
+        adapter.platformCode.trim() as PlatformAdapter["platformCode"],
       name: adapter.name.trim(),
       description: adapter.description?.trim() ?? "",
       version: adapter.version.trim(),
@@ -2041,38 +2052,47 @@ export class PlatformAdminService implements OnModuleInit {
 
   // ── Platform Notices ──────────────────────────────────────────────────────
 
-  listPlatformNotices(): PlatformNoticeRecord[] {
-    return this.platformNotices.map((n) => ({ ...n }));
+  listPlatformNotices(): CanonicalNotice[] {
+    return this.noticeLifecycle.list();
+  }
+
+  listRecipientNotices(
+    identity: BootstrapRequestIdentity | null,
+    audience: NoticeAudience,
+  ) {
+    return this.noticeLifecycle.forPrincipal(identity, audience);
+  }
+
+  listRecipientNoticeNotifications(
+    identity: BootstrapRequestIdentity | null,
+    audience: NoticeAudience,
+  ) {
+    return this.noticeLifecycle.notificationFeed(identity, audience);
+  }
+
+  readRecipientNotice(
+    noticeId: string,
+    outcomeId: string,
+    identity: BootstrapRequestIdentity | null,
+    audience: NoticeAudience,
+  ) {
+    return this.noticeLifecycle.read(noticeId, outcomeId, identity, audience);
   }
 
   createPlatformNotice(
-    command: CreatePlatformNoticeCommand,
+    command: NoticeCommand,
     requestId?: string,
-  ): PlatformNoticeRecord {
+  ): CanonicalNotice {
     return this.createPlatformNoticeWithAudit(command, requestId).data;
   }
 
   createPlatformNoticeWithAudit(
-    command: CreatePlatformNoticeCommand,
+    command: NoticeCommand,
     requestId?: string,
-  ): AuditedActionResult<PlatformNoticeRecord> {
+  ): AuditedActionResult<CanonicalNotice> {
     this.assertNonBlank(command.title, "title");
     this.assertNonBlank(command.body, "body");
-    const now = new Date().toISOString();
-    const notice: PlatformNoticeRecord = {
-      noticeId: `notice_${randomUUID()}`,
-      title: command.title.trim(),
-      body: command.body.trim(),
-      severity: command.severity,
-      status: command.scheduledAt ? "scheduled" : "active",
-      targetAudience: command.targetAudience,
-      scheduledAt: command.scheduledAt ?? null,
-      resolvedAt: null,
-      createdBy: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.platformNotices.unshift({ ...notice });
+    const notice = this.noticeLifecycle.create(command);
     const auditLog = this.recordAudit(
       {
         actorId: null,
@@ -2082,7 +2102,14 @@ export class PlatformAdminService implements OnModuleInit {
         actionName: "create_platform_notice",
         resourceType: "platform_notice",
         resourceId: notice.noticeId,
-        newValuesSummary: { title: notice.title, severity: notice.severity },
+        newValuesSummary: {
+          title: notice.title,
+          severity: notice.severity,
+          reason: notice.reason,
+          scheduledAt: notice.scheduledAt,
+          expiresAt: notice.expiresAt,
+          storageMode: notice.storageMode,
+        },
       },
       requestId,
     );
@@ -2092,19 +2119,8 @@ export class PlatformAdminService implements OnModuleInit {
     };
   }
 
-  resolveNotice(noticeId: string, requestId?: string): PlatformNoticeRecord {
-    const notice = this.platformNotices.find((n) => n.noticeId === noticeId);
-    if (!notice) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "NOTICE_NOT_FOUND",
-        "Platform notice not found.",
-        { noticeId },
-      );
-    }
-    notice.status = "resolved";
-    notice.resolvedAt = new Date().toISOString();
-    notice.updatedAt = notice.resolvedAt;
+  resolveNotice(noticeId: string, requestId?: string): CanonicalNotice {
+    const notice = this.noticeLifecycle.resolve(noticeId);
     this.recordAudit(
       {
         actorId: null,
@@ -2138,12 +2154,32 @@ export class PlatformAdminService implements OnModuleInit {
     command: SetPlatformMaintenanceModeCommand,
     requestId?: string,
   ): AuditedActionResult<PlatformMaintenanceModeRecord> {
+    this.assertNonBlank(command.reason ?? "", "reason");
+    if (typeof command.enabled !== "boolean")
+      throw new ApiRequestError(
+        400,
+        "MAINTENANCE_ENABLED_REQUIRED",
+        "enabled must be boolean.",
+      );
+    const scheduledStart = noticeTime(command.scheduledStart, "scheduledStart");
+    const scheduledEnd = noticeTime(command.scheduledEnd, "scheduledEnd");
+    if (
+      scheduledStart &&
+      scheduledEnd &&
+      Date.parse(scheduledEnd) <= Date.parse(scheduledStart)
+    ) {
+      throw new ApiRequestError(
+        400,
+        "NOTICE_INVALID_WINDOW",
+        "Maintenance end must follow start.",
+      );
+    }
     const now = new Date().toISOString();
     this.maintenanceMode = {
       enabled: command.enabled,
       reason: command.reason ?? null,
-      scheduledStart: command.scheduledStart ?? null,
-      scheduledEnd: command.scheduledEnd ?? null,
+      scheduledStart,
+      scheduledEnd,
       updatedBy: null,
       updatedAt: now,
     };

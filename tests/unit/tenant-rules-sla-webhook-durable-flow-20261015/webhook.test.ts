@@ -562,7 +562,7 @@ describe("C112 durable commands and first in-flight restart", () => {
                   ? { status: "disabled", disableReason: "maintenance" }
                   : { url: command.url + "/edited" },
               );
-      await expect(pending).rejects.toThrow("SQL rejected");
+      await expect(Promise.resolve(pending)).rejects.toThrow("SQL rejected");
       expect(service.listWebhookEndpoints(tenantId)).toEqual(before);
       expect(auditSpy).not.toHaveBeenCalled();
     },

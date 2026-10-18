@@ -1,3 +1,4 @@
+import { PlatformNoticeBanner } from "../components/platform-notice-banner";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { TenantShell } from "@/components/tenant-shell";
@@ -28,7 +29,10 @@ export default async function RootLayout({
       <body>
         <RuntimeConfigScript />
         <LanguageProvider defaultLocale={locale}>
-          <TenantShell env={env}>{children}</TenantShell>
+          <TenantShell env={env}>
+            <PlatformNoticeBanner />
+            {children}
+          </TenantShell>
         </LanguageProvider>
       </body>
     </html>

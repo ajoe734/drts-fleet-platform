@@ -1,3 +1,4 @@
+import type { NoticeCommand } from "./platform-notice-lifecycle";
 import {
   Body,
   Controller,
@@ -14,7 +15,6 @@ import { Throttle } from "@nestjs/throttler";
 import type {
   CreatePlatformPricingRuleCommand,
   CreatePlatformAdminUserCommand,
-  CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
   GeneratePlacardVersionCommand,
   PlatformAdapter,
@@ -207,7 +207,7 @@ export class PlatformAdminController {
 
   @Post("notices")
   createPlatformNotice(
-    @Body() command: CreatePlatformNoticeCommand,
+    @Body() command: NoticeCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
