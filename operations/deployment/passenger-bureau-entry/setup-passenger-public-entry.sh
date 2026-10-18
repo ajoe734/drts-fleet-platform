@@ -105,6 +105,25 @@ for backend in "$public_backend" "$guard_backend"; do
       --global \
       --load-balancing-scheme=EXTERNAL_MANAGED \
       --protocol=HTTPS
+  fi
+
+  # A prior run can have created the backend and then failed before
+  # attaching the NEG (e.g. a transient add-backend error), in which case
+  # `exists` above is now true and the create branch above is skipped on
+  # retry. Resource creation alone is not sufficient, so always verify the
+  # actual attachment instead of inferring it from create/already-existed.
+  # `add-backend` is not idempotent against an already-attached NEG, so this
+  # must be checked, not retried blindly; a failed read must stop the script
+  # under `set -e` rather than be treated as "no attachment, safe to add".
+  backend_groups="$(
+    gcloud compute backend-services describe "$backend" \
+      --project="$project" \
+      --global \
+      --format='value(backends[].group)'
+  )"
+  if [[ "$backend_groups" == *"networkEndpointGroups/${neg_name}"* ]]; then
+    echo "${backend} already has ${neg_name} attached; skipping add-backend."
+  else
     gcloud compute backend-services add-backend "$backend" \
       --project="$project" \
       --global \

@@ -4,6 +4,7 @@ import {
   BUREAU_REVIEW_STAGE_GROUPS,
   BUREAU_REVIEW_TOTAL_STAGES,
 } from "./content";
+import { t } from "./translations";
 
 // Read-only reference entry for the New Taipei transport bureau, served from
 // the same passenger-app-web Cloud Run service as the real product. This
@@ -28,72 +29,72 @@ export function BureauReviewPage() {
 
   return (
     <main style={{ padding: 18, maxWidth: 860 }}>
-      <h1>新北市交通局審查入口</h1>
+      <h1>{t.title}</h1>
       <p role="status">
-        本頁本身唯讀，不提供建立訂單、取消、派遣或司機端操作；下方連結導向的
-        <code>/login</code> 與 <code>/review</code>
-        才是乘客可實際操作的既有入口，沿乘客本人身分登入與操作。
+        {t.statusIntroPrefix}
+        <code>/login</code>
+        {t.statusIntroAnd}
+        <code>/review</code>
+        {t.statusIntroSuffix}
       </p>
 
       <section>
-        <h2>存取方式與範圍</h2>
+        <h2>{t.accessHeading}</h2>
         {publicEntryHost ? (
           <>
-            <p>
-              本服務目前可直接用一般瀏覽器開啟，不需要任何 Google
-              帳號登入、技術權杖或憑證檔案：
-            </p>
+            <p>{t.accessAvailableIntro}</p>
             <ul>
               <li>
                 <a href={`https://${publicEntryHost}/login`}>
                   https://{publicEntryHost}/login
                 </a>{" "}
-                — 乘客本人登入（手機號碼或既有帳號，依既有驗證方式），非交通局專屬帳號。
+                {t.loginLinkDesc}
               </li>
               <li>
                 <a href={`https://${publicEntryHost}/review`}>
                   https://{publicEntryHost}/review
                 </a>{" "}
-                — 既有共享演練操作頁（需負責單位先行啟用）。
+                {t.reviewLinkDesc}
               </li>
             </ul>
           </>
         ) : (
           <p role="alert">
-            本環境尚未開放對外的公開網址，一般瀏覽器暫時無法經由本服務的公開網址到達
-            <code>/login</code>。負責單位需先完成網域、DNS 與憑證設定（詳見
+            {t.noPublicUrlPrefix}
+            <code>/login</code>
+            {t.noPublicUrlMid}
             <code>
               docs/03-runbooks/passenger-bureau-browser-entry-20261018.md
             </code>
-            ），本頁才會顯示實際可開啟的網址；在那之前，不應把本頁本身當作已解除
-            403 的證據。
+            {t.noPublicUrlSuffix}
           </p>
         )}
+        <p>{t.driverScopeNote}</p>
         <p>
-          司機端的上線演練與調度派遣控制畫面不在這個對外入口的範圍內：即使以上網址已經公開，一般使用者與交通局承辦同仁都無法透過這個入口看到或操作司機端功能，只能使用乘客本人既有的登入、預約與行程頁面。
-        </p>
-        <p>
-          完整的部署設定、權限細節與操作指令留在{" "}
+          {t.fullConfigPrefix}{" "}
           <code>
             docs/03-runbooks/passenger-bureau-browser-entry-20261018.md
           </code>
-          ，本頁只呈現一般使用者需要知道的存取方式與範圍。
+          {t.fullConfigSuffix}
         </p>
       </section>
 
       <section>
-        <h2>已驗證案例摘要</h2>
+        <h2>{t.verifiedCasesHeading}</h2>
         <p>
-          來源快照：<code>{BUREAU_REVIEW_SOURCE.release}</code>（
-          <code>{BUREAU_REVIEW_SOURCE.sourceSha}</code>），檢查時間{" "}
+          {t.sourceSnapshotLabel}
+          <code>{BUREAU_REVIEW_SOURCE.release}</code>（
+          <code>{BUREAU_REVIEW_SOURCE.sourceSha}</code>
+          {t.sourceSnapshotSeparator}
+          {" "}
           {BUREAU_REVIEW_SOURCE.checkedAtUtc}。
         </p>
         <table>
           <thead>
             <tr>
-              <th>階段群組</th>
-              <th>步驟數</th>
-              <th>結果</th>
+              <th>{t.stageGroupHeader}</th>
+              <th>{t.stepCountHeader}</th>
+              <th>{t.resultHeader}</th>
             </tr>
           </thead>
           <tbody>
@@ -106,7 +107,7 @@ export function BureauReviewPage() {
             ))}
             <tr>
               <td>
-                <strong>合計</strong>
+                <strong>{t.totalLabel}</strong>
               </td>
               <td>
                 <strong>{BUREAU_REVIEW_TOTAL_STAGES}</strong>
@@ -118,10 +119,8 @@ export function BureauReviewPage() {
       </section>
 
       <section>
-        <h2>案例清單（UC01–UC16）</h2>
-        <p>
-          每一案例可展開查看前提、步驟、預期結果、實際驗證內容與尚未覆蓋的部分；狀態文字逐案各自撰寫，不套用單一通過／不通過標籤，避免掩蓋個別案例的實際缺口。
-        </p>
+        <h2>{t.caseListHeading}</h2>
+        <p>{t.caseListIntro}</p>
         {BUREAU_REVIEW_CASES.map((entry) => (
           <details key={entry.id} style={{ marginBottom: 10 }}>
             <summary>
@@ -129,15 +128,15 @@ export function BureauReviewPage() {
             </summary>
             <div style={{ paddingLeft: 16 }}>
               <p>
-                <strong>情境：</strong>
+                <strong>{t.scenarioLabel}</strong>
                 {entry.scenarios}
               </p>
               <p>
-                <strong>前提：</strong>
+                <strong>{t.preconditionLabel}</strong>
                 {entry.preconditions}
               </p>
               <p>
-                <strong>步驟：</strong>
+                <strong>{t.stepsLabel}</strong>
               </p>
               <ol>
                 {entry.steps.map((step, index) => (
@@ -145,15 +144,15 @@ export function BureauReviewPage() {
                 ))}
               </ol>
               <p>
-                <strong>預期結果：</strong>
+                <strong>{t.expectedLabel}</strong>
                 {entry.expected}
               </p>
               <p>
-                <strong>實際驗證：</strong>
+                <strong>{t.verifiedLabel}</strong>
                 {entry.verified}
               </p>
               <p>
-                <strong>尚未覆蓋：</strong>
+                <strong>{t.missingLabel}</strong>
                 {entry.missing}
               </p>
             </div>
@@ -162,13 +161,14 @@ export function BureauReviewPage() {
       </section>
 
       <section>
-        <h2>完整原圖與離線封存</h2>
+        <h2>{t.archiveHeading}</h2>
         <p>
-          本頁上方已逐案列出詳細步驟與驗證內容；若需要原始畫面截圖，另有雜湊驗證之離線示範包（
+          {t.archivePrefix}
           <code>{BUREAU_REVIEW_SOURCE.offlinePackage.fileEntries}</code>{" "}
-          個檔案，SHA-256{" "}
+          {t.archiveMid}
+          {" "}
           <code>{BUREAU_REVIEW_SOURCE.offlinePackage.sha256}</code>
-          ）作為補充，可向負責單位索取；本頁的案例清單本身已是可直接閱讀的完整紀錄，不是離線包的替代摘要。
+          {t.archiveSuffix}
         </p>
       </section>
     </main>

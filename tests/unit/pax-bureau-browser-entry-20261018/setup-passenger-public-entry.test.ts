@@ -41,8 +41,41 @@ if [[ "$1 $2" == "projects describe" ]]; then
   exit 0
 fi
 
+if [[ "$*" == *"backend-services list"* ]]; then
+  # \$MOCK_EXISTING_BACKENDS: space-separated backend names that should be
+  # reported as already existing (simulating a create that already
+  # succeeded in an earlier partial run). Anything else: empty = does not
+  # exist yet.
+  for existing in \${MOCK_EXISTING_BACKENDS:-}; do
+    if [[ "$*" == *"filter=name=\${existing}"* ]]; then
+      echo "$existing"
+      exit 0
+    fi
+  done
+  exit 0
+fi
+
+if [[ "$*" == *"backend-services describe"* ]]; then
+  # \$MOCK_PUBLIC_BACKEND / \$MOCK_GUARD_BACKEND name which backend is being
+  # described; \$MOCK_PUBLIC_BACKEND_GROUPS / \$MOCK_GUARD_BACKEND_GROUPS is
+  # the simulated 'backends[].group' value (empty = NEG not attached yet).
+  if [[ -n "\${MOCK_PUBLIC_BACKEND:-}" && "$*" == *"backend-services describe \${MOCK_PUBLIC_BACKEND} "* ]]; then
+    if [[ "\${MOCK_PUBLIC_DESCRIBE_EXIT_CODE:-0}" != "0" ]]; then
+      printf '%s\\n' "\${MOCK_PUBLIC_DESCRIBE_STDERR:-}" >&2
+      exit "\${MOCK_PUBLIC_DESCRIBE_EXIT_CODE}"
+    fi
+    printf '%s\\n' "\${MOCK_PUBLIC_BACKEND_GROUPS:-}"
+    exit 0
+  fi
+  if [[ -n "\${MOCK_GUARD_BACKEND:-}" && "$*" == *"backend-services describe \${MOCK_GUARD_BACKEND} "* ]]; then
+    printf '%s\\n' "\${MOCK_GUARD_BACKEND_GROUPS:-}"
+    exit 0
+  fi
+  exit 0
+fi
+
 case "$*" in
-  *"network-endpoint-groups list"*|*"backend-services list"*|*"ssl-certificates list"*|*"addresses list"*|*"target-https-proxies list"*|*"forwarding-rules list"*)
+  *"network-endpoint-groups list"*|*"ssl-certificates list"*|*"addresses list"*|*"target-https-proxies list"*|*"forwarding-rules list"*)
     # Empty result = resource does not exist yet.
     exit 0
     ;;
@@ -82,12 +115,22 @@ function runSetup(
     guardPolicyExitCode?: number;
     guardPolicyStderr?: string;
     guardPolicyJson?: string;
+    existingBackends?: string[];
+    publicBackendGroups?: string;
+    guardBackendGroups?: string;
+    publicDescribeExitCode?: number;
+    publicDescribeStderr?: string;
   } = {},
 ) {
   const {
     guardPolicyExitCode = 0,
     guardPolicyStderr = "",
     guardPolicyJson = '{"bindings":[]}',
+    existingBackends = [],
+    publicBackendGroups = "",
+    guardBackendGroups = "",
+    publicDescribeExitCode = 0,
+    publicDescribeStderr = "",
   } = opts;
 
   const directory = mkdtempSync(
@@ -123,6 +166,13 @@ function runSetup(
       MOCK_GUARD_POLICY_STDERR: guardPolicyStderr,
       MOCK_GUARD_POLICY_JSON: guardPolicyJson,
       MOCK_URLMAP_CAPTURE_FILE: urlmapCaptureFile,
+      MOCK_EXISTING_BACKENDS: existingBackends.join(" "),
+      MOCK_PUBLIC_BACKEND: publicBackend,
+      MOCK_GUARD_BACKEND: guardBackend,
+      MOCK_PUBLIC_BACKEND_GROUPS: publicBackendGroups,
+      MOCK_GUARD_BACKEND_GROUPS: guardBackendGroups,
+      MOCK_PUBLIC_DESCRIBE_EXIT_CODE: String(publicDescribeExitCode),
+      MOCK_PUBLIC_DESCRIBE_STDERR: publicDescribeStderr,
     },
   });
 
@@ -220,6 +270,66 @@ describe("PAX-BUREAU-BROWSER-ENTRY-20261018: setup-passenger-public-entry.sh", (
     ).toBe(true);
     expect(result.commands.some((c) => c.includes("url-maps import"))).toBe(
       true,
+    );
+  });
+
+  it("ENTRY-R8-PARTIAL-BACKEND-RETRY: a retry attaches the NEG to a backend that already exists from a prior partial run", () => {
+    // Simulates the second run after an earlier add-backend failure: the
+    // backend resource already exists (create succeeded last time) but
+    // reports no attached NEG yet.
+    const result = runSetup([service, region, project, host], {
+      existingBackends: [publicBackend],
+      publicBackendGroups: "",
+    });
+
+    expect(result.status).toBe(0);
+    expect(
+      result.commands.some(
+        (c) =>
+          c.includes("backend-services create") &&
+          c.includes(publicBackend),
+      ),
+    ).toBe(false);
+    expect(
+      result.commands.some(
+        (c) =>
+          c.includes("backend-services add-backend") &&
+          c.includes(publicBackend) &&
+          c.includes(`--network-endpoint-group=${service}-neg`),
+      ),
+    ).toBe(true);
+  });
+
+  it("ENTRY-R8-PARTIAL-BACKEND-RETRY: an already-bound backend is not re-attached", () => {
+    const result = runSetup([service, region, project, host], {
+      existingBackends: [publicBackend],
+      publicBackendGroups: `https://www.googleapis.com/compute/v1/projects/${project}/regions/${region}/networkEndpointGroups/${service}-neg`,
+    });
+
+    expect(result.status).toBe(0);
+    expect(
+      result.commands.some(
+        (c) =>
+          c.includes("backend-services add-backend") &&
+          c.includes(publicBackend),
+      ),
+    ).toBe(false);
+  });
+
+  it("ENTRY-R8-PARTIAL-BACKEND-RETRY: a failed NEG-attachment read stops the script, not a false complete claim", () => {
+    const result = runSetup([service, region, project, host], {
+      existingBackends: [publicBackend],
+      publicDescribeExitCode: 1,
+      publicDescribeStderr: "ERROR: (gcloud.compute.backend-services.describe) PERMISSION_DENIED",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("PERMISSION_DENIED");
+    expect(
+      result.commands.some((c) => c.includes("add-iam-policy-binding")),
+    ).toBe(false);
+    expect(result.commands.some((c) => c.includes("url-maps import"))).toBe(
+      false,
     );
   });
 
