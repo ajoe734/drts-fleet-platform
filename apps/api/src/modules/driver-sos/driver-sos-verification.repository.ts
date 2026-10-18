@@ -528,18 +528,29 @@ export class DriverSosVerificationRepository {
    * resolved / closed) onto the correlated DriverSosEvent + timeline. The
    * caller (service layer) only determines a transition is new from its own
    * in-memory/just-reloaded snapshot, which a second, independent instance
-   * can also be computing concurrently from an equally stale snapshot --
-   * the UPDATE itself is the real arbiter: it only takes effect while the
-   * durable row is still behind the target rank, so two instances can never
-   * both append the same forward transition's timeline entries, and a
-   * delayed lower-rank write can never overwrite an already-further-along
-   * row (F2 progression). Returns whether this call's transition actually
-   * won; the caller must not apply the transition to its own in-memory
-   * state (or append its timeline entries a second time) when it did not.
+   * can also be computing concurrently from an equally stale snapshot, and
+   * each instance's `timelineEntries` are built to cover every intermediate
+   * rank from *its own* stale starting point up to its target -- a rank-only
+   * guard (durable rank < target rank) is not enough to stop that: a second
+   * instance observing a durable row an earlier writer already advanced can
+   * still durably "win" a further target and re-append the exact
+   * intermediate entries the first writer already committed (F2 overlapping
+   * forward ranges). The UPDATE is therefore an exact compare-and-swap on
+   * `fromStatus` -- the precise durable status this call's `timelineEntries`
+   * were computed against -- not merely a rank inequality: it only takes
+   * effect while the durable row is still exactly at that starting status,
+   * so two instances can never both append timeline entries for an
+   * overlapping range, and a delayed stale-start write can never land on
+   * top of a row another writer already moved off of. Returns whether this
+   * call's transition actually won; the caller must not apply the
+   * transition to its own in-memory state (or append its timeline entries a
+   * second time) when it did not -- it must re-derive the transition from a
+   * fresh authoritative read instead.
    */
   async persistStatusTransition(
     event: DriverSosEventRecord,
     timelineEntries: DriverSosTimelineEntry[],
+    fromStatus: DriverSosEventRecord["status"],
   ): Promise<boolean> {
     if (!this.isEnabled()) {
       return true;
@@ -554,10 +565,10 @@ export class DriverSosVerificationRepository {
           SET status = $2,
               updated_at = $3
           WHERE sos_event_id = $1
-            AND (${sosStatusRankSql("status")}) < (${sosStatusRankSql("$2::text")})
+            AND status = $4
           RETURNING sos_event_id
         `,
-        [event.sosEventId, event.status, event.updatedAt],
+        [event.sosEventId, event.status, event.updatedAt, fromStatus],
       );
       const applied = (updated.rowCount ?? 0) > 0;
       if (applied) {

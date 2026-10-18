@@ -1589,3 +1589,234 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R8 repair: F2 duty acknow
     );
   });
 });
+
+describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R9 repair: F1 a CAS-loss result must not report success when its own Incident convergence fails", () => {
+  it("F1-alternate-CAS-loss: a durably-confirmed foreign Incident owner combined with a losing SOS-side CAS fails honestly instead of reporting the CAS winner's success", async () => {
+    const mockIncidentRepository = {
+      isEnabled: () => true,
+      persistChanges: async (payload: {
+        incidents: Array<{ assignedTo: string | null }>;
+      }) => {
+        if (
+          payload.incidents.some(
+            (incident) => incident.assignedTo === "ops-db-winner",
+          )
+        ) {
+          // Converging the Incident onto the real SOS-side CAS winner is
+          // durably unavailable.
+          throw new Error("convergence DB unavailable");
+        }
+        // Confirming the already-durable foreign owner succeeds.
+      },
+      reportPersistenceFailure: () => {},
+    } as unknown as IncidentRepository;
+
+    const auditService = new AuditNotificationService();
+    const incidentService = new IncidentService(
+      auditService,
+      mockIncidentRepository,
+    );
+    const mockVerificationRepository = {
+      isEnabled: () => true,
+      // Another instance has already durably ACKed this event for
+      // ops-db-winner; this call's own SOS-side CAS write loses to it.
+      persistDutyAcknowledgement: async () => ({
+        accepted: false,
+        acknowledgedByActorId: "ops-db-winner",
+        acknowledgedAt: "2026-10-18T00:00:00.000Z",
+      }),
+    } as unknown as DriverSosVerificationRepository;
+    const driverSosService = new DriverSosService(
+      auditService,
+      incidentService,
+      undefined,
+      mockVerificationRepository,
+    );
+    const sos = await submitSos(
+      driverSosService,
+      "ffffffff-0000-4000-8000-000000000006",
+    );
+    const foreignOwner = buildOpsIdentity("ops-foreign-owner");
+    const casWinner = buildOpsIdentity("ops-db-winner");
+
+    // Durably assign the Incident to a foreign owner first, matching a
+    // separate instance's already-confirmed claim.
+    incidentService.updateIncident(
+      sos.receipt.incidentId,
+      { assignedTo: foreignOwner.actorId as string },
+      undefined,
+      foreignOwner,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(
+      incidentService.getIncident(sos.receipt.incidentId).assignedTo,
+    ).toBe("ops-foreign-owner");
+
+    // The CAS winner's own stale instance calls acknowledgeDuty: it durably
+    // confirms the foreign Incident owner (not a fresh claim) and then
+    // loses its own SOS-side CAS to its own actor id, already durably
+    // ACKed by another instance. Before this fix, `finalOwner === actorId`
+    // let this fall straight into `buildIdempotentAcknowledgement` with
+    // `wonAcknowledgement: true` while the discarded convergence attempt
+    // had actually failed.
+    let error: unknown;
+    try {
+      await driverSosService.acknowledgeDuty(
+        sos.event.sosEventId,
+        {},
+        casWinner,
+      );
+    } catch (caught) {
+      error = caught;
+    }
+    expect((error as { code?: string })?.code).toBe(
+      "INCIDENT_HANDOVER_UNAVAILABLE",
+    );
+    // The Incident must not be left durably converged onto the CAS winner
+    // while the convergence write actually failed.
+    expect(
+      incidentService.getIncident(sos.receipt.incidentId).assignedTo,
+    ).toBe("ops-foreign-owner");
+  });
+});
+
+describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R9 repair: F2 overlapping forward ranges carry this call's real starting status, not just its target rank", () => {
+  it("F2-overlapping-forward-ranges: a stale reconcile whose assumed starting status the repository no longer durably holds does not advance the cache or append its intermediate timeline entries", async () => {
+    const persistStatusCalls: Array<{ status: string; fromStatus: string }> =
+      [];
+    const mockVerificationRepository = {
+      isEnabled: () => true,
+      persistStatusTransition: async (
+        event: { status: string },
+        _entries: unknown[],
+        fromStatus: string,
+      ) => {
+        persistStatusCalls.push({ status: event.status, fromStatus });
+        // Exact compare-and-swap: simulates another instance having
+        // already durably advanced the row to "investigating" from
+        // "submitted" before this call's own (equally stale "submitted")
+        // snapshot runs -- a rank-only guard ("durable rank < target
+        // rank") would still have let this call through and re-appended
+        // its own "investigation_started" entry a second time.
+        return fromStatus === "investigating";
+      },
+    } as unknown as DriverSosVerificationRepository;
+
+    const { driverSosService, incidentService } = setupService(
+      mockVerificationRepository,
+    );
+    const sos = await submitSos(
+      driverSosService,
+      "ffffffff-1111-4000-8000-000000000007",
+    );
+    const opsIdentity = buildOpsIdentity("ops-f2-overlap");
+
+    // The Incident has already durably reached "resolved"; this process's
+    // own SOS-event cache is still at "submitted", so reconcile recomputes
+    // the *entire* intermediate range [investigation_started, resolved]
+    // instead of just the delta past whatever the row actually holds.
+    incidentService.updateIncident(
+      sos.receipt.incidentId,
+      { status: "resolved" },
+      undefined,
+      opsIdentity,
+    );
+
+    const readback = await driverSosService.getEventForOps(
+      sos.event.sosEventId,
+      opsIdentity,
+    );
+
+    // The repository call must carry this call's real starting snapshot
+    // ("submitted"), not merely the forward target, so an exact-match CAS
+    // can reject it exactly as a real durable row already past that
+    // starting point would.
+    expect(persistStatusCalls).toHaveLength(1);
+    expect(persistStatusCalls[0]).toEqual({
+      status: "resolved",
+      fromStatus: "submitted",
+    });
+    // The CAS lost -- this call's assumed "submitted" starting point no
+    // longer durably holds -- so the cache must not have advanced or
+    // appended any of this call's intermediate entries.
+    expect(readback.event.status).toBe("submitted");
+    expect(
+      readback.timeline.filter(
+        (entry) =>
+          entry.eventType === "investigation_started" ||
+          entry.eventType === "resolved",
+      ),
+    ).toHaveLength(0);
+  });
+});
+
+describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R9 repair: F5 compensation uses a column-scoped CAS instead of a full-record overwrite", () => {
+  it("F5-compensation-order: reverting a rejected fresh Incident claim calls the column-scoped assignedTo CAS, not a full-record re-persist that could clobber a concurrent status change", async () => {
+    const revertCalls: Array<{
+      incidentId: string;
+      expectedCurrentOwner: string;
+      nextOwner: string | null;
+    }> = [];
+    const mockIncidentRepository = {
+      isEnabled: () => true,
+      persistChanges: async () => {
+        // The fresh claim's own durable write is always rejected, forcing
+        // the compensation path below.
+        throw new Error("claim write unavailable");
+      },
+      revertAssignedToIfStillOwner: async (
+        incidentId: string,
+        expectedCurrentOwner: string,
+        nextOwner: string | null,
+      ) => {
+        revertCalls.push({ incidentId, expectedCurrentOwner, nextOwner });
+        return true;
+      },
+      reportPersistenceFailure: () => {},
+    } as unknown as IncidentRepository;
+
+    const auditService = new AuditNotificationService();
+    const incidentService = new IncidentService(
+      auditService,
+      mockIncidentRepository,
+    );
+    const driverSosService = new DriverSosService(auditService, incidentService);
+    const sos = await submitSos(
+      driverSosService,
+      "ffffffff-2222-4000-8000-000000000008",
+    );
+    const claimant = buildOpsIdentity("ops-claimant");
+
+    let ackError: unknown;
+    try {
+      await driverSosService.acknowledgeDuty(
+        sos.event.sosEventId,
+        {},
+        claimant,
+      );
+    } catch (error) {
+      ackError = error;
+    }
+    expect((ackError as { code?: string })?.code).toBe(
+      "INCIDENT_HANDOVER_UNAVAILABLE",
+    );
+
+    // Exactly one column-scoped revert call -- never a full-record
+    // `persistChanges` re-persist of this call's own (possibly-stale)
+    // status/suppression snapshot, which is what previously let a
+    // compensation that finishes after a legitimately-accepted status
+    // update clobber that status back via the shared full UPSERT (F5
+    // compensation order).
+    expect(revertCalls).toHaveLength(1);
+    expect(revertCalls[0]).toEqual({
+      incidentId: sos.receipt.incidentId,
+      expectedCurrentOwner: "ops-claimant",
+      nextOwner: null,
+    });
+
+    expect(
+      incidentService.getIncident(sos.receipt.incidentId).assignedTo,
+    ).toBeNull();
+  });
+});

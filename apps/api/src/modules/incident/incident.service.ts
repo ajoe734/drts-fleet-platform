@@ -574,10 +574,11 @@ export class IncidentService implements OnModuleInit {
         const current = this.require(incidentId);
         let revertedOwner: string | null = current.assignedTo;
         if (current.assignedTo === owner) {
+          const revertedAt = new Date().toISOString();
           const reverted: IncidentRecord = {
             ...current,
             assignedTo: null,
-            updatedAt: new Date().toISOString(),
+            updatedAt: revertedAt,
           };
           this.replace(this.decorateIncident(reverted, identity));
           revertedOwner = null;
@@ -585,15 +586,23 @@ export class IncidentService implements OnModuleInit {
             // The rejected claim may already have been carried into durable
             // state by an unrelated concurrent writer that read this
             // record's in-memory snapshot (with `owner` still set) and
-            // persisted its own full upsert before this rollback ran.
-            // Re-persist the reverted record so that leaked, never-accepted
-            // owner cannot outlive this rollback in the database -- while
-            // preserving whatever other fields (e.g. status) that
-            // concurrent writer legitimately changed (F5).
+            // persisted its own full upsert before this rollback ran, or
+            // may do so *after* this rollback runs (a deferred writer that
+            // started before the rollback but finishes later). Reverting
+            // via a column-scoped CAS (not a full-record re-persist built
+            // from this call's own possibly-stale snapshot) means this
+            // write can never itself clobber a status/suppression change
+            // that concurrent writer legitimately made -- the prior full
+            // UPSERT compensation could overwrite that status via its own
+            // stale snapshot the instant it ran after such a write (F5
+            // compensation order).
             try {
-              await this.incidentRepository.persistChanges({
-                incidents: [this.cloneIncident(reverted)],
-              });
+              await this.incidentRepository.revertAssignedToIfStillOwner(
+                incidentId,
+                owner,
+                null,
+                revertedAt,
+              );
             } catch (compensationError) {
               this.incidentRepository.reportPersistenceFailure(
                 compensationError,
@@ -664,9 +673,17 @@ export class IncidentService implements OnModuleInit {
     this.replace(decorated);
     if (this.incidentRepository) {
       try {
-        await this.incidentRepository.persistChanges({
-          incidents: [this.cloneIncident(decorated)],
-        });
+        // Column-scoped CAS, not a full-record re-persist of this call's
+        // own in-memory snapshot -- a concurrent status/suppression write
+        // legitimately landing before or after this release must survive
+        // it unclobbered (F5 compensation order), matching
+        // `assignIncidentOwnerDurable`'s own compensation write.
+        await this.incidentRepository.revertAssignedToIfStillOwner(
+          incidentId,
+          owner,
+          null,
+          now,
+        );
       } catch (error) {
         // Best-effort durable compensation: the in-memory claim is already
         // released, and the next handover attempt (fresh claim or repair)

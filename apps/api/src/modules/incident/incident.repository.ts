@@ -205,6 +205,49 @@ export class IncidentRepository {
     await Promise.all(writes);
   }
 
+  /**
+   * Conditionally reverts only the `assignedTo` ownership field (column +
+   * its mirror inside the JSON `record`) back to `nextOwner`, but only
+   * while the durable row's `assigned_to` column is still exactly
+   * `expectedCurrentOwner`. Unlike `persistChanges`'s full-record UPSERT --
+   * built from a single caller's possibly-stale in-memory snapshot of
+   * every other field -- this never touches `status`, `severity` or any
+   * other column/JSON key, so a concurrently-accepted status/suppression
+   * write (landed before or after this call) is never clobbered by a
+   * stale compensating snapshot (F5 compensation order). Returns whether
+   * the condition held and the revert was actually applied; a `false`
+   * result means some other writer already changed `assigned_to` away
+   * from `expectedCurrentOwner`, so there is nothing for this call to
+   * undo.
+   */
+  async revertAssignedToIfStillOwner(
+    incidentId: string,
+    expectedCurrentOwner: string,
+    nextOwner: string | null,
+    updatedAt: string,
+  ): Promise<boolean> {
+    if (!this.isEnabled()) {
+      return true;
+    }
+
+    const result = await this.databaseService!.query(
+      `
+        UPDATE ops.phase1_incidents
+        SET assigned_to = $3,
+            updated_at = $4,
+            record = jsonb_set(
+              jsonb_set(record, '{assignedTo}', to_jsonb($3::text), true),
+              '{updatedAt}', to_jsonb($4::text), true
+            )
+        WHERE incident_id = $1
+          AND assigned_to = $2
+        RETURNING incident_id
+      `,
+      [incidentId, expectedCurrentOwner, nextOwner, updatedAt],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
     this.logger.warn(

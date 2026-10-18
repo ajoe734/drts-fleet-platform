@@ -486,6 +486,20 @@ export function isDriverSosStatusTerminal(
   return status !== null && DRIVER_SOS_TERMINAL_STATUSES.has(status);
 }
 
+/** Ranks of the forward (non-false-alarm) S-3 progression reachable through
+ * server readback, mirrored from the API's own
+ * `DriverSosService.SOS_PROGRESS_RANK` so this client-side apply can refuse
+ * an out-of-order result the same way the server already refuses an
+ * out-of-order write. */
+const DRIVER_SOS_READBACK_RANK: Partial<Record<DriverSosStatus, number>> = {
+  submitted: 0,
+  duty_alerted: 1,
+  acknowledged: 2,
+  investigating: 3,
+  resolved: 4,
+  closed: 5,
+};
+
 /**
  * Applies an authoritative server readback of the own SOS event. This is
  * the only path that is allowed to report duty acknowledgment or any later
@@ -497,6 +511,25 @@ export function applyDriverSosDutyReadback(
   activeCase: DriverSosActiveCase,
   readback: Pick<DriverSosEventRecord, "status" | "dutyAcknowledgement">,
 ): DriverSosActiveCase {
+  const currentRank =
+    activeCase.status === null
+      ? undefined
+      : DRIVER_SOS_READBACK_RANK[activeCase.status];
+  const nextRank = DRIVER_SOS_READBACK_RANK[readback.status];
+  if (
+    currentRank !== undefined &&
+    nextRank !== undefined &&
+    nextRank < currentRank
+  ) {
+    // Two overlapping readback polls (e.g. the 20s interval firing again
+    // before a slow in-flight request resolves) can settle out of order:
+    // an older response reporting an earlier status/no owner must never
+    // regress an already-applied later status or erase an already-known
+    // duty acknowledgment once a newer response already advanced past it
+    // (N1 native out-of-order polls).
+    return activeCase;
+  }
+
   const previouslyAcknowledged = Boolean(
     activeCase.dutyAcknowledgement.acknowledgedByActorId,
   );

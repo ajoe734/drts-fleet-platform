@@ -440,5 +440,60 @@ describe("driver-sos-outbox", () => {
       ).toHaveLength(1);
       expect(isDriverSosStatusTerminal(closed.status)).toBe(true);
     });
+
+    it("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 N1: a delayed older readback resolving after a newer one does not regress status or erase a known duty owner", () => {
+      const submitted = buildSubmittedCase();
+
+      // Poll P2 (started later) resolves first: the server already shows
+      // duty acknowledgment by ops-duty-01.
+      const afterP2 = applyDriverSosDutyReadback(submitted, {
+        status: "acknowledged",
+        dutyAcknowledgement: {
+          acknowledgedAt: "2026-07-20T09:02:00.000Z",
+          acknowledgedByActorId: "ops-duty-01",
+        },
+      });
+      expect(afterP2.dutyAcknowledgement.acknowledgedByActorId).toBe(
+        "ops-duty-01",
+      );
+      expect(
+        afterP2.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
+      ).toHaveLength(1);
+
+      // Poll P1 (started earlier) only now resolves -- its in-flight
+      // response was delayed -- and still reports the pre-ACK snapshot it
+      // actually read from the server before P2 landed: submitted, no
+      // owner. Applying it naively would erase the just-applied ACK and
+      // regress status back to "submitted".
+      const afterP1 = applyDriverSosDutyReadback(afterP2, {
+        status: "submitted",
+        dutyAcknowledgement: {
+          acknowledgedAt: null,
+          acknowledgedByActorId: null,
+        },
+      });
+      expect(afterP1.status).toBe("acknowledged");
+      expect(afterP1.dutyAcknowledgement.acknowledgedByActorId).toBe(
+        "ops-duty-01",
+      );
+      expect(
+        afterP1.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
+      ).toHaveLength(1);
+
+      // A later poll P3 re-observing the same ACK must stay idempotent --
+      // not append a second duty_acknowledged entry just because the
+      // delayed P1 response had (if unguarded) reset the locally-known
+      // owner back to null in between.
+      const afterP3 = applyDriverSosDutyReadback(afterP1, {
+        status: "acknowledged",
+        dutyAcknowledgement: {
+          acknowledgedAt: "2026-07-20T09:02:00.000Z",
+          acknowledgedByActorId: "ops-duty-01",
+        },
+      });
+      expect(
+        afterP3.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
+      ).toHaveLength(1);
+    });
   });
 });

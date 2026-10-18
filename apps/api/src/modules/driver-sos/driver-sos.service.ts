@@ -968,12 +968,37 @@ export class DriverSosService implements OnModuleInit {
             identity,
           );
         }
-        await this.repairIncidentHandover(
+        const converged = await this.repairIncidentHandover(
           event.incidentId,
           finalOwner,
           requestId,
           identity,
         );
+        // A rejected/unknown convergence onto *this call's own actor* is the
+        // exact same class of failure as the existingOwner replay branch
+        // above: the SOS side has already durably decided this caller is
+        // `finalOwner`, but the Incident (the cross-system arbiter every
+        // other caller reads) does not yet agree with it. This call must
+        // surface the existing truthful retryable error instead of
+        // reporting its own success for an owner the Incident does not
+        // durably reflect -- otherwise a caller landing on this exact
+        // CAS-loss branch (as opposed to the already-owner-cached replay
+        // branch) could show a success banner while the Incident remains
+        // durably assigned to a different, unconverged owner
+        // (F1-alternate-CAS-loss). A convergence failure for some *other*
+        // actor's win is not this call's failure to report: this call
+        // already honestly reports `wonAcknowledgement: false` regardless
+        // (it lost the real SOS-side CAS to that other actor), and the
+        // best-effort repair is retried on that actor's own next replay.
+        if (!converged && finalOwner === actorId) {
+          throw new ApiRequestError(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "INCIDENT_HANDOVER_UNAVAILABLE",
+            "Duty acknowledgment could not be durably handed over to the Incident; retry.",
+            { sosEventId, incidentId: event.incidentId },
+            true,
+          );
+        }
       }
 
       if (!accepted) {
@@ -1432,6 +1457,7 @@ export class DriverSosService implements OnModuleInit {
       (await this.verificationRepository?.persistStatusTransition(
         updatedEvent,
         timelineEntries,
+        event.status,
       )) ?? true;
     // A concurrent instance's own reconciliation (from an equally stale
     // snapshot) may have already durably won this exact transition, or
