@@ -57,6 +57,7 @@ jobs:
           python3 -m unittest tools/ci/test_check_test_coverage.py
           python3 -m unittest tools/ci/test_workflow_timeouts.py
           python3 -m unittest tools/ci/test_workflow_unit_partitioning.py
+          python3 -m unittest tools/ci/test_delivery_workflow_contract.py
           python3 -m unittest tools/ci/test_unit_partition_coverage.py
           python3 -m unittest tools/ci/test_canonical_consistency.py
           python3 -m unittest tools/ci/test_dependency_security.py
@@ -126,6 +127,8 @@ jobs:
 
   repo-classification:
     name: Repo classification
+    # ci-integ owns this check on every dev PR (including drafts).
+    if: github.event_name != 'pull_request' || github.base_ref != 'dev'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -147,6 +150,9 @@ jobs:
 
   dependency-security:
     name: Dependency security
+    # Ready dev PRs require ci-integ, which runs this same check once.
+    # Keep CI's existing checks on drafts and on main/dispatch events.
+    if: github.event_name != 'pull_request' || github.base_ref != 'dev' || github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -237,7 +243,7 @@ jobs:
   i18n-guard:
     name: i18n guard
     needs: scope
-    if: needs.scope.outputs.product == 'true'
+    if: needs.scope.outputs.product == 'true' && (github.event_name != 'pull_request' || github.base_ref != 'dev' || github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -284,6 +290,8 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
       - name: Lint
+        # ci-integ's required aggregate owns lint/typecheck on ready dev PRs.
+        if: github.event_name != 'pull_request' || github.base_ref != 'dev' || github.event.pull_request.draft
         run: pnpm run lint
       - name: Reject cross-app relative imports
         run: node tools/ci/check-cross-app-imports.mjs
@@ -305,6 +313,7 @@ jobs:
           fi
 
       - name: Typecheck
+        if: github.event_name != 'pull_request' || github.base_ref != 'dev' || github.event.pull_request.draft
         run: pnpm run typecheck
       - name: Native passenger App typecheck and unit tests
         run: |
