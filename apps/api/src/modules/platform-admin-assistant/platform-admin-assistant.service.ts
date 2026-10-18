@@ -547,6 +547,7 @@ export class PlatformAdminAssistantService {
     const domainResult = resolvedAction.execute(
       this.platformAdminService,
       requestId,
+      normalizedReason,
     );
     const receipt = toActionReceipt({
       auditLog: domainResult.auditLog,

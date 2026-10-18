@@ -105,7 +105,7 @@ test("voice callback workbench retains the real closed-call order through contac
     await screenshot("01-original-closed-call-and-order");
 
     await page.getByRole("button", { name: "領取待辦", exact: true }).click();
-    await expect(page.getByRole("status")).toHaveText("操作已儲存");
+    await expect(workbench.getByRole("status")).toHaveText("操作已儲存");
     const claimed = await data(
       await page.request.get(bff(`/voice/callbacks/${taskId}`)),
     );
@@ -214,7 +214,7 @@ test("voice callback workbench retains the real closed-call order through contac
     await page
       .getByRole("button", { name: "記錄聯繫結果", exact: true })
       .click();
-    await expect(page.getByRole("status")).toHaveText(
+    await expect(workbench.getByRole("status")).toHaveText(
       "操作未確認，請重試或重新讀取。",
     );
     stage("Real attempt commits before its browser acknowledgement is dropped");
@@ -222,7 +222,7 @@ test("voice callback workbench retains the real closed-call order through contac
     await page
       .getByRole("button", { name: "重試上一次操作", exact: true })
       .click();
-    await expect(page.getByRole("status")).toHaveText("已查回原操作結果");
+    await expect(workbench.getByRole("status")).toHaveText("已查回原操作結果");
     expect(httpAttempts).toHaveLength(2);
     expect(httpAttempts[1]).toEqual(httpAttempts[0]);
     const recovered = await data(
