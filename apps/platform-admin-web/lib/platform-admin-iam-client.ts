@@ -1,4 +1,5 @@
 import type { ApiClient } from "@drts/api-client";
+import { identitySessionCsrfHeaders } from "./identity-session-csrf";
 import type {
   AccessReviewCampaignRecord,
   AccessReviewEvidenceRecord,
@@ -70,6 +71,7 @@ export class PlatformAdminIamClient {
       session: MaskedSessionSummary | null;
     }>(`/identity/sessions/${encodeURIComponent(sessionId)}/revoke`, {
       body: command,
+      headers: await identitySessionCsrfHeaders(this.client.baseUrl),
     });
   }
 
