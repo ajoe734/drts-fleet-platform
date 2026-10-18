@@ -285,3 +285,54 @@ $ pnpm exec eslint apps/api/src/modules/complaint/complaint.service.ts \
 
 本輪改動檔案：`apps/api/src/modules/complaint/complaint.service.ts`（8.6 的 settlementPersistence 清理修正；write_scopes 內）、`vitest.config.ts`（接續前一 session 已完成的 alias 新增，供 write_scopes 內測試執行；非本任務政策變更）。
 - 本文件（8 節）
+
+## 9. Root ca237 review 六項 unknown-COMMIT findings ＋ captureAudit TypeError 修復
+
+前一 session（`claude2-20261018T221042Z-337e25a7`）針對 reviewer 在 `ca237ed9d` 上提出的六項 unknown-COMMIT 缺口與 `retryUncertainComplaintWrite` 的 captureAudit 形狀 TypeError，已寫出 `complaint.repository.ts`（新增 `loadCaseByCaseNo`）、`complaint.service.ts`（`reconcilePendingCase(s)`、`refreshSettlementCases` 接線、`retryUncertainComplaintWrite` 簽名改為接受 `auditInput` 直傳而非回呼）與 `complaint-terminal-state-and-ack.test.ts`（新增 9 個 `C045-F3-20261018-*` 案例）三份 WIP，但於 22:34:52 因 supervisor 更高優先序 review 搶占而 exit 143，未 checkpoint（HEAD 仍是 `ca237ed9d`，worktree 僅有未提交的三檔變更）。本輪直接沿用該 WIP（內容與 custody 記錄的 sha256 完全一致，未重做、未取用 18:31 舊 merge archive），在其基礎上定位並修掉剩餘的 2 個邏輯缺陷，使當時卡在 8 failed/14 passed 的 22 案例全部轉綠。
+
+### 9.1 根因一：`ComplaintCommitOutcomeUnknownError` 分支遺漏 settlementPersistence 清理（READBACK/LINK-SLA-RETRY/ESCALATION-CALLER 共 6 個案例失敗的共同成因）
+
+`persistChanges` 的 catch 分支中，`error instanceof ComplaintCommitOutcomeUnknownError` 分支只寫入 `pendingUncertainCommits`，未如另外兩個分支（確定失敗、isRetry 失敗）一樣同步刪除 `settlementPersistence.get(caseNo)` 對應的 rejected promise。這與 8.6 修的是同一類洩漏，只是 8.6 修的是「確定失敗」分支，這裡遺漏的是「commit 結果未知」分支。後果：任一 controller action 開頭的 `refreshSettlementCases()`（經 `reloadSettlementCases()` 內不帶 caseNo 的 `awaitSettlementPersistence()`）會重新掃到這個已經轉為 `pendingUncertainCommits` 的舊 rejection 並 `throw failure.reason`，導致 `reconcilePendingCase` 根本沒有機會跑，不管測試如何 mock `loadCaseByCaseNo`，第二次呼叫一律在 `refreshSettlementCases()` 這一步就被舊錯誤攔截。
+
+修法：在 `ComplaintCommitOutcomeUnknownError` 分支寫入 `pendingUncertainCommits` 之後，比照另外兩分支，一併刪除 `settlementPersistence` 中仍指向同一個 `persistence` promise 的項目。
+
+### 9.2 根因二：`reconcilePendingCase` 把「更新案件查無durable列」誤判為「確定未 commit」
+
+修掉 9.1 後，READBACK（2）、LINK-SLA-RETRY（2）、ESCALATION-CALLER（1）共 5 案例轉綠，但 NOTE-REPLAY 的 note／assign 兩案例在 5000ms 逾時。定位：這兩個測試的 `loadCaseByCaseNo` mock 全程回傳 `null`（未如其他案例在驗證前改為 `mockResolvedValue(...)`）。既有 WIP 的 `reconcilePendingCase` 把「`durableCase === null`」無差別視為「未 commit，執行 rollback」；但函式自己的文件註解已說明：對 create 而言查無列是確定證據（允許 rollback），對 update 而言案件列本就已存在，查無列只代表 repository/連線異常，不是任一方向的證據，應維持 pending 不猜測——程式碼跟自己的註解自相矛盾。修法：在 `durableCase === null` 時依 `pending.action === "create_complaint_case"` 分流；非 create 時直接 return，保留 pending marker。
+
+### 9.3 根因三（連動）：note/assign 的「內容相同重試」命中 `retryUncertainComplaintWrite` 會真的卡死 controller 呼叫
+
+修掉 9.2 後 note/assign 兩案例仍逾時。定位：`addComplaintCaseNoteInternal`/`assignComplaintCase` 命中 `pendingNote`/`pendingAssign` 比對相同 command 時，呼叫的是會真正再發一次 `persistChanges` 的 `retryUncertainComplaintWrite`；controller 的 `addComplaintCaseNote`/`assignComplaintCase` 皆以 `{ captureAudit: true }` 呼叫，`finishOrdinaryComplaintAction` 在此選項下回傳 `persistence.then(finish)`，會真正等待這次新寫入 commit。但測試在 `await controller.addComplaintCaseNote(...)` 這一行之後才呼叫 `retryGate.resolve()`，若真的觸發第二次 `persistChanges` 並卡在 gate 上，await 永遠不會完成——這與同一測試檔其他「LINK-SLA-RETRY 必須是真正重試，而非 0-write 複寫」的要求相反：note／assign 的「內容相同重試」被設計為不需要、也不應該真的再發一次 canonical 寫入（append-only 的 note 或完全相同的 assign 重送不帶來新資訊，真正落地與否交給之後的 `refreshSettlementCases()`／`reconcilePendingCase` 去判定，重複寫入反而有在原始 commit 事後落地時造出第二筆列的風險）。
+
+修法：新增 `acknowledgePendingUncertainCommit`（仿照既有 `existingComplaintAction` 的同步模式），note/assign 命中相同內容重試時改呼叫此方法：直接以 pending 快照同步組出 `{ data, auditLog }`（`finishComplaintAction`），不發出新的 `persistChanges`、不消耗測試的 `retryGate`，且保留 `pendingUncertainCommits` 原封不動供未來的 `refreshSettlementCases()` 繼續嘗試對帳。`retryUncertainComplaintWrite` 本身不變，close/resolve/reopen/escalate/link/sla-breach 既有的「真正重試」語意不受影響。
+
+### 9.4 驗證
+
+```bash
+$ pnpm exec vitest run tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-terminal-state-and-ack.test.ts
+ Test Files  1 passed (1)
+      Tests  22 passed (22)
+
+$ pnpm exec vitest run tests/unit/complaint-canonical-lifecycle-and-ack-20261015 tests/unit/complaint.test.ts \
+    tests/unit/system-remediation/sr-qa-call-001/c045-complaint-lifecycle-sla.test.ts \
+    tests/unit/system-remediation/sr-fleet-case-001/sr-fleet-case-001.test.ts
+ Test Files  5 passed (5)
+      Tests  58 passed (58)
+
+$ cd apps/api && pnpm exec vitest run tests/unit/complaint-taxonomy-reopen-sla.test.ts tests/unit/complaint-incident-escalation.test.ts
+ Test Files  2 passed (2)
+      Tests  24 passed (24)
+
+$ cd apps/api && pnpm exec tsc --noEmit -p tsconfig.json   # exit 0
+$ cd apps/ops-console-web && pnpm exec tsc --noEmit -p tsconfig.json   # exit 0
+$ cd apps/api && pnpm exec vitest run tests/unit   # 129 passed | 1 skipped files; 1387 passed | 3 skipped tests
+$ pnpm exec vitest run tests/unit/fleet-statement-decisions-20261013   # 7 passed; 77 passed
+$ pnpm exec eslint apps/api/src/modules/complaint/complaint.service.ts \
+    apps/api/src/modules/complaint/complaint.repository.ts \
+    tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-terminal-state-and-ack.test.ts \
+    --max-warnings=0   # exit 0
+```
+
+### 9.5 未解的第六項 finding：restart/replica 下的 durable command identity（明列，不冒充已交付）
+
+Reviewer 在 ca237 review 中列出的六項 unknown-COMMIT findings，本輪連同前一 session 的 WIP 共修完五項（readback reconciliation、link/SLA 重試、escalation precheck 順序、unknown-then-failed 保留原身分、note/assign 去重）。第六項——`pendingUncertainCommits` 目前僅是 service 行程內的 `Map`，API 行程重啟或請求落在另一個 replica 時會遺失待對帳的身分，使得「同一指令重試應沿用同一 caseNo/entryId」這個保證在跨行程/跨重啟時失效——**本輪未修**。這需要把待對帳身分改為跨行程可讀（例如一張新的 durable pending-commit 表或在既有 `crm.phase1_complaint_cases` 列上加一個欄位記錄「嘗試中但未確認」狀態），屬於需要新 migration 的 schema 變更，超出本任務 15 個 write_scopes 且不應憑空猜測 migration 編號；需先提出精確方案與原 task owner/reviewer 協調後才能實作。在此之前，重啟或跨 replica 的重試仍只能依賴 `reconcilePendingCase` 對 durable store 的最終對帳（`refreshSettlementCases()` 持續輪詢），而非即時沿用同一身分重送。

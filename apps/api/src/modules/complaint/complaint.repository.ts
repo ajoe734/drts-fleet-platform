@@ -607,6 +607,28 @@ export class ComplaintRepository {
     );
   }
 
+  /** Reads the current durable record for one case, independent of category
+   * and of the in-memory optimistic cache. Used to reconcile a case whose
+   * COMMIT outcome was unknown. For a create, `null` definitively proves the
+   * write never landed (safe to roll back). For an update the row already
+   * existed before the uncertain attempt, so `null` is a repository/
+   * connectivity anomaly rather than proof either way (left pending); only a
+   * record that does not match the attempted snapshot proves that update
+   * did not land, and an exact match proves it did. */
+  async loadCaseByCaseNo(caseNo: string): Promise<ComplaintCaseRecord | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM crm.phase1_complaint_cases WHERE case_no = $1`,
+      [caseNo],
+    );
+    return result.rows[0]
+      ? this.parseRecord<ComplaintCaseRecord>(
+          result.rows[0].record,
+          "crm.phase1_complaint_cases",
+        )
+      : null;
+  }
+
   async loadSettlementState(): Promise<ComplaintState> {
     if (!this.isEnabled())
       return { complaintCases: [], complaintTimelines: [] };

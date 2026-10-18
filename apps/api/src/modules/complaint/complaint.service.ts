@@ -168,11 +168,17 @@ export class ComplaintService implements OnModuleInit {
   }
 
   /** Read the committed settlement cases on every request, including cases
-   * submitted through another API replica. Other complaint state is untouched. */
+   * submitted through another API replica, then reconcile any ordinary case
+   * whose COMMIT outcome was left unknown against the durable record. Every
+   * controller endpoint already calls this first, so a caller never reads,
+   * re-decides from, or retries an optimistic case/timeline that in fact
+   * never committed (or treats an already-confirmed one as still pending). */
   async refreshSettlementCases(): Promise<void> {
     if (!this.complaintRepository?.isEnabled()) return;
     if (this.settlementRefresh) return this.settlementRefresh;
-    const refresh = this.reloadSettlementCases();
+    const refresh = this.reloadSettlementCases().then(() =>
+      this.reconcilePendingCases(),
+    );
     this.settlementRefresh = refresh;
     try {
       await refresh;
@@ -180,6 +186,52 @@ export class ComplaintService implements OnModuleInit {
       if (this.settlementRefresh === refresh)
         this.settlementRefresh = undefined;
     }
+  }
+
+  /** Resolves every outstanding uncertain-commit case against the durable
+   * store. Safe to call repeatedly: a case with no pending entry, or with a
+   * repository that cannot answer right now, is left untouched. */
+  private async reconcilePendingCases(): Promise<void> {
+    const caseNos = [...this.pendingUncertainCommits.keys()];
+    await Promise.all(caseNos.map((caseNo) => this.reconcilePendingCase(caseNo)));
+  }
+
+  /** For a create, a missing durable row definitively proves the write never
+   * landed. For an update, the case row already existed before the attempt,
+   * so existence alone cannot tell a committed new state from the untouched
+   * old one; only an exact match against the attempted snapshot proves the
+   * COMMIT landed. Anything else (not found, or found but still the older
+   * state) is safe to roll back now that it is no longer merely "unknown". */
+  private async reconcilePendingCase(caseNo: string): Promise<void> {
+    const pending = this.pendingUncertainCommits.get(caseNo);
+    if (!pending || !this.canonicalDbEnabled()) return;
+    let durableCase: ComplaintCaseRecord | null;
+    try {
+      durableCase = await this.complaintRepository!.loadCaseByCaseNo(caseNo);
+    } catch {
+      // Cannot reconcile right now; leave the pending marker for a later
+      // read or retry rather than guessing in either direction.
+      return;
+    }
+    // A newer attempt may have already superseded or resolved this entry
+    // while the read above was in flight.
+    if (this.pendingUncertainCommits.get(caseNo) !== pending) return;
+    if (durableCase === null) {
+      // A missing row only definitively proves a create never landed. For an
+      // update the row already existed before the attempt, so a missing row
+      // is a repository/connectivity anomaly, not proof either way; leave
+      // the pending marker for a later read or retry rather than guessing.
+      if (pending.action !== "create_complaint_case") return;
+      if (pending.rollback) pending.rollback();
+      this.pendingUncertainCommits.delete(caseNo);
+      return;
+    }
+    const committed =
+      JSON.stringify(durableCase) === JSON.stringify(pending.complaintCase);
+    if (!committed && pending.rollback) {
+      pending.rollback();
+    }
+    this.pendingUncertainCommits.delete(caseNo);
   }
 
   /** Settlement endpoints must acknowledge only committed case and timeline
@@ -272,27 +324,27 @@ export class ComplaintService implements OnModuleInit {
       command,
     );
     if (pendingRetry) {
-      return this.retryUncertainComplaintWrite(pendingRetry, () =>
-        this.recordAudit(
-          {
-            actorId: null,
-            actorType: "system",
-            tenantId: null,
-            moduleName: "complaint",
-            actionName: "create_complaint_case",
-            resourceType: "complaint_case",
-            resourceId: pendingRetry.complaintCase.caseNo,
-            newValuesSummary: {
-              caseSource: command.caseSource,
-              category: command.category,
-              severity: command.severity,
-              status: pendingRetry.complaintCase.status,
-              relatedOrderId: pendingRetry.complaintCase.relatedOrderId,
-              relatedCallId: pendingRetry.complaintCase.relatedCallId,
-            },
+      return this.retryUncertainComplaintWrite(
+        pendingRetry,
+        {
+          actorId: null,
+          actorType: "system",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "create_complaint_case",
+          resourceType: "complaint_case",
+          resourceId: pendingRetry.complaintCase.caseNo,
+          newValuesSummary: {
+            caseSource: command.caseSource,
+            category: command.category,
+            severity: command.severity,
+            status: pendingRetry.complaintCase.status,
+            relatedOrderId: pendingRetry.complaintCase.relatedOrderId,
+            relatedCallId: pendingRetry.complaintCase.relatedCallId,
           },
-          requestId,
-        ),
+        },
+        requestId,
+        options,
       ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
     }
 
@@ -693,6 +745,35 @@ export class ComplaintService implements OnModuleInit {
     this.assertNonBlank(command.assigneeId, "assigneeId");
 
     const complaintCase = this.requireComplaintCase(caseNo);
+    // A retry of the exact same assignment while its earlier commit outcome
+    // is still unknown must recover that attempt's entryId instead of
+    // appending a second timeline row for one assignment intent. A genuinely
+    // different assignment is not a retry and falls through unaffected.
+    const pendingAssign = this.pendingUncertainCommits.get(caseNo);
+    if (
+      pendingAssign?.action === "assign_complaint_case" &&
+      this.stableStringify(pendingAssign.matchCommand) ===
+        this.stableStringify(command)
+    ) {
+      return this.acknowledgePendingUncertainCommit(
+        pendingAssign,
+        {
+          actorId: pendingAssign.complaintCase.assigneeId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "assign_complaint_case",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            assigneeId: pendingAssign.complaintCase.assigneeId,
+            status: pendingAssign.complaintCase.status,
+          },
+        },
+        requestId,
+        options,
+      ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
+    }
     this.assertCaseOpenForAction(complaintCase, "assign");
 
     const note = this.normalizeNullableText(command.note);
@@ -721,6 +802,7 @@ export class ComplaintService implements OnModuleInit {
               timelineEntry.entryId,
             ])
         : undefined,
+      command,
     );
     return this.finishOrdinaryComplaintAction(
       this.cloneComplaintCase(updated),
@@ -788,6 +870,36 @@ export class ComplaintService implements OnModuleInit {
     this.assertNonBlank(command.note, "note");
 
     const complaintCase = this.requireComplaintCase(caseNo);
+    // A retry of the exact same note while its earlier commit outcome is
+    // still unknown must recover that attempt's entryId instead of
+    // appending a second canonical timeline row for one reply intent (e.g. a
+    // Fleet idempotency-key retry). A genuinely different note still falls
+    // through to a fresh mutation below.
+    const pendingNote = this.pendingUncertainCommits.get(caseNo);
+    if (
+      pendingNote?.action === "add_complaint_case_note" &&
+      this.stableStringify(pendingNote.matchCommand) ===
+        this.stableStringify(command)
+    ) {
+      return this.acknowledgePendingUncertainCommit(
+        pendingNote,
+        {
+          actorId: pendingNote.complaintCase.assigneeId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: "add_complaint_case_note",
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: {
+            status: pendingNote.complaintCase.status,
+            note: command.note.trim(),
+          },
+        },
+        requestId,
+        options,
+      ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
+    }
     if (!(allowResolvedSettlement && complaintCase.status === "resolved")) {
       this.assertCaseOpenForAction(complaintCase, "note");
     }
@@ -822,6 +934,7 @@ export class ComplaintService implements OnModuleInit {
               timelineEntry.entryId,
             ])
         : undefined,
+      command,
     );
     return this.finishOrdinaryComplaintAction(
       this.cloneComplaintCase(updated),
@@ -873,23 +986,23 @@ export class ComplaintService implements OnModuleInit {
       // write, not silently no-op on the optimistic in-memory "resolved".
       const pending = this.pendingUncertainCommits.get(caseNo);
       if (pending?.action === "resolve_complaint_case") {
-        return this.retryUncertainComplaintWrite(pending, () =>
-          this.recordAudit(
-            {
-              actorId: null,
-              actorType: "ops_user",
-              tenantId: null,
-              moduleName: "complaint",
-              actionName: "resolve_complaint_case",
-              resourceType: "complaint_case",
-              resourceId: caseNo,
-              newValuesSummary: {
-                status: pending.complaintCase.status,
-                resolutionCode: pending.complaintCase.resolutionCode,
-              },
+        return this.retryUncertainComplaintWrite(
+          pending,
+          {
+            actorId: null,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "complaint",
+            actionName: "resolve_complaint_case",
+            resourceType: "complaint_case",
+            resourceId: caseNo,
+            newValuesSummary: {
+              status: pending.complaintCase.status,
+              resolutionCode: pending.complaintCase.resolutionCode,
             },
-            requestId,
-          ),
+          },
+          requestId,
+          options,
         ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
       }
       return this.existingComplaintAction(
@@ -980,23 +1093,23 @@ export class ComplaintService implements OnModuleInit {
       // write, not silently no-op on the optimistic in-memory "closed".
       const pending = this.pendingUncertainCommits.get(caseNo);
       if (pending?.action === "close_complaint_case") {
-        return this.retryUncertainComplaintWrite(pending, () =>
-          this.recordAudit(
-            {
-              actorId: null,
-              actorType: "ops_user",
-              tenantId: null,
-              moduleName: "complaint",
-              actionName: "close_complaint_case",
-              resourceType: "complaint_case",
-              resourceId: caseNo,
-              newValuesSummary: {
-                status: pending.complaintCase.status,
-                resolutionCode: pending.complaintCase.resolutionCode,
-              },
+        return this.retryUncertainComplaintWrite(
+          pending,
+          {
+            actorId: null,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "complaint",
+            actionName: "close_complaint_case",
+            resourceType: "complaint_case",
+            resourceId: caseNo,
+            newValuesSummary: {
+              status: pending.complaintCase.status,
+              resolutionCode: pending.complaintCase.resolutionCode,
             },
-            requestId,
-          ),
+          },
+          requestId,
+          options,
         ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
       }
       return this.existingComplaintAction(
@@ -1079,26 +1192,26 @@ export class ComplaintService implements OnModuleInit {
         complaintCase.status === "reopened" &&
         pending?.action === "reopen_complaint_case"
       ) {
-        return this.retryUncertainComplaintWrite(pending, () =>
-          this.recordAudit(
-            {
-              actorId: null,
-              actorType: "ops_user",
-              tenantId: null,
-              moduleName: "complaint",
-              actionName: "reopen_complaint_case",
-              resourceType: "complaint_case",
-              resourceId: caseNo,
-              newValuesSummary: {
-                status: pending.complaintCase.status,
-                reason: command.reason,
-                reopenCount: pending.complaintCase.reopenCount,
-                slaDueAt: pending.complaintCase.slaDueAt,
-                slaBreach: false,
-              },
+        return this.retryUncertainComplaintWrite(
+          pending,
+          {
+            actorId: null,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "complaint",
+            actionName: "reopen_complaint_case",
+            resourceType: "complaint_case",
+            resourceId: caseNo,
+            newValuesSummary: {
+              status: pending.complaintCase.status,
+              reason: command.reason,
+              reopenCount: pending.complaintCase.reopenCount,
+              slaDueAt: pending.complaintCase.slaDueAt,
+              slaBreach: false,
             },
-            requestId,
-          ),
+          },
+          requestId,
+          options,
         ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
       }
       throw new ApiRequestError(
@@ -1187,6 +1300,39 @@ export class ComplaintService implements OnModuleInit {
   ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     const complaintCase = this.requireComplaintCase(caseNo);
     if (complaintCase.slaBreach) {
+      // A retry of an uncertain-commit breach mark must actually re-attempt
+      // the write (and its delayed notification) instead of a silent no-op
+      // on the optimistic in-memory "breached" flag that never confirmed.
+      const pending = this.pendingUncertainCommits.get(caseNo);
+      if (pending?.action === "mark_complaint_sla_breach") {
+        return this.retryUncertainComplaintWrite(
+          pending,
+          {
+            actorId: null,
+            actorType: "system",
+            tenantId: null,
+            moduleName: "complaint",
+            actionName: "mark_complaint_sla_breach",
+            resourceType: "complaint_case",
+            resourceId: caseNo,
+            newValuesSummary: {
+              status: pending.complaintCase.status,
+              slaBreach: true,
+              slaDueAt: pending.complaintCase.slaDueAt,
+            },
+          },
+          requestId,
+          options,
+          () =>
+            this.auditNotificationService.recordNotification({
+              tenantId: null,
+              channel: "ops_notice",
+              title: "Complaint SLA breached",
+              message: `Complaint ${caseNo} exceeded SLA due at ${pending.complaintCase.slaDueAt}.`,
+              status: "unread",
+            }),
+        ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
+      }
       return this.existingComplaintAction(
         this.cloneComplaintCase(complaintCase),
         "mark_complaint_sla_breach",
@@ -1271,23 +1417,23 @@ export class ComplaintService implements OnModuleInit {
         pending?.action === "escalate_to_incident" &&
         complaintCase.relatedIncidentId === incidentId
       ) {
-        return this.retryUncertainComplaintWrite(pending, () =>
-          this.recordAudit(
-            {
-              actorId: null,
-              actorType: "ops_user",
-              tenantId: null,
-              moduleName: "complaint",
-              actionName: "escalate_to_incident",
-              resourceType: "complaint_case",
-              resourceId: caseNo,
-              newValuesSummary: {
-                relatedIncidentId: incidentId,
-                reason,
-              },
+        return this.retryUncertainComplaintWrite(
+          pending,
+          {
+            actorId: null,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "complaint",
+            actionName: "escalate_to_incident",
+            resourceType: "complaint_case",
+            resourceId: caseNo,
+            newValuesSummary: {
+              relatedIncidentId: incidentId,
+              reason,
             },
-            requestId,
-          ),
+          },
+          requestId,
+          options,
         ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
       }
       throw new ApiRequestError(
@@ -1374,6 +1520,29 @@ export class ComplaintService implements OnModuleInit {
       );
     }
     if (complaintCase.relatedIncidentId === incidentId) {
+      // A retry of the same uncertain-commit link must actually re-attempt
+      // the write instead of a silent no-op on the optimistic in-memory
+      // link that never confirmed (0 canonical writes, 0 notification).
+      const pending = this.pendingUncertainCommits.get(caseNo);
+      if (pending?.action === "link_incident") {
+        return this.retryUncertainComplaintWrite(
+          pending,
+          {
+            actorId: null,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "complaint",
+            actionName: "link_incident",
+            resourceType: "complaint_case",
+            resourceId: caseNo,
+            newValuesSummary: {
+              relatedIncidentId: incidentId,
+            },
+          },
+          requestId,
+          options,
+        ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
+      }
       return this.existingComplaintAction(
         this.cloneComplaintCase(complaintCase),
         "link_incident",
@@ -1616,6 +1785,11 @@ export class ComplaintService implements OnModuleInit {
     // call with an equal command can be recognized as a retry of this same
     // attempt rather than a brand-new case.
     matchCommand?: unknown,
+    // True only when this call resends a previously uncertain-commit
+    // snapshot (see retryUncertainComplaintWrite). A definite failure of
+    // *this* attempt does not prove the original attempt rolled back, so
+    // the pending marker must survive it for a later retry or reconciliation.
+    isRetry = false,
   ): Promise<void> {
     if (!this.complaintRepository) {
       return Promise.resolve();
@@ -1684,6 +1858,28 @@ export class ComplaintService implements OnModuleInit {
                 });
               }
             }
+            // The outcome is now tracked as a pending uncertain commit, not a
+            // live settlementPersistence failure. Leaving the rejected
+            // promise mapped by caseNo would make a later, unrelated
+            // refreshSettlementCases() sweep rethrow this same failure and
+            // block that case's own reconciliation/retry.
+            for (const caseNo of affectedCaseNos) {
+              if (this.settlementPersistence.get(caseNo) === persistence) {
+                this.settlementPersistence.delete(caseNo);
+              }
+            }
+          } else if (isRetry) {
+            // This retry's own attempt failed definitely, but that failure
+            // belongs to the retry, not the original still-uncertain one; a
+            // connect/query error here does not prove the first COMMIT never
+            // landed. Preserve the existing pending marker untouched so a
+            // later retry (or reconcilePendingCase's durable read) can still
+            // recover the same caseNo instead of minting a duplicate.
+            for (const caseNo of affectedCaseNos) {
+              if (this.settlementPersistence.get(caseNo) === persistence) {
+                this.settlementPersistence.delete(caseNo);
+              }
+            }
           } else {
             for (const caseNo of affectedCaseNos) {
               this.pendingUncertainCommits.delete(caseNo);
@@ -1719,12 +1915,18 @@ export class ComplaintService implements OnModuleInit {
   /** Resends the exact case/timeline snapshot from an earlier attempt whose
    * COMMIT outcome was unknown, reusing its caseNo/entryIds so the
    * repository's ON CONFLICT DO UPDATE upserts idempotently instead of a
-   * retry allocating a second case or row. Returns the same optimistic
-   * snapshot synchronously, consistent with every other mutation method. */
-  private retryUncertainComplaintWrite(
+   * retry allocating a second case or row. Shares finishOrdinaryComplaintAction
+   * with every other ordinary mutation so a captureAudit: true caller gets
+   * back the same `{ data, auditLog }` shape only once this retry actually
+   * commits, instead of a bare ComplaintCaseRecord the controller cannot read
+   * `.data`/`.auditLog` off of. */
+  private retryUncertainComplaintWrite<Capture extends boolean = false>(
     pending: PendingUncertainComplaintCommit,
-    onConfirmed: () => void,
-  ): ComplaintCaseRecord {
+    auditInput: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
+    requestId?: string,
+    options?: { captureAudit?: Capture },
+    onCommitted?: () => void,
+  ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     const persistence = this.persistChanges(
       {
         complaintCases: [pending.complaintCase],
@@ -1733,9 +1935,40 @@ export class ComplaintService implements OnModuleInit {
       pending.action,
       pending.rollback,
       pending.matchCommand,
+      true,
     );
-    this.emitAfterOrdinaryPersistence(persistence, true, onConfirmed);
-    return this.cloneComplaintCase(pending.complaintCase);
+    return this.finishOrdinaryComplaintAction(
+      this.cloneComplaintCase(pending.complaintCase),
+      persistence,
+      true,
+      auditInput,
+      requestId,
+      options,
+      onCommitted,
+    );
+  }
+
+  /** Acknowledges a retry whose content exactly matches an already-attempted
+   * uncertain-commit note/assignment: unlike a terminal-state mutation
+   * (resolve/close/reopen/escalate/link/sla-breach), a duplicate append-only
+   * note or an identical reassignment carries no additional information to
+   * commit, so resending it would only risk minting a second canonical row
+   * once the original commit lands. Returns the pending attempt's own
+   * snapshot immediately instead of starting another canonical write, and
+   * leaves the pending marker untouched for refreshSettlementCases() to
+   * resolve against the durable store whenever it next can. */
+  private acknowledgePendingUncertainCommit<Capture extends boolean = false>(
+    pending: PendingUncertainComplaintCommit,
+    auditInput: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
+    requestId?: string,
+    options?: { captureAudit?: Capture },
+  ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
+    return this.finishComplaintAction(
+      this.cloneComplaintCase(pending.complaintCase),
+      auditInput,
+      requestId,
+      options,
+    ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
   }
 
   /** Finds an uncertain-commit create (createComplaintCase /

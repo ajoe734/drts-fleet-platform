@@ -630,3 +630,508 @@ describe("C045-F3: ComplaintCommitOutcomeUnknownError retry resends instead of a
     ).toHaveLength(1);
   });
 });
+
+// Root ca237 review follow-up (2026-10-18): the six unknown-COMMIT findings
+// left unfixed by ca237ed9d, plus the captureAudit shape bug it introduced
+// in every retryUncertainComplaintWrite call site.
+describe("Root ca237 follow-up: readback reconciliation, link/SLA/escalation retry, failed-retry-preserves-uncertainty, note/assign dedup, captureAudit shape", () => {
+  function deferred() {
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<void>((done, fail) => {
+      resolve = done;
+      reject = fail;
+    });
+    return { promise, resolve, reject };
+  }
+
+  function fixture(
+    repositoryOverrides: Record<string, unknown> = {},
+  ) {
+    const writeGates: ReturnType<typeof deferred>[] = [];
+    const persistChanges = vi.fn(async () => {
+      const gate = writeGates.shift();
+      if (gate) await gate.promise;
+    });
+    const loadCaseByCaseNo = vi.fn(async () => null);
+    const repository = {
+      isEnabled: () => true,
+      persistChanges,
+      reportPersistenceFailure: vi.fn(),
+      loadSettlementState: vi.fn(async () => ({
+        complaintCases: [],
+        complaintTimelines: [],
+      })),
+      loadCaseByCaseNo,
+      ...repositoryOverrides,
+    } as unknown as ComplaintRepository;
+    const audit = new AuditNotificationService();
+    const complaintService = new ComplaintService(audit, repository);
+    const incidentService = new IncidentService(audit);
+    const controller = new ComplaintController(
+      complaintService,
+      incidentService,
+      {} as never,
+    );
+    return {
+      controller,
+      complaintService,
+      incidentService,
+      audit,
+      persistChanges,
+      loadCaseByCaseNo,
+      pauseWrite() {
+        const gate = deferred();
+        writeGates.push(gate);
+        return gate;
+      },
+    };
+  }
+
+  it("C045-F3-20261018-READBACK: reconciles an unknown-commit close back to the real prior state once the durable store proves it never landed", async () => {
+    const context = fixture();
+    const complaintCase = context.complaintService.createComplaintCase({
+      caseSource: "ops",
+      category: "driver_service",
+      severity: "normal",
+      description: "Readback reconciliation regression",
+    });
+    await context.complaintService.awaitSettlementPersistence(
+      complaintCase.caseNo,
+    );
+    const priorDurable =
+      context.complaintService.getComplaintCase(complaintCase.caseNo);
+
+    const gate = context.pauseWrite();
+    const failure = new ComplaintCommitOutcomeUnknownError(
+      new Error("close COMMIT outcome unknown"),
+    );
+    const firstAttempt = context.controller
+      .closeComplaintCase(complaintCase.caseNo, {
+        resolutionCode: "resolved_driver_warning",
+        closingNote: "Closed",
+      })
+      .catch((error: unknown) => error);
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(2),
+    );
+    gate.reject(failure);
+    expect(await firstAttempt).toBe(failure);
+
+    // Before reconciliation, a second raw readback still looks closed.
+    expect(
+      context.complaintService.getComplaintCase(complaintCase.caseNo).status,
+    ).toBe("closed");
+
+    // The durable store proves the close never landed.
+    context.loadCaseByCaseNo.mockResolvedValue(priorDurable);
+    await context.complaintService.refreshSettlementCases();
+
+    expect(
+      context.complaintService.getComplaintCase(complaintCase.caseNo).status,
+    ).toBe("new");
+    expect(
+      context.complaintService.getComplaintExportView(complaintCase.caseNo)
+        .readyForAudit,
+    ).toBe(false);
+
+    // A genuine retry now actually re-attempts the write instead of reading
+    // a never-committed "closed" case as done.
+    const retry = await context.controller.closeComplaintCase(
+      complaintCase.caseNo,
+      { resolutionCode: "resolved_driver_warning", closingNote: "Closed" },
+    );
+    expect(retry.data.status).toBe("closed");
+  });
+
+  it("C045-F3-20261018-READBACK: clears the pending marker without re-attempting the write once the durable store proves the close did land", async () => {
+    const context = fixture();
+    const complaintCase = context.complaintService.createComplaintCase({
+      caseSource: "ops",
+      category: "driver_service",
+      severity: "normal",
+      description: "Readback confirmed-commit regression",
+    });
+    await context.complaintService.awaitSettlementPersistence(
+      complaintCase.caseNo,
+    );
+
+    const gate = context.pauseWrite();
+    const failure = new ComplaintCommitOutcomeUnknownError(
+      new Error("close COMMIT outcome unknown"),
+    );
+    const firstAttempt = context.controller
+      .closeComplaintCase(complaintCase.caseNo, {
+        resolutionCode: "resolved_driver_warning",
+        closingNote: "Closed",
+      })
+      .catch((error: unknown) => error);
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(2),
+    );
+    gate.reject(failure);
+    expect(await firstAttempt).toBe(failure);
+
+    const closedSnapshot = context.complaintService.getComplaintCase(
+      complaintCase.caseNo,
+    );
+    context.loadCaseByCaseNo.mockResolvedValue(closedSnapshot);
+    await context.complaintService.refreshSettlementCases();
+
+    const callsAfterReconcile = context.persistChanges.mock.calls.length;
+    const ack = await context.controller.closeComplaintCase(
+      complaintCase.caseNo,
+      { resolutionCode: "resolved_driver_warning", closingNote: "Closed" },
+    );
+    expect(ack.data.status).toBe("closed");
+    expect(context.persistChanges).toHaveBeenCalledTimes(callsAfterReconcile);
+  });
+
+  it("C045-F3-20261018-LINK-SLA-RETRY: a linkIncident retry actually re-attempts persistence after reconciliation, instead of a 0-write success replay", async () => {
+    const context = fixture();
+    const complaintCase = context.complaintService.createComplaintCase({
+      caseSource: "ops",
+      category: "driver_service",
+      severity: "normal",
+      description: "Link retry regression",
+    });
+    await context.complaintService.awaitSettlementPersistence(
+      complaintCase.caseNo,
+    );
+    const preLinkDurable = context.complaintService.getComplaintCase(
+      complaintCase.caseNo,
+    );
+    const incident = context.incidentService.createIncident({
+      title: "Existing incident",
+      description: "Pre-existing incident to link",
+      category: "operational",
+      severity: "medium",
+      reportedBy: "ops-1",
+    });
+
+    const gate = context.pauseWrite();
+    const failure = new ComplaintCommitOutcomeUnknownError(
+      new Error("link COMMIT outcome unknown"),
+    );
+    const firstAttempt = context.controller
+      .linkIncident(complaintCase.caseNo, { incidentId: incident.incidentId })
+      .catch((error: unknown) => error);
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(2),
+    );
+    gate.reject(failure);
+    expect(await firstAttempt).toBe(failure);
+
+    // The durable store proves the link never landed.
+    context.loadCaseByCaseNo.mockResolvedValue(preLinkDurable);
+
+    const retry = await context.controller.linkIncident(complaintCase.caseNo, {
+      incidentId: incident.incidentId,
+    });
+    expect(retry.data.relatedIncidentId).toBe(incident.incidentId);
+    // The precheck's refreshSettlementCases() reconciled the case before the
+    // retry decided anything, so this is a genuine third persistChanges call
+    // (create, first link attempt, retried link), not a 0-write replay.
+    expect(context.persistChanges).toHaveBeenCalledTimes(3);
+  });
+
+  it("C045-F3-20261018-LINK-SLA-RETRY: a markComplaintSlaBreach retry actually re-attempts persistence and the delayed notification after reconciliation", async () => {
+    const context = fixture();
+    const complaintCase = context.complaintService.createComplaintCase({
+      caseSource: "ops",
+      category: "driver_service",
+      severity: "normal",
+      description: "SLA breach retry regression",
+    });
+    await context.complaintService.awaitSettlementPersistence(
+      complaintCase.caseNo,
+    );
+    const preBreachDurable = context.complaintService.getComplaintCase(
+      complaintCase.caseNo,
+    );
+
+    const gate = context.pauseWrite();
+    const failure = new ComplaintCommitOutcomeUnknownError(
+      new Error("sla-breach COMMIT outcome unknown"),
+    );
+    const firstAttempt = context.controller
+      .markComplaintSlaBreach(complaintCase.caseNo)
+      .catch((error: unknown) => error);
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(2),
+    );
+    gate.reject(failure);
+    expect(await firstAttempt).toBe(failure);
+
+    context.loadCaseByCaseNo.mockResolvedValue(preBreachDurable);
+
+    const retry = await context.controller.markComplaintSlaBreach(
+      complaintCase.caseNo,
+    );
+    expect(retry.data.slaBreach).toBe(true);
+    expect(context.persistChanges).toHaveBeenCalledTimes(3);
+    const notices = context.audit
+      .listNotifications()
+      .filter((n) => n.title === "Complaint SLA breached");
+    expect(notices).toHaveLength(1);
+  });
+
+  it("C045-F3-20261018-ESCALATION-CALLER: a controller-level escalation retry recovers after reconciliation instead of being blocked by its own optimistic precheck", async () => {
+    const context = fixture();
+    const complaintCase = context.complaintService.createComplaintCase({
+      caseSource: "ops",
+      category: "safety_concern",
+      severity: "high",
+      description: "Escalation retry regression",
+    });
+    await context.complaintService.awaitSettlementPersistence(
+      complaintCase.caseNo,
+    );
+    const preEscalateDurable = context.complaintService.getComplaintCase(
+      complaintCase.caseNo,
+    );
+
+    const gate = context.pauseWrite();
+    const failure = new ComplaintCommitOutcomeUnknownError(
+      new Error("escalate COMMIT outcome unknown"),
+    );
+    const firstAttempt = context.controller
+      .escalateToIncident(complaintCase.caseNo, {
+        title: "Safety escalation",
+        severity: "high",
+        reason: "Driver conduct requires investigation",
+      })
+      .catch((error: unknown) => error);
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(2),
+    );
+    gate.reject(failure);
+    expect(await firstAttempt).toBe(failure);
+
+    // The mounted precheck still sees the optimistic (never-confirmed) link
+    // before reconciliation.
+    expect(
+      context.complaintService.getComplaintCase(complaintCase.caseNo)
+        .relatedIncidentId,
+    ).not.toBeNull();
+
+    // The durable store proves the escalation never landed.
+    context.loadCaseByCaseNo.mockResolvedValue(preEscalateDurable);
+
+    const retry = await context.controller.escalateToIncident(
+      complaintCase.caseNo,
+      {
+        title: "Safety escalation",
+        severity: "high",
+        reason: "Driver conduct requires investigation, retried",
+      },
+    );
+    expect(retry.data.complaintCase.relatedIncidentId).toBe(
+      retry.data.incident.incidentId,
+    );
+  });
+
+  it("C045-F3-20261018-UNKNOWN-THEN-FAILED-RETRY: a failed retry does not erase the still-unknown original, so a third attempt recovers the same case instead of minting a duplicate", async () => {
+    const context = fixture();
+    const command = {
+      caseSource: "ops" as const,
+      category: "driver_service" as const,
+      severity: "normal" as const,
+      description: "Unknown-then-failed-retry regression",
+    };
+
+    const gate1 = context.pauseWrite();
+    const firstAttempt = context.complaintService.createComplaintCase(command);
+    const outcome1 = context.complaintService
+      .awaitSettlementPersistence(firstAttempt.caseNo)
+      .catch((error: unknown) => error);
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(1),
+    );
+    const unknownFailure = new ComplaintCommitOutcomeUnknownError(
+      new Error("create COMMIT outcome unknown"),
+    );
+    gate1.reject(unknownFailure);
+    expect(await outcome1).toBe(unknownFailure);
+
+    // Retry #2 (same command) reuses the pending caseNo but fails with a
+    // DEFINITE error this time; that failure must not prove the first
+    // attempt rolled back.
+    const gate2 = context.pauseWrite();
+    const retry2 = context.complaintService.createComplaintCase(command);
+    expect(retry2.caseNo).toBe(firstAttempt.caseNo);
+    const outcome2 = context.complaintService
+      .awaitSettlementPersistence(retry2.caseNo)
+      .catch((error: unknown) => error);
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(2),
+    );
+    const definiteFailure = new Error("connection reset");
+    gate2.reject(definiteFailure);
+    expect(await outcome2).toBe(definiteFailure);
+
+    // The case is NOT rolled back/removed by the second attempt's own
+    // definite failure.
+    expect(context.complaintService.listComplaintCases()).toHaveLength(1);
+    expect(context.complaintService.listComplaintCases()[0]!.caseNo).toBe(
+      firstAttempt.caseNo,
+    );
+
+    // Retry #3 (same command) still recognizes the original pending attempt
+    // and reuses its caseNo instead of allocating a second case.
+    const gate3 = context.pauseWrite();
+    const retry3 = context.complaintService.createComplaintCase(command);
+    expect(retry3.caseNo).toBe(firstAttempt.caseNo);
+    gate3.resolve();
+    await context.complaintService.awaitSettlementPersistence(
+      retry3.caseNo,
+    );
+
+    expect(context.complaintService.listComplaintCases()).toHaveLength(1);
+    expect(
+      context.complaintService.getComplaintTimeline(retry3.caseNo),
+    ).toHaveLength(1);
+  });
+
+  it("C045-F3-20261018-NOTE-REPLAY: an unknown-commit note retry recovers the same timeline entry instead of minting a second one", async () => {
+    const context = fixture();
+    const complaintCase = context.complaintService.createComplaintCase({
+      caseSource: "ops",
+      category: "driver_service",
+      severity: "normal",
+      description: "Note replay regression",
+    });
+    await context.complaintService.awaitSettlementPersistence(
+      complaintCase.caseNo,
+    );
+
+    const gate = context.pauseWrite();
+    const failure = new ComplaintCommitOutcomeUnknownError(
+      new Error("note COMMIT outcome unknown"),
+    );
+    const firstAttempt = context.controller
+      .addComplaintCaseNote(complaintCase.caseNo, { note: "Called driver" })
+      .catch((error: unknown) => error);
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(2),
+    );
+    gate.reject(failure);
+    expect(await firstAttempt).toBe(failure);
+
+    // A same-content retry (e.g. a Fleet idempotency-key resend) recovers
+    // the same pending entry instead of appending a second canonical row.
+    const retryGate = context.pauseWrite();
+    const retry = await context.controller.addComplaintCaseNote(
+      complaintCase.caseNo,
+      { note: "Called driver" },
+    );
+    retryGate.resolve();
+    expect(retry.data.status).toBe("under_investigation");
+    expect(
+      context.complaintService.getComplaintTimeline(complaintCase.caseNo),
+    ).toHaveLength(2); // case_created + the single note, not two notes
+
+    // A genuinely different note is never swallowed as a duplicate retry.
+    const distinctNote = await context.controller.addComplaintCaseNote(
+      complaintCase.caseNo,
+      { note: "Driver confirmed pickup location" },
+    );
+    expect(distinctNote.data.status).toBe("under_investigation");
+    expect(
+      context.complaintService.getComplaintTimeline(complaintCase.caseNo),
+    ).toHaveLength(3);
+  });
+
+  it("C045-F3-20261018-NOTE-REPLAY: an unknown-commit assign retry recovers the same timeline entry instead of minting a second one", async () => {
+    const context = fixture();
+    const complaintCase = context.complaintService.createComplaintCase({
+      caseSource: "ops",
+      category: "driver_service",
+      severity: "normal",
+      description: "Assign replay regression",
+    });
+    await context.complaintService.awaitSettlementPersistence(
+      complaintCase.caseNo,
+    );
+
+    const gate = context.pauseWrite();
+    const failure = new ComplaintCommitOutcomeUnknownError(
+      new Error("assign COMMIT outcome unknown"),
+    );
+    const firstAttempt = context.controller
+      .assignComplaintCase(complaintCase.caseNo, {
+        assigneeId: "AGENT-OPS-001",
+      })
+      .catch((error: unknown) => error);
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(2),
+    );
+    gate.reject(failure);
+    expect(await firstAttempt).toBe(failure);
+
+    const retryGate = context.pauseWrite();
+    const retry = await context.controller.assignComplaintCase(
+      complaintCase.caseNo,
+      { assigneeId: "AGENT-OPS-001" },
+    );
+    retryGate.resolve();
+    expect(retry.data.assigneeId).toBe("AGENT-OPS-001");
+    expect(
+      context.complaintService.getComplaintTimeline(complaintCase.caseNo),
+    ).toHaveLength(2); // case_created + the single assignment, not two
+  });
+
+  it("TypeError regression (Root ca237 review): a controller-driven resolve retry after an unknown commit returns a real action receipt instead of crashing on an undefined auditLog", async () => {
+    const context = fixture();
+    const complaintCase = context.complaintService.createComplaintCase({
+      caseSource: "ops",
+      category: "driver_service",
+      severity: "normal",
+      description: "captureAudit shape regression",
+    });
+    await context.complaintService.awaitSettlementPersistence(
+      complaintCase.caseNo,
+    );
+
+    const gate = context.pauseWrite();
+    const unknownFailure = new ComplaintCommitOutcomeUnknownError(
+      new Error("resolve COMMIT outcome unknown"),
+    );
+    const firstAttempt = context.controller
+      .resolveComplaintCase(complaintCase.caseNo, {
+        resolutionCode: "resolved_driver_warning",
+        closingNote: "First attempt",
+      })
+      .catch((error: unknown) => error);
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(2),
+    );
+    gate.reject(unknownFailure);
+    expect(await firstAttempt).toBe(unknownFailure);
+
+    // Before ca237's fix, this retry's pending branch returned a bare
+    // ComplaintCaseRecord cast to the captureAudit shape; the controller's
+    // `updated.data` / `updated.auditLog` were then undefined, and
+    // toActionReceipt({ auditLog: undefined, ... }) threw
+    // "Cannot read properties of undefined (reading 'resourceType')" even
+    // though the case was already durably resolved.
+    const retryGate = context.pauseWrite();
+    const retryPromise = context.controller.resolveComplaintCase(
+      complaintCase.caseNo,
+      {
+        resolutionCode: "resolved_driver_warning",
+        closingNote: "Retry after uncertain commit",
+      },
+    );
+    await vi.waitFor(() =>
+      expect(context.persistChanges).toHaveBeenCalledTimes(3),
+    );
+    retryGate.resolve();
+    const retry = await retryPromise;
+
+    expect(retry.data.status).toBe("resolved");
+    expect(retry.meta.actionReceipt.resourceType).toBe("complaint_case");
+    expect(retry.meta.actionReceipt.resourceId).toBe(complaintCase.caseNo);
+    expect(retry.meta.actionReceipt.status).toBe("completed");
+  });
+});
