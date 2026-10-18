@@ -13,7 +13,10 @@ import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
 import { bookingResponseDiagnostic } from "./pax-review-shared-order/booking-diagnostic";
 import { dispatchResponseDiagnostic } from "./pax-review-shared-order/dispatch-diagnostic";
-import { createDispatchInOrdinaryWorkspace } from "./pax-review-shared-order/ordinary-ops-dispatch";
+import {
+  createDispatchInOrdinaryWorkspace,
+  assignInOrdinaryWorkspace,
+} from "./pax-review-shared-order/ordinary-ops-dispatch";
 
 type JourneyStep = ReturnType<typeof createJourneyProgress>["step"];
 
@@ -1266,7 +1269,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
     await step(
       "A Ops assign then reassign while Passenger offline",
       async () => {
-        await assign(ops, "pax-review-driver-b");
+        await assignInOrdinaryWorkspace(ops, OPS, normal, "b", false, info);
         await expect
           .poll(
             async () =>
@@ -1274,7 +1277,9 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           )
           .toBe("pax-review-driver-b");
         await pax.context().setOffline(true);
-        await assign(ops, "pax-review-driver-a", true);
+        await assignInOrdinaryWorkspace(ops, OPS, normal, "a", true, info);
+        await ops.goto(`${OPS}/review`);
+        await opsRead(ops, normal);
         await pax.context().setOffline(false);
         await expect(
           pax.getByText("SIM-1001", { exact: false }).first(),
