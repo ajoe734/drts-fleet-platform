@@ -65,7 +65,13 @@ function createInMemoryTenantPartnerRepository(
 ) {
   let state = cloneState(initialState);
 
-  return {
+  const repository = {
+    isEnabled: () => true,
+    persistConfigurationChanges: vi.fn(
+      async (changes: PersistTenantPartnerChanges) => {
+        await repository.persistChanges(changes);
+      },
+    ),
     loadState: vi.fn(async () => cloneState(state)),
     persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
       state = {
@@ -166,6 +172,7 @@ function createInMemoryTenantPartnerRepository(
     reportPersistenceFailure: vi.fn(),
     getState: () => cloneState(state),
   };
+  return repository;
 }
 
 function createTenantUsers(tenantId: string): TenantUserRoleRecord[] {
@@ -224,6 +231,91 @@ async function createHarness(tenantId: string) {
 }
 
 describe("seedTenantGovernance", () => {
+  for (const [field, step] of [
+    ["quotaPolicies", "quota_policy"],
+    ["approvalRules", "approval_rule"],
+  ] as const) {
+    it(`waits for the ${step} durable ACK before seed success or its step audit`, async () => {
+      const tenantId = `tenant-seed-ack-${step}`;
+      const { repository, tenantPartnerService, auditNotificationService } =
+        await createHarness(tenantId);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      repository.persistConfigurationChanges.mockImplementation(
+        async (changes) => {
+          if (changes[field]) await gate;
+          await repository.persistChanges(changes);
+        },
+      );
+      let settled = false;
+      const seed = seedTenantGovernance(tenantId, {
+        services: { tenantPartnerService, auditNotificationService },
+      }).finally(() => {
+        settled = true;
+      });
+      try {
+        await vi.waitFor(() =>
+          expect(
+            repository.persistConfigurationChanges.mock.calls.some(
+              ([changes]) => changes[field],
+            ),
+          ).toBe(true),
+        );
+        expect(settled).toBe(false);
+        expect(repository.getState()[field]).toEqual([]);
+        const audits = auditNotificationService
+          .listAuditLogs(null)
+          .map((log) => log.actionName);
+        expect(audits).not.toContain(`tenant.governance_seed.${step}`);
+        expect(audits).not.toContain("tenant.governance_seed.completed");
+      } finally {
+        release();
+        await seed;
+        await Promise.allSettled(
+          repository.persistConfigurationChanges.mock.results.map(
+            (result) => result.value,
+          ),
+        );
+      }
+      expect(repository.getState()[field]).toHaveLength(1);
+      expect(
+        auditNotificationService
+          .listAuditLogs(null)
+          .map((log) => log.actionName),
+      ).toContain("tenant.governance_seed.completed");
+    });
+
+    it(`propagates a rejected ${step} ACK without a successful seed or step audit`, async () => {
+      const tenantId = `tenant-seed-reject-${step}`;
+      const { repository, tenantPartnerService, auditNotificationService } =
+        await createHarness(tenantId);
+      const failure = new Error(`${step} commit rejected`);
+      repository.persistConfigurationChanges.mockImplementation(
+        async (changes) => {
+          if (changes[field]) throw failure;
+          await repository.persistChanges(changes);
+        },
+      );
+      await expect(
+        seedTenantGovernance(tenantId, {
+          services: { tenantPartnerService, auditNotificationService },
+        }),
+      ).rejects.toBe(failure);
+      expect(repository.getState()[field]).toEqual([]);
+      const audits = auditNotificationService
+        .listAuditLogs(null)
+        .map((log) => log.actionName);
+      expect(audits).not.toContain(`tenant.governance_seed.${step}`);
+      expect(audits).not.toContain("tenant.governance_seed.completed");
+      expect(repository.reportPersistenceFailure).toHaveBeenCalledWith(
+        failure,
+        expect.any(String),
+      );
+    });
+  }
+
   it("seeds the midmarket default payload with the expected limits and rule", async () => {
     const tenantId = "tenant-seed-midmarket";
     const { auditNotificationService, tenantPartnerService } =
