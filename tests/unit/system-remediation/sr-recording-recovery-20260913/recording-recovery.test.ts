@@ -281,6 +281,28 @@ class InMemoryDatabase {
   ): Promise<{ rows: T[]; rowCount: number }> {
     const trimmed = sql.trim().replace(/\s+/g, " ");
 
+    if (trimmed.startsWith("SELECT s.call_id, scope.brand_id")) {
+      const session = this.voiceSessions.get(String(params[0]));
+      const rows = session
+        ? [
+            {
+              call_id: session.call_id,
+              brand_id: session.resource_scope_id,
+              bound_order_id: null,
+            } as unknown as T,
+          ]
+        : [];
+      return { rows, rowCount: rows.length };
+    }
+
+    if (trimmed.startsWith("SELECT voice_session_id FROM voice.session")) {
+      const session = this.voiceSessions.get(String(params[0]));
+      const rows = session
+        ? [{ voice_session_id: session.voice_session_id } as unknown as T]
+        : [];
+      return { rows, rowCount: rows.length };
+    }
+
     // 1. SELECT for repair dedupe
     if (
       trimmed.includes(
@@ -642,6 +664,8 @@ class InMemoryDatabase {
         voice_session_id: c.voice_session_id,
         call_id: c.call_id,
         resource_scope_id: c.resource_scope_id,
+        brand_id: c.resource_scope_id,
+        bound_order_id: null,
       })) as unknown as T[];
       return { rows, rowCount: rows.length };
     }
