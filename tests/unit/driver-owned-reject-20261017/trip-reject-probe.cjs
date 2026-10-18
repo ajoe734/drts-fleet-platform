@@ -126,18 +126,26 @@ Module._load = function (request, parent, isMain) {
   return originalLoad.call(this, request, parent, isMain);
 };
 
+const isTerminalScenario = scenario.startsWith("terminal-");
 let task = {
   taskId: "owned-task-1",
   orderId: "same-order-1",
   driverId: "fixture-driver",
   vehicleId: "fixture-vehicle",
   sourcePlatform: scenario === "forwarded" ? "fixture-platform" : null,
-  status: scenario === "accepted" ? "accepted" : "pending_acceptance",
+  status: isTerminalScenario
+    ? scenario.slice("terminal-".length)
+    : scenario === "accepted"
+      ? "accepted"
+      : "pending_acceptance",
   routeProvided: false,
   waypoints: [],
 };
 const order = {
   orderId: task.orderId,
+  // A terminal task keeps the recordingId from its finished GPS recording;
+  // the UI must read that as history, not as a still-live recording.
+  recordingId: isTerminalScenario ? "historical-recording-1" : null,
   pickup: { address: "fixture pickup" },
   dropoff: { address: "fixture dropoff" },
   proofRequirements: {
@@ -196,9 +204,14 @@ globalThis.fetch = async (url, init = {}) => {
               sourcePlatform:
                 scenario === "forwarded" ? "fixture-platform" : "drts",
               localStatus: task.status,
-              driverActionState: "action_required",
-              allowedActions:
-                scenario === "not-allowed" ? ["accept"] : ["accept", "reject"],
+              driverActionState: isTerminalScenario
+                ? "completed"
+                : "action_required",
+              allowedActions: isTerminalScenario
+                ? []
+                : scenario === "not-allowed"
+                  ? ["accept"]
+                  : ["accept", "reject"],
               routeLocked: false,
               fareAuthority: "drts",
               settlementAuthority: "drts",
@@ -220,6 +233,9 @@ const flatten = (n) =>
   typeof n === "string" ? n : (n.children ?? []).map(flatten).join("");
 const find = (r, label) =>
   r.root.findAll((n) => n.type === "Pressable" && flatten(n) === label);
+const hasText = (r, substring) =>
+  r.root.findAll((n) => n.type === "Text" && flatten(n).includes(substring))
+    .length > 0;
 const button = (r, label) => {
   const rows = find(r, label);
   assert.equal(rows.length, 1, "expected one " + label);
@@ -247,7 +263,30 @@ async function tick() {
     await tick();
   });
   try {
-    if (["forwarded", "accepted", "not-allowed"].includes(scenario)) {
+    if (isTerminalScenario) {
+      assert.equal(
+        find(r, "婉拒任務").length,
+        0,
+        "a terminal task must not offer a reject action",
+      );
+      assert.equal(requests.length, 0);
+      assert.equal(
+        hasText(r, "追蹤 · 開啟"),
+        false,
+        "a finished recording's historical recordingId must not render as still live",
+      );
+      assert.equal(
+        hasText(r, "追蹤 · 待開始"),
+        false,
+        "a terminal task must not promise tracking will still start",
+      );
+      const expectedTrackingLabel =
+        scenario === "terminal-completed" ? "追蹤 · 已結束" : "追蹤 · 已停止";
+      assert.ok(
+        hasText(r, expectedTrackingLabel),
+        `expected tracking label "${expectedTrackingLabel}" for ${scenario}`,
+      );
+    } else if (["forwarded", "accepted", "not-allowed"].includes(scenario)) {
       assert.equal(find(r, "婉拒任務").length, 0);
       assert.equal(requests.length, 0);
     } else {

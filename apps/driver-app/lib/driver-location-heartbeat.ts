@@ -112,7 +112,7 @@ function installReviewLocationProducer() {
   panel.append(title, state, toggle);
   document.body.append(panel);
   const tick = () => {
-    state.textContent = `同單任務：${activeTaskId ?? "等待接單"}；座標 ${reviewPosition + 1}/${PAX_REVIEW_TRACK.length}${reviewPaused ? "（已停止；等待真 freshness 過期）" : ""}`;
+    state.textContent = `同單任務：${activeTaskId ?? "目前沒有活動任務"}；座標 ${reviewPosition + 1}/${PAX_REVIEW_TRACK.length}${reviewPaused ? "（已停止；等待真 freshness 過期）" : ""}`;
     if (reviewPaused) return;
     if (!activeTaskId) {
       // Foreground simulated supply position, using the registered driver's

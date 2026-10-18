@@ -594,7 +594,10 @@ export function BookingScreen({
         <>
           {!account.contactPhoneVerified &&
             !settings.requireSmsVerification && (
-              <AuthAlert kind="warn">{T.unverifiedPhone}</AuthAlert>
+              <>
+                <AuthAlert kind="warn">{T.unverifiedPhone}</AuthAlert>
+                <a href="/account">{T.account}</a>
+              </>
             )}
           <BookingForm
             client={client}

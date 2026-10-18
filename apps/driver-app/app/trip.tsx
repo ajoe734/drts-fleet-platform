@@ -388,6 +388,7 @@ function getTrackingDescriptor(
   locationTrackingState: LocationTrackingState,
   locationTrackingMessage: string | null,
   recordingActive: boolean,
+  taskStatus: string | null | undefined,
 ) {
   if (isForwardedTrip) {
     return {
@@ -402,6 +403,22 @@ function getTrackingDescriptor(
       label: "錄製中",
       tone: "danger" as const,
       detail: locationTrackingMessage ?? "里程與時長正在即時更新。",
+    };
+  }
+
+  if (taskStatus === "completed") {
+    return {
+      label: "已結束",
+      tone: "neutral" as const,
+      detail: "行程已完成，追蹤已結束，不再更新里程與時長。",
+    };
+  }
+
+  if (taskStatus === "cancelled" || taskStatus === "rejected") {
+    return {
+      label: "已停止",
+      tone: "neutral" as const,
+      detail: "此任務已結束，追蹤已停止，不再更新里程與時長。",
     };
   }
 
@@ -1019,14 +1036,21 @@ export default function TripScreen() {
     : sourcePlatformOffline
       ? `${platformLabel} 目前為離線模式。來源平台的轉送動作已鎖定，請先回平台健康頁恢復上線。`
       : null;
+  const isOwnedTaskTerminal =
+    !isForwardedTrip &&
+    Boolean(
+      taskDetail && ["completed", "cancelled", "rejected"].includes(taskDetail.status),
+    );
   const recordingActive =
-    Boolean(orderDetail?.recordingId) ||
-    (!isForwardedTrip && locationTrackingState === "active");
+    !isOwnedTaskTerminal &&
+    (Boolean(orderDetail?.recordingId) ||
+      (!isForwardedTrip && locationTrackingState === "active"));
   const trackingDescriptor = getTrackingDescriptor(
     isForwardedTrip,
     locationTrackingState,
     locationTrackingMessage,
     recordingActive,
+    taskDetail?.status,
   );
   const trackingGapNotice =
     !isForwardedTrip &&
