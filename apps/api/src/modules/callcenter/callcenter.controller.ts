@@ -46,12 +46,17 @@ export class CallcenterController {
 
   @Get("sessions")
   @RequireRealms("platform", "ops")
-  listCallSessions(
+  async listCallSessions(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      { items: this.callcenterService.listCallSessions(requestId, identity) },
+      {
+        items: await this.callcenterService.listCallSessionsForRead(
+          requestId,
+          identity,
+        ),
+      },
       requestId,
     );
   }

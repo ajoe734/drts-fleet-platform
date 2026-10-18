@@ -325,6 +325,52 @@ describe("callback durable acknowledgement", () => {
   );
 });
 
+describe("committed phone session list", () => {
+  it("cold and stale peers list the latest callback with its original order", async () => {
+    const h = fixture();
+    const callId = "synthetic-current-session-list";
+    const order = await h.owned.createCallCenterOrder(phoneCommand(callId));
+    const peer = productionServices(h.database as never);
+    expect(peer.calls.listCallSessions()).toEqual([]);
+    const created = await peer.controller.createCallbackTask(callId, {
+      dueAt: "2026-10-19T00:00:00Z",
+    });
+    const claimed = await peer.controller.claimCallbackTask(
+      created.data.callbackTaskId,
+      { operatorId: "synthetic-current-operator" },
+    );
+    expect(h.calls.listCallSessions()[0]!.callbackTask).toBeNull();
+    for (const controller of [
+      h.controller,
+      productionServices(h.database as never).controller,
+    ]) {
+      expect(
+        (await controller.listCallSessions(null)).data.items,
+      ).toContainEqual(
+        expect.objectContaining({
+          callId,
+          linkedOrderId: order.orderId,
+          callbackTask: claimed.data,
+        }),
+      );
+    }
+  });
+
+  it("a database read failure cannot silently return an older cached session list", async () => {
+    const h = fixture();
+    await h.owned.createCallCenterOrder(
+      phoneCommand("synthetic-session-list-read-failure"),
+    );
+    expect(h.calls.listCallSessions()).toHaveLength(1);
+    vi.spyOn(h.database, "query").mockRejectedValueOnce(
+      new Error("synthetic session read failure"),
+    );
+    await expect(
+      Promise.resolve().then(() => h.controller.listCallSessions(null)),
+    ).rejects.toThrow("synthetic session read failure");
+  });
+});
+
 describe("phone durable acknowledgement", () => {
   const webhookEvents: SandboxWebhookEventType[] = [
     "call.started",
