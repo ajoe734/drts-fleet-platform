@@ -220,11 +220,21 @@ export interface RequestHandoffCommand {
   output: unknown;
 }
 
+/**
+ * AUDIT-VOICE-APPLICATION-REGRESSION-20261018: despite this route/method's
+ * name, apps/api's `VoiceToolGatewayService.execute` (which this call
+ * reaches, see `VoiceBookingController.requestHandoff`) already runs the
+ * WHOLE submitted `output.tools` batch, not only `request_handoff` -- each
+ * element of `results` is whichever `voiceToolResultSchemas[tool.name]`
+ * shape that proposal's own tool produced, in proposal order. Kept as
+ * `unknown` rather than a discriminated union: this client has no local
+ * copy of `voiceDialogueOutputSchema`'s own per-tool result schemas to
+ * stay in sync with, and the caller (`VoiceCallTurnCoordinator.
+ * executeTools`) only ever forwards these untouched as this turn's own
+ * tool-call results.
+ */
 export interface RequestHandoffResult {
-  results: ReadonlyArray<{
-    status: "queued" | "connected" | "unavailable";
-    handoffId: string | null;
-  }>;
+  results: ReadonlyArray<unknown>;
 }
 
 /** Mirrors `RecordControlEventCommand` (apps/api's
