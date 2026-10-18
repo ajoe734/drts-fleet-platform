@@ -609,6 +609,18 @@ function getTripStatusPresentation(
             tone: "warning",
             detail: "完單前需補齊照片、簽收或費用佐證。",
           };
+        case "cancelled":
+          return {
+            label: "任務已取消",
+            tone: "neutral",
+            detail: "此任務已取消，請勿繼續接送。原訂單與任務紀錄仍可查閱。",
+          };
+        case "rejected":
+          return {
+            label: "已婉拒任務",
+            tone: "neutral",
+            detail: "已送出婉拒，此任務不再需要接送。請等待新的派遣任務。",
+          };
         case "completed":
           return {
             label: "行程已完成",
@@ -671,7 +683,15 @@ function getTripLockBody(state: TripExperienceState | null): {
   }
 }
 
-function getIdleBottomActionLabel(state: TripExperienceState | null) {
+function getIdleBottomActionLabel(
+  state: TripExperienceState | null,
+  task: DriverTaskRecord | null,
+) {
+  if (task && !isForwardedTask(task)) {
+    if (task.status === "cancelled") return "任務已取消";
+    if (task.status === "rejected") return "已婉拒任務";
+    if (task.status === "completed") return "行程已完成";
+  }
   switch (state) {
     case "forwarded_pending":
       return "等待平台確認";
@@ -703,6 +723,22 @@ function getTripAuthorityBannerProps(
   state: TripExperienceState | null,
 ): TripAuthorityBannerDescriptor {
   if (!task || !isForwardedTask(task)) {
+    if (task && ["cancelled", "rejected", "completed"].includes(task.status)) {
+      const completed = task.status === "completed";
+      return {
+        title: completed
+          ? "行程已完成"
+          : task.status === "rejected"
+            ? "已婉拒任務"
+            : "任務已取消",
+        authorityLabel: "DRTS 行程主控",
+        description: completed
+          ? "行程已結束，保留原訂單與任務紀錄供查閱。"
+          : "此任務已結束，請勿繼續接送。原訂單與任務紀錄保留；後續派車請等候新任務。",
+        tone: "info",
+        icon: completed ? "checkmark-done-outline" : "close-circle-outline",
+      };
+    }
     return {
       title: "自營派單",
       authorityLabel: "DRTS 行程主控",
@@ -1812,7 +1848,7 @@ export default function TripScreen() {
             <Text style={styles.footerNotice}>
               {bottomPrimaryAction || bottomSecondaryAction
                 ? footerNotice
-                : getIdleBottomActionLabel(tripExperienceState)}
+                : getIdleBottomActionLabel(tripExperienceState, taskDetail)}
             </Text>
             <View style={styles.footerButtons}>
               {bottomSecondaryAction ? (
@@ -1834,7 +1870,10 @@ export default function TripScreen() {
                 />
               ) : (
                 <ActionButton
-                  label={getIdleBottomActionLabel(tripExperienceState)}
+                  label={getIdleBottomActionLabel(
+                    tripExperienceState,
+                    taskDetail,
+                  )}
                   onPress={() => undefined}
                   disabled
                   variant="secondary"
@@ -1854,7 +1893,13 @@ export default function TripScreen() {
         onConfirm={(reasonNote) => void handleOwnedReject(reasonNote)}
       />
       <PageHeader
-        title={driverStrings.trip.title}
+        title={
+          !isForwardedTrip &&
+          taskDetail &&
+          ["cancelled", "rejected", "completed"].includes(taskDetail.status)
+            ? tripStatusPresentation.label
+            : driverStrings.trip.title
+        }
         subtitle={headerSubtitle}
         actions={
           <View style={styles.headerActionRow}>
