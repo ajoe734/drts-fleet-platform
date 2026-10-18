@@ -4704,7 +4704,14 @@ export type CallType = (typeof CALL_TYPES)[number];
 export const CALL_SESSION_STATUSES = ["active", "closed"] as const;
 export type CallSessionStatus = (typeof CALL_SESSION_STATUSES)[number];
 
-export const CALLBACK_TASK_STATUSES = ["pending", "completed"] as const;
+export const CALLBACK_TASK_STATUSES = [
+  "pending",
+  "claimed",
+  "in_progress",
+  "completed",
+  "cancelled",
+  "unreachable",
+] as const;
 export type CallbackTaskStatus = (typeof CALLBACK_TASK_STATUSES)[number];
 
 export interface OpenCallSessionCommand {
@@ -4763,6 +4770,18 @@ export interface CallbackTaskRecord {
   status: CallbackTaskStatus;
   createdAt: string;
   updatedAt: string;
+  version?: number;
+  assignedOperatorId?: string | null;
+  attemptCount?: number;
+  lastOutcome?: string | null;
+  attempts?: Array<{
+    attemptId: string;
+    operatorId: string;
+    outcome: string;
+    notes: string | null;
+    recordedAt: string;
+    hangupConfirmed: boolean;
+  }>;
 }
 
 export type CallRecordingState = "ready" | "pending" | "missing";
@@ -4785,6 +4804,7 @@ export interface CallSessionRecord {
   lastEtaQuotedMinutes: number | null;
   lastEtaQuotedAt: string | null;
   callbackTask: CallbackTaskRecord | null;
+  callbackTaskHistory?: CallbackTaskRecord[];
   recordingState: CallRecordingState;
   flags: string[];
 }
