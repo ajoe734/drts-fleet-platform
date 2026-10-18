@@ -265,7 +265,9 @@ export function OtpFlow({
           {simulatedCode && (
             <AuthAlert kind="warn">
               <p>{reviewText.ordinarySmsNotice}</p>
-              <output aria-label="模擬簡訊驗證碼">{simulatedCode}</output>
+              <output aria-label={reviewText.ordinarySmsCodeLabel}>
+                {simulatedCode}
+              </output>
             </AuthAlert>
           )}
           {(expired || locked || error) && (
