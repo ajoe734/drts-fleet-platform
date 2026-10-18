@@ -102,3 +102,124 @@ export async function createDispatchInOrdinaryWorkspace(
       "ordinary Ops creation on original Passenger order; subsequent review assignment/reassignment and ordinary full journey remain separately scoped",
   };
 }
+
+/** Real ordinary Ops control -> SDK/BFF -> persisted assignment/task readback.
+ * No direct POST, review-action substitute, or internal network response mock.
+ */
+export async function assignInOrdinaryWorkspace(
+  ops: Page,
+  origin: string,
+  orderId: string,
+  driver: "a" | "b",
+  reassign: boolean,
+  info: TestInfo,
+) {
+  const navigation = await ops.goto(`${origin}/dispatch/${orderId}`);
+  expect(navigation?.status()).toBe(200);
+  await expect(ops.locator(`[data-ops-order-id="${orderId}"]`)).toBeVisible();
+  const readTasks = async () => {
+    const response = await ops.request.get(
+      `${origin}/control-plane-proxy/driver/tasks`,
+    );
+    expect(response.status()).toBe(200);
+    return camel(await response.json()).data.items.filter(
+      (task: any) => task.orderId === orderId,
+    );
+  };
+  const before = await readTasks();
+  const prior = before.find(
+    (task: any) => task.status === "pending_acceptance",
+  );
+  if (reassign) expect(prior).toBeTruthy();
+  else expect(before).toHaveLength(0);
+  const driverId = `pax-review-driver-${driver}`;
+  const vehicleId = `pax-review-vehicle-${driver}`;
+  await ops
+    .locator("select[data-drt-dispatch-candidate]")
+    .selectOption(`${driverId}:${vehicleId}`);
+  if (reassign) {
+    await ops
+      .locator("select[data-drt-dispatch-reason]")
+      .selectOption("operator_reassign");
+    await ops
+      .locator("input[data-drt-dispatch-note]")
+      .fill("同單一般調度改派演練");
+  }
+  const operation = reassign ? "reassign" : "assign";
+  const [response] = await Promise.all([
+    ops.waitForResponse(
+      (result) =>
+        result.request().method() === "POST" &&
+        new URL(result.url()).pathname ===
+          `/control-plane-proxy/dispatch/${operation}`,
+    ),
+    ops.locator(`[data-drt-operation="ops-dispatch-${operation}"]`).click(),
+  ]);
+  expect(response.status(), await response.text()).toBe(201);
+  const body = response.request().postDataJSON();
+  expect(body.driverId).toBe(driverId);
+  expect(body.vehicleId).toBe(vehicleId);
+  if (reassign) {
+    expect(body.reasonCode).toBe("operator_reassign");
+    expect(body.reasonNote).toBe("同單一般調度改派演練");
+  }
+  const headers = await response.request().allHeaders();
+  expect(headers["idempotency-key"]).toBeTruthy();
+  expect(headers["x-idempotency-key"]).toBe(headers["idempotency-key"]);
+  const result = camel(await response.json()).data;
+  await expect(
+    ops.locator(`[data-ops-task-id="${result.taskId}"]`),
+  ).toBeVisible();
+  await expect(ops.getByText(orderId, { exact: true })).toBeVisible();
+  await expect(
+    ops.locator('[data-drt-operation="ops-dispatch-reassign"]'),
+  ).toBeVisible();
+  const tasks = await readTasks();
+  const task = tasks.find((entry: any) => entry.taskId === result.taskId);
+  expect(task).toMatchObject({
+    orderId,
+    dispatchJobId: body.dispatchJobId,
+    assignmentId: result.assignmentId,
+    driverId,
+    vehicleId,
+    status: "pending_acceptance",
+  });
+  expect(
+    tasks.filter((entry: any) => entry.status === "pending_acceptance"),
+  ).toHaveLength(1);
+  if (reassign) {
+    expect(result.taskId).not.toBe(prior.taskId);
+    expect(body.dispatchJobId).toBe(prior.dispatchJobId);
+    expect(
+      tasks.find((entry: any) => entry.taskId === prior.taskId)?.status,
+    ).toBe("cancelled");
+  }
+  await info.attach(`A-ordinary-Ops-${operation}-ops`, {
+    contentType: "image/png",
+    body: await ops.screenshot({ fullPage: true }),
+  });
+  const facts = {
+    orderId,
+    actualEntry: `/dispatch/${orderId}`,
+    actualNavigationHTTPStatus: navigation?.status(),
+    actualOperation: operation,
+    actualPOSTStatus: response.status(),
+    actualCommand: body,
+    assignmentId: result.assignmentId,
+    taskId: result.taskId,
+    previousTaskId: prior?.taskId ?? null,
+    actualPersistedTask: task,
+    actualPreviousTaskCancelled: reassign ? true : null,
+    actualOnlyOnePendingTask: true,
+    actualServerRefreshShowsReassignControl: true,
+    actualServerRefreshShowsPersistedTaskId: result.taskId,
+    actualOriginalOrderIdVisibleInOrdinaryDetail: true,
+    actualInternalNetworkMocks: false,
+    actualDirectCommandPOSTSubstituteUsed: false,
+  };
+  await info.attach(`A-ordinary-Ops-${operation}-facts`, {
+    contentType: "application/json",
+    body: JSON.stringify(facts),
+  });
+  return facts;
+}
