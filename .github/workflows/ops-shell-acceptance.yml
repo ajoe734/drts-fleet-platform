@@ -167,6 +167,15 @@ jobs:
             sleep 2
           done
 
+      - name: Prepare the real closed-call callback workbench scenario
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha || github.sha }}
+          TS_NODE_PROJECT: tsconfig.seed.json
+          TS_NODE_TRANSPILE_ONLY: "true"
+        run: |
+          pnpm --filter @drts/api exec node -r ts-node/register \
+            ../../tests/e2e/system-remediation/sr-ops-shell-001/prepare-voice-callback-workbench.ts
+
       - name: Run Playwright remote acceptance tests
         env:
           CI: "true"

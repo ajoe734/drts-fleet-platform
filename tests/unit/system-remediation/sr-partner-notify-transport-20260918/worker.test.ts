@@ -18,7 +18,7 @@ const { NestFactory } = apiRequire("@nestjs/core");
 class WorkerTestModule {}
 
 const apps: { close(): Promise<void> }[] = [];
-async function boot(h: ReturnType<typeof harness>) {
+async function boot(h: Awaited<ReturnType<typeof harness>>) {
   // Real Nest bootstrap/shutdown invokes the production provider. Only durable
   // storage and the partner socket are replaced; no delivery method is called
   // by these tests and no product HTTP listener is started.
@@ -51,7 +51,7 @@ describe("consumer outbox production lifecycle", () => {
     expect(Reflect.getMetadata("providers", MultiTaxiModule)).toContain(
       PartnerNotificationWorker,
     );
-    const h = harness();
+    const h = await harness();
     await boot(h);
     expect(h.repository.loadState).toHaveBeenCalledOnce();
     expect(h.repository.listDuePartnerNotifications).toHaveBeenCalledOnce();
@@ -63,7 +63,7 @@ describe("consumer outbox production lifecycle", () => {
   });
 
   it("polls newly committed rows after startup", async () => {
-    const h = harness();
+    const h = await harness();
     h.repository.listDuePartnerNotifications.mockResolvedValueOnce([]);
     await boot(h);
     expect(h.fetch).not.toHaveBeenCalled();
@@ -73,7 +73,7 @@ describe("consumer outbox production lifecycle", () => {
   });
 
   it("automatically retries only when due and accepts a duplicate ack for identical bytes", async () => {
-    const h = harness();
+    const h = await harness();
     const normal = h.fetch.getMockImplementation()!;
     h.fetch.mockImplementationOnce(async (...args) => {
       await normal(...args);
@@ -95,7 +95,7 @@ describe("consumer outbox production lifecycle", () => {
   });
 
   it("recovers after process restart and lease expiry when ack persistence failed", async () => {
-    const h = harness();
+    const h = await harness();
     h.repository.recordPushDeliveryOutcome.mockRejectedValueOnce(
       new Error("DB unavailable"),
     );
@@ -115,7 +115,7 @@ describe("consumer outbox production lifecycle", () => {
   });
 
   it("two running application workers compete through the existing claim", async () => {
-    const h = harness();
+    const h = await harness();
     await Promise.all([boot(h), boot(h)]);
     expect(h.fetch).toHaveBeenCalledOnce();
     expect(h.row.status).toBe("delivered");
@@ -123,7 +123,7 @@ describe("consumer outbox production lifecycle", () => {
   });
 
   it("does not overlap polls while a selected delivery is in flight and drains on shutdown", async () => {
-    const h = harness();
+    const h = await harness();
     const normal = h.fetch.getMockImplementation()!;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -153,7 +153,7 @@ describe("consumer outbox production lifecycle", () => {
   });
 
   it("recovers from a selection failure on the next poll", async () => {
-    const h = harness();
+    const h = await harness();
     h.repository.listDuePartnerNotifications.mockRejectedValueOnce(
       new Error("DB reconnecting"),
     );
@@ -165,7 +165,7 @@ describe("consumer outbox production lifecycle", () => {
   });
 
   it("stops automatically after five attempts with no tenant passenger retry timer", async () => {
-    const h = harness();
+    const h = await harness();
     h.row.eventType = "receipt_ready";
     h.fetch.mockResolvedValue({ ok: false, status: 503 });
     await boot(h);
@@ -189,7 +189,7 @@ describe("consumer outbox production lifecycle", () => {
   it.each([401, 204])(
     "does not rescan blocked/manual HTTP %i outcomes",
     async (status) => {
-      const h = harness();
+      const h = await harness();
       h.fetch.mockResolvedValue({ ok: status < 300, status });
       await boot(h);
       await vi.advanceTimersByTimeAsync(120_000);
@@ -199,7 +199,7 @@ describe("consumer outbox production lifecycle", () => {
   );
 
   it("terminalizes an expired notification without HTTP or repeated claims", async () => {
-    const h = harness();
+    const h = await harness();
     h.row.payload.expiresAt = new Date(Date.now() - 1).toISOString();
     await boot(h);
     await vi.advanceTimersByTimeAsync(3_000);
@@ -212,7 +212,7 @@ describe("consumer outbox production lifecycle", () => {
   });
 
   it("records absent route configuration even though generic availability is false", async () => {
-    const h = harness();
+    const h = await harness();
     h.bindings.findByEntrySlug.mockResolvedValue(null);
     expect(h.adapter.isAvailable()).toBe(false);
     await boot(h);
@@ -223,7 +223,7 @@ describe("consumer outbox production lifecycle", () => {
   });
 
   it("does not start without durable storage", async () => {
-    const h = harness();
+    const h = await harness();
     vi.spyOn(h.repository, "isEnabled").mockReturnValue(false);
     await boot(h);
     await vi.advanceTimersByTimeAsync(3_000);

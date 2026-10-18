@@ -132,7 +132,7 @@ describe("production HTTPS status preservation through dispatch and the facade",
     async (status) => {
       vi.useFakeTimers();
       const socket = harness(status);
-      const h = transportHarness(true);
+      const h = await transportHarness(true);
       const pending = h.service.deliverPassengerNotification(h.row);
       await vi.advanceTimersByTimeAsync(0);
       // There is deliberately no 'end'. A stalled body cannot obscure headers.

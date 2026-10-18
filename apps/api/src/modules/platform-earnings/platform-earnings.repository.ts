@@ -1,5 +1,7 @@
-import { Injectable, Logger, Optional } from "@nestjs/common";
+import { HttpStatus, Injectable, Logger, Optional } from "@nestjs/common";
 import { DatabaseService } from "../../common/db";
+import { ApiRequestError } from "../../common/api-envelope";
+import { DEFAULT_PRODUCT_TIMEZONE } from "@drts/contracts";
 import type { MoneyAmount, PlatformCode } from "@drts/contracts";
 
 export interface PlatformEarningsAggregateRow {
@@ -19,6 +21,126 @@ export interface PlatformEarningsAggregateItem {
   netAmount: MoneyAmount;
 }
 
+// USER calendar definition (2026-10-16; task UAT records immutable authority):
+// week is the complete current Asia/Taipei Monday-through-Sunday calendar week.
+// V0018 stores period_date as DATE: inclusive Monday..Sunday is equivalent to
+// Monday 00:00 inclusive through next Monday 00:00 exclusive in that timezone.
+// Today/month retain their existing complete calendar-date bounds.
+export const PLATFORM_EARNINGS_TIMEZONE = DEFAULT_PRODUCT_TIMEZONE;
+export const PLATFORM_EARNINGS_PERIODS = ["today", "week", "month"] as const;
+export type PlatformEarningsPeriod = (typeof PLATFORM_EARNINGS_PERIODS)[number];
+export interface PlatformEarningsPeriodRange {
+  period: PlatformEarningsPeriod;
+  startDate: string;
+  endDate: string;
+  timeZone: string;
+}
+
+function extractCalendarDatePartsInTimeZone(
+  referenceDate: Date,
+  timeZone: string,
+): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(referenceDate);
+
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+  const day = Number(parts.find((part) => part.type === "day")?.value);
+
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day)
+  ) {
+    throw new Error(`Unable to derive calendar date in timezone ${timeZone}`);
+  }
+
+  return { year, month, day };
+}
+
+function formatUtcCalendarDate(utcDate: Date): string {
+  const year = String(utcDate.getUTCFullYear()).padStart(4, "0");
+  const month = String(utcDate.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(utcDate.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function resolvePlatformEarningsPeriodRange(
+  period?: string | null,
+  referenceDate: Date = new Date(),
+): PlatformEarningsPeriodRange | null {
+  const timeZone = PLATFORM_EARNINGS_TIMEZONE;
+  if (period === undefined || period === null) {
+    return null;
+  }
+
+  const normalized = typeof period === "string" ? period.trim() : "";
+  if (
+    !normalized ||
+    !(PLATFORM_EARNINGS_PERIODS as readonly string[]).includes(normalized)
+  ) {
+    const message = `Invalid earnings period "${period}". Expected one of: ${PLATFORM_EARNINGS_PERIODS.join(", ")}.`;
+    const error = new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "INVALID_EARNINGS_PERIOD",
+      message,
+      {
+        period,
+        allowedPeriods: [...PLATFORM_EARNINGS_PERIODS],
+      },
+      false,
+    );
+    throw error;
+  }
+
+  const validPeriod = normalized as PlatformEarningsPeriod;
+  const { year, month, day } = extractCalendarDatePartsInTimeZone(
+    referenceDate,
+    timeZone,
+  );
+  const anchorUtc = new Date(Date.UTC(year, month - 1, day));
+  const todayIso = formatUtcCalendarDate(anchorUtc);
+
+  if (validPeriod === "today") {
+    return {
+      period: "today",
+      startDate: todayIso,
+      endDate: todayIso,
+      timeZone,
+    };
+  }
+
+  if (validPeriod === "week") {
+    const utcDayOfWeek = anchorUtc.getUTCDay();
+    const daysSinceMonday = (utcDayOfWeek + 6) % 7;
+    const weekStartUtc = new Date(
+      Date.UTC(year, month - 1, day - daysSinceMonday),
+    );
+    const weekEndUtc = new Date(
+      Date.UTC(year, month - 1, day - daysSinceMonday + 6),
+    );
+    return {
+      period: "week",
+      startDate: formatUtcCalendarDate(weekStartUtc),
+      endDate: formatUtcCalendarDate(weekEndUtc),
+      timeZone,
+    };
+  }
+
+  const monthStartUtc = new Date(Date.UTC(year, month - 1, 1));
+  const monthEndUtc = new Date(Date.UTC(year, month, 0));
+  return {
+    period: "month",
+    startDate: formatUtcCalendarDate(monthStartUtc),
+    endDate: formatUtcCalendarDate(monthEndUtc),
+    timeZone,
+  };
+}
+
 @Injectable()
 export class PlatformEarningsRepository {
   private readonly logger = new Logger(PlatformEarningsRepository.name);
@@ -31,7 +153,10 @@ export class PlatformEarningsRepository {
 
   async aggregateByDriver(
     driverId: string,
+    period?: string,
+    referenceDate?: Date,
   ): Promise<PlatformEarningsAggregateItem[]> {
+    const range = resolvePlatformEarningsPeriodRange(period, referenceDate);
     if (!this.isEnabled()) return [];
     try {
       const result = await this.db!.query<PlatformEarningsAggregateRow>(
@@ -43,9 +168,10 @@ export class PlatformEarningsRepository {
                 SUM(net_minor)     AS net_minor
          FROM ops.phase1_platform_earnings_ledger
          WHERE driver_id = $1
+         ${range ? "AND period_date >= $2::date AND period_date <= $3::date" : ""}
          GROUP BY platform_code, currency_code
          ORDER BY platform_code`,
-        [driverId],
+        range ? [driverId, range.startDate, range.endDate] : [driverId],
       );
 
       return result.rows.map((row) => ({
@@ -71,7 +197,13 @@ export class PlatformEarningsRepository {
       this.logger.warn(
         `Failed to aggregate platform earnings for ${driverId}: ${err}`,
       );
-      return [];
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "PLATFORM_EARNINGS_READ_UNAVAILABLE",
+        "Platform earnings canonical read is currently unavailable.",
+        undefined,
+        true,
+      );
     }
   }
 }
