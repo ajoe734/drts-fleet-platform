@@ -1053,7 +1053,9 @@ jobs:
           env_vars="${env_vars}@OIDC_ENABLED=${{ steps.api_secrets.outputs.oidc_enabled }}"
           env_vars="${env_vars}@OAUTH_REDIRECT_ALLOWLIST=${oauth_redirect_allowlist}@REQUIRE_SMS_VERIFICATION=false"
           env_vars="${env_vars}@PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
+          env_vars="${env_vars}@VOICE_BACKGROUND_RUNNER_ENABLED=true"
           if [[ "${DEV_PAX_REVIEW_DEMO_ENABLED:-false}" == "true" ]]; then
+            env_vars="${env_vars}@VOICE_BOOKING_RESULT_DELIVERY=simulation"
             # Existing complete groups keep their references. Absent groups
             # receive the explicit PUBLIC synthetic profile; never generate a
             # new key at boot or require a real SMS/financial account. The
@@ -1139,7 +1141,8 @@ jobs:
             --set-secrets "$api_secrets" \
             --set-env-vars "$API_ENV_VARS" \
             ${{ needs.prepare.outputs.api_exposure_flag }} \
-            --min-instances 0 \
+            --min-instances 1 \
+            --no-cpu-throttling \
             --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
