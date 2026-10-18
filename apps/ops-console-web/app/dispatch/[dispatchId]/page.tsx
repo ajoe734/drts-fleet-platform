@@ -19,6 +19,7 @@ import type {
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { OpsDispatchAssignmentButton } from "@/components/ops-dispatch-assignment-button";
 import { OpsDispatchCreateButton } from "@/components/ops-dispatch-create-button";
+import { DispatchAutoRefresh } from "@/components/dispatch-auto-refresh";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
@@ -2165,6 +2166,10 @@ async function renderOwnedWorkspace({
 
   return (
     <>
+      <DispatchAutoRefresh
+        intervalMs={REFRESH_STALE_AFTER_MS}
+        enabled={!terminal}
+      />
       <PageHeader
         theme={theme}
         title={
@@ -2291,7 +2296,10 @@ async function renderOwnedWorkspace({
               theme={theme}
               title={tr(locale, "dispatch.detail.assignment.current")}
             >
-              <div data-ops-task-id={currentTask.taskId}>
+              <div
+                data-ops-task-id={currentTask.taskId}
+                data-ops-task-status={currentTask.status}
+              >
                 <DL
                   theme={theme}
                   cols={2}

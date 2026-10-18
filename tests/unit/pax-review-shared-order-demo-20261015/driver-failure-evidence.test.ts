@@ -152,6 +152,10 @@ async function exercise(options: Options) {
     ) => boundary("register", page, base),
     finish: async (page: (typeof pages)[number], base: string) =>
       boundary("finish", page, base),
+    opsRead: async (page: (typeof pages)[number], orderId: string) => {
+      expect(page).toBe(pages[1]);
+      expect(orderId).toBe("A-order");
+    },
   });
   const info = {
     outputPath: (name: string) => name,
