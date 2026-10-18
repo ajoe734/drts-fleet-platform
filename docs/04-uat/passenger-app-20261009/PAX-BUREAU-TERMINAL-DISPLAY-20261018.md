@@ -55,8 +55,8 @@ exclusive with the earlier `phoneReady` gate) now also renders the existing
 
 ## Verification performed on this VM (repo-level only; no product/browser server started)
 
-- `apps/driver-app` unit test `tests/unit/driver-location-heartbeat.test.ts`:
-  5/5 passed.
+- `apps/driver-app` unit test
+  `apps/driver-app/tests/unit/driver-location-heartbeat.test.ts`: 5/5 passed.
 - `tests/unit/driver-owned-reject-20261017/owned-reject-screen.test.ts`
   (extends the real mounted Trip + SDK probe, not a text self-check): 13/13
   passed, including 3 new terminal-state cases
