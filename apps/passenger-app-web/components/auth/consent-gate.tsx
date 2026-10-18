@@ -7,8 +7,10 @@ import { t } from "../../lib/auth/translations";
 import { AuthScreen, AuthAlert, P5Btn, P5 } from "./ui";
 import { isDemoMode } from "../../lib/demo/store";
 import { DEMO_T } from "../../lib/demo/translations";
+import { useReviewDemo } from "../review-demo/review-context";
+import { t as reviewText } from "../review-demo/translations";
 
-function legalConfig() {
+function legalConfig(review: boolean) {
   if (isDemoMode())
     return {
       termsUrl: "/demo/terms",
@@ -17,6 +19,15 @@ function legalConfig() {
       privacyVersion: "demo-privacy-v1",
       ready: true,
       demo: true,
+    };
+  if (review)
+    return {
+      termsUrl: "/review/terms",
+      privacyUrl: "/review/terms",
+      termsVersion: "review-terms-v1",
+      privacyVersion: "review-privacy-v1",
+      ready: true,
+      demo: false,
     };
   const termsUrl = process.env.NEXT_PUBLIC_TERMS_URL ?? "";
   const privacyUrl = process.env.NEXT_PUBLIC_PRIVACY_URL ?? "";
@@ -51,12 +62,13 @@ export function ConsentGate({
   onAccepted: () => void;
   onRefused: () => void;
 }) {
+  const review = useReviewDemo();
   const [account, setAccount] = useState<PassengerAccount | null>(null);
   const [checked, setChecked] = useState(false);
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
   const [error, setError] = useState("");
-  const config = legalConfig();
+  const config = legalConfig(review);
   const load = useCallback(async () => {
     if (busy.current) return;
     busy.current = true;
@@ -133,6 +145,9 @@ export function ConsentGate({
   return (
     <AuthScreen title={t("firstLogin")}>
       {config.demo && <AuthAlert kind="warn">{DEMO_T.consentNotice}</AuthAlert>}
+      {review && (
+        <AuthAlert kind="warn">{reviewText.ordinaryConsentNotice}</AuthAlert>
+      )}
       <div style={{ fontSize: 16, fontWeight: 700 }}>{t("consentHeading")}</div>
       <div style={{ flex: 1, fontSize: 14, lineHeight: 1.6 }}>
         {t("consentIntro")}

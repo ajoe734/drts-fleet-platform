@@ -498,10 +498,10 @@ export function assertAcceptancePassed(acceptance) {
     throw new Error(`Workload failed: must be full burst schedule`);
   }
 
-  // 4499 dispatches * 200ms spacing = 899800ms
-  if (!Number.isFinite(summary.elapsedMs) || summary.elapsedMs < 899800) {
+  // The final arrival is at899800ms, but observation must cover all900s.
+  if (!Number.isFinite(summary.elapsedMs) || summary.elapsedMs < 900000) {
     throw new Error(
-      `Workload failed: invalid elapsedMs, must be at least 899800 for a 900s run, got ${summary.elapsedMs}`,
+      `Workload failed: invalid elapsedMs, must be at least 900000 for a 900s run, got ${summary.elapsedMs}`,
     );
   }
   if (

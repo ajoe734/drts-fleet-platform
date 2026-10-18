@@ -26,6 +26,12 @@ import { ReviewSupplyService } from "./review-supply.service";
 export class ReviewDemoOpsController {
   constructor(private readonly supply: ReviewSupplyService) {}
 
+  @Get("config")
+  @RequireRealms("ops", "platform", "system")
+  config() {
+    return toApiSuccessEnvelope({ enabled: reviewDemoEnabled(process.env) });
+  }
+
   @Post("prepare")
   @RequireRealms("ops", "platform", "system")
   async prepare() {

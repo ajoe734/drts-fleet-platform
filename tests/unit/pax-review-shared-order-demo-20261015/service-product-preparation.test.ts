@@ -173,7 +173,10 @@ function productPeers() {
   };
 }
 
-function rehearsal(p: ReturnType<typeof productPeers>) {
+function rehearsal(
+  p: ReturnType<typeof productPeers>,
+  onRegistry?: (registry: RegulatoryRegistryService) => void,
+) {
   const audit = new AuditNotificationService();
   const registry = new RegulatoryRegistryService(
     { publishSupplyLifecycleUpdated() {} } as never,
@@ -184,6 +187,7 @@ function rehearsal(p: ReturnType<typeof productPeers>) {
     ),
     new RegulatoryRegistryRepository(p.database as never),
   );
+  onRegistry?.(registry);
   return new ReviewSupplyService(
     p.database as never,
     registry,
@@ -245,6 +249,45 @@ describe("R18: rehearsal prepares the native reservation product before real boo
       meterRequired: true,
       fixedFareAllowed: false,
     });
+  });
+
+  it("prepares twice on the same real registry after persisted supply replaces seed templates", async () => {
+    const p = productPeers();
+    let registry!: RegulatoryRegistryService;
+    const supply = rehearsal(p, (instance) => {
+      registry = instance;
+    });
+    await supply.prepare();
+    expect(
+      registry.listVehicles().some((v) => v.vehicleId === "veh-demo-001"),
+    ).toBe(false);
+    await expect(supply.prepare()).resolves.toMatchObject({ simulated: true });
+    expect(
+      registry
+        .listVehicles()
+        .filter((v) => v.vehicleId.startsWith("pax-review-vehicle-")),
+    ).toHaveLength(2);
+  });
+
+  it("prepares existing committed supply after a real registry lifecycle reload", async () => {
+    const p = productPeers();
+    await rehearsal(p).prepare();
+    let registry!: RegulatoryRegistryService;
+    const restarted = rehearsal(p, (instance) => {
+      registry = instance;
+    });
+    await registry.onModuleInit();
+    expect(
+      registry.listVehicles().some((v) => v.vehicleId === "veh-demo-001"),
+    ).toBe(false);
+    await expect(restarted.prepare()).resolves.toMatchObject({
+      simulated: true,
+    });
+    expect(
+      registry
+        .listDrivers()
+        .filter((d) => d.driverId.startsWith("pax-review-driver-")),
+    ).toHaveLength(2);
   });
 
   it("preserves the established master and other product configuration across repeated preparation", async () => {

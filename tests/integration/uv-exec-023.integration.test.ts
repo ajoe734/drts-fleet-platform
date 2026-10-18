@@ -32,6 +32,10 @@ interface MockWorkItemRow {
 
 class MockVoiceWorkDatabase {
   readonly items = new Map<string, MockWorkItemRow>();
+  readonly recordingContexts = new Map<
+    string,
+    { call_id: string; brand_id: string; bound_order_id: string | null }
+  >();
   readonly receipts = new Map<
     string,
     { commandId: string; status: string; orderId?: string }
@@ -82,6 +86,13 @@ class MockVoiceWorkDatabase {
           fields: [],
           rows,
         });
+
+        if (
+          sql.includes("SELECT s.call_id, scope.brand_id, i.bound_order_id")
+        ) {
+          const context = this.recordingContexts.get(values?.[0] as string);
+          return wrapResult(context ? [context as unknown as T] : []);
+        }
 
         // Query for candidate work items (lease claim)
         if (
@@ -247,6 +258,11 @@ describe("UV-EXEC-023: 獨立媒體部署、持續背景工作及回退", () => 
       });
 
       // 3. recording finalize work item
+      db.recordingContexts.set("session-closed-1", {
+        call_id: "call-closed-1",
+        brand_id: "brand-1",
+        bound_order_id: null,
+      });
       db.insertWorkItem({
         workId: "work-rec-1",
         commandId: null,
@@ -267,7 +283,9 @@ describe("UV-EXEC-023: 獨立媒體部署、持續背景工作及回退", () => 
       });
 
       // Mock execute(commandId) to simulate order creation on pending receipt
-      runner.execute = async (id: string): Promise<VoiceCommandReceiptRecord> => {
+      runner.execute = async (
+        id: string,
+      ): Promise<VoiceCommandReceiptRecord> => {
         const receipt = db.receipts.get(id);
         if (receipt) {
           receipt.status = "succeeded";

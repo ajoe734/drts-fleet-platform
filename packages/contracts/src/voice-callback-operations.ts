@@ -1,0 +1,133 @@
+import { z } from "zod";
+import {
+  VoiceCallbackStatusSchema,
+  type VoiceCallbackStatus,
+  type VoiceCallbackAttemptOutcome,
+} from "./unattended-voice";
+
+export const VoiceCallbackTaskIdSchema = z.string().uuid();
+export const VoiceCallbackActionKeySchema = z.string().trim().min(1).max(255);
+export const VoiceCallbackReceiptLookupSchema = z.string().min(1);
+export const VoiceCallbackQueueFilterSchema = z.object({
+  resourceScopeId: z.string().uuid(),
+  status: VoiceCallbackStatusSchema.optional(),
+  voiceSessionId: z.string().uuid().optional(),
+});
+export const VoiceCallbackCreateRequestSchema = z
+  .object({
+    contactPhoneEncrypted: z.string().min(1),
+    contactPhoneLookupToken: z.string().min(1),
+    consentSnapshotHash: z.string().min(1),
+    reason: z.string().optional(),
+    priority: z.enum(["normal", "urgent", "emergency"]).optional(),
+    scheduledAt: z.string().datetime({ offset: true }).nullable().optional(),
+    dueAt: z.string().datetime({ offset: true }).nullable().optional(),
+  })
+  .strict();
+export const VoiceCallbackOperationRequestSchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    leaseDurationMs: z.number().int().positive().optional(),
+    outcome: z
+      .enum(["answered", "no_answer", "busy", "failed", "succeeded"])
+      .optional(),
+    dialOperationKey: z.string().min(1).optional(),
+    dialStatus: z.enum(["dialing", "bridged", "hung_up"]).optional(),
+    hangupConfirmed: z.boolean().optional(),
+    notes: z.string().optional(),
+    reason: z.string().min(1).optional(),
+    toOperatorId: z.string().min(1).max(100).optional(),
+  })
+  .strict();
+export type VoiceCallbackCreateRequest = z.infer<
+  typeof VoiceCallbackCreateRequestSchema
+>;
+export type VoiceCallbackOperationRequest = z.infer<
+  typeof VoiceCallbackOperationRequestSchema
+>;
+export type VoiceCallbackOperation =
+  | "claim"
+  | "attempt"
+  | "complete"
+  | "cancel"
+  | "transfer";
+
+export interface VoiceCallbackTaskView {
+  taskId: string;
+  voiceSessionId: string;
+  resourceScopeId: string;
+  brandId: string;
+  callId: string;
+  linkedOrderId?: string | null;
+  reason: string;
+  priority: "normal" | "urgent" | "emergency";
+  dueAt: string;
+  scheduledAt: string | null;
+  status: VoiceCallbackStatus;
+  assignedOperatorId: string | null;
+  claimExpiresAt: string | null;
+  version: number;
+  attemptCount: number;
+  maxAttempts: number;
+  lastOutcome: VoiceCallbackAttemptOutcome | null;
+  actionKey: string;
+  cancellationReason?: string | null;
+  dialReconcileRequired?: boolean;
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+}
+
+export interface VoiceCallbackAttemptView {
+  attemptId: string;
+  taskId: string;
+  attemptNumber: number;
+  operatorId: string;
+  startedAt: string;
+  endedAt: string | null;
+  outcome: VoiceCallbackAttemptOutcome;
+  nextAction: string | null;
+  dialOperationKey: string | null;
+  dialStatus: "dialing" | "bridged" | "hung_up" | "reconcile_required";
+  hangupConfirmed: boolean;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface VoiceCallbackOperationResponse {
+  task: VoiceCallbackTaskView;
+  attempt?: VoiceCallbackAttemptView;
+  transfer?: {
+    fromOperatorId: string | null;
+    toOperatorId: string;
+    reason: string;
+  };
+  actualPhoneHungUp?: boolean;
+  dialReconcileRequired?: boolean;
+  operatorNotes: string | null;
+  receipt: {
+    commandId: string;
+    taskId: string;
+    action: VoiceCallbackOperation;
+    operatorId: string;
+    createdAt: string;
+  };
+  replayed: boolean;
+}
+export interface VoiceCallbackTaskDetail {
+  task: VoiceCallbackTaskView;
+  attempts: VoiceCallbackAttemptView[];
+  commands: VoiceCallbackOperationResponse[];
+}
+
+export interface VoiceCallbackCreateResponse {
+  task: VoiceCallbackTaskView | null;
+  receipt: {
+    commandId: string;
+    actionKey: string;
+    taskId: string | null;
+    status: string;
+    createdAt: string;
+  } | null;
+  replayed?: boolean;
+}

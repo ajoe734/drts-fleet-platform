@@ -14,6 +14,10 @@ import {
 } from "react";
 import { getToneRamp, passengerChrome } from "../../lib/passenger-presentation";
 import { STATUS_TONES } from "@drts/ui-tokens";
+import {
+  getPassengerLocationRecordedAt,
+  getPassengerTrackingMapPositions,
+} from "@drts/passenger-client";
 import type {
   PassengerRideFixture,
   PassengerCertificatePresentation,
@@ -340,6 +344,7 @@ function InlineBanner({ fixture }: { fixture: PassengerRideFixture }) {
 }
 
 function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
+  const positions = getPassengerTrackingMapPositions(fixture);
   const { lastEventTime, connectionState } =
     React.useContext(ConnectionContext);
   const [now, setNow] = React.useState(Date.now());
@@ -362,6 +367,8 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
   const _isStale =
     fixture.mapState === "stale" || (fixture.mapState === "fresh" && !_isFresh);
 
+  if (fixture.status === "行程已完成") return null;
+
   return (
     <div
       style={{
@@ -375,7 +382,8 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
         flexShrink: 0,
       }}
     >
-      {fixture.mapState !== "missing" ? (
+      {positions ||
+      (fixture.tracking === undefined && fixture.mapState !== "missing") ? (
         <>
           <svg
             aria-hidden="true"
@@ -385,7 +393,11 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
             style={{ position: "absolute", inset: 0 }}
           >
             <path
-              d="M50 120 C 120 90, 200 100, 310 44"
+              d={
+                positions
+                  ? `M${positions.driver.x * 3.2} ${positions.driver.y * 1.5} L${positions.target.x * 3.2} ${positions.target.y * 1.5}`
+                  : "M50 120 C 120 90, 200 100, 310 44"
+              }
               fill="none"
               stroke={passengerChrome.shell}
               strokeWidth="3"
@@ -394,10 +406,14 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
             />
           </svg>
           <div
+            data-testid={
+              positions ? "passenger-live-driver-position" : undefined
+            }
             style={{
               position: "absolute",
-              left: 38,
-              top: 108,
+              left: positions ? `${positions.driver.x}%` : 38,
+              top: positions ? `${positions.driver.y}%` : 108,
+              ...(positions ? { transform: "translate(-50%, -50%)" } : {}),
               width: 26,
               height: 26,
               borderRadius: 13,
@@ -418,8 +434,13 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
             aria-hidden="true"
             style={{
               position: "absolute",
-              right: 64,
-              top: 30,
+              ...(positions
+                ? {
+                    left: `${positions.target.x}%`,
+                    top: `${positions.target.y}%`,
+                    transform: "translate(-50%, -50%)",
+                  }
+                : { right: 64, top: 30 }),
               width: 22,
               height: 22,
               borderRadius: 11,
@@ -447,6 +468,19 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
           {t.GettingDriverLocation}
         </div>
       )}
+      {positions ? (
+        <span
+          style={{
+            position: "absolute",
+            left: 10,
+            top: 10,
+            fontSize: 10,
+            color: passengerChrome.muted,
+          }}
+        >
+          {t.LocationDiagram}
+        </span>
+      ) : null}
       <div
         style={{
           position: "absolute",
@@ -459,8 +493,10 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
           color: passengerChrome.muted,
         }}
       >
-        {t.PickupLabel}
-        {fixture.pickupLabel}
+        {positions?.targetLabel || t.PickupLabel}
+        {positions?.targetLabel === "下車點"
+          ? fixture.dropoffLabel
+          : fixture.pickupLabel}
       </div>
       {_isFresh ? (
         <div
@@ -584,12 +620,13 @@ function VehicleCard({
       <div
         style={{
           display: "flex",
+          flexWrap: "wrap",
           gap: 12,
           alignItems: "center",
           marginBottom: 10,
         }}
       >
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: "1 1 120px", minWidth: 0 }}>
           <div style={{ fontSize: 14.5, fontWeight: 700 }}>
             {assignment.vehicle.make} {assignment.vehicle.model}
           </div>
@@ -603,7 +640,13 @@ function VehicleCard({
             {vehicleDetails.join(" · ")}
           </div>
         </div>
-        <div style={{ textAlign: "center" }}>
+        <div
+          style={{
+            textAlign: "center",
+            maxWidth: "100%",
+            marginLeft: "auto",
+          }}
+        >
           <div
             style={{
               fontFamily: monoFont,
@@ -2000,6 +2043,8 @@ function Actions({
   onFixtureUpdate?: ((fixture: PassengerRideFixture) => void) | undefined;
 }) {
   const [actionPending, setActionPending] = useState(false);
+  const [contactFallback, setContactFallback] = useState<string | null>(null);
+  useEffect(() => setContactFallback(null), [token]);
   if (fixture.status === "行程已取消") {
     return <CancelledActions token={token} authMode={authMode} />;
   }
@@ -2023,9 +2068,15 @@ function Actions({
       action === "cancel" && authMode !== "token" ? { rideId: token } : {};
     void requestPassengerRideAction(token, action, body, authMode === "token")
       .then((res: unknown) => {
-        const result = res as { contactUri?: string };
-        if (action === "contact" && result.contactUri) {
-          window.location.href = result.contactUri;
+        const result =
+          res as import("@drts/contracts").PassengerRideContactOption;
+        if (action === "contact") {
+          if (result.mode === "masked_call" && result.contactUri) {
+            window.location.href = result.contactUri;
+          } else {
+            setContactFallback(result.contactUri || "tel:02-2944-0985");
+          }
+          setActionPending(false);
           return;
         }
         window.location.reload();
@@ -2038,7 +2089,13 @@ function Actions({
       });
   };
   const cancel = () => runLiveAction("cancel", onCancel);
-  const contact = () => runLiveAction("contact", onContact);
+  const contact = () => {
+    if (fixture.actionMode === "support_only" && !onContact) {
+      window.location.href = "tel:02-2944-0985";
+      return;
+    }
+    runLiveAction("contact", onContact);
+  };
   const requote = () => {
     if (actionPending) return;
     setActionPending(true);
@@ -2279,10 +2336,21 @@ function Actions({
   }
 
   const contactLabel =
-    fixture.actionMode === "support_only" ? t.ContactSupport : "聯絡司機";
+    fixture.actionMode === "support_only"
+      ? t.ContactSupport
+      : contactFallback
+        ? t.RetryContactDriver
+        : "聯絡司機";
 
   return (
     <ActionGroup>
+      {contactFallback ? (
+        <div role="alert" style={{ padding: 12 }}>
+          <strong>{t.CannotContactDriver}</strong>
+          <p>{t.ContactSupportInstead}</p>
+          <a href={contactFallback}>{t.ContactSupport}</a>
+        </div>
+      ) : null}
       <button
         type="button"
         style={buttonStyle("primary")}
@@ -2469,11 +2537,11 @@ function RideContent({
         <MapCard fixture={fixture} />
         <StatusSubline fixture={fixture} />
         <ProgressCard
-          title={t.ArrangingVehicle}
+          title={fixture.status || t.ArrangingVehicle}
           detail={
             fixture.requestedPickupText
-              ? `${fixture.requestedPickupText} · 通常 1–3 分鐘完成指派`
-              : "通常 1–3 分鐘完成指派"
+              ? `${fixture.requestedPickupText} · ${fixture.statusSubline || "通常 1–3 分鐘完成指派"}`
+              : fixture.statusSubline || "通常 1–3 分鐘完成指派"
           }
         />
         <FareCard fixture={fixture} />
@@ -2761,13 +2829,13 @@ export function PassengerRidePage({
       token,
       (nextView) => {
         startTransition(() => {
-          setLiveFixture(
-            mapPassengerRideAuthorityToFixture(nextView.data, token, kind),
+          const fixture = mapPassengerRideAuthorityToFixture(
+            nextView.data,
+            token,
+            kind,
           );
-          const newCalculatedAt =
-            nextView.data.order?.status !== "cancelled"
-              ? nextView.data.assignment?.eta?.calculatedAt
-              : null;
+          setLiveFixture(fixture);
+          const newCalculatedAt = getPassengerLocationRecordedAt(fixture);
           if (newCalculatedAt) {
             const ts = new Date(newCalculatedAt).getTime();
             setLastEventTime(Number.isNaN(ts) ? 0 : ts);
@@ -2787,10 +2855,7 @@ export function PassengerRidePage({
     (next: PassengerRideFixture) => {
       startTransition(() => {
         setLiveFixture(next);
-        const calculatedAt =
-          next.status !== "行程已取消"
-            ? next.assignment?.eta?.calculatedAt
-            : null;
+        const calculatedAt = getPassengerLocationRecordedAt(next);
         if (calculatedAt) {
           const ts = new Date(calculatedAt).getTime();
           setLastEventTime(Number.isNaN(ts) ? 0 : ts);
@@ -2826,13 +2891,12 @@ export function PassengerRidePage({
       .then((view) => {
         if (!active) return;
         startTransition(() => {
-          setLiveFixture(mapPassengerRideAuthorityToFixture(view, token, kind));
+          const fixture = mapPassengerRideAuthorityToFixture(view, token, kind);
+          setLiveFixture(fixture);
           setAuthorityError(null);
-          if (
-            view.order?.status !== "cancelled" &&
-            view.assignment?.eta?.calculatedAt
-          ) {
-            const ts = new Date(view.assignment.eta.calculatedAt).getTime();
+          const recordedAt = getPassengerLocationRecordedAt(fixture);
+          if (recordedAt) {
+            const ts = new Date(recordedAt).getTime();
             setLastEventTime(Number.isNaN(ts) ? 0 : ts);
           } else {
             setLastEventTime(0); // Make it stale if missing or cancelled

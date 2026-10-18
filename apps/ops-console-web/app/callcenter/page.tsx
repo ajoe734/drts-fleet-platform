@@ -58,6 +58,7 @@ import type {
 import { CALL_TYPES, COMPLAINT_CATEGORIES } from "@drts/contracts";
 import { createIdempotencyKey } from "@drts/api-client";
 import { getOpsClient } from "@/lib/api-client";
+import { voiceCallbackCopy } from "./voice-callbacks/translations";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, formatOpsCodeList } from "@/lib/localized-labels";
 import {
@@ -1112,7 +1113,9 @@ export default function CallcenterPage() {
     null,
   );
   const [usageRecords, setUsageRecords] = useState<UiCostLedgerItem[]>([]);
-  const [serverCohort, setServerCohort] = useState<UiCohortMetricsView | null>(null);
+  const [serverCohort, setServerCohort] = useState<UiCohortMetricsView | null>(
+    null,
+  );
   const [cohortStatus, setCohortStatus] =
     useState<VoiceMetricsSectionStatus>("unavailable");
   const [usageStatus, setUsageStatus] =
@@ -1178,8 +1181,10 @@ export default function CallcenterPage() {
   const [callbackDueAt, setCallbackDueAt] = useState("");
   const [callbackNote, setCallbackNote] = useState("");
   const [callbackCompleteNote, setCallbackCompleteNote] = useState("");
-  const [callbackClaimOperator, setCallbackClaimOperator] = useState("AGENT-OPS-001");
-  const [callbackAttemptOutcome, setCallbackAttemptOutcome] = useState("connected");
+  const [callbackClaimOperator, setCallbackClaimOperator] =
+    useState("AGENT-OPS-001");
+  const [callbackAttemptOutcome, setCallbackAttemptOutcome] =
+    useState("connected");
   const [callbackAttemptNotes, setCallbackAttemptNotes] = useState("");
   const [callbackCancelReason, setCallbackCancelReason] = useState("");
   const takeoverReason = "human_intervention";
@@ -1332,10 +1337,14 @@ export default function CallcenterPage() {
   );
   const exceptionSessions = filteredSessions.filter(
     (session) =>
-      Boolean((session as ExtendedCallSessionRecord).aiMetadata?.hasException) ||
+      Boolean(
+        (session as ExtendedCallSessionRecord).aiMetadata?.hasException,
+      ) ||
       session.flags.includes("exception") ||
       session.flags.includes("ai_exception") ||
-      Boolean((session as ExtendedCallSessionRecord).aiMetadata?.exceptionDetails),
+      Boolean(
+        (session as ExtendedCallSessionRecord).aiMetadata?.exceptionDetails,
+      ),
   );
   const callbackQueue = [...callbacks].sort(
     (left, right) =>
@@ -1418,7 +1427,10 @@ export default function CallcenterPage() {
     const total = callbacks.length;
     const completed = callbacks.filter((c) => c.status === "completed").length;
     const breached = callbacks.filter(
-      (c) => c.status === "pending" && c.dueAt && Date.now() > new Date(c.dueAt).getTime(),
+      (c) =>
+        c.status === "pending" &&
+        c.dueAt &&
+        Date.now() > new Date(c.dueAt).getTime(),
     ).length;
     const completedWithContact = callbacks.filter(
       (c) => c.status === "completed" && c.updatedAt && c.createdAt,
@@ -1427,7 +1439,8 @@ export default function CallcenterPage() {
       completedWithContact.length > 0
         ? completedWithContact.reduce((sum, c) => {
             const diff =
-              (new Date(c.updatedAt).getTime() - new Date(c.createdAt).getTime()) /
+              (new Date(c.updatedAt).getTime() -
+                new Date(c.createdAt).getTime()) /
               1000;
             return sum + Math.max(0, diff);
           }, 0) / completedWithContact.length
@@ -1456,7 +1469,7 @@ export default function CallcenterPage() {
         ext.aiMetadata?.step === "completed" ||
         Boolean(
           ext.aiMetadata?.confirmedData?.confirmedPickup &&
-            ext.aiMetadata?.confirmedData?.confirmedDropoff,
+          ext.aiMetadata?.confirmedData?.confirmedDropoff,
         )
       );
     });
@@ -2015,6 +2028,9 @@ export default function CallcenterPage() {
         tabs={headerTabs}
         activeTab={headerTabs[activeTabIndex] ?? headerTabs[0]}
         actions={[
+          <Link key="voice-callbacks" href="/callcenter/voice-callbacks">
+            {voiceCallbackCopy[currentLocale].title}
+          </Link>,
           <CanvasBtn
             key="open-session"
             onClick={() => setShowIntake((current) => !current)}
@@ -2556,8 +2572,11 @@ export default function CallcenterPage() {
                       />
                     </CanvasField>
                   </div>
-                  {((selectedSession as ExtendedCallSessionRecord).recordingAuthorized === false ||
-                    selectedSession.flags.includes("recording_unauthorized")) && (
+                  {((selectedSession as ExtendedCallSessionRecord)
+                    .recordingAuthorized === false ||
+                    selectedSession.flags.includes(
+                      "recording_unauthorized",
+                    )) && (
                     <div style={{ marginBottom: 12 }}>
                       <CanvasBanner
                         theme={theme}
@@ -3109,13 +3128,12 @@ export default function CallcenterPage() {
                       createBookingAction,
                       async () => {
                         const created =
-                          await getOpsClient().createCallCenterOrder(
-                            command,
-                            {
-                              idempotencyKey: orderIntentKey,
-                            },
-                          );
-                        setOrderIntentKey(createIdempotencyKey("callcenter-order"));
+                          await getOpsClient().createCallCenterOrder(command, {
+                            idempotencyKey: orderIntentKey,
+                          });
+                        setOrderIntentKey(
+                          createIdempotencyKey("callcenter-order"),
+                        );
                         setOrderForm(INITIAL_ORDER_FORM);
                         setPickupAddress(null);
                         setDropoffAddress(null);
@@ -3830,7 +3848,9 @@ export default function CallcenterPage() {
                   >
                     SLA {callbackSlaSummary.complianceRateFormatted}
                   </CanvasPill>
-                  <CanvasPill theme={theme}>{pendingCallbacks.length}</CanvasPill>
+                  <CanvasPill theme={theme}>
+                    {pendingCallbacks.length}
+                  </CanvasPill>
                 </div>
               }
               padding={0}
