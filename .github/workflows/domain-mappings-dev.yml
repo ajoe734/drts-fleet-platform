@@ -28,6 +28,12 @@ env:
   DEV_GCP_ENTERPRISE_DISPATCH_SERVICE: ${{ vars.DEV_GCP_ENTERPRISE_DISPATCH_SERVICE }}
   DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE: ${{ vars.DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE }}
   DEV_GCP_PASSENGER_APP_SERVICE: ${{ vars.DEV_GCP_PASSENGER_APP_SERVICE }}
+  # Hostname for the Cloud IAP public front door in front of passenger-app-web
+  # (see operations/deployment/passenger-bureau-entry/setup-passenger-public-entry.sh).
+  # Separate from, and not a replacement for, the ride.smarttransport.tw
+  # direct Cloud Run domain mapping below, which still requires an identity
+  # token and stays unusable from an ordinary browser.
+  DEV_PAX_BUREAU_ENTRY_HOST: ${{ vars.DEV_PAX_BUREAU_ENTRY_HOST }}
   DEV_WIF_PROVIDER: ${{ secrets.DEV_WIF_PROVIDER }}
   DEV_WIF_SERVICE_ACCOUNT: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
   WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
@@ -88,6 +94,13 @@ jobs:
           ./operations/deployment/map-domain-service.sh refer.smarttransport.tw      "${DEV_GCP_REFERRAL_EMBED_SERVICE:-drts-dev-referral-embed-web}" "$REGION" "$PROJECT"
           ./operations/deployment/map-domain-service.sh api.smarttransport.tw        "${DEV_GCP_API_SERVICE:-drts-dev-api}" "$REGION" "$PROJECT"
           ./operations/deployment/map-domain-service.sh ride.smarttransport.tw       "$passenger_app_service" "$REGION" "$PROJECT"
+
+          if [[ -n "${DEV_PAX_BUREAU_ENTRY_HOST:-}" ]]; then
+            ./operations/deployment/passenger-bureau-entry/setup-passenger-public-entry.sh \
+              "$passenger_app_service" "$REGION" "$PROJECT" "$DEV_PAX_BUREAU_ENTRY_HOST"
+          else
+            echo "::notice::DEV_PAX_BUREAU_ENTRY_HOST is not set; skipping bureau public-entry provisioning."
+          fi
 
       - name: List mappings
         run: |
