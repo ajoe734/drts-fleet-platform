@@ -160,6 +160,16 @@ describe.skipIf(!hostedPaymentEnabled)(
         policies: a.registry.listPolicies(),
         exclusivities: a.registry.listExclusivities(),
       });
+      // The committed-booking fixture's synthetic product port does not
+      // configure the dispatch authority. Persist that prerequisite through
+      // its original service before both actual peers load it.
+      await a.products.upsertRuntimeProfilePolicy({
+        runtimeProfileCode: "ordinary_taxi",
+        serviceProductCode: "taxi_realtime",
+        active: true,
+        effectiveFrom: new Date(Date.now() - 60_000).toISOString(),
+        effectiveUntil: null,
+      });
       await initialize(a);
       // External GPS is synthetic, but its original registry write and peer
       // readback are real. Retain the actual autonomous freshness/policy gates.
