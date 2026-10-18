@@ -14,6 +14,9 @@ import {
 } from "../../lib/auth/otp-state";
 import { t } from "../../lib/auth/translations";
 import { AuthScreen, AuthAlert, P5Btn, P5, inputStyle } from "./ui";
+import { useReviewDemo } from "../review-demo/review-context";
+import { requestReviewLoginSms } from "../review-demo/login-sms";
+import { t as reviewText } from "../review-demo/translations";
 
 export function OtpFlow({
   client,
@@ -32,6 +35,7 @@ export function OtpFlow({
   onBack: () => void;
   onSuccess: () => void;
 }) {
+  const review = useReviewDemo();
   const key = otpKey(provider, purpose, subject);
   const [record, setRecord] = useState<OtpState | null>(() => readOtp(key));
   const [target, setTarget] = useState(
@@ -39,6 +43,7 @@ export function OtpFlow({
   );
   const [sent, setSent] = useState(() => !!readOtp(key));
   const [code, setCode] = useState("");
+  const [simulatedCode, setSimulatedCode] = useState<string>();
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const live = useRef(true);
@@ -92,13 +97,18 @@ export function OtpFlow({
     pendingRef.current = true;
     setPending(true);
     setError("");
+    setSimulatedCode(undefined);
     try {
       await checkSubject();
-      const result = await client.requestOtp({
-        target: normalized,
-        provider,
-        purpose,
-      });
+      const reviewTarget = normalized.replace(/^\+886/, "0");
+      const simulated =
+        review &&
+        provider === "phone" &&
+        purpose === "login" &&
+        /^09000000[0-9]{2}$/.test(reviewTarget);
+      const result = simulated
+        ? await requestReviewLoginSms(reviewTarget)
+        : await client.requestOtp({ target: normalized, provider, purpose });
       if (!live.current) return;
       if (!result.success || !result.challenge)
         throw new Error("Invalid challenge");
@@ -114,6 +124,11 @@ export function OtpFlow({
       });
       setNow(Date.now());
       setCode("");
+      setSimulatedCode(
+        "code" in result && typeof result.code === "string"
+          ? result.code
+          : undefined,
+      );
       setSent(true);
     } catch (err) {
       if (live.current) {
@@ -205,6 +220,9 @@ export function OtpFlow({
     >
       {!sent ? (
         <>
+          {review && provider === "phone" && purpose === "login" && (
+            <AuthAlert kind="warn">{reviewText.ordinaryLoginHint}</AuthAlert>
+          )}
           <label style={{ fontSize: 15, fontWeight: 700 }} htmlFor="otp-target">
             {provider === "phone" ? t("phonePrompt") : t("emailPrompt")}
           </label>
@@ -244,6 +262,12 @@ export function OtpFlow({
               {current?.target}
             </span>
           </div>
+          {simulatedCode && (
+            <AuthAlert kind="warn">
+              <p>{reviewText.ordinarySmsNotice}</p>
+              <output aria-label="模擬簡訊驗證碼">{simulatedCode}</output>
+            </AuthAlert>
+          )}
           {(expired || locked || error) && (
             <AuthAlert kind={expired ? "warn" : "danger"}>
               {expired ? t("expired") : locked ? t("locked") : error}
@@ -320,6 +344,7 @@ export function OtpFlow({
           if (sent) {
             setSent(false);
             setCode("");
+            setSimulatedCode(undefined);
             setError("");
           } else onBack();
         }}

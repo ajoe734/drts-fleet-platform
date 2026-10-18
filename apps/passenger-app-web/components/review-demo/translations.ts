@@ -23,6 +23,11 @@ export const t = {
   termsLink: "演練條款與隱私說明",
   requestSms: "取得模擬簡訊",
   smsCode: "模擬簡訊驗證碼：",
+  ordinaryLoginHint:
+    "本環境使用模擬簡訊。演練請輸入 0900000000–0900000099，驗證碼會顯示於本頁。",
+  ordinarySmsNotice: "模擬簡訊收件匣；未發送真實簡訊。請輸入下方驗證碼。",
+  ordinaryConsentNotice:
+    "本次同意的是共享演練條款與隱私說明，僅供模擬流程，不提供實際運輸服務。",
   codeExpiry: "（5 分鐘有效）",
   login: "驗證並登入演練帳戶",
   requestAgain: "重新取得",

@@ -1125,34 +1125,107 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
     });
     await registerDriver(ops, driver, DRIVER, step);
     await step("Passenger genuine OTP login and account", async () => {
-      await pax.goto(`${PAX}/review`);
+      await pax.goto(`${PAX}/login`);
+      await expect(
+        pax.getByLabel("同單審查演練", { exact: true }),
+      ).toBeVisible();
       await pax
-        .getByLabel("演練手機", { exact: true })
-        .fill(
-          `09000000${String(Number(process.env.GITHUB_RUN_ID ?? 1) % 100).padStart(2, "0")}`,
-        );
-      await pax.getByRole("checkbox").check();
+        .getByRole("button", { name: "手機號碼登入", exact: true })
+        .click();
+      await info.attach("ordinary-entry-phone-login-pax", {
+        body: await pax.screenshot({ fullPage: true }),
+        contentType: "image/png",
+      });
+      const phone = `09000000${String(Number(process.env.GITHUB_RUN_ID ?? 1) % 100).padStart(2, "0")}`;
+      await pax.getByLabel("請輸入您的手機號碼", { exact: true }).fill(phone);
       const requestedOtp = pax.waitForResponse(
         (response) =>
           new URL(response.url()).pathname ===
             "/api/passenger-app/review-demo/otp" &&
           response.request().method() === "POST",
       );
-      await pax.getByRole("button", { name: "取得模擬簡訊" }).click();
+      await pax
+        .getByRole("button", { name: "取得驗證碼", exact: true })
+        .click();
       const otpResponse = await requestedOtp;
-      let failureCode = "unclassified";
-      if (!otpResponse.ok()) {
-        const body = await otpResponse.json().catch(() => null);
-        // Report only this fixed known code; never print OTPs or raw bodies.
-        if (body?.error === "CSRF_CHECK_FAILED")
-          failureCode = "CSRF_CHECK_FAILED";
-      }
       expect(
         otpResponse.ok(),
-        `Review OTP status=${otpResponse.status()} code=${failureCode}`,
+        `Rehearsal SMS HTTP${otpResponse.status()}`,
       ).toBe(true);
-      await pax.getByRole("button", { name: "驗證並登入演練帳戶" }).click();
-      await expect(pax.getByTestId("review-passenger-id")).toBeVisible();
+      // The page shows the external simulated inbox. Do not attach its code,
+      // challenge, request bodies or screenshot to the exported evidence.
+      const code =
+        (await pax
+          .getByLabel("模擬簡訊驗證碼", { exact: true })
+          .textContent()) ?? "";
+      expect(/^\d{6}$/.test(code)).toBe(true);
+      await pax
+        .getByRole("textbox", { name: "6 位數驗證碼 1", exact: true })
+        .fill(code);
+      const verification = pax.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname.endsWith("/auth/otp/verify") &&
+          response.request().method() === "POST",
+      );
+      await pax.getByRole("button", { name: "驗證", exact: true }).click();
+      expect((await verification).status()).toBe(200);
+      const accountResponse = await pax.request.get(
+        `${PAX}/api/passenger-app/me`,
+      );
+      expect(accountResponse.ok()).toBe(true);
+      const account = camel(await accountResponse.json()).data.account;
+      const returningConsent =
+        account.termsVersion === "review-terms-v1" &&
+        account.privacyVersion === "review-privacy-v1";
+      if (!returningConsent) {
+        await expect(
+          pax.getByText("歡迎加入，請同意服務條款", { exact: true }),
+        ).toBeVisible();
+        await expect(
+          pax.getByRole("link", { name: "服務條款", exact: true }),
+        ).toHaveAttribute("href", "/review/terms");
+        await expect(
+          pax.getByRole("link", { name: "隱私權政策", exact: true }),
+        ).toHaveAttribute("href", "/review/terms");
+        await pax.getByRole("checkbox").check();
+        const persisted = pax.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname === "/api/passenger-app/me" &&
+            response.request().method() === "PATCH",
+        );
+        await pax.getByRole("button", { name: "繼續", exact: true }).click();
+        expect((await persisted).ok()).toBe(true);
+      }
+      await expect(pax).toHaveURL(`${PAX}/`);
+      const afterResponse = await pax.request.get(
+        `${PAX}/api/passenger-app/me`,
+      );
+      expect(afterResponse.ok()).toBe(true);
+      const after = camel(await afterResponse.json()).data.account;
+      expect(after).toMatchObject({
+        drtsPassengerId: account.drtsPassengerId,
+        termsVersion: "review-terms-v1",
+        privacyVersion: "review-privacy-v1",
+      });
+      await info.attach("ordinary-entry-login-complete-pax", {
+        body: await pax.screenshot({ fullPage: true }),
+        contentType: "image/png",
+      });
+      await info.attach("ordinary-entry-login-and-consent-facts", {
+        body: JSON.stringify({
+          entry: "/login",
+          actualSMSDeliverySimulated: true,
+          actualOrdinaryOtpVerificationStatus: 200,
+          actualOrdinaryConsentPromptPresented: !returningConsent,
+          returningAccountConsentAlreadyCurrent: returningConsent,
+          actualPersistedTermsVersion: after.termsVersion,
+          actualPersistedPrivacyVersion: after.privacyVersion,
+          actualPassengerId: after.drtsPassengerId,
+          authLocalStorageSubstituteUsed: false,
+          realSMSOrFormalServiceContractClaimed: false,
+        }),
+        contentType: "application/json",
+      });
       expect(
         await pax.evaluate(() =>
           localStorage.getItem("drts.passenger.functional-demo.v1"),
