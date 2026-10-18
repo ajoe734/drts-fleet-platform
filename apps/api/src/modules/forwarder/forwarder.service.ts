@@ -229,7 +229,6 @@ export class ForwarderService implements OnModuleInit {
     const committed = await this.persistOrFail(
       forwardedOrder,
       {
-        forwardedOrders: [this.cloneOrder(forwardedOrder)],
         adapterHealth: [{ ...adapterHealth }],
       },
       "ingest_external_order",
@@ -368,7 +367,6 @@ export class ForwarderService implements OnModuleInit {
       const committed = await this.persistOrFail(
         retryDraft,
         {
-          forwardedOrders: [this.cloneOrder(retryDraft)],
           adapterHealth: [{ ...adapterHealth }],
         },
         "ingest_external_order_retry",
@@ -679,9 +677,7 @@ export class ForwarderService implements OnModuleInit {
       draft.updatedAt = new Date().toISOString();
       const committed = await this.persistOrFail(
         draft,
-        {
-          forwardedOrders: [this.cloneOrder(draft)],
-        },
+        {},
         "reject_forwarded_order",
         requestId,
       );
@@ -766,7 +762,6 @@ export class ForwarderService implements OnModuleInit {
       const committed = await this.persistOrFail(
         draft,
         {
-          forwardedOrders: [this.cloneOrder(draft)],
           adapterHealth: [{ ...adapterHealth }],
         },
         "broadcast_forwarded_order",
@@ -989,7 +984,6 @@ export class ForwarderService implements OnModuleInit {
       const committed = await this.persistOrFail(
         draft,
         {
-          forwardedOrders: [this.cloneOrder(draft)],
           adapterHealth: [{ ...adapterHealth }],
         },
         "relay_driver_accept",
@@ -1097,9 +1091,7 @@ export class ForwarderService implements OnModuleInit {
       draft.updatedAt = now;
       const committed = await this.persistOrFail(
         draft,
-        {
-          forwardedOrders: [this.cloneOrder(draft)],
-        },
+        {},
         "engage_manual_fallback",
         requestId,
       );
@@ -1165,7 +1157,6 @@ export class ForwarderService implements OnModuleInit {
       const committed = await this.persistOrFail(
         draft,
         {
-          forwardedOrders: [this.cloneOrder(draft)],
           adapterHealth: [{ ...adapterHealth }],
         },
         "sync_forwarded_order_status",
@@ -1247,7 +1238,6 @@ export class ForwarderService implements OnModuleInit {
       const committed = await this.persistOrFail(
         draft,
         {
-          forwardedOrders: [this.cloneOrder(draft)],
           adapterHealth: [{ ...adapterHealth }],
         },
         "complete_forwarder_reconciliation",
@@ -2546,14 +2536,34 @@ export class ForwarderService implements OnModuleInit {
    * mirrorOrderId, so platformCode/externalOrderId/mirror identity and
    * snapshots survive. Must always be called from within `withLock` for
    * this order.
+   *
+   * `draft` may have been cloned from a canonical record whose
+   * `lastSyncError` still carries a stale `mirrorWriteAckUncertain: true`
+   * marker from an earlier, unrelated write that failed to durably commit
+   * (see `isMirrorWriteAckUncertain`). This method builds the durable
+   * `forwardedOrders` row from `draft` itself (callers must not pre-clone it
+   * into `extraChanges`) specifically so that marker can be cleared here,
+   * before the write happens, whenever it is stale: a write that is about to
+   * durably land for `draft` right now makes any earlier "was this write
+   * ACKed" uncertainty about that same cached content moot, and persisting
+   * the marker unchanged would durably assert that this very write — the one
+   * currently succeeding — was never ACKed. Leaving that until after
+   * `persistChanges` resolves would be too late, since the row already
+   * written to canonical storage (and reloaded verbatim on restart) would
+   * still carry the stale marker.
    */
   private async persistOrFail(
     draft: ForwardedOrderRecord,
-    changes: PersistForwarderChanges,
+    extraChanges: Omit<PersistForwarderChanges, "forwardedOrders">,
     context: string,
     requestId?: string,
     acceptedDriverId?: string,
   ): Promise<ForwardedOrderRecord> {
+    this.clearStaleMirrorWriteAckUncertainty(draft);
+    const changes: PersistForwarderChanges = {
+      ...extraChanges,
+      forwardedOrders: [this.cloneOrder(draft)],
+    };
     try {
       await this.persistChanges(changes, context);
     } catch (error) {
@@ -2625,6 +2635,28 @@ export class ForwarderService implements OnModuleInit {
    */
   private isMirrorWriteAckUncertain(order: ForwardedOrderRecord): boolean {
     return order.lastSyncError?.payload?.mirrorWriteAckUncertain === true;
+  }
+
+  /**
+   * Clears a stale `mirrorWriteAckUncertain` marker (see
+   * `isMirrorWriteAckUncertain`) on `draft` in place, if present. Only
+   * `markSyncFailed`'s own failure branch may set this marker back to `true`
+   * for its own write; every other command that carries a cloned
+   * `lastSyncError` forward (e.g. `engageManualFallback`, which does not
+   * otherwise touch `lastSyncError`) must not durably re-assert an old
+   * write's uncertainty once a *different*, later write for this same draft
+   * is itself about to be durably ACKed.
+   */
+  private clearStaleMirrorWriteAckUncertainty(draft: ForwardedOrderRecord) {
+    if (draft.lastSyncError?.payload?.mirrorWriteAckUncertain === true) {
+      draft.lastSyncError = {
+        ...draft.lastSyncError,
+        payload: {
+          ...draft.lastSyncError.payload,
+          mirrorWriteAckUncertain: false,
+        },
+      };
+    }
   }
 
   /**

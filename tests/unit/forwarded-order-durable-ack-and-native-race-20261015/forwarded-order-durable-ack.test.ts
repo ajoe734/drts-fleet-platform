@@ -1431,6 +1431,112 @@ describe("FORWARDED-ORDER-DURABLE-ACK-AND-NATIVE-RACE-FLOW-20261015: C033-F1 dur
     });
   });
 
+  describe("R6: a later confirmed write must not durably re-assert a stale uncertain-ACK marker", () => {
+    it("clears the stale mirrorWriteAckUncertain marker once engageManualFallback's own write is durably ACKed, so later accept/reject and a cold restart are honest again", async () => {
+      const {
+        databaseService,
+        setRejectOrderWrites,
+        readDurableOrder,
+      } = createRecordingDatabaseService();
+      const repository = new ForwarderRepository(databaseService);
+      const { service, controller } = createHarness({ repository });
+
+      const order = await service.ingestExternalOrder({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: "grab-order-manual-fallback-clears-marker-001",
+        payload: { serviceBucket: "standard_taxi" },
+      });
+      await service.broadcastOrder(order.mirrorOrderId, {
+        candidateDriverIds: ["driver-ack-001"],
+      });
+
+      // Both the accept_pending write and markSyncFailed's own fallback
+      // write are rejected: the cache is left with a genuinely uncertain
+      // sync_failed state (lastSyncError.payload.mirrorWriteAckUncertain:
+      // true), and nothing durable was ever written for either.
+      setRejectOrderWrites(true);
+      await expect(
+        controller.acceptForwardedOrder(
+          order.mirrorOrderId,
+          driverIdentity("driver-ack-001"),
+          {},
+        ),
+      ).rejects.toMatchObject({
+        response: { error: { code: "FORWARDER_PERSISTENCE_ACK_UNCERTAIN" } },
+      });
+      expect(
+        service.getOrder(order.mirrorOrderId).lastSyncError?.payload
+          ?.mirrorWriteAckUncertain,
+      ).toBe(true);
+
+      // Durable writes recover. A real ops command (manual fallback) now
+      // lands a genuine, ACKed write (rowCount 1) for this same order.
+      setRejectOrderWrites(false);
+      const fallbackResponse = await controller.engageManualFallback(
+        order.mirrorOrderId,
+        { reason: "ops confirmed platform state manually" },
+      );
+      expect(fallbackResponse.data.status).toBe("sync_failed");
+
+      // The durable row this write just landed must not itself claim to be
+      // unACKed: the marker describes whether *this* write was confirmed,
+      // and it plainly was (the call above did not throw).
+      const durableAfterFallback = readDurableOrder(order.mirrorOrderId) as {
+        status: string;
+        acceptedDriverId: string | null;
+        lastSyncError?: { payload?: Record<string, unknown> } | null;
+      };
+      expect(durableAfterFallback.status).toBe("sync_failed");
+      expect(durableAfterFallback.acceptedDriverId).toBe("driver-ack-001");
+      expect(
+        durableAfterFallback.lastSyncError?.payload?.mirrorWriteAckUncertain,
+      ).not.toBe(true);
+
+      // A later accept/reject on the same driver must read this as the
+      // confirmed sync_failed state it now durably is, not re-reject it as
+      // still-uncertain off a stale marker.
+      const acceptAfterFallback = await controller.acceptForwardedOrder(
+        order.mirrorOrderId,
+        driverIdentity("driver-ack-001"),
+        {},
+      );
+      expect(acceptAfterFallback.data.outcome).toBe("sync_failed");
+
+      const rejectAfterFallback = await controller.rejectForwardedOrder(
+        order.mirrorOrderId,
+        driverIdentity("driver-ack-001"),
+        {},
+      );
+      expect(rejectAfterFallback.data.outcome).toBe("sync_failed");
+
+      // A cold restart reloads the same, now-honest durable row: it must
+      // not resurrect the stale marker either, and driver commands against
+      // the restarted service must stay honest too.
+      const restartedRepository = new ForwarderRepository(databaseService);
+      const restartedService = new ForwarderService(
+        { getEligibleCandidates: vi.fn(() => []) } as never,
+        { recordAuditLog: vi.fn() } as never,
+        [createAdapter()],
+        restartedRepository,
+      );
+      await restartedService.onModuleInit();
+      const restartedController = new ForwarderController(restartedService);
+      const restarted = restartedService.getOrder(order.mirrorOrderId);
+      expect(restarted.status).toBe("sync_failed");
+      expect(restarted.acceptedDriverId).toBe("driver-ack-001");
+      expect(
+        restarted.lastSyncError?.payload?.mirrorWriteAckUncertain,
+      ).not.toBe(true);
+
+      const acceptAfterRestart = await restartedController.acceptForwardedOrder(
+        order.mirrorOrderId,
+        driverIdentity("driver-ack-001"),
+        {},
+      );
+      expect(acceptAfterRestart.data.outcome).toBe("sync_failed");
+    });
+  });
+
   describe("R3 ingress retry shares the mirrorOrderId lock with native sync (unified lock domain)", () => {
     it("queues native sync behind an in-flight uncertain-retry readback instead of letting it interleave, and the later-queued native result survives", async () => {
       const { repository, persistChanges, findOrderByIdentity } =
