@@ -35,6 +35,7 @@ import { VoiceRetentionService } from "./voice-retention.service";
 import { VoiceUsageService } from "./voice-usage.service";
 import { VoiceBookingMetricsService } from "../../observability/voice-booking-metrics.service";
 import { VoiceBookingController } from "./voice-booking.controller";
+import { VoiceCallbackController } from "./voice-callback.controller";
 import {
   VoiceCapabilityService,
   VoiceCapabilityGuard,
@@ -58,7 +59,7 @@ import {
     forwardRef(() => OwnedMobilityModule),
     AuditNotificationModule,
   ],
-  controllers: [VoiceBookingController],
+  controllers: [VoiceBookingController, VoiceCallbackController],
   providers: [
     VoiceCapabilityService,
     VoiceCapabilityGuard,
