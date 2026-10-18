@@ -90,12 +90,17 @@ test("voice callback workbench retains the real closed-call order through contac
       .getByRole("link", { name: "語音來電回撥工作台", exact: true })
       .click();
     await expect(page).toHaveURL(/\/callcenter\/voice-callbacks$/);
+    const workbench = page.getByRole("main", {
+      name: "語音來電回撥工作台",
+      exact: true,
+    });
     await page
       .getByLabel("服務範圍", { exact: true })
       .selectOption(seed.scopeId);
     await page.getByRole("button", { name: new RegExp(reason) }).click();
     await expect(page.getByText(orderId!, { exact: true })).toBeVisible();
     await expect(page.getByText(callId!, { exact: true })).toBeVisible();
+    await expect(workbench).not.toContainText("1970");
     stage("Normal call-center entry opens real scoped closed-call callback");
     await screenshot("01-original-closed-call-and-order");
 
@@ -261,7 +266,7 @@ test("voice callback workbench retains the real closed-call order through contac
     await page
       .getByRole("button", { name: "記錄聯繫結果", exact: true })
       .click();
-    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(workbench.getByRole("alert")).toHaveCount(0);
     await expect(
       page
         .getByText("仍有未確認結束的電話，請確認通話狀態。", { exact: true })
@@ -274,7 +279,7 @@ test("voice callback workbench retains the real closed-call order through contac
     await expect(
       page.getByRole("heading", { name: "已取消", exact: true }),
     ).toBeVisible();
-    await expect(page.getByRole("alert")).toHaveText(
+    await expect(workbench.getByRole("alert")).toHaveText(
       "仍有未確認結束的電話，請確認通話狀態。",
     );
     const uncertain = await data(

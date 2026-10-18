@@ -191,6 +191,10 @@ export default function VoiceCallbacksPage() {
     value
       ? new Date(value).toLocaleString(locale === "zh" ? "zh-TW" : "en")
       : "—";
+  // The existing callback API represents an unset deadline with the epoch.
+  // Show its absence instead of presenting a fictitious 1970 deadline.
+  const dueTime = (value: string) =>
+    value === "1970-01-01T00:00:00.000Z" ? "—" : time(value);
   const panel = {
     border: "1px solid #556577",
     borderRadius: 10,
@@ -199,7 +203,7 @@ export default function VoiceCallbacksPage() {
   };
 
   return (
-    <main style={{ padding: 24, maxWidth: 1400 }}>
+    <main aria-label={copy.title} style={{ padding: 24, maxWidth: 1400 }}>
       <Link href="/callcenter">{copy.back}</Link>
       <h1>{copy.title}</h1>
       <p>{copy.subtitle}</p>
@@ -301,7 +305,7 @@ export default function VoiceCallbacksPage() {
                     {row.reason || row.taskId} · {copy.statuses[row.status]}
                   </button>
                   <div>
-                    {copy.priority[row.priority]} · {time(row.dueAt)}
+                    {copy.priority[row.priority]} · {dueTime(row.dueAt)}
                   </div>
                   <small>{row.taskId}</small>
                 </li>
@@ -323,7 +327,7 @@ export default function VoiceCallbacksPage() {
                 <dt>{copy.owner}</dt>
                 <dd>{task.assignedOperatorId || copy.none}</dd>
                 <dt>{copy.due}</dt>
-                <dd>{time(task.dueAt)}</dd>
+                <dd>{dueTime(task.dueAt)}</dd>
                 <dt>{copy.scheduled}</dt>
                 <dd>{time(task.scheduledAt)}</dd>
                 <dt>{copy.version}</dt>
@@ -344,6 +348,7 @@ export default function VoiceCallbacksPage() {
                 <label>
                   {copy.outcome}
                   <select
+                    aria-label={copy.outcome}
                     value={outcome}
                     onChange={(e) =>
                       setOutcome(e.target.value as typeof outcome)
