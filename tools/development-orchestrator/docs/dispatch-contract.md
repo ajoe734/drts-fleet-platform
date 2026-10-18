@@ -35,13 +35,23 @@ failures into indefinite manual lane bans. Existing auth/quota handling remains.
   tool writes the same schema to the run's Codex-style result file. `pi --mode json`
   exits 0 on failure, so the detector reads its assistant `stopReason` and
   `auto_retry_end` events instead of the exit code.
-- Briefs retain complete current feedback, specification, write scopes, acceptance
-  and candidate identity. Report-only work is not told to create source commits.
+- Briefs retain specification, write scopes, acceptance and candidate identity.
+  Legacy handoffs over 4,000 characters use an explicit preview with the exact
+  canonical source selector and digest; the full text remains available.
+  Report-only work is not told to create source commits.
   Workers must wait for their own checks before declaring results.
 - Read-only board commands read atomic JSON snapshots without creating a writer
   lock. Mutations retain the existing transaction lock.
 
 No scheduler, broker, recovery daemon or independent status writer is added.
+
+Keep `next` to the current action, blocker and evidence references, within 4,000
+characters. Preserve historical text once in an immutable artifact before
+replacing it, then link it through the existing evidence references; do not append
+old handoffs or embed previous full JSON snapshots in each new report. Publishing
+or rechecking a report does not itself count as product progress or reset a
+stalled-work counter. Report the actual source, test, merge, deployment or
+acceptance changes evidenced by that report.
 
 ## Host verification and activation
 
