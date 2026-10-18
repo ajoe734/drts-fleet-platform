@@ -36,6 +36,14 @@ function mockGcloudScript(): string {
 set -euo pipefail
 printf '%s\\n' "$*" >> "$MOCK_GCLOUD_LOG_FILE"
 
+if [[ "$1 $2" == "services enable" ]]; then
+  if [[ "\${MOCK_ENABLE_EXIT_CODE:-0}" != "0" ]]; then
+    printf '%s\\n' "\${MOCK_ENABLE_STDERR:-}" >&2
+    exit "\${MOCK_ENABLE_EXIT_CODE}"
+  fi
+  exit 0
+fi
+
 if [[ "$1 $2" == "projects describe" ]]; then
   echo "$MOCK_PROJECT_NUMBER"
   exit 0
@@ -120,6 +128,8 @@ function runSetup(
     guardBackendGroups?: string;
     publicDescribeExitCode?: number;
     publicDescribeStderr?: string;
+    enableExitCode?: number;
+    enableStderr?: string;
   } = {},
 ) {
   const {
@@ -131,6 +141,8 @@ function runSetup(
     guardBackendGroups = "",
     publicDescribeExitCode = 0,
     publicDescribeStderr = "",
+    enableExitCode = 0,
+    enableStderr = "",
   } = opts;
 
   const directory = mkdtempSync(
@@ -173,6 +185,8 @@ function runSetup(
       MOCK_GUARD_BACKEND_GROUPS: guardBackendGroups,
       MOCK_PUBLIC_DESCRIBE_EXIT_CODE: String(publicDescribeExitCode),
       MOCK_PUBLIC_DESCRIBE_STDERR: publicDescribeStderr,
+      MOCK_ENABLE_EXIT_CODE: String(enableExitCode),
+      MOCK_ENABLE_STDERR: enableStderr,
     },
   });
 
@@ -384,5 +398,55 @@ describe("PAX-BUREAU-BROWSER-ENTRY-20261018: setup-passenger-public-entry.sh", (
 
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("Usage:");
+  });
+
+  it("ENTRY-R11-FIRST-ACTIVATION-API-BOOTSTRAP: enables compute.googleapis.com and iap.googleapis.com before the first Compute/IAP call, so a brand-new project that never used either API before does not fail with SERVICE_DISABLED", () => {
+    const result = runSetup([service, region, project, host]);
+
+    expect(result.status).toBe(0);
+    const enableIndex = result.commands.findIndex(
+      (c) =>
+        c.startsWith("services enable") &&
+        c.includes("compute.googleapis.com") &&
+        c.includes("iap.googleapis.com"),
+    );
+    const firstComputeIndex = result.commands.findIndex((c) =>
+      c.startsWith("compute "),
+    );
+    const firstIapIndex = result.commands.findIndex((c) =>
+      c.startsWith("iap "),
+    );
+    expect(enableIndex).toBe(0);
+    expect(firstComputeIndex).toBeGreaterThan(enableIndex);
+    expect(firstIapIndex).toBeGreaterThan(enableIndex);
+  });
+
+  it("ENTRY-R11-FIRST-ACTIVATION-API-BOOTSTRAP: a project where both APIs are already enabled is not treated as an error (idempotent re-enable on every run)", () => {
+    const first = runSetup([service, region, project, host]);
+    const second = runSetup([service, region, project, host]);
+
+    expect(first.status).toBe(0);
+    expect(second.status).toBe(0);
+    expect(
+      second.commands.some(
+        (c) =>
+          c.startsWith("services enable") &&
+          c.includes("compute.googleapis.com"),
+      ),
+    ).toBe(true);
+  });
+
+  it("ENTRY-R11-FIRST-ACTIVATION-API-BOOTSTRAP: fails closed when the required APIs cannot be enabled, before any Compute or IAP mutation is attempted", () => {
+    const result = runSetup([service, region, project, host], {
+      enableExitCode: 7,
+      enableStderr:
+        "ERROR: (gcloud.services.enable) PERMISSION_DENIED: caller lacks serviceusage.services.enable",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("serviceusage.services.enable");
+    expect(result.commands.some((c) => c.startsWith("compute "))).toBe(false);
+    expect(result.commands.some((c) => c.startsWith("iap "))).toBe(false);
+    expect(result.urlmapYaml).toBeNull();
   });
 });

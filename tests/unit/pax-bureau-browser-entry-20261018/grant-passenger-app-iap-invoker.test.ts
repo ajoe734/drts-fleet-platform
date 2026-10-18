@@ -23,6 +23,8 @@ function runGrant(
   args: string[],
   opts: {
     projectNumber?: string;
+    enableExitCode?: number;
+    enableStderr?: string;
     identityExitCode?: number;
     identityStderr?: string;
     addExitCode?: number;
@@ -31,6 +33,8 @@ function runGrant(
 ) {
   const {
     projectNumber = "123456789012",
+    enableExitCode = 0,
+    enableStderr = "",
     identityExitCode = 0,
     identityStderr = "",
     addExitCode = 0,
@@ -56,6 +60,14 @@ printf '%s\\n' "$*" >> "$MOCK_GCLOUD_LOG_FILE"
 
 if [[ "$1 $2" == "projects describe" ]]; then
   printf '%s\\n' "$MOCK_PROJECT_NUMBER"
+  exit 0
+fi
+
+if [[ "$1 $2" == "services enable" ]]; then
+  if ((MOCK_ENABLE_EXIT_CODE != 0)); then
+    printf '%s\\n' "$MOCK_ENABLE_STDERR" >&2
+    exit "$MOCK_ENABLE_EXIT_CODE"
+  fi
   exit 0
 fi
 
@@ -89,6 +101,8 @@ exit 99
       PATH: `${binDirectory}:${process.env.PATH ?? ""}`,
       MOCK_GCLOUD_LOG_FILE: commandLogFile,
       MOCK_PROJECT_NUMBER: projectNumber,
+      MOCK_ENABLE_EXIT_CODE: String(enableExitCode),
+      MOCK_ENABLE_STDERR: enableStderr,
       MOCK_IDENTITY_EXIT_CODE: String(identityExitCode),
       MOCK_IDENTITY_STDERR: identityStderr,
       MOCK_ADD_EXIT_CODE: String(addExitCode),
@@ -119,9 +133,89 @@ describe("PAX-BUREAU-BROWSER-ENTRY-20261018: grant-passenger-app-iap-invoker.sh"
     expect(result.status).toBe(0);
     expect(result.commands).toEqual([
       "projects describe drts-dev-devcc-20260825 --format=value(projectNumber)",
-      "beta services identity create --service=iap.googleapis.com --project=drts-dev-devcc-20260825",
+      "services enable iap.googleapis.com --project=drts-dev-devcc-20260825 --quiet",
+      "beta services identity create --service=iap.googleapis.com --project=drts-dev-devcc-20260825 --quiet",
       "run services add-iam-policy-binding drts-dev-passenger-app-web --region us-central1 --project drts-dev-devcc-20260825 --member serviceAccount:service-987654321098@gcp-sa-iap.iam.gserviceaccount.com --role roles/run.invoker",
     ]);
+  });
+
+  it("ENTRY-R11-FIRST-ACTIVATION-API-BOOTSTRAP: enables iap.googleapis.com before the first service-identity call, so a brand-new project that never used IAP before does not fail with the API disabled", () => {
+    const result = runGrant([
+      "drts-dev-passenger-app-web",
+      "us-central1",
+      "drts-dev-devcc-20260825",
+    ]);
+
+    expect(result.status).toBe(0);
+    const enableIndex = result.commands.findIndex((c) =>
+      c.startsWith("services enable iap.googleapis.com"),
+    );
+    const identityIndex = result.commands.findIndex((c) =>
+      c.startsWith("beta services identity create"),
+    );
+    expect(enableIndex).toBeGreaterThan(-1);
+    expect(identityIndex).toBeGreaterThan(enableIndex);
+  });
+
+  it("ENTRY-R11-FIRST-ACTIVATION-API-BOOTSTRAP: a project where iap.googleapis.com is already enabled is not treated as an error (idempotent re-enable on every run)", () => {
+    // The stubbed `gcloud services enable` always exits 0 regardless of
+    // whether the API was already on, exactly like the real command; this
+    // documents that calling it again on an already-activated project is a
+    // normal, successful no-op rather than a path this script needs to branch
+    // around.
+    const first = runGrant([
+      "drts-dev-passenger-app-web",
+      "us-central1",
+      "drts-dev-devcc-20260825",
+    ]);
+    const second = runGrant([
+      "drts-dev-passenger-app-web",
+      "us-central1",
+      "drts-dev-devcc-20260825",
+    ]);
+
+    expect(first.status).toBe(0);
+    expect(second.status).toBe(0);
+    expect(
+      second.commands.some((c) =>
+        c.startsWith("services enable iap.googleapis.com"),
+      ),
+    ).toBe(true);
+  });
+
+  it("ENTRY-R11-FIRST-ACTIVATION-API-BOOTSTRAP: fails closed when iap.googleapis.com cannot be enabled, without attempting the service-identity create or the grant", () => {
+    const result = runGrant(
+      ["drts-dev-passenger-app-web", "us-central1", "drts-dev-devcc-20260825"],
+      {
+        enableExitCode: 7,
+        enableStderr:
+          "ERROR: (gcloud.services.enable) PERMISSION_DENIED: caller lacks serviceusage.services.enable",
+      },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("serviceusage.services.enable");
+    expect(
+      result.commands.some((c) => c.startsWith("beta services identity create")),
+    ).toBe(false);
+    expect(
+      result.commands.some((c) => c.includes("add-iam-policy-binding")),
+    ).toBe(false);
+  });
+
+  it("ENTRY-R11-COLD-BETA-SDK-NOPROMPT: the service-identity create call is noninteractive (--quiet), so a cold Cloud SDK that has never installed the beta component group does not hang on an unanswerable install prompt", () => {
+    const result = runGrant([
+      "drts-dev-passenger-app-web",
+      "us-central1",
+      "drts-dev-devcc-20260825",
+    ]);
+
+    expect(result.status).toBe(0);
+    const identityCommand = result.commands.find((c) =>
+      c.startsWith("beta services identity create"),
+    );
+    expect(identityCommand).toBeDefined();
+    expect(identityCommand).toContain("--quiet");
   });
 
   it("ensures the IAP service identity exists (idempotent create) before granting, so a project whose IAP identity was never bootstrapped does not fail the grant", () => {

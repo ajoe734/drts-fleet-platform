@@ -61,8 +61,8 @@ URL map 對不符任何 `hostRules` 的 Host（包含直接用 IP 或偽造 Host
 
 | 腳本 | 用途 |
 | --- | --- |
-| `grant-passenger-app-iap-invoker.sh <service> <region> <project>` | 先以冪等的 `gcloud beta services identity create --service=iap.googleapis.com` 確保 Cloud IAP service agent（`service-<project-number>@gcp-sa-iap.iam.gserviceaccount.com`）本身存在，再對它授予 `roles/run.invoker`；純增量，不會移除既有 binding，也絕不觸碰 `allUsers`／`allAuthenticatedUsers`（`enforce-no-public-access.sh` 仍會攔截這兩者）。 |
-| `setup-passenger-public-entry.sh <service> <region> <project> <host>` | 建立／對齊 serverless NEG、兩個 backend service、guard-backend 無公開授權的驗證、public-backend 的 `allUsers` IAP 授權、URL map、受管憑證、靜態 IP、HTTPS proxy 與 forwarding rule。所有資源建立前先以 `list --filter=name=...` 查存在性（idempotent）；URL map 一律用 `import` 整份宣告式重套，不做局部 `add-path-matcher`。 |
+| `grant-passenger-app-iap-invoker.sh <service> <region> <project>` | 先 `gcloud services enable iap.googleapis.com --quiet`，再以冪等的 `gcloud beta services identity create --service=iap.googleapis.com --quiet` 確保 Cloud IAP service agent（`service-<project-number>@gcp-sa-iap.iam.gserviceaccount.com`）本身存在，最後對它授予 `roles/run.invoker`；純增量，不會移除既有 binding，也絕不觸碰 `allUsers`／`allAuthenticatedUsers`（`enforce-no-public-access.sh` 仍會攔截這兩者）。`--quiet` 同時讓冷 Cloud SDK 的 beta 元件安裝確認不卡在互動提示（見 §6a）。 |
+| `setup-passenger-public-entry.sh <service> <region> <project> <host>` | 先 `gcloud services enable compute.googleapis.com iap.googleapis.com --quiet`（見 §6a），再建立／對齊 serverless NEG、兩個 backend service、guard-backend 無公開授權的驗證、public-backend 的 `allUsers` IAP 授權、URL map、受管憑證、靜態 IP、HTTPS proxy 與 forwarding rule。所有資源建立前先以 `list --filter=name=...` 查存在性（idempotent）；URL map 一律用 `import` 整份宣告式重套，不做局部 `add-path-matcher`。 |
 
 兩個腳本都遵守既有 `set -euo pipefail` fail-closed 慣例：任何 `gcloud`
 讀取失敗（例如 guard backend 的 IAP policy 讀不到）都視為「未知」而中止，不會
@@ -160,6 +160,52 @@ IAP 是否已經由 `domain-mappings-dev.yml` 啟用過，這個呼叫都安全�
 嘗試授權。回歸測試見
 `tests/unit/pax-bureau-browser-entry-20261018/grant-passenger-app-iap-invoker.test.ts`
 新增的兩個案例（身分建立在授權之前執行、身分建立失敗時不嘗試授權）。
+
+## 6a. 首次雲端啟用：Compute／IAP API 必須先 `enable`（`ENTRY-R11-FIRST-ACTIVATION-API-BOOTSTRAP`）
+
+實際 `publish/v2026.10.18.7` 部署（run
+[39166716207](https://github.com/ajoe734/drts-fleet-platform/actions/runs/39166716207)）在
+`drts-dev-devcc-20260825` 第一次執行 `setup-passenger-public-entry.sh` 時，
+`compute network-endpoint-groups list` 直接回
+`SERVICE_DISABLED: compute.googleapis.com`：這個專案從未用過 Compute Engine
+API。WIF 驗證與 project lookup 本身成功，沒有拿到靜態 IP 或可用 URL，不是已
+證明缺 IAM role。
+
+同一批次 deploy（run 39165989369）另外十個既有服務的 deploy steps 全部
+success，但最後的 `grant-passenger-app-iap-invoker.sh` 在呼叫
+`gcloud beta services identity create` 時失敗：冷安裝的 Cloud SDK 第一次用到
+`beta` command group，gcloud 嘗試互動詢問是否自動安裝 `gcloud Beta Commands`
+元件，noninteractive runner 無法回答，實際錯誤是 gcloud 自己的
+`This prompt could not be answered because you are not in an interactive
+session. You can re-run the command with the --quiet flag to accept default
+answers for all prompts.`——這不是 IAP API 未啟用，也不是 IAM 權限不足，而是
+冷 SDK 元件安裝需要互動確認。
+
+修正（本次 `PAX-BUREAU-ENTRY-CLOUD-BOOTSTRAP-20261018`）：
+
+- `setup-passenger-public-entry.sh` 在第一個 Compute／IAP 指令之前，先呼叫
+  `gcloud services enable compute.googleapis.com iap.googleapis.com
+  --project="$project" --quiet`。`services enable` 本身對已啟用的 API 是
+  idempotent 的 no-op，所以每次執行都直接呼叫，不另外查詢「是否已啟用」；
+  這個呼叫失敗（例如呼叫者缺 `serviceusage.services.enable`）會在
+  `set -euo pipefail` 下直接中止腳本，後面的 Compute／IAP 變更都不會被嘗試。
+- `grant-passenger-app-iap-invoker.sh` 在 `beta services identity create` 之前
+  先用同樣方式 `gcloud services enable iap.googleapis.com --project="$project"
+  --quiet`；`beta services identity create` 呼叫本身也加上 `--quiet`——這正是
+  上述 gcloud 錯誤訊息要求的修法，讓冷 SDK 的元件安裝確認自動採預設答案，不
+  再需要互動輸入。
+
+兩個腳本都沒有自行 grant 任何 IAM role、沒有停用任何 API、沒有改動
+public/private、hostguard、NEG 附件重試或 pause／VM 規則。若實際 WIF caller
+真的缺 `serviceusage.services.enable` 或 Compute/IAP 權限，`gcloud services
+enable` 會以非零結束並保留原始 stderr，由具權限 operator 依該錯誤訊息補授權，
+不由本腳本臆測或自行授權。回歸測試見
+`tests/unit/pax-bureau-browser-entry-20261018/setup-passenger-public-entry.test.ts`
+與
+`tests/unit/pax-bureau-browser-entry-20261018/grant-passenger-app-iap-invoker.test.ts`
+新增的 `ENTRY-R11-FIRST-ACTIVATION-API-BOOTSTRAP`／`ENTRY-R11-COLD-BETA-SDK-NOPROMPT`
+案例（啟用先於第一次使用、已啟用時的 idempotent 重跑、啟用失敗時中止、
+`--quiet` 不留互動提示）。
 
 ## 7. `/bureau-review` 執行期算繪（`ENTRY-R4-RUNTIME-HOST-PRERENDER`）
 
