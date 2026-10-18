@@ -24,6 +24,10 @@ import { RegulatoryRegistryRepository } from "../../../apps/api/src/modules/regu
 import { RegulatoryRegistryService } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 import { ServiceProductRepository } from "../../../apps/api/src/modules/service-product/service-product.repository";
 import { ServiceProductService } from "../../../apps/api/src/modules/service-product/service-product.service";
+import { ServiceAreaRepository } from "../../../apps/api/src/modules/service-area/service-area.repository";
+import { ServiceAreaService } from "../../../apps/api/src/modules/service-area/service-area.service";
+import { EligibilityContextResolver } from "../../../apps/api/src/modules/vehicle-eligibility/eligibility-context-resolver.service";
+import { RuntimeEligibilityEvaluator } from "../../../apps/api/src/modules/vehicle-eligibility/runtime-eligibility-evaluator.service";
 import { VehicleEligibilityRepository } from "../../../apps/api/src/modules/vehicle-eligibility/vehicle-eligibility.repository";
 import { VehicleEligibilityService } from "../../../apps/api/src/modules/vehicle-eligibility/vehicle-eligibility.service";
 import { VoiceBookingCommandService } from "../../../apps/api/src/modules/voice-booking/voice-booking-command.service";
@@ -81,6 +85,15 @@ describe.skipIf(!hostedPaymentEnabled)(
         new VehicleEligibilityRepository(database),
         products,
       );
+      const areas = new ServiceAreaService(
+        new ServiceAreaRepository(database),
+        audit,
+      );
+      const runtime = new RuntimeEligibilityEvaluator(
+        new EligibilityContextResolver(registry, products, eligibility),
+        audit,
+        new VehicleEligibilityRepository(database),
+      );
       const events = new OwnedMobilityTaskEventsService(
         new EventEmitter() as never,
         database,
@@ -101,10 +114,10 @@ describe.skipIf(!hostedPaymentEnabled)(
         eligibility,
         products,
         undefined,
+        runtime,
         undefined,
         undefined,
-        undefined,
-        undefined,
+        areas,
         undefined,
         new IdempotencyService(new IdempotencyRepository(database)),
         voice,
@@ -116,6 +129,7 @@ describe.skipIf(!hostedPaymentEnabled)(
         registryStore,
         registry,
         eligibility,
+        areas,
         events,
         owned,
         repository,
@@ -129,6 +143,7 @@ describe.skipIf(!hostedPaymentEnabled)(
       await p.profiles.onModuleInit();
       await p.registry.onModuleInit();
       await p.eligibility.onModuleInit();
+      await p.areas.onModuleInit();
       await p.owned.onModuleInit();
       await p.events.onModuleInit();
     }
@@ -146,6 +161,15 @@ describe.skipIf(!hostedPaymentEnabled)(
         exclusivities: a.registry.listExclusivities(),
       });
       await initialize(a);
+      // External GPS is synthetic, but its original registry write and peer
+      // readback are real. Retain the actual autonomous freshness/policy gates.
+      await a.registry.recordDriverLocation({
+        driverId: "drv-demo-001",
+        lat: 25.03,
+        lng: 121.56,
+        accuracyM: 5,
+        recordedAt: new Date().toISOString(),
+      });
       await initialize(b);
       return { a, b };
     }
