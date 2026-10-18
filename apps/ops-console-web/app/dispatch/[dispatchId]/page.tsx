@@ -18,6 +18,8 @@ import type {
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { OpsDispatchAssignmentButton } from "@/components/ops-dispatch-assignment-button";
+import { OpsDispatchCreateButton } from "@/components/ops-dispatch-create-button";
+import { DispatchAutoRefresh } from "@/components/dispatch-auto-refresh";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
@@ -1244,16 +1246,37 @@ function renderHeaderActions(
   assignment?: {
     dispatchJobId: string;
     candidate: DispatchCandidate;
+    candidates: DispatchCandidate[];
+    driverNames: Record<string, string>;
   },
+  creation?: { orderId: string },
+  terminal = true,
 ) {
+  if (
+    creation &&
+    actions.some(
+      (action) => action.action === "create_dispatch" && action.enabled,
+    )
+  )
+    return (
+      <OpsDispatchCreateButton orderId={creation.orderId} locale={locale} />
+    );
+
   const assignAction = actions.find(
-    (action) => action.action === "assign_candidate" && action.enabled,
+    (action) =>
+      ["assign_candidate", "reassign_driver"].includes(action.action) &&
+      action.enabled,
   );
 
   if (!assignAction || !assignment) {
     return (
       <Pill theme={theme} tone="neutral">
-        {tr(locale, "dispatch.detail.action.readOnlyTerminal")}
+        {tr(
+          locale,
+          terminal
+            ? "dispatch.detail.action.readOnlyTerminal"
+            : "dispatch.actions.none",
+        )}
       </Pill>
     );
   }
@@ -1262,6 +1285,9 @@ function renderHeaderActions(
     <OpsDispatchAssignmentButton
       dispatchJobId={assignment.dispatchJobId}
       candidate={assignment.candidate}
+      candidates={assignment.candidates}
+      driverNames={assignment.driverNames}
+      reassign={assignAction.action === "reassign_driver"}
       locale={locale}
     />
   );
@@ -1283,6 +1309,14 @@ function synthesizeOwnedActions(
     task != null &&
     (task.acceptedAt != null || task.startedAt != null) &&
     task.completedAt == null;
+  const hasActiveAssignment =
+    task != null &&
+    [
+      "pending_acceptance",
+      "accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+    ].includes(task.status);
   const blockedByHold = Boolean(
     order.exceptionHold && !order.exceptionHold.resolution,
   );
@@ -1291,16 +1325,34 @@ function synthesizeOwnedActions(
     { action: "contact_passenger", enabled: true, riskLevel: "low" },
   ];
 
+  if (!job)
+    actions.push({
+      action: "create_dispatch",
+      enabled: !blockedByHold,
+      riskLevel: "medium",
+    });
+
   actions.push({
     action: "assign_candidate",
-    enabled: candidateCount > 0 && !hasActiveDriver && !blockedByHold,
+    enabled:
+      candidateCount > 0 &&
+      !hasActiveDriver &&
+      !hasActiveAssignment &&
+      !blockedByHold,
     ...(candidateCount === 0
       ? { disabledReasonCode: "no_eligible_candidate" }
-      : hasActiveDriver
+      : hasActiveDriver || hasActiveAssignment
         ? { disabledReasonCode: "driver_already_assigned" }
         : blockedByHold
           ? { disabledReasonCode: "exception_hold_active" }
           : {}),
+    riskLevel: "medium",
+  });
+
+  actions.push({
+    action: "reassign_driver",
+    enabled: candidateCount > 0 && hasActiveAssignment && !blockedByHold,
+    requiresReason: true,
     riskLevel: "medium",
   });
 
@@ -2114,13 +2166,19 @@ async function renderOwnedWorkspace({
 
   return (
     <>
+      <DispatchAutoRefresh
+        intervalMs={REFRESH_STALE_AFTER_MS}
+        enabled={!terminal}
+      />
       <PageHeader
         theme={theme}
         title={
           <span
             style={{ display: "inline-flex", alignItems: "center", gap: 10 }}
           >
-            <span>{`${order.orderNo} · ${getTenantLabel(order)}`}</span>
+            <span
+              data-ops-order-id={order.orderId}
+            >{`${order.orderNo} · ${getTenantLabel(order)}`}</span>
             <Pill theme={theme} tone="accent">
               OWNED
             </Pill>
@@ -2134,8 +2192,17 @@ async function renderOwnedWorkspace({
             ? {
                 dispatchJobId: dispatchJob.dispatchJobId,
                 candidate: sortedCandidates[0],
+                candidates: sortedCandidates,
+                driverNames: Object.fromEntries(
+                  driversResult.data.map((driver) => [
+                    driver.driverId,
+                    driver.name,
+                  ]),
+                ),
               }
             : undefined,
+          !dispatchJob && !loadFailed ? { orderId: order.orderId } : undefined,
+          terminal,
         )}
       />
 
@@ -2196,6 +2263,11 @@ async function renderOwnedWorkspace({
               cols={2}
               items={[
                 {
+                  k: tr(locale, "dispatch.detail.assignment.orderId"),
+                  v: order.orderId,
+                  mono: true,
+                },
+                {
                   k: tr(locale, "dispatch.queue.serviceTypeLabel"),
                   v: queueSemantics.serviceTypeText,
                   mono: true,
@@ -2218,6 +2290,45 @@ async function renderOwnedWorkspace({
               ]}
             />
           </Card>
+
+          {currentTask ? (
+            <Card
+              theme={theme}
+              title={tr(locale, "dispatch.detail.assignment.current")}
+            >
+              <div
+                data-ops-task-id={currentTask.taskId}
+                data-ops-task-status={currentTask.status}
+              >
+                <DL
+                  theme={theme}
+                  cols={2}
+                  items={[
+                    {
+                      k: tr(locale, "common.driver"),
+                      v:
+                        driverById.get(currentTask.driverId)?.name ??
+                        currentTask.driverId,
+                    },
+                    {
+                      k: tr(locale, "common.vehicle"),
+                      v: currentTask.vehicleId,
+                      mono: true,
+                    },
+                    {
+                      k: tr(locale, "dispatch.detail.assignment.task"),
+                      v: currentTask.taskId,
+                      mono: true,
+                    },
+                    {
+                      k: tr(locale, "common.status"),
+                      v: formatOpsCodeLabel(locale, currentTask.status),
+                    },
+                  ]}
+                />
+              </div>
+            </Card>
+          ) : null}
 
           <Card
             theme={theme}

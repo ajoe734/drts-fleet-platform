@@ -37,7 +37,7 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
     AuditNotificationModule,
     CallcenterModule,
     ProductRuleModule,
-    VoiceBookingModule,
+    forwardRef(() => VoiceBookingModule),
     forwardRef(() => SandboxDispatchGateModule),
     forwardRef(() => TenantPartnerModule),
     forwardRef(() => PlatformPresenceModule),

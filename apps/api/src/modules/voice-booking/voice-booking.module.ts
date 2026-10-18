@@ -3,7 +3,7 @@ import { GeoModule } from "../geo/geo.module";
 import { ServiceAreaModule } from "../service-area/service-area.module";
 import { ServiceProductModule } from "../service-product/service-product.module";
 import { VoiceBookingDraftService } from "./voice-booking-draft.service";
-import { Module } from "@nestjs/common";
+import { Module, forwardRef } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
 import { IdempotencyModule } from "../../common/idempotency";
@@ -16,6 +16,7 @@ import { VoiceDispatchProjectionService } from "./voice-dispatch-projection.serv
 import { VoiceBookingCommandService } from "./voice-booking-command.service";
 import { VoiceCommandRunnerService } from "./voice-command-runner.service";
 import { OwnedMobilityRepository } from "../owned-mobility/owned-mobility.repository";
+import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 
 import { VoiceHandoffService } from "./voice-handoff.service";
 import { VoiceSessionService } from "./voice-session.service";
@@ -43,7 +44,14 @@ import {
  * (SD §7.4/§7.5).
  */
 @Module({
-  imports: [DatabaseModule, GeoModule, ServiceAreaModule, ServiceProductModule, IdempotencyModule],
+  imports: [
+    DatabaseModule,
+    GeoModule,
+    ServiceAreaModule,
+    ServiceProductModule,
+    IdempotencyModule,
+    forwardRef(() => OwnedMobilityModule),
+  ],
   controllers: [VoiceBookingController],
   providers: [
     VoiceCapabilityService,
@@ -95,4 +103,3 @@ import {
   ],
 })
 export class VoiceBookingModule {}
-

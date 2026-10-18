@@ -13,6 +13,10 @@ import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
 import { bookingResponseDiagnostic } from "./pax-review-shared-order/booking-diagnostic";
 import { dispatchResponseDiagnostic } from "./pax-review-shared-order/dispatch-diagnostic";
+import {
+  createDispatchInOrdinaryWorkspace,
+  assignInOrdinaryWorkspace,
+} from "./pax-review-shared-order/ordinary-ops-dispatch";
 
 type JourneyStep = ReturnType<typeof createJourneyProgress>["step"];
 
@@ -716,8 +720,30 @@ async function visitActualAuditDestination(
   }
 }
 
-async function createDispatch(ops: Page, orderId: string) {
+async function createDispatch(ops: Page, orderId: string, info?: TestInfo) {
   await opsRead(ops, orderId);
+  if (info) {
+    const facts = await createDispatchInOrdinaryWorkspace(
+      ops,
+      OPS,
+      orderId,
+      info,
+    );
+    await ops.goto(`${OPS}/review`);
+    await opsRead(ops, orderId);
+    await expect(ops.getByTestId("ops-review-job-id")).toHaveText(
+      facts.dispatchJobId,
+    );
+    await expect(ops.locator(`a[href="/dispatch/${orderId}"]`)).toBeVisible();
+    await info.attach("A-ordinary-Ops-create-dispatch-facts", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...facts,
+        actualReviewDetailLinkUsesOriginalOrderId: true,
+      }),
+    });
+    return;
+  }
   const job = ops.waitForResponse(
     (r) =>
       r.url().endsWith(`/orders/${orderId}/dispatch`) &&
@@ -806,9 +832,43 @@ async function finish(
   ops: Page,
   step: JourneyStep,
   stale = false,
+  ordinaryOpsInfo?: TestInfo,
 ) {
+  const ordinaryTaskId = ordinaryOpsInfo
+    ? await ops.locator("[data-ops-task-id]").getAttribute("data-ops-task-id")
+    : null;
+  if (ordinaryOpsInfo) expect(ordinaryTaskId).toMatch(/^[0-9a-f-]{36}$/);
+  const observedOrdinaryStates: {
+    status: string;
+    taskId: string;
+    observedAt: number;
+  }[] = [];
+  const ordinaryState = async (status: string) => {
+    if (!ordinaryOpsInfo) return;
+    // Stay on the original ordinary detail page: no goto, reload, direct
+    // refresh, or response substitution between Driver actions and readback.
+    expect(new URL(ops.url()).pathname).toBe(`/dispatch/${orderId}`);
+    await expect(ops.locator(`[data-ops-order-id="${orderId}"]`)).toBeVisible();
+    await expect(ops.getByText(orderId, { exact: true })).toBeVisible();
+    await expect(
+      ops.locator(
+        `[data-ops-task-id="${ordinaryTaskId}"][data-ops-task-status="${status}"]`,
+      ),
+    ).toBeVisible({ timeout: 20_000 });
+    observedOrdinaryStates.push({
+      status,
+      taskId: ordinaryTaskId!,
+      observedAt: Date.now(),
+    });
+  };
   await step("Driver read assigned trip and accept", async () => {
     await readAssignedTripAndAccept(driver, base, orderId, step);
+    await ordinaryState("accepted");
+    if (ordinaryOpsInfo)
+      await ordinaryOpsInfo.attach("A-ordinary-Ops-driver-accepted-live-ops", {
+        contentType: "image/png",
+        body: await ops.screenshot({ fullPage: true }),
+      });
   });
   for (const [label, action] of [
     ["前往接送點", "depart"],
@@ -830,6 +890,13 @@ async function finish(
       );
       await driver.getByRole("button", { name: label, exact: true }).click();
       expect((await response).status()).toBeLessThan(300);
+      await ordinaryState(
+        {
+          depart: "enroute_pickup",
+          arrived_pickup: "arrived_pickup",
+          start: "on_trip",
+        }[action],
+      );
     });
   }
   await expect
@@ -929,6 +996,44 @@ async function finish(
       await expect
         .poll(async () => (await authority(pax, orderId)).order.status)
         .toBe("completed");
+      await ordinaryState("completed");
+      if (ordinaryOpsInfo) {
+        const taskId = await ops
+          .locator('[data-ops-task-status="completed"]')
+          .getAttribute("data-ops-task-id");
+        expect(taskId).toMatch(/^[0-9a-f-]{36}$/);
+        expect(taskId).toBe(ordinaryTaskId);
+        expect(observedOrdinaryStates.map((state) => state.status)).toEqual([
+          "accepted",
+          "enroute_pickup",
+          "arrived_pickup",
+          "on_trip",
+          "completed",
+        ]);
+        await ordinaryOpsInfo.attach(
+          "A-ordinary-Ops-driver-completed-live-ops",
+          {
+            contentType: "image/png",
+            body: await ops.screenshot({ fullPage: true }),
+          },
+        );
+        await ordinaryOpsInfo.attach("A-ordinary-Ops-live-Driver-state-facts", {
+          contentType: "application/json",
+          body: JSON.stringify({
+            orderId,
+            taskId,
+            actualEntry: `/dispatch/${orderId}`,
+            actualVisibleDriverStates: observedOrdinaryStates.map(
+              (state) => state.status,
+            ),
+            actualObservedStates: observedOrdinaryStates,
+            actualOriginalDetailPageRetainedBetweenDriverStates: true,
+            actualManualNavigationOrReloadBetweenDriverStates: false,
+            actualInternalNetworkMocks: false,
+            actualClockAdvanced: false,
+          }),
+        });
+      }
     },
   );
 }
@@ -1237,11 +1342,13 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
       bind(pax, "success"),
     );
     const normal = await step("A Passenger book", () => book(pax, firstMethod));
-    await step("A Ops create dispatch", () => createDispatch(ops, normal));
+    await step("A Ops create dispatch", () =>
+      createDispatch(ops, normal, info),
+    );
     await step(
       "A Ops assign then reassign while Passenger offline",
       async () => {
-        await assign(ops, "pax-review-driver-b");
+        await assignInOrdinaryWorkspace(ops, OPS, normal, "b", false, info);
         await expect
           .poll(
             async () =>
@@ -1249,7 +1356,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           )
           .toBe("pax-review-driver-b");
         await pax.context().setOffline(true);
-        await assign(ops, "pax-review-driver-a", true);
+        await assignInOrdinaryWorkspace(ops, OPS, normal, "a", true, info);
         await pax.context().setOffline(false);
         await expect(
           pax.getByText("SIM-1001", { exact: false }).first(),
@@ -1268,7 +1375,9 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
       expect(peer.status()).toBe(200);
       expect(camel(await peer.json()).data.ride.order.orderId).toBe(normal);
     }
-    await finish(driver, DRIVER, pax, normal, ops, step, true);
+    await finish(driver, DRIVER, pax, normal, ops, step, true, info);
+    await ops.goto(`${OPS}/review`);
+    await opsRead(ops, normal);
     await step(
       "A captured payment, high rating, document and relational facts",
       async () => {

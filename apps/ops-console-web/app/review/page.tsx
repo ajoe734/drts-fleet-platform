@@ -242,10 +242,8 @@ export default function SharedOrderReviewOps() {
                 <p>
                   {order.pickup.address} → {order.dropoff.address}
                 </p>
-                <a href={`/dispatch/${job?.dispatchJobId ?? orderId}`}>
-                  {t.dispatchDetails}
-                </a>{" "}
-                · <a href="/dispatch">{t.dispatchBoard}</a>
+                <a href={`/dispatch/${orderId}`}>{t.dispatchDetails}</a> ·{" "}
+                <a href="/dispatch">{t.dispatchBoard}</a>
                 <button
                   disabled={busy || !!job}
                   onClick={() =>
