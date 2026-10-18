@@ -273,6 +273,117 @@ describe.skipIf(!hostedPaymentEnabled)(
       ]);
     }, 30000);
 
+    it("no-supply work preserves the durable retry queue across fresh-peer replay and supply recovery", async () => {
+      const { a } = await seededPeers();
+      const { f, committed } = await commitVoiceOrder(a);
+      for (const driver of a.registry.listDrivers()) {
+        await a.registry.updateDriverWorkStateFromPersistence(driver.driverId, {
+          workState: "offline",
+        });
+      }
+      const cold = makePeer(h.peerDatabase());
+      peers.push(cold);
+      await initialize(cold);
+      const result = await runnerFor(cold, f).runOnce({
+        supportedTypes: ["request_dispatch"],
+      });
+      expect(result).toMatchObject({
+        success: true,
+        result: { status: "no_supply", orderId: committed.orderId },
+      });
+      const before = await h.pool!.query(
+        `SELECT o.record AS order_record, j.dispatch_job_id, j.status AS job_status
+         FROM ops.phase1_owned_orders o JOIN ops.phase1_dispatch_jobs j USING(order_id)
+         WHERE o.order_id=$1`,
+        [committed.orderId],
+      );
+      expect(before.rows).toHaveLength(1);
+      expect(before.rows[0].order_record).toMatchObject({
+        status: "delayed_queue",
+        queueFamily: "delayed_retry_queue",
+        dispatchAttemptCount: 1,
+      });
+      expect(before.rows[0].job_status).toBe("no_supply");
+      await a.registry.updateDriverWorkStateFromPersistence("drv-demo-001", {
+        workState: "available",
+      });
+      const restarted = makePeer(h.peerDatabase());
+      peers.push(restarted);
+      await initialize(restarted);
+      expect(
+        await restarted.owned.executeAutoDispatch(committed.orderId!, {
+          idempotencyKey: committed.commandId,
+        }),
+      ).toMatchObject({
+        status: "no_supply",
+        dispatchJobId: before.rows[0].dispatch_job_id,
+      });
+      const after = await h.pool!.query(
+        `SELECT record FROM ops.phase1_owned_orders WHERE order_id=$1`,
+        [committed.orderId],
+      );
+      expect(after.rows[0].record).toEqual(before.rows[0].order_record);
+      const tasks = await h.pool!.query(
+        `SELECT task_id FROM ops.phase1_driver_tasks WHERE order_id=$1`,
+        [committed.orderId],
+      );
+      expect(tasks.rows).toHaveLength(0);
+    }, 30000);
+
+    it("supply exhausted after matching commits the original no-supply policy on the same job before completing work", async () => {
+      const { a, b } = await seededPeers();
+      const { f, committed } = await commitVoiceOrder(a);
+      await b.owned.prepareOrderAction({ orderId: committed.orderId! });
+      const job = await b.owned.dispatchOrder(
+        committed.orderId!,
+        { mode: "auto" },
+        undefined,
+        "before-supply-disappears",
+        { required: true },
+      );
+      expect(job.status).toBe("matching");
+      for (const driver of a.registry.listDrivers()) {
+        await a.registry.updateDriverWorkStateFromPersistence(driver.driverId, {
+          workState: "offline",
+        });
+      }
+      expect(
+        await runnerFor(b, f).runOnce({ supportedTypes: ["request_dispatch"] }),
+      ).toMatchObject({
+        success: true,
+        result: { status: "no_supply", dispatchJobId: job.dispatchJobId },
+      });
+      const rows = await h.pool!.query(
+        `SELECT o.record AS order_record, j.dispatch_job_id, j.status AS job_status, w.status AS work_status
+         FROM ops.phase1_owned_orders o JOIN ops.phase1_dispatch_jobs j USING(order_id)
+         JOIN voice.command_receipt r ON r.order_id=o.order_id
+         JOIN voice.work_item w ON w.command_id=r.command_id AND w.work_type='request_dispatch'
+         WHERE o.order_id=$1`,
+        [committed.orderId],
+      );
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0]).toMatchObject({
+        dispatch_job_id: job.dispatchJobId,
+        job_status: "no_supply",
+        work_status: "completed",
+        order_record: {
+          status: "delayed_queue",
+          dispatchAttemptCount: 1,
+          noSupplyEscalation: {
+            dispatchJobId: job.dispatchJobId,
+            escalationAction: "move_to_delayed_queue",
+          },
+        },
+      });
+      const restarted = makePeer(h.peerDatabase());
+      peers.push(restarted);
+      await initialize(restarted);
+      expect(restarted.owned.getOrder(committed.orderId!)).toMatchObject({
+        status: "delayed_queue",
+        dispatchAttemptCount: 1,
+      });
+    }, 30000);
+
     it("lost queue acknowledgement resumes on a fresh peer without a second job, assignment or task", async () => {
       const { a, b } = await seededPeers();
       const { f, committed } = await commitVoiceOrder(a);
