@@ -175,7 +175,6 @@ type NormalizedUpdateServiceProductCommand = {
 @Injectable()
 export class ServiceProductService implements OnModuleInit {
   private sequence = 1;
-  private readonly inFlightGeneratedIds = new Set<string>();
   private records: ServiceProductRecord[] = [];
   private runtimePolicies: RuntimeProfileServiceProductPolicy[] = [];
 
@@ -202,11 +201,36 @@ export class ServiceProductService implements OnModuleInit {
       this.sequence = this.deriveNextSequence(state.records);
     } catch (error) {
       this.repository.reportPersistenceFailure(error, "module init");
+      if (this.repository.isEnabled()) throw error;
     }
   }
 
   listServiceProducts() {
     return this.records.map((record) => this.cloneRecord(record));
+  }
+
+  /** Authoritative admin read. The synchronous listServiceProducts snapshot is
+   * retained for the accepted Demo prepare -> snapshot consumer only. */
+  readServiceProducts():
+    | ServiceProductRecord[]
+    | Promise<ServiceProductRecord[]> {
+    if (!this.repository?.isEnabled()) return this.listServiceProducts();
+    return this.repository
+      .loadState()
+      .then((state) =>
+        state.records.map((record) =>
+          this.cloneRecord(this.hydrateRecord(record)),
+        ),
+      );
+  }
+
+  readRuntimeProfilePolicies():
+    | RuntimeProfileServiceProductPolicy[]
+    | Promise<RuntimeProfileServiceProductPolicy[]> {
+    if (!this.repository?.isEnabled()) return this.listRuntimeProfilePolicies();
+    return this.repository
+      .loadState()
+      .then((state) => state.runtimePolicies.map((policy) => ({ ...policy })));
   }
 
   listRuntimeServiceProducts() {
@@ -225,6 +249,34 @@ export class ServiceProductService implements OnModuleInit {
 
   listRuntimeProfilePolicies() {
     return this.runtimePolicies.map((policy) => ({ ...policy }));
+  }
+
+  /** Refresh only the requested booking context. A failed authoritative read
+   * must reject the command, never authorize it from this instance's cache.
+   * Keep the synchronous readers for existing in-process callers.
+   */
+  prepareRuntimeProfileServiceProduct(
+    runtimeProfileCode: RuntimeProfileServiceProductPolicy["runtimeProfileCode"],
+    serviceProductCode: ServiceProductType,
+  ) {
+    if (!this.repository?.isEnabled()) return;
+    return this.repository
+      .findRuntimeContext(runtimeProfileCode, serviceProductCode)
+      .then((context) => {
+        const record = context.record
+          ? this.hydrateRecord(context.record)
+          : null;
+        this.records = this.records.filter(
+          (candidate) => candidate.serviceProductType !== serviceProductCode,
+        );
+        if (record) this.records.unshift(record);
+        this.runtimePolicies = this.runtimePolicies.filter(
+          (candidate) =>
+            candidate.runtimeProfileCode !== runtimeProfileCode ||
+            candidate.serviceProductCode !== serviceProductCode,
+        );
+        if (context.policy) this.runtimePolicies.unshift({ ...context.policy });
+      });
   }
 
   upsertRuntimeProfilePolicy(
@@ -336,8 +388,23 @@ export class ServiceProductService implements OnModuleInit {
     return record ? this.cloneRecord(this.hydrateRecord(record)) : null;
   }
 
-  getServiceProduct(serviceProductId: string) {
-    return this.cloneRecord(this.require(serviceProductId));
+  getServiceProduct(serviceProductId: string): ServiceProductRecord {
+    const normalizedId = this.normalizeRequiredString(
+      serviceProductId,
+      "serviceProductId",
+    );
+    if (!this.repository?.isEnabled())
+      return this.cloneRecord(this.require(normalizedId));
+    return this.repository.findById(normalizedId).then((record) => {
+      if (!record)
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "NOT_FOUND",
+          "Service product not found.",
+          { serviceProductId: normalizedId },
+        );
+      return this.cloneRecord(this.hydrateRecord(record));
+    }) as unknown as ServiceProductRecord;
   }
 
   createServiceProduct(
@@ -379,7 +446,8 @@ export class ServiceProductService implements OnModuleInit {
     );
     const { serviceProductId, generated, nextSequence } =
       this.resolveServiceProductId(normalizedCommand);
-    this.assertUniqueServiceProduct(serviceProductId, serviceProductType);
+    if (!this.repository?.isEnabled())
+      this.assertUniqueServiceProduct(serviceProductId, serviceProductType);
 
     const now = new Date().toISOString();
     const record: ServiceProductRecord = {
@@ -401,12 +469,16 @@ export class ServiceProductService implements OnModuleInit {
     };
 
     const hydratedRecord = this.hydrateRecord(record);
-    const commitCreate = () => {
-      this.assertUniqueServiceProduct(
-        hydratedRecord.serviceProductId,
-        hydratedRecord.serviceProductType,
-      );
-      this.records = [hydratedRecord, ...this.records];
+    const commitCreate = (committed = hydratedRecord) => {
+      const hydratedRecord = this.hydrateRecord(committed);
+      this.records = [
+        hydratedRecord,
+        ...this.records.filter(
+          (current) =>
+            current.serviceProductId !== hydratedRecord.serviceProductId &&
+            current.serviceProductType !== hydratedRecord.serviceProductType,
+        ),
+      ];
       if (generated && nextSequence !== undefined) {
         this.sequence = Math.max(this.sequence, nextSequence);
       }
@@ -448,16 +520,9 @@ export class ServiceProductService implements OnModuleInit {
       return commitCreate();
     }
 
-    if (generated) {
-      this.inFlightGeneratedIds.add(serviceProductId);
-    }
-    return this.persist({ records: [hydratedRecord] }, "create_service_product")
-      .then(() => commitCreate())
-      .finally(() => {
-        if (generated) {
-          this.inFlightGeneratedIds.delete(serviceProductId);
-        }
-      });
+    return this.repository
+      .createCanonical(this.cloneRecord(hydratedRecord), generated)
+      .then((committed) => commitCreate(committed));
   }
 
   updateServiceProduct(
@@ -479,7 +544,10 @@ export class ServiceProductService implements OnModuleInit {
     options?: { captureAudit?: boolean },
   ) {
     const normalizedCommand = this.normalizeUpdateCommand(command);
-    const record = this.require(serviceProductId);
+    const normalizedId = this.normalizeRequiredString(
+      serviceProductId,
+      "serviceProductId",
+    );
 
     if (normalizedCommand.timing !== undefined) {
       this.assertValidTiming(normalizedCommand.timing);
@@ -488,52 +556,58 @@ export class ServiceProductService implements OnModuleInit {
       this.assertValidBillingMode(normalizedCommand.defaultBillingMode);
     }
 
-    const updated: ServiceProductRecord = this.hydrateRecord({
-      ...record,
-      displayName:
-        normalizedCommand.displayName !== undefined
-          ? this.normalizeRequiredString(
-              normalizedCommand.displayName,
-              "displayName",
-            )
-          : record.displayName,
-      description:
-        normalizedCommand.description !== undefined
-          ? this.normalizeOptionalString(normalizedCommand.description)
-          : record.description,
-      timing:
-        (normalizedCommand.timing as ServiceTiming | undefined) ??
-        record.timing,
-      active: normalizedCommand.active ?? record.active,
-      allowedLicenseTypes:
-        normalizedCommand.allowedLicenseTypes !== undefined
-          ? this.resolveAllowedLicenseTypes(
-              record.serviceProductType,
-              normalizedCommand.allowedLicenseTypes,
-            )
-          : [...record.allowedLicenseTypes],
-      meterRequired: normalizedCommand.meterRequired ?? record.meterRequired,
-      fixedFareAllowed:
-        normalizedCommand.fixedFareAllowed ?? record.fixedFareAllowed,
-      defaultBillingMode:
-        (normalizedCommand.defaultBillingMode as
-          | ServiceProductBillingMode
-          | undefined) ?? record.defaultBillingMode,
-      defaultProofRequirements:
-        normalizedCommand.defaultProofRequirements !== undefined
-          ? this.normalizeProofRequirements(
-              normalizedCommand.defaultProofRequirements,
-            )
-          : [...record.defaultProofRequirements],
-      updatedAt: new Date().toISOString(),
-    });
-
-    const commitUpdate = () => {
-      this.records = this.records.map((candidate) =>
-        candidate.serviceProductId === record.serviceProductId
-          ? updated
-          : candidate,
-      );
+    const apply = (current: ServiceProductRecord): ServiceProductRecord => {
+      const record = this.hydrateRecord(current);
+      return this.hydrateRecord({
+        ...record,
+        displayName:
+          normalizedCommand.displayName !== undefined
+            ? this.normalizeRequiredString(
+                normalizedCommand.displayName,
+                "displayName",
+              )
+            : record.displayName,
+        description:
+          normalizedCommand.description !== undefined
+            ? this.normalizeOptionalString(normalizedCommand.description)
+            : record.description,
+        timing:
+          (normalizedCommand.timing as ServiceTiming | undefined) ??
+          record.timing,
+        active: normalizedCommand.active ?? record.active,
+        allowedLicenseTypes:
+          normalizedCommand.allowedLicenseTypes !== undefined
+            ? this.resolveAllowedLicenseTypes(
+                record.serviceProductType,
+                normalizedCommand.allowedLicenseTypes,
+              )
+            : [...record.allowedLicenseTypes],
+        meterRequired: normalizedCommand.meterRequired ?? record.meterRequired,
+        fixedFareAllowed:
+          normalizedCommand.fixedFareAllowed ?? record.fixedFareAllowed,
+        defaultBillingMode:
+          (normalizedCommand.defaultBillingMode as
+            | ServiceProductBillingMode
+            | undefined) ?? record.defaultBillingMode,
+        defaultProofRequirements:
+          normalizedCommand.defaultProofRequirements !== undefined
+            ? this.normalizeProofRequirements(
+                normalizedCommand.defaultProofRequirements,
+              )
+            : [...record.defaultProofRequirements],
+        updatedAt: new Date().toISOString(),
+      });
+    };
+    const commitUpdate = (updated: ServiceProductRecord) => {
+      this.records = this.records.some(
+        (candidate) => candidate.serviceProductId === updated.serviceProductId,
+      )
+        ? this.records.map((candidate) =>
+            candidate.serviceProductId === updated.serviceProductId
+              ? updated
+              : candidate,
+          )
+        : [updated, ...this.records];
       const auditLog = this.recordAudit(
         {
           actorId: null,
@@ -542,7 +616,7 @@ export class ServiceProductService implements OnModuleInit {
           moduleName: "service-product",
           actionName: "update_service_product",
           resourceType: "service_product",
-          resourceId: record.serviceProductId,
+          resourceId: updated.serviceProductId,
           newValuesSummary: {
             timing: updated.timing,
             active: updated.active,
@@ -565,12 +639,12 @@ export class ServiceProductService implements OnModuleInit {
     };
 
     if (!this.repository?.isEnabled()) {
-      return commitUpdate();
+      return commitUpdate(apply(this.require(normalizedId)));
     }
 
-    return this.persist({ records: [updated] }, "update_service_product").then(
-      () => commitUpdate(),
-    );
+    return this.repository
+      .updateCanonical(normalizedId, apply)
+      .then(commitUpdate);
   }
 
   private assertUniqueServiceProduct(
@@ -661,8 +735,7 @@ export class ServiceProductService implements OnModuleInit {
     let nextSeq = this.sequence;
     let candidateId = `SVP-${String(nextSeq).padStart(6, "0")}`;
     while (
-      this.records.some((record) => record.serviceProductId === candidateId) ||
-      this.inFlightGeneratedIds.has(candidateId)
+      this.records.some((record) => record.serviceProductId === candidateId)
     ) {
       nextSeq += 1;
       candidateId = `SVP-${String(nextSeq).padStart(6, "0")}`;

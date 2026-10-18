@@ -425,6 +425,47 @@ describe("actual capacity scheduler boundaries across all families", () => {
     }
   });
 
+  it.each(["uniform", "budgeted_dispatch_burst"] as const)(
+    "%s observes the complete900s window after the last response without adding requests",
+    async (profile) => {
+      const output = resolve(directory, "complete-observation-window.jsonl");
+      let settled = false;
+      const run = runPlan(
+        profile === "uniform" ? plan(900) : stagedPlan(profile),
+        output,
+        {},
+      ).then(
+        (summary: {
+          elapsedMs: number;
+          startedAt: string;
+          endedAt: string;
+        }) => {
+          settled = true;
+          return summary;
+        },
+      );
+      await vi.advanceTimersByTimeAsync(899999);
+      const rows = readRecords(output);
+      expect(
+        rows.filter((row) => row.kind === "capacity_request"),
+      ).toHaveLength(5850);
+      expect(rows.filter((row) => row.kind === "capacity_seed")).toHaveLength(
+        profile === "uniform" ? 0 : 4000,
+      );
+      expect(settled).toBe(false);
+      const requestsAtEndOfWork = boundary.request.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(1);
+      const summary = await run;
+      expect(summary.elapsedMs).toBe(900000);
+      expect(Date.parse(summary.endedAt) - Date.parse(summary.startedAt)).toBe(
+        900000,
+      );
+      expect(boundary.request).toHaveBeenCalledTimes(requestsAtEndOfWork);
+      expect(readRecords(output)).toEqual(rows);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
   it("records real readiness before one measured t0 and preserves every measured request", async () => {
     const output = resolve(directory, "baseline-initialize.jsonl");
     const initialize = vi.fn(async ({ startedAt }: { startedAt: string }) => {
@@ -442,7 +483,7 @@ describe("actual capacity scheduler boundaries across all families", () => {
     expect(summary.startedAt).toBe(new Date(25).toISOString());
     assertUniformCadence(rows);
     expect(rows).toHaveLength(39);
-    expect(summary.elapsedMs).toBe(5805);
+    expect(summary.elapsedMs).toBe(6000);
     expect(Date.parse(summary.endedAt) - Date.parse(summary.startedAt)).toBe(
       summary.elapsedMs,
     );

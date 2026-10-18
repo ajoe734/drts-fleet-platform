@@ -185,6 +185,30 @@ export class PassengerBookingController {
     return toApiSuccessEnvelope({ success: true }, idempotencyKey);
   }
 
+  @Post(":id/contact")
+  async contactRide(
+    @CurrentIdentity() identity: RequestIdentity,
+    @Param("id") orderId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (identity.realm !== "passenger")
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "UNAUTHORIZED",
+        "Not a passenger",
+      );
+    const passengerId = (identity as PassengerRequestIdentity).drtsPassengerId;
+    await this.service.assertRideOwner(passengerId, orderId);
+    return toApiSuccessEnvelope(
+      await this.multiTaxiService.getPassengerContactById(
+        orderId,
+        passengerId,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
   @Post(":id/ratings")
   async rateRide(
     @CurrentIdentity() identity: RequestIdentity,

@@ -29,6 +29,11 @@ on:
         required: false
         default: ""
         type: string
+      failed_api_revision:
+        description: "Read-only startup log readback for one fixed failed API revision (drts-dev-api-00092-9j6)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -97,6 +102,52 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  readonly-api-startup-readback:
+    if: github.event_name == 'workflow_dispatch' && inputs.failed_api_revision == 'drts-dev-api-00092-9j6'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+    steps:
+      - name: Validate immutable definition and target before authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_DEFINITION_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
+          [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify actual checkout before authentication
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_DEFINITION_SHA"
+      - name: Authenticate existing deploy identity for read-only startup readback
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Read failed API revision startup diagnostics
+        run: >-
+          python3 operations/verification/read-dev-api-startup-log.py
+          --output .artifacts/dev-api-startup-readback/snapshot.json
+      - name: Preserve startup readback or concrete query failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-api-startup-readback-${{ github.run_id }}
+          path: .artifacts/dev-api-startup-readback/snapshot.json
+          if-no-files-found: error
+          retention-days: 14
+
   # Owner checkpoints are intentionally cheap. A review candidate is the first
   # immutable SHA that may start the full integration gate.
   candidate:
@@ -140,6 +191,9 @@ jobs:
           python3 -m unittest tools/ci/test_check_commit_trailers.py
           python3 -m unittest tools/ci/test_check_test_coverage.py
           python3 -m unittest tools/ci/test_workflow_timeouts.py
+          python3 -m unittest tools/ci/test_workflow_unit_partitioning.py
+          python3 -m unittest tools/ci/test_delivery_workflow_contract.py
+          python3 -m unittest tools/ci/test_unit_partition_coverage.py
           python3 -m unittest tools/ci/test_dependency_security.py
           python3 -m unittest tools/ci/test_dev_artifact_providers.py
           python3 -m unittest tools/ci/test_dev_cloud_metadata_preflight.py
@@ -213,11 +267,52 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
 
-  unit:
+  # CI-BUDGET-F1: the API image build (measured 224-283s) and `pnpm run
+  # test:unit` (measured running 849-944s and still not finished) used to
+  # compete inside one 20-minute "unit" job, so the job was repeatedly
+  # cancelled mid-suite rather than ever failing on a real assertion. The
+  # image now builds once here and is loaded from a saved tarball by each
+  # shard below; `unit` is now a cheap coverage+merge aggregate rather than
+  # the job that runs tests, keeping that required check's name stable.
+  unit-image:
+    name: Unit test API image
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # The default docker driver cannot export a cache; the container driver can.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build API image for the control-plane resolution test
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          tags: drts-api:test
+          push: false
+          load: true
+          cache-from: type=gha,scope=api-test-image
+          cache-to: type=gha,scope=api-test-image,mode=max
+      - name: Save the built image so every unit shard can load it without rebuilding
+        run: docker save drts-api:test -o drts-api-test-image.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: drts-api-test-image-${{ github.run_id }}
+          path: drts-api-test-image.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  unit-shard:
+    name: Unit tests (shard ${{ matrix.shard }}/4)
+    needs: [candidate, changes, unit-image]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
+    runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -249,30 +344,78 @@ jobs:
             cache-dependency-path: pnpm-lock.yaml,
           }
       - run: pnpm install --frozen-lockfile
-      # Built here rather than inside the test: a cold image build is minutes of
-      # work, and paying for it inside a vitest budget made the suite fail with
-      # "Test timed out" on branches that never touched it. Buildx cache keeps
-      # this near-free on repeat runs, and the failure now names the real cause.
-      # The default docker driver cannot export a cache; the container driver can.
-      - uses: docker/setup-buildx-action@v3
-      - name: Build API image for the control-plane resolution test
-        uses: docker/build-push-action@v5
+      - uses: actions/download-artifact@v4
         with:
-          context: .
-          file: apps/api/Dockerfile
-          tags: drts-api:test
-          push: false
-          load: true
-          cache-from: type=gha,scope=api-test-image
-          cache-to: type=gha,scope=api-test-image,mode=max
-      - name: Run unit tests
-        # Only this job builds drts-api:test, so only here is a missing image a
-        # failure. Smoke acceptance runs the same suite without one.
+          name: drts-api-test-image-${{ github.run_id }}
+      - name: Load the API image this shard's control-plane resolution test requires
+        run: docker load -i drts-api-test-image.tar
+      - name: Run unit tests (shard ${{ matrix.shard }}/4)
+        # Only unit-image builds drts-api:test; this shard only loads it, but
+        # a missing image is still a failure here. Smoke acceptance runs the
+        # same suite without one.
         env:
           DRTS_REQUIRE_API_TEST_IMAGE: "1"
         run: |
           pnpm db:migrate
-          pnpm run test:unit
+          pnpm exec vitest run \
+            --exclude tests/integration/unattended-voice-postgres.integration.test.ts \
+            --exclude "tests/integration/system-remediation/sr-leave-be-001/**" \
+            --exclude tests/e2e/system-remediation/sr-host-fe-001/host-api-sql-acceptance.test.ts \
+            --shard=${{ matrix.shard }}/4 \
+            --reporter=default --reporter=json \
+            --outputFile.json=ci-integ-unit-shard-${{ matrix.shard }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-integ-unit-shard-${{ matrix.shard }}-${{ github.run_id }}
+          path: ci-integ-unit-shard-${{ matrix.shard }}.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  # Verifies the 4 shards above covered the exact file set `pnpm run
+  # test:unit` would discover unsharded -- no gaps, no duplicates -- then
+  # merges their reports into the same single-report shape the rest of this
+  # file's tooling already expects.
+  unit:
+    name: Unit tests
+    needs: [candidate, changes, unit-shard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Not applicable for this scope/checkpoint
+        if: needs.candidate.outputs.run_full_ci != 'true' || needs.changes.outputs.product != 'true'
+        run: echo "Unit tests are not applicable to this scope/checkpoint; shard job was skipped."
+      - uses: actions/download-artifact@v4
+        if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
+        with:
+          pattern: ci-integ-unit-shard-*-${{ github.run_id }}
+          path: ci-integ-unit-shards
+          merge-multiple: true
+      - name: Verify shard partition coverage and merge reports
+        if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
+        run: |
+          [ '${{ needs.unit-shard.result }}' = 'success' ] || { echo "A unit test shard failed, was cancelled or was skipped: ${{ needs.unit-shard.result }}"; exit 1; }
+          python3 tools/ci/verify_unit_partition_coverage.py \
+            --root . \
+            --include "tests/contract/**/*.test.ts" \
+            --include "tests/integ/**/*.test.ts" \
+            --include "tests/unit/**/*.test.ts" \
+            --include "tests/unit/**/*.test.tsx" \
+            --include "tests/integration/**/*.test.ts" \
+            --include "tests/security/**/*.test.ts" \
+            --include "tests/load/**/*.test.ts" \
+            --include "tests/e2e/**/*.test.ts" \
+            --exclude tests/integration/unattended-voice-postgres.integration.test.ts \
+            --exclude "tests/integration/system-remediation/sr-leave-be-001/**" \
+            --exclude tests/e2e/system-remediation/sr-host-fe-001/host-api-sql-acceptance.test.ts \
+            --shard-report ci-integ-unit-shards/ci-integ-unit-shard-1.json \
+            --shard-report ci-integ-unit-shards/ci-integ-unit-shard-2.json \
+            --shard-report ci-integ-unit-shards/ci-integ-unit-shard-3.json \
+            --shard-report ci-integ-unit-shards/ci-integ-unit-shard-4.json
 
   integration:
     needs: [candidate, changes]
@@ -673,8 +816,94 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # The real scheduled journeys need their own existing 25-minute envelope;
+  # the legacy route suites consumed half of it before this case could start.
+  # Both jobs remain required by the original E2E aggregate below.
+  ui-shared-order-e2e:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_route_suite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - run: pnpm install --frozen-lockfile
+      - name: Build API
+        run: pnpm --filter @drts/api build
+      - name: Run the real three-role shared-order journeys
+        run: |
+          PGPASSWORD=postgres psql \
+            postgresql://postgres:postgres@localhost:5432/postgres \
+            -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS drts_route_suite;' \
+            -c 'CREATE DATABASE drts_route_suite;'
+          pnpm db:migrate
+          pnpm db:seed
+          sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \
+            \( -iname "*google*" -o -iname "*chrome*" \) \
+            -exec mv "{}" "{}.disabled" \; || true
+          pnpm exec playwright install --with-deps chromium
+          # Build the exact production Driver mount plus the existing standalone
+          # Driver Web surface. Neither export starts a dev server on this VM.
+          EXPO_PUBLIC_API_URL=/api/review-driver-api \
+            EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH=/review-driver \
+            pnpm --filter @drts/driver-app exec expo export -p web --output-dir dist
+          mkdir -p apps/passenger-app-web/public/review-driver
+          cp -R apps/driver-app/dist/. apps/passenger-app-web/public/review-driver/
+          pnpm --filter @drts/passenger-app-web... build
+          EXPO_PUBLIC_API_URL=http://127.0.0.1:3001 \
+            EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH= \
+            pnpm --filter @drts/driver-app exec expo export -p web --output-dir dist
+          pnpm exec tsc -p tests/unit/pax-review-shared-order-demo-20261015/tsconfig.driver-tests.json --noEmit
+          pnpm exec vitest run --config tests/unit/pax-review-shared-order-demo-20261015/driver-vitest.config.ts
+          pnpm exec playwright test -c playwright.pax-review-shared-order.config.ts
+      - name: Run additional real booking, accepted-cancellation and no-contact rating branches
+        run: pnpm exec playwright test -c playwright.pax-review-additional-branches.config.ts
+      - name: Upload additional passenger branch evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pax-review-additional-branches-${{ github.run_id }}
+          path: .artifacts/pax-review-additional-branches
+          include-hidden-files: true
+          if-no-files-found: ignore
+      - name: Upload new shared-order rehearsal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pax-review-shared-order-${{ github.run_id }}
+          path: .artifacts/pax-review-shared-order
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
   e2e:
-    needs: [candidate, changes, cross-surface-e2e, ui-route-e2e]
+    needs:
+      [candidate, changes, cross-surface-e2e, ui-route-e2e, ui-shared-order-e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: always()
@@ -686,7 +915,7 @@ jobs:
             exit 0
           fi
           [ '${{ needs.changes.result }}' = 'success' ] || { echo "changes gate failed"; exit 1; }
-          for result in '${{ needs.cross-surface-e2e.result }}' '${{ needs.ui-route-e2e.result }}'; do
+          for result in '${{ needs.cross-surface-e2e.result }}' '${{ needs.ui-route-e2e.result }}' '${{ needs.ui-shared-order-e2e.result }}'; do
             case "$result" in
               success) ;;
               skipped) echo "E2E skipped: no changed path can exercise it." ;;

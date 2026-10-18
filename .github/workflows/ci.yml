@@ -56,6 +56,9 @@ jobs:
           python3 -m unittest tools/ci/test_check_commit_trailers.py
           python3 -m unittest tools/ci/test_check_test_coverage.py
           python3 -m unittest tools/ci/test_workflow_timeouts.py
+          python3 -m unittest tools/ci/test_workflow_unit_partitioning.py
+          python3 -m unittest tools/ci/test_delivery_workflow_contract.py
+          python3 -m unittest tools/ci/test_unit_partition_coverage.py
           python3 -m unittest tools/ci/test_canonical_consistency.py
           python3 -m unittest tools/ci/test_dependency_security.py
           python3 -m unittest tools/ci/test_dev_artifact_providers.py
@@ -124,6 +127,8 @@ jobs:
 
   repo-classification:
     name: Repo classification
+    # ci-integ owns this check on every dev PR (including drafts).
+    if: github.event_name != 'pull_request' || github.base_ref != 'dev'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -145,6 +150,9 @@ jobs:
 
   dependency-security:
     name: Dependency security
+    # Ready dev PRs require ci-integ, which runs this same check once.
+    # Keep CI's existing checks on drafts and on main/dispatch events.
+    if: github.event_name != 'pull_request' || github.base_ref != 'dev' || github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -235,7 +243,7 @@ jobs:
   i18n-guard:
     name: i18n guard
     needs: scope
-    if: needs.scope.outputs.product == 'true'
+    if: needs.scope.outputs.product == 'true' && (github.event_name != 'pull_request' || github.base_ref != 'dev' || github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -254,12 +262,81 @@ jobs:
       - name: Run i18n guard
         run: pnpm run i18n:guard
 
-  product_smoke_acceptance:
-    name: Product smoke acceptance
+  # CI-BUDGET-F2: lint/typecheck/native-passenger, root `test:unit` (measured
+  # 1085s) and the apps/api suite used to run serially inside one 25-minute
+  # "product_smoke_acceptance" job. Root unit tests alone left the API suite
+  # under 90s of nominal budget before the job's 25m cap cancelled it mid-run.
+  # Each stage now has its own job (and, for the two test suites, its own
+  # parallel shards with independent budgets); product_smoke_acceptance below
+  # is now a cheap coverage+merge aggregate, keeping that required check's
+  # name -- which smoke-acceptance depends on -- unchanged.
+  product_fast_checks:
+    name: Product fast checks (lint/typecheck/native passenger)
     needs: scope
     if: needs.scope.outputs.product == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        # ci-integ's required aggregate owns lint/typecheck on ready dev PRs.
+        if: github.event_name != 'pull_request' || github.base_ref != 'dev' || github.event.pull_request.draft
+        run: pnpm run lint
+      - name: Reject cross-app relative imports
+        run: node tools/ci/check-cross-app-imports.mjs
+
+      - name: Verify Passenger Client Portability & Export
+        run: |
+          pnpm --filter @drts/passenger-client run build
+          test -f packages/passenger-client/dist/index.d.ts
+
+          # Static portability check for DOM/Node/Next
+          echo "Checking passenger-client portability..."
+          if grep -qR -E "from ['\"](next|react|fs|path|os|events|crypto|child_process)" packages/passenger-client/src; then
+            echo "Failed portability check: contains restricted Node/Next imports"
+            exit 1
+          fi
+          if grep -qR -E "(window\.|document\.)" packages/passenger-client/src; then
+            echo "Failed portability check: contains DOM globals"
+            exit 1
+          fi
+
+      - name: Typecheck
+        if: github.event_name != 'pull_request' || github.base_ref != 'dev' || github.event.pull_request.draft
+        run: pnpm run typecheck
+      - name: Native passenger App typecheck and unit tests
+        run: |
+          pnpm --filter @drts/passenger-app typecheck
+          pnpm --filter @drts/passenger-app test --reporter=default --reporter=json --outputFile.json=native-passenger-app-test-results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: product-fast-checks-native-passenger-${{ github.run_id }}
+          path: apps/passenger-app/native-passenger-app-test-results.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  product_root_unit:
+    name: Product root unit tests (shard ${{ matrix.shard }}/4)
+    needs: scope
+    if: needs.scope.outputs.product == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -295,57 +372,86 @@ jobs:
           }
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Lint
-        run: pnpm run lint
-      - name: Reject cross-app relative imports
-        run: node tools/ci/check-cross-app-imports.mjs
-
-      - name: Verify Passenger Client Portability & Export
-        run: |
-          pnpm --filter @drts/passenger-client run build
-          test -f packages/passenger-client/dist/index.d.ts
-
-          # Static portability check for DOM/Node/Next
-          echo "Checking passenger-client portability..."
-          if grep -qR -E "from ['\"](next|react|fs|path|os|events|crypto|child_process)" packages/passenger-client/src; then
-            echo "Failed portability check: contains restricted Node/Next imports"
-            exit 1
-          fi
-          if grep -qR -E "(window\.|document\.)" packages/passenger-client/src; then
-            echo "Failed portability check: contains DOM globals"
-            exit 1
-          fi
-
-      - name: Typecheck
-        run: pnpm run typecheck
-      - name: Native passenger App typecheck and unit tests
-        run: |
-          pnpm --filter @drts/passenger-app typecheck
-          pnpm --filter @drts/passenger-app test --reporter=default --reporter=json --outputFile.json=native-passenger-app-test-results.json
       - name: Apply migrations
         run: pnpm db:migrate
-      - name: Unit tests
+      - name: Unit tests (shard ${{ matrix.shard }}/4)
         # Deliberately does not set DRTS_DEV_MFA_WAIVED: tests/unit/** includes
         # the ENTRY-IAP-WORKFORCE-AUTH-20261005 tests that pin the no-waiver
         # deny-by-default baseline (tests/unit/step-up-iap-path.test.ts,
         # tests/unit/system-remediation/sr-qa-identity-001/c003-c004-c005-*);
         # enabling the waiver here would make them pass for the wrong reason.
         run: |
-          pnpm run test:unit --reporter=default --reporter=json --outputFile.json=unit-test-results.json
-          python3 tools/ci/verify_partner_notification_postgres_gate.py unit-test-results.json
-      - name: Verify passenger App PostgreSQL and HTTP test counts
+          pnpm exec vitest run \
+            --exclude tests/integration/unattended-voice-postgres.integration.test.ts \
+            --exclude "tests/integration/system-remediation/sr-leave-be-001/**" \
+            --exclude tests/e2e/system-remediation/sr-host-fe-001/host-api-sql-acceptance.test.ts \
+            --shard=${{ matrix.shard }}/4 \
+            --reporter=default --reporter=json \
+            --outputFile.json=unit-test-results-shard-${{ matrix.shard }}.json
+      - uses: actions/upload-artifact@v4
         if: always()
-        run: |
-          python3 -m unittest tools/ci/test_passenger_app_postgres_gate.py
-          python3 tools/ci/verify_passenger_app_postgres_gate.py unit-test-results.json
-      - name: API unit tests
+        with:
+          name: product-root-unit-shard-${{ matrix.shard }}-${{ github.run_id }}
+          path: unit-test-results-shard-${{ matrix.shard }}.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  product_api_unit:
+    name: Product API unit tests (shard ${{ matrix.shard }}/2)
+    needs: scope
+    if: needs.scope.outputs.product == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PARTNER_NOTIFY_UI_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PASSENGER_PUSH_CHANNEL_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PASSENGER_APP_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      UV_RECORDER_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Apply migrations
+        run: pnpm db:migrate
+      - name: API unit tests (shard ${{ matrix.shard }}/2)
         # The root `test:unit` only covers tests/unit/**; the apps/api package
         # also owns package-local tests, including DB-backed regressions that
         # must run against the migrated schema to match ci-integ coverage.
-        # All files use this job's one database. Running files concurrently lets
-        # another test's background outbox consumer claim the Stage1 gate's rows,
-        # changing its replay snapshot or consuming its delivery without a sink.
-        # Keep every test and assertion, but serialize access to the shared DB.
+        # Each shard has its own fresh database above, but files within one
+        # shard still share it: running them concurrently lets another test's
+        # background outbox consumer claim the Stage1 gate's rows, changing
+        # its replay snapshot or consuming its delivery without a sink. Keep
+        # every test and assertion, but serialize access to each shard's DB.
         #
         # This step (only) runs as a non-strict (CI/"test") auth environment
         # that needs the explicit, audited DRTS_DEV_MFA_WAIVED dev waiver
@@ -357,15 +463,92 @@ jobs:
         env:
           DRTS_DEV_MFA_WAIVED: "true"
         run: |
-          pnpm --filter @drts/api test --no-file-parallelism --maxConcurrency=1 --reporter=default --reporter=json --outputFile.json=api-test-results.json
-          python3 tools/ci/verify_partner_notification_postgres_gate.py unit-test-results.json apps/api/api-test-results.json
-      - name: Verify passenger push PostgreSQL and regression gates
+          pnpm --filter @drts/api exec vitest run --passWithNoTests \
+            --shard=${{ matrix.shard }}/2 \
+            --no-file-parallelism --maxConcurrency=1 \
+            --reporter=default --reporter=json \
+            --outputFile.json=api-test-results-shard-${{ matrix.shard }}.json
+      - uses: actions/upload-artifact@v4
         if: always()
+        with:
+          name: product-api-unit-shard-${{ matrix.shard }}-${{ github.run_id }}
+          path: apps/api/api-test-results-shard-${{ matrix.shard }}.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  # Verifies the root-unit and API-unit shards above each covered their exact
+  # file set with no gaps/duplicates, merges every shard into the same
+  # single-report shape the existing postgres-gate verifiers already expect
+  # (unchanged below), and runs those unchanged verifiers plus the voice
+  # checkpoint gate exactly as the old monolithic job did.
+  product_smoke_acceptance:
+    name: Product smoke acceptance
+    needs: [scope, product_fast_checks, product_root_unit, product_api_unit]
+    if: needs.scope.outputs.product == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Require every upstream stage to have actually succeeded
+        run: |
+          [ '${{ needs.product_fast_checks.result }}' = 'success' ] || { echo "product_fast_checks: ${{ needs.product_fast_checks.result }}"; exit 1; }
+          [ '${{ needs.product_root_unit.result }}' = 'success' ] || { echo "product_root_unit: ${{ needs.product_root_unit.result }}"; exit 1; }
+          [ '${{ needs.product_api_unit.result }}' = 'success' ] || { echo "product_api_unit: ${{ needs.product_api_unit.result }}"; exit 1; }
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: product-root-unit-shard-*-${{ github.run_id }}
+          path: product-root-unit-shards
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: product-api-unit-shard-*-${{ github.run_id }}
+          path: product-api-unit-shards
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: product-fast-checks-native-passenger-${{ github.run_id }}
+          path: apps/passenger-app
+      - name: Verify root unit shard partition coverage and merge reports
+        run: |
+          python3 tools/ci/verify_unit_partition_coverage.py \
+            --root . \
+            --include "tests/contract/**/*.test.ts" \
+            --include "tests/integ/**/*.test.ts" \
+            --include "tests/unit/**/*.test.ts" \
+            --include "tests/unit/**/*.test.tsx" \
+            --include "tests/integration/**/*.test.ts" \
+            --include "tests/security/**/*.test.ts" \
+            --include "tests/load/**/*.test.ts" \
+            --include "tests/e2e/**/*.test.ts" \
+            --exclude tests/integration/unattended-voice-postgres.integration.test.ts \
+            --exclude "tests/integration/system-remediation/sr-leave-be-001/**" \
+            --exclude tests/e2e/system-remediation/sr-host-fe-001/host-api-sql-acceptance.test.ts \
+            --shard-report product-root-unit-shards/unit-test-results-shard-1.json \
+            --shard-report product-root-unit-shards/unit-test-results-shard-2.json \
+            --shard-report product-root-unit-shards/unit-test-results-shard-3.json \
+            --shard-report product-root-unit-shards/unit-test-results-shard-4.json \
+            --merged-output unit-test-results.json
+      - name: Verify API unit shard partition coverage and merge reports
+        run: |
+          python3 tools/ci/verify_unit_partition_coverage.py \
+            --root apps/api \
+            --include "**/*.test.ts" \
+            --shard-report product-api-unit-shards/api-test-results-shard-1.json \
+            --shard-report product-api-unit-shards/api-test-results-shard-2.json \
+            --merged-output apps/api/api-test-results.json
+      - name: Verify partner notification PostgreSQL gate (root + API)
+        run: python3 tools/ci/verify_partner_notification_postgres_gate.py unit-test-results.json apps/api/api-test-results.json
+      - name: Verify passenger App PostgreSQL and HTTP test counts
+        run: |
+          python3 -m unittest tools/ci/test_passenger_app_postgres_gate.py
+          python3 tools/ci/verify_passenger_app_postgres_gate.py unit-test-results.json
+      - name: Verify passenger push PostgreSQL and regression gates
         run: |
           python3 -m unittest tools/ci/test_partner_notification_postgres_gate.py
           python3 tools/ci/verify_passenger_push_channel_postgres_gate.py unit-test-results.json
       - name: Verify voice checkpoint PostgreSQL gate (four cases, zero skips)
-        if: always()
         run: |
           python3 - <<'PY'
           import json

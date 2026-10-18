@@ -1,3 +1,4 @@
+import { CallcenterService } from "../../../apps/api/src/modules/callcenter/callcenter.service";
 import type {
   ConsumerNotificationOutboxRecord,
   DriverTaskRecord,
@@ -152,7 +153,7 @@ function harness() {
   const service = new OwnedMobilityService(
     {} as never,
     audit,
-    { linkOrderToCallSession: vi.fn(() => ({ recordingId: null })) } as never,
+    new CallcenterService(audit),
     { publishTaskUpdated: vi.fn() } as never,
     { publishOrderCreated: publish } as never,
     repository,
@@ -603,7 +604,7 @@ describe("referral booking to partner notification delivery", () => {
       payload: { eventSequence: 1 },
     });
     expect(h.sequences.get(booking.orderId)).toBe(2);
-    const delivery = transportHarness();
+    const delivery = await transportHarness();
     const route = (await h.allocator.findOrderPartnerNotificationRoute(
       booking.orderId,
     ))!;

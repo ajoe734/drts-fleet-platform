@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   DriverLocationHeartbeatEnvelope,
   DriverLocationSnapshot,
+  DriverRegistryRecord,
 } from "@drts/contracts";
 
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
@@ -15,6 +16,7 @@ import { DriverHeartbeatController } from "../../src/modules/regulatory-registry
 import { OpsDriverTrackingController } from "../../src/modules/regulatory-registry/ops-driver-tracking.controller";
 import {
   type DriverHeartbeatEventSnapshot,
+  type PersistRegulatoryRegistryChanges,
   RegulatoryRegistryRepository,
 } from "../../src/modules/regulatory-registry/regulatory-registry.repository";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
@@ -22,6 +24,7 @@ import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry
 type StoredHeartbeatEvent = DriverHeartbeatEventSnapshot;
 
 class InMemoryHeartbeatRepository {
+  private readonly drivers = new Map<string, DriverRegistryRecord>();
   private readonly currentLocations = new Map<string, DriverLocationSnapshot>();
   private readonly heartbeatEvents: StoredHeartbeatEvent[] = [];
 
@@ -29,14 +32,24 @@ class InMemoryHeartbeatRepository {
     return true;
   }
 
-  async persistChanges() {}
+  async persistChanges(changes: PersistRegulatoryRegistryChanges) {
+    for (const driver of changes.drivers ?? []) {
+      this.drivers.set(driver.driverId, structuredClone(driver));
+    }
+  }
+
+  async lockDriver(driverId: string) {
+    return structuredClone(this.drivers.get(driverId) ?? null);
+  }
 
   reportPersistenceFailure() {}
 
   async loadState() {
     return {
       vehicles: [],
-      drivers: [],
+      drivers: [...this.drivers.values()].map((driver) =>
+        structuredClone(driver),
+      ),
       supplyPairs: [],
       contracts: [],
       policies: [],
@@ -435,6 +448,7 @@ describe("INT-MOB-001 batch heartbeat idempotency", () => {
       new DriverProfileService(new AuditNotificationService()),
       repository as never,
     );
+    await repository.persistChanges({ drivers: service.listDrivers() });
 
     await expect(
       service.getDriverTrackingStatus("drv-demo-001"),

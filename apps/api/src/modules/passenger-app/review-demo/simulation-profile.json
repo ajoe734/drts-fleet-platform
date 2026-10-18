@@ -1,0 +1,17 @@
+{
+  "notice": "PUBLIC SYNTHETIC REVIEW CONFIGURATION. Only explicit nonproduction rehearsal deployments without the optional provider groups use these values. Never real SMS, payment credentials or customer financial tokens.",
+  "otp": {
+    "PASSENGER_OTP_PEPPER": "public-synthetic-review-otp-pepper-v1-not-a-live-credential"
+  },
+  "payment": {
+    "PSP_MERCHANT_ID": "synthetic-review-merchant",
+    "PSP_API_KEY": "public-synthetic-review-provider-configuration",
+    "PSP_SANDBOX": "true",
+    "PSP_TOKEN_ENCRYPTION_KEY_NAME": {
+      "activeKeyId": "public-review-simulation-v1",
+      "keys": {
+        "public-review-simulation-v1": "ERERERERERERERERERERERERERERERERERERERERERE="
+      }
+    }
+  }
+}

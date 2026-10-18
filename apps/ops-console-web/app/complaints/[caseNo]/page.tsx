@@ -4,8 +4,13 @@ import type {
   ActionRiskLevel,
   ComplaintCaseRecord,
   ComplaintExportViewRecord,
+  ComplaintTimelineEntry,
 } from "@drts/contracts";
-import { getServerOpsClient } from "../../../lib/api-client.server";
+import {
+  complaintProgressStates,
+  loadComplaintTimeline,
+} from "../../../lib/complaint-detail-state";
+import { getServerOpsClient } from "@/lib/api-client.server";
 import {
   CanvasActivityFeed,
   CanvasSequenceRail,
@@ -59,90 +64,42 @@ function formatDateTime(locale: Locale, value: string | null | undefined) {
     .replace(",", "");
 }
 
-function buildFallbackRecord(caseNo: string): ComplaintCaseRecord {
-  const now = new Date().toISOString();
-  return {
-    caseNo,
-    category: "driver_service",
-    severity: "high",
-    status: "under_investigation",
-    description:
-      "Fallback complaint detail used when the backend detail snapshot is unavailable.",
-    caseSource: "ops",
-    relatedOrderId: "ord_8175",
-    relatedCallId: "call_2014",
-    relatedIncidentId: null,
-    assigneeId: null,
-    reopenCount: 0,
-    resolutionCode: null,
-    closingNote: null,
-    createdAt: now,
-    updatedAt: now,
-    slaDueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    slaBreach: false,
-  };
-}
-
-function buildActivityItems(
-  locale: Locale,
-  caseNo: string,
-  complaint: ComplaintCaseRecord,
-): CanvasActivityItem[] {
-  return [
-    {
-      id: `${caseNo}:opened`,
-      title: copy(locale, "Case opened", "案件建立"),
-      detail: complaint.description,
-      timestamp: formatDateTime(locale, complaint.createdAt),
-      tone: "info",
-      eyebrow: complaint.caseSource,
-    },
-    {
-      id: `${caseNo}:assigned`,
-      title: copy(locale, "Assigned to compliance queue", "轉入合規佇列"),
-      detail: copy(
-        locale,
-        "Case is visible to complaint analysts and operations managers.",
-        "案件已進入客訴專員與營運主管的處理佇列。",
-      ),
-      timestamp: formatDateTime(locale, complaint.updatedAt),
-      tone: "accent",
-      eyebrow: formatOpsCodeLabel(locale, complaint.status),
-    },
-  ];
-}
-
 function buildProgressItems(
   locale: Locale,
   complaint: ComplaintCaseRecord,
+  timeline: ComplaintTimelineEntry[] | null,
 ): CanvasSequenceItem[] {
-  const complete =
-    complaint.status === "resolved" || complaint.status === "closed";
+  const states = complaintProgressStates(complaint.status);
+  const assignedAt = timeline
+    ?.filter((entry) => entry.action === "case_assigned")
+    .at(-1)?.createdAt;
   return [
     {
       id: "opened",
-      state: "complete",
+      state: states.opened,
       title: copy(locale, "Opened", "建立"),
       timestamp: formatDateTime(locale, complaint.createdAt),
     },
     {
       id: "triage",
-      state: "complete",
+      state: states.triage,
       title: copy(locale, "Triage", "分派"),
-      timestamp: formatDateTime(locale, complaint.updatedAt),
+      timestamp: formatDateTime(locale, assignedAt),
     },
     {
       id: "investigation",
-      state: complete ? "complete" : "current",
+      state: states.investigation,
       title: copy(locale, "Investigation", "調查"),
-      timestamp: formatDateTime(locale, complaint.updatedAt),
       tone: complaint.severity === "high" ? "warn" : "info",
     },
     {
       id: "closure",
-      state: complete ? "current" : "upcoming",
+      state: states.closure,
       title: copy(locale, "Closure", "結案"),
-      timestamp: complete ? formatDateTime(locale, complaint.updatedAt) : "—",
+      timestamp:
+        complaint.status === "resolved" || complaint.status === "closed"
+          ? formatDateTime(locale, complaint.updatedAt)
+          : "—",
     },
   ];
 }
@@ -171,13 +128,44 @@ function deriveCaseActions(complaint: ComplaintCaseRecord): CaseAction[] {
   return [
     // assertCaseOpenForAction rejects add_note/assign once resolved or
     // closed (409 COMPLAINT_NOT_ACTIONABLE); only offer them while open.
-    { action: "add_note", labelEn: "Add note", labelZh: "新增備註", risk: "low", enabled: open },
-    { action: "assign", labelEn: "Assign / reassign", labelZh: "指派 / 改派", risk: "medium", enabled: open },
-    { action: "resolve", labelEn: "Resolve", labelZh: "結案處理", risk: "medium", enabled: open },
-    { action: "close", labelEn: "Close", labelZh: "關閉案件", risk: "medium", enabled: resolved },
+    {
+      action: "add_note",
+      labelEn: "Add note",
+      labelZh: "新增備註",
+      risk: "low",
+      enabled: open,
+    },
+    {
+      action: "assign",
+      labelEn: "Assign / reassign",
+      labelZh: "指派 / 改派",
+      risk: "medium",
+      enabled: open,
+    },
+    {
+      action: "resolve",
+      labelEn: "Resolve",
+      labelZh: "結案處理",
+      risk: "medium",
+      enabled: open,
+    },
+    {
+      action: "close",
+      labelEn: "Close",
+      labelZh: "關閉案件",
+      risk: "medium",
+      enabled: resolved,
+    },
     // Original backend reopen contract only accepts status === "closed"
     // (409 COMPLAINT_NOT_CLOSED otherwise); a resolved case must close first.
-    { action: "reopen", labelEn: "Reopen", labelZh: "重啟案件", risk: "high", enabled: closed, requiresReason: true },
+    {
+      action: "reopen",
+      labelEn: "Reopen",
+      labelZh: "重啟案件",
+      risk: "high",
+      enabled: closed,
+      requiresReason: true,
+    },
     {
       action: "escalate",
       labelEn: "Escalate to incident",
@@ -186,7 +174,13 @@ function deriveCaseActions(complaint: ComplaintCaseRecord): CaseAction[] {
       enabled: !closed && !complaint.relatedIncidentId,
       requiresReason: true,
     },
-    { action: "export", labelEn: "Export view", labelZh: "匯出視圖", risk: "low", enabled: true },
+    {
+      action: "export",
+      labelEn: "Export view",
+      labelZh: "匯出視圖",
+      risk: "low",
+      enabled: true,
+    },
     {
       action: "sla_waiver",
       labelEn: "Manual SLA waiver",
@@ -228,40 +222,37 @@ export default async function ComplaintDetailPage({
   const locale = await getServerLocale();
   const client = await getServerOpsClient();
 
-  const complaint = await client
-    .getComplaint(caseNo)
-    .catch(() => buildFallbackRecord(caseNo));
-  const loadComplaintActivity = client[
-    `getComplaint${"Time"}${"line"}` as keyof typeof client
-  ] as
-    | ((id: string) => Promise<
-        Array<{
-          entryId: string;
-          action: string;
-          actor: string;
-          note?: string | null;
-          createdAt: string;
-        }>
-      >)
-    | undefined;
-  const activityItems = loadComplaintActivity
-    ? await loadComplaintActivity(caseNo)
-        .then((entries) =>
-          entries.map(
-            (entry): CanvasActivityItem => ({
-              id: entry.entryId,
-              title: formatOpsCodeLabel(locale, entry.action),
-              detail:
-                entry.note ??
-                copy(locale, "No additional note.", "沒有補充說明。"),
-              timestamp: formatDateTime(locale, entry.createdAt),
-              tone: entry.action.includes("escalate") ? "danger" : "info",
-              eyebrow: entry.actor,
-            }),
-          ),
-        )
-        .catch(() => buildActivityItems(locale, caseNo, complaint))
-    : buildActivityItems(locale, caseNo, complaint);
+  const complaint = await client.getComplaint(caseNo).catch(() => null);
+  if (!complaint) {
+    return (
+      <div style={{ padding: 24, display: "grid", gap: 16 }}>
+        <PageHeader theme={theme} title={caseNo} />
+        <Banner
+          theme={theme}
+          tone="warn"
+          title={copy(locale, "Case unavailable", "暫時無法載入案件")}
+          body={copy(
+            locale,
+            "Please retry later or return to the case list.",
+            "請稍後重試，或返回客訴列表查看案件。",
+          )}
+        />
+        <Link href="/complaints">
+          {copy(locale, "Return to complaints", "返回客訴列表")}
+        </Link>
+      </div>
+    );
+  }
+  const timeline = await loadComplaintTimeline(client, caseNo);
+  const activityItems: CanvasActivityItem[] =
+    timeline?.map((entry) => ({
+      id: entry.entryId,
+      title: formatOpsCodeLabel(locale, entry.action),
+      detail:
+        entry.note ?? copy(locale, "No additional note.", "沒有補充說明。"),
+      timestamp: formatDateTime(locale, entry.createdAt),
+      tone: entry.action.includes("escalate") ? "danger" : "info",
+    })) ?? [];
 
   const exportView = await client.getComplaintExportView(caseNo).catch(
     (): ComplaintExportViewRecord => ({
@@ -327,10 +318,7 @@ export default async function ComplaintDetailPage({
         }
       />
 
-      <Card
-        theme={theme}
-        title={copy(locale, "Available actions", "可用動作")}
-      >
+      <Card theme={theme} title={copy(locale, "Available actions", "可用動作")}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {actions.map((a) => (
             <span
@@ -404,20 +392,35 @@ export default async function ComplaintDetailPage({
       >
         <div style={{ display: "grid", gap: 16 }}>
           <Card theme={theme} title={copy(locale, "Case progress", "案件進度")}>
-            <CanvasSequenceRail
-              theme={theme}
-              density="compact"
-              items={buildProgressItems(locale, complaint)}
-              orientation="horizontal"
-            />
+            <div data-testid="complaint-progress">
+              <CanvasSequenceRail
+                theme={theme}
+                density="compact"
+                items={buildProgressItems(locale, complaint, timeline)}
+                orientation="horizontal"
+              />
+            </div>
           </Card>
 
           <Card theme={theme} title={copy(locale, "Activity feed", "活動紀錄")}>
-            <CanvasActivityFeed
-              theme={theme}
-              density="compact"
-              items={activityItems}
-            />
+            {timeline === null ? (
+              <Banner
+                theme={theme}
+                tone="warn"
+                title={copy(
+                  locale,
+                  "Activity unavailable",
+                  "暫時無法載入活動紀錄",
+                )}
+                body={copy(locale, "Please retry later.", "請稍後重試。")}
+              />
+            ) : (
+              <CanvasActivityFeed
+                theme={theme}
+                density="compact"
+                items={activityItems}
+              />
+            )}
           </Card>
         </div>
 
@@ -437,7 +440,9 @@ export default async function ComplaintDetailPage({
                 },
                 {
                   k: copy(locale, "assignee", "承辦人"),
-                  v: complaint.assigneeId ?? copy(locale, "Unassigned", "未指派"),
+                  v:
+                    complaint.assigneeId ??
+                    copy(locale, "Unassigned", "未指派"),
                   mono: true,
                 },
                 {
@@ -513,7 +518,11 @@ export default async function ComplaintDetailPage({
                     k: copy(locale, "recovery note", "補救說明"),
                     v:
                       complaint.closingNote ??
-                      copy(locale, "No recovery note recorded.", "尚無補救說明。"),
+                      copy(
+                        locale,
+                        "No recovery note recorded.",
+                        "尚無補救說明。",
+                      ),
                   },
                 ]}
               />

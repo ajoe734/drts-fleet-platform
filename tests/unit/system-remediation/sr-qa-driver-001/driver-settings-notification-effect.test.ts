@@ -38,7 +38,7 @@ describe("SR-QA-DRIVER-001 C060: notification preference genuinely affects deliv
     const auditService = new AuditNotificationService();
     const settingsService = new DriverSettingsService(auditService);
 
-    const updated = settingsService.updateSettings("drv-demo-notif-001", {
+    const updated = await settingsService.updateSettings("drv-demo-notif-001", {
       notificationsEnabled: false,
     });
     expect(updated.notificationsEnabled).toBe(false);
@@ -77,7 +77,7 @@ describe("SR-QA-DRIVER-001 C060: notification preference genuinely affects deliv
     const auditService = new AuditNotificationService();
     const settingsService = new DriverSettingsService(auditService);
 
-    settingsService.updateSettings("drv-demo-notif-002", {
+    await settingsService.updateSettings("drv-demo-notif-002", {
       notificationsEnabled: true,
     });
 

@@ -11,7 +11,10 @@ import type {
   PlatformCode,
   PlatformEarningsItem,
 } from "@drts/contracts";
-import { PlatformEarningsRepository } from "./platform-earnings.repository";
+import {
+  PlatformEarningsRepository,
+  resolvePlatformEarningsPeriodRange,
+} from "./platform-earnings.repository";
 
 const DEFAULT_CURRENCY = PLATFORM_CURRENCY;
 
@@ -116,14 +119,26 @@ export class PlatformEarningsService {
       : (DEMO_DRIVER_ALIASES[driverId] ?? driverId);
   }
 
-  async byPlatform(driverId: string): Promise<{
+  async byPlatform(
+    driverId: string,
+    period?: string,
+    referenceDate?: Date,
+  ): Promise<{
     driverId: string;
     items: PlatformEarningsItem[];
     notes: string[];
   }> {
+    resolvePlatformEarningsPeriodRange(period, referenceDate);
     if (this.dbEnabled()) {
-      const items = await this.repo!.aggregateByDriver(driverId);
-      if (items.length > 0) {
+      const items = await this.repo!.aggregateByDriver(
+        driverId,
+        period,
+        referenceDate,
+      );
+      if (
+        items.length > 0 ||
+        !this.memory.has(this.resolveMemoryDriverId(driverId))
+      ) {
         return {
           driverId,
           items,
@@ -153,7 +168,11 @@ export class PlatformEarningsService {
     };
   }
 
-  async summary(driverId: string): Promise<{
+  async summary(
+    driverId: string,
+    period?: string,
+    referenceDate?: Date,
+  ): Promise<{
     driverId: string;
     totalGross: MoneyAmount;
     totalServiceFee: MoneyAmount;
@@ -161,7 +180,7 @@ export class PlatformEarningsService {
     totalNet: MoneyAmount;
     notes: string[];
   }> {
-    const { items } = await this.byPlatform(driverId);
+    const { items } = await this.byPlatform(driverId, period, referenceDate);
     const currency = items[0]?.grossEarning?.currency ?? DEFAULT_CURRENCY;
 
     const sum = (

@@ -207,7 +207,7 @@ describe("SR-DRIVER-GAPS-20260911: Remediation Suite", () => {
       const auditService = new AuditNotificationService();
       const settingsService = new DriverSettingsService(auditService);
 
-      settingsService.updateSettings("drv-demo-optout-001", {
+      await settingsService.updateSettings("drv-demo-optout-001", {
         notificationsEnabled: false,
       });
 
@@ -245,7 +245,7 @@ describe("SR-DRIVER-GAPS-20260911: Remediation Suite", () => {
       const auditService = new AuditNotificationService();
       const settingsService = new DriverSettingsService(auditService);
 
-      settingsService.updateSettings("drv-demo-optin-001", {
+      await settingsService.updateSettings("drv-demo-optin-001", {
         notificationsEnabled: true,
       });
 

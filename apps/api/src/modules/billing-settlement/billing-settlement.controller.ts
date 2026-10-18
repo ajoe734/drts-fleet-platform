@@ -20,6 +20,7 @@ import type {
   DriverStatementRecord,
   GenerateDriverStatementCommand,
   GenerateTenantInvoiceCommand,
+  MarkReimbursementBatchReconciledCommand,
   MarkReimbursementPaidCommand,
   MarkReimbursementPaidWithProofCommand,
   RequestRemittanceProofReadbackCommand,
@@ -714,6 +715,70 @@ export class BillingSettlementController {
       this.billingSettlementService.getReimbursementBatch(batchId),
       requestId,
     );
+  }
+
+  /** C080 signed batch artifact export; not a remittance-proof readback or bank transfer. */
+  @Post("reimbursements/:batchId/export")
+  @HttpCode(HttpStatus.OK)
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:write")
+  async exportReimbursementBatch(
+    @Param("batchId") batchId: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+  ) {
+    const scope = `billing:reimbursement_batch:${batchId}:export`;
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: { batchId },
+      execute: async () => {
+        const data =
+          await this.billingSettlementService.exportReimbursementBatch(
+            batchId,
+            identity ?? null,
+            requestId,
+          );
+        return { data, statusCode: 200 };
+      },
+    });
+
+    return toApiSuccessEnvelope(result.data, requestId);
+  }
+
+  /** C080 explicit manual paid -> reconciled transition (Q-ADM12). */
+  @Post("reimbursements/:batchId/reconcile")
+  @HttpCode(HttpStatus.OK)
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:write")
+  async markReimbursementBatchReconciled(
+    @Param("batchId") batchId: string,
+    @Body() command: MarkReimbursementBatchReconciledCommand,
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+  ) {
+    const scope = `billing:reimbursement_batch:${batchId}:reconcile`;
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: { batchId, reason: command?.reason },
+      execute: async () => {
+        const data =
+          await this.billingSettlementService.markReimbursementBatchReconciled(
+            batchId,
+            command,
+            identity ?? null,
+            requestId,
+          );
+        return { data, statusCode: 200 };
+      },
+    });
+
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   // ── Remittance Proof (SR-PROOF-001) ──

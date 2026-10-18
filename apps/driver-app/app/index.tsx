@@ -1,3 +1,4 @@
+import { loadDriverOrderSummaries } from "@/lib/task-order-summaries";
 import { useEffect, useMemo, useState } from "react";
 import { Redirect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,7 +19,7 @@ import {
   type RefreshTier,
   type ResourceActionDescriptor,
   type EmptyReason,
-  type OwnedOrderRecord,
+  type DriverTaskOrderSummary,
   type PlatformPresenceAdapterStatusRecord,
   type PlatformPresenceRecord,
   type PlatformPresenceSummary,
@@ -72,7 +73,7 @@ type WorkspaceRoute =
 
 type WorkspaceLoadResult = {
   taskViews: UnifiedDriverTaskView[];
-  orderMap: Record<string, OwnedOrderRecord>;
+  orderMap: Record<string, DriverTaskOrderSummary>;
   taskFallbackMode: boolean;
   taskLoadError: string | null;
   platformSummary: PlatformPresenceSummary | null;
@@ -757,31 +758,9 @@ async function loadWorkspaceData(): Promise<WorkspaceLoadResult> {
     next.taskViews = tasksResult.value.tasks;
     next.taskFallbackMode = tasksResult.value.fallbackMode;
 
-    const uniqueOrderIds = [
-      ...new Set(
-        tasksResult.value.tasks.map((task) => task.orderId).filter(Boolean),
-      ),
-    ];
-    const orderResults = await Promise.all(
-      uniqueOrderIds.map(async (orderId) => {
-        try {
-          const order = (await client.getOrder(orderId)) as OwnedOrderRecord;
-          return { orderId, order };
-        } catch {
-          return { orderId, order: null };
-        }
-      }),
-    );
-
-    next.orderMap = orderResults.reduce<Record<string, OwnedOrderRecord>>(
-      (map, entry) => {
-        if (entry.order) {
-          map[entry.orderId] = entry.order;
-        }
-
-        return map;
-      },
-      {},
+    next.orderMap = await loadDriverOrderSummaries(
+      client,
+      tasksResult.value.tasks,
     );
   } else {
     next.taskLoadError = toErrorMessage(
@@ -2616,9 +2595,7 @@ export default function WorkspaceIndex() {
         <View style={styles.sectionHeader}>
           <View>
             <Text style={styles.sectionEyebrow}>整備狀態</Text>
-            <Text style={styles.sectionTitle}>
-              裝置 / 身份 / 平台整備狀態
-            </Text>
+            <Text style={styles.sectionTitle}>裝置 / 身份 / 平台整備狀態</Text>
           </View>
         </View>
         <View style={styles.readinessStrip}>

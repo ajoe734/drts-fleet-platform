@@ -1786,6 +1786,87 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /api/reimbursements/{batchId}/export:
+    post:
+      tags:
+        - Reimbursement
+      operationId: exportReimbursementBatch
+      summary: 匯出已核可請款批次之簽署成品 (C080)
+      description: |
+        前置條件：批次須已核可 (`approvedAt` 已設定)，否則回 409。回傳的
+        `manifestHash`/`download` 一經首次匯出即固定；重複呼叫僅在連結過期
+        時重新簽署同一雜湊的連結，絕不重新產生不同內容的位元組。這是批次
+        成品匯出，不是匯款證明讀回，也不是銀行轉帳指示。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: batchId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 請款批次識別碼
+      responses:
+        "200":
+          description: 簽署匯出收據 (冪等回放或新建)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReimbursementBatchExportReceiptEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/reimbursements/{batchId}/reconcile:
+    post:
+      tags:
+        - Reimbursement
+      operationId: markReimbursementBatchReconciled
+      summary: 手動將已付款請款批次標記為已對帳 (Q-ADM12)
+      description: |
+        前置條件：批次須已付款 (`status=paid`)，否則回 409；`reason` 須為
+        非空白字串，否則回 400。此轉換每批次僅發生一次：重複呼叫 (任何
+        reason 內容) 回傳原始收據，不覆寫原始 actor/time/reason/evidence。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: batchId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 請款批次識別碼
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarkReimbursementBatchReconciledCommand"
+      responses:
+        "200":
+          description: 對帳收據 (冪等回放或新建)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReimbursementBatchReconciliationReceiptEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /api/platform-admin/adapters/{id}/credential-expiry-warning:
     get:
       tags:
@@ -5521,6 +5602,140 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/RemittanceProofPaymentReceipt"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+
+    # === REIMBURSEMENT-BATCH-EXPORT-RECONCILIATION-20261015 ===
+    ControlledDownloadRecord:
+      type: object
+      required:
+        - kind
+        - subjectId
+        - manifestHash
+        - host
+        - keyId
+        - signedAt
+        - expiresAt
+        - ttlMinutes
+        - signatureVersion
+        - signature
+        - downloadUrl
+        - immutable
+      properties:
+        kind:
+          type: string
+        subjectId:
+          type: string
+        manifestHash:
+          type: string
+        host:
+          type: string
+        keyId:
+          type: string
+        signedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        ttlMinutes:
+          type: integer
+        signatureVersion:
+          type: integer
+        signature:
+          type: string
+        downloadUrl:
+          type: string
+        immutable:
+          type: boolean
+          enum: [true]
+    ReimbursementBatchExportReceipt:
+      type: object
+      required:
+        - receiptId
+        - batchId
+        - exportedAt
+        - exportedByActorId
+        - manifestHash
+        - download
+        - createdAt
+      properties:
+        receiptId:
+          type: string
+        batchId:
+          type: string
+        exportedAt:
+          type: string
+          format: date-time
+        exportedByActorId:
+          type: string
+          nullable: true
+        manifestHash:
+          type: string
+        download:
+          $ref: "#/components/schemas/ControlledDownloadRecord"
+        createdAt:
+          type: string
+          format: date-time
+    ReimbursementBatchExportReceiptEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/ReimbursementBatchExportReceipt"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    MarkReimbursementBatchReconciledCommand:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          description: 非空白、經 trim 之對帳原因
+        evidenceRef:
+          type: string
+          nullable: true
+          description: 選填之佐證參照 (例如銀行對帳單編號)
+    ReimbursementBatchReconciliationReceipt:
+      type: object
+      required:
+        - receiptId
+        - batchId
+        - reconciledAt
+        - reconciledByActorId
+        - reason
+        - evidenceRef
+        - createdAt
+      properties:
+        receiptId:
+          type: string
+        batchId:
+          type: string
+        reconciledAt:
+          type: string
+          format: date-time
+        reconciledByActorId:
+          type: string
+          nullable: true
+        reason:
+          type: string
+        evidenceRef:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    ReimbursementBatchReconciliationReceiptEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/ReimbursementBatchReconciliationReceipt"
         meta:
           $ref: "#/components/schemas/ApiMeta"
 

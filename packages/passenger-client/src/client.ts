@@ -116,6 +116,14 @@ export class PassengerClient implements PassengerViewModel {
     return res.account;
   }
 
+  getReviewRecord(
+    orderId: string,
+  ): Promise<import("./review-demo.js").PassengerReviewRecord> {
+    return this.request(
+      `/api/passenger-app/review-demo/rides/${encodeURIComponent(orderId)}/record`,
+    );
+  }
+
   async getProviders(): Promise<import("./types.js").AuthProvidersResponse> {
     return this.request<import("./types.js").AuthProvidersResponse>(
       "/api/passenger-app/auth/providers",
@@ -324,6 +332,15 @@ export class PassengerClient implements PassengerViewModel {
         method: "POST",
         body: JSON.stringify(command),
       },
+    );
+  }
+
+  async contactRide(
+    id: string,
+  ): Promise<import("@drts/contracts").PassengerRideContactOption> {
+    return this.request<import("@drts/contracts").PassengerRideContactOption>(
+      `/api/passenger-app/rides/${encodeURIComponent(id)}/contact`,
+      { method: "POST", body: JSON.stringify({}) },
     );
   }
 

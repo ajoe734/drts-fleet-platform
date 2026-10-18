@@ -2500,9 +2500,26 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       let result: Promise<unknown> | undefined;
       try {
         if (scenario === "token_failure") {
+          const authorizations = new Map<
+            string,
+            ReturnType<MultiTaxiService["createAuthorization"]>
+          >();
           const multiTaxi = new MultiTaxiService(service, {
             isEnabled: () => true,
-            persistAuthorization: async () => {},
+            persistAuthorization: async (
+              authorization: ReturnType<
+                MultiTaxiService["createAuthorization"]
+              >,
+            ) => {
+              authorizations.set(
+                authorization.authorizationId,
+                structuredClone(authorization),
+              );
+            },
+            findEffectiveAuthorizations: async () =>
+              [...authorizations.values()].map((authorization) =>
+                structuredClone(authorization),
+              ),
             persistRideAccessToken: async () => {
               throw new Error("injected token failure");
             },

@@ -95,10 +95,8 @@ export class DriverSettingsController {
         { driverId },
       );
     }
-    return toApiSuccessEnvelope(
-      this.driverSettingsService.updateSettings(driverId, command, requestId),
-      requestId,
-    );
+    return this.driverSettingsService
+      .updateSettings(driverId, command, requestId)
+      .then((settings) => toApiSuccessEnvelope(settings, requestId));
   }
 }
-

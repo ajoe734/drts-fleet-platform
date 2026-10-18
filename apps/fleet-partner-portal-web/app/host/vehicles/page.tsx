@@ -39,7 +39,7 @@ export default async function HostVehiclesPage({
                 tone="warn"
                 icon="warn"
                 title={trHost("vehiclesServiceUnavailableTitle", locale)}
-                body="Host 後端模組（SR-HOST-BE-001）尚未合併至 dev，暫時無法讀取自有車輛資料。此為已知限制，不以假資料代替。"
+                body="目前無法讀取自有車輛資料，車主資料服務暫時不可用。請稍後重試；若持續發生，請聯繫平台支援。此為真實失敗狀態，不以假資料代替。"
               />
               <HostAccessStateCard theme={theme} state={result.accessState} detail={result.error} />
             </>

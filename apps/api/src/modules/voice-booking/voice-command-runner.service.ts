@@ -3,10 +3,18 @@ import {
   Inject,
   Injectable,
   Logger,
+  type OnApplicationBootstrap,
+  type OnModuleDestroy,
   Optional,
 } from "@nestjs/common";
 import { isDeepStrictEqual } from "node:util";
 import { ApiRequestError } from "../../common/api-envelope";
+import { generateDeterministicUuid } from "../../common/durable-identity";
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import {
+  VOICE_BOOKING_RESULT_DELIVERY,
+  type VoiceBookingResultDelivery,
+} from "./voice-booking-result-delivery";
 import { OwnedMobilityRepository } from "../owned-mobility/owned-mobility.repository";
 import { prepareVoiceOrder } from "../owned-mobility/voice-order-preparation";
 import {
@@ -23,6 +31,10 @@ import {
   type VoiceMediaRecordingAdapter,
 } from "./voice-evidence.service";
 import type { VoiceQueryExecutor } from "./voice-booking.repository";
+import {
+  readFinalizedCallRecording,
+  readVoiceRecordingContext,
+} from "./voice-recording-context";
 
 export class LeaseFencedError extends Error {
   constructor(
@@ -70,12 +82,14 @@ export type CustomWorkItemHandler = (
  * - graceful shutdown drain on SIGTERM / revision switch
  */
 @Injectable()
-export class VoiceCommandRunnerService {
+export class VoiceCommandRunnerService
+  implements OnApplicationBootstrap, OnModuleDestroy
+{
   private readonly logger = new Logger(VoiceCommandRunnerService.name);
   private readonly customHandlers = new Map<string, CustomWorkItemHandler>();
 
   private isDraining = false;
-  private inFlightExecution: Promise<unknown> | null = null;
+  private readonly activeExecutions = new Set<Promise<unknown>>();
   private loopRunning = false;
   private loopTimer: NodeJS.Timeout | null = null;
 
@@ -94,7 +108,37 @@ export class VoiceCommandRunnerService {
     @Optional()
     @Inject(VOICE_MEDIA_RECORDING_ADAPTER)
     readonly mediaAdapter?: VoiceMediaRecordingAdapter,
+    @Optional()
+    readonly auditNotificationService?: AuditNotificationService,
+    @Optional()
+    @Inject(VOICE_BOOKING_RESULT_DELIVERY)
+    readonly bookingResultDelivery?: VoiceBookingResultDelivery | null,
   ) {}
+
+  onApplicationBootstrap(): void {
+    if (process.env.VOICE_BACKGROUND_RUNNER_ENABLED !== "true") return;
+    if (!this.commands.repository.isEnabled())
+      throw new Error("Voice background runner requires PostgreSQL");
+    // Start after all domain modules have restored their persisted state.
+    // Recording and callbacks still require their durable provider wiring;
+    // leave those work items pending rather than running legacy placeholders.
+    this.startBackgroundLoop({
+      supportedTypes: [
+        "execute_booking_command",
+        "request_dispatch",
+        "publish_booking_audit",
+        "notify_booking_result",
+      ],
+    });
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    const result = await this.drain(9000);
+    if (!result.inFlightCompleted)
+      this.logger.warn(
+        "Voice runner shutdown deadline reached; durable leases remain recoverable",
+      );
+  }
 
   registerHandler(workType: string, handler: CustomWorkItemHandler): void {
     this.customHandlers.set(workType, handler);
@@ -217,6 +261,14 @@ export class VoiceCommandRunnerService {
         snapshotHash: proof.request.snapshotHash,
         snapshot,
       });
+      // A recording can finish while an already accepted booking is still
+      // pending. Preserve that completed manifest when the original order
+      // finally commits, rather than replacing it with the checkpoint ID.
+      const finalizedRecording = await readFinalizedCallRecording(
+        tx,
+        current.callId,
+      );
+      if (finalizedRecording) Object.assign(order, finalizedRecording);
       await this.orders.insertVoiceOrder(tx, order);
 
       const call = await tx.query(
@@ -231,7 +283,7 @@ export class VoiceCommandRunnerService {
             voiceSessionId: locked.session.voiceSessionId,
             sourceChannel: "voice_agent",
             customerConfirmationId: proof.request.confirmationId,
-            recordingEvidenceRef: checkpoint.checkpointId,
+            recordingEvidenceRef: order.recordingEvidenceRef,
           }),
           order.orderId,
         ],
@@ -485,7 +537,7 @@ export class VoiceCommandRunnerService {
         }
       }
 
-      const callId =
+      let callId =
         finalResult.scope?.callId ??
         (parsedPayload.callId as string | undefined) ??
         record.dedupeKey.replace(/^finalize_recording:(ai:|call:)?/, "");
@@ -502,7 +554,7 @@ export class VoiceCommandRunnerService {
         finalResult.voiceSessionId ??
         (parsedPayload.voiceSessionId as string | undefined) ??
         null;
-      const linkedOrderId =
+      let linkedOrderId =
         finalResult.linkedOrderId ??
         (parsedPayload.linkedOrderId as string | undefined) ??
         null;
@@ -510,6 +562,19 @@ export class VoiceCommandRunnerService {
         finalResult.manifestRef?.objectKey ??
         finalResult.manifestRef?.checksum ??
         null;
+
+      if (voiceSessionId) {
+        // Booking commits hold the original session before touching the call.
+        // Use that same ordering, then read the now-current bound order.
+        await tx.query(
+          "SELECT voice_session_id FROM voice.session WHERE voice_session_id = $1 FOR UPDATE",
+          [voiceSessionId],
+        );
+        const context = await readVoiceRecordingContext(tx, voiceSessionId);
+        if (!context) throw new Error("Voice recording context unavailable");
+        callId = context.callId;
+        linkedOrderId = context.linkedOrderId;
+      }
 
       // Update call session in crm.phase1_call_sessions
       if (callId) {
@@ -540,6 +605,7 @@ export class VoiceCommandRunnerService {
             recordingId,
             recordingUrl: recordingUrl ?? existingRecord.recordingUrl ?? null,
             recordingState: "bound",
+            recordingEvidenceRef: manifestEvidenceRef ?? recordingId,
             flags: updatedFlags,
           };
           await tx.query(
@@ -551,11 +617,11 @@ export class VoiceCommandRunnerService {
         }
       }
 
-      // If AI session: update voice.session recording_state to 'sealed'
+      // The voice schema uses finalized; the separate CRM projection is bound.
       if (voiceSessionId) {
         await tx.query(
           `UPDATE voice.session
-          SET recording_state = 'sealed', session_version = session_version + 1
+          SET recording_state = 'finalized', session_version = session_version + 1
           WHERE voice_session_id = $1`,
           [voiceSessionId],
         );
@@ -869,6 +935,21 @@ export class VoiceCommandRunnerService {
       return null;
     }
 
+    // Track the full claim, domain effect and queue acknowledgement, so drain
+    // cannot return while a claimed item is still being committed or retried.
+    const execution = this.executeNextWorkItem(options);
+    this.activeExecutions.add(execution);
+    try {
+      return await execution;
+    } finally {
+      this.activeExecutions.delete(execution);
+    }
+  }
+
+  private async executeNextWorkItem(options?: {
+    supportedTypes?: string[] | undefined;
+    maxAttempts?: number | undefined;
+  }): Promise<VoiceWorkExecutionResult | null> {
     const repository = this.commands.repository;
     const maxAttempts = options?.maxAttempts ?? 5;
 
@@ -927,7 +1008,6 @@ export class VoiceCommandRunnerService {
     };
 
     const executePromise = this.dispatchWorkItem(record);
-    this.inFlightExecution = executePromise;
 
     try {
       const result = await executePromise;
@@ -1007,8 +1087,6 @@ export class VoiceCommandRunnerService {
         success: false,
         error: errorMsg,
       };
-    } finally {
-      this.inFlightExecution = null;
     }
   }
 
@@ -1038,15 +1116,29 @@ export class VoiceCommandRunnerService {
         return this.handleExecuteCallback(work);
       }
 
-      case "request_dispatch":
-      case "notify_booking_result":
+      case "request_dispatch": {
+        if (!work.commandId)
+          throw new Error("Missing commandId for request_dispatch");
+        const receipt = await this.commands.repository.findReceiptById(
+          work.commandId,
+        );
+        if (receipt?.status !== "succeeded" || !receipt.orderId)
+          throw new Error(
+            "Committed booking order unavailable for request_dispatch",
+          );
+        if (!this.dispatchExecutor)
+          throw new Error("Automatic dispatch executor is unavailable");
+        return this.dispatchExecutor.requestDispatch(receipt.orderId, {
+          requestId: receipt.commandId,
+        });
+      }
+
       case "publish_booking_audit": {
-        // Standard downstream pipeline items
-        return {
-          workType: work.workType,
-          status: "dispatched",
-          commandId: work.commandId,
-        };
+        return this.handlePublishBookingAudit(work);
+      }
+
+      case "notify_booking_result": {
+        return this.handleNotifyBookingResult(work);
       }
 
       default:
@@ -1054,6 +1146,140 @@ export class VoiceCommandRunnerService {
           `Unhandled or unsupported work_type: ${work.workType}; stub execution forbidden`,
         );
     }
+  }
+
+  private async handleNotifyBookingResult(work: VoiceWorkItemRecord) {
+    if (!work.commandId || !work.voiceSessionId)
+      throw new Error("Missing booking context for notify_booking_result");
+    const receipt = await this.commands.repository.findReceiptById(
+      work.commandId,
+    );
+    if (!receipt || !["succeeded", "rejected"].includes(receipt.status))
+      throw new Error("Final booking result unavailable for notification");
+    if (!this.bookingResultDelivery || !this.auditNotificationService)
+      throw new Error("Booking result delivery is unavailable");
+    let tenantId: string | null = null;
+    if (receipt.orderId) {
+      const order = await this.commands.repository.withTransaction(
+        async (tx) => {
+          const result = await tx.query<{ tenant_id: string | null }>(
+            "SELECT tenant_id FROM ops.phase1_owned_orders WHERE order_id = $1",
+            [receipt.orderId],
+          );
+          return result.rows[0];
+        },
+      );
+      if (!order)
+        throw new Error("Committed booking order unavailable for notification");
+      tenantId = order.tenant_id;
+    } else if (receipt.status === "succeeded") {
+      throw new Error("Committed booking order unavailable for notification");
+    }
+    const delivery = await this.bookingResultDelivery.deliver({
+      idempotencyKey: work.dedupeKey,
+      commandId: receipt.commandId,
+      voiceSessionId: work.voiceSessionId,
+      brandId: receipt.brandId,
+      callId: receipt.callId,
+      orderId: receipt.orderId,
+      bookingStatus: receipt.status as "succeeded" | "rejected",
+      errorCode: receipt.errorCode,
+    });
+    const audit = await this.auditNotificationService.recordAuditLogAsync({
+      auditId: generateDeterministicUuid(
+        "voice_booking_result_notification",
+        work.dedupeKey,
+      ),
+      actorId: null,
+      actorType: "system",
+      tenantId,
+      moduleName: "voice_booking",
+      actionName: "voice.booking.result_notification",
+      resourceType: receipt.orderId ? "owned_order" : "voice_command",
+      resourceId: receipt.orderId ?? receipt.commandId,
+      requestId: receipt.commandId,
+      newValuesSummary: {
+        commandId: receipt.commandId,
+        orderId: receipt.orderId,
+        bookingStatus: receipt.status,
+        deliveryStatus: delivery.status,
+        provider: this.bookingResultDelivery.provider,
+        providerMessageId: delivery.providerMessageId,
+        simulated: delivery.status === "simulated",
+      },
+    });
+    return {
+      status: delivery.status,
+      commandId: receipt.commandId,
+      orderId: receipt.orderId,
+      provider: this.bookingResultDelivery.provider,
+      providerMessageId: delivery.providerMessageId,
+      auditId: audit.auditId,
+    };
+  }
+
+  private async handlePublishBookingAudit(work: VoiceWorkItemRecord) {
+    if (!work.commandId)
+      throw new Error("Missing commandId for publish_booking_audit");
+    const receipt = await this.commands.repository.findReceiptById(
+      work.commandId,
+    );
+    if (receipt?.status !== "succeeded" || !receipt.orderId)
+      throw new Error(
+        "Committed booking order unavailable for publish_booking_audit",
+      );
+    if (!this.auditNotificationService)
+      throw new Error("Booking audit publisher is unavailable");
+
+    const intent = await this.commands.repository.withTransaction(
+      async (tx) => {
+        const result = await tx.query<{
+          order_id: string;
+          tenant_id: string | null;
+          record: Record<string, unknown>;
+        }>(
+          `SELECT i.order_id, i.record, o.tenant_id
+         FROM voice.booking_audit_intent i
+         JOIN ops.phase1_owned_orders o ON o.order_id = i.order_id
+         WHERE i.command_id = $1`,
+          [receipt.commandId],
+        );
+        return result.rows[0];
+      },
+    );
+    if (!intent || intent.order_id !== receipt.orderId)
+      throw new Error("Committed booking audit intent unavailable");
+
+    // The original booking transaction owns the immutable intent. Publish it
+    // through the existing audit sink; a retry uses the same original work key.
+    // The executor is system-owned, while the original voice actor and scope
+    // remain intact in the intent copied into the business record.
+    const auditId = generateDeterministicUuid(
+      "voice_booking_audit",
+      work.dedupeKey,
+    );
+    const audit = await this.auditNotificationService.recordAuditLogAsync({
+      auditId,
+      actorId: null,
+      actorType: "system",
+      tenantId: intent.tenant_id,
+      moduleName: "voice_booking",
+      actionName: "voice.booking.created",
+      resourceType: "owned_order",
+      resourceId: receipt.orderId,
+      requestId: receipt.commandId,
+      newValuesSummary: {
+        ...intent.record,
+        commandId: receipt.commandId,
+        orderId: receipt.orderId,
+      },
+    });
+    return {
+      status: "published",
+      commandId: receipt.commandId,
+      orderId: receipt.orderId,
+      auditId: audit.auditId,
+    };
   }
 
   private async handleDispatchTimeout(
@@ -1113,14 +1339,24 @@ export class VoiceCommandRunnerService {
       };
     }
 
-    const callId =
+    let callId =
       (payload.callId as string | undefined) ??
       work.dedupeKey.replace(/^finalize_recording:(ai:|call:)?/, "");
-    const brandId = (payload.brandId as string | undefined) ?? "default";
+    let brandId = (payload.brandId as string | undefined) ?? "default";
+    const legId = (payload.legId as string | undefined) ?? null;
+    let linkedOrderId = (payload.linkedOrderId as string | undefined) ?? null;
+
+    if (work.voiceSessionId) {
+      const context = await this.commands.repository.withTransaction((tx) =>
+        readVoiceRecordingContext(tx, work.voiceSessionId!),
+      );
+      if (!context) throw new Error("Voice recording context unavailable");
+      callId = context.callId;
+      brandId = context.brandId;
+      linkedOrderId = context.linkedOrderId;
+    }
     const recordingId =
       (payload.recordingId as string | undefined) ?? `rec-${callId}`;
-    const legId = (payload.legId as string | undefined) ?? null;
-    const linkedOrderId = (payload.linkedOrderId as string | undefined) ?? null;
 
     let finalResult: unknown;
     if (this.mediaAdapter) {
@@ -1163,25 +1399,21 @@ export class VoiceCommandRunnerService {
       }
     }
 
-    if (this.callbackService && payload.taskId) {
-      const task = this.callbackService.getTaskById(String(payload.taskId));
-      if (task && task.status === "pending") {
-        return this.callbackService.claimCallback({
-          taskId: task.taskId,
-          expectedVersion: task.version,
-          operatorId: "voice-runner-system",
-          leaseDurationMs: 60000,
-        });
-      }
+    if (!this.callbackService || !payload.taskId)
+      throw new Error("Callback task/service unavailable");
+    const task = await this.callbackService.getTaskForRead(
+      String(payload.taskId),
+    );
+    if (!task) throw new Error("Callback task unavailable");
+    if (task.status === "pending") {
+      return this.callbackService.claimCallbackForWrite({
+        taskId: task.taskId,
+        expectedVersion: task.version,
+        operatorId: "voice-runner-system",
+        leaseDurationMs: 60000,
+      });
     }
-
-    return {
-      handled: true,
-      type: "execute_callback",
-      voiceSessionId: work.voiceSessionId,
-      taskId: payload.taskId ?? null,
-      executedAt: new Date().toISOString(),
-    };
+    return task;
   }
 
   /**
@@ -1254,17 +1486,23 @@ export class VoiceCommandRunnerService {
     }
 
     let inFlightCompleted = true;
-    if (this.inFlightExecution) {
+    if (this.activeExecutions.size > 0) {
+      let timer: NodeJS.Timeout | undefined;
       try {
-        const timeout = new Promise<never>((_, reject) =>
-          setTimeout(
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(
             () => reject(new Error("Drain timeout exceeded")),
             timeoutMs,
-          ),
-        );
-        await Promise.race([this.inFlightExecution, timeout]);
+          );
+        });
+        await Promise.race([
+          Promise.allSettled([...this.activeExecutions]),
+          timeout,
+        ]);
       } catch {
         inFlightCompleted = false;
+      } finally {
+        if (timer) clearTimeout(timer);
       }
     }
 

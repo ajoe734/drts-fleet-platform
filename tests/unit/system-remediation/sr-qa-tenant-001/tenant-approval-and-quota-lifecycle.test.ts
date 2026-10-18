@@ -36,7 +36,9 @@ const TENANT_ID = "tenant-demo-001";
 // → dispatch pipeline that the existing reject/escalate negative tests use.
 function createHarness() {
   const auditNotificationService = new AuditNotificationService();
-  const tenantPartnerService = new TenantPartnerService(auditNotificationService);
+  const tenantPartnerService = new TenantPartnerService(
+    auditNotificationService,
+  );
   const tenantsService = new TenantsService(auditNotificationService);
   const ownedMobilityService = new OwnedMobilityService(
     {
@@ -142,15 +144,16 @@ describe("SR-QA-TENANT-001 — approval-requests: approve happy path (write→re
   });
 
   it("approving the resolved approver's request moves the booking to approved and unblocks dispatch", async () => {
-    const { tenantPartnerService, ownedMobilityService, auditNotificationService } =
-      createHarness();
+    const {
+      tenantPartnerService,
+      ownedMobilityService,
+      auditNotificationService,
+    } = createHarness();
 
-    const rule = tenantPartnerService.upsertApprovalRule(TENANT_ID, {
+    const rule = await tenantPartnerService.upsertApprovalRule(TENANT_ID, {
       ruleName: "Finance approval",
       priority: 10,
-      conditions: [
-        { field: "cost_center.code", op: "eq", value: "CC-FIN-04" },
-      ],
+      conditions: [{ field: "cost_center.code", op: "eq", value: "CC-FIN-04" }],
       action: "require_approval",
       approvers: [{ kind: "tenant_finance_admin" }],
     } as never);
@@ -172,7 +175,8 @@ describe("SR-QA-TENANT-001 — approval-requests: approve happy path (write→re
     expect(pendingBooking.approvalState).toBe("pending");
     expect(pendingBooking.approvalRequestIds).toHaveLength(1);
     await expectApiErrorCode(
-      () => ownedMobilityService.dispatchOrder(created.orderId, { mode: "auto" }),
+      () =>
+        ownedMobilityService.dispatchOrder(created.orderId, { mode: "auto" }),
       "BOOKING_APPROVAL_PENDING",
     );
 
@@ -184,14 +188,15 @@ describe("SR-QA-TENANT-001 — approval-requests: approve happy path (write→re
     expect(request!.resolvedApproverUserIds).toContain("tenant-user-demo-003");
 
     // WRITE: approve as the resolved tenant_finance_admin approver.
-    const decided = await ownedMobilityService.approveTenantBookingApprovalRequest(
-      TENANT_ID,
-      request!.approvalRequestId,
-      "tenant-user-demo-003",
-      "tenant_finance_admin",
-      { reasonNote: "Within Q3 travel budget" },
-      "req-qa-approve-decision",
-    );
+    const decided =
+      await ownedMobilityService.approveTenantBookingApprovalRequest(
+        TENANT_ID,
+        request!.approvalRequestId,
+        "tenant-user-demo-003",
+        "tenant_finance_admin",
+        { reasonNote: "Within Q3 travel budget" },
+        "req-qa-approve-decision",
+      );
     expect(decided.status).toBe("approved");
 
     // READ BACK #1: the approval-request record itself, via an independent
@@ -248,12 +253,10 @@ describe("SR-QA-TENANT-001 — approval-requests: approve happy path (write→re
     // request-no-longer-pending short-circuit (see the resolved-in-one-shot
     // approve test above, where a single any_of approver resolves the
     // request immediately).
-    tenantPartnerService.upsertApprovalRule(TENANT_ID, {
+    await tenantPartnerService.upsertApprovalRule(TENANT_ID, {
       ruleName: "Finance + admin dual approval",
       priority: 10,
-      conditions: [
-        { field: "cost_center.code", op: "eq", value: "CC-FIN-04" },
-      ],
+      conditions: [{ field: "cost_center.code", op: "eq", value: "CC-FIN-04" }],
       action: "require_approval",
       approvalMode: "all_of_parallel",
       approvers: [{ kind: "tenant_finance_admin" }, { kind: "tenant_admin" }],
@@ -272,14 +275,15 @@ describe("SR-QA-TENANT-001 — approval-requests: approve happy path (write→re
       expect.arrayContaining(["tenant-user-demo-003", "tenant-user-demo-001"]),
     );
 
-    const afterFirst = await ownedMobilityService.approveTenantBookingApprovalRequest(
-      TENANT_ID,
-      request.approvalRequestId,
-      "tenant-user-demo-003",
-      "tenant_finance_admin",
-      {},
-      "req-qa-double-approve-first",
-    );
+    const afterFirst =
+      await ownedMobilityService.approveTenantBookingApprovalRequest(
+        TENANT_ID,
+        request.approvalRequestId,
+        "tenant-user-demo-003",
+        "tenant_finance_admin",
+        {},
+        "req-qa-double-approve-first",
+      );
     // Still pending: only one of two required approvers has decided.
     expect(afterFirst.status).toBe("pending");
 
@@ -310,12 +314,10 @@ describe("SR-QA-TENANT-001 — approval-requests: approve happy path (write→re
   it("rejects a decision from an actor who is not a resolved approver on the request", async () => {
     const { tenantPartnerService, ownedMobilityService } = createHarness();
 
-    tenantPartnerService.upsertApprovalRule(TENANT_ID, {
+    await tenantPartnerService.upsertApprovalRule(TENANT_ID, {
       ruleName: "Finance approval",
       priority: 10,
-      conditions: [
-        { field: "cost_center.code", op: "eq", value: "CC-FIN-04" },
-      ],
+      conditions: [{ field: "cost_center.code", op: "eq", value: "CC-FIN-04" }],
       action: "require_approval",
       approvers: [{ kind: "tenant_finance_admin" }],
     } as never);
@@ -377,7 +379,7 @@ describe("SR-QA-TENANT-001 — cost-center quota: consumption ledger and summary
     } as never);
     expect(costCenter.activeFlag).toBe(true);
 
-    tenantPartnerService.upsertTenantQuotaPolicy(TENANT_ID, {
+    await tenantPartnerService.upsertTenantQuotaPolicy(TENANT_ID, {
       costCenterCode: "CC-QA-QUOTA-01",
       period: "monthly",
       limit: {
@@ -400,7 +402,10 @@ describe("SR-QA-TENANT-001 — cost-center quota: consumption ledger and summary
       "CC-QA-QUOTA-01",
       reservationWindowStart,
     );
-    expect(before.usage.confirmedBookingCount + before.usage.pendingReservedBookingCount).toBe(0);
+    expect(
+      before.usage.confirmedBookingCount +
+        before.usage.pendingReservedBookingCount,
+    ).toBe(0);
 
     const created = await ownedMobilityService.createTenantBooking(
       createBookingCommand({
@@ -433,9 +438,12 @@ describe("SR-QA-TENANT-001 — cost-center quota: consumption ledger and summary
       reservationWindowStart,
     );
     expect(
-      after.usage.confirmedBookingCount + after.usage.pendingReservedBookingCount,
+      after.usage.confirmedBookingCount +
+        after.usage.pendingReservedBookingCount,
     ).toBe(
-      before.usage.confirmedBookingCount + before.usage.pendingReservedBookingCount + 1,
+      before.usage.confirmedBookingCount +
+        before.usage.pendingReservedBookingCount +
+        1,
     );
     if (after.usage.bookingCountRemaining !== null) {
       expect(after.usage.bookingCountRemaining).toBeLessThan(
@@ -462,7 +470,7 @@ describe("SR-QA-TENANT-001 — cost-center quota: consumption ledger and summary
       code: "CC-QA-QUOTA-BOUNDARY",
       name: "QA Quota Boundary Cost Center",
     } as never);
-    tenantPartnerService.upsertTenantQuotaPolicy(TENANT_ID, {
+    await tenantPartnerService.upsertTenantQuotaPolicy(TENANT_ID, {
       costCenterCode: "CC-QA-QUOTA-BOUNDARY",
       period: "monthly",
       limit: {
@@ -488,7 +496,10 @@ describe("SR-QA-TENANT-001 — cost-center quota: consumption ledger and summary
       "CC-QA-QUOTA-BOUNDARY",
       reservationWindowStart,
     );
-    expect(before.usage.confirmedBookingCount + before.usage.pendingReservedBookingCount).toBe(0);
+    expect(
+      before.usage.confirmedBookingCount +
+        before.usage.pendingReservedBookingCount,
+    ).toBe(0);
 
     const created = await ownedMobilityService.createTenantBooking(
       createBookingCommand({
@@ -518,9 +529,12 @@ describe("SR-QA-TENANT-001 — cost-center quota: consumption ledger and summary
       reservationWindowStart,
     );
     expect(
-      after.usage.confirmedBookingCount + after.usage.pendingReservedBookingCount,
+      after.usage.confirmedBookingCount +
+        after.usage.pendingReservedBookingCount,
     ).toBe(
-      before.usage.confirmedBookingCount + before.usage.pendingReservedBookingCount + 1,
+      before.usage.confirmedBookingCount +
+        before.usage.pendingReservedBookingCount +
+        1,
     );
   });
 
@@ -531,7 +545,7 @@ describe("SR-QA-TENANT-001 — cost-center quota: consumption ledger and summary
       code: "CC-QA-QUOTA-ZERO",
       name: "QA Zero Quota Cost Center",
     } as never);
-    tenantPartnerService.upsertTenantQuotaPolicy(TENANT_ID, {
+    await tenantPartnerService.upsertTenantQuotaPolicy(TENANT_ID, {
       costCenterCode: "CC-QA-QUOTA-ZERO",
       period: "monthly",
       limit: {

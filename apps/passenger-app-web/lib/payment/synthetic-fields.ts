@@ -2,12 +2,14 @@ import type { PassengerPaymentFieldsPort } from "../../../../packages/passenger-
 
 /** Explicit test/nonproduction adapter: no first-party financial-field inputs. */
 export function createSyntheticPaymentFields(options: {
-  runtime: "production" | "nonproduction";
+  runtime: "production" | "nonproduction" | "review";
   issueSyntheticNonce: () => string;
+  captureResult?: "success" | "retry_once";
 }): PassengerPaymentFieldsPort {
   if (
-    options.runtime !== "nonproduction" ||
-    process.env.NODE_ENV === "production"
+    options.runtime !== "review" &&
+    (options.runtime !== "nonproduction" ||
+      process.env.NODE_ENV === "production")
   ) {
     throw new Error("synthetic_payment_fields_forbidden");
   }
@@ -28,7 +30,9 @@ export function createSyntheticPaymentFields(options: {
           /[0-9]/g,
           (digit) => `_${String.fromCharCode(97 + Number(digit))}`,
         );
-      return { providerToken: `synthetic_credential_${encodedNonce}` };
+      return {
+        providerToken: `synthetic_credential_${options.runtime === "review" && options.captureResult === "retry_once" ? "review_retry_" : ""}${encodedNonce}`,
+      };
     },
     dispose() {
       disposed = true;

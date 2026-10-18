@@ -24,6 +24,7 @@ import {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import type { AuditedActionResult } from "../../common/action-receipt";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import type { PoolClient } from "pg";
 import type {
@@ -39,6 +40,21 @@ import {
   normalizePassengerComplaintIntake,
   type PassengerComplaintIntake,
 } from "./passenger-complaint-intake";
+
+type ComplaintActionResult<T, Capture extends boolean> = Capture extends true
+  ? AuditedActionResult<T>
+  : T;
+
+// An ordinary (non-settlement) canonical write defers its audit record until
+// persistence confirms (see finishOrdinaryComplaintAction), so a caller that
+// wants that confirmed receipt back (captureAudit: true) must await it;
+// every other caller keeps today's synchronous, optimistic return.
+type OrdinaryComplaintActionResult<
+  T,
+  Capture extends boolean,
+> = Capture extends true
+  ? ComplaintActionResult<T, Capture> | Promise<ComplaintActionResult<T, Capture>>
+  : ComplaintActionResult<T, Capture>;
 
 const COMPLAINT_CATEGORY_VALUES = [
   "late_arrival",
@@ -241,7 +257,11 @@ export class ComplaintService implements OnModuleInit {
     }
   }
 
-  createComplaintCase(command: CreateComplaintCaseCommand, requestId?: string) {
+  createComplaintCase<Capture extends boolean = false>(
+    command: CreateComplaintCaseCommand,
+    requestId?: string,
+    options?: { captureAudit?: Capture },
+  ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     this.assertValidCategory(command.category);
     this.assertNonBlank(command.description, "description");
 
@@ -273,7 +293,7 @@ export class ComplaintService implements OnModuleInit {
           },
           requestId,
         ),
-      );
+      ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
     }
 
     const now = new Date();
@@ -320,30 +340,30 @@ export class ComplaintService implements OnModuleInit {
         : undefined,
       command,
     );
-    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
-      this.recordAudit(
-        {
-          actorId: null,
-          actorType: "system",
-          tenantId: null,
-          moduleName: "complaint",
-          actionName: "create_complaint_case",
-          resourceType: "complaint_case",
-          resourceId: caseNo,
-          newValuesSummary: {
-            caseSource: command.caseSource,
-            category: command.category,
-            severity: command.severity,
-            status: complaintCase.status,
-            relatedOrderId: complaintCase.relatedOrderId,
-            relatedCallId: complaintCase.relatedCallId,
-          },
+    return this.finishOrdinaryComplaintAction(
+      this.cloneComplaintCase(complaintCase),
+      persistence,
+      isOrdinaryDbWrite,
+      {
+        actorId: null,
+        actorType: "system",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: "create_complaint_case",
+        resourceType: "complaint_case",
+        resourceId: caseNo,
+        newValuesSummary: {
+          caseSource: command.caseSource,
+          category: command.category,
+          severity: command.severity,
+          status: complaintCase.status,
+          relatedOrderId: complaintCase.relatedOrderId,
+          relatedCallId: complaintCase.relatedCallId,
         },
-        requestId,
-      ),
+      },
+      requestId,
+      options,
     );
-
-    return this.cloneComplaintCase(complaintCase);
   }
 
   async createPassengerComplaintCase(input: PassengerComplaintIntake) {
@@ -664,11 +684,12 @@ export class ComplaintService implements OnModuleInit {
     }));
   }
 
-  assignComplaintCase(
+  assignComplaintCase<Capture extends boolean = false>(
     caseNo: string,
     command: AssignComplaintCaseCommand,
     requestId?: string,
-  ) {
+    options?: { captureAudit?: Capture },
+  ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     this.assertNonBlank(command.assigneeId, "assigneeId");
 
     const complaintCase = this.requireComplaintCase(caseNo);
@@ -701,34 +722,41 @@ export class ComplaintService implements OnModuleInit {
             ])
         : undefined,
     );
-    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
-      this.recordAudit(
-        {
-          actorId: updated.assigneeId,
-          actorType: "ops_user",
-          tenantId: null,
-          moduleName: "complaint",
-          actionName: "assign_complaint_case",
-          resourceType: "complaint_case",
-          resourceId: caseNo,
-          newValuesSummary: {
-            assigneeId: updated.assigneeId,
-            status: updated.status,
-          },
+    return this.finishOrdinaryComplaintAction(
+      this.cloneComplaintCase(updated),
+      persistence,
+      isOrdinaryDbWrite,
+      {
+        actorId: updated.assigneeId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: "assign_complaint_case",
+        resourceType: "complaint_case",
+        resourceId: caseNo,
+        newValuesSummary: {
+          assigneeId: updated.assigneeId,
+          status: updated.status,
         },
-        requestId,
-      ),
+      },
+      requestId,
+      options,
     );
-
-    return this.cloneComplaintCase(updated);
   }
 
-  addComplaintCaseNote(
+  addComplaintCaseNote<Capture extends boolean = false>(
     caseNo: string,
     command: AddComplaintCaseNoteCommand,
     requestId?: string,
-  ) {
-    return this.addComplaintCaseNoteInternal(caseNo, command, requestId);
+    options?: { captureAudit?: Capture },
+  ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
+    return this.addComplaintCaseNoteInternal(
+      caseNo,
+      command,
+      requestId,
+      false,
+      options,
+    );
   }
 
   /** The Fleet case contract permits replies until closed, including a
@@ -750,12 +778,13 @@ export class ComplaintService implements OnModuleInit {
     return this.addComplaintCaseNoteInternal(caseNo, command, requestId, true);
   }
 
-  private addComplaintCaseNoteInternal(
+  private addComplaintCaseNoteInternal<Capture extends boolean = false>(
     caseNo: string,
     command: AddComplaintCaseNoteCommand,
     requestId?: string,
     allowResolvedSettlement = false,
-  ) {
+    options?: { captureAudit?: Capture },
+  ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     this.assertNonBlank(command.note, "note");
 
     const complaintCase = this.requireComplaintCase(caseNo);
@@ -794,26 +823,26 @@ export class ComplaintService implements OnModuleInit {
             ])
         : undefined,
     );
-    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
-      this.recordAudit(
-        {
-          actorId: updated.assigneeId,
-          actorType: "ops_user",
-          tenantId: null,
-          moduleName: "complaint",
-          actionName: "add_complaint_case_note",
-          resourceType: "complaint_case",
-          resourceId: caseNo,
-          newValuesSummary: {
-            status: updated.status,
-            note: command.note.trim(),
-          },
+    return this.finishOrdinaryComplaintAction(
+      this.cloneComplaintCase(updated),
+      persistence,
+      isOrdinaryDbWrite,
+      {
+        actorId: updated.assigneeId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: "add_complaint_case_note",
+        resourceType: "complaint_case",
+        resourceId: caseNo,
+        newValuesSummary: {
+          status: updated.status,
+          note: command.note.trim(),
         },
-        requestId,
-      ),
+      },
+      requestId,
+      options,
     );
-
-    return this.cloneComplaintCase(updated);
   }
 
   getComplaintExportView(caseNo: string): ComplaintExportViewRecord {
@@ -829,11 +858,12 @@ export class ComplaintService implements OnModuleInit {
     };
   }
 
-  resolveComplaintCase(
+  resolveComplaintCase<Capture extends boolean = false>(
     caseNo: string,
     command: ResolveComplaintCaseCommand,
     requestId?: string,
-  ) {
+    options?: { captureAudit?: Capture },
+  ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     this.assertNonBlank(command.resolutionCode, "resolutionCode");
     this.assertNonBlank(command.closingNote, "closingNote");
 
@@ -860,9 +890,14 @@ export class ComplaintService implements OnModuleInit {
             },
             requestId,
           ),
-        );
+        ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
       }
-      return this.cloneComplaintCase(complaintCase);
+      return this.existingComplaintAction(
+        this.cloneComplaintCase(complaintCase),
+        "resolve_complaint_case",
+        requestId,
+        options,
+      ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
     }
     if (complaintCase.status === "closed") {
       throw new ApiRequestError(
@@ -908,33 +943,34 @@ export class ComplaintService implements OnModuleInit {
             ])
         : undefined,
     );
-    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
-      this.recordAudit(
-        {
-          actorId: null,
-          actorType: "ops_user",
-          tenantId: null,
-          moduleName: "complaint",
-          actionName: "resolve_complaint_case",
-          resourceType: "complaint_case",
-          resourceId: caseNo,
-          newValuesSummary: {
-            status: updated.status,
-            resolutionCode: command.resolutionCode,
-          },
+    return this.finishOrdinaryComplaintAction(
+      this.cloneComplaintCase(updated),
+      persistence,
+      isOrdinaryDbWrite,
+      {
+        actorId: null,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: "resolve_complaint_case",
+        resourceType: "complaint_case",
+        resourceId: caseNo,
+        newValuesSummary: {
+          status: updated.status,
+          resolutionCode: command.resolutionCode,
         },
-        requestId,
-      ),
+      },
+      requestId,
+      options,
     );
-
-    return this.cloneComplaintCase(updated);
   }
 
-  closeComplaintCase(
+  closeComplaintCase<Capture extends boolean = false>(
     caseNo: string,
     command: ResolveComplaintCaseCommand,
     requestId?: string,
-  ) {
+    options?: { captureAudit?: Capture },
+  ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     this.assertNonBlank(command.resolutionCode, "resolutionCode");
     this.assertNonBlank(command.closingNote, "closingNote");
 
@@ -961,9 +997,14 @@ export class ComplaintService implements OnModuleInit {
             },
             requestId,
           ),
-        );
+        ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
       }
-      return this.cloneComplaintCase(complaintCase);
+      return this.existingComplaintAction(
+        this.cloneComplaintCase(complaintCase),
+        "close_complaint_case",
+        requestId,
+        options,
+      ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
     }
 
     this.assertValidResolutionCode(
@@ -998,33 +1039,34 @@ export class ComplaintService implements OnModuleInit {
             ])
         : undefined,
     );
-    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
-      this.recordAudit(
-        {
-          actorId: null,
-          actorType: "ops_user",
-          tenantId: null,
-          moduleName: "complaint",
-          actionName: "close_complaint_case",
-          resourceType: "complaint_case",
-          resourceId: caseNo,
-          newValuesSummary: {
-            status: updated.status,
-            resolutionCode: command.resolutionCode,
-          },
+    return this.finishOrdinaryComplaintAction(
+      this.cloneComplaintCase(updated),
+      persistence,
+      isOrdinaryDbWrite,
+      {
+        actorId: null,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: "close_complaint_case",
+        resourceType: "complaint_case",
+        resourceId: caseNo,
+        newValuesSummary: {
+          status: updated.status,
+          resolutionCode: command.resolutionCode,
         },
-        requestId,
-      ),
+      },
+      requestId,
+      options,
     );
-
-    return this.cloneComplaintCase(updated);
   }
 
-  reopenComplaintCase(
+  reopenComplaintCase<Capture extends boolean = false>(
     caseNo: string,
     command: ReopenComplaintCaseCommand,
     requestId?: string,
-  ) {
+    options?: { captureAudit?: Capture },
+  ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     this.assertNonBlank(command.reason, "reason");
 
     const complaintCase = this.requireComplaintCase(caseNo);
@@ -1057,7 +1099,7 @@ export class ComplaintService implements OnModuleInit {
             },
             requestId,
           ),
-        );
+        ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
       }
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -1113,35 +1155,44 @@ export class ComplaintService implements OnModuleInit {
             ])
         : undefined,
     );
-    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
-      this.recordAudit(
-        {
-          actorId: null,
-          actorType: "ops_user",
-          tenantId: null,
-          moduleName: "complaint",
-          actionName: "reopen_complaint_case",
-          resourceType: "complaint_case",
-          resourceId: caseNo,
-          newValuesSummary: {
-            status: updated.status,
-            reason: command.reason,
-            reopenCount: updated.reopenCount,
-            slaDueAt: newSlaDueAt,
-            slaBreach: false,
-          },
+    return this.finishOrdinaryComplaintAction(
+      this.cloneComplaintCase(updated),
+      persistence,
+      isOrdinaryDbWrite,
+      {
+        actorId: null,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: "reopen_complaint_case",
+        resourceType: "complaint_case",
+        resourceId: caseNo,
+        newValuesSummary: {
+          status: updated.status,
+          reason: command.reason,
+          reopenCount: updated.reopenCount,
+          slaDueAt: newSlaDueAt,
+          slaBreach: false,
         },
-        requestId,
-      ),
+      },
+      requestId,
+      options,
     );
-
-    return this.cloneComplaintCase(updated);
   }
 
-  markComplaintSlaBreach(caseNo: string, requestId?: string) {
+  markComplaintSlaBreach<Capture extends boolean = false>(
+    caseNo: string,
+    requestId?: string,
+    options?: { captureAudit?: Capture },
+  ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     const complaintCase = this.requireComplaintCase(caseNo);
     if (complaintCase.slaBreach) {
-      return this.cloneComplaintCase(complaintCase);
+      return this.existingComplaintAction(
+        this.cloneComplaintCase(complaintCase),
+        "mark_complaint_sla_breach",
+        requestId,
+        options,
+      ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
     }
 
     const updated = {
@@ -1169,42 +1220,44 @@ export class ComplaintService implements OnModuleInit {
             ])
         : undefined,
     );
-    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () => {
-      this.auditNotificationService.recordNotification({
+    return this.finishOrdinaryComplaintAction(
+      this.cloneComplaintCase(updated),
+      persistence,
+      isOrdinaryDbWrite,
+      {
+        actorId: null,
+        actorType: "system",
         tenantId: null,
-        channel: "ops_notice",
-        title: "Complaint SLA breached",
-        message: `Complaint ${caseNo} exceeded SLA due at ${complaintCase.slaDueAt}.`,
-        status: "unread",
-      });
-      this.recordAudit(
-        {
-          actorId: null,
-          actorType: "system",
-          tenantId: null,
-          moduleName: "complaint",
-          actionName: "mark_complaint_sla_breach",
-          resourceType: "complaint_case",
-          resourceId: caseNo,
-          newValuesSummary: {
-            status: updated.status,
-            slaBreach: true,
-            slaDueAt: complaintCase.slaDueAt,
-          },
+        moduleName: "complaint",
+        actionName: "mark_complaint_sla_breach",
+        resourceType: "complaint_case",
+        resourceId: caseNo,
+        newValuesSummary: {
+          status: updated.status,
+          slaBreach: true,
+          slaDueAt: complaintCase.slaDueAt,
         },
-        requestId,
-      );
-    });
-
-    return this.cloneComplaintCase(updated);
+      },
+      requestId,
+      options,
+      () =>
+        this.auditNotificationService.recordNotification({
+          tenantId: null,
+          channel: "ops_notice",
+          title: "Complaint SLA breached",
+          message: `Complaint ${caseNo} exceeded SLA due at ${complaintCase.slaDueAt}.`,
+          status: "unread",
+        }),
+    );
   }
 
-  escalateToIncident(
+  escalateToIncident<Capture extends boolean = false>(
     caseNo: string,
     incidentId: string,
     reason: string,
     requestId?: string,
-  ) {
+    options?: { captureAudit?: Capture },
+  ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     this.assertNonBlank(reason, "reason");
 
     const complaintCase = this.requireComplaintCase(caseNo);
@@ -1235,7 +1288,7 @@ export class ComplaintService implements OnModuleInit {
             },
             requestId,
           ),
-        );
+        ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
       }
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -1273,33 +1326,34 @@ export class ComplaintService implements OnModuleInit {
             ])
         : undefined,
     );
-    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
-      this.recordAudit(
-        {
-          actorId: null,
-          actorType: "ops_user",
-          tenantId: null,
-          moduleName: "complaint",
-          actionName: "escalate_to_incident",
-          resourceType: "complaint_case",
-          resourceId: caseNo,
-          newValuesSummary: {
-            relatedIncidentId: incidentId,
-            reason,
-          },
+    return this.finishOrdinaryComplaintAction(
+      this.cloneComplaintCase(updated),
+      persistence,
+      isOrdinaryDbWrite,
+      {
+        actorId: null,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: "escalate_to_incident",
+        resourceType: "complaint_case",
+        resourceId: caseNo,
+        newValuesSummary: {
+          relatedIncidentId: incidentId,
+          reason,
         },
-        requestId,
-      ),
+      },
+      requestId,
+      options,
     );
-
-    return this.cloneComplaintCase(updated);
   }
 
-  linkIncident(
+  linkIncident<Capture extends boolean = false>(
     caseNo: string,
     command: LinkComplaintToIncidentCommand,
     requestId?: string,
-  ) {
+    options?: { captureAudit?: Capture },
+  ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     this.assertNonBlank(command.incidentId, "incidentId");
     const incidentId = command.incidentId.trim();
 
@@ -1320,7 +1374,12 @@ export class ComplaintService implements OnModuleInit {
       );
     }
     if (complaintCase.relatedIncidentId === incidentId) {
-      return this.cloneComplaintCase(complaintCase);
+      return this.existingComplaintAction(
+        this.cloneComplaintCase(complaintCase),
+        "link_incident",
+        requestId,
+        options,
+      ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
     }
 
     const updated = {
@@ -1348,25 +1407,25 @@ export class ComplaintService implements OnModuleInit {
             ])
         : undefined,
     );
-    this.emitAfterOrdinaryPersistence(persistence, isOrdinaryDbWrite, () =>
-      this.recordAudit(
-        {
-          actorId: null,
-          actorType: "ops_user",
-          tenantId: null,
-          moduleName: "complaint",
-          actionName: "link_incident",
-          resourceType: "complaint_case",
-          resourceId: caseNo,
-          newValuesSummary: {
-            relatedIncidentId: incidentId,
-          },
+    return this.finishOrdinaryComplaintAction(
+      this.cloneComplaintCase(updated),
+      persistence,
+      isOrdinaryDbWrite,
+      {
+        actorId: null,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: "link_incident",
+        resourceType: "complaint_case",
+        resourceId: caseNo,
+        newValuesSummary: {
+          relatedIncidentId: incidentId,
         },
-        requestId,
-      ),
+      },
+      requestId,
+      options,
     );
-
-    return this.cloneComplaintCase(updated);
   }
 
   evaluateAllSlaBreach(requestId?: string) {
@@ -1765,6 +1824,39 @@ export class ComplaintService implements OnModuleInit {
     void persistence.then(emit, () => undefined);
   }
 
+  /** Builds the audit-log record for a mutation and, for ordinary canonical
+   * writes, defers it (and any caller-supplied onCommitted side effect, e.g.
+   * a notification) until persistence confirms, same as
+   * emitAfterOrdinaryPersistence above. A caller that asked for the receipt
+   * back via captureAudit must then await it, since it does not exist until
+   * the write actually commits; every other caller keeps the existing
+   * synchronous, optimistic return. */
+  private finishOrdinaryComplaintAction<T, Capture extends boolean = false>(
+    data: T,
+    persistence: Promise<void>,
+    isOrdinaryDbWrite: boolean,
+    input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
+    requestId?: string,
+    options?: { captureAudit?: Capture },
+    onCommitted?: () => void,
+  ): OrdinaryComplaintActionResult<T, Capture> {
+    const finish = () => {
+      onCommitted?.();
+      return this.finishComplaintAction(data, input, requestId, options);
+    };
+    if (!isOrdinaryDbWrite) {
+      return finish() as OrdinaryComplaintActionResult<T, Capture>;
+    }
+    if (!options?.captureAudit) {
+      void persistence.then(finish, () => undefined);
+      return data as OrdinaryComplaintActionResult<T, Capture>;
+    }
+    return persistence.then(finish) as OrdinaryComplaintActionResult<
+      T,
+      Capture
+    >;
+  }
+
   private assertValidCategory(
     category: string,
   ): asserts category is ComplaintCategory {
@@ -1798,6 +1890,96 @@ export class ComplaintService implements OnModuleInit {
     return trimmed ? trimmed : null;
   }
 
+  private finishComplaintAction<T, Capture extends boolean = false>(
+    data: T,
+    input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
+    requestId?: string,
+    options?: { captureAudit?: Capture },
+  ): ComplaintActionResult<T, Capture> {
+    const auditLog = this.recordAudit(input, requestId);
+    return (
+      options?.captureAudit ? { data, auditLog } : data
+    ) as ComplaintActionResult<T, Capture>;
+  }
+
+  private existingComplaintAction<Capture extends boolean = false>(
+    data: ComplaintCaseRecord,
+    actionName: string,
+    requestId?: string,
+    options?: { captureAudit?: Capture },
+  ): ComplaintActionResult<ComplaintCaseRecord, Capture> {
+    if (!options?.captureAudit) {
+      return data as ComplaintActionResult<ComplaintCaseRecord, Capture>;
+    }
+    const auditLog = this.auditNotificationService
+      .getAuditLogsSnapshot()
+      .find(
+        (entry) =>
+          entry.moduleName === "complaint" &&
+          entry.resourceType === "complaint_case" &&
+          entry.resourceId === data.caseNo &&
+          entry.actionName === actionName,
+      );
+    if (auditLog) {
+      return { data, auditLog } as ComplaintActionResult<
+        ComplaintCaseRecord,
+        Capture
+      >;
+    }
+    // Older completed commands may predate retained audit history. Record this
+    // acknowledgement without inventing a prior event or repeating the write.
+    return this.finishComplaintAction(
+      data,
+      {
+        actorId: null,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: `${actionName}_acknowledged`,
+        resourceType: "complaint_case",
+        resourceId: data.caseNo,
+        newValuesSummary: { outcome: "already_completed", status: data.status },
+      },
+      requestId,
+      options,
+    );
+  }
+
+  acknowledgeExistingCaseAction(
+    data: ComplaintCaseRecord,
+    actionName: string,
+    requestId?: string,
+  ) {
+    return this.existingComplaintAction(
+      this.cloneComplaintCase(data),
+      actionName,
+      requestId,
+      { captureAudit: true },
+    );
+  }
+
+  getComplaintExportViewWithReceipt(caseNo: string, requestId?: string) {
+    const data = this.getComplaintExportView(caseNo);
+    return this.finishComplaintAction(
+      data,
+      {
+        actorId: null,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: "export_complaint_case_view",
+        resourceType: "complaint_case",
+        resourceId: caseNo,
+        newValuesSummary: {
+          exportGeneratedAt: data.exportGeneratedAt,
+          readyForAudit: data.readyForAudit,
+        },
+      },
+      requestId,
+      { captureAudit: true },
+    );
+  }
+
   private recordAudit(
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
     requestId?: string,
@@ -1811,6 +1993,6 @@ export class ComplaintService implements OnModuleInit {
     if (requestId) {
       auditLogInput.requestId = requestId;
     }
-    this.auditNotificationService.recordAuditLog(auditLogInput);
+    return this.auditNotificationService.recordAuditLog(auditLogInput);
   }
 }
