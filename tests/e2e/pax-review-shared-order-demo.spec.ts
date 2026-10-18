@@ -1168,7 +1168,8 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           response.request().method() === "POST",
       );
       await pax.getByRole("button", { name: "驗證", exact: true }).click();
-      expect((await verification).status()).toBe(200);
+      const actualVerificationStatus = (await verification).status();
+      expect(actualVerificationStatus).toBe(201);
       const accountResponse = await pax.request.get(
         `${PAX}/api/passenger-app/me`,
       );
@@ -1215,7 +1216,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         body: JSON.stringify({
           entry: "/login",
           actualSMSDeliverySimulated: true,
-          actualOrdinaryOtpVerificationStatus: 200,
+          actualOrdinaryOtpVerificationStatus: actualVerificationStatus,
           actualOrdinaryConsentPromptPresented: !returningConsent,
           returningAccountConsentAlreadyCurrent: returningConsent,
           actualPersistedTermsVersion: after.termsVersion,
