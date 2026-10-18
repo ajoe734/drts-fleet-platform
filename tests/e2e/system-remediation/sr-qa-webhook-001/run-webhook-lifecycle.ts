@@ -33,13 +33,21 @@ function createControlledReceiver() {
     url: string;
     requests: ControlledReceiverRequest[];
     setHandler: (
-      handler: (req: http.IncomingMessage, res: http.ServerResponse, body: string) => void,
+      handler: (
+        req: http.IncomingMessage,
+        res: http.ServerResponse,
+        body: string,
+      ) => void,
     ) => void;
     close: () => Promise<void>;
   }>((resolveReady) => {
     const requests: ControlledReceiverRequest[] = [];
     let customHandler:
-      | ((req: http.IncomingMessage, res: http.ServerResponse, body: string) => void)
+      | ((
+          req: http.IncomingMessage,
+          res: http.ServerResponse,
+          body: string,
+        ) => void)
       | null = null;
 
     const server = http.createServer((req, res) => {
@@ -47,7 +55,11 @@ function createControlledReceiver() {
       req.on("data", (chunk: Buffer) => chunks.push(chunk));
       req.on("end", () => {
         const rawBody = Buffer.concat(chunks).toString("utf-8");
-        requests.push({ method: req.method ?? "UNKNOWN", headers: req.headers, rawBody });
+        requests.push({
+          method: req.method ?? "UNKNOWN",
+          headers: req.headers,
+          rawBody,
+        });
         if (customHandler) {
           customHandler(req, res, rawBody);
         } else {
@@ -65,13 +77,20 @@ function createControlledReceiver() {
         setHandler: (handler) => {
           customHandler = handler;
         },
-        close: () => new Promise<void>((resolveClose) => server.close(() => resolveClose())),
+        close: () =>
+          new Promise<void>((resolveClose) =>
+            server.close(() => resolveClose()),
+          ),
       });
     });
   });
 }
 
-function verifyHmacSignature(headerValue: string, rawBody: string, secret: string) {
+function verifyHmacSignature(
+  headerValue: string,
+  rawBody: string,
+  secret: string,
+) {
   const match = /^v=(\d+);t=([^;]+);sig=([0-9a-f]+)$/.exec(headerValue);
   if (!match) {
     return { valid: false, version: 0 };
@@ -135,27 +154,38 @@ async function main() {
       { keyName: "Revocation Target Key", scopes: ["tenant:read"] },
       "req-e2e-issue-002",
     );
-    service.revokeApiKey(tenantId, revocable.apiKey.apiKeyId, "req-e2e-revoke-001");
+    service.revokeApiKey(
+      tenantId,
+      revocable.apiKey.apiKeyId,
+      "req-e2e-revoke-001",
+    );
     const revokedReadback = service
       .listApiKeys(tenantId)
       .find((k) => k.apiKeyId === revocable.apiKey.apiKeyId)!;
 
     let rotationOfRevokedRejectedCode: string | null = null;
     try {
-      service.rotateApiKey(tenantId, revocable.apiKey.apiKeyId, { overlapDays: 3 });
+      service.rotateApiKey(tenantId, revocable.apiKey.apiKeyId, {
+        overlapDays: 3,
+      });
     } catch (err: unknown) {
       rotationOfRevokedRejectedCode =
         (err as { errorCode?: string })?.errorCode ??
-        (err as { getResponse?: () => { error?: { code?: string } } })
-          ?.getResponse?.()?.error?.code ??
+        (
+          err as { getResponse?: () => { error?: { code?: string } } }
+        )?.getResponse?.()?.error?.code ??
         null;
     }
 
     // ---- C112: real HTTP dispatch, HMAC verified against wire bytes ----
     const webhookSecret = "whsec_e2e_verified_signing_secret_999";
-    const createdWebhook = service.createWebhookEndpoint(
+    const createdWebhook = await service.createWebhookEndpoint(
       tenantId,
-      { url: receiver.url, secret: webhookSecret, events: ["tenant.webhook.test"] },
+      {
+        url: receiver.url,
+        secret: webhookSecret,
+        events: ["tenant.webhook.test"],
+      },
       "req-e2e-create-wh-001",
     );
 
@@ -165,8 +195,14 @@ async function main() {
       "req-e2e-send-test-001",
     );
     const firstRequest = receiver.requests[receiver.requests.length - 1]!;
-    const firstSigHeader = firstRequest.headers["x-drts-webhook-signature"] as string;
-    const firstHmac = verifyHmacSignature(firstSigHeader, firstRequest.rawBody, webhookSecret);
+    const firstSigHeader = firstRequest.headers[
+      "x-drts-webhook-signature"
+    ] as string;
+    const firstHmac = verifyHmacSignature(
+      firstSigHeader,
+      firstRequest.rawBody,
+      webhookSecret,
+    );
     const endpointAfterFirstTest = service.listWebhookEndpoints(tenantId)[0]!;
 
     // 503 -> queued with exponential backoff
@@ -198,20 +234,30 @@ async function main() {
       .listNotifications()
       .filter((n) => n.tenantId === tenantId);
     const disabledNoticeFound = disableNotices.some((n) =>
-      n.title.includes("Tenant webhook disabled after repeated delivery failures"),
+      n.title.includes(
+        "Tenant webhook disabled after repeated delivery failures",
+      ),
     );
 
     // Secret rotation v2 + recovery redelivery
     const secretV2 = "whsec_rotated_e2e_secret_v2";
-    const rotatedSecret = service.rotateWebhookSecret(
+    const rotatedSecret = await service.rotateWebhookSecret(
       tenantId,
-      { webhookId: createdWebhook.webhookId, secret: secretV2, rotationReason: "e2e_recovery_rotation" },
+      {
+        webhookId: createdWebhook.webhookId,
+        secret: secretV2,
+        rotationReason: "e2e_recovery_rotation",
+      },
       "req-e2e-secret-rotate-001",
     );
-    const endpointAfterSecretRotation = service.listWebhookEndpoints(tenantId)[0]!;
-    const secretHistoryLeaksPlaintext = endpointAfterSecretRotation.secretHistory.some(
-      (hist) => (hist as unknown as Record<string, unknown>).secretValue !== undefined,
-    );
+    const endpointAfterSecretRotation =
+      service.listWebhookEndpoints(tenantId)[0]!;
+    const secretHistoryLeaksPlaintext =
+      endpointAfterSecretRotation.secretHistory.some(
+        (hist) =>
+          (hist as unknown as Record<string, unknown>).secretValue !==
+          undefined,
+      );
 
     receiver.setHandler((_req, res) => {
       res.writeHead(200, { "content-type": "application/json" });
@@ -224,8 +270,16 @@ async function main() {
     );
     const v2Request = receiver.requests[receiver.requests.length - 1]!;
     const v2SigHeader = v2Request.headers["x-drts-webhook-signature"] as string;
-    const v2HmacWithNewSecret = verifyHmacSignature(v2SigHeader, v2Request.rawBody, secretV2);
-    const v2HmacWithOldSecret = verifyHmacSignature(v2SigHeader, v2Request.rawBody, webhookSecret);
+    const v2HmacWithNewSecret = verifyHmacSignature(
+      v2SigHeader,
+      v2Request.rawBody,
+      secretV2,
+    );
+    const v2HmacWithOldSecret = verifyHmacSignature(
+      v2SigHeader,
+      v2Request.rawBody,
+      webhookSecret,
+    );
     const endpointAfterRecovery = service.listWebhookEndpoints(tenantId)[0]!;
 
     // Replay protection: a byte-for-byte replay of the last signed request
@@ -262,8 +316,12 @@ async function main() {
           scopes: issuedReadback.scopes,
           keyPrefix: issuedReadback.keyPrefix,
           maskedSuffix: issuedReadback.maskedSuffix,
-          hasPlaintextField: (issuedReadback as unknown as Record<string, unknown>).plaintextKey !== undefined,
-          hasKeyHashField: (issuedReadback as unknown as Record<string, unknown>).keyHash !== undefined,
+          hasPlaintextField:
+            (issuedReadback as unknown as Record<string, unknown>)
+              .plaintextKey !== undefined,
+          hasKeyHashField:
+            (issuedReadback as unknown as Record<string, unknown>).keyHash !==
+            undefined,
         },
         rotatedApiKeyId: rotated.apiKey.apiKeyId,
         rotatedPlaintextKey: rotated.plaintextKey,
@@ -294,12 +352,14 @@ async function main() {
             method: firstRequest.method,
             eventType: firstRequest.headers["x-drts-event-type"],
             tenantId: firstRequest.headers["x-drts-tenant-id"],
-            deliveryIdHeader: firstRequest.headers["x-drts-webhook-delivery-id"],
+            deliveryIdHeader:
+              firstRequest.headers["x-drts-webhook-delivery-id"],
             signatureHeader: firstSigHeader,
           },
           hmac: firstHmac,
           endpointStatusAfter: endpointAfterFirstTest.status,
-          lastDeliveredAt: endpointAfterFirstTest.runtimeMetadata.lastDeliveredAt,
+          lastDeliveredAt:
+            endpointAfterFirstTest.runtimeMetadata.lastDeliveredAt,
         },
         retryAttempt: {
           httpStatus: retryResult.httpStatus,
@@ -308,7 +368,9 @@ async function main() {
           deliveryStatus: queuedDelivery.status,
           deliveryHttpStatus: queuedDelivery.httpStatus,
           backoffSeconds: Math.round(
-            (Date.parse(queuedDelivery.nextAttemptAt!) - Date.parse(queuedDelivery.attemptedAt)) / 1000,
+            (Date.parse(queuedDelivery.nextAttemptAt!) -
+              Date.parse(queuedDelivery.attemptedAt)) /
+              1000,
           ),
         },
         permanentFailure: {
@@ -362,7 +424,10 @@ async function main() {
 
 main().catch((error) => {
   console.log(
-    JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+    JSON.stringify({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    }),
   );
   process.exit(1);
 });

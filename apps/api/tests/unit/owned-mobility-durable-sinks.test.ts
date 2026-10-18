@@ -30,6 +30,11 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
     it("uses outboxKey to produce deterministic deliveryId and deduplicates delivery without duplicate sends", async () => {
       const repo = {
         isEnabled: () => true,
+        persistConfigurationChanges: vi.fn(
+          async (...args: unknown[]): Promise<void> => {
+            await repo.persistChanges(...args);
+          },
+        ),
         persistChanges: vi.fn().mockResolvedValue(undefined),
         reportPersistenceFailure: vi.fn(),
       };
@@ -118,6 +123,11 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
     it("handles multiple active endpoints with distinct stable delivery IDs, no duplicate sends on retry, and propagates persistence failure", async () => {
       const repo = {
         isEnabled: () => true,
+        persistConfigurationChanges: vi.fn(
+          async (...args: unknown[]): Promise<void> => {
+            await repo.persistChanges(...args);
+          },
+        ),
         persistChanges: vi.fn().mockResolvedValue(undefined),
         reportPersistenceFailure: vi.fn(),
       };
@@ -691,6 +701,9 @@ describe("Durable Sinks Integration & Contract Gates (STAGE1-UAT-DURABLE-SINKS-2
     it("propagates webhook repository persistence errors during publishWebhookEvent", async () => {
       const repo = {
         isEnabled: () => true,
+        persistConfigurationChanges: vi
+          .fn()
+          .mockRejectedValue(new Error("Webhook DB write error")),
         persistChanges: vi
           .fn()
           .mockRejectedValue(new Error("Webhook DB write error")),
