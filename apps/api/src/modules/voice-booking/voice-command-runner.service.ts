@@ -31,6 +31,10 @@ import {
   type VoiceMediaRecordingAdapter,
 } from "./voice-evidence.service";
 import type { VoiceQueryExecutor } from "./voice-booking.repository";
+import {
+  readFinalizedCallRecording,
+  readVoiceRecordingContext,
+} from "./voice-recording-context";
 
 export class LeaseFencedError extends Error {
   constructor(
@@ -257,11 +261,19 @@ export class VoiceCommandRunnerService
         snapshotHash: proof.request.snapshotHash,
         snapshot,
       });
+      // A recording can finish while an already accepted booking is still
+      // pending. Preserve that completed manifest when the original order
+      // finally commits, rather than replacing it with the checkpoint ID.
+      const finalizedRecording = await readFinalizedCallRecording(
+        tx,
+        current.callId,
+      );
+      if (finalizedRecording) Object.assign(order, finalizedRecording);
       await this.orders.insertVoiceOrder(tx, order);
 
       const call = await tx.query(
         `UPDATE crm.phase1_call_sessions
-        SET record = record || $2::jsonb, updated_at = now()
+        SET record = record || $2::jsonb, linked_order_id = $3, updated_at = now()
         WHERE call_id = $1 AND (linked_order_id IS NULL OR linked_order_id = $3)
         RETURNING call_id`,
         [
@@ -271,7 +283,7 @@ export class VoiceCommandRunnerService
             voiceSessionId: locked.session.voiceSessionId,
             sourceChannel: "voice_agent",
             customerConfirmationId: proof.request.confirmationId,
-            recordingEvidenceRef: checkpoint.checkpointId,
+            recordingEvidenceRef: order.recordingEvidenceRef,
           }),
           order.orderId,
         ],
@@ -525,7 +537,7 @@ export class VoiceCommandRunnerService
         }
       }
 
-      const callId =
+      let callId =
         finalResult.scope?.callId ??
         (parsedPayload.callId as string | undefined) ??
         record.dedupeKey.replace(/^finalize_recording:(ai:|call:)?/, "");
@@ -542,7 +554,7 @@ export class VoiceCommandRunnerService
         finalResult.voiceSessionId ??
         (parsedPayload.voiceSessionId as string | undefined) ??
         null;
-      const linkedOrderId =
+      let linkedOrderId =
         finalResult.linkedOrderId ??
         (parsedPayload.linkedOrderId as string | undefined) ??
         null;
@@ -550,6 +562,19 @@ export class VoiceCommandRunnerService
         finalResult.manifestRef?.objectKey ??
         finalResult.manifestRef?.checksum ??
         null;
+
+      if (voiceSessionId) {
+        // Booking commits hold the original session before touching the call.
+        // Use that same ordering, then read the now-current bound order.
+        await tx.query(
+          "SELECT voice_session_id FROM voice.session WHERE voice_session_id = $1 FOR UPDATE",
+          [voiceSessionId],
+        );
+        const context = await readVoiceRecordingContext(tx, voiceSessionId);
+        if (!context) throw new Error("Voice recording context unavailable");
+        callId = context.callId;
+        linkedOrderId = context.linkedOrderId;
+      }
 
       // Update call session in crm.phase1_call_sessions
       if (callId) {
@@ -580,6 +605,7 @@ export class VoiceCommandRunnerService
             recordingId,
             recordingUrl: recordingUrl ?? existingRecord.recordingUrl ?? null,
             recordingState: "bound",
+            recordingEvidenceRef: manifestEvidenceRef ?? recordingId,
             flags: updatedFlags,
           };
           await tx.query(
@@ -1313,14 +1339,24 @@ export class VoiceCommandRunnerService
       };
     }
 
-    const callId =
+    let callId =
       (payload.callId as string | undefined) ??
       work.dedupeKey.replace(/^finalize_recording:(ai:|call:)?/, "");
-    const brandId = (payload.brandId as string | undefined) ?? "default";
+    let brandId = (payload.brandId as string | undefined) ?? "default";
+    const legId = (payload.legId as string | undefined) ?? null;
+    let linkedOrderId = (payload.linkedOrderId as string | undefined) ?? null;
+
+    if (work.voiceSessionId) {
+      const context = await this.commands.repository.withTransaction((tx) =>
+        readVoiceRecordingContext(tx, work.voiceSessionId!),
+      );
+      if (!context) throw new Error("Voice recording context unavailable");
+      callId = context.callId;
+      brandId = context.brandId;
+      linkedOrderId = context.linkedOrderId;
+    }
     const recordingId =
       (payload.recordingId as string | undefined) ?? `rec-${callId}`;
-    const legId = (payload.legId as string | undefined) ?? null;
-    const linkedOrderId = (payload.linkedOrderId as string | undefined) ?? null;
 
     let finalResult: unknown;
     if (this.mediaAdapter) {

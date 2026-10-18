@@ -21,6 +21,7 @@ import {
   type VoiceQueryExecutor,
 } from "./voice-session.repository";
 import { VoiceUsageService } from "./voice-usage.service";
+import { readVoiceRecordingContext } from "./voice-recording-context";
 import { VoiceBookingMetricsService } from "../../observability/voice-booking-metrics.service";
 import { voiceAlertMetrics } from "../../observability/voice-alert-metrics";
 import {
@@ -903,6 +904,15 @@ export class VoiceSessionService {
         leaseEpoch: command.expectedLeaseEpoch,
       });
 
+      if (!tx)
+        throw new Error("Voice recording context requires a transaction");
+      const recordingContext = await readVoiceRecordingContext(
+        tx,
+        session.voiceSessionId,
+      );
+      if (!recordingContext)
+        throw new Error("Voice recording context unavailable");
+
       const closeEvent = command.closeEvent;
       const eventType = closeEvent?.eventType ?? "call.ended";
       const sequence =
@@ -965,7 +975,8 @@ export class VoiceSessionService {
       const payloadRefData = JSON.stringify({
         voiceSessionId: session.voiceSessionId,
         callId: session.callId,
-        brandId: session.resourceScopeId,
+        brandId: recordingContext.brandId,
+        linkedOrderId: recordingContext.linkedOrderId,
         recordingId: command.recordingId ?? null,
         closedAt: occurredAt,
       });
@@ -1061,12 +1072,17 @@ export class VoiceSessionService {
         voice_session_id: string;
         call_id: string;
         resource_scope_id: string;
+        brand_id: string;
+        bound_order_id: string | null;
       }>(
-        `SELECT s.voice_session_id, s.call_id, s.resource_scope_id
+        `SELECT s.voice_session_id, s.call_id, s.resource_scope_id, scope.brand_id, i.bound_order_id
         FROM voice.session s
         LEFT JOIN voice.work_item w
           ON w.voice_session_id = s.voice_session_id
          AND w.work_type = 'finalize_recording'
+        JOIN voice.resource_scope scope ON scope.scope_id = s.resource_scope_id
+        LEFT JOIN voice.intent i ON i.voice_session_id = s.voice_session_id
+          AND i.action = 'create_owned_order'
         WHERE (s.dialog_state = 'closed' OR s.recording_state = 'finalizing')
           AND (w.work_id IS NULL OR w.status IN ('failed', 'dead_letter'))
         ORDER BY s.created_at ASC
@@ -1079,7 +1095,8 @@ export class VoiceSessionService {
         const payloadRef = JSON.stringify({
           voiceSessionId: sess.voice_session_id,
           callId: sess.call_id,
-          brandId: sess.resource_scope_id,
+          brandId: sess.brand_id,
+          linkedOrderId: sess.bound_order_id,
           recordingId: null,
           recoveredAt: new Date().toISOString(),
         });

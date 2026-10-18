@@ -255,6 +255,71 @@ describe.skipIf(!hostedPaymentEnabled)(
       ).rows;
     }
 
+    async function pendingVoiceOrder(p: ReturnType<typeof makePeer>) {
+      const f = await seedVoiceDispatchWorkFixture(h.pool!);
+      const commands = new VoiceBookingCommandService(
+        p.voice,
+        f.makeEvidence(p.voice) as never,
+        f.products as never,
+        f.areas as never,
+        f.access,
+      );
+      const accepted = await commands.accept("fixture-provider", f.request);
+      const store = new VoiceSessionRepository(p.database);
+      const session = await store.findSessionById(f.request.voiceSessionId);
+      await new VoiceSessionService(store).closeSession(
+        f.request.voiceSessionId,
+        session!.sessionVersion,
+      );
+      return { f, commands, accepted };
+    }
+
+    function simulatedRecorder(
+      beforeAck?: (
+        params: Parameters<VoiceMediaRecordingAdapter["finalizeRecording"]>[0],
+      ) => Promise<void>,
+    ): VoiceMediaRecordingAdapter {
+      return {
+        async finalizeRecording(params) {
+          await beforeAck?.(params);
+          return {
+            recordingId: params.scope.recordingId,
+            manifestRef: {
+              objectKey: "simulation/original-call-manifest",
+              objectVersion: "simulation-v1",
+              checksum: "simulation-checksum",
+              byteLength: 0,
+              durableAt: new Date().toISOString(),
+            },
+            verifiedAt: new Date().toISOString(),
+          };
+        },
+      };
+    }
+
+    async function expectOriginalRecordingLink(
+      orderId: string,
+      callId: string,
+      evidenceRef: string,
+    ) {
+      const result = await h.pool!.query(
+        `SELECT o.order_id, o.record AS order_record, c.linked_order_id, c.record AS call_record
+         FROM ops.phase1_owned_orders o JOIN crm.phase1_call_sessions c ON c.call_id=o.call_id
+         WHERE o.order_id=$1 AND c.call_id=$2`,
+        [orderId, callId],
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0]).toMatchObject({
+        order_id: orderId,
+        linked_order_id: orderId,
+        order_record: { recordingEvidenceRef: evidenceRef },
+        call_record: {
+          linkedOrderId: orderId,
+          recordingEvidenceRef: evidenceRef,
+        },
+      });
+    }
+
     it("persists an explicitly simulated notification receipt for the original booking result", async () => {
       const { a, b } = await seededPeers();
       const { f, committed } = await commitVoiceOrder(a);
@@ -440,7 +505,7 @@ describe.skipIf(!hostedPaymentEnabled)(
 
     it("a simulated recorder acknowledgement persists the canonical finalized voice state without duplicating close work", async () => {
       const { a, b } = await seededPeers();
-      const { f } = await commitVoiceOrder(a);
+      const { f, committed } = await commitVoiceOrder(a);
       const sessionStore = new VoiceSessionRepository(a.database);
       const session = await sessionStore.findSessionById(
         f.request.voiceSessionId,
@@ -461,6 +526,9 @@ describe.skipIf(!hostedPaymentEnabled)(
           calls += 1;
           expect(params.voiceSessionId).toBe(f.request.voiceSessionId);
           expect(params.scope.callId).toBe(f.callId);
+          expect(params.scope.brandId).toBe(f.authority.brandId);
+          expect(params.scope.brandId).not.toBe(f.scopeId);
+          expect(params.linkedOrderId).toBe(committed.orderId);
           // Only the external recorder acknowledgement is simulated; the
           // original close transaction, work item and state writes are real.
           return {
@@ -482,6 +550,11 @@ describe.skipIf(!hostedPaymentEnabled)(
         }),
       ).toMatchObject({ success: true });
       expect(calls).toBe(1);
+      await expectOriginalRecordingLink(
+        committed.orderId!,
+        f.callId,
+        "simulation/recording-manifest",
+      );
       const rows = await h.pool!.query(
         `SELECT s.recording_state, w.status AS work_status FROM voice.session s
          JOIN voice.work_item w USING(voice_session_id)
@@ -497,6 +570,99 @@ describe.skipIf(!hostedPaymentEnabled)(
         }),
       ).toBeNull();
       expect(calls).toBe(1);
+    }, 30000);
+
+    it("an accepted booking committed after recording finalization retains its original completed manifest", async () => {
+      const { a, b } = await seededPeers();
+      const { f, commands, accepted } = await pendingVoiceOrder(a);
+      expect(
+        await runnerFor(
+          b,
+          f,
+          undefined,
+          undefined,
+          simulatedRecorder(async (params) => {
+            expect(params.scope.brandId).toBe(f.authority.brandId);
+            expect(params.linkedOrderId).toBeNull();
+          }),
+        ).runOnce({ supportedTypes: ["finalize_recording"] }),
+      ).toMatchObject({ success: true });
+      const committed = await new VoiceCommandRunnerService(
+        commands,
+        a.repository,
+      ).execute(accepted.commandId);
+      expect(committed.status).toBe("succeeded");
+      await expectOriginalRecordingLink(
+        committed.orderId!,
+        f.callId,
+        "simulation/original-call-manifest",
+      );
+      const intent = await h.pool!.query(
+        `SELECT record FROM voice.booking_audit_intent WHERE command_id=$1`,
+        [committed.commandId],
+      );
+      expect(intent.rows[0].record.checkpointId).toBe(f.checkpointId);
+    }, 30000);
+
+    it("acknowledgement binds an order committed while the simulated external recorder was completing", async () => {
+      const { a, b } = await seededPeers();
+      const { f, commands, accepted } = await pendingVoiceOrder(a);
+      let orderId: string | null = null;
+      const recorder = simulatedRecorder(async (params) => {
+        expect(params.linkedOrderId).toBeNull();
+        const receipt = await new VoiceCommandRunnerService(
+          commands,
+          a.repository,
+        ).execute(accepted.commandId);
+        expect(receipt.status).toBe("succeeded");
+        orderId = receipt.orderId;
+      });
+      expect(
+        await runnerFor(b, f, undefined, undefined, recorder).runOnce({
+          supportedTypes: ["finalize_recording"],
+        }),
+      ).toMatchObject({ success: true });
+      expect(orderId).toBeTruthy();
+      await expectOriginalRecordingLink(
+        orderId!,
+        f.callId,
+        "simulation/original-call-manifest",
+      );
+    }, 30000);
+
+    it("a fresh historical recovery rebuilds the real brand and original-order link in missing close work", async () => {
+      const { a } = await seededPeers();
+      const { f, committed } = await commitVoiceOrder(a);
+      const store = new VoiceSessionRepository(a.database);
+      const session = await store.findSessionById(f.request.voiceSessionId);
+      await new VoiceSessionService(store).closeSession(
+        f.request.voiceSessionId,
+        session!.sessionVersion,
+      );
+      // Model an older deployment that durably closed the session without its
+      // queue producer. The original session, intent and order stay intact.
+      await h.pool!.query(
+        `DELETE FROM voice.work_item WHERE voice_session_id=$1 AND work_type='finalize_recording'`,
+        [f.request.voiceSessionId],
+      );
+      const fresh = new VoiceSessionService(
+        new VoiceSessionRepository(h.peerDatabase()),
+      );
+      expect(await fresh.recoverPendingRecordingSessions()).toEqual({
+        scanned: 1,
+        enqueued: 1,
+      });
+      const result = await h.pool!.query(
+        `SELECT payload_ref FROM voice.work_item WHERE voice_session_id=$1 AND work_type='finalize_recording'`,
+        [f.request.voiceSessionId],
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(JSON.parse(result.rows[0].payload_ref)).toMatchObject({
+        voiceSessionId: f.request.voiceSessionId,
+        callId: f.callId,
+        brandId: f.authority.brandId,
+        linkedOrderId: committed.orderId,
+      });
     }, 30000);
 
     it("publishes the original immutable booking audit into the canonical PostgreSQL audit feed", async () => {
