@@ -1038,7 +1038,23 @@ export class VoiceCommandRunnerService {
         return this.handleExecuteCallback(work);
       }
 
-      case "request_dispatch":
+      case "request_dispatch": {
+        if (!work.commandId)
+          throw new Error("Missing commandId for request_dispatch");
+        const receipt = await this.commands.repository.findReceiptById(
+          work.commandId,
+        );
+        if (receipt?.status !== "succeeded" || !receipt.orderId)
+          throw new Error(
+            "Committed booking order unavailable for request_dispatch",
+          );
+        if (!this.dispatchExecutor)
+          throw new Error("Automatic dispatch executor is unavailable");
+        return this.dispatchExecutor.requestDispatch(receipt.orderId, {
+          requestId: receipt.commandId,
+        });
+      }
+
       case "notify_booking_result":
       case "publish_booking_audit": {
         // Standard downstream pipeline items

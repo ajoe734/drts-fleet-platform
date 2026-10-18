@@ -103,6 +103,7 @@ export class OwnedAutonomousDispatchExecutorService {
       return existingReceipt.result as unknown as AutonomousDispatchOfferResult;
     }
 
+    await this.ownedMobilityService.prepareOrderAction({ orderId });
     let job = this.ownedMobilityService.getActiveDispatchJobForOrder(orderId);
 
     if (!job) {
@@ -110,7 +111,10 @@ export class OwnedAutonomousDispatchExecutorService {
         orderId,
         { mode: "auto" },
         options?.requestId,
+        opKey,
+        { required: true },
       );
+      await this.ownedMobilityService.prepareOrderAction({ orderId });
       job = this.ownedMobilityService.requireDispatchJob(
         dispatchRes.dispatchJobId,
       );
