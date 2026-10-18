@@ -12,6 +12,7 @@ import { getURLFromRedirectError } from "next/dist/client/components/redirect";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import type {
   CreateTenantWebhookEndpointCommand,
+  IdentityContext,
   UpdateTenantWebhookEndpointCommand,
 } from "@drts/contracts";
 import { JwtAuthService } from "../../../apps/api/src/common/auth/jwt-auth.service";
@@ -87,9 +88,10 @@ async function harness(kind: string) {
   );
   services.push(service);
   const jwt = new JwtAuthService();
-  const identity = jwt.toRequestIdentity(
-    jwt.verify(signedIdentity(jwt, tenantId))!,
-  );
+  const identity: IdentityContext = {
+    ...jwt.toRequestIdentity(jwt.verify(signedIdentity(jwt, tenantId))!),
+    supportedExecutionModes: [],
+  };
   let webhookId = "";
   let deliveryId = "";
   if (kind !== "create") {
@@ -113,8 +115,7 @@ async function harness(kind: string) {
     getTenantIntegrationGovernancePackage: async () =>
       service.getIntegrationGovernancePackage(tenantId, identity),
     listTenantNotificationFeed: async () => [],
-    listWebhooks: async () =>
-      service.listWebhookEndpoints(tenantId, undefined, identity),
+    listWebhooks: async () => service.listWebhookEndpoints(tenantId, identity),
     get: async (path: string) => {
       if (path === "/api/tenant/webhooks/deliveries")
         return {
@@ -193,7 +194,6 @@ async function prepare(kind: string, buttonLabel: string, mode: string) {
   const button = screen
     .getAllByRole("button", {
       name: buttonLabel,
-      exact: true,
     })
     .find((item) => !(item as HTMLButtonElement).disabled)!;
   expect((button as HTMLButtonElement).disabled).toBe(false);
