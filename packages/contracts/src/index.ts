@@ -4116,6 +4116,17 @@ export const DRIVER_TASK_AUTHORITY_MODES = [
 export type DriverTaskAuthorityMode =
   (typeof DRIVER_TASK_AUTHORITY_MODES)[number];
 
+export type DriverTaskOrderSummary = Pick<
+  OwnedOrderRecord,
+  | "orderId"
+  | "serviceBucket"
+  | "serviceProductCode"
+  | "businessDispatchSubtype"
+  | "dispatchSemantics"
+  | "fixedPrice"
+  | "quotedFare"
+>;
+
 export interface UnifiedDriverTaskView {
   taskId: string;
   orderId: string;
@@ -4137,6 +4148,8 @@ export interface UnifiedDriverTaskView {
   blockingReason: string | null;
   pickupSummary: string | null;
   dropoffSummary: string | null;
+  /** Already batch-read display data; omitted by older task-view producers. */
+  orderSummary?: DriverTaskOrderSummary | null;
   deadlineAt: string | null;
   updatedAt: string;
 }

@@ -306,7 +306,8 @@ export function mapPassengerRideAuthorityToFixture(
   quoteAnomalyCode?: string | null,
 ): PassengerRideFixture {
   const view = (rawView as any)?.ride || rawView;
-  const assignment = view.assignment;
+  const assignment =
+    view.order.status === "dispatch_timeout" ? null : view.assignment;
   const screenId = resolveScreenId(view, kind, quoteAnomalyCode);
   const showPickupEta = [
     "assigned",
@@ -317,9 +318,22 @@ export function mapPassengerRideAuthorityToFixture(
     view.tracking === undefined ? assignment?.eta : view.tracking?.pickupEta;
   const fareMinor = assignment?.routeFare?.estimatedFareMinor ?? null;
   const payableFareMinor = assignment?.routeFare?.payableFareMinor ?? null;
-  const distanceMeters = assignment?.routeFare?.estimatedDistanceMeters ?? null;
+  const bookedQuote = view.bookingQuote;
+  const bookedFareText = bookedQuote
+    ? `預估 ${formatMoney(bookedQuote.estimatedMin * 100)}${
+        bookedQuote.estimatedMin === bookedQuote.estimatedMax
+          ? ""
+          : `–${formatMoney(bookedQuote.estimatedMax * 100)}`
+      }`
+    : null;
+  const distanceMeters =
+    assignment?.routeFare?.estimatedDistanceMeters ??
+    bookedQuote?.route.distanceMeters ??
+    null;
   const durationSeconds =
-    assignment?.routeFare?.estimatedDurationSeconds ?? null;
+    assignment?.routeFare?.estimatedDurationSeconds ??
+    bookedQuote?.route.durationSeconds ??
+    null;
   const payment = mapPassengerPayment(view.payment);
   const certificate =
     view.order?.status === "completed" || view.receipt
@@ -340,7 +354,9 @@ export function mapPassengerRideAuthorityToFixture(
     status: statusLabel(view.order.status),
     ...(view.tracking !== undefined
       ? {
-          tracking: ["cancelled", "completed"].includes(view.order.status)
+          tracking: ["cancelled", "completed", "dispatch_timeout"].includes(
+            view.order.status,
+          )
             ? null
             : view.tracking,
         }
@@ -348,6 +364,12 @@ export function mapPassengerRideAuthorityToFixture(
     ...(quoteAnomalyCode && screenId === "A04" ? { quoteAnomalyCode } : {}),
     ...(view.order.status === "created"
       ? { statusSubline: "系統正在安排可派車輛" }
+      : {}),
+    ...(view.order.status === "dispatch_timeout"
+      ? {
+          statusSubline:
+            "尚未有司機完成接單，請等待調度重新安排車輛，或取消行程。",
+        }
       : {}),
     ...(view.order.requestedPickupAt
       ? {
@@ -383,7 +405,7 @@ export function mapPassengerRideAuthorityToFixture(
               : payableFareMinor !== null
                 ? `應付 ${formatMoney(payableFareMinor)}`
                 : fareMinor === null
-                  ? "依計費表實際金額收費"
+                  ? (bookedFareText ?? "依計費表實際金額收費")
                   : `預估 ${formatMoney(fareMinor)}`,
         }),
     ...(screenId === "A04"
@@ -402,21 +424,20 @@ export function mapPassengerRideAuthorityToFixture(
       assignment?.routeFare?.dropoff?.address ||
       view.order.dropoff?.address ||
       "",
-    mapState:
-      view.order.status === "cancelled"
-        ? "missing"
-        : view.tracking !== undefined
-          ? !view.tracking?.location ||
-            view.tracking.locationFreshness === "missing"
-            ? "missing"
-            : view.tracking.locationFreshness === "fresh"
-              ? "fresh"
-              : "stale"
-          : assignment?.eta.locationFreshness === "fresh"
+    mapState: ["cancelled", "dispatch_timeout"].includes(view.order.status)
+      ? "missing"
+      : view.tracking !== undefined
+        ? !view.tracking?.location ||
+          view.tracking.locationFreshness === "missing"
+          ? "missing"
+          : view.tracking.locationFreshness === "fresh"
             ? "fresh"
-            : assignment
-              ? "stale"
-              : "missing",
+            : "stale"
+        : assignment?.eta.locationFreshness === "fresh"
+          ? "fresh"
+          : assignment
+            ? "stale"
+            : "missing",
     actionMode: view.actions.canContact
       ? "driver_contact_ready"
       : "support_only",
@@ -764,6 +785,7 @@ function resolveScreenId(
   if (view.receipt) return "P5-10";
   if (view.order.status === "on_trip") return "P5-07";
   if (view.order.status === "arrived_pickup") return "P5-06";
+  if (view.order.status === "dispatch_timeout") return "P5-01";
   if (view.order.status === "redispatch_required") return "P5-04";
   if (!view.assignment) {
     if (
@@ -815,6 +837,7 @@ function statusLabel(status: PassengerRideAuthorityView["order"]["status"]) {
     completed: "行程已完成",
     cancelled: "行程已取消",
     redispatch_required: "正在為您改派",
+    dispatch_timeout: "派車逾時",
     exception_hold: "行程保留處理中",
   };
   return labels[status] ?? "行程狀態更新中";

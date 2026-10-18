@@ -194,6 +194,9 @@ export async function ownedRejectionJourney(
       await expect(pax.getByText(assignedPlate, { exact: true })).toBeVisible({
         timeout: 10_000,
       });
+      await expect(
+        pax.getByText(assignedPlate, { exact: true }),
+      ).toBeInViewport({ ratio: 1 });
       await expect(pax.getByText("正在為您改派", { exact: true })).toHaveCount(
         0,
       );
@@ -201,7 +204,11 @@ export async function ownedRejectionJourney(
         body: await pax.screenshot({ fullPage: true }),
         contentType: "image/png",
       });
-      return { ...result, passengerObservedPlate: assignedPlate };
+      return {
+        ...result,
+        passengerObservedPlate: assignedPlate,
+        passengerEntirePlateInViewport: true,
+      };
     },
   );
   await step(
@@ -264,6 +271,8 @@ export async function ownedRejectionJourney(
           actualNewDriver: "pax-review-driver-b",
           actualMountedPassengerNewPlateShownBeforeCancel: true,
           actualMountedPassengerNewPlate: second.passengerObservedPlate,
+          actualMountedPassengerEntirePlateInViewport:
+            second.passengerEntirePlateInViewport,
           actualMountedPassengerCancellationShown: true,
           finalOrderStatus: ride.order.status,
           actualCancelPOSTStatus: 201,

@@ -11,6 +11,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { Redirect, useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
+import { ApiClientError } from "@drts/api-client";
 import type {
   DriverTaskRecord,
   ForwardedDriverActionOutcome,
@@ -1241,6 +1242,9 @@ export default function TripScreen() {
       const tasks = await client.listDriverTasks();
       const firstTask = tasks[0] ?? null;
       setTaskDetail(firstTask);
+      setOrderDetail((current) =>
+        current?.orderId === firstTask?.orderId ? current : null,
+      );
       setForwardedActionResult(null);
 
       const [pendingCompletion, unifiedTasks, presenceSummary] =
@@ -1271,8 +1275,18 @@ export default function TripScreen() {
           ? await client.getOrder(firstTask.orderId)
           : await client.getDriverTaskOrder(firstTask.taskId);
         setOrderDetail(order);
-      } catch {
-        setOrderDetail(null);
+      } catch (orderError) {
+        const temporaryFailure =
+          orderError instanceof ApiClientError &&
+          (orderError.statusCode === 429 || orderError.statusCode >= 500);
+        setOrderDetail((current) =>
+          temporaryFailure && current?.orderId === firstTask.orderId
+            ? current
+            : null,
+        );
+        if (temporaryFailure) {
+          setError("行程資料暫時無法更新，請稍後重新整理。");
+        }
       }
     } catch (loadError) {
       setError(getErrorMessage(loadError));
