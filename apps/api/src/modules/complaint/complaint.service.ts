@@ -1687,6 +1687,14 @@ export class ComplaintService implements OnModuleInit {
           } else {
             for (const caseNo of affectedCaseNos) {
               this.pendingUncertainCommits.delete(caseNo);
+              // A definite (non-uncertain) failure has already been rolled
+              // back and surfaced to its own caller above; leaving this
+              // rejected promise keyed by caseNo would otherwise make a
+              // later, unrelated refreshSettlementCases() sweep rethrow this
+              // same stale failure and block that case's own retry.
+              if (this.settlementPersistence.get(caseNo) === persistence) {
+                this.settlementPersistence.delete(caseNo);
+              }
             }
             if (rollback) rollback();
           }
