@@ -18,6 +18,7 @@ import type {
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { OpsDispatchAssignmentButton } from "@/components/ops-dispatch-assignment-button";
+import { OpsDispatchCreateButton } from "@/components/ops-dispatch-create-button";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
@@ -1245,7 +1246,19 @@ function renderHeaderActions(
     dispatchJobId: string;
     candidate: DispatchCandidate;
   },
+  creation?: { orderId: string },
+  terminal = true,
 ) {
+  if (
+    creation &&
+    actions.some(
+      (action) => action.action === "create_dispatch" && action.enabled,
+    )
+  )
+    return (
+      <OpsDispatchCreateButton orderId={creation.orderId} locale={locale} />
+    );
+
   const assignAction = actions.find(
     (action) => action.action === "assign_candidate" && action.enabled,
   );
@@ -1253,7 +1266,12 @@ function renderHeaderActions(
   if (!assignAction || !assignment) {
     return (
       <Pill theme={theme} tone="neutral">
-        {tr(locale, "dispatch.detail.action.readOnlyTerminal")}
+        {tr(
+          locale,
+          terminal
+            ? "dispatch.detail.action.readOnlyTerminal"
+            : "dispatch.actions.none",
+        )}
       </Pill>
     );
   }
@@ -1290,6 +1308,13 @@ function synthesizeOwnedActions(
   const actions: ResourceActionDescriptor[] = [
     { action: "contact_passenger", enabled: true, riskLevel: "low" },
   ];
+
+  if (!job)
+    actions.push({
+      action: "create_dispatch",
+      enabled: !blockedByHold,
+      riskLevel: "medium",
+    });
 
   actions.push({
     action: "assign_candidate",
@@ -2120,7 +2145,9 @@ async function renderOwnedWorkspace({
           <span
             style={{ display: "inline-flex", alignItems: "center", gap: 10 }}
           >
-            <span>{`${order.orderNo} · ${getTenantLabel(order)}`}</span>
+            <span
+              data-ops-order-id={order.orderId}
+            >{`${order.orderNo} · ${getTenantLabel(order)}`}</span>
             <Pill theme={theme} tone="accent">
               OWNED
             </Pill>
@@ -2136,6 +2163,8 @@ async function renderOwnedWorkspace({
                 candidate: sortedCandidates[0],
               }
             : undefined,
+          !dispatchJob && !loadFailed ? { orderId: order.orderId } : undefined,
+          terminal,
         )}
       />
 

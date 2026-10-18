@@ -13,6 +13,7 @@ import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
 import { bookingResponseDiagnostic } from "./pax-review-shared-order/booking-diagnostic";
 import { dispatchResponseDiagnostic } from "./pax-review-shared-order/dispatch-diagnostic";
+import { createDispatchInOrdinaryWorkspace } from "./pax-review-shared-order/ordinary-ops-dispatch";
 
 type JourneyStep = ReturnType<typeof createJourneyProgress>["step"];
 
@@ -716,8 +717,30 @@ async function visitActualAuditDestination(
   }
 }
 
-async function createDispatch(ops: Page, orderId: string) {
+async function createDispatch(ops: Page, orderId: string, info?: TestInfo) {
   await opsRead(ops, orderId);
+  if (info) {
+    const facts = await createDispatchInOrdinaryWorkspace(
+      ops,
+      OPS,
+      orderId,
+      info,
+    );
+    await ops.goto(`${OPS}/review`);
+    await opsRead(ops, orderId);
+    await expect(ops.getByTestId("ops-review-job-id")).toHaveText(
+      facts.dispatchJobId,
+    );
+    await expect(ops.locator(`a[href="/dispatch/${orderId}"]`)).toBeVisible();
+    await info.attach("A-ordinary-Ops-create-dispatch-facts", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...facts,
+        actualReviewDetailLinkUsesOriginalOrderId: true,
+      }),
+    });
+    return;
+  }
   const job = ops.waitForResponse(
     (r) =>
       r.url().endsWith(`/orders/${orderId}/dispatch`) &&
@@ -1237,7 +1260,9 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
       bind(pax, "success"),
     );
     const normal = await step("A Passenger book", () => book(pax, firstMethod));
-    await step("A Ops create dispatch", () => createDispatch(ops, normal));
+    await step("A Ops create dispatch", () =>
+      createDispatch(ops, normal, info),
+    );
     await step(
       "A Ops assign then reassign while Passenger offline",
       async () => {
