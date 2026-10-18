@@ -947,7 +947,7 @@ export class VoiceSessionService {
         {
           dialogState: "closed",
           mediaState: "ended",
-          recordingState: "pending",
+          recordingState: "finalizing",
           lastAppliedControlSequence: sequence,
         },
         tx,
@@ -1067,7 +1067,7 @@ export class VoiceSessionService {
         LEFT JOIN voice.work_item w
           ON w.voice_session_id = s.voice_session_id
          AND w.work_type = 'finalize_recording'
-        WHERE (s.dialog_state = 'closed' OR s.recording_state = 'pending')
+        WHERE (s.dialog_state = 'closed' OR s.recording_state = 'finalizing')
           AND (w.work_id IS NULL OR w.status IN ('failed', 'dead_letter'))
         ORDER BY s.created_at ASC
         LIMIT 100`,
@@ -1239,9 +1239,7 @@ export class VoiceSessionService {
           "Resource scope no longer matches this session.",
         );
       }
-      if (
-        session.routeProfileVersion !== command.expectedRouteProfileVersion
-      ) {
+      if (session.routeProfileVersion !== command.expectedRouteProfileVersion) {
         throw new ApiRequestError(
           409,
           "VOICE_DRAFT_STALE",
@@ -1785,9 +1783,8 @@ export class VoiceSessionService {
     voiceSessionId: string,
   ): Promise<DialogueSnapshotRestoration> {
     const session = await this.requireSession(voiceSessionId);
-    const row = await this.repository.findLatestDialogueSnapshot(
-      voiceSessionId,
-    );
+    const row =
+      await this.repository.findLatestDialogueSnapshot(voiceSessionId);
     if (!row) {
       return { session, snapshot: null };
     }
@@ -1862,9 +1859,8 @@ export class VoiceSessionService {
         "Voice retention policy service is unavailable; refusing to purge without its legal-hold-aware policy decision.",
       );
     }
-    const policy = this.retentionService.assertRetentionDefined(
-      "voice_transcript",
-    );
+    const policy =
+      this.retentionService.assertRetentionDefined("voice_transcript");
     const candidates = await this.repository.findExpiredDialogueSnapshots(
       new Date().toISOString(),
     );
@@ -1874,7 +1870,12 @@ export class VoiceSessionService {
     let skippedHeldCount = 0;
     let deletedCount = 0;
     for (const row of candidates) {
-      if (this.retentionService.isSubjectUnderHold("voice_transcript", row.voiceSessionId)) {
+      if (
+        this.retentionService.isSubjectUnderHold(
+          "voice_transcript",
+          row.voiceSessionId,
+        )
+      ) {
         skippedHeldCount++;
         results.push({
           subjectRef: row.voiceSessionId,
@@ -1901,7 +1902,8 @@ export class VoiceSessionService {
         results.push({
           subjectRef: row.voiceSessionId,
           action: "purged",
-          reason: "Aged dialogue snapshot purged in accordance with retention policy.",
+          reason:
+            "Aged dialogue snapshot purged in accordance with retention policy.",
         });
       }
     }
@@ -2066,7 +2068,8 @@ export class VoiceSessionService {
           results.push({
             subjectRef: receipt.voiceSessionId,
             action: "purged",
-            reason: "Aged purge receipt retired in accordance with voice_booking_evidence retention policy; history-unavailable floor raised in the same transaction.",
+            reason:
+              "Aged purge receipt retired in accordance with voice_booking_evidence retention policy; history-unavailable floor raised in the same transaction.",
           });
         }
       }
@@ -2086,7 +2089,7 @@ export class VoiceSessionService {
     // method's own doc on "preview cursor starvation").
     if (!dryRun) {
       await this.repository.saveDialogueSnapshotPurgeReceiptScanCursor(
-        reachedBacklogEnd ? null : cursor ?? null,
+        reachedBacklogEnd ? null : (cursor ?? null),
       );
     }
 

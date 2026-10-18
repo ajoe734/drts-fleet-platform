@@ -591,11 +591,11 @@ export class VoiceCommandRunnerService
         }
       }
 
-      // If AI session: update voice.session recording_state to 'sealed'
+      // The voice schema uses finalized; the separate CRM projection is bound.
       if (voiceSessionId) {
         await tx.query(
           `UPDATE voice.session
-          SET recording_state = 'sealed', session_version = session_version + 1
+          SET recording_state = 'finalized', session_version = session_version + 1
           WHERE voice_session_id = $1`,
           [voiceSessionId],
         );

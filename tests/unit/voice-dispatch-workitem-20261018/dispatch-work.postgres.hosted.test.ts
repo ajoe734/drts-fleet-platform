@@ -41,6 +41,7 @@ import {
 } from "../../../apps/api/src/modules/voice-booking/voice-booking-result-delivery";
 import { VoiceSessionService } from "../../../apps/api/src/modules/voice-booking/voice-session.service";
 import { VoiceSessionRepository } from "../../../apps/api/src/modules/voice-booking/voice-session.repository";
+import type { VoiceMediaRecordingAdapter } from "../../../apps/api/src/modules/voice-booking/voice-evidence.service";
 import { seedVoiceDispatchWorkFixture } from "../../support/voice-dispatch-workitem-postgres-fixture";
 import {
   hostedPaymentEnabled,
@@ -216,6 +217,7 @@ describe.skipIf(!hostedPaymentEnabled)(
       f: Awaited<ReturnType<typeof seedVoiceDispatchWorkFixture>>,
       audit?: AuditNotificationService,
       delivery?: VoiceBookingResultDelivery,
+      mediaAdapter?: VoiceMediaRecordingAdapter,
     ) {
       const commands = new VoiceBookingCommandService(
         p.voice,
@@ -230,7 +232,7 @@ describe.skipIf(!hostedPaymentEnabled)(
         p.owned.getAutonomousDispatchExecutor(),
         undefined,
         undefined,
-        undefined,
+        mediaAdapter,
         audit,
         delivery,
       );
@@ -369,6 +371,7 @@ describe.skipIf(!hostedPaymentEnabled)(
       );
       expect(closed.dialogState).toBe("closed");
       expect(closed.mediaState).toBe("ended");
+      expect(closed.recordingState).toBe("finalizing");
       const runner = runnerFor(
         b,
         f,
@@ -433,6 +436,67 @@ describe.skipIf(!hostedPaymentEnabled)(
       }
       expect(runner.running).toBe(false);
       expect(await runner.runOnce()).toBeNull();
+    }, 30000);
+
+    it("a simulated recorder acknowledgement persists the canonical finalized voice state without duplicating close work", async () => {
+      const { a, b } = await seededPeers();
+      const { f } = await commitVoiceOrder(a);
+      const sessionStore = new VoiceSessionRepository(a.database);
+      const session = await sessionStore.findSessionById(
+        f.request.voiceSessionId,
+      );
+      const service = new VoiceSessionService(sessionStore);
+      const closed = await service.closeSession(
+        f.request.voiceSessionId,
+        session!.sessionVersion,
+      );
+      expect(closed.recordingState).toBe("finalizing");
+      await service.closeSession(
+        f.request.voiceSessionId,
+        closed.sessionVersion,
+      );
+      let calls = 0;
+      const recorder: VoiceMediaRecordingAdapter = {
+        async finalizeRecording(params) {
+          calls += 1;
+          expect(params.voiceSessionId).toBe(f.request.voiceSessionId);
+          expect(params.scope.callId).toBe(f.callId);
+          // Only the external recorder acknowledgement is simulated; the
+          // original close transaction, work item and state writes are real.
+          return {
+            recordingId: params.scope.recordingId,
+            manifestRef: {
+              objectKey: "simulation/recording-manifest",
+              objectVersion: "simulation-v1",
+              checksum: "simulation-checksum",
+              byteLength: 0,
+              durableAt: new Date().toISOString(),
+            },
+            verifiedAt: new Date().toISOString(),
+          };
+        },
+      };
+      expect(
+        await runnerFor(b, f, undefined, undefined, recorder).runOnce({
+          supportedTypes: ["finalize_recording"],
+        }),
+      ).toMatchObject({ success: true });
+      expect(calls).toBe(1);
+      const rows = await h.pool!.query(
+        `SELECT s.recording_state, w.status AS work_status FROM voice.session s
+         JOIN voice.work_item w USING(voice_session_id)
+         WHERE s.voice_session_id=$1 AND w.work_type='finalize_recording'`,
+        [f.request.voiceSessionId],
+      );
+      expect(rows.rows).toEqual([
+        { recording_state: "finalized", work_status: "completed" },
+      ]);
+      expect(
+        await runnerFor(b, f, undefined, undefined, recorder).runOnce({
+          supportedTypes: ["finalize_recording"],
+        }),
+      ).toBeNull();
+      expect(calls).toBe(1);
     }, 30000);
 
     it("publishes the original immutable booking audit into the canonical PostgreSQL audit feed", async () => {
