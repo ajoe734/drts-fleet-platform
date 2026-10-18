@@ -62,6 +62,21 @@ ip_name="${service}-public-entry-ip"
 proxy_name="${service}-public-entry-proxy"
 forwarding_rule_name="${service}-public-entry-fr"
 
+# A brand-new project (ENTRY-R11-FIRST-ACTIVATION-API-BOOTSTRAP,
+# actual run39166716207: SERVICE_DISABLED for compute.googleapis.com) has
+# never had Compute Engine or Cloud IAP used in it before, so every command
+# below (NEG/backend-service/URL-map/IAP-policy creation) fails until both
+# APIs are enabled at least once. `gcloud services enable` is itself
+# idempotent against an already-enabled API (exits 0, no-op), so this always
+# runs rather than trying to first read whether it is already on; a failure
+# here is a real activation blocker and must stop the script under
+# `set -e` before any dependent Compute/IAP mutation is attempted.
+echo "::group::Required APIs (compute.googleapis.com, iap.googleapis.com)"
+gcloud services enable compute.googleapis.com iap.googleapis.com \
+  --project="$project" \
+  --quiet
+echo "::endgroup::"
+
 # $1 = resource name to filter on; $2.. = full gcloud args up to and
 # including "list" (e.g. "compute" "backend-services" "list" "--global").
 # Using an argument array (not a word-split string) keeps "list" in the

@@ -37,6 +37,17 @@ fi
 
 iap_agent="service-${project_number}@gcp-sa-iap.iam.gserviceaccount.com"
 
+# A brand-new project has never had iap.googleapis.com enabled, so the
+# service-identity call below fails before even reaching a permissions check
+# (ENTRY-R11-FIRST-ACTIVATION-API-BOOTSTRAP). `gcloud services enable` is
+# itself idempotent against an already-enabled API; a failure here is a real
+# activation blocker and must stop the script under `set -e` before the
+# identity/grant calls below are attempted.
+echo "Ensuring ${project} has iap.googleapis.com enabled."
+gcloud services enable iap.googleapis.com \
+  --project="$project" \
+  --quiet
+
 # The agent above does not exist until the IAP service identity has been
 # created at least once for this project
 # (https://docs.cloud.google.com/iap/docs/enabling-cloud-run#gcloud).
@@ -48,10 +59,23 @@ iap_agent="service-${project_number}@gcp-sa-iap.iam.gserviceaccount.com"
 # the principal does not exist yet (entry-R6-first-activation-review/findings.json).
 # `set -e` propagates a failure here as a script failure, and the grant below
 # is never attempted.
+#
+# `beta services identity create` is a `gcloud beta` command: on a cold Cloud
+# SDK install that has never used the `beta` component group before, gcloud
+# tries to interactively prompt to auto-install it first, which fails outright
+# on a noninteractive CI runner ("This prompt could not be answered because
+# you are not in an interactive session", actual run39166716207-era
+# DeployDev run) before ever reaching IAP itself — this is a cold-SDK/
+# component-install failure, not an IAP-disabled or IAM-denied failure.
+# `--quiet` is gcloud's own documented fix (it is what that exact error
+# message tells the caller to add): it accepts the default answer for any
+# prompt, including the component-install confirmation, so this now also
+# works unattended on a cold SDK.
 echo "Ensuring the Cloud IAP service identity exists for ${project}."
 gcloud beta services identity create \
   --service=iap.googleapis.com \
-  --project="$project"
+  --project="$project" \
+  --quiet
 
 echo "Granting roles/run.invoker on ${service} to the Cloud IAP service agent (${iap_agent})."
 gcloud run services add-iam-policy-binding "$service" \
