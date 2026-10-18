@@ -296,9 +296,12 @@ export async function arrivedCancellationJourney(
           driver.getByText(orderId, { exact: false }).first(),
         ).toBeVisible();
         await expect(driver.getByText(/已取消|平台取消/).first()).toBeVisible();
-        await expect(
-          driver.getByText("目前沒有可執行動作", { exact: true }).first(),
-        ).toBeVisible();
+        const cancelledAction = driver.getByRole("button", {
+          name: "任務已取消",
+          exact: true,
+        });
+        await expect(cancelledAction).toBeVisible();
+        await expect(cancelledAction).toBeDisabled();
         const driverRouteRefreshes = await readDriverRoute(
           driver,
           after.order,

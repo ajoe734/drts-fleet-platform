@@ -5,13 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from control_plane.domain.worker_lifecycle import OCCUPIED_WORKER_STATUSES
+
 
 ACTIVE_EXECUTION_STATUSES = frozenset(
     {"running", "started", "draining", "fallback", "retry_backoff", "stalled"}
 )
-ACTIVE_CAPACITY_STATUSES = ACTIVE_EXECUTION_STATUSES | frozenset(
-    {"waiting_approval", "suspended_approval", "manual_pending"}
-)
+ACTIVE_CAPACITY_STATUSES = OCCUPIED_WORKER_STATUSES | {"draining"}
 
 
 @dataclass(frozen=True)

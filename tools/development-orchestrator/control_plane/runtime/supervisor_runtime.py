@@ -49,6 +49,7 @@ from control_plane.domain.worker_lifecycle import (
     worker_reported_outcome,
     worker_supports_approval_resume,
     ACTIVE_WORKER_STATUSES as ACTIVE_RUNTIME_STATUSES,
+    OCCUPIED_WORKER_STATUSES,
     consume_result as consume_worker_result,
     is_active_worker,
     is_terminal_worker,
@@ -1738,7 +1739,7 @@ def update_supervisor_mode_metadata(
         snapshot = dict(worker.get("request_snapshot", {}) or {})
         bucket = runtime_mode_for_snapshot(snapshot.get("reason"), snapshot.get("metadata"))
         occupancy.setdefault(bucket, {"running": 0, "pending": 0, "queued": 0})
-        occupancy[bucket]["running"] += 1
+        occupancy[bucket]["pending" if worker_status == "suspended_approval" else "running"] += 1
 
     active_event_ids = active_worker_queue_event_ids(state, ACTIVE_RUNTIME_STATUSES)
     for event_id, record in state.get("queue", {}).get("events", {}).items():
@@ -2485,7 +2486,7 @@ def process_queue(config: dict[str, Any], state: dict[str, Any], provider_report
             None,
         )
         if active_worker:
-            desired_status = "manual_pending" if active_worker.get("status") in {"manual_pending", "waiting_approval"} else "started"
+            desired_status = "manual_pending" if active_worker.get("status") in {"manual_pending", "waiting_approval", "suspended_approval"} else "started"
             if record.get("status") != desired_status or record.get("run_id") != active_worker.get("run_id"):
                 record["status"] = desired_status
                 record["run_id"] = active_worker.get("run_id") or event_id
@@ -3595,17 +3596,6 @@ def repeated_failure_records(
     if not covered_task_ids:
         return records
     return [record for record in records if str(record.get("task_id") or "").strip() not in covered_task_ids]
-
-
-def failing_agents_in_reassignment_loops(
-    state: dict[str, Any],
-    status: dict[str, Any] | None = None,
-) -> set[str]:
-    return {
-        str(record.get("agent") or "").strip()
-        for record in repeated_failure_records(state, status)
-        if str(record.get("agent") or "").strip()
-    }
 
 
 def active_provider_pause_records(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -5439,6 +5429,29 @@ def handle_worker_approval_state(
     if worker.get("status") in {"waiting_approval", "suspended_approval"} and resolved:
         latest = resolved[-1]
         if latest.get("approval_id") != worker.get("last_approval_id"):
+            if latest.get("decision") == "allow" and not alive and worker_supports_approval_resume(worker):
+                # The suspended attempt released its slot. Other work may now
+                # occupy it, so do not consume this approval until a resumed
+                # process can be admitted. Its exact approval/task binding stays
+                # intact while it waits; this does not authorize another action.
+                admission_state = {
+                    **state,
+                    "workers": {run_id: item for run_id, item in state.get("workers", {}).items()
+                                if run_id != worker.get("run_id")},
+                }
+                snapshot = worker.get("request_snapshot") or {}
+                admission = resource_admission_decision(
+                    config, admission_state, snapshot.get("metadata") or worker.get("metadata"),
+                    agent_id=worker.get("agent_id") or worker.get("provider"),
+                )
+                lane_paused = is_agent_dispatch_paused(
+                    config, state, worker.get("agent_id") or worker.get("provider"),
+                    provider_report=provider_report or {"providers": {}},
+                )
+                if not admission.allowed or lane_paused:
+                    changed = worker.get("status") != "suspended_approval"
+                    worker["status"] = "suspended_approval"
+                    return True, changed
             worker["last_approval_id"] = latest.get("approval_id")
             # A live worker consumes the broker's approval itself. Launching a
             # second process can collide with its existing systemd unit and
@@ -6787,7 +6800,10 @@ def choose_chair_reviewer(
     active_agent_counts = active_worker_agent_counts(state, active_statuses)
     pending_agent_counts = outstanding_delivery_agent_counts(config, state)
     task_map = task_index_from_status(config, status)
-    failing_agents = failing_agents_in_reassignment_loops(state, status)
+    # Task-role failures still block redispatch of that assignment. They do not
+    # establish provider incapacity: failed lifecycle writes must not disqualify
+    # every lane capable of repairing them. Provider pauses/capability and lane
+    # admission below remain authoritative for chair availability.
     candidates: list[tuple[str, str]] = []
     primary_work_candidates: list[tuple[str, str]] = []
     active_recovery_candidates: list[tuple[str, str]] = []
@@ -6812,8 +6828,6 @@ def choose_chair_reviewer(
                 continue
             if not agent_supports_auto_delivery(config, provider_report, agent_id):
                 continue
-            if display_name in failing_agents:
-                continue
             lane_capacity = max_tasks_per_agent_for_lane(settings, normalized)
             lane_load = active_agent_counts.get(normalized, 0) + pending_agent_counts.get(normalized, 0)
             if lane_load < lane_capacity:
@@ -6822,8 +6836,6 @@ def choose_chair_reviewer(
         if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
             continue
         if not agent_supports_auto_delivery(config, provider_report, agent_id):
-            continue
-        if display_name in failing_agents:
             continue
         if agent_has_dispatchable_primary_work(config, status, display_name, task_map):
             if allow_primary_work_fallback:
@@ -8656,14 +8668,14 @@ def break_full_deadlock(
     state: dict[str, Any],
     status: dict[str, Any],
 ) -> bool:
-    """Last-resort recovery when the orchestrator is fully wedged, with zero active
-    workers, an empty queue, dispatchable backlog remains, and either
+    """Last-resort recovery when no worker occupies a slot and no runnable queue
+    event remains (suspended approval bindings are retained), backlog remains, and either
     - chairman review is blocked for lack of a dispatch-capable lane
     - provider pauses are present while no dispatch-capable lane is available.
 
-    Forces a fresh recovery probe and clears any paused lane the probe now
-    reports healthy (auth OR an indefinite quota hold whose underlying probe has
-    recovered). If nothing recovers, raises a loud operator-attention
+    Forces a fresh recovery probe and clears auth pauses the probe now reports
+    healthy. Login readiness does not establish quota recovery, so quota pauses
+    remain. If nothing recovers, raises a loud operator-attention
     escalation instead of sitting silently at zero workers. Rate-limited by a
     cooldown so genuinely dead lanes are not thrashed."""
     settings = config.get("supervisor", {})
@@ -8678,10 +8690,11 @@ def break_full_deadlock(
         })
         return True
     active_statuses = {str(v) for v in ready_dispatch_settings(config).get("active_worker_statuses", [])}
-    active_agents, _ = active_worker_indexes(state, active_statuses)
+    active_agents, _ = active_worker_indexes(state, active_statuses & OCCUPIED_WORKER_STATUSES)
     if active_agents:
         return False
-    if state.get("queue", {}).get("events", {}):
+    suspended_events = active_worker_queue_event_ids(state, {"suspended_approval"})
+    if any(event_id not in suspended_events for event_id in state.get("queue", {}).get("events", {})):
         return False
 
     chair_blocked = bool(state.get("chair_review", {}).get("blocked"))
@@ -8703,13 +8716,13 @@ def break_full_deadlock(
     rec["last_attempt_at"] = utc_now()
     if chair_blocked:
         console_log(
-            "FULL DEADLOCK detected (0 active workers, queue empty, chair review "
+            "FULL DEADLOCK detected (0 occupied worker slots, no runnable queue event, chair review "
             "blocked, backlog pending) - forcing recovery probe",
             quiet=False,
         )
     else:
         console_log(
-            "FULL DEADLOCK detected (0 active workers, queue empty, paused lanes present, "
+            "FULL DEADLOCK detected (0 occupied worker slots, no runnable queue event, paused lanes present, "
             "no chair review blocked marker, backlog pending) - forcing recovery probe",
             quiet=False,
         )

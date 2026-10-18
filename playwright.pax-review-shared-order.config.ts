@@ -39,6 +39,8 @@ const apiEnvironment = {
   JWT_AUDIENCE: "drts-api",
   DRTS_DEV_MFA_WAIVED: "true",
   PAX_REVIEW_DEMO_ENABLED: "true",
+  VOICE_BACKGROUND_RUNNER_ENABLED: "true",
+  VOICE_BOOKING_RESULT_DELIVERY: "simulation",
   ...simulation.otp,
   ...simulationPayment,
   PSP_PROVIDER: "fake",

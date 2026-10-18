@@ -1436,6 +1436,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           .toBe("failed");
         expect((await authority(pax, retry)).actions.canRate).toBe(false);
         await readCompletedByOps(ops, retry);
+        await expect(pax.getByText("付款失敗", { exact: true })).toBeVisible();
         const failedFacts = await recordOrderEvidence(
           retry,
           "B-first-capture-failed",
@@ -1548,10 +1549,17 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           driver.getByText(cancellationHeader, { exact: true }),
         ).toBeVisible();
         pax.on("dialog", (dialog) => void dialog.accept());
+        // The real cancel action reloads the Passenger page after committing.
+        // Observe that navigation before the independent reload/readback below.
+        const cancellationNavigation = pax.waitForEvent("framenavigated", {
+          predicate: (frame) => frame === pax.mainFrame(),
+        });
         await pax
           .getByRole("button", { name: "取消行程", exact: true })
           .first()
           .click();
+        await cancellationNavigation;
+        await pax.waitForLoadState("domcontentloaded");
         await expect
           .poll(async () => (await authority(pax, cancelled)).order.status)
           .toBe("cancelled");

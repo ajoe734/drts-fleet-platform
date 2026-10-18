@@ -385,6 +385,28 @@ jobs:
     name: Build & push images
     runs-on: ubuntu-latest
     needs: prepare
+    # Independent images share the same immutable source and cache scopes.
+    # Limit runner demand; migration still waits for every image to succeed.
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        image:
+          [
+            api,
+            migrate,
+            platform-admin-web,
+            ops-console-web,
+            fleet-partner-portal-web,
+            tenant-console-web,
+            bank-console-web,
+            referral-embed-web,
+            enterprise-dispatch-web,
+            channel-partner-portal-web,
+            passenger-app-web,
+          ]
+    # These outputs are identical for every matrix entry: all check out the
+    # same immutable source. No per-image value is exposed as a shared output.
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
       candidate_sha: ${{ steps.tag.outputs.candidate_sha }}
@@ -421,31 +443,26 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Check which images the registry already has
+      - name: Check whether the registry already has this image
         id: existing
+        env:
+          IMAGE: ${{ matrix.image }}
+          REGISTRY: ${{ needs.prepare.outputs.registry }}
+          IMAGE_TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-
-          # Under tag immutability a candidate tag can be written once and never
-          # again, so re-running a deploy for a source ref that was already built
-          # fails on the push -- the deploy is not idempotent without this. The
-          # tag is the source SHA, so an image that is already there was built
-          # from exactly this commit and is the image we would have produced.
-          # Skip those and build only what is genuinely missing.
-          for image in api migrate platform-admin-web ops-console-web fleet-partner-portal-web tenant-console-web bank-console-web referral-embed-web enterprise-dispatch-web channel-partner-portal-web passenger-app-web;
-          do
-            reference="${{ needs.prepare.outputs.registry }}/${image}:${{ steps.tag.outputs.tag }}"
-            if gcloud container images describe "$reference" >/dev/null 2>&1; then
-              echo "${image}=true" >> "$GITHUB_OUTPUT"
-              echo "already published: ${reference}"
-            else
-              echo "${image}=false" >> "$GITHUB_OUTPUT"
-              echo "needs build: ${reference}"
-            fi
-          done
+          # Immutable candidate tags are never overwritten on a retry.
+          reference="${REGISTRY}/${IMAGE}:${IMAGE_TAG}"
+          if gcloud container images describe "$reference" >/dev/null 2>&1; then
+            echo "${IMAGE}=true" >> "$GITHUB_OUTPUT"
+            echo "already published: ${reference}"
+          else
+            echo "${IMAGE}=false" >> "$GITHUB_OUTPUT"
+            echo "needs build: ${reference}"
+          fi
 
       - name: Build & push — api
-        if: steps.existing.outputs.api != 'true'
+        if: matrix.image == 'api' && steps.existing.outputs.api != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -457,7 +474,7 @@ jobs:
           cache-to: type=gha,scope=api,mode=min
 
       - name: Build & push — migrate
-        if: steps.existing.outputs.migrate != 'true'
+        if: matrix.image == 'migrate' && steps.existing.outputs.migrate != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -469,7 +486,7 @@ jobs:
           cache-to: type=gha,scope=migrate,mode=min
 
       - name: Build & push — platform-admin-web
-        if: steps.existing.outputs.platform-admin-web != 'true'
+        if: matrix.image == 'platform-admin-web' && steps.existing.outputs.platform-admin-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -482,7 +499,7 @@ jobs:
           cache-to: type=gha,scope=platform-admin-web,mode=min
 
       - name: Build & push — ops-console-web
-        if: steps.existing.outputs.ops-console-web != 'true'
+        if: matrix.image == 'ops-console-web' && steps.existing.outputs.ops-console-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -495,7 +512,7 @@ jobs:
           cache-to: type=gha,scope=ops-console-web,mode=min
 
       - name: Build & push — fleet-partner-portal-web
-        if: steps.existing.outputs.fleet-partner-portal-web != 'true'
+        if: matrix.image == 'fleet-partner-portal-web' && steps.existing.outputs.fleet-partner-portal-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -508,7 +525,7 @@ jobs:
           cache-to: type=gha,scope=fleet-partner-portal-web,mode=min
 
       - name: Build & push — tenant-console-web
-        if: steps.existing.outputs.tenant-console-web != 'true'
+        if: matrix.image == 'tenant-console-web' && steps.existing.outputs.tenant-console-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -521,7 +538,7 @@ jobs:
           cache-to: type=gha,scope=tenant-console-web,mode=min
 
       - name: Build & push — bank-console-web
-        if: steps.existing.outputs.bank-console-web != 'true'
+        if: matrix.image == 'bank-console-web' && steps.existing.outputs.bank-console-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -534,7 +551,7 @@ jobs:
           cache-to: type=gha,scope=bank-console-web,mode=min
 
       - name: Build & push — referral-embed-web
-        if: steps.existing.outputs.referral-embed-web != 'true'
+        if: matrix.image == 'referral-embed-web' && steps.existing.outputs.referral-embed-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -547,7 +564,7 @@ jobs:
           cache-to: type=gha,scope=referral-embed-web,mode=min
 
       - name: Build & push — enterprise-dispatch-web
-        if: steps.existing.outputs.enterprise-dispatch-web != 'true'
+        if: matrix.image == 'enterprise-dispatch-web' && steps.existing.outputs.enterprise-dispatch-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -560,7 +577,7 @@ jobs:
           cache-to: type=gha,scope=enterprise-dispatch-web,mode=min
 
       - name: Build & push — channel-partner-portal-web
-        if: steps.existing.outputs.channel-partner-portal-web != 'true'
+        if: matrix.image == 'channel-partner-portal-web' && steps.existing.outputs.channel-partner-portal-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -573,7 +590,7 @@ jobs:
           cache-to: type=gha,scope=channel-partner-portal-web,mode=min
 
       - name: Build & push — passenger-app-web
-        if: steps.existing.outputs.passenger-app-web != 'true'
+        if: matrix.image == 'passenger-app-web' && steps.existing.outputs.passenger-app-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -1053,7 +1070,9 @@ jobs:
           env_vars="${env_vars}@OIDC_ENABLED=${{ steps.api_secrets.outputs.oidc_enabled }}"
           env_vars="${env_vars}@OAUTH_REDIRECT_ALLOWLIST=${oauth_redirect_allowlist}@REQUIRE_SMS_VERIFICATION=false"
           env_vars="${env_vars}@PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
+          env_vars="${env_vars}@VOICE_BACKGROUND_RUNNER_ENABLED=true"
           if [[ "${DEV_PAX_REVIEW_DEMO_ENABLED:-false}" == "true" ]]; then
+            env_vars="${env_vars}@VOICE_BOOKING_RESULT_DELIVERY=simulation"
             # Existing complete groups keep their references. Absent groups
             # receive the explicit PUBLIC synthetic profile; never generate a
             # new key at boot or require a real SMS/financial account. The
@@ -1139,7 +1158,8 @@ jobs:
             --set-secrets "$api_secrets" \
             --set-env-vars "$API_ENV_VARS" \
             ${{ needs.prepare.outputs.api_exposure_flag }} \
-            --min-instances 0 \
+            --min-instances 1 \
+            --no-cpu-throttling \
             --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 import os
 import re
@@ -1061,12 +1062,33 @@ def build_task_brief(
     *,
     runtime_state: dict[str, Any] | None = None,
 ) -> str:
+    from control_plane.domain.handoff_context import MAX_NEXT_CHARACTERS
+
     task_id = str(task.get("id") or "").strip() or "UNKNOWN"
     title = str(task.get("title") or task.get("summary_zh") or "").strip()
     status_value = str(task.get("status") or "").strip() or "-"
     owner = str(task.get("owner") or "").strip() or "-"
     reviewer = str(task.get("reviewer") or "").strip() or "-"
-    next_text = str(task.get("next") or "No short handoff yet.").strip()
+    raw_next = str(task.get("next") or "No short handoff yet.")
+    next_text = raw_next.strip()
+    if len(raw_next) > MAX_NEXT_CHARACTERS:
+        status_path = (
+            config_path(config, "status_file")
+            if config.get("paths", {}).get("status_file")
+            else ROOT / "ai-status.json"
+        ).resolve()
+        digest = hashlib.sha256(raw_next.encode("utf-8")).hexdigest()
+        # This is a display projection only. The canonical handoff is unchanged,
+        # and its exact task selector and UTF-8 digest identify the complete text.
+        next_text = (
+            f"Legacy handoff contains {len(raw_next)} characters; preview only. "
+            "Consult the full handoff for findings omitted from this preview.\n\n"
+            f"Full source: `{status_path}`; task id `{task_id}`, field `next`.\n"
+            f"UTF-8 SHA-256: `{digest}`.\n\n"
+            f"Beginning:\n{raw_next[:1200]}\n\n"
+            f"[... {len(raw_next) - 2400} characters omitted from this preview ...]\n\n"
+            f"End:\n{raw_next[-1200:]}"
+        )
     summary_zh = _normalize_summary(task.get("summary_zh") or "")
     planning_ref = str(task.get("planning_ref") or "").strip()
     artifacts = [str(item) for item in task.get("artifacts", []) if str(item).strip()]
@@ -1173,6 +1195,9 @@ def build_task_brief(
             "",
             f"- Use `{task_board_cli_path()}` for state changes.",
             "- Treat `current-work.md` as a human summary, not canonical machine context.",
+            f"- Keep new `next` handoffs within {MAX_NEXT_CHARACTERS} characters: current action, "
+            "blocker, and evidence paths. Preserve detailed findings in linked artifacts; "
+            "do not append prior handoffs to the current action.",
         ]
     )
     return "\n".join(lines).rstrip() + "\n"
