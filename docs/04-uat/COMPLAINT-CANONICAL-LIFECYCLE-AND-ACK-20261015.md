@@ -239,4 +239,49 @@ $ pnpm exec vitest run \
 - `tests/unit/system-remediation/sr-fleet-case-001/sr-fleet-case-001.test.ts`（8.3 回歸測試）
 - `apps/api/src/modules/complaint/complaint.service.ts`（8.4）
 - `tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-terminal-state-and-ack.test.ts`（8.4 回歸測試）
+
+### 8.6 接續被中斷的 origin/dev merge，修正 settlementPersistence 洩漏
+
+前一 session 在 `git merge origin/dev`（`MERGE_HEAD ce69322f`）時對 `complaint.service.ts` 與兩個 Ops 頁面的三個衝突已在 working tree 完成解衝突（無殘留 conflict marker，內容與 8.1-8.5 的 F1/F2/F3 修法一致），但於 commit 前 process 被中止（exit 143），merge 停留在 index 的 UU 狀態。本輪直接沿用該已解完的 working tree 內容（未重新 fetch、未重建 merge、未套用其他歷史 archive），`git add` 三檔並 `git commit` 完成 merge checkpoint（commit `0f617fac0`）。另一同批未 staged 的 `vitest.config.ts`（為 ops-console-web 的 `@/lib/api-client.server`／`@/lib/localized-labels`／`@/lib/ops-cross-app-links` 新增 root 層級 alias，供 `complaint-ops-ui-actions.test.tsx` 經由 root vitest config 直接執行時正確解析）一併納入同一 merge commit。
+
+Merge 後重跑 `apps/api` 與 `apps/ops-console-web` 的 `tsc --noEmit` 皆 exit 0；但 `complaint-terminal-state-and-ack.test.ts` 出現 3 個新失敗（resolve/reopen/assign 各一個「rolls back a failed ordinary ... so a retry ...」案例）。
+
+根因定位：`persistChanges` 的 catch 分支在非 `ComplaintCommitOutcomeUnknownError`（即確定失敗、已呼叫 `rollback()`）情況下，只清了 `pendingUncertainCommits`，未清對應 caseNo 在 `settlementPersistence` 的項目。該 rejected promise 因此持續留在 map 中；下一次任何 controller action 開頭呼叫的 `refreshSettlementCases()`（經 `reloadSettlementCases()` 內不帶 caseNo 的 `awaitSettlementPersistence()`）會把它與其它 pending 項目一併 `Promise.allSettled`，掃到後重新 `throw failure.reason`，導致同一案件的重試（甚至其他不相干案件的下一次請求）在尚未真正呼叫 `resolveComplaintCase`/`reopenComplaintCase`/`assignComplaintCase` 本體邏輯前，就被這個舊的、已經回報過一次的失敗攔截並 reject。
+
+修法：在該 catch 分支清 `pendingUncertainCommits` 的同一個迴圈內，若 `settlementPersistence.get(caseNo) === persistence`（即尚未被其他寫入覆蓋），一併刪除該項目，與 `awaitSettlementPersistence(caseNo)` 既有的定點 drain 邏輯行為一致，避免確定失敗且已回滾的寫入被重複掃到。
+
+驗證：
+```bash
+$ pnpm exec vitest run tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-terminal-state-and-ack.test.ts
+ Test Files  1 passed (1)
+      Tests  13 passed (13)
+
+$ pnpm exec vitest run tests/unit/complaint.test.ts tests/unit/complaint-canonical-lifecycle-and-ack-20261015/ \
+    tests/unit/system-remediation/sr-qa-call-001/c045-complaint-lifecycle-sla.test.ts \
+    tests/unit/system-remediation/sr-fleet-case-001/sr-fleet-case-001.test.ts \
+    tests/unit/fleet-statement-decisions-20261013/complaint-escalation-concurrency.test.ts \
+    tests/unit/pax-receipt-complaint-20261009/complaint-intake.test.ts \
+    tests/unit/pax-postride-same-order-20261016/complaint-detail-state.test.ts
+ Test Files  8 passed (8)
+      Tests  108 passed (108)
+
+$ cd apps/api && pnpm exec vitest run tests/unit/callcenter.service.test.ts tests/unit/incident.controller.test.ts \
+    tests/unit/complaint-incident-escalation.test.ts tests/unit/complaint-taxonomy-reopen-sla.test.ts
+ Test Files  4 passed (4)
+      Tests  38 passed (38)
+
+$ pnpm exec vitest run tests/unit/fleet-statement-decisions-20261013/ tests/unit/fleet-document-upload.test.ts
+ Test Files  8 passed (8)
+      Tests  103 passed (103)
+
+$ pnpm --filter @drts/api exec tsc --noEmit -p tsconfig.json        # exit 0
+$ cd apps/ops-console-web && pnpm exec tsc --noEmit -p tsconfig.json  # exit 0
+$ pnpm exec eslint apps/api/src/modules/complaint/complaint.service.ts \
+    apps/api/src/modules/complaint/complaint.controller.ts \
+    apps/ops-console-web/app/complaints/page.tsx \
+    "apps/ops-console-web/app/complaints/[caseNo]/page.tsx" \
+    tests/unit/complaint-canonical-lifecycle-and-ack-20261015/ --max-warnings=0   # exit 0
+```
+
+本輪改動檔案：`apps/api/src/modules/complaint/complaint.service.ts`（8.6 的 settlementPersistence 清理修正；write_scopes 內）、`vitest.config.ts`（接續前一 session 已完成的 alias 新增，供 write_scopes 內測試執行；非本任務政策變更）。
 - 本文件（8 節）
