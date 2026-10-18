@@ -6,6 +6,7 @@ import { type ContactRole } from "./voice-contact.service";
 import { VoiceSessionRepository } from "./voice-session.repository";
 import type { VoiceQueryExecutor } from "./voice-booking.repository";
 import { readVoiceRecordingContext } from "./voice-recording-context";
+import { computePayloadHash } from "../../common/idempotency/canonical-json";
 
 export type CallbackTaskStatus =
   | "pending"
@@ -160,6 +161,45 @@ export interface CancelVoiceCallbackResult {
   actualPhoneHungUp: boolean;
   dialReconcileRequired: boolean;
   inFlightAttemptId?: string | undefined;
+}
+
+export interface VoiceCallbackOperationInput {
+  taskId: string;
+  action: "claim" | "attempt" | "complete" | "cancel" | "transfer";
+  operatorId: string;
+  expectedVersion: number;
+  idempotencyKey: string;
+  leaseDurationMs?: number | undefined;
+  outcome?: CallbackOutcome | undefined;
+  dialOperationKey?: string | undefined;
+  dialStatus?: "dialing" | "bridged" | "hung_up" | undefined;
+  hangupConfirmed?: boolean | undefined;
+  notes?: string | undefined;
+  reason?: string | undefined;
+  toOperatorId?: string | undefined;
+}
+
+export interface VoiceCallbackOperationResult {
+  task: VoiceCallbackTaskRecord;
+  attempt?: VoiceCallbackAttemptRecord | undefined;
+  actualPhoneHungUp?: boolean | undefined;
+  dialReconcileRequired?: boolean | undefined;
+  transfer?:
+    | {
+        fromOperatorId: string | null;
+        toOperatorId: string;
+        reason: string;
+      }
+    | undefined;
+  receipt: {
+    commandId: string;
+    taskId: string;
+    action: VoiceCallbackOperationInput["action"];
+    operatorId: string;
+    createdAt: string;
+  };
+  replayed: boolean;
+  operatorNotes: string | null;
 }
 
 interface CallbackDbTaskRow {
@@ -451,6 +491,253 @@ export class VoiceCallbackService {
         return null;
       throw error;
     }
+  }
+
+  async listTaskScopesForRead() {
+    if (!this.isDbBacked()) {
+      return [
+        ...new Map(
+          [...this.tasks.values()].map((task) => [
+            task.resourceScopeId,
+            { resourceScopeId: task.resourceScopeId, brandId: task.brandId },
+          ]),
+        ).values(),
+      ];
+    }
+    const result = await this.databaseService!.query<{
+      resource_scope_id: string;
+      brand_id: string;
+    }>(
+      `SELECT DISTINCT scope.scope_id AS resource_scope_id, scope.brand_id
+       FROM voice.callback_task t
+       JOIN voice.session s ON s.voice_session_id = t.voice_session_id
+       JOIN voice.resource_scope scope ON scope.scope_id = COALESCE(t.resource_scope_id, s.resource_scope_id)
+       ORDER BY scope.brand_id, scope.scope_id`,
+    );
+    return result.rows.map((row) => ({
+      resourceScopeId: row.resource_scope_id,
+      brandId: row.brand_id,
+    }));
+  }
+
+  async listTasksForRead(input: {
+    resourceScopeId: string;
+    voiceSessionId?: string | undefined;
+    status?: CallbackTaskStatus | undefined;
+  }): Promise<VoiceCallbackTaskRecord[]> {
+    if (!this.isDbBacked()) {
+      return [...this.tasks.values()]
+        .filter(
+          (task) =>
+            task.resourceScopeId === input.resourceScopeId &&
+            (!input.voiceSessionId ||
+              task.voiceSessionId === input.voiceSessionId) &&
+            (!input.status || task.status === input.status),
+        )
+        .map((task) => this.cloneTask(task));
+    }
+    const result = await this.databaseService!.query<{ task_id: string }>(
+      `SELECT t.task_id FROM voice.callback_task t
+       JOIN voice.session s ON s.voice_session_id = t.voice_session_id
+       WHERE COALESCE(t.resource_scope_id, s.resource_scope_id) = $1::uuid
+         AND ($2::text IS NULL OR t.status = $2::text)
+         AND ($3::uuid IS NULL OR t.voice_session_id = $3::uuid)
+       ORDER BY CASE t.priority WHEN 'emergency' THEN 0 WHEN 'urgent' THEN 1 ELSE 2 END,
+                t.due_at NULLS LAST, t.created_at, t.task_id`,
+      [
+        input.resourceScopeId,
+        input.status ?? null,
+        input.voiceSessionId ?? null,
+      ],
+    );
+    const tasks: VoiceCallbackTaskRecord[] = [];
+    for (const row of result.rows)
+      tasks.push(await this.loadDbTask(row.task_id));
+    return tasks;
+  }
+
+  async getTaskCommandHistoryForRead(
+    taskId: string,
+  ): Promise<VoiceCallbackOperationResult[]> {
+    if (!this.isDbBacked()) return [];
+    const result = await this.databaseService!.query<{
+      response_body: VoiceCallbackOperationResult;
+    }>(
+      "SELECT response_body FROM ops.idempotency_records WHERE scope = ANY($1::varchar[]) AND status = 'completed' ORDER BY created_at, record_id",
+      [
+        ["claim", "attempt", "complete", "cancel", "transfer"].map(
+          (action) => `voice_callback:${taskId}:${action}`,
+        ),
+      ],
+    );
+    return result.rows.map((row) => row.response_body);
+  }
+
+  /** A task change, attempt and its replayable response commit together.
+   * Reuses the existing shared idempotency table; a lost HTTP response cannot
+   * turn a successful contact attempt into a second attempt on a cold peer. */
+  async executeTaskCommandForWrite(
+    input: VoiceCallbackOperationInput,
+  ): Promise<VoiceCallbackOperationResult> {
+    const key = input.idempotencyKey?.trim();
+    if (!key)
+      throw new ApiRequestError(
+        400,
+        "IDEMPOTENCY_KEY_REQUIRED",
+        "Idempotency-Key is required.",
+      );
+    if (key.length > 255)
+      throw new ApiRequestError(
+        400,
+        "IDEMPOTENCY_KEY_TOO_LONG",
+        "Idempotency-Key exceeds the existing maximum length.",
+      );
+    const payloadHash = computePayloadHash({
+      ...input,
+      idempotencyKey: undefined,
+    });
+    const scope = `voice_callback:${input.taskId}:${input.action}`;
+    return this.withLockedDbTask(input.taskId, async (task, tx) => {
+      const prior = await tx.query<{
+        payload_hash: string;
+        status: string;
+        response_body: VoiceCallbackOperationResult;
+      }>(
+        "SELECT payload_hash, status, response_body FROM ops.idempotency_records WHERE scope = $1 AND idempotency_key = $2",
+        [scope, key],
+      );
+      const saved = prior.rows[0];
+      if (saved) {
+        if (saved.payload_hash !== payloadHash)
+          throw new ApiRequestError(
+            409,
+            "IDEMPOTENCY_KEY_REUSED",
+            "This callback action key already has a different payload.",
+          );
+        if (saved.status !== "completed")
+          throw new ApiRequestError(
+            409,
+            "IDEMPOTENCY_IN_PROGRESS",
+            "The original callback action is still processing.",
+          );
+        return { ...saved.response_body, replayed: true };
+      }
+      let changed = task;
+      let attempt: VoiceCallbackAttemptRecord | undefined;
+      let transfer: VoiceCallbackOperationResult["transfer"];
+      let actualPhoneHungUp: boolean | undefined;
+      let dialReconcileRequired: boolean | undefined;
+      if (input.action === "claim") {
+        changed = await this.claimDbTask(
+          {
+            taskId: input.taskId,
+            operatorId: input.operatorId,
+            expectedVersion: input.expectedVersion,
+            ...(input.leaseDurationMs === undefined
+              ? {}
+              : { leaseDurationMs: input.leaseDurationMs }),
+          },
+          task,
+          tx,
+        );
+      } else if (input.action === "attempt") {
+        if (!input.outcome)
+          throw new ApiRequestError(
+            400,
+            "CALLBACK_OUTCOME_REQUIRED",
+            "Contact outcome is required.",
+          );
+        const recorded = await this.recordDbAttempt(
+          { ...input, outcome: input.outcome },
+          task,
+          tx,
+        );
+        changed = recorded.task;
+        attempt = recorded.attempt;
+      } else if (input.action === "transfer") {
+        this.assertMutableDbTask(task, input.expectedVersion);
+        const toOperatorId = input.toOperatorId?.trim();
+        const reason = input.reason?.trim();
+        if (!toOperatorId || !reason)
+          throw new ApiRequestError(
+            400,
+            "CALLBACK_TRANSFER_DETAILS_REQUIRED",
+            "Recipient and transfer reason are required.",
+          );
+        const expiresAt = new Date(
+          Date.now() + (input.leaseDurationMs ?? 300000),
+        ).toISOString();
+        await tx.query(
+          "UPDATE voice.callback_task SET owner_claim_lease = $2, status = 'claimed', version = version + 1, updated_at = now() WHERE task_id = $1",
+          [task.taskId, `${toOperatorId}:${expiresAt}`],
+        );
+        changed = await this.loadDbTask(task.taskId, tx);
+        transfer = {
+          fromOperatorId: task.assignedOperatorId,
+          toOperatorId,
+          reason,
+        };
+      } else {
+        const desired = input.action === "complete" ? "completed" : "cancelled";
+        if (task.status !== desired) {
+          if (this.isTerminalStatus(task.status))
+            throw new ApiRequestError(
+              409,
+              "CALLBACK_TERMINAL_RACE_CONFLICT",
+              `Task is already ${task.status}.`,
+            );
+          this.assertMutableDbTask(task, input.expectedVersion);
+          if (desired === "cancelled" && !input.reason?.trim())
+            throw new ApiRequestError(
+              400,
+              "CALLBACK_CANCEL_REASON_REQUIRED",
+              "Cancellation reason is required.",
+            );
+          await tx.query(
+            `UPDATE voice.callback_task SET status = $2::varchar(20), cancellation_reason = CASE WHEN $2::varchar(20) = 'cancelled' THEN $3 ELSE cancellation_reason END, owner_claim_lease = NULL, version = version + 1, updated_at = now() WHERE task_id = $1`,
+            [task.taskId, desired, input.reason ?? null],
+          );
+          changed = await this.loadDbTask(task.taskId, tx);
+        }
+        if (desired === "cancelled") {
+          const inFlight = await this.findUnresolvedAttemptDb(task.taskId, tx);
+          actualPhoneHungUp = !inFlight;
+          dialReconcileRequired = !!inFlight;
+        }
+      }
+      const commandId = randomUUID();
+      const createdAt = new Date().toISOString();
+      const result: VoiceCallbackOperationResult = {
+        task: changed,
+        attempt,
+        transfer,
+        actualPhoneHungUp,
+        dialReconcileRequired,
+        receipt: {
+          commandId,
+          taskId: task.taskId,
+          action: input.action,
+          operatorId: input.operatorId,
+          createdAt,
+        },
+        replayed: false,
+        operatorNotes: input.notes ?? input.reason ?? null,
+      };
+      await tx.query(
+        `INSERT INTO ops.idempotency_records (record_id,scope,idempotency_key,actor_id,request_path,payload_hash,status,status_code,response_body,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,'completed',201,$7::jsonb,$8,$8)`,
+        [
+          commandId,
+          scope,
+          key,
+          input.operatorId,
+          `/api/voice/callbacks/${task.taskId}/${input.action === "attempt" ? "attempts" : input.action}`,
+          payloadHash,
+          JSON.stringify(result),
+          createdAt,
+        ],
+      );
+      return result;
+    });
   }
 
   async claimCallbackForWrite(input: ClaimVoiceCallbackInput) {
@@ -961,86 +1248,105 @@ export class VoiceCallbackService {
   async claimCallbackDurable(
     input: ClaimVoiceCallbackInput,
   ): Promise<VoiceCallbackTaskRecord> {
-    return this.withLockedDbTask(input.taskId, async (task, tx) => {
-      this.assertMutableDbTask(task, input.expectedVersion);
-      const now = new Date();
-      if (
-        task.assignedOperatorId &&
-        task.assignedOperatorId !== input.operatorId &&
-        task.claimExpiresAt &&
-        Date.parse(task.claimExpiresAt) > now.getTime()
-      ) {
-        throw new ApiRequestError(
-          409,
-          "CALLBACK_TASK_ALREADY_CLAIMED",
-          `Task is currently claimed by operator '${task.assignedOperatorId}'.`,
-        );
-      }
-      const expiresAt = new Date(
-        now.getTime() + (input.leaseDurationMs ?? 300000),
-      ).toISOString();
-      await tx.query(
-        "UPDATE voice.callback_task SET status = 'claimed', owner_claim_lease = $2, version = version + 1, updated_at = now() WHERE task_id = $1",
-        [input.taskId, `${input.operatorId}:${expiresAt}`],
+    return this.withLockedDbTask(input.taskId, (task, tx) =>
+      this.claimDbTask(input, task, tx),
+    );
+  }
+
+  private async claimDbTask(
+    input: ClaimVoiceCallbackInput,
+    task: VoiceCallbackTaskRecord,
+    tx: VoiceQueryExecutor,
+  ): Promise<VoiceCallbackTaskRecord> {
+    this.assertMutableDbTask(task, input.expectedVersion);
+    const now = new Date();
+    if (
+      task.assignedOperatorId &&
+      task.assignedOperatorId !== input.operatorId &&
+      task.claimExpiresAt &&
+      Date.parse(task.claimExpiresAt) > now.getTime()
+    ) {
+      throw new ApiRequestError(
+        409,
+        "CALLBACK_TASK_ALREADY_CLAIMED",
+        `Task is currently claimed by operator '${task.assignedOperatorId}'.`,
       );
-      return this.loadDbTask(input.taskId, tx);
-    });
+    }
+    const expiresAt = new Date(
+      now.getTime() + (input.leaseDurationMs ?? 300000),
+    ).toISOString();
+    await tx.query(
+      "UPDATE voice.callback_task SET status = 'claimed', owner_claim_lease = $2, version = version + 1, updated_at = now() WHERE task_id = $1",
+      [input.taskId, `${input.operatorId}:${expiresAt}`],
+    );
+    return this.loadDbTask(input.taskId, tx);
   }
 
   async recordAttemptDurable(input: RecordCallbackAttemptInput): Promise<{
     task: VoiceCallbackTaskRecord;
     attempt: VoiceCallbackAttemptRecord;
   }> {
-    return this.withLockedDbTask(input.taskId, async (task, tx) => {
-      this.assertMutableDbTask(task, input.expectedVersion);
-      const numbers = await tx.query<{ next_number: number }>(
-        "SELECT COALESCE(MAX(attempt_number), 0) + 1 AS next_number FROM voice.callback_attempt WHERE task_id = $1",
-        [input.taskId],
-      );
-      const nextNumber = Number(numbers.rows[0]!.next_number);
-      const answered =
-        input.outcome === "answered" || input.outcome === "succeeded";
-      const exhausted = task.attemptCount + 1 >= task.maxAttempts;
-      const nextAction = answered
-        ? "complete_task"
-        : exhausted
-          ? "mark_unreachable"
-          : "retry_later";
-      const hangupConfirmed = input.hangupConfirmed ?? false;
-      const attempt = await tx.query<CallbackDbAttemptRow>(
-        `INSERT INTO voice.callback_attempt (
-          task_id, attempt_number, operator_id, started_at, ended_at, outcome, next_action,
-          dial_operation_key, dial_status, hangup_confirmed, notes
-        ) VALUES ($1,$2,$3,now(),CASE WHEN $8::boolean THEN now() ELSE NULL END,$4,$5,$6,$7,$8,$9)
-        RETURNING *`,
-        [
-          input.taskId,
-          nextNumber,
-          input.operatorId,
-          input.outcome,
-          nextAction,
-          input.dialOperationKey ?? `dial-${input.taskId}-${nextNumber}`,
-          input.dialStatus ?? (hangupConfirmed ? "hung_up" : "dialing"),
-          hangupConfirmed,
-          input.notes ?? null,
-        ],
-      );
-      const status = answered
-        ? "in_progress"
-        : exhausted
-          ? "unreachable"
-          : "pending";
-      await tx.query(
-        `UPDATE voice.callback_task SET status = $2::varchar(20),
-          owner_claim_lease = CASE WHEN $2::varchar(20) = 'in_progress' THEN owner_claim_lease ELSE NULL END,
-          version = version + 1, updated_at = now() WHERE task_id = $1`,
-        [input.taskId, status],
-      );
-      return {
-        task: await this.loadDbTask(input.taskId, tx),
-        attempt: this.mapDbAttemptRow(attempt.rows[0]!),
-      };
-    });
+    return this.withLockedDbTask(input.taskId, (task, tx) =>
+      this.recordDbAttempt(input, task, tx),
+    );
+  }
+
+  private async recordDbAttempt(
+    input: RecordCallbackAttemptInput,
+    task: VoiceCallbackTaskRecord,
+    tx: VoiceQueryExecutor,
+  ): Promise<{
+    task: VoiceCallbackTaskRecord;
+    attempt: VoiceCallbackAttemptRecord;
+  }> {
+    this.assertMutableDbTask(task, input.expectedVersion);
+    const numbers = await tx.query<{ next_number: number }>(
+      "SELECT COALESCE(MAX(attempt_number), 0) + 1 AS next_number FROM voice.callback_attempt WHERE task_id = $1",
+      [input.taskId],
+    );
+    const nextNumber = Number(numbers.rows[0]!.next_number);
+    const answered =
+      input.outcome === "answered" || input.outcome === "succeeded";
+    const exhausted = task.attemptCount + 1 >= task.maxAttempts;
+    const nextAction = answered
+      ? "complete_task"
+      : exhausted
+        ? "mark_unreachable"
+        : "retry_later";
+    const hangupConfirmed = input.hangupConfirmed ?? false;
+    const attempt = await tx.query<CallbackDbAttemptRow>(
+      `INSERT INTO voice.callback_attempt (
+        task_id, attempt_number, operator_id, started_at, ended_at, outcome, next_action,
+        dial_operation_key, dial_status, hangup_confirmed, notes
+      ) VALUES ($1,$2,$3,now(),CASE WHEN $8::boolean THEN now() ELSE NULL END,$4,$5,$6,$7,$8,$9)
+      RETURNING *`,
+      [
+        input.taskId,
+        nextNumber,
+        input.operatorId,
+        input.outcome,
+        nextAction,
+        input.dialOperationKey ?? `dial-${input.taskId}-${nextNumber}`,
+        input.dialStatus ?? (hangupConfirmed ? "hung_up" : "dialing"),
+        hangupConfirmed,
+        input.notes ?? null,
+      ],
+    );
+    const status = answered
+      ? "in_progress"
+      : exhausted
+        ? "unreachable"
+        : "pending";
+    await tx.query(
+      `UPDATE voice.callback_task SET status = $2::varchar(20),
+        owner_claim_lease = CASE WHEN $2::varchar(20) = 'in_progress' THEN owner_claim_lease ELSE NULL END,
+        version = version + 1, updated_at = now() WHERE task_id = $1`,
+      [input.taskId, status],
+    );
+    return {
+      task: await this.loadDbTask(input.taskId, tx),
+      attempt: this.mapDbAttemptRow(attempt.rows[0]!),
+    };
   }
 
   private mapDbAttemptRow(
@@ -1143,8 +1449,9 @@ export class VoiceCallbackService {
 
   private async findUnresolvedAttemptDb(
     taskId: string,
+    tx: VoiceQueryExecutor = this.databaseService!,
   ): Promise<{ attempt_id: string } | null> {
-    const result = await this.databaseService!.query<{ attempt_id: string }>(
+    const result = await tx.query<{ attempt_id: string }>(
       `SELECT attempt_id FROM voice.callback_attempt
        WHERE task_id = $1 AND ended_at IS NULL
        ORDER BY attempt_number DESC LIMIT 1`,

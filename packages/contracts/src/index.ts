@@ -7779,6 +7779,7 @@ export * from "./phase1-p5-s3-multi-taxi";
 export * from "./p5-fare-anomaly-admin";
 export * from "./unattended-voice";
 export * from "./voice-dialogue";
+export * from "./voice-callback-operations";
 export * from "./system-remediation";
 export * from "./remittance-proof";
 export * from "./reimbursement-workflow";

@@ -1,5 +1,14 @@
 import type { TenantInvoiceMailView } from "@drts/contracts";
 import type {
+  VoiceCallbackCreateRequest,
+  VoiceCallbackCreateResponse,
+  VoiceCallbackOperation,
+  VoiceCallbackOperationRequest,
+  VoiceCallbackOperationResponse,
+  VoiceCallbackTaskDetail,
+  VoiceCallbackTaskView,
+} from "@drts/contracts";
+import type {
   CreatePlatformFareVersionCommand,
   UpdatePlatformFareVersionCommand,
   RecordPlatformFareVersionFilingCommand,
@@ -1900,6 +1909,62 @@ export class ApiClient {
   }
 
   // ── Call Center ──
+
+  async listVoiceCallbackScopes() {
+    return this.getList<{ resourceScopeId: string; brandId: string }>(
+      "/api/voice/callback-scopes",
+    );
+  }
+
+  async listVoiceCallbackTasks(filters: {
+    resourceScopeId: string;
+    status?: VoiceCallbackTaskView["status"];
+    voiceSessionId?: string;
+  }) {
+    const query = new URLSearchParams({
+      resourceScopeId: filters.resourceScopeId,
+    });
+    if (filters.status) query.set("status", filters.status);
+    if (filters.voiceSessionId)
+      query.set("voiceSessionId", filters.voiceSessionId);
+    return this.getList<VoiceCallbackTaskView>(`/api/voice/callbacks?${query}`);
+  }
+
+  async getVoiceCallbackTask(taskId: string) {
+    return this.get<VoiceCallbackTaskDetail>(
+      `/api/voice/callbacks/${encodeURIComponent(taskId)}`,
+    );
+  }
+
+  async getVoiceCallbackCreateReceipt(actionKey: string) {
+    return this.get<VoiceCallbackCreateResponse>(
+      `/api/voice/callback-receipts?${new URLSearchParams({ actionKey })}`,
+    );
+  }
+
+  async createVoiceCallback(
+    sessionId: string,
+    command: VoiceCallbackCreateRequest,
+    idempotencyKey: string,
+  ) {
+    return this.post<VoiceCallbackCreateResponse>(
+      `/api/voice/sessions/${encodeURIComponent(sessionId)}/callbacks`,
+      { body: command, idempotencyKey },
+    );
+  }
+
+  async executeVoiceCallbackCommand(
+    taskId: string,
+    action: VoiceCallbackOperation,
+    command: VoiceCallbackOperationRequest,
+    idempotencyKey: string,
+  ) {
+    const route = action === "attempt" ? "attempts" : action;
+    return this.post<VoiceCallbackOperationResponse>(
+      `/api/voice/callbacks/${encodeURIComponent(taskId)}/${route}`,
+      { body: command, idempotencyKey },
+    );
+  }
 
   async listCallSessions(): Promise<CallSessionRecord[]> {
     return this.getList<CallSessionRecord>("/api/callcenter/sessions");
