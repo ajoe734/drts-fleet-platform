@@ -1399,25 +1399,21 @@ export class VoiceCommandRunnerService
       }
     }
 
-    if (this.callbackService && payload.taskId) {
-      const task = this.callbackService.getTaskById(String(payload.taskId));
-      if (task && task.status === "pending") {
-        return this.callbackService.claimCallback({
-          taskId: task.taskId,
-          expectedVersion: task.version,
-          operatorId: "voice-runner-system",
-          leaseDurationMs: 60000,
-        });
-      }
+    if (!this.callbackService || !payload.taskId)
+      throw new Error("Callback task/service unavailable");
+    const task = await this.callbackService.getTaskForRead(
+      String(payload.taskId),
+    );
+    if (!task) throw new Error("Callback task unavailable");
+    if (task.status === "pending") {
+      return this.callbackService.claimCallbackForWrite({
+        taskId: task.taskId,
+        expectedVersion: task.version,
+        operatorId: "voice-runner-system",
+        leaseDurationMs: 60000,
+      });
     }
-
-    return {
-      handled: true,
-      type: "execute_callback",
-      voiceSessionId: work.voiceSessionId,
-      taskId: payload.taskId ?? null,
-      executedAt: new Date().toISOString(),
-    };
+    return task;
   }
 
   /**
