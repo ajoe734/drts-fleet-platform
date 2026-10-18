@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { expect, it } from "vitest";
+import { trackInterruptedRehearsal } from "../../e2e/pax-review-shared-order/interrupted-rehearsal-finalizer";
 
 const specPath = "tests/e2e/pax-review-shared-order-demo.spec.ts";
 const source = process.env.PAX_REVIEW_FAILURE_SOURCE_REF
@@ -61,6 +62,7 @@ async function exercise(options: Options) {
     name,
     currentURL: "about:blank",
     on: () => {},
+    off: () => {},
     goto: async () => {},
     url() {
       return this.currentURL;
@@ -85,6 +87,7 @@ async function exercise(options: Options) {
       return Buffer.from(`actual-page-boundary:${name}`);
     },
     context: () => ({
+      setOffline: async () => {},
       cookies: async () => [{ name: "pax_session", value: "fixture" }],
     }),
     request: {
@@ -133,6 +136,7 @@ async function exercise(options: Options) {
     OPS: "https://ops.invalid",
     DRIVER: "https://standalone.invalid",
     expect,
+    trackInterruptedRehearsal,
     camel: (value: unknown) => value,
     createJourneyProgress: () => ({
       response: () => {},
@@ -148,6 +152,10 @@ async function exercise(options: Options) {
     ) => boundary("register", page, base),
     finish: async (page: (typeof pages)[number], base: string) =>
       boundary("finish", page, base),
+    opsRead: async (page: (typeof pages)[number], orderId: string) => {
+      expect(page).toBe(pages[1]);
+      expect(orderId).toBe("A-order");
+    },
   });
   const info = {
     outputPath: (name: string) => name,

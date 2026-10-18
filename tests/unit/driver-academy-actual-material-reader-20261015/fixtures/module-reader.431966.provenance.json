@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/ajoe734/drts-fleet-platform",
+  "commit": "431966bdf2728a76f7b03907974a124ab4a48ae7",
+  "path": "apps/driver-app/components/academy/module-reader.tsx",
+  "blob": "4fb3b2461bec5f154c5f53f4b4d15267ff5a4a6e",
+  "sha256": "4214e442333f0d4a4f0d164d254a9240ab5d6453be2526ee4126e236d32ea370",
+  "bytes": 10946,
+  "fixture": "module-reader.431966.original.tsx.txt",
+  "source_url": "https://github.com/ajoe734/drts-fleet-platform/blob/431966bdf2728a76f7b03907974a124ab4a48ae7/apps/driver-app/components/academy/module-reader.tsx",
+  "acquisition": "Byte-exact Root evidence copy, independently compared with git --no-replace-objects show on 2026-10-16; upstream contents API provenance preserved in Root correction locator.",
+  "root_correction_locator": "/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261016T001147Z-remaining-ci-and-original-fare-root/Root-Academy-genuine-before-path-exists-upstream-and-local-correction-readonly-locator.json"
+}

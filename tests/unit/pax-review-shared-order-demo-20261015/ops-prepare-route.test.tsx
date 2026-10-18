@@ -34,10 +34,20 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-it("the real Ops prepare button/BFF reaches a realm-admitted controller without changing passenger authorization", async () => {
-  vi.stubEnv("DRTS_ENV", "test");
+async function exerciseOpsReviewConfiguration({
+  environment,
+  authMode,
+  internalKey,
+}: {
+  environment: string;
+  authMode: string;
+  internalKey: string;
+}) {
+  vi.stubEnv("DRTS_ENV", environment);
   vi.stubEnv("NODE_ENV", "test");
-  vi.stubEnv("AUTH_MODE", "test");
+  vi.stubEnv("AUTH_MODE", authMode);
+  vi.stubEnv("DRTS_INTERNAL_KEY", internalKey);
+  vi.stubEnv("DRTS_INTERNAL_KEY_ENFORCED", "false");
   vi.stubEnv("PAX_REVIEW_DEMO_ENABLED", "true");
   vi.stubEnv("DRTS_API_URL", "https://api.example");
   vi.stubEnv("DRTS_API_AUTH_AUDIENCE", "");
@@ -125,19 +135,16 @@ it("the real Ops prepare button/BFF reaches a realm-admitted controller without 
         try {
           await guard.canActivate(context(request, Controller, handler));
           const result = await handler.call(instance);
-          if (isPrepare) {
-            admitted = request;
-            responses.push({ path, status: 200 });
-          }
+          if (isPrepare) admitted = request;
+          responses.push({ path, status: 200 });
           return Response.json(result);
         } catch (error) {
           if (!(error instanceof ApiRequestError)) throw error;
-          if (isPrepare)
-            responses.push({
-              path,
-              status: error.getStatus(),
-              code: error.code,
-            });
+          responses.push({
+            path,
+            status: error.getStatus(),
+            code: error.code,
+          });
           return Response.json(error.getResponse(), {
             status: error.getStatus(),
           });
@@ -148,12 +155,13 @@ it("the real Ops prepare button/BFF reaches a realm-admitted controller without 
   render(<OpsReview />);
   const copy = reviewCopy("en");
   fireEvent.click(await screen.findByRole("button", { name: copy.prepare }));
-  await waitFor(() => expect(responses).toHaveLength(1));
-  // The old real page/BFF/guard returns 401 unauthorized before supply.prepare.
-  expect(responses[0]).toEqual({
-    path: "/api/ops/review-demo/prepare",
-    status: 200,
-  });
+  await waitFor(() => expect(responses).toHaveLength(2));
+  // Both requests must use the Ops authority. The deployed internal key makes
+  // the passenger config request fail before the prepare button can appear.
+  expect(responses).toEqual([
+    { path: "/api/ops/review-demo/config", status: 200 },
+    { path: "/api/ops/review-demo/prepare", status: 200 },
+  ]);
   await screen.findByText(copy.prepared);
   expect(supply.prepare).toHaveBeenCalledOnce();
   expect(admitted?.identity).toMatchObject({ realm: "ops" });
@@ -189,4 +197,16 @@ it("the real Ops prepare button/BFF reaches a realm-admitted controller without 
     },
   );
   expect(supply.prepare).toHaveBeenCalledOnce();
-});
+}
+
+it.each([
+  { environment: "test", authMode: "test", internalKey: "" },
+  {
+    environment: "development",
+    authMode: "explicit",
+    internalKey: "synthetic-configured-dev-internal-key",
+  },
+])(
+  "$environment: the real Ops config and prepare button/BFF use the operator controller",
+  exerciseOpsReviewConfiguration,
+);

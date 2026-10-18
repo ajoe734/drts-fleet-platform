@@ -1,0 +1,21 @@
+{
+  "runtimeSource": "ebdf39ffa789c40ae99c41381540c20d9a90146b",
+  "orders": [
+    {
+      "orderId": "128b865e-68f4-4b38-8b09-cdca799435d5",
+      "phone": "0900000098",
+      "failedRunId": 39052144148,
+      "expectedDriverId": "pax-review-driver-a",
+      "expectedVehicleId": "pax-review-vehicle-a",
+      "note": "Prior failed H: identity and current state require an ordinary owner read before any cancellation."
+    },
+    {
+      "orderId": "1534dbdf-1048-430d-b84a-0f1e7fb3619c",
+      "phone": "0900000029",
+      "failedRunId": 39060841829,
+      "expectedDriverId": "pax-review-driver-b",
+      "expectedVehicleId": "pax-review-vehicle-b",
+      "note": "Current failed A: first assignment succeeded, reassignment returned409; verify its durable state."
+    }
+  ]
+}

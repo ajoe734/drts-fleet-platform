@@ -6,10 +6,12 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
   Res,
 } from "@nestjs/common";
 
 import type {
+  ActionReceipt,
   AddComplaintCaseNoteCommand,
   AssignComplaintCaseCommand,
   CreateComplaintCaseCommand,
@@ -28,6 +30,19 @@ import type { PassthroughResponseLike } from "../../common/idempotency-http";
 import { applyIdempotentResponseHeaders } from "../../common/idempotency-http";
 import { IncidentService } from "../incident/incident.service";
 import { ComplaintService } from "./complaint.service";
+import { toActionReceipt } from "../../common/action-receipt";
+
+function toComplaintActionEnvelope<T>(
+  data: T,
+  actionReceipt: ActionReceipt,
+  requestId?: string,
+) {
+  const envelope = toApiSuccessEnvelope(
+    data,
+    requestId ?? actionReceipt.actionId,
+  );
+  return { ...envelope, meta: { ...envelope.meta, actionReceipt } };
+}
 
 @Controller("complaints")
 export class ComplaintController {
@@ -50,17 +65,38 @@ export class ComplaintController {
       requestPath: "complaints",
       payload: command,
       execute: async () => {
-        const data = this.complaintService.createComplaintCase(
+        const created = await this.complaintService.createComplaintCase(
           command,
           requestId,
+          { captureAudit: true },
         );
+        const data = created.data;
         await this.complaintService.awaitSettlementPersistence(data.caseNo);
-        return { data, statusCode: HttpStatus.CREATED };
+        return {
+          data,
+          statusCode: HttpStatus.CREATED,
+          actionReceipt: toActionReceipt({
+            auditLog: created.auditLog,
+            message: "Complaint case created.",
+          }),
+        };
       },
     });
 
     applyIdempotentResponseHeaders(response, result);
-    return toApiSuccessEnvelope(result.data, requestId);
+    const actionReceipt =
+      result.actionReceipt ??
+      toActionReceipt({
+        auditLog: (
+          await this.complaintService.acknowledgeExistingCaseAction(
+            result.data,
+            "create_complaint_case",
+            requestId,
+          )
+        ).auditLog,
+        message: "Existing complaint case returned.",
+      });
+    return toComplaintActionEnvelope(result.data, actionReceipt, requestId);
   }
 
   @Get()
@@ -132,13 +168,21 @@ export class ComplaintController {
     @Headers("x-request-id") requestId?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    const updated = this.complaintService.assignComplaintCase(
+    const updated = await this.complaintService.assignComplaintCase(
       caseNo,
       command,
       requestId,
+      { captureAudit: true },
     );
     await this.complaintService.awaitSettlementPersistence(caseNo);
-    return toApiSuccessEnvelope(updated, requestId);
+    return toComplaintActionEnvelope(
+      updated.data,
+      toActionReceipt({
+        auditLog: updated.auditLog,
+        message: "Complaint case updated.",
+      }),
+      requestId,
+    );
   }
 
   @Post(":caseNo/notes")
@@ -148,21 +192,45 @@ export class ComplaintController {
     @Headers("x-request-id") requestId?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    const updated = this.complaintService.addComplaintCaseNote(
+    const updated = await this.complaintService.addComplaintCaseNote(
       caseNo,
       command,
       requestId,
+      { captureAudit: true },
     );
     await this.complaintService.awaitSettlementPersistence(caseNo);
-    return toApiSuccessEnvelope(updated, requestId);
+    return toComplaintActionEnvelope(
+      updated.data,
+      toActionReceipt({
+        auditLog: updated.auditLog,
+        message: "Complaint case updated.",
+      }),
+      requestId,
+    );
   }
 
   @Get(":caseNo/export")
   async getComplaintExportView(
     @Param("caseNo") caseNo: string,
     @Headers("x-request-id") requestId?: string,
+    @Query("action_receipt") captureReceipt?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
+    if (captureReceipt === "true") {
+      const result =
+        await this.complaintService.getComplaintExportViewWithReceipt(
+          caseNo,
+          requestId,
+        );
+      return toComplaintActionEnvelope(
+        result.data,
+        toActionReceipt({
+          auditLog: result.auditLog,
+          message: "Complaint export view prepared.",
+        }),
+        requestId,
+      );
+    }
     return toApiSuccessEnvelope(
       this.complaintService.getComplaintExportView(caseNo),
       requestId,
@@ -176,13 +244,21 @@ export class ComplaintController {
     @Headers("x-request-id") requestId?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    const updated = this.complaintService.reopenComplaintCase(
+    const updated = await this.complaintService.reopenComplaintCase(
       caseNo,
       command,
       requestId,
+      { captureAudit: true },
     );
     await this.complaintService.awaitSettlementPersistence(caseNo);
-    return toApiSuccessEnvelope(updated, requestId);
+    return toComplaintActionEnvelope(
+      updated.data,
+      toActionReceipt({
+        auditLog: updated.auditLog,
+        message: "Complaint case updated.",
+      }),
+      requestId,
+    );
   }
 
   @Post(":caseNo/resolve")
@@ -192,13 +268,21 @@ export class ComplaintController {
     @Headers("x-request-id") requestId?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    const updated = this.complaintService.resolveComplaintCase(
+    const updated = await this.complaintService.resolveComplaintCase(
       caseNo,
       command,
       requestId,
+      { captureAudit: true },
     );
     await this.complaintService.awaitSettlementPersistence(caseNo);
-    return toApiSuccessEnvelope(updated, requestId);
+    return toComplaintActionEnvelope(
+      updated.data,
+      toActionReceipt({
+        auditLog: updated.auditLog,
+        message: "Complaint case updated.",
+      }),
+      requestId,
+    );
   }
 
   @Post(":caseNo/close")
@@ -208,13 +292,21 @@ export class ComplaintController {
     @Headers("x-request-id") requestId?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    const updated = this.complaintService.closeComplaintCase(
+    const updated = await this.complaintService.closeComplaintCase(
       caseNo,
       command,
       requestId,
+      { captureAudit: true },
     );
     await this.complaintService.awaitSettlementPersistence(caseNo);
-    return toApiSuccessEnvelope(updated, requestId);
+    return toComplaintActionEnvelope(
+      updated.data,
+      toActionReceipt({
+        auditLog: updated.auditLog,
+        message: "Complaint case updated.",
+      }),
+      requestId,
+    );
   }
 
   @Post(":caseNo/escalate-to-incident")
@@ -267,11 +359,12 @@ export class ComplaintController {
               { caseNo, existingIncidentId: currentCase.relatedIncidentId },
             );
           }
-          const updatedCase = this.complaintService.escalateToIncident(
+          const updatedCase = await this.complaintService.escalateToIncident(
             caseNo,
             preparedIncident.incident.incidentId,
             command.reason,
             requestId,
+            { captureAudit: true },
           );
           await this.complaintService.awaitSettlementPersistence(caseNo);
           const createdIncident = this.incidentService.publishPreparedIncident(
@@ -290,8 +383,12 @@ export class ComplaintController {
             caseNo,
             requestId,
           );
-          return toApiSuccessEnvelope(
-            { complaintCase: updatedCase, incident: linkedIncident },
+          return toComplaintActionEnvelope(
+            { complaintCase: updatedCase.data, incident: linkedIncident },
+            toActionReceipt({
+              auditLog: updatedCase.auditLog,
+              message: "Complaint escalated to incident.",
+            }),
             requestId,
           );
         },
@@ -342,10 +439,11 @@ export class ComplaintController {
               },
             );
           }
-          const updatedComplaintCase = this.complaintService.linkIncident(
+          const updatedComplaintCase = await this.complaintService.linkIncident(
             caseNo,
             command,
             requestId,
+            { captureAudit: true },
           );
           await this.complaintService.awaitSettlementPersistence(caseNo);
           this.incidentService.linkComplaint(
@@ -353,7 +451,14 @@ export class ComplaintController {
             caseNo,
             requestId,
           );
-          return toApiSuccessEnvelope(updatedComplaintCase, requestId);
+          return toComplaintActionEnvelope(
+            updatedComplaintCase.data,
+            toActionReceipt({
+              auditLog: updatedComplaintCase.auditLog,
+              message: "Complaint linked to incident.",
+            }),
+            requestId,
+          );
         },
       );
     });
@@ -365,11 +470,19 @@ export class ComplaintController {
     @Headers("x-request-id") requestId?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    const updated = this.complaintService.markComplaintSlaBreach(
+    const updated = await this.complaintService.markComplaintSlaBreach(
       caseNo,
       requestId,
+      { captureAudit: true },
     );
     await this.complaintService.awaitSettlementPersistence(caseNo);
-    return toApiSuccessEnvelope(updated, requestId);
+    return toComplaintActionEnvelope(
+      updated.data,
+      toActionReceipt({
+        auditLog: updated.auditLog,
+        message: "Complaint case updated.",
+      }),
+      requestId,
+    );
   }
 }

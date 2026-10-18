@@ -83,7 +83,12 @@ function mergeByKey<T>(
 function createDurableTenantPartnerRepository() {
   let state = createEmptyTenantPartnerState();
 
-  return {
+  const repository = {
+    persistConfigurationChanges: vi.fn(
+      async (changes: PersistTenantPartnerChanges) => {
+        await repository.persistChanges(changes);
+      },
+    ),
     isEnabled: vi.fn(() => true),
     loadState: vi.fn(async () => cloneState(state)),
     persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
@@ -119,9 +124,12 @@ function createDurableTenantPartnerRepository() {
     reportPersistenceFailure: vi.fn(),
     getState: () => cloneState(state),
   };
+  return repository;
 }
 
-type DurableRepository = ReturnType<typeof createDurableTenantPartnerRepository>;
+type DurableRepository = ReturnType<
+  typeof createDurableTenantPartnerRepository
+>;
 
 async function createCredentialSurface(
   repository: DurableRepository,
@@ -295,7 +303,8 @@ describe("IAM-PRT-001 partner credential lifecycle across restart", () => {
     );
 
     expect(
-      controller.listApiKeys(TENANT_A, "req-iam-prt-001-manual-list").data.items,
+      controller.listApiKeys(TENANT_A, "req-iam-prt-001-manual-list").data
+        .items,
     ).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -477,7 +486,7 @@ describe("IAM-PRT-001 partner credential lifecycle across restart", () => {
       scopes: ["tenant:webhooks:read", "tenant:webhooks:write", "tenant:read"],
     } as const;
 
-    const created = service.createWebhookEndpoint(
+    const created = await service.createWebhookEndpoint(
       TENANT_A,
       {
         url: "https://tenant.example/webhooks/iam-prt-001",
@@ -507,7 +516,7 @@ describe("IAM-PRT-001 partner credential lifecycle across restart", () => {
 
     // v1 expires before the operator gets around to rotating it.
     vi.setSystemTime(new Date("2026-08-05T00:00:00.000Z"));
-    const rotated = service.rotateWebhookSecret(
+    const rotated = await service.rotateWebhookSecret(
       TENANT_A,
       {
         webhookId: created.webhookId,
@@ -571,7 +580,7 @@ describe("IAM-PRT-001 partner credential lifecycle across restart", () => {
       scopes: ["tenant:webhooks:read", "tenant:webhooks:write", "tenant:read"],
     } as const;
 
-    const created = controller.createWebhookEndpoint(
+    const created = await controller.createWebhookEndpoint(
       {
         url: "https://tenant.example/webhooks/iam-prt-001-leak",
         secret: SECRET_V1,
@@ -583,7 +592,7 @@ describe("IAM-PRT-001 partner credential lifecycle across restart", () => {
     expect(JSON.stringify(created)).not.toContain(SECRET_V1);
 
     vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
-    const rotated = controller.rotateWebhookSecret(
+    const rotated = await controller.rotateWebhookSecret(
       created.data.webhookId,
       {
         webhookId: created.data.webhookId,
@@ -667,7 +676,8 @@ describe("IAM-PRT-001 partner credential lifecycle across restart", () => {
   it("keeps every credential a repeat rotation retires revoked across a restart", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-02T00:00:00.000Z"));
-    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT = SEEDED_PARTNER_KEY;
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      SEEDED_PARTNER_KEY;
     const seeds = resolvePartnerIngressCredentialsFromEnv();
 
     const repository = createDurableTenantPartnerRepository();
@@ -749,11 +759,14 @@ describe("IAM-PRT-001 partner credential lifecycle across restart", () => {
     const executor = { query: vi.fn() };
 
     await expect(
-      repository.persistIdentityGovernanceChanges(executor as never, {
-        // A bucket outside the identity-governance set would otherwise be
-        // audited by the shared transaction and then silently dropped.
-        webhookDeliveries: [],
-      } as never),
+      repository.persistIdentityGovernanceChanges(
+        executor as never,
+        {
+          // A bucket outside the identity-governance set would otherwise be
+          // audited by the shared transaction and then silently dropped.
+          webhookDeliveries: [],
+        } as never,
+      ),
     ).rejects.toThrowError(/webhookDeliveries/);
     expect(executor.query).not.toHaveBeenCalled();
 

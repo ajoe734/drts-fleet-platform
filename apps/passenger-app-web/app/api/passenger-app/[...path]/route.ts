@@ -187,8 +187,22 @@ async function checkCSRF(request: NextRequest) {
   const origin = request.headers.get("origin");
   if (!origin) return false;
   try {
-    const expectedOrigin = new URL(request.url).origin;
-    return origin === expectedOrigin;
+    const requestUrl = new URL(request.url);
+    const host = request.headers.get("host");
+    const expectedUrl = host
+      ? new URL(`${requestUrl.protocol}//${host}`)
+      : requestUrl;
+    if (host) {
+      // Cloud Run terminates TLS before Next's HTTP standalone listener.
+      // Host is the browser authority; request.url can be 0.0.0.0:3009.
+      if (
+        process.env.NODE_ENV === "production" &&
+        !["localhost", "127.0.0.1", "[::1]"].includes(expectedUrl.hostname)
+      ) {
+        expectedUrl.protocol = "https:";
+      }
+    }
+    return origin === expectedUrl.origin;
   } catch {
     return false;
   }

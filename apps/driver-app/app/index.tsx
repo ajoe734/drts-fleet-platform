@@ -1,4 +1,5 @@
 import { PlatformNoticeBanner } from "../components/platform-notice-banner";
+import { loadDriverOrderSummaries } from "@/lib/task-order-summaries";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Redirect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,7 +19,7 @@ import {
   type RefreshTier,
   type ResourceActionDescriptor,
   type EmptyReason,
-  type OwnedOrderRecord,
+  type DriverTaskOrderSummary,
   type PlatformPresenceAdapterStatusRecord,
   type PlatformPresenceRecord,
   type PlatformPresenceSummary,
@@ -72,7 +73,7 @@ type WorkspaceRoute =
 
 type WorkspaceLoadResult = {
   taskViews: UnifiedDriverTaskView[];
-  orderMap: Record<string, OwnedOrderRecord>;
+  orderMap: Record<string, DriverTaskOrderSummary>;
   taskFallbackMode: boolean;
   taskLoadError: string | null;
   platformSummary: PlatformPresenceSummary | null;
@@ -769,33 +770,9 @@ async function loadWorkspaceData(): Promise<WorkspaceLoadResult> {
     next.taskViews = tasksResult.value.tasks;
     next.taskFallbackMode = tasksResult.value.fallbackMode;
 
-    const orderTasks = new Map(
-      tasksResult.value.tasks
-        .filter((task) => task.orderId)
-        .map((task) => [task.orderId, task]),
-    );
-    const orderResults = await Promise.all(
-      [...orderTasks].map(async ([orderId, task]) => {
-        try {
-          const order = isOwnedUnifiedTask(task)
-            ? await client.getDriverTaskOrder(task.taskId)
-            : await client.getOrder(orderId);
-          return { orderId, order };
-        } catch {
-          return { orderId, order: null };
-        }
-      }),
-    );
-
-    next.orderMap = orderResults.reduce<Record<string, OwnedOrderRecord>>(
-      (map, entry) => {
-        if (entry.order) {
-          map[entry.orderId] = entry.order;
-        }
-
-        return map;
-      },
-      {},
+    next.orderMap = await loadDriverOrderSummaries(
+      client,
+      tasksResult.value.tasks,
     );
   } else {
     next.taskLoadError = toErrorMessage(

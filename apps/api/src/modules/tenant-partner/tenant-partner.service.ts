@@ -1,3 +1,4 @@
+import { deepToSnakeCase } from "../../common/snake-case.interceptor";
 import {
   createHash,
   randomBytes,
@@ -235,7 +236,11 @@ import {
   ReferenceTokenEligibilityAdapter,
 } from "./reference-token-eligibility.adapter";
 import { computeEndpointFingerprint } from "./partner-notification-fingerprint";
-import { IdentityRepository, type TenantOidcProof, type OidcBoundTenantUser } from "../identity/identity.repository";
+import {
+  IdentityRepository,
+  type TenantOidcProof,
+  type OidcBoundTenantUser,
+} from "../identity/identity.repository";
 import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
 import {
   ReferralEmbedHandoffRepository,
@@ -336,6 +341,7 @@ type PublishedWebhookSecretRotationRecord = WebhookSecretRotationRecord & {
 };
 
 type StoredWebhookEndpoint = TenantWebhookEndpoint & {
+  verificationNonce?: string | undefined;
   secretValue: string;
   secretCredentials?: StoredWebhookSecretMaterial[];
   retryPolicy: WebhookRetryPolicy;
@@ -344,6 +350,8 @@ type StoredWebhookEndpoint = TenantWebhookEndpoint & {
 };
 
 type StoredWebhookDelivery = WebhookDeliveryRecord & {
+  verificationFingerprint?: string | undefined;
+  verificationNonce?: string | undefined;
   attemptedAt: string;
   nextAttemptAt: string | null;
   signatureHeader: string;
@@ -2442,6 +2450,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   listQuotaPolicies(tenantId: string) {
+    this.assertConfigurationReadable(tenantId);
     return [...this.quotaPolicies.values()]
       .filter((policy) => policy.tenantId === tenantId)
       .sort((left, right) => {
@@ -2459,6 +2468,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     reservationWindowStart = new Date().toISOString(),
   ): TenantQuotaSummary {
+    this.assertConfigurationReadable(tenantId);
     const periodKey = this.requireQuotaPeriodKey(reservationWindowStart);
     const policy = this.resolveQuotaPolicy(tenantId, null);
     const snapshot = this.getOrCreateQuotaSnapshot(
@@ -2624,6 +2634,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     code: string,
     reservationWindowStart = new Date().toISOString(),
   ): TenantCostCenterQuotaSummary {
+    this.assertConfigurationReadable(tenantId);
     const costCenter = this.getCostCenter(tenantId, code);
     const periodKey = this.requireQuotaPeriodKey(reservationWindowStart);
     const policy = this.resolveQuotaPolicy(tenantId, costCenter.code);
@@ -2651,51 +2662,56 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: UpsertTenantQuotaPolicyCommand,
     requestId?: string,
   ) {
-    const now = new Date().toISOString();
-    const costCenterCode = command.costCenterCode
-      ? this.getCostCenter(tenantId, command.costCenterCode).code
-      : null;
-    const existing = this.quotaPolicies.get(
-      this.buildQuotaPolicyKey(tenantId, costCenterCode, command.period),
-    );
+    return this.runConfigurationCommand(tenantId, () => {
+      const now = new Date().toISOString();
+      const costCenterCode = command.costCenterCode
+        ? this.getCostCenter(tenantId, command.costCenterCode).code
+        : null;
+      const existing = this.quotaPolicies.get(
+        this.buildQuotaPolicyKey(tenantId, costCenterCode, command.period),
+      );
 
-    const record: TenantQuotaPolicyRecord = {
-      tenantId,
-      costCenterCode,
-      period: command.period,
-      limit: this.normalizeQuotaLimit(command.limit),
-      inheritedFromTenant: false,
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
-    };
-
-    this.quotaPolicies.set(
-      this.buildQuotaPolicyKey(tenantId, costCenterCode, command.period),
-      this.cloneQuotaPolicy(record),
-    );
-    this.persistChanges(
-      {
-        quotaPolicies: [this.cloneQuotaPolicy(record)],
-      },
-      "upsert tenant quota policy",
-    );
-    this.auditNotificationService.recordAuditLog({
-      actorId: null,
-      actorType: "system",
-      tenantId,
-      moduleName: "tenant-partner",
-      actionName: "tenant.quota_policy.updated",
-      resourceType: "tenant_quota_policy",
-      resourceId: costCenterCode ?? tenantId,
-      newValuesSummary: {
+      const record: TenantQuotaPolicyRecord = {
+        tenantId,
         costCenterCode,
         period: command.period,
-        enforcementMode: record.limit.enforcementMode,
-      },
-      ...(requestId ? { requestId } : {}),
-    });
+        limit: this.normalizeQuotaLimit(command.limit),
+        inheritedFromTenant: false,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      };
 
-    return this.cloneQuotaPolicy(record);
+      const persisted = this.persistConfigurationChanges(
+        {
+          quotaPolicies: [this.cloneQuotaPolicy(record)],
+        },
+        "upsert tenant quota policy",
+        tenantId,
+      );
+      return this.afterPersistence(persisted, () => {
+        this.quotaPolicies.set(
+          this.buildQuotaPolicyKey(tenantId, costCenterCode, command.period),
+          this.cloneQuotaPolicy(record),
+        );
+        this.auditNotificationService.recordAuditLog({
+          actorId: null,
+          actorType: "system",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "tenant.quota_policy.updated",
+          resourceType: "tenant_quota_policy",
+          resourceId: costCenterCode ?? tenantId,
+          newValuesSummary: {
+            costCenterCode,
+            period: command.period,
+            enforcementMode: record.limit.enforcementMode,
+          },
+          ...(requestId ? { requestId } : {}),
+        });
+
+        return this.cloneQuotaPolicy(record);
+      });
+    });
   }
 
   previewBookingQuotaImpact(
@@ -2856,6 +2872,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     query: ListTenantApprovalRulesQuery = {},
   ) {
+    this.assertConfigurationReadable(tenantId);
     const search = this.normalizeNullableText(query.search)?.toLowerCase();
     return this.approvalRules
       .filter((rule) => rule.tenantId === tenantId)
@@ -2874,6 +2891,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   getApprovalRule(tenantId: string, ruleId: string) {
+    this.assertConfigurationReadable(tenantId);
     return this.cloneApprovalRule(this.requireApprovalRule(tenantId, ruleId));
   }
 
@@ -2882,105 +2900,130 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: UpsertTenantApprovalRuleCommand,
     requestId?: string,
   ) {
-    const now = new Date().toISOString();
-    const ruleName = this.requireNonBlank(
-      command.ruleName ?? command.name ?? "",
-      "ruleName",
-    );
-    const existing = command.ruleId
-      ? (this.approvalRules.find(
-          (rule) =>
-            rule.tenantId === tenantId && rule.ruleId === command.ruleId,
-        ) ?? null)
-      : null;
+    return this.runConfigurationCommand(tenantId, () => {
+      const now = new Date().toISOString();
+      const ruleName = this.requireNonBlank(
+        command.ruleName ?? command.name ?? "",
+        "ruleName",
+      );
+      const creationRuleId =
+        !command.ruleId && requestId
+          ? `rule-${generateDeterministicUuid("tenant_approval_rule", `${tenantId}:${requestId}`)}`
+          : undefined;
+      const requestedRuleId = command.ruleId ?? creationRuleId;
+      if (
+        command.ruleId &&
+        this.approvalRules.some(
+          (item) =>
+            item.ruleId === command.ruleId && item.tenantId !== tenantId,
+        )
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "TENANT_APPROVAL_RULE_NOT_FOUND",
+          "The tenant approval rule could not be found.",
+        );
+      }
+      const existing = requestedRuleId
+        ? (this.approvalRules.find(
+            (rule) =>
+              rule.tenantId === tenantId && rule.ruleId === requestedRuleId,
+          ) ?? null)
+        : null;
 
-    const record: TenantApprovalRuleRecord = {
-      ruleId: existing?.ruleId ?? `rule-${randomUUID()}`,
-      tenantId,
-      ruleName,
-      name: ruleName,
-      description: this.normalizeNullableText(command.description),
-      priority: Math.trunc(command.priority),
-      activeFlag: command.activeFlag ?? existing?.activeFlag ?? true,
-      effectiveFrom: command.effectiveFrom ?? existing?.effectiveFrom ?? null,
-      effectiveUntil:
-        command.effectiveUntil ?? existing?.effectiveUntil ?? null,
-      conditions: (command.conditions ?? []).map((condition) => ({
-        ...condition,
-        ...(Array.isArray(condition.values)
-          ? { values: [...condition.values] }
-          : {}),
-        ...(Array.isArray(condition.value)
-          ? { value: [...condition.value] }
-          : {}),
-      })),
-      action: command.action,
-      approvalMode:
-        command.action === "require_approval" ||
-        command.action === "flag_manual_review"
-          ? (command.approvalMode ?? existing?.approvalMode ?? "any_of")
-          : null,
-      approvers:
-        command.action === "require_approval" ||
-        command.action === "flag_manual_review"
-          ? (command.approvers ?? existing?.approvers ?? []).map(
-              (approver) => ({
-                ...approver,
-              }),
-            )
-          : [],
-      timeoutHoursOverride:
-        command.timeoutHoursOverride ?? existing?.timeoutHoursOverride ?? null,
-      fallbackPolicyOverride:
-        command.fallbackPolicyOverride ??
-        existing?.fallbackPolicyOverride ??
-        null,
-      escalationTarget:
-        command.action === "require_approval" ||
-        command.action === "flag_manual_review"
-          ? command.escalationTarget
-            ? { ...command.escalationTarget }
-            : existing?.escalationTarget
-              ? { ...existing.escalationTarget }
-              : null
-          : null,
-      disabledAt:
-        command.activeFlag === false ? (existing?.disabledAt ?? now) : null,
-      disabledReason:
-        command.activeFlag === false
-          ? (command.disabledReason ??
-            existing?.disabledReason ??
-            "disabled_via_upsert")
-          : null,
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
-    };
-
-    this.approvalRules = [
-      record,
-      ...this.approvalRules.filter((rule) => rule.ruleId !== record.ruleId),
-    ];
-    this.bumpApprovalRuleVersion(tenantId);
-    this.persistChanges(
-      { approvalRules: [this.cloneApprovalRule(record)] },
-      "tenant approval rule upsert",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
+      const record: TenantApprovalRuleRecord = {
+        ruleId: existing?.ruleId ?? creationRuleId ?? `rule-${randomUUID()}`,
         tenantId,
-        moduleName: "tenant-partner",
-        actionName: existing
-          ? "tenant.approval_rule.updated"
-          : "tenant.approval_rule.created",
-        resourceType: "tenant_approval_rule",
-        resourceId: record.ruleId,
-        newValuesSummary: this.buildApprovalRuleAuditSummary(record),
-      },
-      requestId,
-    );
-    return this.cloneApprovalRule(record);
+        ruleName,
+        name: ruleName,
+        description: this.normalizeNullableText(command.description),
+        priority: Math.trunc(command.priority),
+        activeFlag: command.activeFlag ?? existing?.activeFlag ?? true,
+        effectiveFrom: command.effectiveFrom ?? existing?.effectiveFrom ?? null,
+        effectiveUntil:
+          command.effectiveUntil ?? existing?.effectiveUntil ?? null,
+        conditions: (command.conditions ?? []).map((condition) => ({
+          ...condition,
+          ...(Array.isArray(condition.values)
+            ? { values: [...condition.values] }
+            : {}),
+          ...(Array.isArray(condition.value)
+            ? { value: [...condition.value] }
+            : {}),
+        })),
+        action: command.action,
+        approvalMode:
+          command.action === "require_approval" ||
+          command.action === "flag_manual_review"
+            ? (command.approvalMode ?? existing?.approvalMode ?? "any_of")
+            : null,
+        approvers:
+          command.action === "require_approval" ||
+          command.action === "flag_manual_review"
+            ? (command.approvers ?? existing?.approvers ?? []).map(
+                (approver) => ({
+                  ...approver,
+                }),
+              )
+            : [],
+        timeoutHoursOverride:
+          command.timeoutHoursOverride ??
+          existing?.timeoutHoursOverride ??
+          null,
+        fallbackPolicyOverride:
+          command.fallbackPolicyOverride ??
+          existing?.fallbackPolicyOverride ??
+          null,
+        escalationTarget:
+          command.action === "require_approval" ||
+          command.action === "flag_manual_review"
+            ? command.escalationTarget
+              ? { ...command.escalationTarget }
+              : existing?.escalationTarget
+                ? { ...existing.escalationTarget }
+                : null
+            : null,
+        disabledAt:
+          command.activeFlag === false ? (existing?.disabledAt ?? now) : null,
+        disabledReason:
+          command.activeFlag === false
+            ? (command.disabledReason ??
+              existing?.disabledReason ??
+              "disabled_via_upsert")
+            : null,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      };
+
+      const persisted = this.persistConfigurationChanges(
+        { approvalRules: [this.cloneApprovalRule(record)] },
+        "tenant approval rule upsert",
+        tenantId,
+      );
+      return this.afterPersistence(persisted, () => {
+        this.approvalRules = [
+          record,
+          ...this.approvalRules.filter((rule) => rule.ruleId !== record.ruleId),
+        ];
+        this.bumpApprovalRuleVersion(tenantId);
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: existing
+              ? "tenant.approval_rule.updated"
+              : "tenant.approval_rule.created",
+            resourceType: "tenant_approval_rule",
+            resourceId: record.ruleId,
+            newValuesSummary: this.buildApprovalRuleAuditSummary(record),
+          },
+          requestId,
+        );
+        return this.cloneApprovalRule(record);
+      });
+    });
   }
 
   reorderApprovalRules(
@@ -2988,98 +3031,110 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: ReorderTenantApprovalRulesCommand,
     requestId?: string,
   ) {
-    const orderedRuleIds = command.orderedRuleIds ?? command.ruleIds ?? [];
-    const tenantRules = this.listApprovalRules(tenantId);
-    if (orderedRuleIds.length !== tenantRules.length) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "TENANT_APPROVAL_RULE_REORDER_INCOMPLETE",
-        "orderedRuleIds must contain the full tenant rule list.",
-      );
-    }
-    if (new Set(orderedRuleIds).size !== orderedRuleIds.length) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "TENANT_APPROVAL_RULE_REORDER_DUPLICATE_IDS",
-        "orderedRuleIds must not contain duplicate values.",
-      );
-    }
-
-    const byId = new Map(tenantRules.map((rule) => [rule.ruleId, rule]));
-    const now = new Date().toISOString();
-    const reordered = orderedRuleIds.map((ruleId, index) => {
-      const rule = byId.get(ruleId);
-      if (!rule) {
+    return this.runConfigurationCommand(tenantId, () => {
+      const orderedRuleIds = command.orderedRuleIds ?? command.ruleIds ?? [];
+      const tenantRules = this.listApprovalRules(tenantId);
+      if (orderedRuleIds.length !== tenantRules.length) {
         throw new ApiRequestError(
           HttpStatus.BAD_REQUEST,
-          "TENANT_APPROVAL_RULE_NOT_FOUND",
-          "orderedRuleIds contains an unknown ruleId.",
-          { ruleId },
+          "TENANT_APPROVAL_RULE_REORDER_INCOMPLETE",
+          "orderedRuleIds must contain the full tenant rule list.",
         );
       }
-      return {
-        ...rule,
-        priority: (index + 1) * 10,
-        updatedAt: now,
-      };
-    });
+      if (new Set(orderedRuleIds).size !== orderedRuleIds.length) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "TENANT_APPROVAL_RULE_REORDER_DUPLICATE_IDS",
+          "orderedRuleIds must not contain duplicate values.",
+        );
+      }
 
-    this.approvalRules = [
-      ...this.approvalRules.filter((rule) => rule.tenantId !== tenantId),
-      ...reordered,
-    ];
-    this.bumpApprovalRuleVersion(tenantId);
-    this.persistChanges(
-      { approvalRules: reordered.map((rule) => this.cloneApprovalRule(rule)) },
-      "tenant approval rule reorder",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
+      const byId = new Map(tenantRules.map((rule) => [rule.ruleId, rule]));
+      const now = new Date().toISOString();
+      const reordered = orderedRuleIds.map((ruleId, index) => {
+        const rule = byId.get(ruleId);
+        if (!rule) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "TENANT_APPROVAL_RULE_NOT_FOUND",
+            "orderedRuleIds contains an unknown ruleId.",
+            { ruleId },
+          );
+        }
+        return {
+          ...rule,
+          priority: (index + 1) * 10,
+          updatedAt: now,
+        };
+      });
+
+      const persisted = this.persistConfigurationChanges(
+        {
+          approvalRules: reordered.map((rule) => this.cloneApprovalRule(rule)),
+        },
+        "tenant approval rule reorder",
         tenantId,
-        moduleName: "tenant-partner",
-        actionName: "tenant.approval_rule.reordered",
-        resourceType: "tenant_approval_rule_set",
-        resourceId: tenantId,
-        newValuesSummary: { orderedRuleIds },
-      },
-      requestId,
-    );
-    return reordered.map((rule) => this.cloneApprovalRule(rule));
+      );
+      return this.afterPersistence(persisted, () => {
+        this.approvalRules = [
+          ...this.approvalRules.filter((rule) => rule.tenantId !== tenantId),
+          ...reordered,
+        ];
+        this.bumpApprovalRuleVersion(tenantId);
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: "tenant.approval_rule.reordered",
+            resourceType: "tenant_approval_rule_set",
+            resourceId: tenantId,
+            newValuesSummary: { orderedRuleIds },
+          },
+          requestId,
+        );
+        return reordered.map((rule) => this.cloneApprovalRule(rule));
+      });
+    });
   }
 
   disableApprovalRule(tenantId: string, ruleId: string, requestId?: string) {
-    const existing = this.requireApprovalRule(tenantId, ruleId);
-    const disabled: TenantApprovalRuleRecord = {
-      ...existing,
-      activeFlag: false,
-      disabledAt: existing.disabledAt ?? new Date().toISOString(),
-      disabledReason: existing.disabledReason ?? "disabled_by_tenant_admin",
-      updatedAt: new Date().toISOString(),
-    };
-    this.approvalRules = this.approvalRules.map((rule) =>
-      rule.ruleId === ruleId ? disabled : rule,
-    );
-    this.bumpApprovalRuleVersion(tenantId);
-    this.persistChanges(
-      { approvalRules: [this.cloneApprovalRule(disabled)] },
-      "tenant approval rule disable",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
+    return this.runConfigurationCommand(tenantId, () => {
+      const existing = this.requireApprovalRule(tenantId, ruleId);
+      const disabled: TenantApprovalRuleRecord = {
+        ...existing,
+        activeFlag: false,
+        disabledAt: existing.disabledAt ?? new Date().toISOString(),
+        disabledReason: existing.disabledReason ?? "disabled_by_tenant_admin",
+        updatedAt: new Date().toISOString(),
+      };
+      const persisted = this.persistConfigurationChanges(
+        { approvalRules: [this.cloneApprovalRule(disabled)] },
+        "tenant approval rule disable",
         tenantId,
-        moduleName: "tenant-partner",
-        actionName: "tenant.approval_rule.disabled",
-        resourceType: "tenant_approval_rule",
-        resourceId: ruleId,
-        newValuesSummary: this.buildApprovalRuleAuditSummary(disabled),
-      },
-      requestId,
-    );
-    return this.cloneApprovalRule(disabled);
+      );
+      return this.afterPersistence(persisted, () => {
+        this.approvalRules = this.approvalRules.map((rule) =>
+          rule.ruleId === ruleId ? disabled : rule,
+        );
+        this.bumpApprovalRuleVersion(tenantId);
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: "tenant.approval_rule.disabled",
+            resourceType: "tenant_approval_rule",
+            resourceId: ruleId,
+            newValuesSummary: this.buildApprovalRuleAuditSummary(disabled),
+          },
+          requestId,
+        );
+        return this.cloneApprovalRule(disabled);
+      });
+    });
   }
 
   evaluateApprovalRules(
@@ -3087,6 +3142,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: EvaluateTenantApprovalRuleCommand,
     requestId?: string,
   ): TenantApprovalEvaluationResult {
+    this.assertConfigurationReadable(tenantId);
     const evaluationStartedAtMs = Date.now();
     const inputSnapshot = command.inputSnapshot ?? {
       costCenterCode: command.sampleBooking?.costCenterCode ?? null,
@@ -4600,8 +4656,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     if (!this.identityRepository?.isEnabled()) {
       const bound = this.userRoles.filter((entry) => {
         const candidate = entry as OidcBoundTenantUser;
-        return candidate.oidcIssuer === proof.issuer && candidate.subjectId === proof.subject
-          && (!proof.tenantId || candidate.tenantId === proof.tenantId);
+        return (
+          candidate.oidcIssuer === proof.issuer &&
+          candidate.subjectId === proof.subject &&
+          (!proof.tenantId || candidate.tenantId === proof.tenantId)
+        );
       });
       if (bound.length === 1) return this.cloneUserRole(bound[0]!);
     }
@@ -4611,7 +4670,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     if (
       (environment === "local" || environment === "test") &&
       process.env.OIDC_MOCK_MODE === "true" &&
-      !["https://accounts.google.com", "accounts.google.com"].includes(proof.issuer)
+      !["https://accounts.google.com", "accounts.google.com"].includes(
+        proof.issuer,
+      )
     ) {
       const fixture = this.findTenantUserBySubject(
         proof.subject,
@@ -4701,10 +4762,20 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     const boundUser = userRole as OidcBoundTenantUser;
     const configuredIssuer = process.env.OIDC_ISSUER?.trim();
-    const issuer = configuredIssuer === "accounts.google.com" ? "https://accounts.google.com" : configuredIssuer;
-    if (!issuer || (boundUser.subjectId && boundUser.subjectId !== trimmedSubject)
-      || (boundUser.oidcIssuer && boundUser.oidcIssuer !== issuer)) {
-      throw new ApiRequestError(403, "TENANT_IDENTITY_BINDING_DENIED", "An existing identity binding cannot be replaced.");
+    const issuer =
+      configuredIssuer === "accounts.google.com"
+        ? "https://accounts.google.com"
+        : configuredIssuer;
+    if (
+      !issuer ||
+      (boundUser.subjectId && boundUser.subjectId !== trimmedSubject) ||
+      (boundUser.oidcIssuer && boundUser.oidcIssuer !== issuer)
+    ) {
+      throw new ApiRequestError(
+        403,
+        "TENANT_IDENTITY_BINDING_DENIED",
+        "An existing identity binding cannot be replaced.",
+      );
     }
     const previousUserRoles = this.userRoles.map((entry) =>
       this.cloneUserRole(entry),
@@ -5075,85 +5146,85 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
       if (this.partnerEntries.some((entry) => entry.entrySlug === entrySlug)) {
         throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "PARTNER_ENTRY_CONFLICT",
-        "A partner entry with this slug already exists.",
-        {
-          entrySlug,
-        },
-      );
-    }
+          HttpStatus.CONFLICT,
+          "PARTNER_ENTRY_CONFLICT",
+          "A partner entry with this slug already exists.",
+          {
+            entrySlug,
+          },
+        );
+      }
 
-    const record: PartnerChannelEntryRecord = {
-      partnerId: `partner_${randomUUID()}`,
-      partnerCode,
-      partnerType: this.requireNonBlank(command.partnerType, "partnerType"),
-      programId,
-      programCode: this.normalizeNullableText(command.programCode),
-      tenantId,
-      bankCode: this.normalizeNullableText(command.bankCode),
-      entrySlug,
-      displayName: this.requireNonBlank(command.displayName, "displayName"),
-      businessDispatchSubtype: command.businessDispatchSubtype,
-      authMode: command.authMode,
-      eligibilityMode: command.eligibilityMode,
-      entryHost: this.normalizeNullableText(command.entryHost),
-      entryPath: this.normalizeNullableText(command.entryPath),
-      themeAccent: this.normalizeNullableText(command.themeAccent),
-      brandingMetadata: this.buildBrandingMetadata(
-        command.displayName,
-        command.themeAccent,
-        command.brandingMetadata ?? null,
-      ),
-      eligibilityContract: null,
-      status: command.status ?? "active",
-      activeFlag:
-        command.activeFlag ?? (command.status ?? "active") === "active",
-      revokedAt: null,
-      revokedBy: null,
-      revokeReason: null,
-      createdAt: now,
-      updatedAt: now,
-      auditMetadata: {
-        source: "platform_admin_console",
-        requestId: this.normalizeNullableText(requestId),
-        createdBy: "platform_admin",
-        updatedBy: "platform_admin",
-      },
-    };
-
-    const newEntry = this.clonePartnerEntry(record);
-
-    await this.persistChangesRequired(
-      {
-        partnerEntries: [newEntry],
-      },
-      "create_platform_partner_entry",
-    );
-
-    this.partnerEntries = [
-      newEntry,
-      ...this.partnerEntries.filter((entry) => entry.entrySlug !== entrySlug),
-    ];
-
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "platform_admin",
+      const record: PartnerChannelEntryRecord = {
+        partnerId: `partner_${randomUUID()}`,
+        partnerCode,
+        partnerType: this.requireNonBlank(command.partnerType, "partnerType"),
+        programId,
+        programCode: this.normalizeNullableText(command.programCode),
         tenantId,
-        moduleName: "tenant-partner",
-        actionName: "create_partner_entry",
-        resourceType: "partner_entry",
-        resourceId: record.entrySlug,
-        newValuesSummary: this.clonePartnerEntry(record) as unknown as Record<
-          string,
-          unknown
-        >,
-      },
-      requestId,
-    );
+        bankCode: this.normalizeNullableText(command.bankCode),
+        entrySlug,
+        displayName: this.requireNonBlank(command.displayName, "displayName"),
+        businessDispatchSubtype: command.businessDispatchSubtype,
+        authMode: command.authMode,
+        eligibilityMode: command.eligibilityMode,
+        entryHost: this.normalizeNullableText(command.entryHost),
+        entryPath: this.normalizeNullableText(command.entryPath),
+        themeAccent: this.normalizeNullableText(command.themeAccent),
+        brandingMetadata: this.buildBrandingMetadata(
+          command.displayName,
+          command.themeAccent,
+          command.brandingMetadata ?? null,
+        ),
+        eligibilityContract: null,
+        status: command.status ?? "active",
+        activeFlag:
+          command.activeFlag ?? (command.status ?? "active") === "active",
+        revokedAt: null,
+        revokedBy: null,
+        revokeReason: null,
+        createdAt: now,
+        updatedAt: now,
+        auditMetadata: {
+          source: "platform_admin_console",
+          requestId: this.normalizeNullableText(requestId),
+          createdBy: "platform_admin",
+          updatedBy: "platform_admin",
+        },
+      };
 
-    return this.clonePartnerEntry(record);
+      const newEntry = this.clonePartnerEntry(record);
+
+      await this.persistChangesRequired(
+        {
+          partnerEntries: [newEntry],
+        },
+        "create_platform_partner_entry",
+      );
+
+      this.partnerEntries = [
+        newEntry,
+        ...this.partnerEntries.filter((entry) => entry.entrySlug !== entrySlug),
+      ];
+
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "platform_admin",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "create_partner_entry",
+          resourceType: "partner_entry",
+          resourceId: record.entrySlug,
+          newValuesSummary: this.clonePartnerEntry(record) as unknown as Record<
+            string,
+            unknown
+          >,
+        },
+        requestId,
+      );
+
+      return this.clonePartnerEntry(record);
     });
   }
 
@@ -5167,135 +5238,135 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       const before = this.clonePartnerEntry(originalEntry);
       const entry = this.clonePartnerEntry(originalEntry);
 
-    const lifecycleStatus = this.resolveLifecycleStatus(command.status);
-    const lifecycleActiveFlag =
-      command.activeFlag !== undefined ? command.activeFlag : undefined;
+      const lifecycleStatus = this.resolveLifecycleStatus(command.status);
+      const lifecycleActiveFlag =
+        command.activeFlag !== undefined ? command.activeFlag : undefined;
 
-    if (
-      entry.status === "revoked" &&
-      ((lifecycleStatus && lifecycleStatus !== "revoked") ||
-        lifecycleActiveFlag === true)
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "PARTNER_ENTRY_REVOKED",
-        "Revoked partner entries cannot be reactivated or re-opened.",
+      if (
+        entry.status === "revoked" &&
+        ((lifecycleStatus && lifecycleStatus !== "revoked") ||
+          lifecycleActiveFlag === true)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PARTNER_ENTRY_REVOKED",
+          "Revoked partner entries cannot be reactivated or re-opened.",
+          {
+            entrySlug: entry.entrySlug,
+          },
+        );
+      }
+
+      if (typeof command.tenantId === "string") {
+        entry.tenantId = this.requireNonBlank(command.tenantId, "tenantId");
+      }
+      if (typeof command.partnerCode === "string") {
+        entry.partnerCode = this.normalizePartnerCode(command.partnerCode);
+      }
+      if (typeof command.partnerType === "string") {
+        entry.partnerType = this.requireNonBlank(
+          command.partnerType,
+          "partnerType",
+        );
+      }
+      if (typeof command.programId === "string") {
+        entry.programId = this.requireNonBlank(command.programId, "programId");
+      }
+      if (command.programCode !== undefined) {
+        entry.programCode = this.normalizeNullableText(command.programCode);
+      }
+      if (command.bankCode !== undefined) {
+        entry.bankCode = this.normalizeNullableText(command.bankCode);
+      }
+      if (typeof command.displayName === "string") {
+        entry.displayName = this.requireNonBlank(
+          command.displayName,
+          "displayName",
+        );
+      }
+      if (command.businessDispatchSubtype) {
+        entry.businessDispatchSubtype = command.businessDispatchSubtype;
+      }
+      if (command.authMode) {
+        entry.authMode = command.authMode;
+      }
+      if (command.eligibilityMode) {
+        entry.eligibilityMode = command.eligibilityMode;
+      }
+      if (command.entryHost !== undefined) {
+        entry.entryHost = this.normalizeNullableText(command.entryHost);
+      }
+      if (command.entryPath !== undefined) {
+        entry.entryPath = this.normalizeNullableText(command.entryPath);
+      }
+      if (command.themeAccent !== undefined) {
+        entry.themeAccent = this.normalizeNullableText(command.themeAccent);
+      }
+      if (lifecycleStatus) {
+        entry.status = lifecycleStatus;
+        entry.activeFlag = lifecycleStatus === "active";
+        if (lifecycleStatus !== "revoked") {
+          entry.revokedAt = null;
+          entry.revokedBy = null;
+          entry.revokeReason = null;
+        }
+      }
+      if (lifecycleActiveFlag !== undefined) {
+        entry.activeFlag = lifecycleActiveFlag;
+        entry.status = lifecycleActiveFlag ? "active" : "inactive";
+        if (lifecycleActiveFlag) {
+          entry.revokedAt = null;
+          entry.revokedBy = null;
+          entry.revokeReason = null;
+        }
+      }
+
+      entry.brandingMetadata = this.buildBrandingMetadata(
+        entry.displayName,
+        entry.themeAccent,
+        command.brandingMetadata,
+        entry.brandingMetadata,
+      );
+      entry.updatedAt = new Date().toISOString();
+      entry.auditMetadata = {
+        ...entry.auditMetadata,
+        source: "platform_admin_console",
+        requestId: this.normalizeNullableText(requestId),
+        updatedBy: "platform_admin",
+      };
+
+      const newEntry = this.clonePartnerEntry(entry);
+
+      await this.persistChangesRequired(
         {
-          entrySlug: entry.entrySlug,
+          partnerEntries: [newEntry],
         },
+        "update_platform_partner_entry",
       );
-    }
 
-    if (typeof command.tenantId === "string") {
-      entry.tenantId = this.requireNonBlank(command.tenantId, "tenantId");
-    }
-    if (typeof command.partnerCode === "string") {
-      entry.partnerCode = this.normalizePartnerCode(command.partnerCode);
-    }
-    if (typeof command.partnerType === "string") {
-      entry.partnerType = this.requireNonBlank(
-        command.partnerType,
-        "partnerType",
+      this.partnerEntries = this.partnerEntries.map((e) =>
+        e.entrySlug === entry.entrySlug ? newEntry : e,
       );
-    }
-    if (typeof command.programId === "string") {
-      entry.programId = this.requireNonBlank(command.programId, "programId");
-    }
-    if (command.programCode !== undefined) {
-      entry.programCode = this.normalizeNullableText(command.programCode);
-    }
-    if (command.bankCode !== undefined) {
-      entry.bankCode = this.normalizeNullableText(command.bankCode);
-    }
-    if (typeof command.displayName === "string") {
-      entry.displayName = this.requireNonBlank(
-        command.displayName,
-        "displayName",
+
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "platform_admin",
+          tenantId: entry.tenantId,
+          moduleName: "tenant-partner",
+          actionName: "update_partner_entry",
+          resourceType: "partner_entry",
+          resourceId: entry.entrySlug,
+          oldValuesSummary: before as unknown as Record<string, unknown>,
+          newValuesSummary: this.clonePartnerEntry(entry) as unknown as Record<
+            string,
+            unknown
+          >,
+        },
+        requestId,
       );
-    }
-    if (command.businessDispatchSubtype) {
-      entry.businessDispatchSubtype = command.businessDispatchSubtype;
-    }
-    if (command.authMode) {
-      entry.authMode = command.authMode;
-    }
-    if (command.eligibilityMode) {
-      entry.eligibilityMode = command.eligibilityMode;
-    }
-    if (command.entryHost !== undefined) {
-      entry.entryHost = this.normalizeNullableText(command.entryHost);
-    }
-    if (command.entryPath !== undefined) {
-      entry.entryPath = this.normalizeNullableText(command.entryPath);
-    }
-    if (command.themeAccent !== undefined) {
-      entry.themeAccent = this.normalizeNullableText(command.themeAccent);
-    }
-    if (lifecycleStatus) {
-      entry.status = lifecycleStatus;
-      entry.activeFlag = lifecycleStatus === "active";
-      if (lifecycleStatus !== "revoked") {
-        entry.revokedAt = null;
-        entry.revokedBy = null;
-        entry.revokeReason = null;
-      }
-    }
-    if (lifecycleActiveFlag !== undefined) {
-      entry.activeFlag = lifecycleActiveFlag;
-      entry.status = lifecycleActiveFlag ? "active" : "inactive";
-      if (lifecycleActiveFlag) {
-        entry.revokedAt = null;
-        entry.revokedBy = null;
-        entry.revokeReason = null;
-      }
-    }
 
-    entry.brandingMetadata = this.buildBrandingMetadata(
-      entry.displayName,
-      entry.themeAccent,
-      command.brandingMetadata,
-      entry.brandingMetadata,
-    );
-    entry.updatedAt = new Date().toISOString();
-    entry.auditMetadata = {
-      ...entry.auditMetadata,
-      source: "platform_admin_console",
-      requestId: this.normalizeNullableText(requestId),
-      updatedBy: "platform_admin",
-    };
-
-    const newEntry = this.clonePartnerEntry(entry);
-
-    await this.persistChangesRequired(
-      {
-        partnerEntries: [newEntry],
-      },
-      "update_platform_partner_entry",
-    );
-
-    this.partnerEntries = this.partnerEntries.map((e) =>
-      e.entrySlug === entry.entrySlug ? newEntry : e,
-    );
-
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "platform_admin",
-        tenantId: entry.tenantId,
-        moduleName: "tenant-partner",
-        actionName: "update_partner_entry",
-        resourceType: "partner_entry",
-        resourceId: entry.entrySlug,
-        oldValuesSummary: before as unknown as Record<string, unknown>,
-        newValuesSummary: this.clonePartnerEntry(entry) as unknown as Record<
-          string,
-          unknown
-        >,
-      },
-      requestId,
-    );
-
-    return this.clonePartnerEntry(entry);
+      return this.clonePartnerEntry(entry);
     });
   }
 
@@ -5362,10 +5433,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
 
       const updatedKeyIds = new Set(updatedCredentials.map((c) => c.keyId));
-      this.partnerIngressCredentials = this.partnerIngressCredentials.map((c) =>
-        updatedKeyIds.has(c.keyId)
-          ? updatedCredentials.find((u) => u.keyId === c.keyId)!
-          : c,
+      this.partnerIngressCredentials = this.partnerIngressCredentials.map(
+        (c) =>
+          updatedKeyIds.has(c.keyId)
+            ? updatedCredentials.find((u) => u.keyId === c.keyId)!
+            : c,
       );
 
       this.recordTenantAudit(
@@ -5435,7 +5507,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ]);
       const updatedCredentialsList = this.partnerIngressCredentials.map(
         (credential) => {
-          if (credential.entrySlug !== entry.entrySlug || credential.revokedAt) {
+          if (
+            credential.entrySlug !== entry.entrySlug ||
+            credential.revokedAt
+          ) {
             return credential;
           }
 
@@ -5444,8 +5519,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           this.reconcileStoredPartnerIngressCredential(updated, rotatedAt);
           if (
             !preservedOverlap &&
-            (updated.status === "active" ||
-              updated.status === "overlap_active")
+            (updated.status === "active" || updated.status === "overlap_active")
           ) {
             preservedOverlap = true;
             revokedCredentialId = updated.keyId;
@@ -5466,8 +5540,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
           updated.revokedAt = rotatedAt;
           updated.revokedBy = "platform_admin";
-          updated.revokeReason =
-            command.rotationReason ?? "credential_rotated";
+          updated.revokeReason = command.rotationReason ?? "credential_rotated";
           updated.status = "revoked";
           updated.overlapEndsAt = null;
           return updated;
@@ -5477,8 +5550,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         issued.storedCredential,
         ...updatedCredentialsList,
       ];
-      const persistedCredentials = finalCredentialsList.filter(
-        (credential) => mutatedCredentialIds.has(credential.keyId),
+      const persistedCredentials = finalCredentialsList.filter((credential) =>
+        mutatedCredentialIds.has(credential.keyId),
       );
 
       await this.persistChangesRequired(
@@ -5541,7 +5614,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         keyId,
       );
 
-      const credential = this.cloneStoredPartnerIngressCredential(originalCredential);
+      const credential =
+        this.cloneStoredPartnerIngressCredential(originalCredential);
       this.reconcileStoredPartnerIngressCredential(credential);
       if (credential.revokedAt) {
         return this.toPartnerIngressCredentialResponse(credential);
@@ -5564,8 +5638,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         "revoke_platform_partner_ingress_credential",
       );
 
-      this.partnerIngressCredentials = this.partnerIngressCredentials.map((c) =>
-        c.keyId === credential.keyId ? credential : c
+      this.partnerIngressCredentials = this.partnerIngressCredentials.map(
+        (c) => (c.keyId === credential.keyId ? credential : c),
       );
 
       this.recordTenantAudit(
@@ -5730,7 +5804,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     void this.runWithEntryMutex(entry.entrySlug, async () => {
       const current = this.partnerIngressCredentials.find(
-        (c) => c.entrySlug === entry.entrySlug && c.keyId === matchingCredential.keyId
+        (c) =>
+          c.entrySlug === entry.entrySlug &&
+          c.keyId === matchingCredential.keyId,
       );
       if (!current) return;
 
@@ -5826,7 +5902,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     void this.runWithEntryMutex(entry.entrySlug, async () => {
       const current = this.partnerIngressCredentials.find(
-        (c) => c.entrySlug === entry.entrySlug && c.keyId === credential.keyId
+        (c) => c.entrySlug === entry.entrySlug && c.keyId === credential.keyId,
       );
       if (!current) return;
 
@@ -6044,10 +6120,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (!result.session.identityActive) {
-        const latestConsent = await this.referralEmbedHandoffRepository.findLatestConsent(
-          result.session.partnerEntrySlug,
-          result.session.drtsPassengerId,
-        );
+        const latestConsent =
+          await this.referralEmbedHandoffRepository.findLatestConsent(
+            result.session.partnerEntrySlug,
+            result.session.drtsPassengerId,
+          );
         if (latestConsent) {
           result.session.identityActive = true;
           result.session.consent.bundleVersion = latestConsent.bundleVersion;
@@ -6119,10 +6196,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           "The partner entry ownership has changed.",
         );
       }
-      const link = await this.partnerUserIdentityLinkRepository.findByDrtsPassengerId(
-        session.partnerEntrySlug,
-        session.drtsPassengerId,
-      );
+      const link =
+        await this.partnerUserIdentityLinkRepository.findByDrtsPassengerId(
+          session.partnerEntrySlug,
+          session.drtsPassengerId,
+        );
       if (!link || link.status !== "active") {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
@@ -6132,8 +6210,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       }
     };
 
-    const result =
-      await this.referralEmbedHandoffRepository.recordConsent(command, validateFn);
+    const result = await this.referralEmbedHandoffRepository.recordConsent(
+      command,
+      validateFn,
+    );
 
     if (result.outcome === "recorded" || result.outcome === "replayed") {
       return result.session;
@@ -8042,6 +8122,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   listWebhookEndpoints(tenantId: string, identity?: IdentityContext | null) {
+    this.assertConfigurationReadable(tenantId);
     return this.webhookEndpoints
       .filter((endpoint) => endpoint.tenantId === tenantId)
       .map((endpoint) => {
@@ -8146,130 +8227,135 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: CreateTenantWebhookEndpointCommand,
     requestId?: string,
   ) {
-    this.assertNonBlank(command.url, "url");
-    this.assertNonBlank(command.secret, "secret");
-    const normalizedEvents = this.normalizeWebhookEvents(command.events);
-    const normalizedUrl = command.url.trim();
+    return this.runConfigurationCommand(tenantId, () => {
+      this.assertNonBlank(command.url, "url");
+      this.assertNonBlank(command.secret, "secret");
+      const normalizedEvents = this.normalizeWebhookEvents(command.events);
+      const normalizedUrl = command.url.trim();
 
-    const now = new Date().toISOString();
-    const webhookId = `wh_${randomUUID()}`;
-    const owner = this.resolveCredentialOwner(command, {
-      ownerRef: null,
-      ownerName: "Tenant webhook integration owner",
-      ownerType: "tenant_admin",
-    });
-    const secretPreview = this.secretPreview(command.secret);
-    const secretExpiresAt = this.resolveWebhookSecretExpiry(
-      command.expiresAt ?? null,
-      now,
-    );
-    const initialSecret: StoredWebhookSecretMaterial = {
-      createdAt: now,
-      secretVersion: 1,
-      rotatedAt: now,
-      rotationReason: "initial_secret",
-      secretPreview,
-      secretValue: command.secret,
-      ownerRef: owner.ownerRef,
-      ownerName: owner.ownerName,
-      ownerType: owner.ownerType,
-      purpose: this.resolveCredentialPurpose(
-        command.purpose,
-        "tenant webhook signing secret",
-      ),
-      expiresAt: secretExpiresAt,
-      lastUsedAt: null,
-      lastUsedWorkload: null,
-      status: "active",
-      overlapEndsAt: null,
-      autoRevokedAt: null,
-      supersededByVersion: null,
-      revokedAt: null,
-      signals: this.buildCredentialSignals(null, secretExpiresAt, null, now),
-    };
-    const webhookEndpoint: StoredWebhookEndpoint = {
-      webhookId,
-      tenantId,
-      url: normalizedUrl,
-      events: normalizedEvents,
-      status: "test_pending",
-      ownerRef: owner.ownerRef,
-      ownerName: owner.ownerName,
-      ownerType: owner.ownerType,
-      purpose: initialSecret.purpose,
-      resourceScope: `tenant:${tenantId}:webhook:${webhookId}`,
-      secretVersion: 1,
-      secretPreview,
-      secretExpiresAt: initialSecret.expiresAt,
-      secretLastUsedAt: null,
-      secretLastUsedWorkload: null,
-      credentialStatus: "active",
-      rotationOverlapEndsAt: null,
-      credentialSignals: this.toCredentialSignals(initialSecret.signals),
-      secretValue: command.secret,
-      secretCredentials: [{ ...initialSecret }],
-      retryPolicy: this.toWebhookRetryPolicy(DEFAULT_WEBHOOK_RETRY_POLICY),
-      runtimeMetadata: {
-        deliveryCount: 0,
-        failedDeliveryCount: 0,
-        lastAttemptAt: null,
-        lastDeliveredAt: null,
-        lastValidatedAt: null,
-        nextAttemptAt: null,
-        lastSignaturePreview: null,
-        disabledAt: null,
-        disableReason: null,
-        disableReasonNote: null,
-        retryPolicy: this.toWebhookRetryPolicy(DEFAULT_WEBHOOK_RETRY_POLICY),
-        secretRotation: {
-          currentVersion: 1,
-          rotatedAt: now,
-          rotationCount: 1,
-          history: [this.toWebhookSecretHistoryRecord(initialSecret)],
-        },
-      },
-      secretHistory: [this.toWebhookSecretHistoryRecord(initialSecret)],
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.reconcileStoredWebhookEndpoint(webhookEndpoint, now);
-
-    this.webhookEndpoints = [
-      this.cloneStoredWebhookEndpoint(webhookEndpoint),
-      ...this.webhookEndpoints,
-    ];
-    this.persistChanges(
-      {
-        webhookEndpoints: [this.cloneStoredWebhookEndpoint(webhookEndpoint)],
-      },
-      "create_webhook_endpoint",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
+      const now = new Date().toISOString();
+      const webhookId = `wh_${randomUUID()}`;
+      const owner = this.resolveCredentialOwner(command, {
+        ownerRef: null,
+        ownerName: "Tenant webhook integration owner",
+        ownerType: "tenant_admin",
+      });
+      const secretPreview = this.secretPreview(command.secret);
+      const secretExpiresAt = this.resolveWebhookSecretExpiry(
+        command.expiresAt ?? null,
+        now,
+      );
+      const initialSecret: StoredWebhookSecretMaterial = {
+        createdAt: now,
+        secretVersion: 1,
+        rotatedAt: now,
+        rotationReason: "initial_secret",
+        secretPreview,
+        secretValue: command.secret,
+        ownerRef: owner.ownerRef,
+        ownerName: owner.ownerName,
+        ownerType: owner.ownerType,
+        purpose: this.resolveCredentialPurpose(
+          command.purpose,
+          "tenant webhook signing secret",
+        ),
+        expiresAt: secretExpiresAt,
+        lastUsedAt: null,
+        lastUsedWorkload: null,
+        status: "active",
+        overlapEndsAt: null,
+        autoRevokedAt: null,
+        supersededByVersion: null,
+        revokedAt: null,
+        signals: this.buildCredentialSignals(null, secretExpiresAt, null, now),
+      };
+      const webhookEndpoint: StoredWebhookEndpoint = {
+        webhookId,
         tenantId,
-        moduleName: "tenant-partner",
-        actionName: "create_webhook_endpoint",
-        resourceType: "webhook_endpoint",
-        resourceId: webhookEndpoint.webhookId,
-        newValuesSummary: {
-          ownerName: webhookEndpoint.ownerName,
-          purpose: webhookEndpoint.purpose,
-          url: webhookEndpoint.url,
-          events: webhookEndpoint.events,
-          secretVersion: webhookEndpoint.secretVersion,
-          secretExpiresAt: webhookEndpoint.secretExpiresAt,
-          retryPolicy: webhookEndpoint.retryPolicy,
+        url: normalizedUrl,
+        events: normalizedEvents,
+        status: "test_pending",
+        ownerRef: owner.ownerRef,
+        ownerName: owner.ownerName,
+        ownerType: owner.ownerType,
+        purpose: initialSecret.purpose,
+        resourceScope: `tenant:${tenantId}:webhook:${webhookId}`,
+        secretVersion: 1,
+        secretPreview,
+        secretExpiresAt: initialSecret.expiresAt,
+        secretLastUsedAt: null,
+        secretLastUsedWorkload: null,
+        credentialStatus: "active",
+        rotationOverlapEndsAt: null,
+        credentialSignals: this.toCredentialSignals(initialSecret.signals),
+        secretValue: command.secret,
+        secretCredentials: [{ ...initialSecret }],
+        retryPolicy: this.toWebhookRetryPolicy(DEFAULT_WEBHOOK_RETRY_POLICY),
+        runtimeMetadata: {
+          deliveryCount: 0,
+          failedDeliveryCount: 0,
+          lastAttemptAt: null,
+          lastDeliveredAt: null,
+          lastValidatedAt: null,
+          nextAttemptAt: null,
+          lastSignaturePreview: null,
+          disabledAt: null,
+          disableReason: null,
+          disableReasonNote: null,
+          retryPolicy: this.toWebhookRetryPolicy(DEFAULT_WEBHOOK_RETRY_POLICY),
+          secretRotation: {
+            currentVersion: 1,
+            rotatedAt: now,
+            rotationCount: 1,
+            history: [this.toWebhookSecretHistoryRecord(initialSecret)],
+          },
         },
-      },
-      requestId,
-    );
+        secretHistory: [this.toWebhookSecretHistoryRecord(initialSecret)],
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.reconcileStoredWebhookEndpoint(webhookEndpoint, now);
 
-    return {
-      webhookId: webhookEndpoint.webhookId,
-      status: webhookEndpoint.status,
-    };
+      const persisted = this.persistConfigurationChanges(
+        {
+          webhookEndpoints: [this.cloneStoredWebhookEndpoint(webhookEndpoint)],
+        },
+        "create_webhook_endpoint",
+        tenantId,
+      );
+      return this.afterPersistence(persisted, () => {
+        this.webhookEndpoints = [
+          this.cloneStoredWebhookEndpoint(webhookEndpoint),
+          ...this.webhookEndpoints,
+        ];
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: "create_webhook_endpoint",
+            resourceType: "webhook_endpoint",
+            resourceId: webhookEndpoint.webhookId,
+            newValuesSummary: {
+              ownerName: webhookEndpoint.ownerName,
+              purpose: webhookEndpoint.purpose,
+              url: webhookEndpoint.url,
+              events: webhookEndpoint.events,
+              secretVersion: webhookEndpoint.secretVersion,
+              secretExpiresAt: webhookEndpoint.secretExpiresAt,
+              retryPolicy: webhookEndpoint.retryPolicy,
+            },
+          },
+          requestId,
+        );
+
+        return {
+          webhookId: webhookEndpoint.webhookId,
+          status: webhookEndpoint.status,
+        };
+      });
+    });
   }
 
   updateWebhookEndpoint(
@@ -8278,100 +8364,113 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: UpdateTenantWebhookEndpointCommand,
     requestId?: string,
   ) {
-    const endpoint = this.requireWebhookEndpoint(tenantId, webhookId);
-    const oldValues = this.toWebhookResponse(endpoint);
-    const previousEndpointStatus = endpoint.status;
-
-    let changed = false;
-    let requiresRevalidation = false;
-    let requestedStatus: TenantWebhookEndpointStatus | undefined;
-
-    if (command.url !== undefined) {
-      this.assertNonBlank(command.url, "url");
-      endpoint.url = command.url.trim();
-      changed = true;
-      requiresRevalidation = true;
-    }
-
-    if (command.events !== undefined) {
-      endpoint.events = this.normalizeWebhookEvents(command.events);
-      changed = true;
-      requiresRevalidation = true;
-    }
-
-    if (command.status !== undefined) {
-      this.assertSupportedWebhookStatus(command.status);
-      requestedStatus = command.status;
-      changed = true;
-    }
-
-    if (!changed) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "WEBHOOK_UPDATE_EMPTY",
-        "At least one webhook metadata field must be provided.",
-        {
-          webhookId,
-        },
+    return this.runConfigurationCommand(tenantId, () => {
+      const endpoint = this.cloneStoredWebhookEndpoint(
+        this.requireWebhookEndpoint(tenantId, webhookId),
       );
-    }
+      const oldValues = this.toWebhookResponse(endpoint);
+      const previousEndpointStatus = endpoint.status;
 
-    const now = new Date().toISOString();
-    if (requestedStatus === "disabled") {
-      const disableReasonNote = command.disableReason?.trim();
-      if (!disableReasonNote) {
+      let changed = false;
+      let requiresRevalidation = false;
+      let requestedStatus: TenantWebhookEndpointStatus | undefined;
+
+      if (command.url !== undefined) {
+        this.assertNonBlank(command.url, "url");
+        endpoint.url = command.url.trim();
+        changed = true;
+        requiresRevalidation = true;
+      }
+
+      if (command.events !== undefined) {
+        endpoint.events = this.normalizeWebhookEvents(command.events);
+        changed = true;
+        requiresRevalidation = true;
+      }
+
+      if (command.status !== undefined) {
+        this.assertSupportedWebhookStatus(command.status);
+        requestedStatus = command.status;
+        changed = true;
+      }
+
+      if (!changed) {
         throw new ApiRequestError(
           HttpStatus.BAD_REQUEST,
-          "WEBHOOK_DISABLE_REASON_REQUIRED",
-          "disableReason is required when disabling a webhook endpoint.",
+          "WEBHOOK_UPDATE_EMPTY",
+          "At least one webhook metadata field must be provided.",
           {
             webhookId,
           },
         );
       }
-      endpoint.status = "disabled";
-      endpoint.runtimeMetadata.disabledAt = now;
-      endpoint.runtimeMetadata.disableReason = "manual_disable";
-      endpoint.runtimeMetadata.disableReasonNote = disableReasonNote;
-      endpoint.updatedAt = now;
-    } else if (requiresRevalidation || requestedStatus === "test_pending") {
-      this.markWebhookValidationPending(endpoint, now);
-    } else if (requestedStatus === "active") {
-      if (previousEndpointStatus === "disabled") {
+
+      const now = new Date().toISOString();
+      if (requestedStatus === "disabled") {
+        const disableReasonNote = command.disableReason?.trim();
+        if (!disableReasonNote) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "WEBHOOK_DISABLE_REASON_REQUIRED",
+            "disableReason is required when disabling a webhook endpoint.",
+            {
+              webhookId,
+            },
+          );
+        }
+        endpoint.status = "disabled";
+        endpoint.runtimeMetadata.disabledAt = now;
+        endpoint.runtimeMetadata.disableReason = "manual_disable";
+        endpoint.runtimeMetadata.disableReasonNote = disableReasonNote;
+        endpoint.updatedAt = now;
+      } else if (requiresRevalidation || requestedStatus === "test_pending") {
         this.markWebhookValidationPending(endpoint, now);
+      } else if (requestedStatus === "active") {
+        if (
+          previousEndpointStatus !== "active" ||
+          !endpoint.runtimeMetadata.lastValidatedAt
+        ) {
+          this.markWebhookValidationPending(endpoint, now);
+        } else {
+          endpoint.status = "active";
+          endpoint.runtimeMetadata.disabledAt = null;
+          endpoint.runtimeMetadata.disableReason = null;
+          endpoint.runtimeMetadata.disableReasonNote = null;
+          endpoint.updatedAt = now;
+        }
       } else {
-        endpoint.status = "active";
-        endpoint.runtimeMetadata.disabledAt = null;
-        endpoint.runtimeMetadata.disableReason = null;
-        endpoint.runtimeMetadata.disableReasonNote = null;
         endpoint.updatedAt = now;
       }
-    } else {
-      endpoint.updatedAt = now;
-    }
 
-    this.persistChanges(
-      {
-        webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
-      },
-      "update_webhook_endpoint",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
+      const persisted = this.persistConfigurationChanges(
+        {
+          webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
+        },
+        "update_webhook_endpoint",
         tenantId,
-        moduleName: "tenant-partner",
-        actionName: "update_webhook_endpoint",
-        resourceType: "webhook_endpoint",
-        resourceId: endpoint.webhookId,
-        oldValuesSummary: oldValues,
-        newValuesSummary: this.toWebhookResponse(endpoint),
-      },
-      requestId,
-    );
+      );
+      return this.afterPersistence(persisted, () => {
+        this.webhookEndpoints = this.webhookEndpoints.map((item) =>
+          item.webhookId === endpoint.webhookId ? endpoint : item,
+        );
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: "update_webhook_endpoint",
+            resourceType: "webhook_endpoint",
+            resourceId: endpoint.webhookId,
+            oldValuesSummary: oldValues,
+            newValuesSummary: this.toWebhookResponse(endpoint),
+          },
+          requestId,
+        );
 
-    return this.toWebhookResponse(endpoint);
+        return this.toWebhookResponse(endpoint);
+      });
+    });
   }
 
   async sendTestWebhook(
@@ -8379,29 +8478,42 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: SendTestWebhookCommand,
     requestId?: string,
   ) {
-    const endpoint = this.requireWebhookEndpoint(tenantId, command.webhookId);
-    const oldValues = this.toWebhookResponse(endpoint);
-    const createdAt = new Date().toISOString();
-    this.markWebhookValidationPending(endpoint, createdAt);
-    this.persistChanges(
-      {
-        webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
+    const { endpoint, createdAt } = await this.runConfigurationCommand(
+      tenantId,
+      async () => {
+        const endpoint = this.cloneStoredWebhookEndpoint(
+          this.requireWebhookEndpoint(tenantId, command.webhookId),
+        );
+        const oldValues = this.toWebhookResponse(endpoint);
+        const createdAt = new Date().toISOString();
+        this.markWebhookValidationPending(endpoint, createdAt);
+        await this.persistConfigurationChanges(
+          {
+            webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
+          },
+          "send_test_webhook_pending",
+          tenantId,
+        );
+        this.webhookEndpoints = this.webhookEndpoints.map((item) =>
+          item.webhookId === endpoint.webhookId ? endpoint : item,
+        );
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: "set_webhook_test_pending",
+            resourceType: "webhook_endpoint",
+            resourceId: endpoint.webhookId,
+            oldValuesSummary: oldValues,
+            newValuesSummary: this.toWebhookResponse(endpoint),
+          },
+          requestId,
+        );
+
+        return { endpoint, createdAt };
       },
-      "send_test_webhook_pending",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "set_webhook_test_pending",
-        resourceType: "webhook_endpoint",
-        resourceId: endpoint.webhookId,
-        oldValuesSummary: oldValues,
-        newValuesSummary: this.toWebhookResponse(endpoint),
-      },
-      requestId,
     );
 
     const delivery = await this.enqueueWebhookDelivery(
@@ -8409,25 +8521,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       "tenant.webhook.test",
       createdAt,
       "send_test_webhook",
+      undefined,
+      { webhookId: endpoint.webhookId, secretVersion: endpoint.secretVersion },
     );
 
-    const payload = this.buildWebhookPayload<{
-      webhookId: string;
-      secretVersion: number;
-    }>({
-      deliveryId: delivery.deliveryId,
-      eventType: delivery.eventType,
-      tenantId: endpoint.tenantId,
-      occurredAt: createdAt,
-      data: {
-        webhookId: endpoint.webhookId,
-        secretVersion: endpoint.secretVersion,
-      },
-    });
     const result = await this.dispatchWebhookAttempt(
       endpoint,
       delivery,
-      payload as unknown as Record<string, unknown>,
+      delivery.rawBody,
     );
 
     this.recordTenantAudit(
@@ -8469,6 +8570,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       outboxKey?: string;
     },
   ) {
+    this.assertConfigurationReadable(tenantId);
     this.assertNonBlank(tenantId, "tenantId");
     this.assertNonBlank(input.eventType, "eventType");
 
@@ -8502,8 +8604,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         occurredAt,
         "publish_webhook_event",
         deliveryIdOverride,
+        input.data,
       );
-      if (delivery.status === "delivered") {
+      if (!delivery) continue;
+      if (
+        delivery.status === "delivered" ||
+        (delivery.attempt > 0 &&
+          delivery.nextAttemptAt &&
+          Date.parse(delivery.nextAttemptAt) > Date.now())
+      ) {
         results.push({
           webhookId: endpoint.webhookId,
           deliveryId: delivery.deliveryId,
@@ -8514,17 +8623,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         });
         continue;
       }
-      const payload = this.buildWebhookPayload({
-        deliveryId: delivery.deliveryId,
-        eventType: input.eventType,
-        tenantId,
-        occurredAt,
-        data: input.data,
-      });
       const result = await this.dispatchWebhookAttempt(
         endpoint,
         delivery,
-        payload as unknown as Record<string, unknown>,
+        delivery.rawBody,
       );
       results.push({
         webhookId: endpoint.webhookId,
@@ -8557,65 +8659,110 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private enqueueWebhookDelivery(
+    endpoint: StoredWebhookEndpoint,
+    eventType: "tenant.webhook.test",
+    createdAt: string,
+    context: string,
+    deliveryIdOverride?: string,
+    data?: Record<string, unknown>,
+  ): Promise<StoredWebhookDelivery>;
+  private enqueueWebhookDelivery(
+    endpoint: StoredWebhookEndpoint,
+    eventType: string,
+    createdAt: string,
+    context: string,
+    deliveryIdOverride?: string,
+    data?: Record<string, unknown>,
+  ): Promise<StoredWebhookDelivery | null>;
   private async enqueueWebhookDelivery(
     endpoint: StoredWebhookEndpoint,
     eventType: string,
     createdAt: string,
     context: string,
     deliveryIdOverride?: string,
-  ): Promise<StoredWebhookDelivery> {
-    this.reconcileStoredWebhookEndpoint(endpoint, createdAt);
-    const deliveryId = deliveryIdOverride ?? `wd_${randomUUID()}`;
-    const existingIndex = this.webhookDeliveries.findIndex(
-      (d) => d.deliveryId === deliveryId,
-    );
-    if (existingIndex >= 0 && this.webhookDeliveries[existingIndex]) {
-      return this.webhookDeliveries[existingIndex];
-    }
+    data: Record<string, unknown> = {},
+  ): Promise<StoredWebhookDelivery | null> {
+    return this.runConfigurationCommand(endpoint.tenantId, async () => {
+      endpoint = this.cloneStoredWebhookEndpoint(
+        this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId),
+      );
+      this.reconcileStoredWebhookEndpoint(endpoint, createdAt);
+      // The publisher's initial cache selection can predate a metadata COMMIT.
+      // Reapply the original live-event predicate under the configuration lock
+      // before accepting an intent or incrementing its delivery counter.
+      if (
+        eventType !== "tenant.webhook.test" &&
+        (endpoint.status !== "active" || !endpoint.events.includes(eventType))
+      ) {
+        return null;
+      }
+      const deliveryId = deliveryIdOverride ?? `wd_${randomUUID()}`;
+      const existingIndex = this.webhookDeliveries.findIndex(
+        (d) => d.deliveryId === deliveryId,
+      );
+      if (existingIndex >= 0 && this.webhookDeliveries[existingIndex]) {
+        return this.webhookDeliveries[existingIndex];
+      }
 
-    const delivery: StoredWebhookDelivery = {
-      deliveryId,
-      webhookId: endpoint.webhookId,
-      tenantId: endpoint.tenantId,
-      eventType,
-      attempt: 0,
-      status: "queued",
-      httpStatus: null,
-      signature: "",
-      createdAt,
-      attemptedAt: createdAt,
-      nextAttemptAt: null,
-      signatureHeader: "",
-      signatureVersion: endpoint.secretVersion,
-      secretVersion: endpoint.secretVersion,
-      retryPolicySnapshot: this.toWebhookRetryPolicy(endpoint.retryPolicy),
-      rawBody: {},
-    };
+      const delivery: StoredWebhookDelivery = {
+        deliveryId,
+        webhookId: endpoint.webhookId,
+        tenantId: endpoint.tenantId,
+        eventType,
+        attempt: 0,
+        status: "queued",
+        httpStatus: null,
+        signature: "",
+        createdAt,
+        attemptedAt: createdAt,
+        nextAttemptAt: new Date().toISOString(),
+        signatureHeader: "",
+        signatureVersion: endpoint.secretVersion,
+        secretVersion: endpoint.secretVersion,
+        retryPolicySnapshot: this.toWebhookRetryPolicy(endpoint.retryPolicy),
+        rawBody: deepToSnakeCase(
+          this.buildWebhookPayload({
+            deliveryId,
+            eventType,
+            tenantId: endpoint.tenantId,
+            occurredAt: createdAt,
+            data,
+          }),
+        ) as Record<string, unknown>,
+        verificationNonce: endpoint.verificationNonce,
+        verificationFingerprint: computeEndpointFingerprint(endpoint),
+      };
 
-    this.webhookDeliveries = [delivery, ...this.webhookDeliveries];
-    endpoint.runtimeMetadata = this.toWebhookRuntimeMetadata(
-      {
-        ...endpoint.runtimeMetadata,
-        deliveryCount: endpoint.runtimeMetadata.deliveryCount + 1,
-        retryPolicy: endpoint.retryPolicy,
-      },
-      {
-        currentVersion: endpoint.secretVersion,
-        rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
-        rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-        history: endpoint.runtimeMetadata.secretRotation.history,
-      },
-    );
+      endpoint.runtimeMetadata = this.toWebhookRuntimeMetadata(
+        {
+          ...endpoint.runtimeMetadata,
+          deliveryCount: endpoint.runtimeMetadata.deliveryCount + 1,
+          retryPolicy: endpoint.retryPolicy,
+        },
+        {
+          currentVersion: endpoint.secretVersion,
+          rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
+          rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
+          history: endpoint.runtimeMetadata.secretRotation.history,
+        },
+      );
 
-    await this.persistChangesRequired(
-      {
-        webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
-        webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
-      },
-      context,
-    );
+      await this.persistConfigurationChanges(
+        {
+          webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
+          webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
+        },
+        context,
+        endpoint.tenantId,
+      );
+      this.webhookDeliveries = [delivery, ...this.webhookDeliveries];
+      this.webhookEndpoints = this.webhookEndpoints.map((item) =>
+        item.webhookId === endpoint.webhookId ? endpoint : item,
+      );
 
-    return delivery;
+      return delivery;
+    });
   }
 
   private async dispatchWebhookAttempt(
@@ -8638,6 +8785,34 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       retryPolicySnapshot?: WebhookRetryPolicyRecord;
     },
   ): Promise<WebhookDispatchAttemptResult> {
+    endpoint = this.cloneStoredWebhookEndpoint(
+      this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId),
+    );
+    // An edit can also commit after enqueue or before a process resumes its
+    // first interrupted attempt. Recheck the original live-event predicate
+    // before sending; leave the original identity/payload/key/policy intact.
+    if (
+      delivery.attempt === 0 &&
+      delivery.eventType !== "tenant.webhook.test" &&
+      (this.pendingConfigurationReadbacks.has(endpoint.tenantId) ||
+        endpoint.status !== "active" ||
+        !endpoint.events.includes(delivery.eventType))
+    ) {
+      // No attempt occurred. In particular, do not fabricate a failure or
+      // delivery receipt, consume a retry, or reject the boot timer promise.
+      return this.cloneStoredWebhookDelivery(delivery);
+    }
+    delivery = this.cloneStoredWebhookDelivery(delivery);
+    const effects: Array<() => void> = [];
+    const publish = () => {
+      this.webhookEndpoints = this.webhookEndpoints.map((item) =>
+        item.webhookId === endpoint.webhookId ? endpoint : item,
+      );
+      this.webhookDeliveries = this.webhookDeliveries.map((item) =>
+        item.deliveryId === delivery.deliveryId ? delivery : item,
+      );
+      for (const effect of effects) effect();
+    };
     const previousEndpointValues = this.toWebhookResponse(endpoint);
     const signingSecret = this.resolveWebhookSecretMaterial(
       endpoint,
@@ -8648,39 +8823,70 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       (signingSecret.status !== "active" &&
         signingSecret.status !== "overlap_active")
     ) {
-      const attemptedAt = new Date().toISOString();
-      delivery.attempt += 1;
-      delivery.status = "delivery_failed";
-      delivery.httpStatus = null;
-      delivery.signature = "";
-      delivery.attemptedAt = attemptedAt;
-      delivery.nextAttemptAt = null;
-      delivery.signatureHeader = "";
-      delivery.signatureVersion = delivery.secretVersion;
-      delivery.rawBody = {
-        errorCode: "WEBHOOK_SECRET_UNAVAILABLE",
-        secretVersion: delivery.secretVersion,
-      };
-      endpoint.runtimeMetadata = this.toWebhookRuntimeMetadata(
-        {
-          ...endpoint.runtimeMetadata,
-          failedDeliveryCount: endpoint.runtimeMetadata.failedDeliveryCount + 1,
-          lastAttemptAt: attemptedAt,
-          nextAttemptAt: null,
-          lastSignaturePreview: null,
-          retryPolicy: endpoint.retryPolicy,
-        },
-        {
-          currentVersion: endpoint.secretVersion,
-          rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
-          rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-          history: endpoint.runtimeMetadata.secretRotation.history,
-        },
-      );
-      this.applyWebhookPostDispatchPolicy(
-        endpoint,
-        delivery,
-        {
+      return this.runConfigurationCommand(endpoint.tenantId, async () => {
+        endpoint = this.cloneStoredWebhookEndpoint(
+          this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId),
+        );
+        const attemptedAt = new Date().toISOString();
+        delivery.attempt += 1;
+        delivery.status = "delivery_failed";
+        delivery.httpStatus = null;
+        delivery.signature = "";
+        delivery.attemptedAt = attemptedAt;
+        delivery.nextAttemptAt = null;
+        delivery.signatureHeader = "";
+        delivery.signatureVersion = delivery.secretVersion;
+        delivery.rawBody = {
+          errorCode: "WEBHOOK_SECRET_UNAVAILABLE",
+          secretVersion: delivery.secretVersion,
+        };
+        endpoint.runtimeMetadata = this.toWebhookRuntimeMetadata(
+          {
+            ...endpoint.runtimeMetadata,
+            failedDeliveryCount:
+              endpoint.runtimeMetadata.failedDeliveryCount + 1,
+            lastAttemptAt: attemptedAt,
+            nextAttemptAt: null,
+            lastSignaturePreview: null,
+            retryPolicy: endpoint.retryPolicy,
+          },
+          {
+            currentVersion: endpoint.secretVersion,
+            rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
+            rotationCount:
+              endpoint.runtimeMetadata.secretRotation.rotationCount,
+            history: endpoint.runtimeMetadata.secretRotation.history,
+          },
+        );
+        this.applyWebhookPostDispatchPolicy(
+          endpoint,
+          delivery,
+          {
+            attempt: delivery.attempt,
+            status: delivery.status,
+            httpStatus: null,
+            signature: "",
+            attemptedAt,
+            nextAttemptAt: null,
+            signatureHeader: "",
+            signatureVersion: delivery.secretVersion,
+            secretVersion: delivery.secretVersion,
+            rawBody: { ...delivery.rawBody },
+          },
+          previousEndpointValues,
+          (effect) => effects.push(effect),
+        );
+        await this.persistConfigurationChanges(
+          {
+            webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
+            webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
+          },
+          "webhook_dispatch_secret_unavailable",
+          endpoint.tenantId,
+        );
+        publish();
+        this.clearWebhookRetry(delivery.deliveryId);
+        return {
           attempt: delivery.attempt,
           status: delivery.status,
           httpStatus: null,
@@ -8691,29 +8897,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           signatureVersion: delivery.secretVersion,
           secretVersion: delivery.secretVersion,
           rawBody: { ...delivery.rawBody },
-        },
-        previousEndpointValues,
-      );
-      await this.persistChangesRequired(
-        {
-          webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
-          webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
-        },
-        "webhook_dispatch_secret_unavailable",
-      );
-      this.clearWebhookRetry(delivery.deliveryId);
-      return {
-        attempt: delivery.attempt,
-        status: delivery.status,
-        httpStatus: null,
-        signature: "",
-        attemptedAt,
-        nextAttemptAt: null,
-        signatureHeader: "",
-        signatureVersion: delivery.secretVersion,
-        secretVersion: delivery.secretVersion,
-        rawBody: { ...delivery.rawBody },
-      };
+        };
+      });
     }
 
     const attemptNumber = options?.attemptNumber ?? delivery.attempt + 1;
@@ -8732,45 +8917,69 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       // the queued/delivery_failed classification, or a single transient
       // failure would look "exhausted" and wrongly disable the endpoint on
       // its very first attempt (see the scheduling guard below instead).
-      retryPolicy: options?.retryPolicySnapshot ?? endpoint.retryPolicy,
+      retryPolicy: options?.retryPolicySnapshot ?? delivery.retryPolicySnapshot,
       ...(options?.partnerAckV1 ? { partnerAckV1: options.partnerAckV1 } : {}),
     });
 
-    this.applyWebhookDispatchResult(
-      endpoint,
-      delivery,
-      result,
-      signingSecret,
-      options?.retryPolicySnapshot ?? endpoint.retryPolicy,
-      previousEndpointValues,
-    );
-
-    await this.persistChangesRequired(
-      {
-        webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
-        webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
-      },
-      "webhook_dispatch_attempt",
-    );
-
-    if (
-      !options?.forceSingleAttempt &&
-      result.status === "queued" &&
-      result.nextAttemptAt
-    ) {
-      this.scheduleWebhookRetry(
-        endpoint.webhookId,
-        delivery.deliveryId,
-        result.nextAttemptAt,
+    return this.runConfigurationCommand(endpoint.tenantId, async () => {
+      // A metadata command may still be awaiting COMMIT when HTTP completes.
+      // Join its configuration queue before reading or persisting the outcome.
+      // Configuration may have changed while HTTP was in flight. Apply the
+      // outcome to the current committed configuration; an old test nonce must
+      // never restore an earlier URL/secret or activate the replacement.
+      endpoint = this.cloneStoredWebhookEndpoint(
+        this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId),
       );
-    } else {
-      // Idempotent hygiene clear, not a new timer — see the guard above:
-      // the partner-notification façade's caller is the single automatic
-      // retry owner for its own deliveries.
-      this.clearWebhookRetry(delivery.deliveryId);
-    }
+      const currentSigningSecret = this.resolveWebhookSecretMaterial(
+        endpoint,
+        delivery.secretVersion,
+      );
+      this.applyWebhookDispatchResult(
+        endpoint,
+        delivery,
+        result,
+        currentSigningSecret,
+        options?.retryPolicySnapshot ?? delivery.retryPolicySnapshot,
+        previousEndpointValues,
+        false,
+      );
+      this.applyWebhookPostDispatchPolicy(
+        endpoint,
+        delivery,
+        result,
+        previousEndpointValues,
+        (effect) => effects.push(effect),
+      );
 
-    return result;
+      await this.persistConfigurationChanges(
+        {
+          webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
+          webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
+        },
+        "webhook_dispatch_attempt",
+        endpoint.tenantId,
+      );
+      publish();
+
+      if (
+        !options?.forceSingleAttempt &&
+        result.status === "queued" &&
+        result.nextAttemptAt
+      ) {
+        this.scheduleWebhookRetry(
+          endpoint.webhookId,
+          delivery.deliveryId,
+          result.nextAttemptAt,
+        );
+      } else {
+        // Idempotent hygiene clear, not a new timer — see the guard above:
+        // the partner-notification façade's caller is the single automatic
+        // retry owner for its own deliveries.
+        this.clearWebhookRetry(delivery.deliveryId);
+      }
+
+      return result;
+    });
   }
 
   private applyWebhookDispatchResult(
@@ -8840,8 +9049,16 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     delivery: StoredWebhookDelivery,
     result: Awaited<ReturnType<WebhookDispatchService["dispatchAttempt"]>>,
     previousEndpointValues: Record<string, unknown>,
+    publishEffect: (effect: () => void) => void = (effect) => effect(),
   ) {
-    if (result.status === "delivered" && endpoint.status === "test_pending") {
+    if (
+      result.status === "delivered" &&
+      endpoint.status === "test_pending" &&
+      delivery.eventType === "tenant.webhook.test" &&
+      delivery.secretVersion === endpoint.secretVersion &&
+      Boolean(endpoint.verificationNonce) &&
+      delivery.verificationNonce === endpoint.verificationNonce
+    ) {
       endpoint.status = "active";
       endpoint.updatedAt = result.attemptedAt;
       endpoint.runtimeMetadata.lastValidatedAt = result.attemptedAt;
@@ -8849,20 +9066,22 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       endpoint.runtimeMetadata.disableReason = null;
       endpoint.runtimeMetadata.disableReasonNote = null;
 
-      this.recordTenantAudit({
-        actorId: null,
-        actorType: "system",
-        tenantId: endpoint.tenantId,
-        moduleName: "tenant-partner",
-        actionName: "activate_webhook_endpoint",
-        resourceType: "webhook_endpoint",
-        resourceId: endpoint.webhookId,
-        oldValuesSummary: previousEndpointValues,
-        newValuesSummary: this.toWebhookResponse(endpoint) as Record<
-          string,
-          unknown
-        >,
-      });
+      publishEffect(() =>
+        this.recordTenantAudit({
+          actorId: null,
+          actorType: "system",
+          tenantId: endpoint.tenantId,
+          moduleName: "tenant-partner",
+          actionName: "activate_webhook_endpoint",
+          resourceType: "webhook_endpoint",
+          resourceId: endpoint.webhookId,
+          oldValuesSummary: previousEndpointValues,
+          newValuesSummary: this.toWebhookResponse(endpoint) as Record<
+            string,
+            unknown
+          >,
+        }),
+      );
       return;
     }
 
@@ -8873,32 +9092,36 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       endpoint.runtimeMetadata.disableReason = "delivery_failed";
       endpoint.runtimeMetadata.disableReasonNote = null;
 
-      this.auditNotificationService.recordNotification({
-        tenantId: endpoint.tenantId,
-        recipientUserId: null,
-        channel: "ops_notice",
-        title: "Tenant webhook disabled after repeated delivery failures",
-        message: [
-          `Endpoint ${endpoint.webhookId} (${endpoint.url})`,
-          `failed ${result.attempt} attempts for ${delivery.eventType}`,
-          `and was disabled pending revalidation.`,
-        ].join(" "),
-        status: "unread",
-      });
-      this.recordTenantAudit({
-        actorId: null,
-        actorType: "system",
-        tenantId: endpoint.tenantId,
-        moduleName: "tenant-partner",
-        actionName: "disable_webhook_endpoint",
-        resourceType: "webhook_endpoint",
-        resourceId: endpoint.webhookId,
-        oldValuesSummary: previousEndpointValues,
-        newValuesSummary: this.toWebhookResponse(endpoint) as Record<
-          string,
-          unknown
-        >,
-      });
+      publishEffect(() =>
+        this.auditNotificationService.recordNotification({
+          tenantId: endpoint.tenantId,
+          recipientUserId: null,
+          channel: "ops_notice",
+          title: "Tenant webhook disabled after repeated delivery failures",
+          message: [
+            `Endpoint ${endpoint.webhookId} (${endpoint.url})`,
+            `failed ${result.attempt} attempts for ${delivery.eventType}`,
+            `and was disabled pending revalidation.`,
+          ].join(" "),
+          status: "unread",
+        }),
+      );
+      publishEffect(() =>
+        this.recordTenantAudit({
+          actorId: null,
+          actorType: "system",
+          tenantId: endpoint.tenantId,
+          moduleName: "tenant-partner",
+          actionName: "disable_webhook_endpoint",
+          resourceType: "webhook_endpoint",
+          resourceId: endpoint.webhookId,
+          oldValuesSummary: previousEndpointValues,
+          newValuesSummary: this.toWebhookResponse(endpoint) as Record<
+            string,
+            unknown
+          >,
+        }),
+      );
     }
   }
 
@@ -9234,6 +9457,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     updatedAt: string,
   ) {
     endpoint.status = "test_pending";
+    endpoint.verificationNonce = randomUUID();
     endpoint.updatedAt = updatedAt;
     endpoint.runtimeMetadata.disabledAt = null;
     endpoint.runtimeMetadata.disableReason = null;
@@ -9309,80 +9533,120 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const endpoint = this.webhookEndpoints.find(
-      (candidate) =>
-        candidate.tenantId === tenantId && candidate.webhookId === webhookId,
-    );
-    if (!endpoint) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "WEBHOOK_ENDPOINT_NOT_FOUND",
-        `Webhook endpoint ${webhookId} was not found for tenant ${tenantId}.`,
+    // Persist the operator's retry intent before changing the read model or
+    // sending HTTP. A restart can resume this same queued delivery after ACK.
+    const prepared = this.runConfigurationCommand(tenantId, () => {
+      const storedEndpoint = this.webhookEndpoints.find(
+        (candidate) =>
+          candidate.tenantId === tenantId && candidate.webhookId === webhookId,
       );
-    }
+      if (!storedEndpoint) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "WEBHOOK_ENDPOINT_NOT_FOUND",
+          `Webhook endpoint ${webhookId} was not found for tenant ${tenantId}.`,
+        );
+      }
 
-    const delivery = this.webhookDeliveries.find(
-      (candidate) =>
-        candidate.tenantId === tenantId &&
-        candidate.webhookId === webhookId &&
-        candidate.deliveryId === deliveryId,
-    );
-    if (!delivery) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "WEBHOOK_DELIVERY_NOT_FOUND",
-        `Webhook delivery ${deliveryId} was not found for endpoint ${webhookId}.`,
+      const endpoint = this.cloneStoredWebhookEndpoint(storedEndpoint);
+      const storedDelivery = this.webhookDeliveries.find(
+        (candidate) =>
+          candidate.tenantId === tenantId &&
+          candidate.webhookId === webhookId &&
+          candidate.deliveryId === deliveryId,
       );
-    }
-    if (delivery.eventType.startsWith("passenger.")) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "PASSENGER_NOTIFICATION_RETRY_OWNER",
-        "Retry passenger notifications through the consumer outbox.",
-      );
-    }
-    if (delivery.status !== "delivery_failed") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "WEBHOOK_DELIVERY_NOT_RETRYABLE",
-        "Only failed webhook deliveries can be retried manually.",
-      );
-    }
+      if (!storedDelivery) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "WEBHOOK_DELIVERY_NOT_FOUND",
+          `Webhook delivery ${deliveryId} was not found for endpoint ${webhookId}.`,
+        );
+      }
+      const delivery = this.cloneStoredWebhookDelivery(storedDelivery);
+      if (delivery.eventType.startsWith("passenger.")) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PASSENGER_NOTIFICATION_RETRY_OWNER",
+          "Retry passenger notifications through the consumer outbox.",
+        );
+      }
+      if (delivery.status !== "delivery_failed") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "WEBHOOK_DELIVERY_NOT_RETRYABLE",
+          "Only failed webhook deliveries can be retried manually.",
+        );
+      }
 
-    this.clearWebhookRetry(delivery.deliveryId);
-    delivery.status = "queued";
-    delivery.nextAttemptAt = null;
+      delivery.status = "queued";
+      delivery.nextAttemptAt = new Date().toISOString();
 
-    const now = new Date().toISOString();
-    const previousEndpointValues = this.toWebhookResponse(endpoint, identity);
-    if (endpoint.status === "disabled") {
-      this.markWebhookValidationPending(endpoint, now);
-      this.recordTenantAudit(
+      const now = new Date().toISOString();
+      const previousEndpointValues = this.toWebhookResponse(endpoint, identity);
+      if (endpoint.status === "disabled") {
+        this.markWebhookValidationPending(endpoint, now);
+      }
+
+      if (
+        delivery.eventType === "tenant.webhook.test" &&
+        delivery.secretVersion === endpoint.secretVersion &&
+        delivery.verificationFingerprint ===
+          computeEndpointFingerprint(endpoint)
+      ) {
+        delivery.verificationNonce = endpoint.verificationNonce;
+      }
+
+      const persisted = this.persistConfigurationChanges(
         {
-          actorId: identity?.actorId ?? null,
-          actorType:
-            (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
-            "system",
-          tenantId,
-          moduleName: "tenant-partner",
-          actionName: "prepare_webhook_retry",
-          resourceType: "webhook_endpoint",
-          resourceId: endpoint.webhookId,
-          oldValuesSummary: previousEndpointValues as Record<string, unknown>,
-          newValuesSummary: this.toWebhookResponse(
-            endpoint,
-            identity,
-          ) as Record<string, unknown>,
+          webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
+          webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
         },
-        requestId,
+        "prepare_webhook_retry",
+        tenantId,
       );
-    }
-
-    return this.retryQueuedWebhookDelivery(
-      webhookId,
-      deliveryId,
-      requestId,
-      identity,
+      return this.afterPersistence(persisted, () => {
+        this.webhookEndpoints = this.webhookEndpoints.map((item) =>
+          item.webhookId === endpoint.webhookId ? endpoint : item,
+        );
+        this.webhookDeliveries = this.webhookDeliveries.map((item) =>
+          item.deliveryId === delivery.deliveryId ? delivery : item,
+        );
+        this.clearWebhookRetry(delivery.deliveryId);
+        if (previousEndpointValues.status === "disabled") {
+          this.recordTenantAudit(
+            {
+              actorId: identity?.actorId ?? null,
+              actorType:
+                (identity?.actorType as
+                  | AuditLogRecord["actorType"]
+                  | undefined) ?? "system",
+              tenantId,
+              moduleName: "tenant-partner",
+              actionName: "prepare_webhook_retry",
+              resourceType: "webhook_endpoint",
+              resourceId: endpoint.webhookId,
+              oldValuesSummary: previousEndpointValues as Record<
+                string,
+                unknown
+              >,
+              newValuesSummary: this.toWebhookResponse(
+                endpoint,
+                identity,
+              ) as Record<string, unknown>,
+            },
+            requestId,
+          );
+        }
+      });
+    });
+    // HTTP must stay outside the configuration lock; its outcome joins it again.
+    return this.afterPersistence(prepared, () =>
+      this.retryQueuedWebhookDelivery(
+        webhookId,
+        deliveryId,
+        requestId,
+        identity,
+      ),
     );
   }
 
@@ -9410,6 +9674,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     // Passenger deliveries are owned exclusively by the consumer outbox, including after restart/manual retry.
     if (delivery.eventType.startsWith("passenger.")) return;
     await this.dispatchWebhookAttempt(endpoint, delivery, delivery.rawBody);
+    // Dispatch publishes a staged delivery only after its durable outcome ACK.
+    // The pre-dispatch object still describes the queued attempt.
+    const committedDelivery =
+      this.webhookDeliveries.find((item) => item.deliveryId === deliveryId) ??
+      delivery;
 
     this.recordTenantAudit(
       {
@@ -9425,16 +9694,16 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         newValuesSummary: {
           webhookId: endpoint.webhookId,
           eventType: delivery.eventType,
-          status: delivery.status,
-          attempt: delivery.attempt,
-          httpStatus: delivery.httpStatus,
-          nextAttemptAt: delivery.nextAttemptAt,
+          status: committedDelivery.status,
+          attempt: committedDelivery.attempt,
+          httpStatus: committedDelivery.httpStatus,
+          nextAttemptAt: committedDelivery.nextAttemptAt,
         },
       },
       requestId,
     );
 
-    return this.toDeliveryResponse(delivery, identity);
+    return this.toDeliveryResponse(committedDelivery, identity);
   }
 
   listWebhookDeliveries(
@@ -9442,6 +9711,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
     identity?: IdentityContext | null,
   ) {
+    this.assertConfigurationReadable(tenantId);
     const policy = assertEvidenceAccess({
       family: "webhook_delivery",
       identity,
@@ -9476,6 +9746,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
     identity?: IdentityContext | null,
   ) {
+    this.assertConfigurationReadable(tenantId);
     const policy = assertEvidenceAccess({
       family: "webhook_delivery",
       identity,
@@ -9584,172 +9855,184 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: RotateWebhookSecretCommand,
     requestId?: string,
   ) {
-    this.assertNonBlank(command.secret, "secret");
+    return this.runConfigurationCommand(tenantId, () => {
+      this.assertNonBlank(command.secret, "secret");
 
-    const endpoint = this.requireWebhookEndpoint(tenantId, command.webhookId);
-    const oldValues = this.toWebhookResponse(endpoint);
+      const endpoint = this.cloneStoredWebhookEndpoint(
+        this.requireWebhookEndpoint(tenantId, command.webhookId),
+      );
+      const oldValues = this.toWebhookResponse(endpoint);
 
-    const rotatedAt = new Date().toISOString();
-    const secretPreview = this.secretPreview(command.secret);
-    const rotationReason = command.rotationReason?.trim() || null;
-    const overlapEndsAt = this.resolveCredentialOverlapEndsAt(
-      rotatedAt,
-      command.overlapDays,
-    );
-    const currentSecret = this.resolveWebhookSecretMaterial(
-      endpoint,
-      endpoint.secretVersion,
-      rotatedAt,
-    );
-    if (!currentSecret) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "WEBHOOK_SECRET_NOT_CONFIGURED",
-        "The current webhook secret could not be resolved.",
+      const rotatedAt = new Date().toISOString();
+      const secretPreview = this.secretPreview(command.secret);
+      const rotationReason = command.rotationReason?.trim() || null;
+      const overlapEndsAt = this.resolveCredentialOverlapEndsAt(
+        rotatedAt,
+        command.overlapDays,
+      );
+      const currentSecret = this.resolveWebhookSecretMaterial(
+        endpoint,
+        endpoint.secretVersion,
+        rotatedAt,
+      );
+      if (!currentSecret) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "WEBHOOK_SECRET_NOT_CONFIGURED",
+          "The current webhook secret could not be resolved.",
+          {
+            webhookId: endpoint.webhookId,
+            secretVersion: endpoint.secretVersion,
+          },
+        );
+      }
+
+      // Recovering from an expired or revoked secret is a legitimate reason to
+      // rotate, but the dead secret is retired outright: only a still-live secret
+      // earns an overlap window, so signing material is never resurrected.
+      const currentSecretIsLive =
+        currentSecret.status === "active" ||
+        currentSecret.status === "overlap_active";
+      const grantedOverlapEndsAt = currentSecretIsLive ? overlapEndsAt : null;
+      currentSecret.overlapEndsAt = grantedOverlapEndsAt;
+      currentSecret.supersededByVersion = endpoint.secretVersion + 1;
+      if (currentSecretIsLive) {
+        currentSecret.autoRevokedAt = null;
+        currentSecret.status = "overlap_active";
+        currentSecret.revokedAt = null;
+      }
+      currentSecret.signals = this.buildCredentialSignals(
+        currentSecret.lastUsedAt,
+        currentSecret.expiresAt ?? null,
+        currentSecret.autoRevokedAt ?? null,
+        rotatedAt,
+      );
+
+      const owner = this.resolveCredentialOwner(command, {
+        ownerRef: endpoint.ownerRef ?? null,
+        ownerName: endpoint.ownerName ?? "Tenant webhook integration owner",
+        ownerType: endpoint.ownerType ?? "tenant_admin",
+      });
+      const nextSecretExpiresAt = this.resolveWebhookSecretExpiry(
+        command.expiresAt ?? null,
+        rotatedAt,
+      );
+      const nextSecret: StoredWebhookSecretMaterial = {
+        createdAt: rotatedAt,
+        secretVersion: endpoint.secretVersion + 1,
+        rotatedAt,
+        rotationReason,
+        secretPreview,
+        secretValue: command.secret,
+        ownerRef: owner.ownerRef,
+        ownerName: owner.ownerName,
+        ownerType: owner.ownerType,
+        purpose: this.resolveCredentialPurpose(
+          command.purpose ?? endpoint.purpose,
+          "tenant webhook signing secret",
+        ),
+        expiresAt: nextSecretExpiresAt,
+        lastUsedAt: null,
+        lastUsedWorkload: null,
+        status: "active",
+        overlapEndsAt: null,
+        autoRevokedAt: null,
+        supersededByVersion: null,
+        revokedAt: null,
+        signals: this.buildCredentialSignals(
+          null,
+          nextSecretExpiresAt,
+          null,
+          rotatedAt,
+        ),
+      };
+
+      endpoint.secretVersion = nextSecret.secretVersion;
+      endpoint.secretValue = command.secret;
+      endpoint.secretPreview = secretPreview;
+      endpoint.secretCredentials = [
+        nextSecret,
+        ...(endpoint.secretCredentials ?? []).map(
+          (record): StoredWebhookSecretMaterial => ({
+            ...record,
+            createdAt: record.createdAt ?? record.rotatedAt,
+            status: record.status ?? "active",
+            signals:
+              record.signals ??
+              this.buildCredentialSignals(
+                record.lastUsedAt ?? null,
+                record.expiresAt ??
+                  this.addDaysToIso(
+                    rotatedAt,
+                    DEFAULT_WEBHOOK_SECRET_LIFETIME_DAYS,
+                  ),
+                record.autoRevokedAt ?? null,
+                rotatedAt,
+              ),
+          }),
+        ),
+      ];
+      endpoint.ownerRef = owner.ownerRef;
+      endpoint.ownerName = owner.ownerName;
+      endpoint.ownerType = owner.ownerType;
+      endpoint.purpose = nextSecret.purpose;
+      endpoint.updatedAt = rotatedAt;
+      this.reconcileStoredWebhookEndpoint(endpoint, rotatedAt);
+      this.markWebhookValidationPending(endpoint, rotatedAt);
+      const persisted = this.persistConfigurationChanges(
         {
+          webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
+        },
+        "rotate_webhook_secret",
+        tenantId,
+      );
+      return this.afterPersistence(persisted, () => {
+        this.webhookEndpoints = this.webhookEndpoints.map((item) =>
+          item.webhookId === endpoint.webhookId ? endpoint : item,
+        );
+
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: "rotate_webhook_secret",
+            resourceType: "webhook_endpoint",
+            resourceId: endpoint.webhookId,
+            oldValuesSummary: oldValues,
+            newValuesSummary: {
+              secretVersion: endpoint.secretVersion,
+              rotationCount: endpoint.secretHistory.length,
+              rotationReason,
+              secretPreview: endpoint.secretPreview,
+              secretExpiresAt: endpoint.secretExpiresAt,
+              overlapEndsAt: grantedOverlapEndsAt,
+              status: endpoint.status,
+            },
+          },
+          requestId,
+        );
+
+        return {
           webhookId: endpoint.webhookId,
           secretVersion: endpoint.secretVersion,
-        },
-      );
-    }
-
-    // Recovering from an expired or revoked secret is a legitimate reason to
-    // rotate, but the dead secret is retired outright: only a still-live secret
-    // earns an overlap window, so signing material is never resurrected.
-    const currentSecretIsLive =
-      currentSecret.status === "active" ||
-      currentSecret.status === "overlap_active";
-    const grantedOverlapEndsAt = currentSecretIsLive ? overlapEndsAt : null;
-    currentSecret.overlapEndsAt = grantedOverlapEndsAt;
-    currentSecret.supersededByVersion = endpoint.secretVersion + 1;
-    if (currentSecretIsLive) {
-      currentSecret.autoRevokedAt = null;
-      currentSecret.status = "overlap_active";
-      currentSecret.revokedAt = null;
-    }
-    currentSecret.signals = this.buildCredentialSignals(
-      currentSecret.lastUsedAt,
-      currentSecret.expiresAt ?? null,
-      currentSecret.autoRevokedAt ?? null,
-      rotatedAt,
-    );
-
-    const owner = this.resolveCredentialOwner(command, {
-      ownerRef: endpoint.ownerRef ?? null,
-      ownerName: endpoint.ownerName ?? "Tenant webhook integration owner",
-      ownerType: endpoint.ownerType ?? "tenant_admin",
-    });
-    const nextSecretExpiresAt = this.resolveWebhookSecretExpiry(
-      command.expiresAt ?? null,
-      rotatedAt,
-    );
-    const nextSecret: StoredWebhookSecretMaterial = {
-      createdAt: rotatedAt,
-      secretVersion: endpoint.secretVersion + 1,
-      rotatedAt,
-      rotationReason,
-      secretPreview,
-      secretValue: command.secret,
-      ownerRef: owner.ownerRef,
-      ownerName: owner.ownerName,
-      ownerType: owner.ownerType,
-      purpose: this.resolveCredentialPurpose(
-        command.purpose ?? endpoint.purpose,
-        "tenant webhook signing secret",
-      ),
-      expiresAt: nextSecretExpiresAt,
-      lastUsedAt: null,
-      lastUsedWorkload: null,
-      status: "active",
-      overlapEndsAt: null,
-      autoRevokedAt: null,
-      supersededByVersion: null,
-      revokedAt: null,
-      signals: this.buildCredentialSignals(
-        null,
-        nextSecretExpiresAt,
-        null,
-        rotatedAt,
-      ),
-    };
-
-    endpoint.secretVersion = nextSecret.secretVersion;
-    endpoint.secretValue = command.secret;
-    endpoint.secretPreview = secretPreview;
-    endpoint.secretCredentials = [
-      nextSecret,
-      ...(endpoint.secretCredentials ?? []).map(
-        (record): StoredWebhookSecretMaterial => ({
-          ...record,
-          createdAt: record.createdAt ?? record.rotatedAt,
-          status: record.status ?? "active",
-          signals:
-            record.signals ??
-            this.buildCredentialSignals(
-              record.lastUsedAt ?? null,
-              record.expiresAt ??
-                this.addDaysToIso(
-                  rotatedAt,
-                  DEFAULT_WEBHOOK_SECRET_LIFETIME_DAYS,
-                ),
-              record.autoRevokedAt ?? null,
-              rotatedAt,
-            ),
-        }),
-      ),
-    ];
-    endpoint.ownerRef = owner.ownerRef;
-    endpoint.ownerName = owner.ownerName;
-    endpoint.ownerType = owner.ownerType;
-    endpoint.purpose = nextSecret.purpose;
-    endpoint.updatedAt = rotatedAt;
-    this.reconcileStoredWebhookEndpoint(endpoint, rotatedAt);
-    this.markWebhookValidationPending(endpoint, rotatedAt);
-    this.persistChanges(
-      {
-        webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
-      },
-      "rotate_webhook_secret",
-    );
-
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "rotate_webhook_secret",
-        resourceType: "webhook_endpoint",
-        resourceId: endpoint.webhookId,
-        oldValuesSummary: oldValues,
-        newValuesSummary: {
-          secretVersion: endpoint.secretVersion,
-          rotationCount: endpoint.secretHistory.length,
-          rotationReason,
           secretPreview: endpoint.secretPreview,
-          secretExpiresAt: endpoint.secretExpiresAt,
+          rotationCount: endpoint.secretHistory.length,
+          rotatedAt,
           overlapEndsAt: grantedOverlapEndsAt,
-          status: endpoint.status,
-        },
-      },
-      requestId,
-    );
-
-    return {
-      webhookId: endpoint.webhookId,
-      secretVersion: endpoint.secretVersion,
-      secretPreview: endpoint.secretPreview,
-      rotationCount: endpoint.secretHistory.length,
-      rotatedAt,
-      overlapEndsAt: grantedOverlapEndsAt,
-    };
+        };
+      });
+    });
   }
 
   getSlaProfile(tenantId: string) {
+    this.assertConfigurationReadable(tenantId);
     return { ...this.getOrCreateSlaProfile(tenantId) };
   }
 
   getSlaProfileView(tenantId: string): TenantSlaProfileView {
+    this.assertConfigurationReadable(tenantId);
     const profile = this.slaProfiles.get(tenantId);
     const availableActions = this.buildTenantSlaAvailableActions(profile);
     const refreshMetadata: UiRefreshMetadata = {
@@ -9825,71 +10108,79 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     actorId?: string,
     requestId?: string,
     identity?: IdentityContext | null,
-  ): ActionReceipt {
+  ): MaybePromise<ActionReceipt> {
     this.assertTenantMutationScope(tenantId, identity);
-    for (const [field, value] of [
-      ["waitThresholdMin", command.waitThresholdMin],
-      ["arrivalThresholdMin", command.arrivalThresholdMin],
-      ["completionThresholdMin", command.completionThresholdMin],
-    ] as const) {
-      if (
-        value !== undefined &&
-        (typeof value !== "number" || Number.isNaN(value) || value < 0)
-      ) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "INVALID_SLA_THRESHOLD",
-          `SLA threshold '${field}' must be a non-negative number.`,
-          { field, value },
-        );
+    return this.runConfigurationCommand(tenantId, () => {
+      for (const [field, value] of [
+        ["waitThresholdMin", command.waitThresholdMin],
+        ["arrivalThresholdMin", command.arrivalThresholdMin],
+        ["completionThresholdMin", command.completionThresholdMin],
+      ] as const) {
+        if (
+          value !== undefined &&
+          (typeof value !== "number" || Number.isNaN(value) || value < 0)
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "INVALID_SLA_THRESHOLD",
+            `SLA threshold '${field}' must be a non-negative number.`,
+            { field, value },
+          );
+        }
       }
-    }
-    const currentProfile = this.getOrCreateSlaProfile(tenantId);
-    const slaProfile: TenantSlaProfile = {
-      tenantId,
-      waitThresholdMin:
-        command.waitThresholdMin ?? currentProfile.waitThresholdMin,
-      arrivalThresholdMin:
-        command.arrivalThresholdMin ?? currentProfile.arrivalThresholdMin,
-      completionThresholdMin:
-        command.completionThresholdMin ?? currentProfile.completionThresholdMin,
-      updatedAt: new Date().toISOString(),
-    };
-    this.slaProfiles.set(tenantId, this.cloneSlaProfile(slaProfile));
-    this.persistChanges(
-      {
-        slaProfiles: [this.cloneSlaProfile(slaProfile)],
-      },
-      "update_sla_profile",
-    );
-
-    this.recordTenantAudit(
-      {
-        actorId: actorId ?? identity?.actorId ?? null,
-        actorType: "tenant_admin",
+      const currentProfile =
+        this.slaProfiles.get(tenantId) ??
+        this.createDefaultSlaProfile(tenantId);
+      const slaProfile: TenantSlaProfile = {
         tenantId,
-        moduleName: "tenant-partner",
-        actionName: "update_sla_profile",
-        resourceType: "tenant_sla",
-        resourceId: tenantId,
-        newValuesSummary: {
-          waitThresholdMin: slaProfile.waitThresholdMin,
-          arrivalThresholdMin: slaProfile.arrivalThresholdMin,
-          completionThresholdMin: slaProfile.completionThresholdMin,
-          reason: command.reason ?? null,
+        waitThresholdMin:
+          command.waitThresholdMin ?? currentProfile.waitThresholdMin,
+        arrivalThresholdMin:
+          command.arrivalThresholdMin ?? currentProfile.arrivalThresholdMin,
+        completionThresholdMin:
+          command.completionThresholdMin ??
+          currentProfile.completionThresholdMin,
+        updatedAt: new Date().toISOString(),
+      };
+      const persisted = this.persistConfigurationChanges(
+        {
+          slaProfiles: [this.cloneSlaProfile(slaProfile)],
         },
-      },
-      requestId,
-    );
+        "update_sla_profile",
+        tenantId,
+      );
+      return this.afterPersistence(persisted, () => {
+        this.slaProfiles.set(tenantId, this.cloneSlaProfile(slaProfile));
 
-    return {
-      actionId: randomUUID(),
-      auditId: requestId ?? randomUUID(),
-      resourceType: "tenant_sla",
-      resourceId: tenantId,
-      status: "completed",
-      message: "SLA profile updated.",
-    };
+        this.recordTenantAudit(
+          {
+            actorId: actorId ?? identity?.actorId ?? null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: "update_sla_profile",
+            resourceType: "tenant_sla",
+            resourceId: tenantId,
+            newValuesSummary: {
+              waitThresholdMin: slaProfile.waitThresholdMin,
+              arrivalThresholdMin: slaProfile.arrivalThresholdMin,
+              completionThresholdMin: slaProfile.completionThresholdMin,
+              reason: command.reason ?? null,
+            },
+          },
+          requestId,
+        );
+
+        return {
+          actionId: randomUUID(),
+          auditId: requestId ?? randomUUID(),
+          resourceType: "tenant_sla",
+          resourceId: tenantId,
+          status: "completed",
+          message: "SLA profile updated.",
+        };
+      });
+    });
   }
 
   recalculateSlaBookings(
@@ -10505,7 +10796,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private assertTenantAccessScope(
+  assertTenantAccessScope(
     targetTenantId: string,
     identity?: IdentityContext | null,
     action: "read" | "mutation" | "access" = "access",
@@ -14910,6 +15201,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     costCenterCode: string | null,
   ): TenantQuotaPolicyRecord {
+    // All cached-policy consumers, including preview and quota ledger helpers,
+    // must share the summary's guard after an uncertain canonical write.
+    this.assertConfigurationReadable(tenantId);
     const exact = costCenterCode
       ? this.quotaPolicies.get(
           this.buildQuotaPolicyKey(tenantId, costCenterCode, "monthly"),
@@ -15674,6 +15968,154 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     return normalized;
+  }
+
+  private readonly pendingConfigurationReadbacks = new Map<
+    string,
+    PersistTenantPartnerChanges
+  >();
+
+  private assertConfigurationReadable(tenantId: string) {
+    if (this.pendingConfigurationReadbacks.has(tenantId)) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "TENANT_CONFIGURATION_READBACK_PENDING",
+        "Canonical configuration readback is pending after a failed write.",
+      );
+    }
+  }
+
+  private runConfigurationCommand<T>(
+    tenantId: string,
+    execute: () => MaybePromise<T>,
+  ): MaybePromise<T> {
+    if (!this.tenantPartnerRepository?.isEnabled()) return execute();
+    return this.withTenantBookWriteLock(
+      `configuration:${tenantId}`,
+      async () => {
+        const pending = this.pendingConfigurationReadbacks.get(tenantId);
+        if (pending) await this.recoverTenantConfiguration(tenantId, pending);
+        return execute();
+      },
+    );
+  }
+
+  private async recoverTenantConfiguration(
+    tenantId: string,
+    changes: PersistTenantPartnerChanges,
+  ) {
+    const canonical = await this.tenantPartnerRepository!.loadState();
+    this.pendingConfigurationReadbacks.delete(tenantId);
+    if (changes.quotaPolicies) {
+      for (const policy of changes.quotaPolicies) {
+        this.quotaPolicies.delete(
+          this.buildQuotaPolicyKey(
+            tenantId,
+            policy.costCenterCode,
+            policy.period,
+          ),
+        );
+      }
+      for (const policy of canonical.quotaPolicies.filter(
+        (item) => item.tenantId === tenantId,
+      )) {
+        this.quotaPolicies.set(
+          this.buildQuotaPolicyKey(
+            tenantId,
+            policy.costCenterCode,
+            policy.period,
+          ),
+          this.cloneQuotaPolicy(policy),
+        );
+      }
+    }
+    if (changes.approvalRules) {
+      const before = this.listApprovalRules(tenantId);
+      this.approvalRules = [
+        ...this.approvalRules.filter((item) => item.tenantId !== tenantId),
+        ...canonical.approvalRules
+          .filter((item) => item.tenantId === tenantId)
+          .map((item) => this.cloneApprovalRule(item)),
+      ];
+      if (
+        JSON.stringify(before) !==
+        JSON.stringify(this.listApprovalRules(tenantId))
+      )
+        this.bumpApprovalRuleVersion(tenantId);
+    }
+    if (changes.slaProfiles) {
+      const profile = canonical.slaProfiles.find(
+        (item) => item.tenantId === tenantId,
+      );
+      if (profile)
+        this.slaProfiles.set(tenantId, this.cloneSlaProfile(profile));
+    }
+    if (changes.webhookEndpoints) {
+      const ids = new Set(
+        changes.webhookEndpoints.map((item) => item.webhookId),
+      );
+      this.webhookEndpoints = [
+        ...this.webhookEndpoints.filter((item) => !ids.has(item.webhookId)),
+        ...canonical.webhookEndpoints
+          .filter((item) => ids.has(item.webhookId))
+          .map((item) => this.cloneStoredWebhookEndpoint(item)),
+      ];
+    }
+    if (changes.webhookDeliveries) {
+      const ids = new Set(
+        changes.webhookDeliveries.map((item) => item.deliveryId),
+      );
+      this.webhookDeliveries = [
+        ...this.webhookDeliveries.filter((item) => !ids.has(item.deliveryId)),
+        ...canonical.webhookDeliveries
+          .filter((item) => ids.has(item.deliveryId))
+          .map((item) => this.cloneStoredWebhookDelivery(item)),
+      ];
+    }
+  }
+
+  private persistConfigurationChanges(
+    changes: PersistTenantPartnerChanges,
+    context: string,
+    tenantId: string,
+  ): MaybePromise<void> {
+    const repository = this.tenantPartnerRepository;
+    if (!repository?.isEnabled()) return;
+    return repository
+      .persistConfigurationChanges(changes)
+      .catch(async (error: unknown) => {
+        repository.reportPersistenceFailure(error, context);
+        // A rejected COMMIT response is not proof of rollback. Read the authority
+        // before retry, including a commit whose response was lost.
+        const pending = this.pendingConfigurationReadbacks.get(tenantId);
+        const combined: PersistTenantPartnerChanges = {
+          ...pending,
+          ...changes,
+        };
+        for (const key of [
+          "webhookEndpoints",
+          "webhookDeliveries",
+          "quotaPolicies",
+          "slaProfiles",
+          "approvalRules",
+        ] as const) {
+          if (pending?.[key] && changes[key]) {
+            Object.assign(combined, {
+              [key]: [...pending[key], ...changes[key]],
+            });
+          }
+        }
+        this.pendingConfigurationReadbacks.set(tenantId, combined);
+        try {
+          await this.recoverTenantConfiguration(tenantId, combined);
+        } catch (readbackError) {
+          repository.reportPersistenceFailure(
+            readbackError,
+            `${context}: canonical readback pending`,
+          );
+        }
+        throw error;
+      });
   }
 
   private persistChanges(

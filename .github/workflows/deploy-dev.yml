@@ -385,6 +385,28 @@ jobs:
     name: Build & push images
     runs-on: ubuntu-latest
     needs: prepare
+    # Independent images share the same immutable source and cache scopes.
+    # Limit runner demand; migration still waits for every image to succeed.
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        image:
+          [
+            api,
+            migrate,
+            platform-admin-web,
+            ops-console-web,
+            fleet-partner-portal-web,
+            tenant-console-web,
+            bank-console-web,
+            referral-embed-web,
+            enterprise-dispatch-web,
+            channel-partner-portal-web,
+            passenger-app-web,
+          ]
+    # These outputs are identical for every matrix entry: all check out the
+    # same immutable source. No per-image value is exposed as a shared output.
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
       candidate_sha: ${{ steps.tag.outputs.candidate_sha }}
@@ -421,31 +443,26 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Check which images the registry already has
+      - name: Check whether the registry already has this image
         id: existing
+        env:
+          IMAGE: ${{ matrix.image }}
+          REGISTRY: ${{ needs.prepare.outputs.registry }}
+          IMAGE_TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-
-          # Under tag immutability a candidate tag can be written once and never
-          # again, so re-running a deploy for a source ref that was already built
-          # fails on the push -- the deploy is not idempotent without this. The
-          # tag is the source SHA, so an image that is already there was built
-          # from exactly this commit and is the image we would have produced.
-          # Skip those and build only what is genuinely missing.
-          for image in api migrate platform-admin-web ops-console-web fleet-partner-portal-web tenant-console-web bank-console-web referral-embed-web enterprise-dispatch-web channel-partner-portal-web passenger-app-web;
-          do
-            reference="${{ needs.prepare.outputs.registry }}/${image}:${{ steps.tag.outputs.tag }}"
-            if gcloud container images describe "$reference" >/dev/null 2>&1; then
-              echo "${image}=true" >> "$GITHUB_OUTPUT"
-              echo "already published: ${reference}"
-            else
-              echo "${image}=false" >> "$GITHUB_OUTPUT"
-              echo "needs build: ${reference}"
-            fi
-          done
+          # Immutable candidate tags are never overwritten on a retry.
+          reference="${REGISTRY}/${IMAGE}:${IMAGE_TAG}"
+          if gcloud container images describe "$reference" >/dev/null 2>&1; then
+            echo "${IMAGE}=true" >> "$GITHUB_OUTPUT"
+            echo "already published: ${reference}"
+          else
+            echo "${IMAGE}=false" >> "$GITHUB_OUTPUT"
+            echo "needs build: ${reference}"
+          fi
 
       - name: Build & push — api
-        if: steps.existing.outputs.api != 'true'
+        if: matrix.image == 'api' && steps.existing.outputs.api != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -457,7 +474,7 @@ jobs:
           cache-to: type=gha,scope=api,mode=min
 
       - name: Build & push — migrate
-        if: steps.existing.outputs.migrate != 'true'
+        if: matrix.image == 'migrate' && steps.existing.outputs.migrate != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -469,7 +486,7 @@ jobs:
           cache-to: type=gha,scope=migrate,mode=min
 
       - name: Build & push — platform-admin-web
-        if: steps.existing.outputs.platform-admin-web != 'true'
+        if: matrix.image == 'platform-admin-web' && steps.existing.outputs.platform-admin-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -482,7 +499,7 @@ jobs:
           cache-to: type=gha,scope=platform-admin-web,mode=min
 
       - name: Build & push — ops-console-web
-        if: steps.existing.outputs.ops-console-web != 'true'
+        if: matrix.image == 'ops-console-web' && steps.existing.outputs.ops-console-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -495,7 +512,7 @@ jobs:
           cache-to: type=gha,scope=ops-console-web,mode=min
 
       - name: Build & push — fleet-partner-portal-web
-        if: steps.existing.outputs.fleet-partner-portal-web != 'true'
+        if: matrix.image == 'fleet-partner-portal-web' && steps.existing.outputs.fleet-partner-portal-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -508,7 +525,7 @@ jobs:
           cache-to: type=gha,scope=fleet-partner-portal-web,mode=min
 
       - name: Build & push — tenant-console-web
-        if: steps.existing.outputs.tenant-console-web != 'true'
+        if: matrix.image == 'tenant-console-web' && steps.existing.outputs.tenant-console-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -521,7 +538,7 @@ jobs:
           cache-to: type=gha,scope=tenant-console-web,mode=min
 
       - name: Build & push — bank-console-web
-        if: steps.existing.outputs.bank-console-web != 'true'
+        if: matrix.image == 'bank-console-web' && steps.existing.outputs.bank-console-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -534,7 +551,7 @@ jobs:
           cache-to: type=gha,scope=bank-console-web,mode=min
 
       - name: Build & push — referral-embed-web
-        if: steps.existing.outputs.referral-embed-web != 'true'
+        if: matrix.image == 'referral-embed-web' && steps.existing.outputs.referral-embed-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -547,7 +564,7 @@ jobs:
           cache-to: type=gha,scope=referral-embed-web,mode=min
 
       - name: Build & push — enterprise-dispatch-web
-        if: steps.existing.outputs.enterprise-dispatch-web != 'true'
+        if: matrix.image == 'enterprise-dispatch-web' && steps.existing.outputs.enterprise-dispatch-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -560,7 +577,7 @@ jobs:
           cache-to: type=gha,scope=enterprise-dispatch-web,mode=min
 
       - name: Build & push — channel-partner-portal-web
-        if: steps.existing.outputs.channel-partner-portal-web != 'true'
+        if: matrix.image == 'channel-partner-portal-web' && steps.existing.outputs.channel-partner-portal-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -573,7 +590,7 @@ jobs:
           cache-to: type=gha,scope=channel-partner-portal-web,mode=min
 
       - name: Build & push — passenger-app-web
-        if: steps.existing.outputs.passenger-app-web != 'true'
+        if: matrix.image == 'passenger-app-web' && steps.existing.outputs.passenger-app-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -1053,7 +1070,9 @@ jobs:
           env_vars="${env_vars}@OIDC_ENABLED=${{ steps.api_secrets.outputs.oidc_enabled }}"
           env_vars="${env_vars}@OAUTH_REDIRECT_ALLOWLIST=${oauth_redirect_allowlist}@REQUIRE_SMS_VERIFICATION=false"
           env_vars="${env_vars}@PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
+          env_vars="${env_vars}@VOICE_BACKGROUND_RUNNER_ENABLED=true"
           if [[ "${DEV_PAX_REVIEW_DEMO_ENABLED:-false}" == "true" ]]; then
+            env_vars="${env_vars}@VOICE_BOOKING_RESULT_DELIVERY=simulation"
             # Existing complete groups keep their references. Absent groups
             # receive the explicit PUBLIC synthetic profile; never generate a
             # new key at boot or require a real SMS/financial account. The
@@ -1139,7 +1158,8 @@ jobs:
             --set-secrets "$api_secrets" \
             --set-env-vars "$API_ENV_VARS" \
             ${{ needs.prepare.outputs.api_exposure_flag }} \
-            --min-instances 0 \
+            --min-instances 1 \
+            --no-cpu-throttling \
             --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
@@ -2396,9 +2416,28 @@ jobs:
           PAX_REVIEW_SHARED_DEV_SMOKE: "true"
           PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
           PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_PLATFORM_ADMIN_ORIGIN: ${{ needs.health-check.outputs.platform_admin }}
           PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
           PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          PAX_REVIEW_PLATFORM_ADMIN_ID_TOKEN: ${{ steps.id_token_platform_admin.outputs.id_token }}
         run: pnpm exec playwright test -c playwright.pax-review-shared-order.config.ts
+      - name: Exercise additional real shared-dev passenger branches
+        if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        env:
+          PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
+          PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
+          PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+        run: pnpm exec playwright test -c playwright.pax-review-additional-branches.config.ts
+      - name: Upload additional shared-dev passenger branch evidence
+        if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-dev-pax-additional-branches-${{ needs.build-push.outputs.candidate_sha }}
+          path: .artifacts/pax-review-additional-branches
+          include-hidden-files: true
+          if-no-files-found: ignore
       - name: Upload shared-dev rehearsal evidence
         if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
         uses: actions/upload-artifact@v4
@@ -2407,6 +2446,66 @@ jobs:
           path: .artifacts/pax-review-shared-order
           include-hidden-files: true
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Exercise real shared-dev quote expiry and recovery
+        if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        env:
+          PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_QUOTE_EXPIRY_SOURCE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
+          PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
+          PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
+          PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+        run: pnpm exec playwright test -c playwright.pax-real-quote-expiry.config.ts
+      - name: Upload shared-dev real quote expiry evidence
+        if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-dev-pax-real-quote-expiry-${{ needs.build-push.outputs.candidate_sha }}
+          path: .artifacts/pax-real-quote-expiry
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Exercise real shared-dev reservation offer timeout and same-order recovery
+        if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        env:
+          PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_DISPATCH_TIMEOUT_SOURCE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
+          PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
+          PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
+          PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+        run: pnpm exec playwright test -c playwright.pax-real-dispatch-timeout.config.ts
+      - name: Upload shared-dev reservation offer timeout evidence
+        if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-dev-pax-real-dispatch-timeout-${{ needs.build-push.outputs.candidate_sha }}
+          path: .artifacts/pax-real-dispatch-timeout
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Exercise real shared-dev Ops declined-command recovery
+        if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        env:
+          PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          OPS_REVIEW_RECOVERY_SOURCE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
+          PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
+          PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
+          PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+        run: pnpm exec playwright test -c playwright.ops-review-recovery.config.ts
+      - name: Upload shared-dev Ops declined-command recovery evidence
+        if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-dev-ops-review-recovery-${{ needs.build-push.outputs.candidate_sha }}
+          path: .artifacts/ops-review-recovery
+          include-hidden-files: true
+          if-no-files-found: ignore
           retention-days: 14
 
   # A red run used to mean two very different things that looked identical in the

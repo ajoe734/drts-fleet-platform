@@ -604,7 +604,7 @@ describe("referral booking to partner notification delivery", () => {
       payload: { eventSequence: 1 },
     });
     expect(h.sequences.get(booking.orderId)).toBe(2);
-    const delivery = transportHarness();
+    const delivery = await transportHarness();
     const route = (await h.allocator.findOrderPartnerNotificationRoute(
       booking.orderId,
     ))!;
