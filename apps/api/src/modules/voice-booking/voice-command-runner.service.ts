@@ -273,7 +273,7 @@ export class VoiceCommandRunnerService
 
       const call = await tx.query(
         `UPDATE crm.phase1_call_sessions
-        SET record = record || $2::jsonb, linked_order_id = $3, updated_at = now()
+        SET record = record || $2::jsonb, updated_at = now()
         WHERE call_id = $1 AND (linked_order_id IS NULL OR linked_order_id = $3)
         RETURNING call_id`,
         [
