@@ -904,13 +904,10 @@ export class VoiceSessionService {
         leaseEpoch: command.expectedLeaseEpoch,
       });
 
-      if (!tx)
-        throw new Error("Voice recording context requires a transaction");
-      const recordingContext = await readVoiceRecordingContext(
-        tx,
-        session.voiceSessionId,
-      );
-      if (!recordingContext)
+      const recordingContext = tx
+        ? await readVoiceRecordingContext(tx, session.voiceSessionId)
+        : null;
+      if (tx && !recordingContext)
         throw new Error("Voice recording context unavailable");
 
       const closeEvent = command.closeEvent;
@@ -920,7 +917,8 @@ export class VoiceSessionService {
       const mediaEpoch = closeEvent?.mediaEpoch ?? 1;
       const occurredAt = closeEvent?.occurredAt ?? new Date().toISOString();
       const source = closeEvent?.source ?? "media_worker";
-      const sourceEventId = closeEvent?.sourceEventId ?? null;
+      const sourceEventId =
+        closeEvent?.sourceEventId ?? `session-close:${session.voiceSessionId}`;
       const payload = closeEvent?.payload ?? null;
       const payloadRef = closeEvent?.payloadRef ?? null;
 
@@ -975,8 +973,8 @@ export class VoiceSessionService {
       const payloadRefData = JSON.stringify({
         voiceSessionId: session.voiceSessionId,
         callId: session.callId,
-        brandId: recordingContext.brandId,
-        linkedOrderId: recordingContext.linkedOrderId,
+        brandId: recordingContext?.brandId ?? null,
+        linkedOrderId: recordingContext?.linkedOrderId ?? null,
         recordingId: command.recordingId ?? null,
         closedAt: occurredAt,
       });
