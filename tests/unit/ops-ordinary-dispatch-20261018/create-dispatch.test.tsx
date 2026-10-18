@@ -25,6 +25,14 @@ type Command = {
 let commands: Command[];
 let upstream: () => Promise<Response>;
 
+async function readyCreateButton() {
+  const button = await screen.findByRole("button", { name: "建立派遣" });
+  await waitFor(() =>
+    expect((button as HTMLButtonElement).disabled).toBe(false),
+  );
+  return button;
+}
+
 function success(responseOrderId = orderId) {
   return Response.json({
     success: true,
@@ -126,7 +134,7 @@ it("shows the real domain refusal and permits a corrected command without preten
   expect(refresh).not.toHaveBeenCalled();
   const originalKey = commands[0]!.key;
   upstream = async () => success();
-  fireEvent.click(screen.getByRole("button", { name: "建立派遣" }));
+  fireEvent.click(await readyCreateButton());
   await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
   expect(commands).toHaveLength(2);
   expect(commands[1]!.key).not.toBe(originalKey);
@@ -142,7 +150,7 @@ it("retries an unknown acknowledgement using the original command and key", asyn
   await screen.findByRole("alert");
   expect(refresh).not.toHaveBeenCalled();
   upstream = async () => success();
-  fireEvent.click(screen.getByRole("button", { name: "建立派遣" }));
+  fireEvent.click(await readyCreateButton());
   await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
   expect(commands).toHaveLength(2);
   expect(commands[1]).toEqual(commands[0]);
@@ -178,7 +186,7 @@ it("changing the viewed order does not reuse the previous order command", async 
   const nextOrder = "2e359246-c5e2-4612-8cd6-e9b9f65864da";
   view.rerender(<OpsDispatchCreateButton orderId={nextOrder} locale="zh" />);
   upstream = async () => success(nextOrder);
-  fireEvent.click(screen.getByRole("button", { name: "建立派遣" }));
+  fireEvent.click(await readyCreateButton());
   await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
   expect(commands).toHaveLength(2);
   expect(commands[1]!.path).toBe(`/api/orders/${nextOrder}/dispatch`);
