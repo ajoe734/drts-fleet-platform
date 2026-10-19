@@ -61,6 +61,16 @@ export interface VoiceCallbackTaskRecord {
   cancellationReason?: string | null;
   dialReconcileRequired?: boolean;
   linkedOrderId?: string | null;
+  /**
+   * AUDIT-VOICE-APPLICATION-REGRESSION-20261018 review round 2 (F5/F8): the
+   * `voice.contact_role_revision.revision_number` this task's `contactName`/
+   * `consentRef` are sealed to (`voice.callback_task_contact_binding`), and
+   * when that binding was written. `null` when no contact state has ever
+   * been bound for this task (an honest gap, not a fabricated pointer) --
+   * only present for DB-backed reads.
+   */
+  contactRevisionNumber?: number | null;
+  contactRevisionBoundAt?: string | null;
 }
 
 export interface VoiceCallbackAttemptRecord {
@@ -1455,27 +1465,41 @@ export class VoiceCallbackService {
         "VOICE_SESSION_NOT_FOUND",
         "Callback voice session was not found.",
       );
-    // AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C/D: resolve the
-    // durable, server-sealed callbackRecipient contact/consent for this
-    // session (voice.contact_role_revision via VoiceContactService), rather
-    // than the hardcoded "" `mapDbTaskRow` defaults. Honestly falls back to
-    // those defaults (not a fabricated value) when no contact state has
-    // ever been recorded for this session -- true for every call today,
-    // since nothing in the live dialogue/booking flow yet calls
-    // `VoiceContactService.initializeContacts` (see this task's UAT doc,
-    // Package C "not started" note on VoiceContactService's prior mounted-
-    // caller gap); this projection is correct as soon as something does.
-    const effectiveContacts = await this.contactService?.getEffectiveContactsDurable(
-      row.voice_session_id,
+    // AUDIT-VOICE-APPLICATION-REGRESSION-20261018 review round 2 (F5): read
+    // the contact/consent PINNED to this task at the moment it was bound
+    // (`voice.callback_task_contact_binding`, written once by
+    // `createCallbackDurable` and re-pointed only by an AUTHORIZED
+    // `VoiceContactService.updateContactRole` correction), never "whatever
+    // is currently effective for the session" -- that mixed a later
+    // recipient's name/consent into an older task's read while its own
+    // sealed `contact_phone_encrypted`/`consent_snapshot_hash` columns (see
+    // `mapDbTaskRow`) stayed on the original contact, silently combining
+    // two different identities in one record. Honestly falls back to the ""
+    // defaults (not a fabricated value, and NOT a live-session lookup) when
+    // no binding has ever been written for this task -- true for every
+    // callback created before this fix shipped, or for any session where
+    // nothing has called `VoiceContactService.initializeContacts` yet (see
+    // this task's UAT doc).
+    const binding = await this.sessionRepository?.getLatestCallbackTaskContactBinding(
+      row.task_id,
+      tx,
     );
+    const boundContact = binding
+      ? await this.contactService?.getContactRevisionByNumber(
+          row.voice_session_id,
+          binding.revisionNumber,
+        )
+      : null;
 
     return {
       ...this.mapDbTaskRow(row),
       brandId: context.brandId,
       callId: context.callId,
       linkedOrderId: context.linkedOrderId,
-      contactName: effectiveContacts?.callbackRecipient.name ?? "",
-      consentRef: effectiveContacts?.callbackRecipientConsentRef ?? "",
+      contactName: boundContact?.name ?? "",
+      consentRef: boundContact?.consentRef ?? "",
+      contactRevisionNumber: binding?.revisionNumber ?? null,
+      contactRevisionBoundAt: binding?.boundAt ?? null,
     };
   }
 
@@ -1589,9 +1613,24 @@ export class VoiceCallbackService {
     const previous = await this.replayDbCallbackCreate(actionKey, payloadHash);
     if (previous) return previous;
 
+    // AUDIT-VOICE-APPLICATION-REGRESSION-20261018 review round 2 (F5):
+    // resolve the CURRENT effective `callbackRecipient` revision for this
+    // session BEFORE creating the task, so the new task can be pinned to it
+    // (`voice.callback_task_contact_binding`) in the same transaction as its
+    // INSERT. Honestly `null` (no binding written, the pre-existing ""
+    // fallback in `loadDbTask` applies) when `contactService` is unavailable
+    // or `VoiceContactService.initializeContacts` has never been called for
+    // this session -- never a fabricated revision.
+    const effective = await this.contactService?.getEffectiveContactsDurable(
+      input.voiceSessionId,
+    );
+    const bindRevisionNumber = effective?.callbackRecipientRevisionNumber ?? null;
+
     const db = this.databaseService!;
+    const client = await db.connect();
     try {
-      const inserted = await db.query<CallbackDbTaskRow>(
+      await client.query("BEGIN");
+      const inserted = await client.query<CallbackDbTaskRow>(
         `INSERT INTO voice.callback_task (
           voice_session_id, contact_phone_encrypted, contact_phone_lookup_token,
           consent_snapshot_hash, reason, resource_scope_id, priority, scheduled_at, due_at,
@@ -1613,13 +1652,24 @@ export class VoiceCallbackService {
         ],
       );
       const row = inserted.rows[0]!;
-      const task = await this.loadDbTask(row.task_id);
+      if (bindRevisionNumber != null) {
+        await this.sessionRepository!.insertCallbackTaskContactBinding(
+          row.task_id,
+          input.voiceSessionId,
+          bindRevisionNumber,
+          "created_with_effective_contact",
+          client,
+        );
+      }
+      const task = await this.loadDbTask(row.task_id, client);
+      await client.query("COMMIT");
       return {
         task,
         receipt: this.mapDbCreateReceipt(row, task),
         replayed: false,
       };
     } catch (error: unknown) {
+      await client.query("ROLLBACK").catch(() => {});
       if ((error as { code?: string }).code !== "23505") throw error;
       const replay = await this.replayDbCallbackCreate(actionKey, payloadHash);
       if (replay) return replay;
@@ -1663,6 +1713,8 @@ export class VoiceCallbackService {
         receipt: null,
         replayed: true,
       };
+    } finally {
+      client.release();
     }
   }
 

@@ -520,12 +520,17 @@ export class VoiceCommandRunnerService
         };
         manifestRef?: {
           objectKey?: string;
+          objectVersion?: string;
           checksum?: string;
+          byteLength?: number;
+          durableAt?: string;
         };
         recordingId?: string | null;
+        requestedRecordingId?: string | null;
         recordingUrl?: string | null;
         linkedOrderId?: string | null;
         voiceSessionId?: string | null;
+        verifiedAt?: string | null;
       };
 
       let parsedPayload: Record<string, unknown> = {};
@@ -541,10 +546,6 @@ export class VoiceCommandRunnerService
         finalResult.scope?.callId ??
         (parsedPayload.callId as string | undefined) ??
         record.dedupeKey.replace(/^finalize_recording:(ai:|call:)?/, "");
-      const recordingId =
-        finalResult.recordingId ??
-        (parsedPayload.recordingId as string | undefined) ??
-        `rec-${callId}`;
       const recordingUrl =
         finalResult.recordingUrl ??
         (parsedPayload.recordingUrl as string | undefined) ??
@@ -558,32 +559,60 @@ export class VoiceCommandRunnerService
         finalResult.linkedOrderId ??
         (parsedPayload.linkedOrderId as string | undefined) ??
         null;
-      const manifestEvidenceRef =
-        finalResult.manifestRef?.objectKey ??
-        finalResult.manifestRef?.checksum ??
-        null;
 
-      // AUDIT-VOICE-APPLICATION-REGRESSION-20261018: this is the single
-      // choke point every finalize_recording completion actually reaches
-      // (handleFinalizeRecording's own real-adapter result, any future
-      // registered custom handler, and direct test callers alike) --
-      // require a real, verified manifest/recording identity here rather
-      // than in any one upstream caller. A missing manifestRef is NOT the
-      // same as "no audit table" or "no linked order": those are optional,
-      // honestly-absent context this method already tolerates; a recording
-      // finalize result with no object/version/checksum evidence at all is
-      // never a legitimate completion, so this throws instead of silently
-      // substituting `recordingId` as its own "evidence". Thrown inside the
-      // same transaction as the lease-fencing `status = 'completed'` update
-      // above, so a real rollback (see `VoiceBookingRepository.
-      // withTransaction`) leaves the work item exactly as `leased` for
-      // `executeNextWorkItem`'s own existing retry/fencing catch to handle,
-      // the same as any other execution failure.
-      if (!manifestEvidenceRef) {
-        throw new Error(
-          "voice_recording_manifest_unverified: finalize_recording completion has no verified manifestRef evidence",
+      // AUDIT-VOICE-APPLICATION-REGRESSION-20261018 review round 2 (F3):
+      // this is the single choke point every finalize_recording completion
+      // actually reaches (handleFinalizeRecording's own real-adapter
+      // result, any future registered custom handler, and direct test
+      // callers alike) -- require the FULL verified manifest/recording
+      // identity contract (`VoiceEvidenceService.FinalizeRecordingResult`)
+      // here rather than in any one upstream caller, and rather than
+      // accepting a truthy `objectKey`/`checksum` alone (a key-only or
+      // partial manifestRef used to pass this guard; `recordingId` could
+      // silently fall back to a payload value or a fabricated
+      // `rec-${callId}` with no connection to what was actually recorded).
+      // A missing/incomplete manifest is NOT the same as "no audit table"
+      // or "no linked order": those are optional, honestly-absent context
+      // this method already tolerates; a recording finalize result with
+      // incomplete object/version/checksum/coverage evidence, no verified
+      // recording identity, or a recording identity that does not match
+      // what was actually requested (`scope.recordingId`) is never a
+      // legitimate completion. Thrown inside the same transaction as the
+      // lease-fencing `status = 'completed'` update above, so a real
+      // rollback (see `VoiceBookingRepository.withTransaction`) leaves the
+      // work item exactly as `leased` for `executeNextWorkItem`'s own
+      // existing retry/fencing catch to handle, the same as any other
+      // execution failure.
+      const manifestRef = finalResult.manifestRef;
+      const manifestDefects: string[] = [];
+      if (!manifestRef?.objectKey) manifestDefects.push("manifestRef.objectKey");
+      if (!manifestRef?.objectVersion)
+        manifestDefects.push("manifestRef.objectVersion");
+      if (!manifestRef?.checksum) manifestDefects.push("manifestRef.checksum");
+      if (
+        typeof manifestRef?.byteLength !== "number" ||
+        !(manifestRef.byteLength > 0)
+      )
+        manifestDefects.push("manifestRef.byteLength");
+      if (!manifestRef?.durableAt) manifestDefects.push("manifestRef.durableAt");
+      if (!finalResult.recordingId) manifestDefects.push("recordingId");
+      if (!finalResult.verifiedAt) manifestDefects.push("verifiedAt");
+      if (
+        finalResult.scope?.recordingId &&
+        finalResult.recordingId &&
+        finalResult.scope.recordingId !== finalResult.recordingId
+      ) {
+        manifestDefects.push(
+          "recordingId does not match the recording that was requested (scope.recordingId)",
         );
       }
+      if (manifestDefects.length > 0) {
+        throw new Error(
+          `voice_recording_manifest_unverified: finalize_recording completion is missing verified manifest evidence (${manifestDefects.join(", ")})`,
+        );
+      }
+      const recordingId = finalResult.recordingId!;
+      const manifestEvidenceRef = manifestRef!.objectKey!;
 
       if (voiceSessionId) {
         // Booking commits hold the original session before touching the call.
@@ -1404,16 +1433,34 @@ export class VoiceCommandRunnerService
       });
     }
 
+    // AUDIT-VOICE-APPLICATION-REGRESSION-20261018 review round 2 (F3): the
+    // VERIFIED `recordingId`/`verifiedAt` the adapter actually finalized and
+    // attested to -- NOT the locally computed `recordingId` above, which is
+    // only a priori guess this method sends the adapter to tell it what to
+    // look for (payload-supplied or a synthesized `rec-${callId}`). An
+    // adapter finalizing a different segment than requested must surface as
+    // a mismatch at `completeWorkItemWithDomainState`'s verification choke
+    // point, not be silently overwritten by the unverified guess.
+    const verifiedRecordingId =
+      (finalResult as { recordingId?: unknown } | undefined)?.recordingId;
+    const verifiedAt = (finalResult as { verifiedAt?: unknown } | undefined)
+      ?.verifiedAt;
+
     return {
       handled: true,
       type: "finalize_recording",
       voiceSessionId: work.voiceSessionId,
       callId,
-      recordingId,
+      recordingId:
+        typeof verifiedRecordingId === "string" && verifiedRecordingId
+          ? verifiedRecordingId
+          : recordingId,
+      requestedRecordingId: recordingId,
       linkedOrderId,
       scope: { brandId, callId, recordingId, legId },
       manifestRef: (finalResult as any)?.manifestRef ?? null,
       recordingUrl: (finalResult as any)?.recordingUrl ?? null,
+      verifiedAt: typeof verifiedAt === "string" ? verifiedAt : null,
       finalizedAt: new Date().toISOString(),
     };
   }

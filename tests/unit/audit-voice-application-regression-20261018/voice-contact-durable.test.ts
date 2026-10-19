@@ -25,18 +25,26 @@ const VOICE_SESSION_ID = "66666666-6666-4666-8666-666666666666";
 function fakeContactRepository() {
   const rows: ContactRoleRevisionRow[] = [];
   const invalidateUnconsumed = vi.fn(async () => null);
+  const rebindCalls: Array<{ voiceSessionId: string; revisionNumber: number; reason: string }> = [];
 
   const repo: Pick<
     VoiceSessionRepository,
     | "isEnabled"
     | "withTransaction"
+    | "findSessionById"
     | "insertContactRoleRevision"
     | "listContactRoleRevisions"
     | "invalidateUnconsumedConfirmationForContactChange"
+    | "rebindOpenCallbackTaskContacts"
   > = {
     isEnabled: () => true,
     withTransaction: async (work: (tx: VoiceQueryExecutor) => Promise<unknown>) =>
       work({} as VoiceQueryExecutor),
+    // A fake, but present, locked session row: `updateContactRoleDurable`
+    // only checks this is non-null (the session exists) before reading
+    // revisions under its lock -- the real column values are irrelevant to
+    // this fixture's `rows`-backed revision ledger.
+    findSessionById: vi.fn(async () => ({}) as never),
     insertContactRoleRevision: vi.fn(
       async (input: InsertContactRoleRevisionInput): Promise<ContactRoleRevisionRow> => {
         const row: ContactRoleRevisionRow = {
@@ -51,6 +59,7 @@ function fakeContactRepository() {
           phoneAuthTag: input.phoneAuthTag,
           consentRef: input.consentRef,
           reason: input.reason,
+          roleSource: input.roleSource,
           replacedRevision: input.replacedRevision,
           createdAt: new Date().toISOString(),
         };
@@ -64,9 +73,19 @@ function fakeContactRepository() {
         .sort((a, b) => a.revisionNumber - b.revisionNumber),
     ),
     invalidateUnconsumedConfirmationForContactChange: invalidateUnconsumed,
+    rebindOpenCallbackTaskContacts: vi.fn(
+      async (voiceSessionId: string, revisionNumber: number, reason: string) => {
+        rebindCalls.push({ voiceSessionId, revisionNumber, reason });
+      },
+    ),
   };
 
-  return { repo: repo as unknown as VoiceSessionRepository, rows, invalidateUnconsumed };
+  return {
+    repo: repo as unknown as VoiceSessionRepository,
+    rows,
+    invalidateUnconsumed,
+    rebindCalls,
+  };
 }
 
 describe("AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C: durable VoiceContactService", () => {
@@ -123,7 +142,14 @@ describe("AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C: durable VoiceCo
     ]);
     // The default pointers, not a custom override, since no override was requested.
     expect(rows[3]?.reason).toBe("default_role:passenger");
+    expect(rows[3]?.roleSource).toBe("default_pointer");
     expect(rows[4]?.reason).toBe("default_role:booker");
+    expect(rows[4]?.roleSource).toBe("default_pointer");
+    expect(rows.slice(0, 3).map((r) => r.roleSource)).toEqual([
+      "explicit",
+      "explicit",
+      "explicit",
+    ]);
     for (const row of rows) {
       expect(row.phoneCiphertext.toString("utf8")).not.toContain("0911000111");
       expect(row.phoneCiphertext.toString("utf8")).not.toContain("0922000222");
@@ -205,5 +231,161 @@ describe("AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C: durable VoiceCo
       name: "Bob (Updated)",
       phone: "0933333444",
     });
+  });
+
+  it("review round 2 (F6): a warm reader sees another instance's committed revision on its NEXT durable read, instead of staying pinned to its first read", async () => {
+    const { repo } = fakeContactRepository();
+    const writer = await (async () => {
+      const s = new VoiceContactService(repo);
+      await s.initializeContacts({
+        voiceSessionId: VOICE_SESSION_ID,
+        callerPhone: "0911000111",
+        bookerName: "Alice",
+        passengerName: "Bob",
+        passengerPhone: "0922000222",
+        isSelfBooking: false,
+      });
+      return s;
+    })();
+
+    const reader = new VoiceContactService(repo);
+    const first = await reader.getEffectiveContactsDurable(VOICE_SESSION_ID);
+    expect(first?.passengerContact.phone).toBe("0922000222");
+
+    await writer.updateContactRole({
+      voiceSessionId: VOICE_SESSION_ID,
+      role: "passenger",
+      phone: "0933000333",
+      name: "Bob corrected",
+      reason: "phone correction",
+      consentRef: "consent-bob-new",
+    });
+
+    // Same `reader` instance, same warm Map entry from the first call --
+    // must still observe the committed correction, not the stale value.
+    const second = await reader.getEffectiveContactsDurable(VOICE_SESSION_ID);
+    expect(second?.passengerContact.phone).toBe("0933000333");
+  });
+
+  it("review round 2 (F7): a correction reason that happens to equal the internal default-pointer literal does not change recipient semantics after cold reconstruction", async () => {
+    const { repo } = fakeContactRepository();
+    const writer = new VoiceContactService(repo);
+    await writer.initializeContacts({
+      voiceSessionId: VOICE_SESSION_ID,
+      callerPhone: "0911000111",
+      bookerName: "Alice",
+      passengerName: "Bob",
+      passengerPhone: "0922000222",
+      isSelfBooking: false,
+    });
+
+    await writer.updateContactRole({
+      voiceSessionId: VOICE_SESSION_ID,
+      role: "callbackRecipient",
+      phone: "0944000555",
+      name: "Custom C",
+      reason: "default_role:passenger",
+      consentRef: "consent-c",
+    });
+
+    const cold = await new VoiceContactService(repo).getEffectiveContactsDurable(
+      VOICE_SESSION_ID,
+    );
+    expect(cold?.callbackRecipientRole).toBe("custom");
+    expect(cold?.callbackRecipient).toEqual({
+      name: "Custom C",
+      phone: "0944000555",
+    });
+  });
+
+  it("review round 2 (F6): the next revision number and replaced-revision pointer are computed from a fresh read, not a stale in-memory counter on a reconstructed instance", async () => {
+    const { repo, rows } = fakeContactRepository();
+    const first = new VoiceContactService(repo);
+    await first.initializeContacts({
+      voiceSessionId: VOICE_SESSION_ID,
+      callerPhone: "0911000111",
+      bookerName: "Alice",
+      passengerName: "Bob",
+      passengerPhone: "0922000222",
+      isSelfBooking: false,
+    });
+
+    // `second` never saw the 5 seed revisions through its own warm Map --
+    // only cold reconstruction on demand would reveal them.
+    const second = new VoiceContactService(repo);
+    const result = await second.updateContactRole({
+      voiceSessionId: VOICE_SESSION_ID,
+      role: "booker",
+      phone: "0966000777",
+      name: "Alice corrected",
+      reason: "booker_phone_correction",
+      consentRef: "consent-alice-new",
+    });
+
+    expect(result.newRevision.revision).toBe(6);
+    expect(result.newRevision.replacedRevision).toBe(2);
+    expect(rows).toHaveLength(6);
+  });
+
+  it("review round 2 (F5): updating callbackRecipient rebinds every still-open callback task for the session, not completed/cancelled ones", async () => {
+    const { repo, rebindCalls } = fakeContactRepository();
+    const service = new VoiceContactService(repo);
+    await service.initializeContacts({
+      voiceSessionId: VOICE_SESSION_ID,
+      callerPhone: "0911000111",
+      bookerName: "Alice",
+      passengerName: "Bob",
+      passengerPhone: "0922000222",
+      isSelfBooking: false,
+    });
+
+    await service.updateContactRole({
+      voiceSessionId: VOICE_SESSION_ID,
+      role: "callbackRecipient",
+      phone: "0977000888",
+      name: "Replacement C",
+      reason: "explicit later recipient change",
+      consentRef: "consent-c",
+    });
+
+    expect(rebindCalls).toEqual([
+      {
+        voiceSessionId: VOICE_SESSION_ID,
+        revisionNumber: 6,
+        reason: "explicit later recipient change",
+      },
+    ]);
+  });
+
+  it("review round 2 (F6): re-asserting the SAME caller phone on a reconstructed instance replays the existing revision without allocating a new one", async () => {
+    const { repo, rows } = fakeContactRepository();
+    const first = new VoiceContactService(repo);
+    await first.initializeContacts({
+      voiceSessionId: VOICE_SESSION_ID,
+      callerPhone: "0911000111",
+      bookerName: "Alice",
+    });
+
+    const second = new VoiceContactService(repo);
+    const result = await second.updateContactRole({
+      voiceSessionId: VOICE_SESSION_ID,
+      role: "caller",
+      phone: "0911000111",
+      reason: "reassert",
+    });
+
+    expect(result.newRevision.revision).toBe(1);
+    expect(rows).toHaveLength(5);
+
+    await expect(
+      second.updateContactRole({
+        voiceSessionId: VOICE_SESSION_ID,
+        role: "caller",
+        phone: "0900000000",
+        reason: "attempted overwrite",
+      }),
+    ).rejects.toThrowError(
+      expect.objectContaining({ code: "ASSERTED_CALLER_PHONE_IMMUTABLE" }),
+    );
   });
 });

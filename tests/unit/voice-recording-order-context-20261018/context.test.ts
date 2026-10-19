@@ -84,16 +84,29 @@ function fixture(appliedMediaEpoch = 0) {
   };
   const service = new VoiceSessionService(repository as never);
   const finalize = vi.fn<
-    (params: unknown) => Promise<{
+    (params: { scope: { recordingId: string } }) => Promise<{
       recordingId: string;
-      manifestRef: { objectKey: string; checksum: string };
+      manifestRef: {
+        objectKey: string;
+        objectVersion: string;
+        checksum: string;
+        byteLength: number;
+        durableAt: string;
+      };
       verifiedAt: string;
     }>
-  >(async () => ({
-    recordingId: "recording",
+  >(async (params) => ({
+    // A trusted adapter finalizes and confirms the SAME recording it was
+    // asked to -- the requested `scope.recordingId`, not an unrelated
+    // identity (AUDIT-VOICE-APPLICATION-REGRESSION-20261018 review round 2
+    // F3's scope/recordingId correlation requirement).
+    recordingId: params.scope.recordingId,
     manifestRef: {
       objectKey: "simulation/manifest",
+      objectVersion: "1",
       checksum: "simulation-checksum",
+      byteLength: 4096,
+      durableAt: new Date().toISOString(),
     },
     verifiedAt: new Date().toISOString(),
   }));
@@ -184,13 +197,16 @@ describe("the original voice recording brand and order", () => {
   it("links an order committed during external recording finalization at acknowledgement time", async () => {
     const h = fixture();
     h.context.bound_order_id = null;
-    h.finalize.mockImplementationOnce(async () => {
+    h.finalize.mockImplementationOnce(async (params) => {
       h.context.bound_order_id = "original-order";
       return {
-        recordingId: "recording",
+        recordingId: params.scope.recordingId,
         manifestRef: {
           objectKey: "simulation/manifest",
+          objectVersion: "1",
           checksum: "simulation-checksum",
+          byteLength: 4096,
+          durableAt: new Date().toISOString(),
         },
         verifiedAt: new Date().toISOString(),
       };

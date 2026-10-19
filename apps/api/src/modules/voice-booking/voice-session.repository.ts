@@ -413,6 +413,8 @@ function mapConfirmationRow(
  * and returns the envelope opaquely; `VoiceContactService` is the only
  * caller that ever encrypts/decrypts it.
  */
+export type ContactRoleSource = "default_pointer" | "explicit";
+
 export type InsertContactRoleRevisionInput = {
   voiceSessionId: string;
   role: "caller" | "booker" | "passenger" | "driverContact" | "callbackRecipient";
@@ -424,6 +426,7 @@ export type InsertContactRoleRevisionInput = {
   phoneAuthTag: Buffer;
   consentRef: string | null;
   reason: string;
+  roleSource: ContactRoleSource;
   replacedRevision: number | null;
 };
 
@@ -439,6 +442,7 @@ export type ContactRoleRevisionRow = {
   phoneAuthTag: Buffer;
   consentRef: string | null;
   reason: string;
+  roleSource: ContactRoleSource;
   replacedRevision: number | null;
   createdAt: string;
 };
@@ -455,6 +459,7 @@ type VoiceContactRoleRevisionRow = QueryResultRow & {
   phone_auth_tag: Buffer;
   consent_ref: string | null;
   reason: string;
+  role_source: string;
   replaced_revision: number | null;
   created_at: Date | string;
 };
@@ -474,6 +479,7 @@ function mapContactRoleRevisionRow(
     phoneAuthTag: row.phone_auth_tag,
     consentRef: row.consent_ref,
     reason: row.reason,
+    roleSource: row.role_source as ContactRoleSource,
     replacedRevision: row.replaced_revision,
     createdAt: new Date(row.created_at).toISOString(),
   };
@@ -849,8 +855,8 @@ export class VoiceSessionRepository {
         INSERT INTO voice.contact_role_revision (
           voice_session_id, role, revision_number, name,
           phone_key_version, phone_nonce, phone_ciphertext, phone_auth_tag,
-          consent_ref, reason, replaced_revision
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+          consent_ref, reason, role_source, replaced_revision
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
         RETURNING *
       `,
       [
@@ -864,6 +870,7 @@ export class VoiceSessionRepository {
         input.phoneAuthTag,
         input.consentRef,
         input.reason,
+        input.roleSource,
         input.replacedRevision,
       ],
     );
@@ -895,6 +902,128 @@ export class VoiceSessionRepository {
       [voiceSessionId],
     );
     return result.rows.map(mapContactRoleRevisionRow);
+  }
+
+  /**
+   * AUDIT-VOICE-APPLICATION-REGRESSION-20261018 review round 2 (F5): pins a
+   * single `voice.callback_task` to the `callbackRecipient` revision that
+   * was effective when the binding was written. Called once at task
+   * creation (`VoiceCallbackService.createCallbackDurable`) -- see
+   * `voice.callback_task_contact_binding`'s migration doc for why this is a
+   * new append-only row, never an UPDATE.
+   */
+  async insertCallbackTaskContactBinding(
+    taskId: string,
+    voiceSessionId: string,
+    revisionNumber: number,
+    bindReason: string,
+    executor?: VoiceQueryExecutor,
+  ): Promise<void> {
+    const exec = executor ?? this.requireDatabase();
+    await exec.query(
+      `
+        INSERT INTO voice.callback_task_contact_binding (
+          task_id, voice_session_id, role, revision_number, bind_reason
+        ) VALUES ($1,$2,'callbackRecipient',$3,$4)
+      `,
+      [taskId, voiceSessionId, revisionNumber, bindReason],
+    );
+  }
+
+  /**
+   * AUDIT-VOICE-APPLICATION-REGRESSION-20261018 review round 2 (F5): the
+   * AUTHORIZED replacement path -- called from
+   * `VoiceContactService.updateContactRole` (same transaction as the new
+   * `callbackRecipient` revision insert) to rebind every still-open
+   * callback task for the session to the new revision. Terminal tasks
+   * (`completed`/`cancelled`/`unreachable`) are deliberately excluded: their
+   * sealed contact snapshot is history, not a live pointer to correct.
+   */
+  async rebindOpenCallbackTaskContacts(
+    voiceSessionId: string,
+    revisionNumber: number,
+    bindReason: string,
+    executor?: VoiceQueryExecutor,
+  ): Promise<void> {
+    const exec = executor ?? this.requireDatabase();
+    await exec.query(
+      `
+        INSERT INTO voice.callback_task_contact_binding (
+          task_id, voice_session_id, role, revision_number, bind_reason
+        )
+        SELECT t.task_id, $1, 'callbackRecipient', $2, $3
+        FROM voice.callback_task t
+        WHERE t.voice_session_id = $1
+          AND t.status NOT IN ('completed', 'cancelled', 'unreachable')
+      `,
+      [voiceSessionId, revisionNumber, bindReason],
+    );
+  }
+
+  /**
+   * Reads back the CURRENT (latest) binding for a task -- the full row
+   * history (every binding this task has ever had) is available by
+   * querying `voice.callback_task_contact_binding` directly for audit UI,
+   * this is only the pointer `VoiceCallbackService.loadDbTask` consumes.
+   */
+  async getLatestCallbackTaskContactBinding(
+    taskId: string,
+    executor?: VoiceQueryExecutor,
+  ): Promise<{ revisionNumber: number; boundAt: string; bindReason: string } | null> {
+    const exec = executor ?? this.requireDatabase();
+    const result = await exec.query<{
+      revision_number: number;
+      bound_at: Date | string;
+      bind_reason: string;
+    }>(
+      `
+        SELECT revision_number, bound_at, bind_reason
+        FROM voice.callback_task_contact_binding
+        WHERE task_id = $1
+        ORDER BY bound_at DESC
+        LIMIT 1
+      `,
+      [taskId],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          revisionNumber: row.revision_number,
+          boundAt: new Date(row.bound_at).toISOString(),
+          bindReason: row.bind_reason,
+        }
+      : null;
+  }
+
+  /**
+   * Full binding history for a task, oldest first -- the "replacement
+   * history" the review required, surfaced to the callback workbench (F8).
+   */
+  async listCallbackTaskContactBindings(
+    taskId: string,
+    executor?: VoiceQueryExecutor,
+  ): Promise<
+    Array<{ revisionNumber: number; boundAt: string; bindReason: string }>
+  > {
+    const exec = executor ?? this.requireDatabase();
+    const result = await exec.query<{
+      revision_number: number;
+      bound_at: Date | string;
+      bind_reason: string;
+    }>(
+      `
+        SELECT revision_number, bound_at, bind_reason
+        FROM voice.callback_task_contact_binding
+        WHERE task_id = $1
+        ORDER BY bound_at ASC
+      `,
+      [taskId],
+    );
+    return result.rows.map((row) => ({
+      revisionNumber: row.revision_number,
+      boundAt: new Date(row.bound_at).toISOString(),
+      bindReason: row.bind_reason,
+    }));
   }
 
   /**

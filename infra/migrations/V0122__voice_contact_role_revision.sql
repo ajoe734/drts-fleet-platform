@@ -40,7 +40,21 @@
 -- Append-only like every other evidence table in this schema
 -- (`voice._make_append_only`, V0086__voice_persistence_domain_schema.sql):
 -- a contact revision is immutable history, never retroactively edited.
-
+--
+-- `role_source` (review round 2, AUDIT-VOICE-APPLICATION-REGRESSION-20261018
+-- F7): a TYPED discriminator for whether this `driverContact`/
+-- `callbackRecipient` revision is an internal "defaults to booker/passenger"
+-- POINTER (written only by `VoiceContactService.initializeContacts` itself,
+-- reason literally `default_role:<role>`) versus an EXPLICIT human
+-- correction (`updateContactRole`). Before this column, cold reconstruction
+-- regex-matched the free-form `reason` TEXT itself
+-- (`/^default_role:(booker|passenger)$/`) to tell the two apart -- a
+-- genuine correction reason that happened to equal that exact string (e.g.
+-- an operator typing "default_role:passenger" as their literal reason) was
+-- silently reinterpreted as the internal pointer and lost its own value on
+-- the next restart. `role_source` is set programmatically by the service,
+-- never from caller-supplied text, so no `reason` string content can ever
+-- change which branch cold reconstruction takes.
 CREATE TABLE IF NOT EXISTS voice.contact_role_revision (
   revision_id       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   voice_session_id  uuid NOT NULL REFERENCES voice.session (voice_session_id),
@@ -55,6 +69,9 @@ CREATE TABLE IF NOT EXISTS voice.contact_role_revision (
   phone_auth_tag    bytea NOT NULL,
   consent_ref       text,
   reason            text NOT NULL,
+  role_source       text NOT NULL DEFAULT 'explicit' CHECK (
+    role_source IN ('default_pointer', 'explicit')
+  ),
   replaced_revision integer,
   created_at        timestamptz NOT NULL DEFAULT now(),
   UNIQUE (voice_session_id, revision_number)
@@ -64,3 +81,37 @@ CREATE INDEX IF NOT EXISTS idx_voice_contact_role_revision_session_role
   ON voice.contact_role_revision (voice_session_id, role, revision_number DESC);
 
 SELECT voice._make_append_only('voice.contact_role_revision');
+
+-- `voice.callback_task_contact_binding` (review round 2, F5): pins a
+-- `voice.callback_task` row to the SPECIFIC `contact_role_revision` that was
+-- effective for its `callbackRecipient` at the moment the binding was
+-- written, so a later contact correction cannot retroactively change what
+-- an existing task's `contactName`/consent reference reads back as (the
+-- task's own `contact_phone_encrypted`/`consent_snapshot_hash` sealed
+-- columns, defined by an earlier migration, already behave this way for the
+-- caller-supplied phone/consent-hash; this table gives the SAME
+-- point-in-time sealing to the server-resolved contact projection added by
+-- V0122/this task). Append-only and multi-row per task (never updated) so
+-- a later AUTHORIZED replacement (an explicit `updateContactRole` on
+-- `callbackRecipient` for the same session) can append a new binding
+-- without destroying the original one -- "current" is simply the latest row
+-- for a `task_id` ordered by `bound_at`, and the full row set IS the
+-- replacement history requested by the review (no separate audit table
+-- needed). Scoped to `callbackRecipient` only: that is the only role a
+-- callback task ever projects (`VoiceCallbackService.loadDbTask`).
+CREATE TABLE IF NOT EXISTS voice.callback_task_contact_binding (
+  binding_id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id           uuid NOT NULL REFERENCES voice.callback_task (task_id),
+  voice_session_id  uuid NOT NULL REFERENCES voice.session (voice_session_id),
+  role              text NOT NULL CHECK (role = 'callbackRecipient'),
+  revision_number   integer NOT NULL,
+  bind_reason       text NOT NULL,
+  bound_at          timestamptz NOT NULL DEFAULT now(),
+  FOREIGN KEY (voice_session_id, revision_number)
+    REFERENCES voice.contact_role_revision (voice_session_id, revision_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_voice_callback_task_contact_binding_task
+  ON voice.callback_task_contact_binding (task_id, bound_at DESC);
+
+SELECT voice._make_append_only('voice.callback_task_contact_binding');

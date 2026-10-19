@@ -822,11 +822,15 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
         scope: { brandId: "default", callId, recordingId: `rec-${callId}` },
         manifestRef: {
           objectKey: "manifest-key-001",
+          objectVersion: "1",
           checksum: "manifest-sha256",
+          byteLength: 4096,
+          durableAt: new Date().toISOString(),
         },
         recordingId: `rec-${callId}`,
         recordingUrl: `https://storage.drts.local/rec-${callId}.opus`,
         linkedOrderId: null,
+        verifiedAt: new Date().toISOString(),
       });
 
       expect(workItem.status).toBe("completed");
@@ -915,11 +919,15 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
         scope: { brandId: "default", callId, recordingId: `rec-${callId}` },
         manifestRef: {
           objectKey: "obj-ord-555",
+          objectVersion: "1",
           checksum: "sha256-order-evidence",
+          byteLength: 4096,
+          durableAt: new Date().toISOString(),
         },
         recordingId: `rec-${callId}`,
         recordingUrl: `https://storage.drts.local/rec-${callId}.opus`,
         linkedOrderId: orderId,
+        verifiedAt: new Date().toISOString(),
       });
 
       expect(workItem.status).toBe("completed");
@@ -1005,8 +1013,15 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
           callId,
           recordingId: `rec-${voiceSessionId}`,
         },
-        manifestRef: { objectKey: "ai-manifest", checksum: "sha256-ai-hash" },
+        manifestRef: {
+          objectKey: "ai-manifest",
+          objectVersion: "1",
+          checksum: "sha256-ai-hash",
+          byteLength: 4096,
+          durableAt: new Date().toISOString(),
+        },
         recordingId: `rec-${voiceSessionId}`,
+        verifiedAt: new Date().toISOString(),
       });
 
       expect(workItem.status).toBe("completed");
@@ -1641,9 +1656,13 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
             },
             manifestRef: {
               objectKey: "obj-no-audit-001",
+              objectVersion: "1",
               checksum: "sha256-no-audit-001",
+              byteLength: 4096,
+              durableAt: new Date().toISOString(),
             },
             recordingId: "rec-call-no-audit",
+            verifiedAt: new Date().toISOString(),
           },
         ),
       ).resolves.not.toThrow();
