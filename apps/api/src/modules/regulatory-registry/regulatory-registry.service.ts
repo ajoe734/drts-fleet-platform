@@ -87,6 +87,8 @@ import { AcademyService } from "../driver-academy/academy.service";
 import { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
 import {
   RegulatoryRegistryRepository,
+  PREEXPIRY_CREDENTIAL_FIELDS,
+  parsePreexpiryCredentialFamily,
   type RegulatoryRegistryQueryExecutor,
   type DriverHeartbeatEventSnapshot,
   type PersistRegulatoryRegistryChanges,
@@ -137,6 +139,12 @@ export type ReconcileExpiryCommand = {
 };
 
 export type ReconcileExpiryResult = {
+  preexpiry?: {
+    eventsCreated: number;
+    intentsCreated: number;
+    recipientStatus: "configured" | "unavailable";
+    deliveryStatus: "available" | "unavailable";
+  };
   asOf: string;
   scope: string;
   scannedDrivers: number;
@@ -1537,7 +1545,17 @@ export class RegulatoryRegistryService
         );
 
         if (this.regulatoryRegistryRepository) {
-          void this.handleDriverLicenseRenewal(driverId, command);
+          // The master save above is already acknowledged. Renewal cleanup can
+          // still fail; retain its durable pending work for the existing rescan
+          // and observe the failure without claiming supersession or delivery.
+          void this.handleDriverLicenseRenewal(driverId, command).catch(
+            (error: unknown) => {
+              this.regulatoryRegistryRepository!.reportPersistenceFailure(
+                error,
+                "driver_license_renewal_reconciliation",
+              );
+            },
+          );
         }
 
         return this.cloneDriver(updated);
@@ -4658,6 +4676,42 @@ export class RegulatoryRegistryService
         "taxi_driver_registration",
       );
     }
+    if (
+      command.licenseExpiry !== undefined ||
+      command.professionalDriverLicenseExpiry !== undefined ||
+      command.taxiDriverRegistrationExpiry !== undefined
+    ) {
+      const repository = this.regulatoryRegistryRepository;
+      await repository.withTransaction(async (client) => {
+        const driver = repository.isEnabled()
+          ? await repository.lockDriver(driverId, client)
+          : this.drivers.find((d) => d.driverId === driverId);
+        for (const [credential, field] of Object.entries(
+          PREEXPIRY_CREDENTIAL_FIELDS,
+        )) {
+          for (const days of [30, 7]) {
+            const previous = await repository.findActiveExpiryEventsForEntity(
+              "driver",
+              driverId,
+              `preexpiry:${credential}:${days}`,
+              client,
+            );
+            const changed = previous.filter((event) => {
+              const expiry =
+                event.source_expiry_at instanceof Date
+                  ? event.source_expiry_at.getTime()
+                  : Date.parse(event.source_expiry_at ?? "");
+              return !driver || expiry !== Date.parse(driver[field] ?? "");
+            });
+            await repository.supersedeExpiryEvents(
+              changed.map((e) => e.event_id),
+              undefined,
+              client,
+            );
+          }
+        }
+      });
+    }
   }
 
   async getExpiryBacklog(filter?: {
@@ -4684,6 +4738,172 @@ export class RegulatoryRegistryService
   ): Promise<RegistryExpiryEventWithIntent | null> {
     if (!this.regulatoryRegistryRepository?.getExpiryEventById) return null;
     return this.regulatoryRegistryRepository.getExpiryEventById(eventId);
+  }
+
+  /** Separate T30/T7 identities, using the existing event/immutable-intent tables.
+   * Never changes a license, expiry/B4 identity, dispatch flag, or mail drain. */
+  private async preparePreexpiryReminders(
+    asOf: string,
+    scope: string,
+    limit: number,
+  ) {
+    const repository = this.regulatoryRegistryRepository!;
+    const asOfMs = Date.parse(asOf);
+    const configured = process.env.REGULATORY_ALERT_RECIPIENT_EMAIL?.trim();
+    // Same address syntax as existing NotificationDeliveryService, before freezing an intent.
+    const recipient =
+      configured &&
+      configured.length <= 254 &&
+      /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+$/.test(configured)
+        ? configured
+        : null;
+    const result: NonNullable<ReconcileExpiryResult["preexpiry"]> = {
+      eventsCreated: 0,
+      intentsCreated: 0,
+      recipientStatus: recipient ? "configured" : "unavailable",
+      deliveryStatus:
+        this.notificationDeliveryService?.availability() ?? "unavailable",
+    };
+    const memory = repository.isEnabled()
+      ? []
+      : [...this.drivers].sort((a, b) =>
+          a.driverId < b.driverId ? -1 : a.driverId > b.driverId ? 1 : 0,
+        );
+    const upper = repository.isEnabled()
+      ? (await repository.getExpiryScanUpperBounds()).driverId
+      : (memory.at(-1)?.driverId ?? null);
+    let afterId: string | undefined;
+    while (upper !== null) {
+      const page = repository.isEnabled()
+        ? await repository.scanPreexpiryDrivers(asOf, limit, {
+            ...(afterId ? { afterId } : {}),
+            throughId: upper,
+          })
+        : memory
+            .filter((d) => !afterId || d.driverId > afterId)
+            .slice(0, limit);
+      if (!page.length) break;
+      await repository.withTransaction(async (client) => {
+        for (const driverId of [
+          ...new Set(page.map((d) => d.driverId)),
+        ].sort()) {
+          const driver = repository.isEnabled()
+            ? await repository.lockDriver(driverId, client)
+            : this.drivers.find((d) => d.driverId === driverId);
+          if (!driver) continue;
+          for (const [credential, field] of Object.entries(
+            PREEXPIRY_CREDENTIAL_FIELDS,
+          )) {
+            const expiry = driver[field];
+            const expiryMs = Date.parse(expiry ?? "");
+            for (const days of [30, 7]) {
+              const family = `preexpiry:${credential}:${days}`;
+              const prior = await repository.findActiveExpiryEventsForEntity(
+                "driver",
+                driverId,
+                family,
+                client,
+              );
+              const obsolete = prior.filter((e) => {
+                const recorded =
+                  e.source_expiry_at instanceof Date
+                    ? e.source_expiry_at.getTime()
+                    : Date.parse(e.source_expiry_at ?? "");
+                return (
+                  recorded !== expiryMs ||
+                  driver.lifecycleStatus !== "active" ||
+                  (expiryMs <= asOfMs && e.status !== "completed")
+                );
+              });
+              await repository.supersedeExpiryEvents(
+                obsolete.map((e) => e.event_id),
+                undefined,
+                client,
+              );
+              if (
+                !expiry ||
+                !Number.isFinite(expiryMs) ||
+                driver.lifecycleStatus !== "active" ||
+                expiryMs <= asOfMs ||
+                expiryMs - days * 86400000 > asOfMs
+              )
+                continue;
+              const fingerprint = createHash("sha256")
+                .update(
+                  JSON.stringify([
+                    "credential-preexpiry/v1",
+                    scope,
+                    "driver",
+                    driverId,
+                    field,
+                    expiryMs,
+                    days,
+                  ]),
+                )
+                .digest("hex");
+              let event = await repository.findExpiryEventByFingerprint(
+                fingerprint,
+                client,
+              );
+              if (!event) {
+                const eventId = randomUUID();
+                event = await repository.insertExpiryEvent(
+                  {
+                    eventId,
+                    scope,
+                    entityType: "driver",
+                    entityId: driverId,
+                    credentialType: family,
+                    sourceFingerprint: fingerprint,
+                    sourceExpiryAt: expiry,
+                    status: "pending",
+                  },
+                  client,
+                );
+                if (event.event_id === eventId) result.eventsCreated++;
+              }
+              if (
+                event.status === "superseded" ||
+                !recipient ||
+                (await repository.getExpiryEventById(event.event_id, client))
+                  ?.intent
+              )
+                continue;
+              const intentId = randomUUID();
+              const intent = await repository.insertDeliveryIntent(
+                {
+                  intentId,
+                  eventId: event.event_id,
+                  scope,
+                  tenantId: scope,
+                  idempotencyKey:
+                    "credential-preexpiry-mail/v1:" +
+                    createHash("sha256")
+                      .update(
+                        JSON.stringify([scope, event.event_id, recipient]),
+                      )
+                      .digest("hex"),
+                  recipientEmail: recipient,
+                  fromEmail:
+                    process.env.NOTIFICATION_FROM_EMAIL?.trim() ||
+                    "noreply@fleet.drts.local",
+                  subject: `[DRTS Reminder] Credential T-${days}: ${credential} for driver ${driverId}`,
+                  body: `Driver ${driverId}; credential ${credential}; source expiry ${new Date(expiryMs).toISOString()}; milestone T-${days}.`,
+                },
+                client,
+              );
+              if (intent.intent_id === intentId) result.intentsCreated++;
+            }
+          }
+        }
+      });
+      const next = page.at(-1)!.driverId;
+      if (afterId !== undefined && next <= afterId)
+        throw new Error("registry_preexpiry_scan_did_not_advance");
+      afterId = next;
+      if (next === upper) break;
+    }
+    return result;
   }
 
   async reconcileExpiredCredentials(
@@ -5095,7 +5315,9 @@ export class RegulatoryRegistryService
       if (next === upper.policyId) break;
     }
 
-    // 3. Post-commit: delivery intent processing
+    const preexpiry = await this.preparePreexpiryReminders(asOf, scope, limit);
+
+    // 3. Post-commit: delivery intent processing (one existing sender/drain).
     const pendingIntents = await repository.findPendingDeliveryIntents(limit);
     for (const intent of pendingIntents) {
       // Pre-send source re-check: verify event hasn't been superseded
@@ -5110,6 +5332,13 @@ export class RegulatoryRegistryService
         continue;
       }
 
+      // The reminder's original source may have renewed since its intent commit.
+      if (parsePreexpiryCredentialFamily(eventWithIntent.credential_type)) {
+        const current = await repository.recordExpiryDeliveryOutcome(intent, {
+          deliveryStatus: "pending",
+        });
+        if (!current || current.delivery_status === "superseded") continue;
+      }
       if (this.notificationDeliveryService) {
         let outboxDeliveryId: string | undefined;
         try {
@@ -5204,6 +5433,7 @@ export class RegulatoryRegistryService
     const events = await repository.listExpiryEvents({ scope, limit });
 
     return {
+      preexpiry,
       asOf,
       scope,
       scannedDrivers,
