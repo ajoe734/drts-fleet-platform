@@ -949,7 +949,7 @@ export class ComplaintService implements OnModuleInit {
       );
     }
     const intake =
-      payload.score <= 2 && contactRequested
+      payload.score <= 2
         ? normalizePassengerComplaintIntake({
             passengerId,
             orderId,
@@ -958,8 +958,8 @@ export class ComplaintService implements OnModuleInit {
             command: {
               rideId: orderId,
               category: "service",
-              contactConsent: true,
-              content: `乘客評價 ${payload.score} 星，已勾選需要客服聯繫。${payload.comment ? `\n${payload.comment}` : ""}`,
+              contactConsent: contactRequested,
+              content: `乘客評價 ${payload.score} 星，${contactRequested ? "已勾選需要客服聯繫" : "不需客服聯繫，僅供內部檢視"}。${payload.comment ? `\n${payload.comment}` : ""}`,
             },
           })
         : null;
@@ -1012,15 +1012,15 @@ export class ComplaintService implements OnModuleInit {
       );
     const choice = contactRequested ?? false;
     const draft =
-      choice && payload.score <= 2
+      payload.score <= 2
         ? this.preparePassengerCase(
             {
               orderId: token.orderId,
               command: {
                 rideId: token.orderId,
                 category: "service",
-                contactConsent: true,
-                content: `乘客評價 ${payload.score} 星，已勾選需要客服聯繫。${payload.comment ? `\n${payload.comment}` : ""}`,
+                contactConsent: choice,
+                content: `乘客評價 ${payload.score} 星，${choice ? "已勾選需要客服聯繫" : "不需客服聯繫，僅供內部檢視"}。${payload.comment ? `\n${payload.comment}` : ""}`,
               },
             },
             "乘客行程連結",

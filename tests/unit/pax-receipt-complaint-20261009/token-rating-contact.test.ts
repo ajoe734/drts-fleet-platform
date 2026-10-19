@@ -138,28 +138,43 @@ function fixture() {
     }
     if (text.startsWith("SELECT payment_id"))
       return { rows: authority.paid ? [{ payment_id: "paid-unit" }] : [] };
+    if (text.startsWith("SELECT low_rating_case_policy_v2"))
+      return {
+        rows: target.rating
+          ? [
+              {
+                low_rating_case_policy_v2:
+                  target.rating.low_rating_case_policy_v2,
+              },
+            ]
+          : [],
+      };
     if (text.startsWith("SELECT * FROM ops.passenger_trip_ratings"))
       return { rows: target.rating ? [target.rating] : [] };
     if (text.startsWith("INSERT INTO ops.passenger_trip_ratings")) {
       fail("rating");
-      target.rating ??= Object.fromEntries(
-        [
-          "rating_id",
-          "order_id",
-          "trip_id",
-          "driver_id",
-          "passenger_subject_ref",
-          "score",
-          "tags",
-          "comment",
-          "status",
-          "submitted_at",
-          "updated_at",
-        ].map((key, index) => [
-          key,
-          index === 6 ? JSON.parse(values[index] as string) : values[index],
-        ]),
-      );
+      if (!target.rating)
+        target.rating = {
+          low_rating_case_policy_v2: true,
+          ...Object.fromEntries(
+            [
+              "rating_id",
+              "order_id",
+              "trip_id",
+              "driver_id",
+              "passenger_subject_ref",
+              "score",
+              "tags",
+              "comment",
+              "status",
+              "submitted_at",
+              "updated_at",
+            ].map((key, index) => [
+              key,
+              index === 6 ? JSON.parse(values[index] as string) : values[index],
+            ]),
+          ),
+        };
       return { rows: [target.rating] };
     }
     if (
@@ -200,6 +215,7 @@ function fixture() {
           "request_hash",
           "complaint_case_no",
           "created_at",
+          "case_required",
         ].map((key, i) => [key, values[i]]),
       );
       return { rows: [] };
@@ -301,7 +317,71 @@ function fixture() {
   };
 }
 
+/** Pre-V0119/V0126 external SQL snapshot; never created by the current producer. */
+function legacyTokenRating(f: ReturnType<typeof fixture>, consent = true) {
+  const at = new Date().toISOString();
+  f.state.rating = {
+    rating_id: "historical-rating",
+    order_id: ORDER,
+    trip_id: "unit-assignment",
+    driver_id: "unit-driver",
+    passenger_subject_ref: SUBJECT,
+    score: 2,
+    low_rating_case_policy_v2: false,
+    tags: [],
+    comment: null,
+    status: "active",
+    submitted_at: at,
+    updated_at: at,
+  };
+  if (consent)
+    f.state.consent = {
+      order_id: ORDER,
+      passenger_subject_ref: SUBJECT,
+      rating_id: "historical-rating",
+      original_token_id: "unit-token",
+      rating_score: 2,
+      contact_requested: false,
+      request_hash: createHash("sha256")
+        .update(
+          JSON.stringify({
+            score: 2,
+            tags: [],
+            comment: null,
+            contactRequested: false,
+          }),
+        )
+        .digest("hex"),
+      complaint_case_no: null,
+      created_at: at,
+      case_required: false,
+    };
+}
+
 describe("F-TOKEN-LOW-RATING-CONTACT supported production operation", () => {
+  it.each([1, 2] as const)(
+    "USER-ALL-LOW token score %s creates a canonical no-contact case",
+    async (score) => {
+      const f = fixture();
+      const notifications = vi.spyOn(f.audit, "recordNotification");
+      await f.submit({ score, contactRequested: false });
+      expect(f.state.complaintCase).toBeDefined();
+      expect(f.state.timeline?.caseNo).toBe(f.state.complaintCase!.caseNo);
+      expect(f.state.consent?.contact_requested).toBe(false);
+      expect(f.state.consent?.case_required).toBe(true);
+      expect(f.state.consent?.complaint_case_no).toBe(
+        f.state.complaintCase!.caseNo,
+      );
+      expect(f.state.complaintCase!.description).toContain("同意客服聯繫：否");
+      expect(f.state.complaintCase!.description).toContain("不需客服聯繫");
+      expect(notifications).not.toHaveBeenCalled();
+      const replica = f.createComplaint();
+      const readback = await replica.getComplaintCaseForOps(
+        f.state.complaintCase!.caseNo,
+      );
+      expect(readback.description).toBe(f.state.complaintCase!.description);
+    },
+  );
   it("score 2 with selected contact persists one canonical CRM case and its initial timeline", async () => {
     const f = fixture();
     const response = await f.submit();
@@ -335,9 +415,12 @@ describe("F-TOKEN-LOW-RATING-CONTACT supported production operation", () => {
   });
 
   it.each([
-    { score: 2 as const, contactRequested: false },
+    { score: 3 as const, contactRequested: false },
+    { score: 3 as const, contactRequested: true },
+    { score: 4 as const },
+    { score: 4 as const, contactRequested: true },
     { score: 5 as const, contactRequested: true },
-    { score: 2 as const },
+    { score: 5 as const, contactRequested: false },
   ])("%j stores a rating without a complaint", async (command) => {
     const f = fixture();
     const response = await f.controller.submitPassengerRating(TOKEN, command);
@@ -442,7 +525,7 @@ describe("token choice transaction, original replay and durable Ops source", () 
     });
     expect(replay.data.ratingId).toBe(first.data.ratingId);
     expect(f.state.consent?.contact_requested).toBe(false);
-    expect(f.state.complaintCase).toBeUndefined();
+    expect(f.state.complaintCase).toBeDefined();
   });
 
   it.each([
@@ -475,13 +558,12 @@ describe("token choice transaction, original replay and durable Ops source", () 
 
   it("historical rating without consent permits only an omitted-contact exact replay, with no backfill", async () => {
     const f = fixture();
-    const first = await f.submit({ score: 2 });
+    legacyTokenRating(f, false);
     // External historical DB snapshot: V0119 deliberately does not backfill old ratings.
-    delete f.state.consent;
     const replay = await f
       .createController()
       .submitPassengerRating(TOKEN, { score: 2 });
-    expect(replay.data.ratingId).toBe(first.data.ratingId);
+    expect(replay.data.ratingId).toBe("historical-rating");
     expect(f.state.consent).toBeUndefined();
     expect(f.state.complaintCase).toBeUndefined();
     for (const contactRequested of [true, false])
@@ -490,6 +572,151 @@ describe("token choice transaction, original replay and durable Ops source", () 
       ).rejects.toMatchObject({ code: "PASSENGER_RATING_CONSENT_UNAVAILABLE" });
     expect(f.state.consent).toBeUndefined();
   });
+
+  it.each([1, 2] as const)(
+    "omitted contact token score %s keeps one no-contact case on fresh retry",
+    async (score) => {
+      const f = fixture();
+      const first = await f.submit({ score });
+      const original = structuredClone(f.state);
+      const replay = await f
+        .createController(f.createComplaint())
+        .submitPassengerRating(TOKEN, { score, contactRequested: false });
+      expect(replay.data.ratingId).toBe(first.data.ratingId);
+      expect(f.state.complaintCase).toEqual(original.complaintCase);
+      expect(f.state.timeline).toEqual(original.timeline);
+      expect(f.state.consent?.case_required).toBe(true);
+      expect(f.state.timeline!.note).toContain("同意客服聯繫：否");
+    },
+  );
+  it.each([false, undefined])(
+    "migrated legacy token low opt-out %s replays without any case or backfill",
+    async (contactRequested) => {
+      const f = fixture();
+      legacyTokenRating(f);
+      const original = structuredClone(f.state);
+      const replay = await f
+        .createController()
+        .submitPassengerRating(
+          TOKEN,
+          contactRequested === undefined
+            ? { score: 2 }
+            : { score: 2, contactRequested },
+        );
+      expect(replay.data.ratingId).toBe("historical-rating");
+      expect(f.state.consent).toEqual(original.consent);
+      expect(f.state.complaintCase).toBeUndefined();
+      expect(f.calls.some((c) => c.sql.startsWith("INSERT INTO crm."))).toBe(
+        false,
+      );
+      await expect(f.submit()).rejects.toMatchObject({
+        code: "PASSENGER_RATING_ALREADY_SUBMITTED",
+      });
+      expect(f.state.consent).toEqual(original.consent);
+    },
+  );
+  it.each([undefined, null, "false", 0])(
+    "missing or invalid token provenance %s fails closed",
+    async (case_required) => {
+      const f = fixture();
+      legacyTokenRating(f);
+      f.state.consent!.case_required = case_required;
+      const original = structuredClone(f.state);
+      await expect(
+        f.submit({ score: 2, contactRequested: false }),
+      ).rejects.toMatchObject({
+        code: "PASSENGER_RATING_CONSENT_INCONSISTENT",
+      });
+      expect(f.state).toEqual(original);
+      expect(f.calls.some((c) => c.sql.startsWith("INSERT INTO crm."))).toBe(
+        false,
+      );
+    },
+  );
+  it.each([true, undefined, null, "false"])(
+    "missing whole token consent with rating provenance %s cannot masquerade as legacy",
+    async (marker) => {
+      const f = fixture();
+      legacyTokenRating(f, false);
+      f.state.rating!.low_rating_case_policy_v2 = marker;
+      const original = structuredClone(f.state);
+      await expect(
+        f
+          .createController(f.createComplaint())
+          .submitPassengerRating(TOKEN, { score: 2 }),
+      ).rejects.toMatchObject({ code: "PASSENGER_RATING_CONSENT_UNAVAILABLE" });
+      expect(f.state).toEqual(original);
+      expect(f.calls.some((c) => c.sql.startsWith("INSERT INTO crm."))).toBe(
+        false,
+      );
+    },
+  );
+  it("lost COMMIT followed by missing whole consent on a new rating fails closed on fresh replica", async () => {
+    const f = fixture();
+    f.authority.fault = "lost_commit_reply";
+    await expect(f.submit({ score: 2 })).rejects.toThrow(
+      "lost_commit_reply failure",
+    );
+    f.authority.fault = undefined;
+    delete f.state.consent;
+    const original = structuredClone(f.state);
+    await expect(
+      f
+        .createController(f.createComplaint())
+        .submitPassengerRating(TOKEN, { score: 2 }),
+    ).rejects.toMatchObject({ code: "PASSENGER_RATING_CONSENT_UNAVAILABLE" });
+    expect(f.state).toEqual(original);
+  });
+  it.each(["caseNo", "case", "timeline"] as const)(
+    "new required token %s missing after unknown reply never becomes legacy",
+    async (missing) => {
+      const f = fixture();
+      f.authority.fault = "lost_commit_reply";
+      await expect(
+        f.submit({ score: 2, contactRequested: false }),
+      ).rejects.toThrow("lost_commit_reply failure");
+      f.authority.fault = undefined;
+      if (missing === "caseNo") f.state.consent!.complaint_case_no = null;
+      if (missing === "case") delete f.state.complaintCase;
+      if (missing === "timeline") delete f.state.timeline;
+      const original = structuredClone(f.state);
+      await expect(
+        f
+          .createController(f.createComplaint())
+          .submitPassengerRating(TOKEN, { score: 2, contactRequested: false }),
+      ).rejects.toMatchObject({
+        code: "PASSENGER_RATING_CONSENT_INCONSISTENT",
+      });
+      expect(f.state).toEqual(original);
+    },
+  );
+  it.each(["commit", "lost_commit_reply", "audit"] as const)(
+    "no-contact token %s failure retries original durable identity without contact",
+    async (fault) => {
+      const f = fixture();
+      const command = { score: 2 as const, contactRequested: false };
+      const notices = vi.spyOn(f.audit, "recordNotification");
+      if (fault === "audit")
+        vi.spyOn(f.audit, "recordAuditLogAsync").mockRejectedValueOnce(
+          new Error("audit failure"),
+        );
+      else f.authority.fault = fault;
+      await expect(f.submit(command)).rejects.toThrow();
+      const original = structuredClone(f.state);
+      expect(f.complaint.listComplaintCases()).toEqual([]);
+      f.authority.fault = undefined;
+      await f
+        .createController(f.createComplaint())
+        .submitPassengerRating(TOKEN, command);
+      if (fault !== "commit") {
+        expect(f.state.complaintCase).toEqual(original.complaintCase);
+        expect(f.state.timeline).toEqual(original.timeline);
+      }
+      expect(f.state.consent?.case_required).toBe(true);
+      expect(f.state.consent?.contact_requested).toBe(false);
+      expect(notices).not.toHaveBeenCalled();
+    },
+  );
 
   it("restart replay preserves rating/case and new Ops service reads the token intake", async () => {
     const f = fixture();
@@ -533,6 +760,7 @@ describe("token choice transaction, original replay and durable Ops source", () 
       driver_id: "unit-driver",
       passenger_subject_ref: SUBJECT,
       score: 2,
+      low_rating_case_policy_v2: false,
       tags: ["b", "a"],
       comment: null,
       status: "active",

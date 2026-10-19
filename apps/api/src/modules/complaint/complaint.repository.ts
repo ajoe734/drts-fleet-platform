@@ -529,10 +529,19 @@ export class ComplaintRepository {
     const existing = await client.query<{
       request_hash: string;
       rating_id: string;
+      contact_requested: boolean;
+      case_required: boolean;
       complaint_case_no: string | null;
+      record: unknown;
+      timeline: unknown;
     }>(
-      `SELECT request_hash, rating_id, complaint_case_no FROM passenger.rating_consents
-       WHERE order_id = $1 AND drts_passenger_id = $2 FOR UPDATE`,
+      `SELECT request_hash, rating_id, complaint_case_no, contact_requested, case_required,
+              c.record, t.record AS timeline
+       FROM passenger.rating_consents r
+       LEFT JOIN crm.phase1_complaint_cases c ON c.case_no = r.complaint_case_no
+       LEFT JOIN crm.phase1_complaint_timelines t
+         ON t.case_no = r.complaint_case_no AND t.action = 'case_created'
+       WHERE order_id = $1 AND drts_passenger_id = $2 FOR UPDATE OF r`,
       [rating.orderId, rating.passengerSubjectRef],
     );
     const row = existing.rows[0];
@@ -552,6 +561,31 @@ export class ComplaintRepository {
         "The original rating and contact choice cannot be changed.",
       );
     }
+    const requiresCase = rating.score <= 2;
+    if (row) {
+      if (
+        row.contact_requested !== contactRequested ||
+        typeof row.case_required !== "boolean" ||
+        row.case_required !== Boolean(row.complaint_case_no) ||
+        (row.case_required &&
+          (!requiresCase || !row.record || !row.timeline)) ||
+        (!row.case_required && requiresCase && contactRequested)
+      )
+        throw new ApiRequestError(
+          409,
+          "PASSENGER_RATING_CONSENT_INCONSISTENT",
+          "The persisted rating contact source is inconsistent.",
+        );
+      // V0126 captured the pre-existing rule explicitly. An exact legacy opt-out
+      // replay must not backfill a case; missing provenance never means legacy.
+      if (!row.case_required) return null;
+    }
+    if (Boolean(intake) !== requiresCase)
+      throw new ApiRequestError(
+        409,
+        "PASSENGER_RATING_CONSENT_INCONSISTENT",
+        "The required low-rating case is unavailable.",
+      );
     const stored = intake
       ? await this.persistPassengerIntakeWithClient(
           client,
@@ -572,8 +606,8 @@ export class ComplaintRepository {
     }
     await client.query(
       `INSERT INTO passenger.rating_consents
-       (order_id, drts_passenger_id, rating_id, contact_requested, request_hash, complaint_case_no, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+       (order_id, drts_passenger_id, rating_id, contact_requested, request_hash, complaint_case_no, created_at, case_required)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         rating.orderId,
         rating.passengerSubjectRef,
@@ -582,6 +616,7 @@ export class ComplaintRepository {
         requestHash,
         stored?.complaintCase.caseNo ?? null,
         rating.submittedAt,
+        requiresCase,
       ],
     );
     return stored;
@@ -605,11 +640,12 @@ export class ComplaintRepository {
       request_hash: string;
       rating_id: string;
       contact_requested: boolean;
+      case_required: boolean;
       complaint_case_no: string | null;
       record: unknown;
       timeline: unknown;
     }>(
-      `SELECT p.request_hash, p.rating_id, p.contact_requested, p.complaint_case_no,
+      `SELECT p.request_hash, p.rating_id, p.contact_requested, p.complaint_case_no, p.case_required,
               c.record, t.record AS timeline
        FROM ops.passenger_ride_rating_consents p
        LEFT JOIN crm.phase1_complaint_cases c ON c.case_no = p.complaint_case_no
@@ -631,9 +667,11 @@ export class ComplaintRepository {
           "The original rating and contact choice cannot be changed.",
         );
       if (
-        Boolean(row.complaint_case_no) !==
-          (contactRequested && rating.score <= 2) ||
-        (row.complaint_case_no && (!row.record || !row.timeline))
+        typeof row.case_required !== "boolean" ||
+        row.case_required !== Boolean(row.complaint_case_no) ||
+        (row.case_required &&
+          (rating.score > 2 || !row.record || !row.timeline)) ||
+        (!row.case_required && rating.score <= 2 && contactRequested)
       )
         throw new ApiRequestError(
           409,
@@ -655,15 +693,33 @@ export class ComplaintRepository {
         : null;
     }
     if (!isNew) {
-      // An old omitted-contact retry is still a valid rating retry. Never infer
-      // historical consent, accept a new explicit choice, or retroactively open CRM.
-      if (!choiceProvided) return null;
+      // Only a rating explicitly captured before V0126 can have no consent.
+      // A new/unknown row is never reclassified as legacy after an unknown COMMIT.
+      const provenance = await client.query<{
+        low_rating_case_policy_v2: boolean;
+      }>(
+        `SELECT low_rating_case_policy_v2 FROM ops.passenger_trip_ratings
+         WHERE rating_id = $1 AND order_id = $2 AND passenger_subject_ref = $3 FOR UPDATE`,
+        [rating.ratingId, rating.orderId, rating.passengerSubjectRef],
+      );
+      if (
+        !choiceProvided &&
+        provenance.rows[0]?.low_rating_case_policy_v2 === false
+      )
+        return null;
       throw new ApiRequestError(
         409,
         "PASSENGER_RATING_CONSENT_UNAVAILABLE",
         "The original rating has no captured contact choice.",
       );
     }
+    const requiresCase = rating.score <= 2;
+    if (Boolean(draft) !== requiresCase)
+      throw new ApiRequestError(
+        409,
+        "PASSENGER_RATING_CONSENT_INCONSISTENT",
+        "The required low-rating case is unavailable.",
+      );
     if (draft)
       await this.persistChanges(
         {
@@ -675,8 +731,8 @@ export class ComplaintRepository {
     await client.query(
       `INSERT INTO ops.passenger_ride_rating_consents
        (order_id, passenger_subject_ref, rating_id, original_token_id, rating_score,
-        contact_requested, request_hash, complaint_case_no, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        contact_requested, request_hash, complaint_case_no, created_at, case_required)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         rating.orderId,
         rating.passengerSubjectRef,
@@ -687,6 +743,7 @@ export class ComplaintRepository {
         requestHash,
         draft?.complaintCase.caseNo ?? null,
         rating.submittedAt,
+        requiresCase,
       ],
     );
     return draft ? { ...draft, replayed: false } : null;

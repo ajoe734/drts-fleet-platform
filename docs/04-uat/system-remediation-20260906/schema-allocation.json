@@ -743,6 +743,30 @@
         "CREATE INDEX idx_phase1_complaint_pending_commits_case_no ON crm.phase1_complaint_pending_commits (case_no) — reconcilePendingCase's existing durable-store sweep scans by case_no.",
         "Write timing: mandatory durable PREPARED reservation is awaited before the ordinary business transaction can begin. The winning original caseNo, timeline entry IDs, caller identity and payload are preserved; reservation failure cannot acknowledge or issue a business COMMIT. The same transaction locks the prepared row and atomically confirms it with canonical case/timeline writes. Confirmed keyed results remain durable for original-result replay without another upsert; unknown outcomes preserve their original reservation. Only a definitely rejected new preparation or a reconciled legacy result is eligible for its own bounded cleanup; a missing or failed read cannot prove an unknown COMMIT rolled back."
       ]
+    },
+    {
+      "task_id": "COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015",
+      "version": "V0126",
+      "migration_filename": "V0126__low_rating_case_contact_independence.sql",
+      "domain": "passenger_low_rating_case_contact_independence",
+      "target_schema": "passenger, ops",
+      "primary_tables": [
+        "passenger.rating_consents",
+        "ops.passenger_ride_rating_consents",
+        "ops.passenger_trip_ratings"
+      ],
+      "referenced_tables": [
+        "passenger.complaints",
+        "crm.phase1_complaint_cases",
+        "crm.phase1_complaint_timelines"
+      ],
+      "description": "USER policy: every new score 1/2 creates its canonical case and initial timeline independently of immutable contact choice. Capture pre-existing consent case requirements and pre-existing rating policy provenance without backfilling cases or contact. New missing provenance fails closed.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "Existing consent rows capture case_required from their existing non-null case reference; new consent writes explicitly provide case_required with no database default. Equality with presence of the original FK-bound case is mandatory. Token case-required rows retain rating_score <= 2. Existing FK, unique, subject, score and immutable request constraints are retained.",
+        "Existing rating rows capture low_rating_case_policy_v2=false. Subsequent rows have a NOT NULL true default; only explicit historical false permits the original omitted-contact retry without a consent row. Missing/unknown provenance never establishes legacy consent or permits a new missing case.",
+        "contact_requested remains the original immutable passenger choice. A false low-rating choice still has a canonical case and timeline with an explicit no-contact description; internal audit/SLA handling does not imply passenger contact."
+      ]
     }
   ]
 }

@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   afterAll,
   beforeAll,
@@ -213,7 +214,8 @@ describe.skipIf(!hostedPaymentEnabled)(
     });
 
     it.each([
-      { rating: 1 as const, contactRequested: false },
+      { rating: 3 as const, contactRequested: false },
+      { rating: 4 as const, contactRequested: true },
       { rating: 5 as const, contactRequested: true },
     ])(
       "rating $rating contact=$contactRequested preserves no-case behavior",
@@ -628,9 +630,9 @@ describe.skipIf(!hostedPaymentEnabled)(
     });
 
     it.each([
-      { score: 2 as const, contactRequested: false },
+      { score: 3 as const, contactRequested: false },
+      { score: 4 as const },
       { score: 5 as const, contactRequested: true },
-      { score: 2 as const },
     ])(
       "token choice %j is durable without a canonical complaint",
       async (body) => {
@@ -659,6 +661,392 @@ describe.skipIf(!hostedPaymentEnabled)(
           expect(state[name]).toHaveLength(0);
       },
     );
+
+    it.each([
+      { score: 1 as const, contactRequested: true },
+      { score: 1 as const, contactRequested: false },
+      { score: 1 as const },
+      { score: 2 as const, contactRequested: true },
+      { score: 2 as const, contactRequested: false },
+      { score: 2 as const },
+    ])(
+      "USER all-low %j has canonical account and token cases independent of contact",
+      async (body) => {
+        const f = await fixture();
+        const notices = vi.spyOn(f.audit, "recordNotification");
+        const { score, ...choice } = body;
+        const accountBody = {
+          rideId: f.event.orderId,
+          rating: score,
+          ...choice,
+        };
+        await f.booking.rateRide(f.owner, f.event.orderId, accountBody);
+        const original = await h.receiptState(f.event.orderId);
+        expect(original.consents[0]).toMatchObject({
+          case_required: true,
+          contact_requested: body.contactRequested ?? false,
+          complaint_case_no: original.cases[0]!.case_no,
+        });
+        expect(original.intakes[0]!.contact_consent).toBe(
+          body.contactRequested ?? false,
+        );
+        expect(original.cases).toHaveLength(1);
+        expect(original.timelines).toHaveLength(1);
+        const peer = await h.receiptServices();
+        await peer.booking.rateRide(f.owner, f.event.orderId, accountBody);
+        const again = await h.receiptState(f.event.orderId);
+        for (const name of [
+          "ratings",
+          "consents",
+          "intakes",
+          "cases",
+          "timelines",
+        ] as const)
+          expect(again[name]).toEqual(original[name]);
+        expect(
+          await peer.complaints.getComplaintCaseForOps(
+            original.cases[0]!.case_no,
+          ),
+        ).toEqual(original.cases[0]!.record);
+        if (!body.contactRequested) {
+          expect(original.cases[0]!.record.description).toContain(
+            "不需客服聯繫",
+          );
+          expect(original.timelines[0]!.record.note).toContain(
+            "同意客服聯繫：否",
+          );
+        }
+        const tokenTrip = await h.receiptTrip(f.owner);
+        const grant = await h.receiptToken(tokenTrip.orderId);
+        const tokenServices = await h.receiptServices();
+        await tokenServices.multi.submitPassengerRating(grant.raw, body);
+        const tokenOriginal = await h.receiptState(tokenTrip.orderId);
+        expect(tokenOriginal.rideConsents[0]).toMatchObject({
+          case_required: true,
+          contact_requested: body.contactRequested ?? false,
+          complaint_case_no: tokenOriginal.cases[0]!.case_no,
+        });
+        expect(tokenOriginal.cases).toHaveLength(1);
+        expect(tokenOriginal.timelines).toHaveLength(1);
+        const tokenPeer = await h.receiptServices();
+        await tokenPeer.multi.submitPassengerRating(grant.raw, body);
+        const tokenAgain = await h.receiptState(tokenTrip.orderId);
+        for (const name of [
+          "ratings",
+          "rideConsents",
+          "cases",
+          "timelines",
+        ] as const)
+          expect(tokenAgain[name]).toEqual(tokenOriginal[name]);
+        expect(
+          await tokenPeer.complaints.getComplaintTimelineForOps(
+            tokenOriginal.cases[0]!.case_no,
+          ),
+        ).toEqual([tokenOriginal.timelines[0]!.record]);
+        if (!body.contactRequested)
+          expect(tokenOriginal.cases[0]!.record.description).toContain(
+            "不需客服聯繫",
+          );
+        expect(notices).not.toHaveBeenCalled();
+      },
+    );
+
+    it("V0126 exact transition preserves original low opt-outs, case IDs and constraints before new writes", async () => {
+      // h.open already ran the official complete db-apply on its owned template.
+      // This owned clone only restores the V0126 delta for a transition fixture;
+      // it is not a production rollback or a replacement minimal schema.
+      const accountCase = await fixture();
+      await accountCase.booking.rateRide(
+        accountCase.owner,
+        accountCase.event.orderId,
+        {
+          rideId: accountCase.event.orderId,
+          rating: 2,
+          contactRequested: true,
+        },
+      );
+      const tokenCase = await fixture();
+      const originalGrant = await h.receiptToken(tokenCase.event.orderId);
+      await tokenCase.multi.submitPassengerRating(originalGrant.raw, {
+        score: 2,
+        contactRequested: true,
+      });
+      const originalAccount = await h.receiptState(accountCase.event.orderId);
+      const originalToken = await h.receiptState(tokenCase.event.orderId);
+      const originalCheck = (file: string) => {
+        const sql = readFileSync(file, "utf8");
+        const check = sql.match(/^ {2}(CHECK \(.+\))$/m)?.[1];
+        if (!check) throw new Error(`Missing published CHECK: ${file}`);
+        return check;
+      };
+      await h.pool!.query(`
+        ALTER TABLE passenger.rating_consents
+          DROP CONSTRAINT rating_consents_case_required_check,
+          DROP COLUMN case_required,
+          ADD CONSTRAINT rating_consents_check ${originalCheck("infra/migrations/V0114__passenger_receipt_complaint.sql")};
+        ALTER TABLE ops.passenger_ride_rating_consents
+          DROP CONSTRAINT passenger_ride_rating_consents_case_required_check,
+          DROP CONSTRAINT passenger_ride_rating_consents_low_score_case_check,
+          DROP COLUMN case_required,
+          ADD CONSTRAINT passenger_ride_rating_consents_check ${originalCheck("infra/migrations/V0119__passenger_ride_rating_contact.sql")};
+        ALTER TABLE ops.passenger_trip_ratings DROP COLUMN low_rating_case_policy_v2;
+      `);
+      const historicalAccount = await fixture();
+      const historicalToken = await fixture();
+      const grant = await h.receiptToken(historicalToken.event.orderId);
+      const seed = async (f: typeof historicalAccount) => {
+        const assignment =
+          await f.owned.resolvePersistedPassengerAssignmentDisclosure(
+            f.event.orderId,
+          );
+        if (!assignment)
+          throw new Error("Historical rating requires a persisted assignment.");
+        const now = new Date().toISOString();
+        return (
+          await h.taxi.persistPassengerRating({
+            ratingId: randomUUID(),
+            orderId: f.event.orderId,
+            tripId: assignment.assignmentId,
+            driverId: assignment.driver.driverId,
+            passengerSubjectRef: f.owner,
+            score: 2,
+            tags: [],
+            comment: null,
+            status: "active",
+            submittedAt: now,
+            updatedAt: now,
+          })
+        ).rating;
+      };
+      // Existing repository supplies real original-schema rating rows; consent
+      // fixtures are captured pre-policy facts, not inferred passenger choices.
+      const oldAccount = await seed(historicalAccount);
+      const oldToken = await seed(historicalToken);
+      const requestHash = createHash("sha256")
+        .update(
+          JSON.stringify({
+            score: 2,
+            tags: [],
+            comment: null,
+            contactRequested: false,
+          }),
+        )
+        .digest("hex");
+      await h.pool!.query(
+        `INSERT INTO passenger.rating_consents
+        (order_id,drts_passenger_id,rating_id,contact_requested,request_hash,complaint_case_no,created_at)
+        VALUES ($1,$2,$3,false,$4,NULL,$5)`,
+        [
+          oldAccount.orderId,
+          historicalAccount.owner,
+          oldAccount.ratingId,
+          requestHash,
+          oldAccount.submittedAt,
+        ],
+      );
+      await h.pool!.query(
+        `INSERT INTO ops.passenger_ride_rating_consents
+        (order_id,passenger_subject_ref,rating_id,original_token_id,rating_score,contact_requested,request_hash,complaint_case_no,created_at)
+        VALUES ($1,$2,$3,$4,2,false,$5,NULL,$6)`,
+        [
+          oldToken.orderId,
+          historicalToken.owner,
+          oldToken.ratingId,
+          grant.record.tokenId,
+          requestHash,
+          oldToken.submittedAt,
+        ],
+      );
+      const beforeAccount = await h.receiptState(oldAccount.orderId);
+      const beforeToken = await h.receiptState(oldToken.orderId);
+      // The original V0114/V0119 checks really reject false+case on native PG.
+      await expect(
+        h.pool!.query(
+          "UPDATE passenger.rating_consents SET contact_requested=false WHERE order_id=$1",
+          [accountCase.event.orderId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        h.pool!.query(
+          "UPDATE ops.passenger_ride_rating_consents SET contact_requested=false WHERE order_id=$1",
+          [tokenCase.event.orderId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      const migration = readFileSync(
+        "infra/migrations/V0126__low_rating_case_contact_independence.sql",
+        "utf8",
+      );
+      await h.pool!.query(migration);
+      const migratedAccount = await h.receiptState(oldAccount.orderId);
+      const migratedToken = await h.receiptState(oldToken.orderId);
+      expect(migratedAccount.consents[0]).toEqual({
+        ...beforeAccount.consents[0],
+        case_required: false,
+      });
+      expect(migratedToken.rideConsents[0]).toEqual({
+        ...beforeToken.rideConsents[0],
+        case_required: false,
+      });
+      expect(migratedAccount.ratings[0]!.low_rating_case_policy_v2).toBe(false);
+      expect(migratedToken.ratings[0]!.low_rating_case_policy_v2).toBe(false);
+      for (const name of ["cases", "timelines"] as const) {
+        expect((await h.receiptState(accountCase.event.orderId))[name]).toEqual(
+          originalAccount[name],
+        );
+        expect((await h.receiptState(tokenCase.event.orderId))[name]).toEqual(
+          originalToken[name],
+        );
+      }
+      const peer = await h.receiptServices();
+      await peer.booking.rateRide(historicalAccount.owner, oldAccount.orderId, {
+        rideId: oldAccount.orderId,
+        rating: 2,
+        contactRequested: false,
+      });
+      expect(
+        (
+          await peer.multi.submitPassengerRating(grant.raw, {
+            score: 2,
+            contactRequested: false,
+          })
+        ).ratingId,
+      ).toBe(oldToken.ratingId);
+      expect((await h.receiptState(oldAccount.orderId)).cases).toHaveLength(0);
+      expect((await h.receiptState(oldToken.orderId)).cases).toHaveLength(0);
+      await expect(
+        peer.multi.submitPassengerRating(grant.raw, {
+          score: 2,
+          contactRequested: true,
+        }),
+      ).rejects.toMatchObject({ code: "PASSENGER_RATING_ALREADY_SUBMITTED" });
+      // Missing whole consent is only legal for a proven pre-policy omitted retry.
+      await h.pool!.query(
+        "DELETE FROM ops.passenger_ride_rating_consents WHERE order_id=$1",
+        [oldToken.orderId],
+      );
+      expect(
+        (await peer.multi.submitPassengerRating(grant.raw, { score: 2 }))
+          .ratingId,
+      ).toBe(oldToken.ratingId);
+      const fresh = await fixture();
+      const newGrant = await h.receiptToken(fresh.event.orderId);
+      await fresh.multi.submitPassengerRating(newGrant.raw, {
+        score: 2,
+        contactRequested: false,
+      });
+      const newState = await h.receiptState(fresh.event.orderId);
+      expect(newState.ratings[0]!.low_rating_case_policy_v2).toBe(true);
+      expect(newState.rideConsents[0]).toMatchObject({
+        case_required: true,
+        contact_requested: false,
+      });
+      expect(newState.cases).toHaveLength(1);
+      expect(newState.timelines).toHaveLength(1);
+      await expect(
+        h.pool!.query(
+          "UPDATE ops.passenger_ride_rating_consents SET complaint_case_no=NULL WHERE order_id=$1",
+          [fresh.event.orderId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        h.pool!.query(
+          "UPDATE passenger.rating_consents SET case_required=NULL WHERE order_id=$1",
+          [oldAccount.orderId],
+        ),
+      ).rejects.toMatchObject({ code: "23502" });
+      await expect(
+        h.pool!.query(
+          "UPDATE ops.passenger_ride_rating_consents SET case_required=NULL WHERE order_id=$1",
+          [fresh.event.orderId],
+        ),
+      ).rejects.toMatchObject({ code: "23502" });
+      await expect(
+        h.pool!.query(
+          "UPDATE ops.passenger_trip_ratings SET low_rating_case_policy_v2=NULL WHERE order_id=$1",
+          [fresh.event.orderId],
+        ),
+      ).rejects.toMatchObject({ code: "23502" });
+      // Primary/unique protection and mandatory new provenance are still native.
+      await expect(
+        h.pool!.query(
+          "INSERT INTO passenger.rating_consents SELECT * FROM passenger.rating_consents WHERE order_id=$1",
+          [oldAccount.orderId],
+        ),
+      ).rejects.toMatchObject({ code: "23505" });
+      await expect(
+        h.pool!.query(
+          "INSERT INTO ops.passenger_ride_rating_consents SELECT * FROM ops.passenger_ride_rating_consents WHERE order_id=$1",
+          [fresh.event.orderId],
+        ),
+      ).rejects.toMatchObject({ code: "23505" });
+      await expect(
+        h.pool!.query(
+          `INSERT INTO passenger.rating_consents
+        (order_id,drts_passenger_id,rating_id,source,contact_requested,request_hash,complaint_case_no,created_at)
+        SELECT order_id,drts_passenger_id,rating_id,source,contact_requested,request_hash,complaint_case_no,created_at
+        FROM passenger.rating_consents WHERE order_id=$1`,
+          [oldAccount.orderId],
+        ),
+      ).rejects.toMatchObject({ code: "23502" });
+      await expect(
+        h.pool!.query(
+          `INSERT INTO ops.passenger_ride_rating_consents
+        (order_id,passenger_subject_ref,rating_id,original_token_id,rating_score,source,contact_requested,request_hash,complaint_case_no,created_at)
+        SELECT order_id,passenger_subject_ref,rating_id,original_token_id,rating_score,source,contact_requested,request_hash,complaint_case_no,created_at
+        FROM ops.passenger_ride_rating_consents WHERE order_id=$1`,
+          [fresh.event.orderId],
+        ),
+      ).rejects.toMatchObject({ code: "23502" });
+      // FK and composite rating-score authority remain on the original real tables.
+      await expect(
+        h.pool!.query(
+          "UPDATE ops.passenger_ride_rating_consents SET complaint_case_no=$2 WHERE order_id=$1",
+          [fresh.event.orderId, `PAX-${randomUUID()}`],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+      await expect(
+        h.pool!.query(
+          "UPDATE ops.passenger_ride_rating_consents SET rating_score=5 WHERE order_id=$1",
+          [fresh.event.orderId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await h.pool!.query(
+        "DELETE FROM ops.passenger_ride_rating_consents WHERE order_id=$1",
+        [fresh.event.orderId],
+      );
+      await expect(
+        (await h.receiptServices()).multi.submitPassengerRating(newGrant.raw, {
+          score: 2,
+        }),
+      ).rejects.toMatchObject({ code: "PASSENGER_RATING_CONSENT_UNAVAILABLE" });
+      expect((await h.receiptState(fresh.event.orderId)).cases).toEqual(
+        newState.cases,
+      );
+      const defaults = await h.pool!
+        .query(`SELECT table_schema,table_name,column_name,column_default,is_nullable FROM information_schema.columns
+        WHERE (table_schema='passenger' AND table_name='rating_consents' AND column_name='case_required')
+        OR (table_schema='ops' AND table_name='passenger_ride_rating_consents' AND column_name='case_required')`);
+      expect(defaults.rows).toHaveLength(2);
+      expect(
+        defaults.rows.every(
+          (row) => row.column_default === null && row.is_nullable === "NO",
+        ),
+      ).toBe(true);
+      const pg = await h.pool!.query(
+        "SELECT current_database() AS owned_database, version() AS postgres",
+      );
+      process.stdout.write(
+        `Complaint V0126 exact native transition ${JSON.stringify({
+          migrationSha256: createHash("sha256").update(migration).digest("hex"),
+          sourceSha: process.env.GITHUB_SHA,
+          originalAccountCase: originalAccount.cases[0]!.case_no,
+          originalTokenCase: originalToken.cases[0]!.case_no,
+          newNoContactCase: newState.cases[0]!.case_no,
+          legacyNoCasePreserved: true,
+          schema: pg.rows[0],
+        })}\n`,
+      );
+    });
 
     it.each([
       "ops.passenger_trip_ratings",

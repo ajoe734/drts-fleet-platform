@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 PREFIX = "tests/unit/pax-qa-20261009/"
-# Source-derived collection at R6: 109 native PG + 38 HTTP + 1 adapter.
+# Source-derived collection after V0126 policy cases: 117 native PG + 38 HTTP + 1 adapter.
 EXPECTED = {
     PREFIX + "account-auth-fare-http.test.ts": 13,
     PREFIX + "account-session.postgres.test.ts": 13,
@@ -15,7 +15,7 @@ EXPECTED = {
     PREFIX + "payment-http.test.ts": 8,
     PREFIX + "payment.postgres.test.ts": 19,
     PREFIX + "receipt-complaint-http.test.ts": 17,
-    PREFIX + "receipt-complaint.postgres.test.ts": 36,
+    PREFIX + "receipt-complaint.postgres.test.ts": 44,
 }
 ADAPTER = (
     "PAX QA instrumentation callback contract (server-free, no DB acceptance) "
@@ -85,7 +85,7 @@ def main(paths):
         print("ERROR: " + error)
     if errors:
         return 1
-    print("Passenger App QA: 9 suites; native PG=109; HTTP=38; business=147; adapter=1; total=148; failed=0; skipped=0")
+    print("Passenger App QA: 9 suites; native PG=117; HTTP=38; business=155; adapter=1; total=156; failed=0; skipped=0")
     return 0
 
 
