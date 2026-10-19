@@ -3957,14 +3957,53 @@ export class BillingSettlementService implements OnModuleInit {
   private referralRevenueShareRules: ReferralRevenueShareRule[] =
     createInitialReferralRevenueShareRules();
 
-  /** Active referral revenue-share rule for an entry at a given completion time. */
-  resolveReferralRevenueShareRule(
+  private async loadReferralRateContext(partnerEntrySlug: string) {
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      return {
+        entry: null,
+        rules: this.referralRevenueShareRules.filter(
+          (rule) => rule.partnerEntrySlug === partnerEntrySlug,
+        ),
+      };
+    }
+    const entry =
+      await this.billingSettlementRepository.loadReferralRateEntry(
+        partnerEntrySlug,
+      );
+    if (
+      !entry ||
+      entry.entrySlug !== partnerEntrySlug ||
+      entry.partnerType !== "referral_channel" ||
+      !entry.activeFlag ||
+      entry.status !== "active"
+    ) {
+      return { entry: null, rules: [] as ReferralRevenueShareRule[] };
+    }
+    return {
+      entry,
+      rules: (entry.referralRevenueShareRules ?? []).filter(
+        (rule) =>
+          rule.partnerEntrySlug === entry.entrySlug &&
+          rule.partnerId === entry.partnerId,
+      ),
+    };
+  }
+
+  /** Active rule at completion time, selected from one committed history read. */
+  async resolveReferralRevenueShareRule(
     partnerEntrySlug: string,
+    atIso: string,
+  ): Promise<ReferralRevenueShareRule | null> {
+    const { rules } = await this.loadReferralRateContext(partnerEntrySlug);
+    return this.selectReferralRevenueShareRule(rules, atIso);
+  }
+
+  private selectReferralRevenueShareRule(
+    rules: readonly ReferralRevenueShareRule[],
     atIso: string,
   ): ReferralRevenueShareRule | null {
     const at = new Date(atIso).getTime();
-    const candidates = this.referralRevenueShareRules
-      .filter((rule) => rule.partnerEntrySlug === partnerEntrySlug)
+    const candidates = rules
       .filter((rule) => {
         const from = new Date(rule.effectiveFrom).getTime();
         const until = rule.effectiveUntil
@@ -3977,17 +4016,48 @@ export class BillingSettlementService implements OnModuleInit {
           new Date(right.effectiveFrom).getTime() -
           new Date(left.effectiveFrom).getTime(),
       );
-    return candidates[0] ?? null;
+    return candidates[0] ? { ...candidates[0] } : null;
   }
 
-  private isReferralSettlementTrip(trip: BillingSettlementTripRecord): boolean {
-    return (
-      Boolean(trip.partnerEntrySlug) &&
-      this.resolveReferralRevenueShareRule(
-        trip.partnerEntrySlug as string,
-        trip.completedAt,
-      ) !== null
-    );
+  private async listReferralTrips(
+    partnerEntrySlug: string,
+    context: Awaited<
+      ReturnType<BillingSettlementService["loadReferralRateContext"]>
+    >,
+    periodMonth?: string,
+  ) {
+    const trips = new Map<string, BillingSettlementTripRecord>();
+    const matches = (trip: BillingSettlementTripRecord) =>
+      trip.partnerEntrySlug === partnerEntrySlug &&
+      (!context.entry ||
+        (trip.tenantId === context.entry.tenantId &&
+          trip.partnerId === context.entry.partnerId)) &&
+      this.selectReferralRevenueShareRule(context.rules, trip.completedAt) !==
+        null;
+    if (!isStrictAuthEnvironment()) {
+      for (const trip of this.settlementTrips)
+        if (matches(trip)) trips.set(trip.orderId, trip);
+    }
+    for (const trip of this.liveSettlementTrips.values()) {
+      const snapshot = this.mapLiveTripToSettlementSnapshot(trip);
+      if (matches(snapshot)) trips.set(snapshot.orderId, snapshot);
+    }
+    if (
+      context.entry &&
+      periodMonth &&
+      this.billingSettlementRepository?.isEnabled()
+    ) {
+      const { periodStart, periodEnd } = this.getPeriodMonthRange(periodMonth);
+      for (const trip of await this.billingSettlementRepository.listLiveCompletedTenantTrips(
+        context.entry.tenantId,
+        periodStart,
+        periodEnd,
+      )) {
+        const snapshot = this.mapLiveTripToSettlementSnapshot(trip);
+        if (matches(snapshot)) trips.set(snapshot.orderId, snapshot);
+      }
+    }
+    return [...trips.values()];
   }
 
   private computeReferralShareMinor(
@@ -4001,65 +4071,94 @@ export class BillingSettlementService implements OnModuleInit {
     return Math.max(0, Math.round((fareMinor * rule.value) / 100));
   }
 
-  /** Referral statements for a channel across all periods with attributed rides. */
+  /** Referral statements use one canonical history for every line in the read. */
   async listReferralStatements(
     partnerEntrySlug: string,
   ): Promise<ReferralStatementRecord[]> {
     this.assertNonBlank(partnerEntrySlug, "partnerEntrySlug");
-    const months = new Set<string>();
-    for (const trip of this.settlementTrips) {
-      if (
-        trip.partnerEntrySlug === partnerEntrySlug &&
-        this.isReferralSettlementTrip(trip)
-      ) {
-        months.add(this.toPeriodMonth(trip.completedAt));
-      }
+    const context = await this.loadReferralRateContext(partnerEntrySlug);
+    const months = new Set(
+      (await this.listReferralTrips(partnerEntrySlug, context)).map((trip) =>
+        this.toPeriodMonth(trip.completedAt),
+      ),
+    );
+    if (context.entry && this.billingSettlementRepository?.isEnabled()) {
+      for (const period of await this.billingSettlementRepository.listLiveReferralSettlementPeriods(
+        context.entry.tenantId,
+        partnerEntrySlug,
+      ))
+        months.add(period);
     }
-    const periods = [...months].sort((left, right) =>
+    const statements: ReferralStatementRecord[] = [];
+    for (const period of [...months].sort((left, right) =>
       right.localeCompare(left),
-    );
-    return periods.map((period) =>
-      this.buildReferralStatement(partnerEntrySlug, period),
-    );
+    )) {
+      const trips = await this.listReferralTrips(
+        partnerEntrySlug,
+        context,
+        period,
+      );
+      const statement = this.buildReferralStatement(
+        partnerEntrySlug,
+        period,
+        context.rules,
+        trips,
+      );
+      if (statement.lines.length) statements.push(statement);
+    }
+    return statements;
   }
 
-  /** Referral statement for a single channel + `YYYY-MM` period. */
-  getReferralStatement(
+  async getReferralStatement(
     partnerEntrySlug: string,
     periodMonth: string,
-  ): ReferralStatementRecord {
+  ): Promise<ReferralStatementRecord> {
     this.assertNonBlank(partnerEntrySlug, "partnerEntrySlug");
     const normalizedPeriod = periodMonth?.trim();
-    if (!normalizedPeriod) {
+    if (!normalizedPeriod)
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "VALIDATION_ERROR",
         "period must be in YYYY-MM format.",
         { period: periodMonth },
       );
-    }
     this.getPeriodMonthRange(normalizedPeriod);
-    return this.buildReferralStatement(partnerEntrySlug, normalizedPeriod);
+    const context = await this.loadReferralRateContext(partnerEntrySlug);
+    const trips = await this.listReferralTrips(
+      partnerEntrySlug,
+      context,
+      normalizedPeriod,
+    );
+    return this.buildReferralStatement(
+      partnerEntrySlug,
+      normalizedPeriod,
+      context.rules,
+      trips,
+    );
   }
 
   private buildReferralStatement(
     partnerEntrySlug: string,
     periodMonth: string,
+    rules: readonly ReferralRevenueShareRule[],
+    attributedTrips: readonly BillingSettlementTripRecord[],
   ): ReferralStatementRecord {
     const { periodStart, periodEnd } = this.getPeriodMonthRange(periodMonth);
     const start = new Date(periodStart).getTime();
     const end = new Date(periodEnd).getTime();
-    const trips = this.settlementTrips.filter((trip) => {
+    const trips = attributedTrips.filter((trip) => {
       const completedAt = new Date(trip.completedAt).getTime();
       return (
         trip.partnerEntrySlug === partnerEntrySlug &&
-        this.isReferralSettlementTrip(trip) &&
+        this.selectReferralRevenueShareRule(rules, trip.completedAt) !== null &&
         completedAt >= start &&
         completedAt <= end
       );
     });
 
-    const lines = trips.map((trip) => this.createReferralStatementLine(trip));
+    const lines = trips.map((trip) =>
+      this.createReferralStatementLine(trip, rules),
+    );
     const gmv = this.sumMoney(lines.map((line) => line.fare));
     const shareTotal = this.sumMoney(lines.map((line) => line.shareAmount));
     const activeRiderCount = new Set(
@@ -4100,11 +4199,12 @@ export class BillingSettlementService implements OnModuleInit {
 
   private createReferralStatementLine(
     trip: BillingSettlementTripRecord,
+    rules: readonly ReferralRevenueShareRule[],
   ): ReferralStatementLine {
     const fare = { ...trip.grossEarning };
-    // Guaranteed present by isReferralSettlementTrip filter.
-    const rule = this.resolveReferralRevenueShareRule(
-      trip.partnerEntrySlug as string,
+    // Guaranteed present by the completion-time filter above.
+    const rule = this.selectReferralRevenueShareRule(
+      rules,
       trip.completedAt,
     ) as ReferralRevenueShareRule;
     const shareMinor = this.computeReferralShareMinor(fare.amountMinor, rule);

@@ -843,17 +843,18 @@ export class TenantPartnerController {
   @Get("partner/referral/statements/:period/artifact")
   @RequireRealms("partner")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  getPartnerReferralStatementArtifact(
+  async getPartnerReferralStatementArtifact(
     @CurrentIdentity() identity: IdentityContext | null,
     @Param("period") period: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const statement = this.tenantPartnerService.getPartnerReferralStatement(
-      identity,
-      this.billingSettlementService,
-      period,
-      requestId,
-    );
+    const statement =
+      await this.tenantPartnerService.getPartnerReferralStatement(
+        identity,
+        this.billingSettlementService,
+        period,
+        requestId,
+      );
 
     return new StreamableFile(
       Buffer.from(this.renderReferralStatementArtifact(statement), "utf8"),
@@ -867,13 +868,13 @@ export class TenantPartnerController {
   @Get("partner/referral/statements/:period")
   @RequireRealms("partner")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  getPartnerReferralStatement(
+  async getPartnerReferralStatement(
     @CurrentIdentity() identity: IdentityContext | null,
     @Param("period") period: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.getPartnerReferralStatement(
+      await this.tenantPartnerService.getPartnerReferralStatement(
         identity,
         this.billingSettlementService,
         period,
@@ -928,25 +929,27 @@ export class TenantPartnerController {
 
   @Get("platform-admin/referral-rates")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listReferralRevenueShareRules(
+  async listReferralRevenueShareRules(
     @Query("entrySlug") entrySlug?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       toApiListData(
-        this.tenantPartnerService.listReferralRevenueShareRules(entrySlug),
+        await this.tenantPartnerService.listReferralRevenueShareRules(
+          entrySlug,
+        ),
       ),
       requestId,
     );
   }
 
   @Post("platform-admin/referral-rates")
-  upsertReferralRevenueShareRule(
+  async upsertReferralRevenueShareRule(
     @Body() command: UpsertReferralRevenueShareRuleCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertReferralRevenueShareRule(
+      await this.tenantPartnerService.upsertReferralRevenueShareRule(
         command,
         requestId,
       ),
