@@ -274,7 +274,7 @@ describe("PLACARD-PRINTABLE-CHINESE-CONTENT-20261015: printable placard PDF pres
     const { platformAdminService } = createService(store);
     const controller = new ControlledDownloadController(store);
 
-    const publicInfo = platformAdminService.createPublicInfoVersion({
+    const publicInfo = await platformAdminService.createPublicInfoVersion({
       title: "花蓮縣 DRTS 智慧公共運輸服務（2026下半年度公告）",
       callPhone: "0800-888-999",
       complaintPhone: "0800-111-222",
@@ -287,7 +287,7 @@ describe("PLACARD-PRINTABLE-CHINESE-CONTENT-20261015: printable placard PDF pres
       effectiveTo: "2026-12-31T23:59:59.000Z",
     });
 
-    const publishedInfo = platformAdminService.publishPublicInfoVersion(
+    const publishedInfo = await platformAdminService.publishPublicInfoVersion(
       publicInfo.versionId,
       {},
       "req-publish-cjk-info",
@@ -362,7 +362,7 @@ describe("PLACARD-PRINTABLE-CHINESE-CONTENT-20261015: printable placard PDF pres
         `第 ${idx + 1} 區段費率 (Zone\\${idx + 1})：核定起跳 NT$${85 + idx}，偏遠補貼 50%`,
     ).join("\n");
 
-    const publicInfo = platformAdminService.createPublicInfoVersion({
+    const publicInfo = await platformAdminService.createPublicInfoVersion({
       title: "跨頁費率與括號斜線測試 (A\\B)",
       callPhone: "0800-555-666 (轉\\9)",
       complaintPhone: "0800-777-888 (申訴\\專線)",
@@ -424,7 +424,7 @@ describe("PLACARD-PRINTABLE-CHINESE-CONTENT-20261015: printable placard PDF pres
     const controller = new ControlledDownloadController(store);
     const adminController = new PlatformAdminController(platformAdminService);
 
-    const draftInfo = platformAdminService.createPublicInfoVersion({
+    const draftInfo = await platformAdminService.createPublicInfoVersion({
       title: "臺東縣預約彈性公車（DRTS）費率公告",
       callPhone: "0800-321-654",
       complaintPhone: "0800-654-321",
@@ -558,16 +558,16 @@ describe("PLACARD-PRINTABLE-CHINESE-CONTENT-20261015: printable placard PDF pres
       "PLACARD_VERSION_CODE_CONFLICT",
     );
 
-    platformAdminService.publishPublicInfoVersion(
+    await platformAdminService.publishPublicInfoVersion(
       draftInfo.versionId,
       {},
       "req-pub-info-1",
       "admin-taitung",
     );
-    const successorInfo = platformAdminService.createPublicInfoVersion({
+    const successorInfo = await platformAdminService.createPublicInfoVersion({
       title: "新版公開資訊",
     });
-    platformAdminService.publishPublicInfoVersion(
+    await platformAdminService.publishPublicInfoVersion(
       successorInfo.versionId,
       {},
       "req-pub-info-2",

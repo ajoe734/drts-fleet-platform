@@ -37,6 +37,19 @@ export type PersistPlatformAdminChanges = {
   deletedPublicInfoVersionIds?: readonly string[];
 };
 
+export type PublicInfoVersionMutation = {
+  upsertedVersions?: readonly PublicInfoVersionRecord[];
+  deletedVersionIds?: readonly string[];
+  resultVersion: PublicInfoVersionRecord;
+  previousPublishedVersionId?: string | null;
+};
+
+export type PublicInfoVersionMutationResult = {
+  version: PublicInfoVersionRecord;
+  versions: PublicInfoVersionRecord[];
+  previousPublishedVersionId: string | null;
+};
+
 /**
  * Thrown by `mutateAdapterWithAudit` when the persisted row's `revision`
  * does not match `expectedRevision` -- a stale snapshot, not a generic DB
@@ -358,6 +371,88 @@ export class PlatformAdminRepository {
     } finally {
       client.release();
     }
+  }
+
+  async mutatePublicInfoVersions(
+    stage: (
+      current: readonly PublicInfoVersionRecord[],
+    ) => PublicInfoVersionMutation,
+  ): Promise<PublicInfoVersionMutationResult> {
+    return this.withTransaction(async (client) => {
+      // Serialize this existing version/history lifecycle, including the case
+      // where no published row exists yet. Reads remain available.
+      await client.query(
+        "LOCK TABLE admin.phase1_public_info_versions IN SHARE ROW EXCLUSIVE MODE",
+      );
+      const readVersions = async () => {
+        const current = await client.query<JsonRecordRow>(
+          `SELECT record FROM admin.phase1_public_info_versions
+           ORDER BY updated_at DESC, created_at DESC`,
+        );
+        return current.rows.map((row) =>
+          this.parseRecord<PublicInfoVersionRecord>(
+            row.record,
+            "admin.phase1_public_info_versions",
+          ),
+        );
+      };
+      const mutation = stage((await readVersions()).map((row) => ({ ...row })));
+      for (const version of mutation.upsertedVersions ?? []) {
+        const saved = await client.query<JsonRecordRow>(
+          `INSERT INTO admin.phase1_public_info_versions
+             (version_id, status, created_at, updated_at, record)
+           VALUES ($1, $2, $3, $4, $5::jsonb)
+           ON CONFLICT (version_id) DO UPDATE SET
+             status = EXCLUDED.status, created_at = EXCLUDED.created_at,
+             updated_at = EXCLUDED.updated_at, record = EXCLUDED.record
+           RETURNING record`,
+          [
+            version.versionId,
+            version.status,
+            version.createdAt,
+            version.updatedAt,
+            JSON.stringify(version),
+          ],
+        );
+        if (saved.rows.length !== 1) {
+          throw new Error("Public info version write was not acknowledged.");
+        }
+      }
+      const deleted = new Map<string, PublicInfoVersionRecord>();
+      for (const versionId of mutation.deletedVersionIds ?? []) {
+        const removed = await client.query<JsonRecordRow>(
+          `DELETE FROM admin.phase1_public_info_versions
+           WHERE version_id = $1 RETURNING record`,
+          [versionId],
+        );
+        if (removed.rows.length !== 1) {
+          throw new Error("Public info version deletion was not acknowledged.");
+        }
+        deleted.set(
+          versionId,
+          this.parseRecord<PublicInfoVersionRecord>(
+            removed.rows[0]!.record,
+            "admin.phase1_public_info_versions",
+          ),
+        );
+      }
+      const versions = await readVersions();
+      const version =
+        deleted.get(mutation.resultVersion.versionId) ??
+        versions.find(
+          (row) => row.versionId === mutation.resultVersion.versionId,
+        );
+      if (!version) {
+        throw new Error(
+          "Committed public info version could not be read back.",
+        );
+      }
+      return {
+        version: { ...version },
+        versions,
+        previousPublishedVersionId: mutation.previousPublishedVersionId ?? null,
+      };
+    });
   }
 
   /**

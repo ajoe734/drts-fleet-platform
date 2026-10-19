@@ -2,21 +2,39 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { PlatformAdminService } from "../../src/modules/platform-admin/platform-admin.service";
+import { PlatformAdminRepository } from "../../src/modules/platform-admin/platform-admin.repository";
+import type { DatabaseService } from "../../src/common/db";
+import { PublicInfoSqlWire } from "../../../../tests/unit/public-info-version-canonical-ack-20261015/wire-fixture";
 
 function createService() {
   const auditNotificationService = {
     recordAuditLog: vi.fn(),
   };
-  const platformAdminRepository = {
-    persistChanges: vi.fn().mockResolvedValue(undefined),
-    reportPersistenceFailure: vi.fn(),
-    claimPlacardPublish: vi
-      .fn()
-      .mockResolvedValue({ claimed: true, currentRecord: null }),
-    finalizePlacardPublish: vi.fn().mockResolvedValue(true),
-    releasePlacardPublishClaim: vi.fn().mockResolvedValue(true),
-    getPlacardVersionRecord: vi.fn().mockResolvedValue(null),
-  };
+  const preparation = new PlatformAdminService(
+    auditNotificationService as never,
+  );
+  const wire = new PublicInfoSqlWire(preparation.listPublicInfoVersions());
+  const platformAdminRepository = new PlatformAdminRepository(
+    wire as unknown as DatabaseService,
+  );
+  vi.spyOn(platformAdminRepository, "persistChanges");
+  // These original service cases retain their existing placard boundary;
+  // public-info commands now exercise the real configured Repository SQL.
+  vi.spyOn(platformAdminRepository, "claimPlacardPublish").mockResolvedValue({
+    claimed: true,
+    currentRecord: null,
+  });
+  vi.spyOn(platformAdminRepository, "finalizePlacardPublish").mockResolvedValue(
+    true,
+  );
+  vi.spyOn(
+    platformAdminRepository,
+    "releasePlacardPublishClaim",
+  ).mockResolvedValue(true);
+  vi.spyOn(
+    platformAdminRepository,
+    "getPlacardVersionRecord",
+  ).mockResolvedValue(null);
 
   const service = new PlatformAdminService(
     auditNotificationService as never,
@@ -27,14 +45,14 @@ function createService() {
     service,
     auditNotificationService,
     platformAdminRepository,
+    wire,
   };
 }
 
 describe("PlatformAdminService.deleteDraftPublicInfoVersion", () => {
-  it("deletes only draft public info versions and persists the removal", () => {
-    const { service, auditNotificationService, platformAdminRepository } =
-      createService();
-    const draft = service.createPublicInfoVersion({
+  it("deletes only draft public info versions and persists the removal", async () => {
+    const { service, auditNotificationService, wire } = createService();
+    const draft = await service.createPublicInfoVersion({
       title: "Draft version to delete",
       callPhone: null,
       complaintPhone: null,
@@ -45,7 +63,7 @@ describe("PlatformAdminService.deleteDraftPublicInfoVersion", () => {
       effectiveTo: null,
     });
 
-    const deleted = service.deleteDraftPublicInfoVersion(
+    const deleted = await service.deleteDraftPublicInfoVersion(
       draft.versionId,
       "req-delete-draft",
       "platform-admin-jwt-011",
@@ -57,9 +75,9 @@ describe("PlatformAdminService.deleteDraftPublicInfoVersion", () => {
         .listPublicInfoVersions()
         .some((version) => version.versionId === draft.versionId),
     ).toBe(false);
-    expect(platformAdminRepository.persistChanges).toHaveBeenCalledWith({
-      deletedPublicInfoVersionIds: [draft.versionId],
-    });
+    // The old mock-call check is now an actual committed canonical removal.
+    expect(wire.records.has(draft.versionId)).toBe(false);
+    expect(wire.statements).toContain("COMMIT");
     expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId: "req-delete-draft",
@@ -70,16 +88,16 @@ describe("PlatformAdminService.deleteDraftPublicInfoVersion", () => {
     );
   });
 
-  it("rejects deleting published public info versions", () => {
+  it("rejects deleting published public info versions", async () => {
     const { service, platformAdminRepository } = createService();
     const published = service
       .listPublicInfoVersions()
       .find((version) => version.status === "published");
 
     expect(published).toBeDefined();
-    expect(() =>
+    await expect(
       service.deleteDraftPublicInfoVersion(published!.versionId),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
     expect(platformAdminRepository.persistChanges).not.toHaveBeenCalledWith(
       expect.objectContaining({
         deletedPublicInfoVersionIds: [published!.versionId],
@@ -92,7 +110,7 @@ describe("PlatformAdminService.publishPlacardVersion", () => {
   it("records the verified publisher actorId in placard publish audit logs", async () => {
     const { service, auditNotificationService, platformAdminRepository } =
       createService();
-    const draftPublicInfo = service.createPublicInfoVersion({
+    const draftPublicInfo = await service.createPublicInfoVersion({
       title: "Draft disclosure for placard publish",
       callPhone: null,
       complaintPhone: null,
@@ -123,9 +141,7 @@ describe("PlatformAdminService.publishPlacardVersion", () => {
     // Publish commits through the fenced, awaited
     // `finalizePlacardPublish` path, not the fire-and-forget
     // `persistChanges` used by other mutations (see R7-followthrough).
-    expect(
-      platformAdminRepository.finalizePlacardPublish,
-    ).toHaveBeenCalledWith(
+    expect(platformAdminRepository.finalizePlacardPublish).toHaveBeenCalledWith(
       expect.objectContaining({ placardVersionId: placard.placardVersionId }),
       expect.any(String),
     );
