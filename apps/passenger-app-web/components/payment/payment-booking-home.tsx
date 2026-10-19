@@ -14,6 +14,7 @@ import {
 } from "../booking/booking-screen";
 import { AuthAlert, P5Btn } from "../auth/ui";
 import { PaymentMethodChoice, UnpaidPaymentNotice } from "./payment-summary";
+import { BOOK_T } from "../../lib/booking/translations";
 import { PAY_T as T } from "../../lib/payment/translations";
 
 export function PaymentBookingHome() {
@@ -156,6 +157,9 @@ export function PaymentBookingHome() {
   );
   return (
     <>
+      <nav aria-label={BOOK_T.disclosure} style={{ padding: "12px 16px" }}>
+        <a href="/fares">{BOOK_T.fullFees}</a>
+      </nav>
       {unpaid && <UnpaidPaymentNotice />}
       <BookingScreen
         client={bookingClient}
