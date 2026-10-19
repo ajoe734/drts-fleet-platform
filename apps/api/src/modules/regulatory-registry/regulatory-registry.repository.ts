@@ -1,4 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { AuditLogRepository } from "../audit-notification/audit-log.repository";
+import type {
+  DisclosureSubjectType,
+  DisclosureRecord,
+  DisclosureReviewDecision,
+} from "./disclosure-review.types";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { PoolClient } from "pg";
 
@@ -248,6 +254,112 @@ export class RegulatoryRegistryRepository {
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  /** Narrow P5 reads never hydrate or replace another Registry writer's cache. */
+  async listDisclosureReviewRecords(): Promise<{
+    profiles: VehiclePassengerDisclosureProfile[];
+    credentials: DriverPublicRegistrationCredential[];
+  }> {
+    const [profiles, credentials] = await Promise.all([
+      this.databaseService!.query<VehiclePassengerDisclosureProfileRow>(
+        "SELECT * FROM reg.vehicle_passenger_disclosure_profiles ORDER BY vehicle_id",
+      ),
+      this.databaseService!.query<DriverPublicRegistrationCredentialRow>(
+        "SELECT * FROM reg.driver_public_registration_credentials ORDER BY driver_id",
+      ),
+    ]);
+    return {
+      profiles: profiles.rows.map((row) => this.mapDisclosureProfileRow(row)),
+      credentials: credentials.rows.map((row) =>
+        this.mapDriverCredentialRow(row),
+      ),
+    };
+  }
+
+  async loadDisclosureReviewSubject(
+    type: DisclosureSubjectType,
+    id: string,
+    executor: RegulatoryRegistryQueryExecutor = this.databaseService!,
+    lock = false,
+  ): Promise<{
+    record: DisclosureRecord;
+    parent: VehicleRegistryRecord | DriverRegistryRecord;
+  } | null> {
+    const vehicle = type === "vehicle";
+    // Fixed table choices only; lock the canonical parent before its review row.
+    const table = vehicle
+      ? "reg.phase1_registry_vehicles"
+      : "reg.phase1_registry_drivers";
+    const key = vehicle ? "vehicle_id" : "driver_id";
+    const parent = await executor.query<{
+      record: VehicleRegistryRecord | DriverRegistryRecord;
+    }>(
+      `SELECT record FROM ${table} WHERE ${key}=$1${lock ? " FOR UPDATE" : ""}`,
+      [id],
+    );
+    if (!parent.rows[0]) return null;
+    if (vehicle) {
+      const result = await executor.query<VehiclePassengerDisclosureProfileRow>(
+        `SELECT * FROM reg.vehicle_passenger_disclosure_profiles WHERE vehicle_id=$1${lock ? " FOR UPDATE" : ""}`,
+        [id],
+      );
+      return result.rows[0]
+        ? {
+            record: this.mapDisclosureProfileRow(result.rows[0]),
+            parent: parent.rows[0].record,
+          }
+        : null;
+    }
+    const result = await executor.query<DriverPublicRegistrationCredentialRow>(
+      `SELECT * FROM reg.driver_public_registration_credentials WHERE driver_id=$1${lock ? " FOR UPDATE" : ""}`,
+      [id],
+    );
+    return result.rows[0]
+      ? {
+          record: this.mapDriverCredentialRow(result.rows[0]),
+          parent: parent.rows[0].record,
+        }
+      : null;
+  }
+
+  async loadDisclosureReviewHistory(
+    type: DisclosureSubjectType,
+    id: string,
+    executor: RegulatoryRegistryQueryExecutor = this.databaseService!,
+  ): Promise<DisclosureReviewDecision[]> {
+    const result = await executor.query<{
+      new_value: { p5Review: DisclosureReviewDecision };
+    }>(
+      "SELECT new_value FROM admin.audit_logs WHERE module_name='regulatory-registry' AND action_name='p5_disclosure_review' AND resource_type=$1 AND resource_id=$2 ORDER BY created_at, audit_id",
+      [`p5_disclosure_${type}`, id],
+    );
+    return result.rows.map((row) => row.new_value.p5Review);
+  }
+
+  async appendDisclosureReview(
+    executor: RegulatoryRegistryQueryExecutor,
+    decision: DisclosureReviewDecision,
+  ): Promise<void> {
+    // Reuse the original audit serializer and schema inside this exact transaction.
+    const repository = new AuditLogRepository({
+      isEnabled: () => true,
+      query: executor.query.bind(executor),
+    } as DatabaseService);
+    await repository.append({
+      auditId: decision.decisionId,
+      actorId: decision.actorId,
+      actorType: decision.actorType,
+      tenantId: null,
+      moduleName: "regulatory-registry",
+      actionName: "p5_disclosure_review",
+      resourceType: `p5_disclosure_${decision.subjectType}`,
+      resourceId: decision.subjectId,
+      oldValuesSummary: { record: decision.previousRecord },
+      newValuesSummary: { p5Review: decision },
+      requestId: decision.operationKey,
+      createdAt: decision.decidedAt,
+    });
   }
 
   async findDriverPublicRegistrationCredential(

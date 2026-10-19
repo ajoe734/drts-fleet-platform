@@ -35,6 +35,15 @@ import {
   ApiRequestError,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import {
+  CurrentIdentity,
+  RequireScopes,
+} from "../../common/auth/auth.decorators";
+import type { BootstrapRequestIdentity } from "../../common/auth/auth.types";
+import type {
+  DisclosureSubjectType,
+  DisclosureReviewCommand,
+} from "./disclosure-review.types";
 import { ContractOperationalViewService } from "./contract-operational-view.service";
 import type {
   DeliveryIntentStatus,
@@ -513,6 +522,56 @@ export class RegulatoryRegistryController {
   ) {
     return toApiSuccessEnvelope(
       this.regulatoryRegistryService.rejectExclusivity(vehicleId, command),
+      requestId,
+    );
+  }
+
+  @Get("disclosure-reviews")
+  async listDisclosureReviews(
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.regulatoryRegistryService.listDisclosureReviews(identity),
+      requestId,
+    );
+  }
+
+  @Get("disclosure-reviews/:subjectType/:subjectId")
+  async getDisclosureReview(
+    @Param("subjectType") type: DisclosureSubjectType,
+    @Param("subjectId") id: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.regulatoryRegistryService.getDisclosureReview(
+        type,
+        id,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("disclosure-reviews/:subjectType/:subjectId")
+  @RequireScopes("regulatory:write")
+  async reviewDisclosure(
+    @Param("subjectType") type: DisclosureSubjectType,
+    @Param("subjectId") id: string,
+    @Body() command: DisclosureReviewCommand,
+    @Headers("idempotency-key") key?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.regulatoryRegistryService.reviewDisclosure(
+        type,
+        id,
+        command,
+        key,
+        identity,
+      ),
       requestId,
     );
   }
