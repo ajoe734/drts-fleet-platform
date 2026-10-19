@@ -1057,26 +1057,132 @@ export class ServiceAreaService implements OnModuleInit {
         { field: "geometry.type" },
       );
     }
-    const coordinates = geometry.coordinates.map((point, index) =>
-      this.normalizePoint(point, `geometry.coordinates.${index}`),
+    const coordinates = this.normalizePolygonRing(
+      geometry.coordinates,
+      "geometry.coordinates",
     );
-    if (coordinates.length < 3) {
+
+    const normalizedHoles: GeoPoint[][] = [];
+    if (geometry.holes !== undefined && geometry.holes !== null) {
+      if (!Array.isArray(geometry.holes)) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_GEOMETRY",
+          "polygon holes must be an array of rings.",
+          { field: "geometry.holes" },
+        );
+      }
+      geometry.holes.forEach((hole, holeIndex) => {
+        const holeField = `geometry.holes.${holeIndex}`;
+        const normalizedHole = this.normalizePolygonRing(hole, holeField);
+
+        const liesStrictlyInside = normalizedHole.every(
+          (vertex) =>
+            this.ringContainsPoint(coordinates, vertex) &&
+            !this.pointOnRingBoundary(coordinates, vertex),
+        );
+        if (
+          !liesStrictlyInside ||
+          this.ringsIntersectOrTouch(coordinates, normalizedHole)
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "INVALID_GEOMETRY_HOLE_OUTSIDE_BOUNDARY",
+            "polygon hole must lie strictly inside the outer boundary.",
+            { field: holeField },
+          );
+        }
+
+        for (const prevHole of normalizedHoles) {
+          if (
+            this.ringsIntersectOrTouch(prevHole, normalizedHole) ||
+            this.ringContainsPoint(prevHole, normalizedHole[0]!) ||
+            this.ringContainsPoint(normalizedHole, prevHole[0]!)
+          ) {
+            throw new ApiRequestError(
+              HttpStatus.BAD_REQUEST,
+              "INVALID_GEOMETRY_HOLE_OVERLAP",
+              "polygon holes cannot intersect, touch, or nest.",
+              { field: holeField },
+            );
+          }
+        }
+
+        normalizedHoles.push(normalizedHole);
+      });
+    }
+
+    return normalizedHoles.length > 0
+      ? { type: "polygon", coordinates, holes: normalizedHoles }
+      : { type: "polygon", coordinates };
+  }
+
+  private normalizePolygonRing(points: unknown, fieldPath: string): GeoPoint[] {
+    if (!Array.isArray(points)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_GEOMETRY",
+        "polygon geometry requires an array of points.",
+        { field: fieldPath },
+      );
+    }
+    const normalized = points.map((point, index) =>
+      this.normalizePoint(point as GeoPoint, `${fieldPath}.${index}`),
+    );
+    let ring = normalized;
+    if (
+      ring.length >= 2 &&
+      this.pointsEqual(ring[0]!, ring[ring.length - 1]!)
+    ) {
+      ring = ring.slice(0, -1);
+    }
+    if (ring.length < 3 || this.distinctPointCount(ring) < 3) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "INVALID_GEOMETRY",
         "polygon geometry requires at least three points.",
-        { field: "geometry.coordinates" },
+        { field: fieldPath },
       );
     }
-    if (this.polygonSelfIntersects(coordinates)) {
+    for (let index = 0; index < ring.length; index += 1) {
+      const current = ring[index]!;
+      const next = ring[(index + 1) % ring.length]!;
+      if (this.pointsEqual(current, next)) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_GEOMETRY",
+          "polygon ring cannot contain duplicate consecutive vertices or zero-length edges.",
+          { field: fieldPath },
+        );
+      }
+    }
+    if (Math.abs(this.signedRingArea(ring)) < 1e-10) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_GEOMETRY",
+        "polygon geometry area must be non-zero.",
+        { field: fieldPath },
+      );
+    }
+    if (this.polygonSelfIntersects(ring)) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "INVALID_GEOMETRY_SELF_INTERSECTION",
         "polygon geometry cannot self-intersect.",
-        { field: "geometry.coordinates" },
+        { field: fieldPath },
       );
     }
-    return { type: "polygon", coordinates };
+    return ring;
+  }
+
+  private signedRingArea(points: GeoPoint[]) {
+    let area = 0;
+    for (let index = 0; index < points.length; index += 1) {
+      const current = points[index]!;
+      const next = points[(index + 1) % points.length]!;
+      area += current.lng * next.lat - next.lng * current.lat;
+    }
+    return area / 2;
   }
 
   private normalizeEffectiveFrom(
@@ -1433,60 +1539,149 @@ export class ServiceAreaService implements OnModuleInit {
     return point.lat !== undefined && point.lng !== undefined;
   }
 
+  /**
+   * Checks an unclosed polygon ring (exterior or hole) for repeated
+   * non-adjacent vertices (pinches), adjacent-edge 180-degree fold-backs
+   * (spikes/reversals), and non-adjacent edge crossing, touching, or
+   * collinear overlap. Shared by exterior rings and hole rings so both are
+   * held to the same non-degeneracy standard.
+   */
   private polygonSelfIntersects(points: GeoPoint[]) {
-    const ring = this.closedPolygonRing(points);
-    for (let leftIndex = 0; leftIndex < ring.length - 1; leftIndex += 1) {
-      const leftStart = ring[leftIndex]!;
-      const leftEnd = ring[leftIndex + 1]!;
-      for (
-        let rightIndex = leftIndex + 1;
-        rightIndex < ring.length - 1;
-        rightIndex += 1
-      ) {
-        if (Math.abs(leftIndex - rightIndex) <= 1) {
+    const n = points.length;
+    if (n < 3) {
+      return false;
+    }
+
+    for (let i = 0; i < n; i += 1) {
+      for (let j = i + 1; j < n; j += 1) {
+        if (j === i + 1) {
           continue;
         }
-        if (leftIndex === 0 && rightIndex === ring.length - 2) {
+        if (i === 0 && j === n - 1) {
           continue;
         }
-        const rightStart = ring[rightIndex]!;
-        const rightEnd = ring[rightIndex + 1]!;
-        if (this.segmentsIntersect(leftStart, leftEnd, rightStart, rightEnd)) {
+        if (this.pointsEqual(points[i]!, points[j]!)) {
           return true;
         }
       }
     }
+
+    for (let i = 0; i < n; i += 1) {
+      const prev = points[(i - 1 + n) % n]!;
+      const curr = points[i]!;
+      const next = points[(i + 1) % n]!;
+      if (this.segmentOrientation(prev, curr, next) === 0) {
+        const dot =
+          (prev.lng - curr.lng) * (next.lng - curr.lng) +
+          (prev.lat - curr.lat) * (next.lat - curr.lat);
+        if (dot > 0) {
+          return true;
+        }
+      }
+    }
+
+    for (let i = 0; i < n; i += 1) {
+      const leftStart = points[i]!;
+      const leftEnd = points[(i + 1) % n]!;
+      for (let j = i + 1; j < n; j += 1) {
+        if (Math.abs(i - j) <= 1) {
+          continue;
+        }
+        if (i === 0 && j === n - 1) {
+          continue;
+        }
+        const rightStart = points[j]!;
+        const rightEnd = points[(j + 1) % n]!;
+        if (
+          this.segmentsIntersectOrTouch(leftStart, leftEnd, rightStart, rightEnd)
+        ) {
+          return true;
+        }
+      }
+    }
+
     return false;
   }
 
-  private closedPolygonRing(points: GeoPoint[]) {
-    const ring = [...points];
-    const first = ring[0];
-    const last = ring[ring.length - 1];
-    if (first && last && (first.lat !== last.lat || first.lng !== last.lng)) {
-      ring.push({ ...first });
-    }
-    return ring;
+  private pointsEqual(left: GeoPoint, right: GeoPoint) {
+    return left.lat === right.lat && left.lng === right.lng;
   }
 
-  private segmentsIntersect(
+  private distinctPointCount(points: GeoPoint[]) {
+    const seen: GeoPoint[] = [];
+    for (const point of points) {
+      if (!seen.some((candidate) => this.pointsEqual(candidate, point))) {
+        seen.push(point);
+      }
+    }
+    return seen.length;
+  }
+
+  private segmentOrientation(
+    start: GeoPoint,
+    end: GeoPoint,
+    point: GeoPoint,
+  ): -1 | 0 | 1 {
+    const cross =
+      (point.lng - start.lng) * (end.lat - start.lat) -
+      (point.lat - start.lat) * (end.lng - start.lng);
+    if (Math.abs(cross) < 1e-10) {
+      return 0;
+    }
+    return cross > 0 ? 1 : -1;
+  }
+
+  private segmentsIntersectOrTouch(
     leftStart: GeoPoint,
     leftEnd: GeoPoint,
     rightStart: GeoPoint,
     rightEnd: GeoPoint,
   ) {
-    const direction1 = this.segmentDirection(leftStart, leftEnd, rightStart);
-    const direction2 = this.segmentDirection(leftStart, leftEnd, rightEnd);
-    const direction3 = this.segmentDirection(rightStart, rightEnd, leftStart);
-    const direction4 = this.segmentDirection(rightStart, rightEnd, leftEnd);
-    return direction1 * direction2 < 0 && direction3 * direction4 < 0;
+    const d1 = this.segmentOrientation(leftStart, leftEnd, rightStart);
+    const d2 = this.segmentOrientation(leftStart, leftEnd, rightEnd);
+    const d3 = this.segmentOrientation(rightStart, rightEnd, leftStart);
+    const d4 = this.segmentOrientation(rightStart, rightEnd, leftEnd);
+    if (d1 !== d2 && d3 !== d4) {
+      return true;
+    }
+    if (d1 === 0 && this.pointOnSegment(rightStart, leftStart, leftEnd)) {
+      return true;
+    }
+    if (d2 === 0 && this.pointOnSegment(rightEnd, leftStart, leftEnd)) {
+      return true;
+    }
+    if (d3 === 0 && this.pointOnSegment(leftStart, rightStart, rightEnd)) {
+      return true;
+    }
+    if (d4 === 0 && this.pointOnSegment(leftEnd, rightStart, rightEnd)) {
+      return true;
+    }
+    return false;
   }
 
-  private segmentDirection(start: GeoPoint, end: GeoPoint, point: GeoPoint) {
-    return (
-      (point.lng - start.lng) * (end.lat - start.lat) -
-      (point.lat - start.lat) * (end.lng - start.lng)
-    );
+  /**
+   * Checks whether every edge of `leftRing` crosses, touches, or collinearly
+   * overlaps any edge of `rightRing`. Used for hole-vs-outer-boundary and
+   * hole-vs-hole disjointness checks, where the two rings are independent
+   * (no shared adjacency to exclude).
+   */
+  private ringsIntersectOrTouch(leftRing: GeoPoint[], rightRing: GeoPoint[]) {
+    const leftCount = leftRing.length;
+    const rightCount = rightRing.length;
+    for (let i = 0; i < leftCount; i += 1) {
+      const leftStart = leftRing[i]!;
+      const leftEnd = leftRing[(i + 1) % leftCount]!;
+      for (let j = 0; j < rightCount; j += 1) {
+        const rightStart = rightRing[j]!;
+        const rightEnd = rightRing[(j + 1) % rightCount]!;
+        if (
+          this.segmentsIntersectOrTouch(leftStart, leftEnd, rightStart, rightEnd)
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   private evaluateStop(
@@ -1679,7 +1874,12 @@ export class ServiceAreaService implements OnModuleInit {
     if (geometry.type === "polygon") {
       return {
         type: "Polygon" as const,
-        coordinates: [this.closeGeoJsonRing(geometry.coordinates)],
+        coordinates: [
+          this.closeGeoJsonRing(geometry.coordinates, "ccw"),
+          ...(geometry.holes ?? []).map((hole) =>
+            this.closeGeoJsonRing(hole, "cw"),
+          ),
+        ],
       };
     }
 
@@ -1691,12 +1891,22 @@ export class ServiceAreaService implements OnModuleInit {
     };
   }
 
-  private closeGeoJsonRing(points: GeoPoint[]) {
-    const ring = points.map((point) => [point.lng, point.lat]);
+  private closeGeoJsonRing(
+    points: GeoPoint[],
+    winding: "ccw" | "cw" = "ccw",
+  ): [number, number][] {
+    const ring: [number, number][] = points.map((point) => [
+      point.lng,
+      point.lat,
+    ]);
     const first = ring[0];
     const last = ring[ring.length - 1];
     if (first && last && (first[0] !== last[0] || first[1] !== last[1])) {
-      ring.push([...first]);
+      ring.push([first[0], first[1]]);
+    }
+    const area = this.signedRingArea(points);
+    if ((winding === "ccw" && area < 0) || (winding === "cw" && area > 0)) {
+      ring.reverse();
     }
     return ring;
   }
@@ -1724,18 +1934,29 @@ export class ServiceAreaService implements OnModuleInit {
   }
 
   private polygonContainsPoint(polygon: GeoPolygon, point: GeoPoint) {
-    const vertices = polygon.coordinates;
+    if (!this.ringContainsPoint(polygon.coordinates, point)) {
+      return false;
+    }
+    for (const hole of polygon.holes ?? []) {
+      if (this.ringContainsPointStrictlyInside(hole, point)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private ringContainsPoint(vertices: GeoPoint[], point: GeoPoint) {
     if (vertices.length < 3) {
       return false;
+    }
+    if (this.pointOnRingBoundary(vertices, point)) {
+      return true;
     }
 
     let inside = false;
     for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
       const current = vertices[i]!;
       const previous = vertices[j]!;
-      if (this.pointOnSegment(point, previous, current)) {
-        return true;
-      }
       const intersects =
         current.lng > point.lng !== previous.lng > point.lng &&
         point.lat <
@@ -1747,6 +1968,27 @@ export class ServiceAreaService implements OnModuleInit {
       }
     }
     return inside;
+  }
+
+  private ringContainsPointStrictlyInside(vertices: GeoPoint[], point: GeoPoint) {
+    if (vertices.length < 3) {
+      return false;
+    }
+    if (this.pointOnRingBoundary(vertices, point)) {
+      return false;
+    }
+    return this.ringContainsPoint(vertices, point);
+  }
+
+  private pointOnRingBoundary(vertices: GeoPoint[], point: GeoPoint) {
+    for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+      const current = vertices[i]!;
+      const previous = vertices[j]!;
+      if (this.pointOnSegment(point, previous, current)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private pointOnSegment(point: GeoPoint, start: GeoPoint, end: GeoPoint) {

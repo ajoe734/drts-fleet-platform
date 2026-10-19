@@ -16,6 +16,7 @@ export interface GeoPoint {
 export interface GeoPolygon {
   type: "polygon";
   coordinates: GeoPoint[];
+  holes?: GeoPoint[][];
 }
 
 export interface GeoCircle {
@@ -48,6 +49,7 @@ export interface GeometryBounds {
 export interface GeometryPolygonDraft {
   kind: "polygon";
   points: GeoPoint[];
+  holes?: GeoPoint[][];
 }
 
 export interface GeometryCircleDraft {
@@ -186,6 +188,8 @@ interface ProjectedPoint {
 interface ProjectedGeometry {
   bounds: GeometryBounds;
   polygonPoints: string | null;
+  polygonPathD: string | null;
+  holeVertices: ProjectedPoint[][];
   polylinePoints: string | null;
   routeStrokeWidth: number;
   vertices: ProjectedPoint[];
@@ -214,17 +218,89 @@ export function validateGeometryDraft(
 
   switch (draft.kind) {
     case "polygon": {
-      const unique = dedupeSequentialPoints(draft.points);
+      const unique = stripClosingDuplicatePoint(draft.points);
       errors.push(...validatePointCollection(unique, "Polygon vertex"));
+      const hasDuplicateConsecutive =
+        unique.length >= 2 &&
+        unique.some((point, index) =>
+          pointsEqual(point, unique[(index + 1) % unique.length]!),
+        );
+      if (hasDuplicateConsecutive) {
+        errors.push(
+          "Polygon cannot contain duplicate consecutive vertices or zero-length edges.",
+        );
+      }
       if (unique.length < 3) {
         errors.push("Polygon requires at least 3 vertices.");
       }
       if (unique.length >= 3 && Math.abs(signedPolygonArea(unique)) < 1e-8) {
         errors.push("Polygon area must be non-zero.");
       }
-      if (unique.length >= 4 && polygonHasSelfIntersection(unique)) {
+      if (unique.length >= 3 && polygonHasSelfIntersection(unique)) {
         errors.push("Polygon cannot self-intersect.");
       }
+
+      const validHoles: GeoPoint[][] = [];
+      (draft.holes ?? []).forEach((hole, holeIndex) => {
+        const uniqueHole = stripClosingDuplicatePoint(hole);
+        errors.push(
+          ...validatePointCollection(
+            uniqueHole,
+            `Polygon hole ${holeIndex + 1} vertex`,
+          ),
+        );
+
+        const hasDuplicateConsecutive =
+          uniqueHole.length >= 2 &&
+          uniqueHole.some((point, index) =>
+            pointsEqual(point, uniqueHole[(index + 1) % uniqueHole.length]!),
+          );
+
+        let holeValid = true;
+        if (uniqueHole.length < 3 || hasDuplicateConsecutive) {
+          errors.push("Polygon hole requires at least 3 vertices.");
+          holeValid = false;
+        }
+        if (
+          uniqueHole.length >= 3 &&
+          Math.abs(signedPolygonArea(uniqueHole)) < 1e-8
+        ) {
+          errors.push("Polygon hole area must be non-zero.");
+          holeValid = false;
+        }
+        if (uniqueHole.length >= 3 && polygonHasSelfIntersection(uniqueHole)) {
+          errors.push("Polygon hole cannot self-intersect.");
+          holeValid = false;
+        }
+
+        if (unique.length >= 3 && holeValid) {
+          const liesStrictlyInside = uniqueHole.every(
+            (vertex) =>
+              ringContainsPoint(unique, vertex) &&
+              !pointOnRingBoundary(unique, vertex),
+          );
+          if (!liesStrictlyInside || ringsIntersectOrTouch(unique, uniqueHole)) {
+            errors.push("Polygon hole must lie strictly inside the outer boundary.");
+            holeValid = false;
+          } else {
+            for (const prevHole of validHoles) {
+              if (
+                ringsIntersectOrTouch(prevHole, uniqueHole) ||
+                ringContainsPoint(prevHole, uniqueHole[0]!) ||
+                ringContainsPoint(uniqueHole, prevHole[0]!)
+              ) {
+                errors.push("Polygon holes cannot intersect, touch, or nest.");
+                holeValid = false;
+                break;
+              }
+            }
+          }
+        }
+
+        if (holeValid) {
+          validHoles.push(uniqueHole);
+        }
+      });
       break;
     }
     case "circle":
@@ -447,6 +523,9 @@ export function GeometryEditor({
         pushDraft({
           kind: "polygon",
           points: [...draft.points, point],
+          ...(draft.holes && draft.holes.length > 0
+            ? { holes: draft.holes }
+            : {}),
         });
         break;
       case "routeCorridor":
@@ -493,7 +572,13 @@ export function GeometryEditor({
         index === vertexIndex ? { ...point, [field]: value } : point,
       );
       return current.kind === "polygon"
-        ? { kind: "polygon", points: nextPoints }
+        ? {
+            kind: "polygon",
+            points: nextPoints,
+            ...(current.holes && current.holes.length > 0
+              ? { holes: current.holes }
+              : {}),
+          }
         : {
             kind: "routeCorridor",
             points: nextPoints,
@@ -510,7 +595,13 @@ export function GeometryEditor({
       const nextPoints = current.points.filter((_, index) => index !== vertexIndex);
       setSelectedVertexIndex(null);
       return current.kind === "polygon"
-        ? { kind: "polygon", points: nextPoints }
+        ? {
+            kind: "polygon",
+            points: nextPoints,
+            ...(current.holes && current.holes.length > 0
+              ? { holes: current.holes }
+              : {}),
+          }
         : {
             kind: "routeCorridor",
             points: nextPoints,
@@ -656,6 +747,7 @@ export function GeometryEditor({
                   return (
                     <rect
                       key={`vertex-${index}`}
+                      data-vertex-index={index}
                       x={point.x - 5}
                       y={point.y - 5}
                       width={10}
@@ -830,15 +922,23 @@ export function GeometryEditor({
 function buildBackendPayloads(draft: GeometryDraft): GeometryEditorBackendPayloads {
   switch (draft.kind) {
     case "polygon": {
-      const points = closePolygonRing(draft.points);
+      const canonicalPoints = stripClosingDuplicatePoint(draft.points);
+      const canonicalHoles = (draft.holes ?? []).map((hole) =>
+        stripClosingDuplicatePoint(hole),
+      );
+      const outerRing = closeOrientedGeoJsonRing(canonicalPoints, "ccw");
+      const holeRings = canonicalHoles.map((hole) =>
+        closeOrientedGeoJsonRing(hole, "cw"),
+      );
       return {
         serviceAreaGeometry: {
           type: "polygon",
-          coordinates: draft.points,
+          coordinates: canonicalPoints,
+          ...(canonicalHoles.length > 0 ? { holes: canonicalHoles } : {}),
         } satisfies GeoPolygon,
         sandboxAreaGeometry: {
           type: "MultiPolygon",
-          coordinates: [[points.map((point) => [point.lng, point.lat] as [number, number])]],
+          coordinates: [[outerRing, ...holeRings]],
         },
         sandboxRouteGeometry: null,
         routeCorridor: null,
@@ -893,6 +993,11 @@ function buildReviewDiff(
   switch (draft.kind) {
     case "polygon":
       summary.push(`${draft.points.length} polygon vertices.`);
+      if ((draft.holes?.length ?? 0) > 0) {
+        summary.push(
+          `${draft.holes!.length} polygon ${draft.holes!.length === 1 ? "hole" : "holes"}.`,
+        );
+      }
       break;
     case "circle":
       summary.push(
@@ -923,7 +1028,12 @@ function geometryDraftToGeoJsonObject(draft: GeometryDraft): Record<string, unkn
         properties: { geometryEditorKind: "polygon" },
         geometry: {
           type: "Polygon",
-          coordinates: [closePolygonRing(draft.points).map((point) => [point.lng, point.lat])],
+          coordinates: [
+            closeOrientedGeoJsonRing(draft.points, "ccw"),
+            ...(draft.holes ?? []).map((hole) =>
+              closeOrientedGeoJsonRing(hole, "cw"),
+            ),
+          ],
         },
       };
     case "circle":
@@ -988,21 +1098,36 @@ function geometryDraftFromGeometry(
   switch (geometry.type) {
     case "Polygon": {
       const rings = geometry.coordinates as number[][][] | undefined;
-      const ring = rings?.[0];
-      if (!Array.isArray(ring) || ring.length < 4) {
-        throw new Error("Polygon ring must contain at least 4 coordinates.");
-      }
-      const points = ring.slice(0, -1).map(positionToPoint);
-      return { kind: "polygon", points };
+      const points = parsePolygonRingCoordinates(
+        rings?.[0],
+        "Polygon ring must contain at least 3 coordinates.",
+      );
+      const holes = (rings?.slice(1) ?? []).map((holeRing) =>
+        parsePolygonRingCoordinates(
+          holeRing,
+          "Polygon hole ring must contain at least 3 coordinates.",
+        ),
+      );
+      return holes.length > 0
+        ? { kind: "polygon", points, holes }
+        : { kind: "polygon", points };
     }
     case "MultiPolygon": {
       const polygons = geometry.coordinates as number[][][][] | undefined;
-      const ring = polygons?.[0]?.[0];
-      if (!Array.isArray(ring) || ring.length < 4) {
-        throw new Error("MultiPolygon requires at least one closed ring.");
-      }
-      const points = ring.slice(0, -1).map(positionToPoint);
-      return { kind: "polygon", points };
+      const rings = polygons?.[0];
+      const points = parsePolygonRingCoordinates(
+        rings?.[0],
+        "MultiPolygon requires at least one ring with 3 or more coordinates.",
+      );
+      const holes = (rings?.slice(1) ?? []).map((holeRing) =>
+        parsePolygonRingCoordinates(
+          holeRing,
+          "Polygon hole ring must contain at least 3 coordinates.",
+        ),
+      );
+      return holes.length > 0
+        ? { kind: "polygon", points, holes }
+        : { kind: "polygon", points };
     }
     case "Point": {
       const coordinates = geometry.coordinates as number[] | undefined;
@@ -1095,7 +1220,17 @@ function renderEditorDraft(
 
   return (
     <g>
-      {projected.polygonPoints ? (
+      {projected.holeVertices.length > 0 && projected.polygonPathD ? (
+        <path
+          d={projected.polygonPathD}
+          fill={fill}
+          fillRule="evenodd"
+          stroke={stroke}
+          strokeWidth={2}
+          strokeDasharray="6 4"
+          data-geometry-polygon-cutout="true"
+        />
+      ) : projected.polygonPoints ? (
         <polygon
           points={projected.polygonPoints}
           fill={fill}
@@ -1155,12 +1290,28 @@ function projectDraft(draft: GeometryDraft, bounds: GeometryBounds): ProjectedGe
   switch (draft.kind) {
     case "polygon": {
       const vertices = draft.points.map((point) => projectPoint(point, bounds));
+      const holeVertices = (draft.holes ?? []).map((hole) =>
+        hole.map((point) => projectPoint(point, bounds)),
+      );
+      const pathRings = [vertices, ...holeVertices].filter(
+        (ring) => ring.length > 0,
+      );
       return {
         bounds,
         polygonPoints:
           vertices.length > 0
             ? vertices.map((point) => `${round(point.x)},${round(point.y)}`).join(" ")
             : null,
+        polygonPathD:
+          pathRings.length > 0
+            ? pathRings
+                .map(
+                  (ring) =>
+                    `M ${ring.map((p) => `${round(p.x)},${round(p.y)}`).join(" L ")} Z`,
+                )
+                .join(" ")
+            : null,
+        holeVertices,
         polylinePoints: null,
         routeStrokeWidth: 0,
         vertices,
@@ -1175,6 +1326,8 @@ function projectDraft(draft: GeometryDraft, bounds: GeometryBounds): ProjectedGe
       return {
         bounds,
         polygonPoints: null,
+        polygonPathD: null,
+        holeVertices: [],
         polylinePoints: null,
         routeStrokeWidth: 0,
         vertices: [],
@@ -1188,6 +1341,8 @@ function projectDraft(draft: GeometryDraft, bounds: GeometryBounds): ProjectedGe
       return {
         bounds,
         polygonPoints: null,
+        polygonPathD: null,
+        holeVertices: [],
         polylinePoints:
           vertices.length > 0
             ? vertices.map((point) => `${round(point.x)},${round(point.y)}`).join(" ")
@@ -1207,6 +1362,8 @@ function resolveBounds(drafts: GeometryDraft[]): GeometryBounds {
   for (const draft of drafts) {
     switch (draft.kind) {
       case "polygon":
+        points.push(...draft.points, ...(draft.holes ?? []).flat());
+        break;
       case "routeCorridor":
         points.push(...draft.points);
         break;
@@ -1290,6 +1447,100 @@ function closePolygonRing(points: GeoPoint[]): GeoPoint[] {
   return [...points, first];
 }
 
+function pointsEqual(a: GeoPoint, b: GeoPoint): boolean {
+  return a.lat === b.lat && a.lng === b.lng;
+}
+
+function stripClosingDuplicatePoint(points: GeoPoint[]): GeoPoint[] {
+  if (points.length >= 2 && pointsEqual(points[0]!, points[points.length - 1]!)) {
+    return points.slice(0, -1);
+  }
+  return points;
+}
+
+/**
+ * Unlike the API/fixture `pointOnSegment(point, start, end)` (collinearity +
+ * bounding-box containment), this file's `pointOnSegment(start, point, end)`
+ * only checks bounding-box containment, guarded by `orientation(...) === 0`
+ * in `segmentsIntersect`. Ring-boundary checks need both, so this combines
+ * them explicitly with the same argument order used elsewhere in this file.
+ */
+function pointOnRingBoundary(ring: GeoPoint[], point: GeoPoint): boolean {
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const current = ring[i]!;
+    const previous = ring[j]!;
+    if (
+      orientation(previous, point, current) === 0 &&
+      pointOnSegment(previous, point, current)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function ringContainsPoint(ring: GeoPoint[], point: GeoPoint): boolean {
+  if (ring.length < 3) {
+    return false;
+  }
+  if (pointOnRingBoundary(ring, point)) {
+    return true;
+  }
+
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const current = ring[i]!;
+    const previous = ring[j]!;
+    const intersects =
+      current.lng > point.lng !== previous.lng > point.lng &&
+      point.lat <
+        ((previous.lat - current.lat) * (point.lng - current.lng)) /
+          (previous.lng - current.lng) +
+          current.lat;
+    if (intersects) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function ringsIntersectOrTouch(ringA: GeoPoint[], ringB: GeoPoint[]): boolean {
+  const countA = ringA.length;
+  const countB = ringB.length;
+  for (let i = 0; i < countA; i += 1) {
+    const aStart = ringA[i]!;
+    const aEnd = ringA[(i + 1) % countA]!;
+    for (let j = 0; j < countB; j += 1) {
+      const bStart = ringB[j]!;
+      const bEnd = ringB[(j + 1) % countB]!;
+      if (segmentsIntersect(aStart, aEnd, bStart, bEnd)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function closeOrientedGeoJsonRing(
+  points: GeoPoint[],
+  winding: "ccw" | "cw",
+): [number, number][] {
+  const ring: [number, number][] = points.map((point) => [
+    point.lng,
+    point.lat,
+  ]);
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first && last && (first[0] !== last[0] || first[1] !== last[1])) {
+    ring.push([first[0], first[1]]);
+  }
+  const area = signedPolygonArea(points);
+  if ((winding === "ccw" && area < 0) || (winding === "cw" && area > 0)) {
+    ring.reverse();
+  }
+  return ring;
+}
+
 function positionToPoint(position: number[]): GeoPoint {
   if (position.length < 2) {
     throw new Error("GeoJSON coordinates must include [lng, lat].");
@@ -1306,6 +1557,16 @@ function positionToPoint(position: number[]): GeoPoint {
     throw new Error("GeoJSON longitude must be between -180 and 180.");
   }
   return { lat: lat!, lng: lng! };
+}
+
+function parsePolygonRingCoordinates(
+  ring: unknown,
+  errorMessage: string,
+): GeoPoint[] {
+  if (!Array.isArray(ring) || ring.length < 3) {
+    throw new Error(errorMessage);
+  }
+  return stripClosingDuplicatePoint(ring.map(positionToPoint));
 }
 
 function numericProperty(value: unknown, fallback: number): number {
@@ -1369,6 +1630,39 @@ function signedPolygonArea(points: GeoPoint[]): number {
 }
 
 function polygonHasSelfIntersection(points: GeoPoint[]): boolean {
+  const n = points.length;
+  if (n < 3) {
+    return false;
+  }
+
+  for (let i = 0; i < n; i += 1) {
+    for (let j = i + 1; j < n; j += 1) {
+      if (j === i + 1) {
+        continue;
+      }
+      if (i === 0 && j === n - 1) {
+        continue;
+      }
+      if (pointsEqual(points[i]!, points[j]!)) {
+        return true;
+      }
+    }
+  }
+
+  for (let i = 0; i < n; i += 1) {
+    const prev = points[(i - 1 + n) % n]!;
+    const curr = points[i]!;
+    const next = points[(i + 1) % n]!;
+    if (orientation(prev, curr, next) === 0) {
+      const dot =
+        (prev.lng - curr.lng) * (next.lng - curr.lng) +
+        (prev.lat - curr.lat) * (next.lat - curr.lat);
+      if (dot > 0) {
+        return true;
+      }
+    }
+  }
+
   const ring = closePolygonRing(points);
   const segmentCount = ring.length - 1;
 
