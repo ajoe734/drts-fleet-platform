@@ -1,6 +1,6 @@
 # OPS-SCHEDULER-QUEUE-CANONICAL-FLOW-20261015
 
-This is the original C037/C039 implementation continuation. All 11 original clauses, five keys and 12 ordered scopes remain in force. Normal R2 adds only the existing controller queue-read test's async/await hunk as scope 13. Codex2 authors; Codex independently reviews. Original Claude/Claude2 provenance, complete draft and narrow positive credits remain preserved.
+This is the original C037/C039 implementation continuation. All 11 original clauses, five keys and 12 ordered scopes remain in force. Normal R2 adds only the existing controller queue-read test's async/await hunk as scope 13. Normal R3 adds only the existing scheduler structural call-chain assertion hunk as scope 14; all eleven clauses and five keys remain unchanged. Codex2 authors; Codex independently reviews. Original Claude/Claude2 provenance, complete draft and narrow positive credits remain preserved.
 
 Base: `a78ce4317a0d83e21af47b4122e35c2909d465c2`, including accepted TenantContact. Ordinary recoverable anchor: `f834d1e33` on `codex2/ops-scheduler-queue-canonical-flow-20261015-root-20261019`. The final SHA/generation are recorded by the immutable handoff receipt.
 
@@ -40,6 +40,18 @@ Machine evidence lives in `.local/goal-continuation-20261019T0200Z-accepted61fa7
 - `complete-api-production-typecheck-exit.json`, `complete-root-and-own-typecheck-exit.json`, `complete-affected-lint-exit.json`: direct 0. API production is checked in full with existing Source aliases in a local evidence config, unchanged compiler rules and no emit/build. Affected root/own tests are checked separately. No shared tsconfig is edited.
 - The extra expanded typecheck of API unit/integration test files is outside their normal root/API production tsconfig inputs. Its corrected literal-base comparison records the identical 216-diagnostic multiset on base and current (direct 2 each, zero new diagnostics). Raw failures and the earlier incorrect comparison command remain recorded as tooling observations, never a full-repository typecheck pass or a reason to relax types/assertions.
 - `preserved-Source-and-assertions.json` plus its checker establish complete member/constructor and original assertion preservation. Normal hook preparation failures are retained; accepted read paths were materialized before successful ordinary hooks, with no bypass.
+
+## R1: existing scheduler structural caller adaptation
+
+The own Product run `39237278554`, job `118009848223`, failed only the old structural expectation that the sweep directly contains `this.dispatchOrder(`. The repaired production sweep instead awaits `escalateReservationHoldRequired`, which uses the existing dispatch preparation and required persistence ACK before apply. The raw job log remains in Root evidence with SHA256 `dea148e3527039fffd07dfe3541765e964bb180a601d42d51a1f5c88bc5d3f44`. Normal reviewer reopen and R3 scope coordination authorize only that existing test hunk plus this UAT update.
+
+- `R1-before-stale-callchain.json`: the unchanged existing file on `d0c6c6aff6ef828142f75335d388ed32b37e210c` reproduces 9 PASS / 1 FAIL / zero skip, direct 1, with the same sole stale call-chain assertion.
+- `R1-fixed-scheduler-and-own.json`: the corrected existing ten cases plus the fifteen actual command cases pass, 25 PASS / zero skip, direct 0. This is the current revision check, not an addition to the retained historical 215-case run. The full 215 suite and expanded legacy typecheck were not rerun for this test-only successor. Their original reports and the identical 216-diagnostic base/current comparison remain immutable and retain their original scope.
+- The single replaced assertion now follows the awaited reservation helper and checks actual prepare, current-order lock, transaction persistence and noDB required persistence before apply. All other 37 complete original assertions in this file retain their actual expressions, matchers, expected operands and order; everything outside the coordinated hunk is byte-exact. All ten case titles and the timer/timeout/manual behavior remain.
+- `R1-structural-and-production-preservation.json` proves all four production files are byte-exact to `d0c6`; `R1-preserved-Source-and-assertions.json` reuses the original complete AST check and preserves the prior 662 assertions, 475 other members and constructors. No production call, comment, bypass, timer, policy or configuration was added to satisfy the stale test.
+- `R1-affected-typecheck-exit.json`, `R1-affected-lint-exit.json` and both preservation check exits are 0. The local typecheck includes this existing test and the own command test under unchanged root compiler rules, without emit or shared config edits. Normal hooks/trailers/plain push and the new immutable handoff are recorded in the R1 packet.
+
+The original packet is retained unchanged. `R1-delivery-result.json` and `R1-hash-manifest.json` record the complete original eleven-clause/five-key/fourteen-scope successor. Its own required hosted CI and independent Root review/protected merge/keys remain pending; no older-SHA CI green is borrowed.
 
 ## Limits
 
