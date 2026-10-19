@@ -2,6 +2,18 @@ import type { FareVersion } from "@drts/contracts";
 export const BOOK_T = {
   realmName: "乘客叫車",
   pickup: "上車地點",
+  reviewAddressMode: "演練選址方式",
+  reviewFixedAddresses: "固定演練點（模擬）",
+  reviewStandardAddresses: "一般地址搜尋與目前位置",
+  reviewAddressNotice:
+    "一般選址使用瀏覽器定位與既有地址查詢，圖資來源依本環境設定；切換方式會清除起訖地點，請重新確認。簡訊、車司資格、司機定位、支付與通知仍依演練設定。",
+  currentLocation: "使用目前位置",
+  locating: "正在取得目前位置…",
+  locationUnsupported: "此瀏覽器無法取得目前位置，請搜尋或手動選擇上車地點。",
+  locationDenied: "未允許使用目前位置，您仍可搜尋或手動選擇上車地點。",
+  locationUnavailable: "目前無法取得位置，請重試或搜尋上車地點。",
+  locationTimeout: "取得位置逾時，請重試或搜尋上車地點。",
+  locationAddressError: "無法解析目前位置的地址，請重試或搜尋上車地點。",
   dropoff: "下車地點",
   time: "預約時間",
   book: "建立乘車需求",
@@ -15,7 +27,8 @@ export const BOOK_T = {
   acknowledgementError: "無法更新費用確認紀錄，請重試。",
   acknowledge: "我已閱讀並同意",
   disclosureFooter: "下單前將再次顯示費用摘要供您確認",
-  unverifiedPhone: "聯絡手機尚未驗證（未驗證）；目前設定允許使用聯絡手機。",
+  unverifiedPhone:
+    "聯絡手機尚未驗證；此驗證與登入手機號碼驗證各自獨立，請前往帳號管理完成聯絡手機驗證。",
   account: "前往帳號管理",
   disclosure: "費用與優惠說明",
   rules: "費用規則",

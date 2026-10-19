@@ -2,6 +2,7 @@ import type { MoneyAmount } from "@drts/contracts";
 import { type Locale, t } from "./translations";
 
 const DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Taipei",
   year: "numeric",
   month: "2-digit",
   day: "2-digit",
@@ -20,6 +21,7 @@ export function formatDateTime(
   }
 
   return new Intl.DateTimeFormat(toIntlLocale(locale), {
+    timeZone: "Asia/Taipei",
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
@@ -28,6 +30,12 @@ export function formatDateTime(
 export function formatDateInput(value: string | null | undefined) {
   if (!value) {
     return "";
+  }
+
+  // Financial calendar days and billing periods are literals, not instants.
+  // Timestamp callers display the same business day as formatDateTime.
+  if (/^\d{4}-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?$/.test(value)) {
+    return value;
   }
 
   return DATE_FORMATTER.format(new Date(value));

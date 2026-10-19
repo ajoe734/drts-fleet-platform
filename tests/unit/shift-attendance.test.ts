@@ -33,7 +33,7 @@ describe("shift attendance service", () => {
     expect(shift.startOdometer).toBe(50000);
     expect(shift.clockedOutAt).toBeNull();
 
-    expect(service.listShifts()).toHaveLength(1);
+    expect(await service.listShifts()).toHaveLength(1);
     expect(auditService.listAuditLogs()[0]?.actionName).toBe("clock_in");
   });
 
@@ -94,7 +94,7 @@ describe("shift attendance service", () => {
     await service.clockIn({ driverId: "driver-004" });
     await service.clockOut({ driverId: "driver-004" });
 
-    const attendance = service.listAttendance("driver-004");
+    const attendance = await service.listAttendance("driver-004");
     expect(attendance).toHaveLength(1);
     expect(attendance[0]!.driverId).toBe("driver-004");
   });
@@ -107,7 +107,7 @@ describe("shift attendance service", () => {
       vehicleId: "VEH-005",
     });
 
-    const abandoned = service.abandonShift(
+    const abandoned = await service.abandonShift(
       shift.shiftId,
       "Emergency situation",
     );
@@ -121,16 +121,18 @@ describe("shift attendance service", () => {
     await service.clockIn({ driverId: "driver-006" });
     await service.clockOut({ driverId: "driver-006" });
 
-    const shifts = service.listShifts("driver-006");
-    expect(() => service.abandonShift(shifts[0]!.shiftId, "reason")).toThrow(
-      "Api Request Error",
-    );
+    const shifts = await service.listShifts("driver-006");
+    await expect(
+      service.abandonShift(shifts[0]!.shiftId, "reason"),
+    ).rejects.toThrow("Api Request Error");
   });
 
   it("returns 404 for nonexistent shift", async () => {
     const { service } = createService();
 
-    expect(() => service.getShift("SFT-999999")).toThrow("Api Request Error");
+    await expect(service.getShift("SFT-999999")).rejects.toThrow(
+      "Api Request Error",
+    );
   });
 
   describe("GAP-CONF-08 vehicle dispatchability check on clock-in", () => {

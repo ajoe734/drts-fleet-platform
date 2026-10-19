@@ -89,7 +89,9 @@ describe("R2: production booking and repositories commit before dispatch", () =>
         "payment",
         "rating",
         "receipt",
+        "tracking",
       ]);
+      expect(result.ride.tracking).toBeNull();
     },
   );
 

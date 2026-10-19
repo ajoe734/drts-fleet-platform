@@ -1,3 +1,4 @@
+import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -98,37 +99,14 @@ function createOwnedMobilityService(
     withTransaction: async <T>(work: (tx: unknown) => Promise<T>) => work({}),
     reportPersistenceFailure: () => undefined,
   };
-  const callcenterService = {
-    registerRecordingAttachmentListener: () => undefined,
-    registerRecordingStateChangeListener: () => undefined,
-    linkOrderToCallSession: ({
-      callId,
-      callType,
-      callerPhone,
-      agentId,
-      linkedOrderId,
-      recordingId,
-    }: {
-      callId: string;
-      callType: string;
-      callerPhone?: string | null;
-      agentId?: string | null;
-      linkedOrderId: string;
-      recordingId?: string | null;
-    }) => ({
-      callId,
-      callType,
-      callerPhone: callerPhone ?? null,
-      agentId: agentId ?? null,
-      linkedOrderId,
-      recordingId: recordingId ?? null,
-    }),
-  };
+  const callcenterService = new CallcenterService(
+    auditNotificationService as never,
+  );
 
   const service = new OwnedMobilityService(
     regulatoryRegistryService as never,
     auditNotificationService as never,
-    callcenterService as never,
+    callcenterService,
     new OwnedMobilityTaskEventsService(new EventEmitter2()),
     new OpsDispatchEventsService(new EventEmitter2()),
     repository as never,
@@ -256,7 +234,7 @@ it("writes cross-surface persisted anti-bypass proof for fleets closeout", async
   );
   const tenantServiceableDetail = service.getOrder(tenantServiceable.orderId);
 
-  const conciergeServiceableOrder = service.createCallCenterOrder(
+  const conciergeServiceableOrder = await service.createCallCenterOrder(
     {
       callId: "CALL-CONCIERGE-001",
       agentId: "concierge-ops-001",
@@ -350,7 +328,7 @@ it("writes cross-surface persisted anti-bypass proof for fleets closeout", async
   );
   const partnerServiceableDetail = service.getOrder(partnerServiceable.orderId);
 
-  const callcenterProviderOutageOrder = service.createCallCenterOrder(
+  const callcenterProviderOutageOrder = await service.createCallCenterOrder(
     {
       callId: "CALL-OUTAGE-001",
       agentId: "ops-agent-001",
@@ -408,7 +386,7 @@ it("writes cross-surface persisted anti-bypass proof for fleets closeout", async
     callcenterProviderOutageOrder.orderId,
   );
 
-  const conciergeProviderOutageOrder = service.createCallCenterOrder(
+  const conciergeProviderOutageOrder = await service.createCallCenterOrder(
     {
       callId: "CALL-CONCIERGE-OUTAGE-001",
       agentId: "concierge-ops-002",
@@ -522,7 +500,7 @@ it("writes cross-surface persisted anti-bypass proof for fleets closeout", async
     partnerCoordinateLess.orderId,
   );
 
-  const callcenterCoordinateLessOrder = service.createCallCenterOrder(
+  const callcenterCoordinateLessOrder = await service.createCallCenterOrder(
     {
       callId: "CALL-COORDLESS-001",
       agentId: "ops-agent-001",
@@ -546,7 +524,7 @@ it("writes cross-surface persisted anti-bypass proof for fleets closeout", async
     callcenterCoordinateLessOrder.orderId,
   );
 
-  const conciergeCoordinateLessOrder = service.createCallCenterOrder(
+  const conciergeCoordinateLessOrder = await service.createCallCenterOrder(
     {
       callId: "CALL-CONCIERGE-COORDLESS-001",
       agentId: "concierge-ops-003",

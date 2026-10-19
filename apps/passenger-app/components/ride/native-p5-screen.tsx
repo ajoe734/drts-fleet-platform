@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import type { RatePassengerRideCommand } from "@drts/contracts";
 import type { NativePassengerRidePresentation } from "@drts/passenger-client";
+import { getPassengerTrackingMapPositions } from "@drts/passenger-client";
 import { PASSENGER_P5_COLORS as p5 } from "@drts/ui-tokens";
 
 /** Actual API, navigation, platform telephone and authorized binary ports. */
@@ -309,6 +310,7 @@ function NativeP5ScreenBody({
   renderMap,
 }: NativeP5ScreenProps) {
   const fixture = presentation.fixture;
+  const positions = getPassengerTrackingMapPositions(fixture);
   const feedback = useActionFeedback();
   const support = (
     <View style={styles.card}>
@@ -408,13 +410,48 @@ function NativeP5ScreenBody({
       )}
       {showTrip ? (
         <View testID="native-active-trip" style={styles.card}>
-          <View testID="native-trip-map">
-            {renderMap ? (
-              renderMap(presentation)
-            ) : (
-              <Text style={styles.muted}>地圖暫時無法使用。</Text>
-            )}
-          </View>
+          {fixture.status !== "行程已完成" ? (
+            <View testID="native-trip-map">
+              {renderMap ? (
+                renderMap(presentation)
+              ) : positions ? (
+                <View
+                  accessibilityLabel="司機位置示意"
+                  testID="native-live-position-diagram"
+                  style={{
+                    height: 150,
+                    position: "relative",
+                    backgroundColor: p5.bg,
+                  }}
+                >
+                  <View
+                    testID="native-live-driver-position"
+                    style={{
+                      position: "absolute",
+                      left: `${positions.driver.x}%`,
+                      top: `${positions.driver.y}%`,
+                    }}
+                  >
+                    <Text>車</Text>
+                  </View>
+                  <View
+                    style={{
+                      position: "absolute",
+                      left: `${positions.target.x}%`,
+                      top: `${positions.target.y}%`,
+                    }}
+                  >
+                    <Text>{positions.targetLabel}</Text>
+                  </View>
+                  <Text style={{ position: "absolute", bottom: 0 }}>
+                    位置示意
+                  </Text>
+                </View>
+              ) : (
+                <Text style={styles.muted}>地圖暫時無法使用。</Text>
+              )}
+            </View>
+          ) : null}
           <Text style={styles.text}>{fixture.statusSubline}</Text>
           {fixture.etaMain ? (
             <Text testID="native-active-eta" style={styles.text}>

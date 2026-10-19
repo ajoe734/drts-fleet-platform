@@ -42,13 +42,34 @@ export function mapNativePassengerRideAuthorityToFixture(
   quoteAnomalyCode?: string | null,
 ): PassengerRideFixture {
   const view = unwrapNativePassengerRideAuthority(rawView);
-  const assignment = view.assignment;
+  const assignment =
+    view.order.status === "dispatch_timeout" ? null : view.assignment;
   const screenId = resolveNativePassengerScreenId(view, kind, quoteAnomalyCode);
+  const showPickupEta = [
+    "assigned",
+    "driver_accepted",
+    "enroute_pickup",
+  ].includes(view.order.status);
+  const pickupEta =
+    view.tracking === undefined ? assignment?.eta : view.tracking?.pickupEta;
   const fareMinor = assignment?.routeFare?.estimatedFareMinor ?? null;
   const payableFareMinor = assignment?.routeFare?.payableFareMinor ?? null;
-  const distanceMeters = assignment?.routeFare?.estimatedDistanceMeters ?? null;
+  const bookedQuote = view.bookingQuote;
+  const bookedFareText = bookedQuote
+    ? `預估 ${formatMoney(bookedQuote.estimatedMin * 100)}${
+        bookedQuote.estimatedMin === bookedQuote.estimatedMax
+          ? ""
+          : `–${formatMoney(bookedQuote.estimatedMax * 100)}`
+      }`
+    : null;
+  const distanceMeters =
+    assignment?.routeFare?.estimatedDistanceMeters ??
+    bookedQuote?.route.distanceMeters ??
+    null;
   const durationSeconds =
-    assignment?.routeFare?.estimatedDurationSeconds ?? null;
+    assignment?.routeFare?.estimatedDurationSeconds ??
+    bookedQuote?.route.durationSeconds ??
+    null;
   const payment = mapNativePassengerPayment(view.payment);
   const certificate =
     view.order?.status === "completed" || view.receipt
@@ -67,9 +88,24 @@ export function mapNativePassengerRideAuthorityToFixture(
         ? "Cancelled Ride"
         : nativePassengerScreenTitle(screenId),
     status: statusLabel(view.order.status),
+    ...(view.tracking !== undefined
+      ? {
+          tracking: ["cancelled", "completed", "dispatch_timeout"].includes(
+            view.order.status,
+          )
+            ? null
+            : view.tracking,
+        }
+      : {}),
     ...(quoteAnomalyCode && screenId === "A04" ? { quoteAnomalyCode } : {}),
     ...(view.order.status === "created"
       ? { statusSubline: "系統正在安排可派車輛" }
+      : {}),
+    ...(view.order.status === "dispatch_timeout"
+      ? {
+          statusSubline:
+            "尚未有司機完成接單，請等待調度重新安排車輛，或取消行程。",
+        }
       : {}),
     ...(view.order.requestedPickupAt
       ? {
@@ -79,16 +115,16 @@ export function mapNativePassengerRideAuthorityToFixture(
     ...(view.order.status === "cancelled" && view.order.cancelledAt
       ? { cancelledAtText: formatDateTime(view.order.cancelledAt) }
       : {}),
-    ...(view.order.status === "cancelled" ||
-    assignment?.eta.minutes === null ||
-    assignment?.eta.minutes === undefined
+    ...(!showPickupEta ||
+    pickupEta?.minutes === null ||
+    pickupEta?.minutes === undefined
       ? {}
-      : { etaMain: `預計 ${assignment.eta.minutes} 分鐘抵達` }),
-    ...(view.order.status === "cancelled" ||
-    !assignment?.eta.calculatedAt ||
-    !Number.isFinite(Date.parse(assignment.eta.calculatedAt))
+      : { etaMain: `預計 ${pickupEta.minutes} 分鐘抵達` }),
+    ...(!showPickupEta ||
+    !pickupEta?.calculatedAt ||
+    !Number.isFinite(Date.parse(pickupEta.calculatedAt))
       ? {}
-      : { etaSub: `更新於 ${formatDateTime(assignment.eta.calculatedAt)}` }),
+      : { etaSub: `更新於 ${formatDateTime(pickupEta.calculatedAt)}` }),
     ...(distanceMeters === null
       ? {}
       : { routeDistanceKm: `約 ${(distanceMeters / 1000).toFixed(1)} 公里` }),
@@ -107,7 +143,7 @@ export function mapNativePassengerRideAuthorityToFixture(
               : payableFareMinor !== null
                 ? `應付 ${formatMoney(payableFareMinor)}`
                 : fareMinor === null
-                  ? "依計費表實際金額收費"
+                  ? (bookedFareText ?? "依計費表實際金額收費")
                   : `預估 ${formatMoney(fareMinor)}`,
         }),
     ...(screenId === "A04"
@@ -126,9 +162,15 @@ export function mapNativePassengerRideAuthorityToFixture(
       assignment?.routeFare?.dropoff?.address ||
       view.order.dropoff?.address ||
       "",
-    mapState:
-      view.order.status === "cancelled"
-        ? "missing"
+    mapState: ["cancelled", "dispatch_timeout"].includes(view.order.status)
+      ? "missing"
+      : view.tracking !== undefined
+        ? !view.tracking?.location ||
+          view.tracking.locationFreshness === "missing"
+          ? "missing"
+          : view.tracking.locationFreshness === "fresh"
+            ? "fresh"
+            : "stale"
         : assignment?.eta.locationFreshness === "fresh"
           ? "fresh"
           : assignment
@@ -482,6 +524,7 @@ export function resolveNativePassengerScreenId(
   if (view.receipt) return "P5-10";
   if (view.order.status === "on_trip") return "P5-07";
   if (view.order.status === "arrived_pickup") return "P5-06";
+  if (view.order.status === "dispatch_timeout") return "P5-01";
   if (view.order.status === "redispatch_required") return "P5-04";
   if (!view.assignment) {
     if (
@@ -533,6 +576,7 @@ function statusLabel(status: PassengerRideAuthorityView["order"]["status"]) {
     completed: "行程已完成",
     cancelled: "行程已取消",
     redispatch_required: "正在為您改派",
+    dispatch_timeout: "派車逾時",
     exception_hold: "行程保留處理中",
   };
   return labels[status] ?? "行程狀態更新中";
@@ -603,7 +647,18 @@ export interface NativePassengerLocationPresentation {
   elapsedSeconds: number | null;
 }
 
-/** Uses the captured assignment timestamp, never receipt time or reconnect time. */
+/** Prefer the actual GPS observation time. Older producers retain their
+ * captured assignment fallback; stream receipt time never renews a GPS fix. */
+export function getPassengerLocationRecordedAt(
+  fixture: PassengerRideFixture,
+): string | null {
+  if (["行程已取消", "行程已完成"].includes(fixture.status)) return null;
+  return fixture.tracking === undefined
+    ? (fixture.assignment?.eta.calculatedAt ?? null)
+    : (fixture.tracking?.location?.recordedAt ?? null);
+}
+
+/** Age the location observation rather than the transport receipt. */
 export function getNativePassengerLocationPresentation(
   fixture: PassengerRideFixture,
   nowMs: number,
@@ -612,7 +667,7 @@ export function getNativePassengerLocationPresentation(
   if (fixture.status === "行程已取消" || fixture.mapState === "missing") {
     return { state: "missing", calculatedAtMs: 0, elapsedSeconds: null };
   }
-  const rawTime = fixture.assignment?.eta.calculatedAt;
+  const rawTime = getPassengerLocationRecordedAt(fixture);
   const parsedTime = rawTime ? Date.parse(rawTime) : NaN;
   const calculatedAtMs = Number.isFinite(parsedTime) ? parsedTime : 0;
   const elapsedSeconds =

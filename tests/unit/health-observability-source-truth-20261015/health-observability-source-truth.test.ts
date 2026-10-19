@@ -1527,13 +1527,13 @@ describe("HEALTH-OBSERVABILITY-SOURCE-TRUTH-20261015", () => {
       expect(zeroLagSnapshot.dispatch.oldestReadyOrderLagMinutes).toBe(0);
 
       // Ingest forwarded order and exercise C108 failure classifications: 429 rate_limit, webhook, credential, 401 auth
-      const grabOrder = forwarderService.ingestExternalOrder({
+      const grabOrder = await forwarderService.ingestExternalOrder({
         platformCode: GRAB_TAIWAN_PLATFORM_CODE,
         externalOrderId: "grab-c108-order-1",
         payload: { serviceBucket: "standard_taxi" },
       });
 
-      forwarderService.reportSyncFailure(grabOrder.mirrorOrderId, {
+      await forwarderService.reportSyncFailure(grabOrder.mirrorOrderId, {
         errorCode: "RATE_LIMIT_EXCEEDED",
         errorMessage: "HTTP 429 rate limit reached",
         retryable: true,
@@ -1545,7 +1545,7 @@ describe("HEALTH-OBSERVABILITY-SOURCE-TRUTH-20261015", () => {
       expect(grabHealth?.rateLimitStatus).toBe("limited");
       expect(grabHealth?.lastRateLimitAt).toBeDefined();
 
-      forwarderService.reportSyncFailure(grabOrder.mirrorOrderId, {
+      await forwarderService.reportSyncFailure(grabOrder.mirrorOrderId, {
         errorCode: "AUTH_TOKEN_EXPIRED",
         errorMessage: "OAuth token 401 reauth required",
         retryable: true,

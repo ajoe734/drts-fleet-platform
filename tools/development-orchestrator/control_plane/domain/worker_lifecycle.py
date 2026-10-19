@@ -30,6 +30,11 @@ ACTIVE_WORKER_STATUSES = frozenset(
     }
 )
 
+# A suspended approval retains its task/session binding, but its process has
+# exited. Keep it active for deduplication and worktree custody without reserving
+# host/lane capacity; resuming it must pass admission again.
+OCCUPIED_WORKER_STATUSES = ACTIVE_WORKER_STATUSES - {"suspended_approval"}
+
 TERMINAL_WORKER_STATUSES = frozenset(
     {
         "completed",

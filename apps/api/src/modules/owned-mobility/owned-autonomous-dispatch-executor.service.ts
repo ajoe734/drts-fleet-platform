@@ -103,6 +103,7 @@ export class OwnedAutonomousDispatchExecutorService {
       return existingReceipt.result as unknown as AutonomousDispatchOfferResult;
     }
 
+    await this.ownedMobilityService.prepareOrderAction({ orderId });
     let job = this.ownedMobilityService.getActiveDispatchJobForOrder(orderId);
 
     if (!job) {
@@ -110,7 +111,10 @@ export class OwnedAutonomousDispatchExecutorService {
         orderId,
         { mode: "auto" },
         options?.requestId,
+        opKey,
+        { required: true },
       );
+      await this.ownedMobilityService.prepareOrderAction({ orderId });
       job = this.ownedMobilityService.requireDispatchJob(
         dispatchRes.dispatchJobId,
       );
@@ -209,22 +213,23 @@ export class OwnedAutonomousDispatchExecutorService {
     }
 
     // List and filter candidates
-    const allCandidates =
-      await this.ownedMobilityService.listEligibleDispatchCandidatesForOrder(
-        orderId,
-      );
+    const allCandidates = ["no_supply", "failed", "queued"].includes(job.status)
+      ? []
+      : await this.ownedMobilityService.listEligibleDispatchCandidatesForOrder(
+          orderId,
+        );
     const excluded = new Set(options?.excludedDriverIds ?? []);
     const availableCandidates = allCandidates.filter(
       (c) => !excluded.has(c.driverId),
     );
 
     if (availableCandidates.length === 0) {
-      // SD §7.6: Candidates exhausted -> transition to redispatch_required / no_supply policy
-      job.status = "failed";
-      job.updatedAt = new Date().toISOString();
-      order.status = "redispatch_required";
-      order.updatedAt = new Date().toISOString();
-      order.lastDispatchFailureReason = "no_eligible_candidate";
+      await this.ownedMobilityService.completeAutonomousNoSupply(
+        orderId,
+        job.dispatchJobId,
+        "no_eligible_candidate",
+        options?.requestId,
+      );
 
       const exhaustedResult: AutonomousDispatchOfferResult = {
         status: "no_supply",
@@ -390,12 +395,14 @@ export class OwnedAutonomousDispatchExecutorService {
       }
     }
 
-    // All available candidates collided
-    job.status = "failed";
-    job.updatedAt = new Date().toISOString();
-    order.status = "redispatch_required";
-    order.updatedAt = new Date().toISOString();
-    order.lastDispatchFailureReason = "reservation_conflicts_exhausted";
+    // Capacity may have changed after matching; persist the original policy
+    // before acknowledging the exhausted round or completing its work item.
+    await this.ownedMobilityService.completeAutonomousNoSupply(
+      orderId,
+      job.dispatchJobId,
+      "reservation_conflicts_exhausted",
+      options?.requestId,
+    );
 
     const noSupplyResult: AutonomousDispatchOfferResult = {
       status: "no_supply",

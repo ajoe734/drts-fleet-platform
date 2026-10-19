@@ -61,6 +61,9 @@ describe("SR-WIRE-001 Consensus B1: Single async persistent clock-in/out path", 
         "Database connection lost during clock-in.",
       );
     });
+    // Canonical readback also goes to the (empty) table — no synthetic row
+    // was left behind by the failed transaction.
+    mockRepo.listShifts = vi.fn(async () => []);
 
     const service = new ShiftAttendanceService(auditService, mockRepo);
 
@@ -75,7 +78,8 @@ describe("SR-WIRE-001 Consensus B1: Single async persistent clock-in/out path", 
     });
 
     // Verify no shift is cached or reported as active
-    expect(service.listShifts("drv-tx-fail")).toHaveLength(0);
+    expect(await service.listShifts("drv-tx-fail")).toHaveLength(0);
+    expect(mockRepo.listShifts).toHaveBeenCalledWith("drv-tx-fail");
   });
 
   it("executes clockOut via executeClockOutTransaction and allows subsequent clockIn", async () => {

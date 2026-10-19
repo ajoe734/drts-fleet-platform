@@ -418,6 +418,10 @@ const en = {
   "status.call.active": "Active",
   "status.call.closed": "Closed",
   "status.callback.pending": "Pending",
+  "status.callback.claimed": "Claimed",
+  "status.callback.in_progress": "In progress",
+  "status.callback.cancelled": "Cancelled",
+  "status.callback.unreachable": "Unreachable",
   "status.callback.completed": "Completed",
   "status.callback.none": "No callback",
   "status.recording.ready": "Ready",
@@ -671,10 +675,8 @@ const zh: Record<keyof typeof en, string> = {
   "booking.field.callbackDue": "選填回撥到期時間",
   "booking.field.callbackNote": "回撥備註",
   "booking.field.notes": "櫃台備註",
-  "booking.help.product":
-    "入口會先確認授權產品，再沿用既有櫃台建單流程。",
-  "booking.help.route":
-    "建立禮賓代訂前，請先在地圖上確認上下車位置。",
+  "booking.help.product": "入口會先確認授權產品，再沿用既有櫃台建單流程。",
+  "booking.help.route": "建立禮賓代訂前，請先在地圖上確認上下車位置。",
   "booking.help.manualReview":
     "此行程在派遣前仍需人工確認；只有在座標無誤時才可繼續。",
   "booking.help.outageReview":
@@ -817,6 +819,10 @@ const zh: Record<keyof typeof en, string> = {
   "status.call.active": "進行中",
   "status.call.closed": "已關閉",
   "status.callback.pending": "待處理",
+  "status.callback.claimed": "已領取",
+  "status.callback.in_progress": "處理中",
+  "status.callback.cancelled": "已取消",
+  "status.callback.unreachable": "無法聯絡",
   "status.callback.completed": "已完成",
   "status.callback.none": "無回撥",
   "status.recording.ready": "已就緒",

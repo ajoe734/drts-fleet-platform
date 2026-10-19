@@ -27,6 +27,7 @@ import type {
   GenerateDriverStatementCommand,
   GenerateTenantInvoiceCommand,
   InvoiceLineRecord,
+  MarkReimbursementBatchReconciledCommand,
   MarkReimbursementPaidCommand,
   MarkReimbursementPaidWithProofCommand,
   MoneyAmount,
@@ -34,7 +35,10 @@ import type {
   PublishDriverFeePlanCommand,
   ReconciliationIssueCommentRecord,
   ReconciliationIssueRecord,
+  ReimbursementBatchExportReceipt,
+  ReimbursementBatchReconciliationReceipt,
   ReimbursementBatchRecord,
+  ReimbursementBatchWorkflowState,
   ReimbursementItemRecord,
   RemittanceProofPaymentReceipt,
   RemittanceProofReadbackGrant,
@@ -694,6 +698,63 @@ function buildDriverStatementPdfRows(
   ];
 }
 
+/**
+ * C080 batch export: binds the batch-owned canonical snapshot (driver,
+ * period, per-item order id and amount) plus the originating fee-plan
+ * version for subsidy traceability. This is the platform finance artifact
+ * export, never the driver's own remittance-proof upload.
+ */
+function buildReimbursementBatchExportPdfRows(
+  batch: ReimbursementBatchRecord,
+  feePlanVersion: string | null,
+  exportedAt: string,
+): string[] {
+  return [
+    `Reimbursement Batch Export ${batch.batchId}`,
+    `Driver ID: ${batch.driverId}`,
+    `Statement ID: ${batch.statementId}`,
+    `Period: ${batch.periodMonth}`,
+    `Fee Plan Version: ${feePlanVersion ?? "-"}`,
+    `Approved At: ${batch.approvedAt ?? "-"}`,
+    `Exported At: ${exportedAt}`,
+    "",
+    "Order ID | Channel | Amount | Reason",
+    "----------------------------------------------------------------",
+    ...batch.items.map(
+      (item) =>
+        `${item.orderId} | ${toPdfAsciiText(item.channelKey ?? "-")} | ${formatMoneyForPdf(item.amount)} | ${toPdfAsciiText(item.reason)}`,
+    ),
+    "----------------------------------------------------------------",
+    `Total (${batch.items.length} line${batch.items.length === 1 ? "" : "s"}): ${formatMoneyForPdf(batch.totalAmount)}`,
+  ];
+}
+
+/** Monotonic Q-ADM12 ordering; see `ReimbursementBatchRecord.workflowState`. */
+const REIMBURSEMENT_BATCH_WORKFLOW_RANK: Record<
+  ReimbursementBatchWorkflowState,
+  number
+> = {
+  draft: 0,
+  pending_approval: 1,
+  approved: 2,
+  exported: 3,
+  paid: 4,
+  reconciled: 5,
+};
+
+function advanceReimbursementWorkflowState(
+  current: ReimbursementBatchWorkflowState | undefined,
+  next: ReimbursementBatchWorkflowState,
+): ReimbursementBatchWorkflowState {
+  if (!current) {
+    return next;
+  }
+  return REIMBURSEMENT_BATCH_WORKFLOW_RANK[next] >
+    REIMBURSEMENT_BATCH_WORKFLOW_RANK[current]
+    ? next
+    : current;
+}
+
 @Injectable()
 export class BillingSettlementService implements OnModuleInit {
   private tenantBillingProfiles = new Map<string, TenantBillingProfile>([
@@ -766,9 +827,18 @@ export class BillingSettlementService implements OnModuleInit {
     documentArtifactRebuildRegistry?.register("tenant-invoice", (subjectId) =>
       this.rebuildTenantInvoiceArtifact(subjectId),
     );
-    documentArtifactRebuildRegistry?.register("report", (subjectId) =>
-      this.rebuildDriverStatementArtifact(subjectId),
-    );
+    // A single "report" rebuilder covers both producers that share this
+    // kind: a subjectId is either a driver statement id or a reimbursement
+    // batch id, never both, so trying the statement first and falling back
+    // to the batch export is unambiguous and loses no coverage.
+    documentArtifactRebuildRegistry?.register("report", async (subjectId) => {
+      const statementArtifact =
+        await this.rebuildDriverStatementArtifact(subjectId);
+      if (statementArtifact) {
+        return statementArtifact;
+      }
+      return this.rebuildReimbursementBatchExportArtifact(subjectId);
+    });
   }
 
   async getMultiTaxiPaymentException(
@@ -2226,6 +2296,17 @@ export class BillingSettlementService implements OnModuleInit {
           items: reimbursementItems,
           approvedAt: null,
           paidAt: null,
+          workflowState: "pending_approval",
+          exportedAt: null,
+          exportedByActorId: null,
+          exportReceiptId: null,
+          exportManifestHash: null,
+          exportDownloadMetadata: null,
+          reconciledAt: null,
+          reconciledByActorId: null,
+          reconciliationReason: null,
+          reconciliationEvidenceRef: null,
+          reconciliationReceiptId: null,
         };
         generatedReimbursements.push(reimbursementBatch);
         this.auditNotificationService.recordNotification({
@@ -2816,6 +2897,10 @@ export class BillingSettlementService implements OnModuleInit {
     }
 
     batch.approvedAt = new Date().toISOString();
+    batch.workflowState = advanceReimbursementWorkflowState(
+      batch.workflowState,
+      "approved",
+    );
     await this.persistChanges(
       {
         reimbursementBatches: [this.cloneReimbursementBatch(batch)],
@@ -3097,6 +3182,10 @@ export class BillingSettlementService implements OnModuleInit {
       updatedBatch.status = "paid";
       updatedBatch.paidAt = receipt.paidAt;
       updatedBatch.remittanceProofId = receipt.proofId;
+      updatedBatch.workflowState = advanceReimbursementWorkflowState(
+        updatedBatch.workflowState,
+        "paid",
+      );
       const relatedStatement = this.driverStatements.find(
         (statement) => statement.statementId === batch.statementId,
       );
@@ -3153,6 +3242,313 @@ export class BillingSettlementService implements OnModuleInit {
     }
 
     return receipt;
+  }
+
+  /**
+   * C080 batch-owned signed export (not the driver's own remittance-proof
+   * upload, and not a bank payment instruction). Requires the batch to be
+   * approved. A repeat call never re-renders different bytes for an
+   * already-exported batch -- it only reissues the signed link's
+   * signature/expiry window over the same immutable manifest hash, exactly
+   * like `ensureTenantInvoiceArtifact` / `ensureDriverStatementArtifact`.
+   */
+  async exportReimbursementBatch(
+    batchId: string,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<ReimbursementBatchExportReceipt> {
+    const batch = this.requireReimbursementBatch(batchId);
+    if (!batch.approvedAt) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "REIMBURSEMENT_BATCH_NOT_APPROVED_FOR_EXPORT",
+        "Reimbursement batch must be approved before it can be exported.",
+        { batchId },
+      );
+    }
+
+    const actorId = identity?.actorId ?? null;
+
+    if (batch.exportDownloadMetadata && batch.exportManifestHash) {
+      const expired = this.isInvoiceArtifactExpired(
+        batch.exportDownloadMetadata.downloadUrl,
+      );
+      let download = batch.exportDownloadMetadata;
+      if (expired) {
+        download = createControlledDownloadMetadata({
+          kind: "report",
+          subjectId: batch.batchId,
+          manifestHash: batch.exportManifestHash,
+          host: this.downloadHost,
+          keyId: this.downloadSigningKeyId,
+          signingSecret: this.downloadSigningSecret,
+          ttlMinutes: this.downloadExpiryMinutes,
+          signatureVersion: this.downloadSignatureVersion,
+        });
+        const refreshed = this.cloneReimbursementBatch(batch);
+        refreshed.exportDownloadMetadata = download;
+        await this.persistChanges(
+          { reimbursementBatches: [refreshed] },
+          "reissue_reimbursement_batch_export_artifact",
+        );
+        Object.assign(batch, refreshed);
+      }
+
+      return {
+        receiptId: batch.exportReceiptId!,
+        batchId: batch.batchId,
+        exportedAt: batch.exportedAt!,
+        exportedByActorId: batch.exportedByActorId ?? null,
+        manifestHash: batch.exportManifestHash,
+        download,
+        createdAt: batch.exportedAt!,
+      };
+    }
+
+    const now = new Date().toISOString();
+    const relatedStatement = this.driverStatements.find(
+      (statement) => statement.statementId === batch.statementId,
+    );
+    const artifactRecord = await this.documentArtifactStore.put({
+      kind: "report",
+      subjectId: batch.batchId,
+      mimeType: "application/pdf",
+      bytes: buildMinimalPdf(
+        buildReimbursementBatchExportPdfRows(
+          batch,
+          relatedStatement?.feePlanVersion ?? null,
+          now,
+        ),
+      ),
+    });
+    const download = createControlledDownloadMetadata({
+      kind: "report",
+      subjectId: batch.batchId,
+      manifestHash: artifactRecord.sha256,
+      createdAt: now,
+      host: this.downloadHost,
+      keyId: this.downloadSigningKeyId,
+      signingSecret: this.downloadSigningSecret,
+      ttlMinutes: this.downloadExpiryMinutes,
+      signatureVersion: this.downloadSignatureVersion,
+    });
+
+    const receiptId = `reimbursement-export-${randomUUID()}`;
+    const updatedBatch = this.cloneReimbursementBatch(batch);
+    updatedBatch.exportedAt = now;
+    updatedBatch.exportedByActorId = actorId;
+    updatedBatch.exportReceiptId = receiptId;
+    updatedBatch.exportManifestHash = artifactRecord.sha256;
+    updatedBatch.exportDownloadMetadata = download;
+    updatedBatch.workflowState = advanceReimbursementWorkflowState(
+      updatedBatch.workflowState,
+      "exported",
+    );
+
+    // Publish in-memory state only after persistence succeeds, matching
+    // `markReimbursementPaidWithProof`'s rationale: a durable receipt lets a
+    // failed batch write recover on retry rather than silently diverging.
+    await this.persistChanges(
+      { reimbursementBatches: [updatedBatch] },
+      "export_reimbursement_batch",
+    );
+    Object.assign(batch, updatedBatch);
+
+    this.recordAudit(
+      {
+        actorId,
+        actorType:
+          identity?.actorType === "driver_user"
+            ? "system"
+            : (identity?.actorType ?? "platform_admin"),
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "billing-settlement",
+        actionName: "export_reimbursement_batch",
+        resourceType: "driver_reimbursement_batch",
+        resourceId: batch.batchId,
+        newValuesSummary: {
+          driverId: batch.driverId,
+          manifestHash: artifactRecord.sha256,
+          exportedAt: now,
+        },
+      },
+      requestId,
+    );
+
+    return {
+      receiptId,
+      batchId: batch.batchId,
+      exportedAt: now,
+      exportedByActorId: actorId,
+      manifestHash: artifactRecord.sha256,
+      download,
+      createdAt: now,
+    };
+  }
+
+  /**
+   * C080 explicit manual paid -> reconciled transition (Q-ADM12). Requires
+   * the batch to already be paid; never inferred from wall-clock age, a
+   * proof's presence, or an unrelated reconciliation-issue resolution --
+   * those stay distinct objects (see `./remittance-proof` and
+   * `ReconciliationIssueRecord`). Idempotent by batch: a repeat call
+   * (regardless of the reason text it carries) returns the original
+   * receipt rather than overwriting the first actor/time/reason/evidence.
+   */
+  async markReimbursementBatchReconciled(
+    batchId: string,
+    command: MarkReimbursementBatchReconciledCommand,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<ReimbursementBatchReconciliationReceipt> {
+    const batch = this.requireReimbursementBatch(batchId);
+
+    if (batch.reconciledAt && batch.reconciliationReceiptId) {
+      return {
+        receiptId: batch.reconciliationReceiptId,
+        batchId: batch.batchId,
+        reconciledAt: batch.reconciledAt,
+        reconciledByActorId: batch.reconciledByActorId ?? null,
+        reason: batch.reconciliationReason ?? "",
+        evidenceRef: batch.reconciliationEvidenceRef ?? null,
+        createdAt: batch.reconciledAt,
+      };
+    }
+
+    if (batch.status !== "paid") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "REIMBURSEMENT_BATCH_NOT_PAID_FOR_RECONCILIATION",
+        "Reimbursement batch must be paid before it can be marked reconciled.",
+        { batchId, status: batch.status },
+      );
+    }
+
+    const reason = command.reason?.trim();
+    if (!reason) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "REIMBURSEMENT_BATCH_RECONCILIATION_REASON_REQUIRED",
+        "A reconciliation reason is required.",
+        { batchId },
+      );
+    }
+
+    const now = new Date().toISOString();
+    const actorId = identity?.actorId ?? null;
+    const receiptId = `reimbursement-reconciliation-${randomUUID()}`;
+    const evidenceRef = command.evidenceRef?.trim() || null;
+
+    const updatedBatch = this.cloneReimbursementBatch(batch);
+    updatedBatch.reconciledAt = now;
+    updatedBatch.reconciledByActorId = actorId;
+    updatedBatch.reconciliationReason = reason;
+    updatedBatch.reconciliationEvidenceRef = evidenceRef;
+    updatedBatch.reconciliationReceiptId = receiptId;
+    updatedBatch.workflowState = advanceReimbursementWorkflowState(
+      updatedBatch.workflowState,
+      "reconciled",
+    );
+
+    await this.persistChanges(
+      { reimbursementBatches: [updatedBatch] },
+      "mark_reimbursement_batch_reconciled",
+    );
+
+    // `batch` and the array element `requireReimbursementBatch` resolves to
+    // are the same live object, so this reads whatever the LATEST write set
+    // -- including a concurrent call's own `Object.assign` that may have
+    // landed on it while the above `persistChanges` await was in flight,
+    // exactly as `markReimbursementPaidWithProof` relies on below.
+    if (this.requireReimbursementBatch(batchId).reconciledAt) {
+      const concurrentWinner = this.requireReimbursementBatch(batchId);
+      return {
+        receiptId: concurrentWinner.reconciliationReceiptId!,
+        batchId: concurrentWinner.batchId,
+        reconciledAt: concurrentWinner.reconciledAt!,
+        reconciledByActorId: concurrentWinner.reconciledByActorId ?? null,
+        reason: concurrentWinner.reconciliationReason ?? reason,
+        evidenceRef: concurrentWinner.reconciliationEvidenceRef ?? null,
+        createdAt: concurrentWinner.reconciledAt!,
+      };
+    }
+    Object.assign(batch, updatedBatch);
+
+    this.auditNotificationService.recordNotification({
+      tenantId: null,
+      channel: "ops_notice",
+      title: "Reimbursement batch reconciled",
+      message: `Reimbursement batch ${batch.batchId} was marked reconciled.`,
+      status: "unread",
+    });
+    this.recordAudit(
+      {
+        actorId,
+        actorType:
+          identity?.actorType === "driver_user"
+            ? "system"
+            : (identity?.actorType ?? "platform_admin"),
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "billing-settlement",
+        actionName: "mark_reimbursement_batch_reconciled",
+        resourceType: "driver_reimbursement_batch",
+        resourceId: batch.batchId,
+        newValuesSummary: {
+          driverId: batch.driverId,
+          reason,
+          reconciledAt: now,
+        },
+      },
+      requestId,
+    );
+
+    return {
+      receiptId,
+      batchId: batch.batchId,
+      reconciledAt: now,
+      reconciledByActorId: actorId,
+      reason,
+      evidenceRef,
+      createdAt: now,
+    };
+  }
+
+  /**
+   * Registered with `DocumentArtifactRebuildRegistry` for kind "report",
+   * tried after `rebuildDriverStatementArtifact` returns null. Re-renders
+   * the export PDF from this batch's own durably persisted record; returns
+   * null (never throws) when this instance holds no such batch, which the
+   * registry contract treats as "nothing to rebuild" rather than failure.
+   */
+  private async rebuildReimbursementBatchExportArtifact(
+    batchId: string,
+  ): Promise<DocumentArtifactRecord | null> {
+    const batch = this.reimbursementBatches.find(
+      (candidate) => candidate.batchId === batchId,
+    );
+    if (!batch || !batch.exportedAt) {
+      return null;
+    }
+    const relatedStatement = this.driverStatements.find(
+      (statement) => statement.statementId === batch.statementId,
+    );
+    try {
+      const { record } = await this.documentArtifactStore.putIfAbsent({
+        kind: "report",
+        subjectId: batch.batchId,
+        mimeType: "application/pdf",
+        bytes: buildMinimalPdf(
+          buildReimbursementBatchExportPdfRows(
+            batch,
+            relatedStatement?.feePlanVersion ?? null,
+            batch.exportedAt,
+          ),
+        ),
+      });
+      return record;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -4198,6 +4594,9 @@ export class BillingSettlementService implements OnModuleInit {
         ...item,
         amount: { ...item.amount },
       })),
+      exportDownloadMetadata: batch.exportDownloadMetadata
+        ? { ...batch.exportDownloadMetadata }
+        : null,
     };
   }
 

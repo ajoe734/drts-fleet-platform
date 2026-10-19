@@ -18,7 +18,7 @@ describe("C107: 服務產品型別、資格要求、預約/即時時間、結算
     return { auditNotificationService, repository, service, controller };
   }
 
-  it("初始狀態驗證：服務產品註冊表預設為 0 筆空清單，此乃冷啟動正常狀態而非後端 API 故障", () => {
+  it("初始狀態驗證：服務產品註冊表預設為 0 筆空清單，此乃冷啟動正常狀態而非後端 API 故障", async () => {
     const { service, controller } = createService();
 
     const initialList = service.listServiceProducts();
@@ -26,7 +26,7 @@ describe("C107: 服務產品型別、資格要求、預約/即時時間、結算
     expect(initialList.length).toBe(0);
 
     const controllerEnvelope =
-      controller.listServiceProducts("req-c107-init-list");
+      await controller.listServiceProducts("req-c107-init-list");
     expect(controllerEnvelope.data.items).toEqual([]);
     expect(controllerEnvelope.meta.requestId).toBe("req-c107-init-list");
   });
@@ -176,7 +176,7 @@ describe("C107: 服務產品型別、資格要求、預約/即時時間、結算
     expect(fromService?.displayName).toBe("一般市區即時計程車");
     expect(fromService?.defaultBillingMode).toBe("meter");
 
-    const listEnvelope = controller.listServiceProducts("req-ctrl-list");
+    const listEnvelope = await controller.listServiceProducts("req-ctrl-list");
     const item = listEnvelope.data.items.find(
       (p) => p.serviceProductId === "SVP-TAXI-001",
     );

@@ -1,0 +1,4 @@
+{
+  "extends": "../../../tsconfig.json",
+  "include": ["./*.ts", "../../e2e/pax-review-shared-order-demo.spec.ts"]
+}

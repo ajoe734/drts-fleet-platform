@@ -23,17 +23,17 @@ export class ServiceProductController {
   constructor(private readonly serviceProductService: ServiceProductService) {}
 
   @Get()
-  listServiceProducts(@Headers("x-request-id") requestId?: string) {
+  async listServiceProducts(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
-      { items: this.serviceProductService.listServiceProducts() },
+      { items: await this.serviceProductService.readServiceProducts() },
       requestId,
     );
   }
 
   @Get("runtime-policies")
-  listRuntimePolicies(@Headers("x-request-id") requestId?: string) {
+  async listRuntimePolicies(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
-      { items: this.serviceProductService.listRuntimeProfilePolicies() },
+      { items: await this.serviceProductService.readRuntimeProfilePolicies() },
       requestId,
     );
   }

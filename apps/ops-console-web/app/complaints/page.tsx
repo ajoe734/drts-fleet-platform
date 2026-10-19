@@ -32,6 +32,7 @@ import type {
   ComplaintCategory,
   ComplaintExportViewRecord,
   ComplaintResolutionCode,
+  ComplaintTimelineEntry,
   CreateComplaintCaseCommand,
   EscalateComplaintToIncidentCommand,
   EmptyReason,
@@ -52,6 +53,10 @@ import {
 import { useTranslation } from "@/lib/i18n";
 import { createIdempotencyKey } from "@drts/api-client";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import {
+  crossAppHref,
+  platformAdminAuditLink,
+} from "@/lib/ops-cross-app-links";
 
 // ── canvas theme + per-page operating context ──────────────────────────────
 const theme = buildCanvasTheme({
@@ -73,13 +78,6 @@ type Translate = (
   params?: Record<string, string | number>,
 ) => string;
 type ComplaintSlaStatus = "within_sla" | "warning" | "breached";
-type ComplaintActivityEntry = {
-  entryId: string;
-  actor: string;
-  action: string;
-  note?: string | null;
-  createdAt: string;
-};
 type ComplaintCaseUiRecord = ComplaintCaseRecord & {
   slaStatus?: ComplaintSlaStatus;
   slaBreachedAt?: string | null;
@@ -439,7 +437,7 @@ export default function ComplaintsPage() {
     error instanceof Error ? error.message : t("common.unknown");
 
   const [records, setRecords] = useState<ComplaintCaseUiRecord[]>([]);
-  const [activityItems, setActivityItems] = useState<ComplaintActivityEntry[]>(
+  const [activityItems, setActivityItems] = useState<ComplaintTimelineEntry[]>(
     [],
   );
   const [exportView, setExportView] =
@@ -599,11 +597,8 @@ export default function ComplaintsPage() {
     void (async () => {
       try {
         const client = getOpsClient();
-        const loadComplaintActivity = client[
-          `getComplaint${"Time"}${"line"}` as keyof typeof client
-        ] as (caseNo: string) => Promise<ComplaintActivityEntry[]>;
         const [nextActivityItems, nextExportView] = await Promise.all([
-          loadComplaintActivity(selectedCaseNo),
+          client.getComplaintTimeline(selectedCaseNo),
           client.getComplaintExportView(selectedCaseNo),
         ]);
         if (cancelled) {
@@ -620,7 +615,7 @@ export default function ComplaintsPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedCaseNo]);
+  }, [selectedCaseNo, selectedRecord]);
 
   async function runAction<T>(key: string, action: () => Promise<T>) {
     setBusyKey(key);
@@ -638,24 +633,25 @@ export default function ComplaintsPage() {
 
   function buildActionReceipt(
     action: string,
-    record: ComplaintCaseUiRecord,
+    receipt: ActionReceipt,
   ): ActionReceipt & { auditHref: string } {
-    const auditId = `audit-${record.caseNo}-${action}`;
     return {
-      actionId: `action-${record.caseNo}-${action}`,
-      auditId,
-      resourceType: "complaint_case",
-      resourceId: record.caseNo,
-      status: "completed",
+      ...receipt,
       message: t("complaints.action.submitted", {
         action: actionLabel(action, locale, t),
       }),
-      auditHref: `/audit?auditId=${encodeURIComponent(auditId)}`,
+      auditHref: crossAppHref(
+        platformAdminAuditLink({
+          auditId: receipt.auditId,
+          resourceType: receipt.resourceType,
+          resourceId: receipt.resourceId,
+        }),
+      ),
     };
   }
 
-  function emitReceipt(action: string, record: ComplaintCaseUiRecord) {
-    const receipt = buildActionReceipt(action, record);
+  function emitReceipt(action: string, result: ActionReceipt) {
+    const receipt = buildActionReceipt(action, result);
     setReceipt(receipt);
     return receipt;
   }
@@ -700,17 +696,21 @@ export default function ComplaintsPage() {
     const client = getOpsClient();
     if (descriptor.action === "mark_sla_breach") {
       return runAction(`mark_sla_breach-${record.caseNo}`, async () => {
-        await client.markComplaintSlaBreach(record.caseNo);
-        const receipt = emitReceipt("mark_sla_breach", record);
+        const result = await client.markComplaintSlaBreachWithReceipt(
+          record.caseNo,
+        );
+        const receipt = emitReceipt("mark_sla_breach", result.receipt);
         await loadRecords(record.caseNo, true);
         return receipt;
       });
     }
     if (descriptor.action === "export_view") {
       return runAction(`export_view-${record.caseNo}`, async () => {
-        const view = await client.getComplaintExportView(record.caseNo);
-        setExportView(view);
-        return emitReceipt("export_view", record);
+        const result = await client.getComplaintExportViewWithReceipt(
+          record.caseNo,
+        );
+        setExportView(result.data);
+        return emitReceipt("export_view", result.receipt);
       });
     }
 
@@ -726,50 +726,70 @@ export default function ComplaintsPage() {
     const key = `${descriptor.action}-${record.caseNo}`;
     try {
       await runAction(key, async () => {
+        let actionReceipt: ActionReceipt;
         switch (descriptor.action) {
           case "assign":
-            await client.assignComplaint(record.caseNo, {
-              assigneeId,
-              note: assignmentNote,
-            });
+            actionReceipt = (
+              await client.assignComplaintWithReceipt(record.caseNo, {
+                assigneeId,
+                note: assignmentNote,
+              })
+            ).receipt;
             setAssignmentNote("");
             break;
           case "add_note":
-            await client.addComplaintNote(record.caseNo, { note: noteText });
+            actionReceipt = (
+              await client.addComplaintNoteWithReceipt(record.caseNo, {
+                note: noteText,
+              })
+            ).receipt;
             setNoteText("");
             break;
           case "resolve":
-            await client.resolveComplaint(record.caseNo, {
-              resolutionCode,
-              closingNote,
-            });
+            actionReceipt = (
+              await client.resolveComplaintWithReceipt(record.caseNo, {
+                resolutionCode,
+                closingNote,
+              })
+            ).receipt;
             break;
           case "close":
-            await client.closeComplaint(record.caseNo, {
-              resolutionCode,
-              closingNote,
-            });
+            actionReceipt = (
+              await client.closeComplaintWithReceipt(record.caseNo, {
+                resolutionCode,
+                closingNote,
+              })
+            ).receipt;
             break;
           case "reopen":
-            await client.reopenComplaint(record.caseNo, {
-              reason: reopenReason,
-            });
+            actionReceipt = (
+              await client.reopenComplaintWithReceipt(record.caseNo, {
+                reason: reopenReason,
+              })
+            ).receipt;
             setReopenReason("");
             break;
           case "escalate_to_incident":
-            await client.escalateComplaintToIncident(record.caseNo, {
-              title: escalateTitle,
-              severity: escalateSeverity,
-              reason: escalateReason,
-            });
+            actionReceipt = (
+              await client.escalateComplaintToIncidentWithReceipt(
+                record.caseNo,
+                {
+                  title: escalateTitle,
+                  severity: escalateSeverity,
+                  reason: escalateReason,
+                },
+              )
+            ).receipt;
             setEscalateTitle("");
             setEscalateReason("");
             setEscalateSeverity("medium");
             break;
           default:
-            break;
+            throw new Error(
+              `Unsupported complaint action: ${descriptor.action}`,
+            );
         }
-        const receipt = emitReceipt(descriptor.action, record);
+        const receipt = emitReceipt(descriptor.action, actionReceipt);
         await loadRecords(record.caseNo, true);
         setModal(null);
         assistantBridgePromiseRef.current?.resolve(receipt);
@@ -785,7 +805,7 @@ export default function ComplaintsPage() {
 
   async function submitCreate() {
     await runAction("create-complaint", async () => {
-      const created = await getOpsClient().createComplaint(
+      const result = await getOpsClient().createComplaintWithReceipt(
         {
           ...createForm,
           relatedOrderId: createForm.relatedOrderId || null,
@@ -795,7 +815,8 @@ export default function ComplaintsPage() {
           idempotencyKey: complaintIntentKey,
         },
       );
-      emitReceipt("create", created);
+      const created = result.data;
+      emitReceipt("create", result.receipt);
       setCreateForm(INITIAL_CREATE_FORM);
       setShowCreate(false);
       setComplaintIntentKey(createIdempotencyKey("complaint-case"));
@@ -1693,6 +1714,7 @@ export default function ComplaintsPage() {
 
               {/* availableActions-driven CTAs */}
               <div
+                data-testid="complaint-list-actions"
                 style={{
                   display: "flex",
                   gap: 8,
@@ -1742,6 +1764,7 @@ export default function ComplaintsPage() {
               <Card theme={theme} title={t("complaints.activityFeed")}>
                 {activityItems.length > 0 ? (
                   <div
+                    data-testid="complaint-list-activity"
                     style={{
                       display: "flex",
                       flexDirection: "column",
@@ -1839,9 +1862,11 @@ export default function ComplaintsPage() {
           style={{
             position: "fixed",
             right: 24,
-            bottom: 24,
-            zIndex: 60,
-            maxWidth: 360,
+            // Keep the real audit link clear of the assistant launcher and
+            // above an expanded assistant panel until the receipt is dismissed.
+            bottom: 96,
+            zIndex: 5001,
+            width: "min(360px, calc(100vw - 48px))",
           }}
         >
           <Banner
@@ -1851,7 +1876,13 @@ export default function ComplaintsPage() {
             title={receipt.message}
             body={
               <span
-                style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+                style={{
+                  display: "inline-flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: 8,
+                  overflowWrap: "anywhere",
+                }}
               >
                 <span style={{ fontFamily: theme.monoFamily, fontSize: 11 }}>
                   {receipt.actionId}
@@ -1860,6 +1891,7 @@ export default function ComplaintsPage() {
                   {receipt.auditId}
                 </span>
                 <a
+                  data-testid="complaint-action-audit-link"
                   href={receipt.auditHref}
                   target="_blank"
                   rel="noreferrer"

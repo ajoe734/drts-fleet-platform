@@ -33,7 +33,12 @@ async function createHarness(
     init?: RequestInit,
   ) => Promise<WebhookFetchResponse>,
 ) {
-  const webhookDispatchService = new WebhookDispatchService(fetchImpl);
+  const webhookDispatchService = new WebhookDispatchService((url, init) =>
+    (init?.headers as Record<string, string>)["x-drts-event-type"] ===
+    "tenant.webhook.test"
+      ? Promise.resolve({ ok: true, status: 204 })
+      : fetchImpl(url, init),
+  );
   const service = new TenantPartnerService(
     new AuditNotificationService(),
     undefined,
@@ -41,14 +46,12 @@ async function createHarness(
   );
   const facade = new PartnerNotificationDispatchFacade(service);
 
-  const endpoint = service.createWebhookEndpoint(TENANT_ID, {
+  const endpoint = await service.createWebhookEndpoint(TENANT_ID, {
     url: "https://partner.example.test/webhooks/passenger",
     secret: "whsec_partner_ack_test",
     events: [WIRE_EVENT],
   });
-  service.updateWebhookEndpoint(TENANT_ID, endpoint.webhookId, {
-    status: "active",
-  });
+  await service.sendTestWebhook(TENANT_ID, { webhookId: endpoint.webhookId });
 
   return { service, facade, webhookId: endpoint.webhookId };
 }
@@ -346,7 +349,7 @@ describe("SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId
       .fn()
       .mockImplementation(async () => jsonResponse(200, null));
     const { facade, service, webhookId } = await createHarness(fetchImpl);
-    service.updateWebhookEndpoint(TENANT_ID, webhookId, {
+    await service.updateWebhookEndpoint(TENANT_ID, webhookId, {
       status: "disabled",
       disableReason: "manual test disable",
     });
@@ -378,7 +381,7 @@ describe("SR-PARTNER-NOTIFY-ACK-20260917: dispatchNotificationAttemptByWebhookId
       webhookDispatchService,
     );
     const facade = new PartnerNotificationDispatchFacade(service);
-    const endpoint = service.createWebhookEndpoint(TENANT_ID, {
+    const endpoint = await service.createWebhookEndpoint(TENANT_ID, {
       url: "https://partner.example.test/webhooks/passenger",
       secret: "whsec_partner_ack_test",
       events: [WIRE_EVENT],
