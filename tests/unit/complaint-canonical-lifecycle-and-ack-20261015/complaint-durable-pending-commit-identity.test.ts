@@ -293,7 +293,9 @@ describe("ComplaintService: a same-command retry is recognized across a process 
     const persistChangesB = vi.fn<(changes: unknown) => Promise<void>>(
       async () => {},
     );
-    const clearPendingCommitB = vi.fn(async () => {});
+    const clearPendingCommitB = vi.fn<(commandKey: string) => Promise<void>>(
+      async () => {},
+    );
     const repositoryB = {
       isEnabled: () => true,
       persistChanges: persistChangesB,
@@ -308,7 +310,10 @@ describe("ComplaintService: a same-command retry is recognized across a process 
       })),
       loadPendingCommits: vi.fn(async () => [durableRow]),
       recordPendingCommit: vi.fn(async () => {}),
-      clearPendingCommit: clearPendingCommitB,
+      // Preserve this original fixture's key observer; the production wire
+      // controls separately verify exact timeline/status cleanup predicates.
+      clearPendingCommit: (commandKey: string) =>
+        clearPendingCommitB(commandKey),
     } as unknown as ComplaintRepositoryType;
     const auditB = new AuditNotificationService();
     const complaintServiceB = new ComplaintService(auditB, repositoryB);

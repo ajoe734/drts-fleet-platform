@@ -337,7 +337,9 @@ async function delayedDeletedIdentity(otherReplica) {
   wire.query = async (sql, values = []) => {
     if (
       armDelete &&
-      sql.includes("DELETE FROM crm.phase1_complaint_pending_commits")
+      (sql.includes("DELETE FROM crm.phase1_complaint_pending_commits") ||
+        (sql.includes("UPDATE crm.phase1_complaint_pending_commits") &&
+          sql.includes("status = 'failed'")))
     ) {
       armDelete = false;
       holdRead = true;
@@ -461,7 +463,7 @@ async function localCommandDuringRead(holdCommit) {
 // B never reaches its own PREPARED: Promise.all(previous) propagates A's typed
 // rejection. A third replica has meanwhile actually reserved B's same key.
 // Cleanup may delete A only, never B's independently allocated identity.
-async function queuedTypedRejection() {
+async function queuedTypedRejection(kind = "typed") {
   const wire = new Wire();
   const a = instance(wire);
   const created = a.service.createComplaintCase(opsPayload);
@@ -482,6 +484,10 @@ async function queuedTypedRejection() {
         armLock = false;
         locked.resolve();
         await release.promise;
+        if (kind === "generic")
+          throw Error(
+            "Fixture: predecessor query failed before business writes",
+          );
       }
       return query(sql, values);
     };
@@ -531,6 +537,336 @@ async function queuedTypedRejection() {
   };
 }
 
+// DELETE can reject before execution or lose only its ACK. Once storage
+// recovers, the same proven-new failed command must refresh and retry. A
+// replacement reserved elsewhere after a lost ACK must keep its own IDs.
+async function definiteCleanupFailure(mode) {
+  const wire = new Wire();
+  const a = instance(wire);
+  const created = a.service.createComplaintCase(opsPayload);
+  const caseNo = created.caseNo;
+  await a.service.awaitSettlementPersistence(caseNo);
+  const b = await fresh(wire);
+  await assign(a, caseNo, "cleanup-owner", undefined);
+  const query = wire.query.bind(wire);
+  let armed = true;
+  wire.query = async (sql, values = []) => {
+    if (
+      armed &&
+      sql.includes("DELETE FROM crm.phase1_complaint_pending_commits")
+    ) {
+      armed = false;
+      if (mode !== "before" && mode !== "fresh-before")
+        await query(sql, values);
+      throw Error("Fixture: definite cleanup DELETE response unavailable");
+    }
+    return query(sql, values);
+  };
+  const command = { note: "Recover after cleanup failure" };
+  const first = await outcome(() =>
+    b.ops.addComplaintCaseNote(
+      caseNo,
+      command,
+      "cleanup-first",
+      "cleanup-note",
+    ),
+  );
+  const remainingAfterFailure = copy([...wire.commands.values()]);
+  let replacement, original;
+  if (mode === "replacement") {
+    const c = await fresh(wire);
+    wire.nextCommit = "unknown-not-landed";
+    replacement = await outcome(() =>
+      c.ops.addComplaintCaseNote(
+        caseNo,
+        command,
+        "cleanup-replacement",
+        "cleanup-note",
+      ),
+    );
+    original = copy(
+      [...wire.commands.values()].find(
+        (row) =>
+          row.command_payload?.complaintCommandIdentity?.key === "cleanup-note",
+      ),
+    );
+  }
+  const retryReplica = mode === "fresh-before" ? await fresh(wire) : b;
+  const retry = await outcome(() =>
+    retryReplica.ops.addComplaintCaseNote(
+      caseNo,
+      command,
+      "cleanup-retry",
+      "cleanup-note",
+    ),
+  );
+  return {
+    first,
+    remainingAfterFailure,
+    replacement,
+    original,
+    retry,
+    finalCase: wire.cases.get(caseNo),
+    entries: [...wire.timelines.values()],
+    unresolved: [...wire.commands.values()].filter(
+      (row) => row.status === "pending",
+    ),
+  };
+}
+
+// A duplicate already waiting at the transaction boundary must not treat a
+// later allocation under the same key as its own pending/confirmed result.
+async function replacedInFlight(landed) {
+  const wire = new Wire();
+  const a = instance(wire);
+  const created = a.service.createComplaintCase(opsPayload);
+  const caseNo = created.caseNo;
+  await a.service.awaitSettlementPersistence(caseNo);
+  const b = await fresh(wire);
+  await assign(a, caseNo, "replacement-owner", undefined);
+  const firstReached = deferred(),
+    releaseFirst = deferred();
+  const oldReached = deferred(),
+    releaseOld = deferred();
+  const connect = wire.connect.bind(wire);
+  let connection = 0;
+  wire.connect = async () => {
+    const client = await connect();
+    const number = ++connection,
+      query = client.query.bind(client);
+    client.query = async (sql, values = []) => {
+      if (number === 1 && sql.includes("AS matches_prepared")) {
+        firstReached.resolve();
+        await releaseFirst.promise;
+      }
+      if (
+        number === 2 &&
+        sql.includes("FROM crm.phase1_complaint_pending_commits") &&
+        sql.includes("FOR UPDATE")
+      ) {
+        oldReached.resolve();
+        await releaseOld.promise;
+      }
+      return query(sql, values);
+    };
+    return client;
+  };
+  const query = wire.query.bind(wire);
+  let failDelete = true;
+  wire.query = async (sql, values = []) => {
+    if (
+      failDelete &&
+      sql.includes("DELETE FROM crm.phase1_complaint_pending_commits")
+    ) {
+      failDelete = false;
+      throw Error("Fixture: DELETE pre-execution failure");
+    }
+    return query(sql, values);
+  };
+  const command = { note: "Replacement identity note" };
+  const firstPromise = outcome(() =>
+    b.ops.addComplaintCaseNote(
+      caseNo,
+      command,
+      "replacement-first",
+      "replace-inflight",
+    ),
+  );
+  await firstReached.promise;
+  const original = copy([...wire.commands.values()][0]);
+  const old = await fresh(wire);
+  const oldPromise = outcome(() =>
+    old.ops.addComplaintCaseNote(
+      caseNo,
+      command,
+      "replacement-old",
+      "replace-inflight",
+    ),
+  );
+  await oldReached.promise;
+  releaseFirst.resolve();
+  const first = await firstPromise;
+  const current = await fresh(wire);
+  wire.nextCommit = landed ? "ok" : "unknown-not-landed";
+  const replacement = await outcome(() =>
+    current.ops.addComplaintCaseNote(
+      caseNo,
+      command,
+      "replacement-current",
+      "replace-inflight",
+    ),
+  );
+  const winner = copy(
+    [...wire.commands.values()].find(
+      (row) =>
+        row.command_payload?.complaintCommandIdentity?.key ===
+        "replace-inflight",
+    ),
+  );
+  const writesBefore = wire.trace.filter(
+    (item) => item === "case-write",
+  ).length;
+  releaseOld.resolve();
+  const oldRetry = await oldPromise;
+  const oldWrites =
+    wire.trace.filter((item) => item === "case-write").length - writesBefore;
+  const finalRetry = await outcome(() =>
+    current.ops.addComplaintCaseNote(
+      caseNo,
+      command,
+      "replacement-final",
+      "replace-inflight",
+    ),
+  );
+  return {
+    first,
+    original,
+    replacement,
+    winner,
+    oldRetry,
+    oldWrites,
+    oldAudits: old.service.auditNotificationService
+      .getAuditLogsSnapshot()
+      .filter((entry) => entry.actionName === "add_complaint_case_note").length,
+    finalRetry,
+    finalCase: wire.cases.get(caseNo),
+    entries: [...wire.timelines.values()],
+  };
+}
+
+// If the definite-failure classification itself never reached storage and
+// that process disappears, another process cannot invent a release proof.
+// Keep the honest 409/original identity; the surviving original process can
+// finish the exact classification/cleanup once storage is available again.
+async function classificationFailure() {
+  const wire = new Wire();
+  const a = instance(wire);
+  const created = a.service.createComplaintCase(opsPayload);
+  const caseNo = created.caseNo;
+  await a.service.awaitSettlementPersistence(caseNo);
+  const b = await fresh(wire);
+  await assign(a, caseNo, "classification-owner", undefined);
+  const query = wire.query.bind(wire);
+  let fail = true;
+  wire.query = async (sql, values = []) => {
+    if (
+      fail &&
+      sql.includes("UPDATE crm.phase1_complaint_pending_commits") &&
+      sql.includes("status = 'failed'")
+    ) {
+      fail = false;
+      throw Error("Fixture: classification did not reach storage");
+    }
+    return query(sql, values);
+  };
+  const command = { note: "Note whose classification failed" };
+  const first = await outcome(() =>
+    b.ops.addComplaintCaseNote(
+      caseNo,
+      command,
+      "classification-first",
+      "classify-failure",
+    ),
+  );
+  const original = copy([...wire.commands.values()]);
+  const c = await fresh(wire);
+  const withoutProof = await outcome(() =>
+    c.ops.addComplaintCaseNote(
+      caseNo,
+      command,
+      "classification-fresh",
+      "classify-failure",
+    ),
+  );
+  const retained = copy([...wire.commands.values()]);
+  await b.ops.getComplaintCase(caseNo);
+  const recovered = await outcome(() =>
+    c.ops.addComplaintCaseNote(
+      caseNo,
+      command,
+      "classification-recovered",
+      "classify-failure",
+    ),
+  );
+  return {
+    first,
+    original,
+    withoutProof,
+    retained,
+    recovered,
+    finalCase: wire.cases.get(caseNo),
+    entries: [...wire.timelines.values()],
+  };
+}
+
+// Two legitimate legacy cleanups of confirmed T1 straddle a new same-key
+// T2 reservation. Only external DELETE delivery is delayed; D2 must leave T2.
+async function delayedLegacyCleanup() {
+  const wire = new Wire();
+  const a = instance(wire);
+  const created = a.service.createComplaintCase(opsPayload);
+  const caseNo = created.caseNo;
+  await a.service.awaitSettlementPersistence(caseNo);
+  const b = await fresh(wire);
+  const query = wire.query.bind(wire);
+  const reached = [deferred(), deferred()],
+    release = [deferred(), deferred()],
+    done = [deferred(), deferred()];
+  let deletes = 0;
+  wire.query = async (sql, values = []) => {
+    if (
+      sql.includes("DELETE FROM crm.phase1_complaint_pending_commits") &&
+      deletes < 2
+    ) {
+      const index = deletes++;
+      reached[index].resolve();
+      await release[index].promise;
+      const result = await query(sql, values);
+      done[index].resolve();
+      return result;
+    }
+    return query(sql, values);
+  };
+  const command = { note: "Repeated legitimate legacy note" };
+  const first = await outcome(() =>
+    a.ops.addComplaintCaseNote(caseNo, command, "legacy-first"),
+  );
+  await reached[0].promise;
+  const read = outcome(() => b.ops.getComplaintCase(caseNo));
+  await reached[1].promise;
+  const confirmedRead = await read;
+  release[0].resolve();
+  await done[0].promise;
+  const c = await fresh(wire);
+  wire.nextCommit = "unknown-not-landed";
+  const second = await outcome(() =>
+    c.ops.addComplaintCaseNote(caseNo, command, "legacy-second"),
+  );
+  const original = copy(
+    [...wire.commands.values()].find(
+      (row) => row.action === "add_complaint_case_note",
+    ),
+  );
+  release[1].resolve();
+  await done[1].promise;
+  const retained = copy(
+    [...wire.commands.values()].filter((row) => row.status === "pending"),
+  );
+  const d = await fresh(wire);
+  const retry = await outcome(() =>
+    d.ops.addComplaintCaseNote(caseNo, command, "legacy-second-retry"),
+  );
+  return {
+    first,
+    confirmedRead,
+    second,
+    original,
+    retained,
+    retry,
+    entries: [...wire.timelines.values()],
+  };
+}
+
 async function run() {
   const hidden = {};
   const multiple = {};
@@ -563,6 +899,19 @@ async function run() {
       inflight: await localCommandDuringRead(true),
     },
     queuedTypedRejection: await queuedTypedRejection(),
+    queuedDefiniteFailure: await queuedTypedRejection("generic"),
+    cleanupFailure: {
+      before: await definiteCleanupFailure("before"),
+      "fresh-before": await definiteCleanupFailure("fresh-before"),
+      ack: await definiteCleanupFailure("ack"),
+      replacement: await definiteCleanupFailure("replacement"),
+    },
+    replacedInFlight: {
+      pending: await replacedInFlight(false),
+      confirmed: await replacedInFlight(true),
+    },
+    classificationFailure: await classificationFailure(),
+    delayedLegacyCleanup: await delayedLegacyCleanup(),
     forbiddenNetworkOrListenAttempts,
     scope:
       "Actual controllers/services/repository and SQL; external SQL rows/response timing only. No real PG/isolation/HTTP/browser acceptance.",

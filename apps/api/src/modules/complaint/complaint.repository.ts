@@ -194,8 +194,9 @@ export class ComplaintRepository {
           status: ComplaintPendingCommitStatus;
           case_no: string;
           previous_case_snapshot: unknown;
+          timeline_snapshot: ComplaintTimelineEntry[];
         }>(
-          `SELECT status, case_no, previous_case_snapshot FROM crm.phase1_complaint_pending_commits WHERE command_key = $1 FOR UPDATE`,
+          `SELECT status, case_no, previous_case_snapshot, timeline_snapshot FROM crm.phase1_complaint_pending_commits WHERE command_key = $1 FOR UPDATE`,
           [commandKey],
         );
         if (!reserved.rows[0])
@@ -206,10 +207,39 @@ export class ComplaintRepository {
             undefined,
             true,
           );
+        const originalTimeline = reserved.rows[0].timeline_snapshot;
+        const expectedTimeline = (changes.complaintTimelines ?? []).filter(
+          (entry) => entry.caseNo === reserved.rows[0]!.case_no,
+        );
+        if (
+          !Array.isArray(originalTimeline) ||
+          originalTimeline.length !== expectedTimeline.length ||
+          expectedTimeline.some(
+            (entry) =>
+              !originalTimeline.some(
+                (original) => original.entryId === entry.entryId,
+              ),
+          )
+        )
+          throw new ApiRequestError(
+            409,
+            "IDEMPOTENCY_IN_PROGRESS",
+            "The complaint reservation changed; retry the original command.",
+            undefined,
+            true,
+          );
         if (reserved.rows[0].status === "confirmed") {
           confirmed++;
           continue;
         }
+        if (reserved.rows[0].status !== "pending")
+          throw new ApiRequestError(
+            409,
+            "IDEMPOTENCY_IN_PROGRESS",
+            "The complaint preparation was rejected; retry after canonical refresh.",
+            undefined,
+            true,
+          );
         // A pending command may have been prepared before a later command
         // was acknowledged by another replica. Lock the actual case and
         // compare its original prepared predecessor before any upsert. This
@@ -785,7 +815,20 @@ export class ComplaintRepository {
       }
       throw error;
     });
-    return result.rows[0] ? this.parsePendingCommit(result.rows[0]) : undefined;
+    const reserved = result.rows[0]
+      ? this.parsePendingCommit(result.rows[0])
+      : undefined;
+    if (reserved?.status === "failed") {
+      // Only a durable, definite rejection permits a new reservation. An
+      // unknown pending or confirmed result is never removed here.
+      await this.databaseService!.query(
+        `DELETE FROM crm.phase1_complaint_pending_commits
+         WHERE command_key = $1 AND status = 'failed' AND timeline_snapshot = $2::jsonb`,
+        [record.commandKey, JSON.stringify(reserved.timelineSnapshot)],
+      );
+      return this.recordPendingCommit(record);
+    }
+    return reserved;
   }
 
   /** Prepared commands and confirmed replay results survive process restarts. */
@@ -862,13 +905,37 @@ export class ComplaintRepository {
     };
   }
 
-  /** Clears the durable pending-commit marker once reconcilePendingCase has
-   * definitively resolved it (confirmed landed, or proven not to have). */
-  async clearPendingCommit(commandKey: string): Promise<void> {
+  /** Only the caller's matched, new, pre-business predicate rejection.
+   * Retained failed rows let another process recover if DELETE fails. */
+  async markPendingCommitFailed(
+    commandKey: string,
+    rejectedTimeline: readonly ComplaintTimelineEntry[],
+  ): Promise<void> {
     if (!this.isEnabled()) return;
     await this.databaseService!.query(
-      `DELETE FROM crm.phase1_complaint_pending_commits WHERE command_key = $1`,
-      [commandKey],
+      `UPDATE crm.phase1_complaint_pending_commits SET status = 'failed', updated_at = now()
+       WHERE command_key = $1 AND status = 'pending' AND timeline_snapshot = $2::jsonb`,
+      [commandKey, JSON.stringify(rejectedTimeline)],
+    );
+  }
+
+  /** Clears the durable pending-commit marker once reconcilePendingCase has
+   * definitively resolved it (confirmed landed, or proven not to have). */
+  async clearPendingCommit(
+    commandKey: string,
+    expectedTimeline?: readonly ComplaintTimelineEntry[],
+    expectedStatus: ComplaintPendingCommitStatus = "confirmed",
+  ): Promise<void> {
+    if (!this.isEnabled()) return;
+    await this.databaseService!.query(
+      `DELETE FROM crm.phase1_complaint_pending_commits WHERE command_key = $1${
+        expectedTimeline
+          ? " AND timeline_snapshot = $2::jsonb AND status = $3"
+          : ""
+      }`,
+      expectedTimeline
+        ? [commandKey, JSON.stringify(expectedTimeline), expectedStatus]
+        : [commandKey],
     );
   }
 

@@ -240,14 +240,39 @@ class Wire {
         });
       return { rows: [clone(this.commands.get(values[0]))], rowCount: 1 };
     }
+    if (
+      sql.includes("UPDATE crm.phase1_complaint_pending_commits") &&
+      sql.includes("status = 'failed'")
+    ) {
+      const row = this.commands.get(values[0]);
+      if (
+        row?.status === "pending" &&
+        isDeepStrictEqual(row.timeline_snapshot, JSON.parse(values[1]))
+      )
+        row.status = "failed";
+      return { rows: [], rowCount: 1 };
+    }
     if (sql.includes("DELETE FROM crm.phase1_complaint_pending_commits")) {
-      this.commands.delete(values[0]);
+      const row = this.commands.get(values[0]);
+      if (
+        !values[1] ||
+        (row &&
+          (values[2]
+            ? row.status === values[2]
+            : sql.includes("status = 'failed'")
+              ? row.status === "failed"
+              : true) &&
+          isDeepStrictEqual(row.timeline_snapshot, JSON.parse(values[1])))
+      )
+        this.commands.delete(values[0]);
       return { rows: [], rowCount: 1 };
     }
     if (sql.includes("FROM crm.phase1_complaint_pending_commits")) {
       if (this.identityReadFails)
         throw Error("Fixture: identity read rejected");
-      let rows = [...this.commands.values()].map(clone);
+      let rows = [...this.commands.values()]
+        .filter((row) => row.status === "pending" || row.status === "confirmed")
+        .map(clone);
       if (this.rowOrder === "reverse") rows.reverse();
       if (this.rowOrder === "rotate" && rows.length) rows.push(rows.shift());
       const gate = this.holdNextIdentityRead;

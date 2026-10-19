@@ -280,16 +280,55 @@ async function fixture() {
     }
     if (text.startsWith("UPDATE crm.phase1_complaint_pending_commits")) {
       const command = target.ordinaryCommands?.[String(values[0])];
-      if (command) command.status = "confirmed";
+      if (command && text.includes("status = 'failed'")) {
+        if (
+          command.status === "pending" &&
+          isDeepStrictEqual(
+            command.timeline_snapshot,
+            JSON.parse(String(values[1])),
+          )
+        )
+          command.status = "failed";
+      } else if (command) command.status = "confirmed";
     }
     if (text.startsWith("DELETE FROM crm.phase1_complaint_pending_commits")) {
-      delete target.ordinaryCommands?.[String(values[0])];
+      const row = target.ordinaryCommands?.[String(values[0])];
+      if (
+        !values[1] ||
+        (row &&
+          (values[2]
+            ? row.status === values[2]
+            : text.includes("status = 'failed'")
+              ? row.status === "failed"
+              : true) &&
+          isDeepStrictEqual(
+            row.timeline_snapshot,
+            JSON.parse(String(values[1])),
+          ))
+      )
+        delete target.ordinaryCommands?.[String(values[0])];
     }
     if (
       text.startsWith("SELECT command_key") &&
       text.includes("FROM crm.phase1_complaint_pending_commits")
     ) {
-      return { rows: Object.values(target.ordinaryCommands ?? {}) };
+      return {
+        rows: Object.values(target.ordinaryCommands ?? {}).filter(
+          (row) => row.status === "pending" || row.status === "confirmed",
+        ),
+      };
+    }
+    if (text.includes("complaint_case_snapshot")) {
+      return {
+        rows: [
+          ...(state.complaintCase?.caseNo === values[0]
+            ? [{ kind: "case", record: structuredClone(state.complaintCase) }]
+            : []),
+          ...(state.timeline?.caseNo === values[0]
+            ? [{ kind: "timeline", record: structuredClone(state.timeline) }]
+            : []),
+        ],
+      };
     }
     if (text.startsWith("INSERT INTO crm.phase1_complaint_cases")) {
       fail("case");

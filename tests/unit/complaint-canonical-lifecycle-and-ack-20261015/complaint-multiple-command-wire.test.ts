@@ -108,6 +108,62 @@ describe("original R3: all same-case prepared identities survive reconciliation"
       finalCase: { assigneeId: string };
       entries: Entry[];
     };
+    queuedDefiniteFailure: {
+      first: Outcome;
+      queued: Outcome;
+      foreign: Outcome;
+      original: Command;
+      remaining: Command[];
+      retry: Outcome;
+      finalCase: { assigneeId: string };
+      entries: Entry[];
+    };
+    cleanupFailure: Record<
+      string,
+      {
+        first: Outcome;
+        remainingAfterFailure: Command[];
+        replacement?: Outcome;
+        original?: Command;
+        retry: Outcome;
+        finalCase: { assigneeId: string };
+        entries: Entry[];
+        unresolved: Command[];
+      }
+    >;
+    replacedInFlight: Record<
+      string,
+      {
+        first: Outcome;
+        original: Command;
+        replacement: Outcome;
+        winner: Command;
+        oldRetry: Outcome;
+        oldWrites: number;
+        oldAudits: number;
+        finalRetry: Outcome;
+        finalCase: { assigneeId: string };
+        entries: Entry[];
+      }
+    >;
+    classificationFailure: {
+      first: Outcome;
+      original: Command[];
+      withoutProof: Outcome;
+      retained: Command[];
+      recovered: Outcome;
+      finalCase: { assigneeId: string };
+      entries: Entry[];
+    };
+    delayedLegacyCleanup: {
+      first: Outcome;
+      confirmedRead: Outcome;
+      second: Outcome;
+      original: Command;
+      retained: Command[];
+      retry: Outcome;
+      entries: Entry[];
+    };
     definitePredecessorFailure: {
       first: Outcome;
       retry: Outcome;
@@ -312,27 +368,119 @@ describe("original R3: all same-case prepared identities survive reconciliation"
     },
   );
 
-  it("a queued inherited typed failure cannot clear another replica's reservation", () => {
-    const row = observed.queuedTypedRejection;
-    expect(row.first).toMatchObject({
+  it.each(["typed", "generic"])(
+    "a queued inherited failure cannot clear another replica's reservation (%s)",
+    (kind) => {
+      const row =
+        kind === "typed"
+          ? observed.queuedTypedRejection
+          : observed.queuedDefiniteFailure;
+      expect(row.first.ok).toBe(false);
+      expect(row.queued.ok).toBe(false);
+      if (kind === "typed") {
+        expect(row.first.code).toBe("IDEMPOTENCY_IN_PROGRESS");
+        expect(row.queued.code).toBe("IDEMPOTENCY_IN_PROGRESS");
+      }
+      expect(row.foreign.ok).toBe(false);
+      expect(row.remaining).toHaveLength(1);
+      expect(row.remaining[0]!.timeline_snapshot).toEqual(
+        row.original.timeline_snapshot,
+      );
+      expect(row.retry.ok).toBe(true);
+      expect(row.finalCase.assigneeId).toBe("queue-owner");
+      expect(
+        row.entries
+          .filter((entry) => entry.action === "case_note_added")
+          .map((entry) => entry.entryId),
+      ).toEqual(row.original.timeline_snapshot.map((entry) => entry.entryId));
+    },
+  );
+
+  it.each(["before", "fresh-before", "ack", "replacement"])(
+    "a definitely rejected new command recovers after DELETE failure (%s)",
+    (mode) => {
+      const row = observed.cleanupFailure[mode]!;
+      expect(row.first.ok).toBe(false);
+      expect(row.remainingAfterFailure).toHaveLength(
+        ["before", "fresh-before"].includes(mode) ? 1 : 0,
+      );
+      if (row.replacement) expect(row.replacement.ok).toBe(false);
+      expect(row.retry.ok).toBe(true);
+      expect(row.finalCase.assigneeId).toBe("cleanup-owner");
+      expect(row.entries.map((entry) => entry.action)).toEqual([
+        "case_created",
+        "case_assigned",
+        "case_note_added",
+      ]);
+      expect(row.unresolved).toHaveLength(0);
+      if (row.original)
+        expect(
+          row.entries
+            .filter((entry) => entry.action === "case_note_added")
+            .map((entry) => entry.entryId),
+        ).toEqual(row.original.timeline_snapshot.map((entry) => entry.entryId));
+    },
+  );
+
+  it.each(["pending", "confirmed"])(
+    "an old in-flight snapshot cannot claim a replacement reservation (%s)",
+    (status) => {
+      const row = observed.replacedInFlight[status]!;
+      expect(row.first.ok).toBe(false);
+      expect(row.replacement.ok).toBe(status === "confirmed");
+      expect(row.winner.timeline_snapshot).not.toEqual(
+        row.original.timeline_snapshot,
+      );
+      expect(row.oldRetry).toMatchObject({
+        ok: false,
+        code: "IDEMPOTENCY_IN_PROGRESS",
+      });
+      expect(row.oldWrites).toBe(0);
+      expect(row.oldAudits).toBe(0);
+      expect(row.finalRetry.ok).toBe(true);
+      expect(row.finalCase.assigneeId).toBe("replacement-owner");
+      expect(
+        row.entries
+          .filter((entry) => entry.action === "case_note_added")
+          .map((entry) => entry.entryId),
+      ).toEqual(row.winner.timeline_snapshot.map((entry) => entry.entryId));
+    },
+  );
+
+  it("preserves identity without durable rejection proof and recovers when its owner completes classification", () => {
+    const row = observed.classificationFailure;
+    expect(row.first.ok).toBe(false);
+    expect(row.original).toHaveLength(1);
+    expect(row.withoutProof).toMatchObject({
       ok: false,
       code: "IDEMPOTENCY_IN_PROGRESS",
     });
-    expect(row.queued).toMatchObject({
-      ok: false,
-      code: "IDEMPOTENCY_IN_PROGRESS",
-    });
-    expect(row.foreign.ok).toBe(false);
-    expect(row.remaining).toHaveLength(1);
-    expect(row.remaining[0]!.timeline_snapshot).toEqual(
+    expect(row.retained).toEqual(row.original);
+    expect(row.recovered.ok).toBe(true);
+    expect(row.finalCase.assigneeId).toBe("classification-owner");
+    expect(row.entries.map((entry) => entry.action)).toEqual([
+      "case_created",
+      "case_assigned",
+      "case_note_added",
+    ]);
+  });
+
+  it("a delayed duplicate legacy cleanup preserves the next unknown same-key identity", () => {
+    const row = observed.delayedLegacyCleanup;
+    expect(row.first.ok).toBe(true);
+    expect(row.confirmedRead.ok).toBe(true);
+    expect(row.second.ok).toBe(false);
+    expect(row.retained).toHaveLength(1);
+    expect(row.retained[0]!.timeline_snapshot).toEqual(
       row.original.timeline_snapshot,
     );
     expect(row.retry.ok).toBe(true);
-    expect(row.finalCase.assigneeId).toBe("queue-owner");
-    expect(
-      row.entries
-        .filter((entry) => entry.action === "case_note_added")
-        .map((entry) => entry.entryId),
-    ).toEqual(row.original.timeline_snapshot.map((entry) => entry.entryId));
+    const notes = row.entries.filter(
+      (entry) => entry.action === "case_note_added",
+    );
+    expect(notes).toHaveLength(2);
+    expect(notes.at(-1)!.entryId).toBe(
+      row.original.timeline_snapshot[0]!.entryId,
+    );
   });
 });

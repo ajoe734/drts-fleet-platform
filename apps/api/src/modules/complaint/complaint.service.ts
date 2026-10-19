@@ -34,6 +34,7 @@ import type {
 } from "@drts/contracts";
 import type {
   ComplaintPendingCommitRecord,
+  ComplaintPendingCommitStatus,
   PassengerIntakeResult,
 } from "./complaint.repository";
 import {
@@ -168,6 +169,13 @@ export class ComplaintService implements OnModuleInit {
   /** Invalidates an identity SELECT spanning a local prepare/outcome/DELETE. */
   private complaintCommandRevision = 0;
 
+  /** Only this process's matched, new, pre-business predicate rejections.
+   * A failed/lost DELETE ACK can be retried without touching a replacement. */
+  private rejectedComplaintPreparations = new Map<
+    string,
+    { timeline: ComplaintTimelineEntry[]; clearing: boolean }
+  >();
+
   private unavailableOrdinaryReadbacks = new Set<string>();
 
   constructor(
@@ -228,6 +236,7 @@ export class ComplaintService implements OnModuleInit {
    * store. Safe to call repeatedly: a case with no pending entry, or with a
    * repository that cannot answer right now, is left untouched. */
   private async reconcilePendingCases(): Promise<void> {
+    await this.clearRejectedComplaintPreparations();
     await this.hydratePendingCommitsFromDurableStore();
     const caseNos = [
       ...new Set([
@@ -421,6 +430,8 @@ export class ComplaintService implements OnModuleInit {
     caseNo: string,
     matchCommand: unknown,
     preparedCommandKey?: string,
+    expectedTimeline?: readonly ComplaintTimelineEntry[],
+    expectedStatus: ComplaintPendingCommitStatus = "confirmed",
   ): void {
     if (!this.canonicalDbEnabled()) return;
     if (typeof this.complaintRepository?.clearPendingCommit !== "function")
@@ -429,8 +440,10 @@ export class ComplaintService implements OnModuleInit {
       .clearPendingCommit(
         preparedCommandKey ??
           this.computeCommandKey(action, caseNo, matchCommand),
+        expectedTimeline,
+        expectedStatus,
       )
-      .then(() => {
+      .finally(() => {
         this.complaintCommandRevision += 1;
       })
       .catch(() => {
@@ -438,14 +451,47 @@ export class ComplaintService implements OnModuleInit {
       });
   }
 
+  private async clearRejectedComplaintPreparations(): Promise<void> {
+    if (typeof this.complaintRepository?.clearPendingCommit !== "function")
+      return;
+    for (const [key, preparation] of this.rejectedComplaintPreparations) {
+      // A concurrent GET can already be reading while the first DELETE awaits
+      // its ACK. Let that observation finish; its revision guard handles it.
+      if (preparation.clearing) continue;
+      preparation.clearing = true;
+      try {
+        await this.complaintRepository.markPendingCommitFailed(
+          key,
+          preparation.timeline,
+        );
+        await this.complaintRepository.clearPendingCommit(
+          key,
+          preparation.timeline,
+          "failed",
+        );
+        if (this.rejectedComplaintPreparations.get(key) === preparation)
+          this.rejectedComplaintPreparations.delete(key);
+      } finally {
+        preparation.clearing = false;
+        // Even a lost DELETE ACK can have changed the durable identity set.
+        this.complaintCommandRevision += 1;
+      }
+    }
+  }
+
   /** Refresh canonical case and timeline before reusing any cache. Missing
    * or older observations preserve prepared identity; only confirmed outcome
    * or the original committed entry IDs allow a successful replay. */
-  private async reconcilePendingCase(caseNo: string): Promise<void> {
+  private async reconcilePendingCase(
+    caseNo: string,
+    forceRead = false,
+  ): Promise<void> {
     const commands = this.complaintCommandsForCase(caseNo);
     if (
       !this.canonicalDbEnabled() ||
-      (!commands.length && !this.unavailableOrdinaryReadbacks.has(caseNo))
+      (!forceRead &&
+        !commands.length &&
+        !this.unavailableOrdinaryReadbacks.has(caseNo))
     )
       return;
     let durableCase: ComplaintCaseRecord | null;
@@ -467,6 +513,16 @@ export class ComplaintService implements OnModuleInit {
     // An old/missing observation does not prove an ambiguous COMMIT rolled
     // back. Preserve the original prepared IDs for a real same-command retry.
     if (!durableCase) {
+      if (!commands.length) {
+        // An authoritative absent row with no pending identity is an ordinary
+        // not-found, not an ambiguous commit or a cached phantom success.
+        this.unavailableOrdinaryReadbacks.delete(caseNo);
+        this.complaintCases = this.complaintCases.filter(
+          (item) => item.caseNo !== caseNo,
+        );
+        this.complaintTimelines.delete(caseNo);
+        return;
+      }
       this.unavailableOrdinaryReadbacks.add(caseNo);
       // Preserve every identity. A single optimistic create can be hidden
       // locally, but a missing observation cannot choose among several writes.
@@ -506,6 +562,7 @@ export class ComplaintService implements OnModuleInit {
           caseNo,
           pending.matchCommand,
           pending.commandKey,
+          pending.complaintTimelines,
         );
       }
     }
@@ -629,6 +686,7 @@ export class ComplaintService implements OnModuleInit {
         caseNo,
         pending.matchCommand,
         pending.commandKey,
+        pending.complaintTimelines,
       );
     }
   }
@@ -1051,10 +1109,14 @@ export class ComplaintService implements OnModuleInit {
   }
 
   async getComplaintCaseForOps(caseNo: string) {
-    this.ensureComplaintReadbackAvailable(caseNo);
-    // Passenger intake owns this UUID namespace; other CRM reads keep their original behavior.
-    if (!/^PAX-[0-9a-f-]{36}$/i.test(caseNo))
+    // Legacy/definitely rejected commands can leave no retained identity.
+    // Actual ordinary GET still reads this case's canonical full snapshot.
+    if (!/^PAX-[0-9a-f-]{36}$/i.test(caseNo)) {
+      await this.reconcilePendingCase(caseNo, true);
+      this.ensureComplaintReadbackAvailable(caseNo);
       return this.getComplaintCase(caseNo);
+    }
+    this.ensureComplaintReadbackAvailable(caseNo);
     if (this.complaintRepository?.isEnabled()) {
       const record = await this.complaintRepository.getPassengerCase(caseNo);
       if (record) this.mergePassengerCase(record);
@@ -1063,9 +1125,11 @@ export class ComplaintService implements OnModuleInit {
   }
 
   async getComplaintTimelineForOps(caseNo: string) {
-    this.ensureComplaintReadbackAvailable(caseNo);
-    if (!/^PAX-[0-9a-f-]{36}$/i.test(caseNo))
+    if (!/^PAX-[0-9a-f-]{36}$/i.test(caseNo)) {
+      await this.getComplaintCaseForOps(caseNo);
       return this.getComplaintTimeline(caseNo);
+    }
+    this.ensureComplaintReadbackAvailable(caseNo);
     await this.getComplaintCaseForOps(caseNo);
     if (this.complaintRepository?.isEnabled()) {
       const persisted =
@@ -2164,12 +2228,13 @@ export class ComplaintService implements OnModuleInit {
                   previousCaseSnapshot,
                   confirmed: true,
                 });
-            } else
+            } else if (committedTarget)
               this.clearDurablePendingCommit(
                 context,
                 caseNo,
                 matchCommand,
                 preparedCommandKey,
+                committedTarget.timelineForCase,
               );
           }
         })
@@ -2229,7 +2294,6 @@ export class ComplaintService implements OnModuleInit {
           } else {
             const rejectedNewPreparation =
               error instanceof ComplaintPreparedCaseChangedError;
-            const rejectedPreparationKeys: string[] = [];
             for (const caseNo of affectedCaseNos) {
               if (rejectedNewPreparation)
                 this.unavailableOrdinaryReadbacks.add(caseNo);
@@ -2249,9 +2313,16 @@ export class ComplaintService implements OnModuleInit {
               if (
                 rejectedNewPreparation &&
                 preparedByThisAttempt.has(commandKey)
-              )
-                rejectedPreparationKeys.push(commandKey);
-              else if (
+              ) {
+                const target = durablePrepareTargets.find(
+                  (item) => item.caseNo === caseNo,
+                )!;
+                this.rejectedComplaintPreparations.set(commandKey, {
+                  timeline: target.timelineForCase,
+                  clearing: false,
+                });
+              } else if (
+                preparedByThisAttempt.has(commandKey) &&
                 !(
                   error instanceof ApiRequestError &&
                   (error.code === "IDEMPOTENCY_IN_PROGRESS" ||
@@ -2263,6 +2334,9 @@ export class ComplaintService implements OnModuleInit {
                   caseNo,
                   matchCommand,
                   preparedCommandKey,
+                  durablePrepareTargets.find((item) => item.caseNo === caseNo)
+                    ?.timelineForCase,
+                  "pending",
                 );
               }
               // A definite (non-uncertain) failure has already been rolled
@@ -2277,17 +2351,7 @@ export class ComplaintService implements OnModuleInit {
             if (rollback) rollback();
             // Await this definite-failure cleanup. A failed DELETE stays an
             // honest failed action; it cannot produce a success receipt.
-            if (
-              typeof this.complaintRepository!.clearPendingCommit === "function"
-            ) {
-              await Promise.all(
-                rejectedPreparationKeys.map((key) =>
-                  this.complaintRepository!.clearPendingCommit(key).then(() => {
-                    this.complaintCommandRevision += 1;
-                  }),
-                ),
-              );
-            }
+            await this.clearRejectedComplaintPreparations();
           }
           throw error;
         });
@@ -2332,6 +2396,7 @@ export class ComplaintService implements OnModuleInit {
         pending.complaintCase.caseNo,
         pending.matchCommand,
         pending.commandKey,
+        pending.complaintTimelines,
       );
     }
     const persistence = pending.confirmed
