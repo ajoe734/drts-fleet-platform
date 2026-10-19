@@ -21,6 +21,8 @@ All five original clauses, five acceptance keys and seven ordered scopes remain 
 
 ## Direct verification
 
+Final API production Source typecheck, affected root-test typecheck, affected ESLint and Prettier each returned direct0. Normal hooked anchor `ff44204af0bfebd71e28c116fdda3ce4945ecbcd` passed generated-file, formatting, lint and trailer checks; this ordinary documentation closeout preserves the checked production/test bytes. The immutable successor and PR are bound in the machine delivery packet.
+
 Machine evidence is under `.local/goal-continuation-20261019T0200Z-accepted61fa7-full-CI-and-native-continuation-root/registryexpiry-original-source-evidence/`.
 
 - `before-valid-three-findings.{json,log,-exit.json}`:5 failed/direct1 at byte-verified literal base; `before-literal-production.json` binds the original two Source blobs.
