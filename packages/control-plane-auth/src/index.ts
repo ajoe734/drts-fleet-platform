@@ -794,9 +794,3 @@ export async function issueControlPlaneRequestAuth(options: {
     headers,
   };
 }
-
-export {
-  applyUpstreamAuth,
-  forwardReviewDriver,
-  serveReviewDriverPage,
-} from "./review-driver-web";

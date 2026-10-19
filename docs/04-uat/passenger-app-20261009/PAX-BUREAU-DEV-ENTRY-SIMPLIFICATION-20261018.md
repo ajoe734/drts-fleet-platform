@@ -156,3 +156,25 @@ wholebuild ENOSPC exit 1 仍保留。只清掉本 task 已完成 Ops build 的
 可重建 cache／standalone 以供後續編譯，原碼、server 產物、log 與資料保留。
 同一修正版再跑原 14 檔／157 項回歸，底層 exit 0。
 其後根目錄 typecheck 與修改的 index scoped lint 亦各 exit 0。
+
+790e5e59642dbcdd220d137e73b069d1c32462f2／gen82c3 已由 owner
+正常撤回：自己的 ci-integ 39182799651／build job117839404872
+實際因 Bank client bundle 的 `node:fs/promises`／`node:path` 而 exit 1。
+實際鏈是 bank-shell → demo-tenants → session → control-plane-auth 主入口。
+前輪只列直接 server consumers 的盤點漏掉這段傳遞 client import；
+同候選 Ops Shell／預約逾時／拒絕復原成功，仍不能當成整版 build 通過。
+
+同一 task 正常配置 package.json 與 Root Vitest config 兩個精確路徑，
+25→27 scopes。從共用套件主入口移除新增的 server helper 匯出，改用
+`@drts/control-plane-auth/review-driver-web` 子入口的明確
+types／import／require／default dist exports；僅兩 App server adapters
+與 Passenger upstream 模組使用它。Root unit alias 對此子入口精確對到
+真正 TS 實作，排序在既有 base alias 前。Bank 原碼及所有其他 App
+bundler／瀏覽器 fallback 均未修改，也未新增 package、依賴版本或角色政策。
+
+修後沿原真 CLI 實跑 Bank、Ops、Passenger 三個 Next Webpack compile
+mode，三者底層均 exit 0；這補驗了前輪漏看的實際 client consumer。
+套件直接 build、原 14 檔／157 項回歸、根目錄 typecheck、1,908 檔
+cross-app import guard 與七個受影響 TS/config 檔 lint 均 exit 0。
+原 whole default build ENOSPC 失敗及各候選 CI 失敗保持；compile mode
+仍不替代新完整候選自己的 monorepo build、browser 或共享部署驗收。

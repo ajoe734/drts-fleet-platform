@@ -1,4 +1,4 @@
-import { forwardReviewDriver } from "@drts/control-plane-auth";
+import { forwardReviewDriver } from "@drts/control-plane-auth/review-driver-web";
 import { applyUpstreamAuth } from "../../../../lib/api-upstream";
 
 export const dynamic = "force-dynamic";
