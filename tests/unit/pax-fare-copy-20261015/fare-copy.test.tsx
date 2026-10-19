@@ -303,3 +303,69 @@ it("contains none of the retired strings anywhere in apps/passenger-app-web", ()
   }
   expect(output).toBe("");
 });
+
+describe("date-validation followup on the genuine formatter and mounted A03", () => {
+  const invalidDates = ["0", "2023-02-29", "2024-02-30T00:00:00+08:00"];
+  it.each(invalidDates)(
+    "refuses malformed API date %s, then recovers through the original retry",
+    async (effectiveAt) => {
+      fetchMock.mockResolvedValueOnce(
+        response({ ...currentVersion, effective_at: effectiveAt }),
+      );
+      fetchMock.mockResolvedValueOnce(response());
+      mount();
+      const alert = await screen.findByRole("alert");
+      expect(alert.textContent).toBe("目前無法取得公開費率，請稍後重試。");
+      expect(screen.queryByText("已生效")).toBeNull();
+      expect(screen.queryByText(/NT\$/)).toBeNull();
+      expect(screen.queryByText(/起實施/)).toBeNull();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByRole("button", { name: "重試" }));
+      const stamp = await screen.findByText(/版本 taipei-20230401/);
+      expect(stamp.textContent).toContain(
+        "依臺北市政府公告計程車運價（112/04/01起實施）",
+      );
+      expectRow("起程運價（1.25 公里）", "NT$ 85");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(
+        fetchMock.mock.calls.every(
+          ([url]) => url === "/api/passenger-app/fares",
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.each(invalidDates)(
+    "the actual VersionInfo preserves raw %s without inventing an announcement",
+    async (effectiveAt) => {
+      const { t } =
+        await import("../../../apps/passenger-app-web/components/ride/translations");
+      const stamp = t.VersionInfo("synthetic-date-control", effectiveAt);
+      expect(stamp).toContain("版本 synthetic-date-control");
+      expect(stamp).toContain(`生效日 ${effectiveAt}`);
+      expect(stamp).not.toContain("依臺北市政府公告計程車運價（");
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["2023-04-01", "112/04/01"],
+    ["2024-02-29", "113/02/29"],
+  ])(
+    "renders the real valid date-only calendar value %s",
+    async (effectiveAt, expectedDay) => {
+      fetchMock.mockResolvedValue(
+        response({ ...currentVersion, effective_at: effectiveAt }),
+      );
+      mount();
+      const stamp = await screen.findByText(/版本 taipei-20230401/);
+      expect(stamp.textContent).toContain(
+        `依臺北市政府公告計程車運價（${expectedDay}起實施）`,
+      );
+      expect(stamp.textContent).toContain(`生效日 ${effectiveAt}`);
+      expectRow("延滯計時（每 60 秒）", "NT$ 5");
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+});
