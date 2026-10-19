@@ -1,7 +1,9 @@
 import { defineConfig } from "vitest/config";
 import path from "node:path";
+import { fleetSourceResolver } from "./tests/unit/fleet-portal-verified-principal-canonical-caller-flow-20261015/fleet-source-resolver";
 
 export default defineConfig({
+  plugins: [fleetSourceResolver(__dirname)],
   resolve: {
     alias: {
       "@drts/contracts": path.resolve(

@@ -808,7 +808,7 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
           idempotencyKey: "idem-ctrl-001",
         },
         undefined,
-        { ...fleetIdentity, partnerId: "METRO_FLEET" },
+        { ...fleetIdentity, partnerId: "METRO_FLEET", actorId: "陳家豪" },
       );
       expect(res.data.caseId).toBe("cmp_0908");
       expect(res.data.actorId).toBe("陳家豪");

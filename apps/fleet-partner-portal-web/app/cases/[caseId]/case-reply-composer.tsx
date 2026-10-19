@@ -12,6 +12,7 @@ import {
 } from "@drts/ui-web";
 import {
   fleetDocumentRequest,
+  fleetMutationHeaders,
   fleetDocumentProxyPath,
   putFleetDocument,
   type FleetDocumentUploadIntent,
@@ -162,11 +163,14 @@ export function CaseReplyComposer({
           `/control-plane-proxy/fleet-partner/cases/${caseDetail.id}/reply`,
           {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-fleet-partner-id": caseDetail.fleetPartnerId,
-              "idempotency-key": idempotencyKey,
-            },
+            headers: fleetMutationHeaders({
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-fleet-partner-id": caseDetail.fleetPartnerId,
+                "idempotency-key": idempotencyKey,
+              },
+            }),
             body: JSON.stringify({
               content: content.trim(),
               idempotencyKey,
