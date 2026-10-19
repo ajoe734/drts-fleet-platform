@@ -629,7 +629,7 @@ function buildCrossAppLinks(
   return [
     {
       targetApp: "tenant-console",
-      route: `/bookings/new?prefillAddressId=${encodeURIComponent(address.addressId)}`,
+      route: `/bookings/new?addressId=${encodeURIComponent(address.addressId)}`,
       resourceType: "tenant_booking_create",
       resourceId: address.addressId,
       openMode: "same_tab",
