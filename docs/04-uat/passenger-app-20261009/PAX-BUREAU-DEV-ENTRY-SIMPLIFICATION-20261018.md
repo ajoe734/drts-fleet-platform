@@ -178,3 +178,46 @@ mode，三者底層均 exit 0；這補驗了前輪漏看的實際 client consume
 cross-app import guard 與七個受影響 TS/config 檔 lint 均 exit 0。
 原 whole default build ENOSPC 失敗及各候選 CI 失敗保持；compile mode
 仍不替代新完整候選自己的 monorepo build、browser 或共享部署驗收。
+
+49f0f9e65364083c64cce7855a7d9e7f817a9ee8／gen46fe 已由 owner
+正常撤回：own ci-integ 39184320188／typecheck117843885815 的 Root
+第一階段出現五個 TS2307。`pnpm typecheck` 先做 root typecheck，才由
+Turbo 建置 workspace 依賴；新增 server subpath 的 types 指向 dist，
+Root 原設定只把舊 main／contracts 指向 source。本機先前已有 dist，
+因此前輪 scoped build／typecheck 未重現此乾淨 runner 條件。
+
+同 task 正常追加 Root `tsconfig.json` 精確路徑，27→28 scopes，
+只依既有 source-first 模式補一個 server subpath source alias，沒有更動
+package runtime exports、各 App moduleResolution、瀏覽器設定或角色政策。
+將本 task 自有生成的 control-plane-auth/dist 暫移並在 finally 原樣復原，
+用下列真正 compiler 指令強制排除本機增量快取：
+
+```bash
+pnpm exec tsc -p tsconfig.json --noEmit --incremental false
+```
+
+同樣沒有該 dist 的條件，修改前實際重現與 CI 相同五個 TS2307，exit 2；
+補 alias 後實際 exit 0。兩次皆完成 finally 復原；未刪除原碼、使用者資料
+或任何既有證據。這是 fresh type-resolution 的 before／fixed，並非僅檢查
+alias 字串或使用已生成宣告掩蓋問題。前輪三個 App 實際 compile／157
+回歸與此次改動不相同的驗證界線保持，新候選仍須自己的完整 CI／獨立審查。
+
+平行核對原 49 的 Ops Shell 39184320154／job117843421108 亦發現
+舊驗收誤判：合法 `resourceId=voice-3820189d-8535-404b-a5d5-419f102e337d`
+使 line201 的全文 `.not.toContain("404")` 失敗，實際不是 HTTP404。
+Root 已透過同一 task 正常加原 consuming spec 的精確路徑，28→29 scopes。
+保留原實際 dispatch DOM link、truthy／audit 路徑斷言、無連結 fallback，
+改以真正 URL 解析驗證原 Admin origin、精確 `/audit`、原 producer
+order／forwarded_order 與非空 resourceId，再實際導覽要求 HTTP200
+及仍在原完整 audit URL。原 viewport／focus／receiver／invalid-context／
+clear-filter 案例不變；沒有改 ID、skip、刪除真 404 失敗或產品程式。
+
+新增 socket-free 測試以 AST 抽出實際 hosted callback 執行，僅替換外部
+browser／evidence transport。相同八例在原 49 callback 實際 8 failed、
+exit 1；修後 8 passed、exit 0。包含合法 ID 含 404 的兩種 producer，
+及錯 origin／path／缺 context／錯 type／真正 HTTP404／登入轉址拒絕。
+最終原回歸加此測試共 15 檔／165 項 exit 0，原 Ops Shell 四檔／65 項
+亦 exit 0，修改的兩個 test 檔 lint exit 0。新增案例與 alias 合併後，
+再暫移自有生成 dist、停用增量快取跑完整 Root compiler，實際 exit 0
+且 finally 復原。新增 hosted 導覽仍待新完整候選自己的原 browser CI，
+本機沒有啟動 browser／HTTP／產品 server。
