@@ -151,6 +151,26 @@ type DriverPublicRegistrationCredentialRow = {
   updated_at: string | Date;
 };
 
+/** Original credential fields; reminder family stays within V0102's driver CHECK. */
+export const PREEXPIRY_CREDENTIAL_FIELDS = {
+  driver_license: "licenseExpiry",
+  professional_driver_license: "professionalDriverLicenseExpiry",
+  taxi_driver_registration: "taxiDriverRegistrationExpiry",
+} as const;
+export function parsePreexpiryCredentialFamily(family: string) {
+  const match =
+    /^preexpiry:(driver_license|professional_driver_license|taxi_driver_registration):(30|7)$/.exec(
+      family,
+    );
+  if (!match) return null;
+  const credential = match[1] as keyof typeof PREEXPIRY_CREDENTIAL_FIELDS;
+  return {
+    credential,
+    field: PREEXPIRY_CREDENTIAL_FIELDS[credential],
+    days: Number(match[2]),
+  };
+}
+
 export type ExpiryEntityType = "driver" | "policy";
 export type ExpiryEventStatus =
   | "pending"
@@ -1632,6 +1652,33 @@ export class RegulatoryRegistryRepository {
     };
   }
 
+  /** Future sources and already-recorded reminder sources, in the same bounded
+   * keyset interval. The locked source is re-evaluated by the real producer. */
+  async scanPreexpiryDrivers(
+    asOf: string,
+    limit: number,
+    range: { afterId?: string; throughId?: string },
+  ): Promise<DriverRegistryRecord[]> {
+    const cutoff = new Date(Date.parse(asOf) + 30 * 86400000).toISOString();
+    const result = await this.databaseService!.query<{
+      record: DriverRegistryRecord;
+    }>(
+      `/* preexpiry-source */ SELECT d.record FROM reg.phase1_registry_drivers d
+       WHERE (
+         ((d.record->>'licenseExpiry')::timestamptz > $1 AND (d.record->>'licenseExpiry')::timestamptz <= $5)
+         OR ((d.record->>'professionalDriverLicenseExpiry')::timestamptz > $1 AND (d.record->>'professionalDriverLicenseExpiry')::timestamptz <= $5)
+         OR ((d.record->>'taxiDriverRegistrationExpiry')::timestamptz > $1 AND (d.record->>'taxiDriverRegistrationExpiry')::timestamptz <= $5)
+         OR EXISTS (SELECT 1 FROM reg.phase1_registry_expiry_events e WHERE e.entity_type='driver'
+           AND e.entity_id=d.driver_id AND e.credential_type LIKE 'preexpiry:%'
+           AND e.status IN ('pending','leased','completed'))
+       ) AND ($3::varchar IS NULL OR d.driver_id > $3::varchar)
+         AND ($4::varchar IS NULL OR d.driver_id <= $4::varchar)
+       ORDER BY d.driver_id ASC LIMIT $2`,
+      [asOf, limit, range.afterId ?? null, range.throughId ?? null, cutoff],
+    );
+    return result.rows.map((r) => r.record);
+  }
+
   async scanExpiredDrivers(
     asOf: Date | string,
     limit: number = 100,
@@ -2075,21 +2122,30 @@ export class RegulatoryRegistryRepository {
         let changed = false;
         if (snapshot.entity_type === "driver") {
           const source = await this.lockDriver(snapshot.entity_id, client);
-          const field = (
-            {
-              driver_license: "licenseExpiry",
-              professional_driver_license: "professionalDriverLicenseExpiry",
-              taxi_driver_registration: "taxiDriverRegistrationExpiry",
-            } as const
-          )[
-            snapshot.credential_type as
-              | "driver_license"
-              | "professional_driver_license"
-              | "taxi_driver_registration"
-          ];
+          const reminder = parsePreexpiryCredentialFamily(
+            snapshot.credential_type,
+          );
+          const field =
+            reminder?.field ??
+            (
+              {
+                driver_license: "licenseExpiry",
+                professional_driver_license: "professionalDriverLicenseExpiry",
+                taxi_driver_registration: "taxiDriverRegistrationExpiry",
+              } as const
+            )[
+              snapshot.credential_type as
+                | "driver_license"
+                | "professional_driver_license"
+                | "taxi_driver_registration"
+            ];
           if (field)
             changed =
-              !source || Date.parse(source[field] ?? "") !== sourceExpiryMs;
+              !source ||
+              Date.parse(source[field] ?? "") !== sourceExpiryMs ||
+              (reminder !== null &&
+                (source.lifecycleStatus !== "active" ||
+                  sourceExpiryMs <= Date.now()));
         } else {
           const source = await this.lockPolicy(snapshot.entity_id, client);
           changed =

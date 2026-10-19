@@ -73,8 +73,18 @@ describe("Registry actual enabled Repository SQL/executor boundary (controlled t
     expect(first.data.scannedPolicies).toBe(101);
     expect(first.data.expiredEventsCreated).toBe(202);
     expect(db.events.size).toBe(202);
-    const scans = db.calls.filter((c) => c.sql.includes("LIMIT $2"));
+    const scans = db.calls.filter(
+      (c) =>
+        c.sql.includes("LIMIT $2") && !c.sql.includes("/* preexpiry-source */"),
+    );
     expect(scans).toHaveLength(4);
+    const reminderScans = db.calls.filter((c) =>
+      c.sql.includes("/* preexpiry-source */"),
+    );
+    expect(reminderScans.map((c) => c.values)).toEqual([
+      [asOf, 100, null, "drv-demo-101", "2030-07-01T00:00:00.000Z"],
+      [asOf, 100, "drv-demo-100", "drv-demo-101", "2030-07-01T00:00:00.000Z"],
+    ]);
     expect(scans.every((c) => c.values[1] === 100)).toBe(true);
     expect(
       db.calls.find(
@@ -128,8 +138,19 @@ describe("Registry actual enabled Repository SQL/executor boundary (controlled t
     expect(first.data.scannedDrivers).toBe(5);
     expect(first.data.scannedPolicies).toBe(5);
     expect(db.events.size).toBe(10);
-    const scans = db.calls.filter((c) => c.sql.includes("LIMIT $2"));
+    const scans = db.calls.filter(
+      (c) =>
+        c.sql.includes("LIMIT $2") && !c.sql.includes("/* preexpiry-source */"),
+    );
     expect(scans).toHaveLength(6);
+    const reminderScans = db.calls.filter((c) =>
+      c.sql.includes("/* preexpiry-source */"),
+    );
+    expect(reminderScans.map((c) => c.values)).toEqual([
+      [asOf, 2, null, "drv-demo-005", "2030-07-01T00:00:00.000Z"],
+      [asOf, 2, "drv-demo-002", "drv-demo-005", "2030-07-01T00:00:00.000Z"],
+      [asOf, 2, "drv-demo-004", "drv-demo-005", "2030-07-01T00:00:00.000Z"],
+    ]);
     expect(scans.every((c) => c.values[1] === 2 && c.values[3] != null)).toBe(
       true,
     );
