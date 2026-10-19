@@ -1,3 +1,5 @@
+import { isIso8601InstantWithTimezone } from "@drts/contracts";
+
 import type {
   ApiSuccessEnvelope,
   MultiTaxiElectronicReceipt,
@@ -300,6 +302,32 @@ export async function fetchPassengerReceipt(
   }
 }
 
+function arrivalClock(
+  calculatedAt: string,
+  durationSeconds: number,
+): string | null {
+  if (!isIso8601InstantWithTimezone(calculatedAt)) return null;
+  const anchor = Date.parse(calculatedAt);
+  const arrival = anchor + durationSeconds * 1000;
+  if (
+    !Number.isFinite(anchor) ||
+    !Number.isFinite(durationSeconds) ||
+    durationSeconds < 0 ||
+    !Number.isFinite(arrival)
+  )
+    return null;
+  try {
+    return new Intl.DateTimeFormat("zh-TW", {
+      timeZone: "Asia/Taipei",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(new Date(arrival));
+  } catch {
+    return null;
+  }
+}
+
 export function mapPassengerRideAuthorityToFixture(
   rawView: PassengerRideAuthorityView,
   token: string,
@@ -315,8 +343,59 @@ export function mapPassengerRideAuthorityToFixture(
     "driver_accepted",
     "enroute_pickup",
   ].includes(view.order.status);
-  const pickupEta =
-    view.tracking === undefined ? assignment?.eta : view.tracking?.pickupEta;
+  const pickupEta = view.tracking?.pickupEta;
+  const pickupClock = pickupEta
+    ? arrivalClock(pickupEta.calculatedAt, pickupEta.minutes * 60)
+    : null;
+  const pickupFresh =
+    view.tracking?.locationFreshness === "fresh" &&
+    Boolean(view.tracking.location);
+  const canShowPickupEta =
+    showPickupEta &&
+    pickupFresh &&
+    pickupClock !== null &&
+    pickupEta?.minutes !== null;
+  const route = view.tracking?.dropoffRoute;
+  const routeClock = route
+    ? arrivalClock(route.generatedAt, route.remainingDurationSeconds)
+    : null;
+  const gps = view.tracking?.location;
+  const age = gps ? Date.now() - Date.parse(gps.recordedAt) : NaN;
+  const routeAge = route ? Date.now() - Date.parse(route.generatedAt) : NaN;
+  const canShowDropoffRoute =
+    view.order.status === "on_trip" &&
+    route?.leg === "dropoff" &&
+    route.source === "geo_route" &&
+    Boolean(route.provider) &&
+    routeClock !== null &&
+    view.tracking?.locationFreshness === "fresh" &&
+    gps &&
+    Number.isFinite(gps.lat) &&
+    Math.abs(gps.lat) <= 90 &&
+    Number.isFinite(gps.lng) &&
+    Math.abs(gps.lng) <= 180 &&
+    Number.isFinite(age) &&
+    age >= -5_000 &&
+    age < 60_000 &&
+    Number.isFinite(routeAge) &&
+    routeAge >= -5_000 &&
+    routeAge < 60_000 &&
+    typeof gps.accuracyM === "number" &&
+    gps.accuracyM >= 0 &&
+    gps.accuracyM <= 100 &&
+    assignment?.assignmentId === route.assignmentId &&
+    view.tracking.assignmentId === route.assignmentId &&
+    assignment?.assignmentVersion === route.assignmentVersion &&
+    Boolean(route.taskId) &&
+    assignment?.driver?.driverId === view.tracking.driverId &&
+    assignment?.vehicle?.vehicleId === view.tracking.vehicleId &&
+    route.locationRecordedAt === gps.recordedAt &&
+    route.origin?.lat === gps.lat &&
+    route.origin?.lng === gps.lng &&
+    route.destination?.lat === view.order.dropoff.lat &&
+    route.destination?.lng === view.order.dropoff.lng &&
+    Number.isFinite(route.remainingDistanceMeters) &&
+    route.remainingDistanceMeters >= 0;
   const fareMinor = assignment?.routeFare?.estimatedFareMinor ?? null;
   const payableFareMinor = assignment?.routeFare?.payableFareMinor ?? null;
   const bookedQuote = view.bookingQuote;
@@ -380,14 +459,17 @@ export function mapPassengerRideAuthorityToFixture(
     ...(view.order.status === "cancelled" && view.order.cancelledAt
       ? { cancelledAtText: formatDateTime(view.order.cancelledAt) }
       : {}),
-    ...(!showPickupEta ||
-    pickupEta?.minutes === null ||
-    pickupEta?.minutes === undefined
-      ? {}
-      : { etaMain: `預計 ${pickupEta.minutes} 分鐘抵達` }),
-    ...(!showPickupEta || !pickupEta?.calculatedAt
-      ? {}
-      : { etaSub: `更新於 ${formatDateTime(pickupEta.calculatedAt)}` }),
+    ...(canShowPickupEta
+      ? {
+          etaMain: `預計 ${pickupEta.minutes} 分鐘抵達`,
+          etaSub: `更新於 ${formatDateTime(pickupEta.calculatedAt)} · 約 ${pickupClock} 抵達`,
+        }
+      : canShowDropoffRoute
+        ? {
+            etaMain: `約 ${routeClock} 抵達目的地`,
+            etaSub: `剩餘 ${(route.remainingDistanceMeters / 1000).toFixed(1)} 公里 · 更新於 ${formatDateTime(route.generatedAt)}`,
+          }
+        : {}),
     ...(distanceMeters === null
       ? {}
       : { routeDistanceKm: `約 ${(distanceMeters / 1000).toFixed(1)} 公里` }),

@@ -53,6 +53,7 @@ export const t = {
   PickupLabel: "上車：",
   LocationUpdated5sAgo: "位置更新於 5 秒前",
   DriverLocationDelayed: "司機位置更新稍有延遲",
+  LiveRouteEstimateUnavailable: "目前無法預估抵達時間與剩餘距離",
   YourVehicleAndDriver: "您的車輛與駕駛",
   LicenseValid: "執登有效",
   ValidUntil: "· 有效至",

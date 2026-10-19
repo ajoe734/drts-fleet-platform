@@ -24,7 +24,10 @@ import { BookingForm, type BookingDraft } from "./booking-form";
 import { FeeDisclosure } from "./disclosure";
 import { BookingConfirmationSheet } from "./confirmation-sheet";
 import { BOOK_T as T } from "../../lib/booking/translations";
-import { useReviewDemo } from "../review-demo/review-context";
+import {
+  useReviewDemo,
+  useReviewDemoPending,
+} from "../review-demo/review-context";
 import {
   clearBookingRecovery,
   readBookingRecovery,
@@ -65,6 +68,7 @@ export function BookingScreen({
 }: BookingScreenProps) {
   const router = useRouter();
   const review = useReviewDemo();
+  const reviewPending = useReviewDemoPending();
   const [client] = useState(() => supplied ?? createBookingClient());
   const [account, setAccount] = useState<PassengerAccount>();
   const [fare, setFare] = useState<FareVersion>();
@@ -465,7 +469,9 @@ export function BookingScreen({
       {error && (mode !== "confirm" || !quote) && (
         <AuthAlert>{error}</AuthAlert>
       )}
-      {!account || !fare || !settings ? (
+      {reviewPending ? (
+        <p>{T.loadingSettings}</p>
+      ) : !account || !fare || !settings ? (
         <>
           <p>{busy ? T.loadingSettings : T.missingSettings}</p>
           <P5Btn disabled={busy} onClick={() => void load()}>

@@ -53,6 +53,21 @@ export type RegulatoryRegistryState = {
   driverCredentials: DriverPublicRegistrationCredential[];
 };
 
+/** Only an actual COMMIT rejection after successful work may be reconciled
+ * as an uncertain command ACK. BEGIN/work/rollback/release failures stay errors. */
+export class RegulatoryCommandCommitUncertainError extends Error {
+  constructor(readonly cause: unknown) {
+    super("Registry command COMMIT acknowledgement is uncertain.");
+  }
+}
+
+export type RegulatoryVehicleCommandState = {
+  vehicle: VehicleRegistryRecord;
+  contracts: VehicleContractRecord[];
+  policies: InsurancePolicyRecord[];
+  exclusivities: DispatchExclusivityRecord[];
+};
+
 export type PersistRegulatoryRegistryChanges = {
   vehicles?: readonly VehicleRegistryRecord[];
   drivers?: readonly DriverRegistryRecord[];
@@ -1602,6 +1617,117 @@ export class RegulatoryRegistryRepository {
     } finally {
       client.release();
     }
+  }
+
+  /** Dedicated transaction boundary for the seven C072 commands only. The
+   * generic detached writer and other Registry transactions are unchanged. */
+  async withVehicleCommandTransaction<T>(
+    work: (client: PoolClient) => Promise<T>,
+  ): Promise<T> {
+    const client = await this.databaseService!.connect();
+    let rollbackStarted = false;
+    let discard: Error | undefined;
+    const rollback = async () => {
+      rollbackStarted = true;
+      try {
+        await client.query("ROLLBACK");
+      } catch (error) {
+        discard = error instanceof Error ? error : new Error(String(error));
+        throw error;
+      }
+    };
+    try {
+      await client.query("BEGIN");
+      const result = await work(client);
+      try {
+        await client.query("COMMIT");
+      } catch (error) {
+        await rollback();
+        // PostgreSQL explicitly rejected these transactions; equal prior
+        // values do not acknowledge the failed retry. Connection/uncoded
+        // COMMIT failures still require exact canonical reconciliation.
+        const code = String((error as { code?: unknown })?.code ?? "");
+        if (
+          /^[0-9A-Z]{5}$/.test(code) &&
+          !code.startsWith("08") &&
+          code !== "40003" &&
+          !code.startsWith("57P")
+        )
+          throw error;
+        throw new RegulatoryCommandCommitUncertainError(error);
+      }
+      return result;
+    } catch (error) {
+      if (!rollbackStarted) await rollback();
+      throw error;
+    } finally {
+      client.release(discard);
+    }
+  }
+
+  /** Seven ordinary C072 commands serialize on the existing vehicle row and
+   * read only its source records through that same dedicated executor. */
+  async readVehicleCommandState(
+    vehicleId: string,
+    client: PoolClient,
+  ): Promise<RegulatoryVehicleCommandState | null> {
+    const executor = this.getExpiryExecutor(client);
+    const vehicles = await executor.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_vehicles WHERE vehicle_id = $1 FOR UPDATE",
+      [vehicleId],
+    );
+    if (!vehicles.rows[0]) return null;
+    const contracts = await executor.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_contracts WHERE vehicle_id = $1 ORDER BY contract_id",
+      [vehicleId],
+    );
+    const policies = await executor.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_policies WHERE vehicle_id = $1 ORDER BY policy_id",
+      [vehicleId],
+    );
+    const exclusivities = await executor.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_exclusivities WHERE vehicle_id = $1",
+      [vehicleId],
+    );
+    return {
+      vehicle: this.parseRecord<VehicleRegistryRecord>(
+        vehicles.rows[0].record,
+        "reg.phase1_registry_vehicles",
+      ),
+      contracts: contracts.rows.map((r) =>
+        this.parseRecord<VehicleContractRecord>(
+          r.record,
+          "reg.phase1_registry_contracts",
+        ),
+      ),
+      policies: policies.rows.map((r) =>
+        this.parseRecord<InsurancePolicyRecord>(
+          r.record,
+          "reg.phase1_registry_policies",
+        ),
+      ),
+      exclusivities: exclusivities.rows.map((r) =>
+        this.parseRecord<DispatchExclusivityRecord>(
+          r.record,
+          "reg.phase1_registry_exclusivities",
+        ),
+      ),
+    };
+  }
+
+  async findCommandContract(
+    contractId: string,
+  ): Promise<VehicleContractRecord | null> {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_contracts WHERE contract_id = $1",
+      [contractId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<VehicleContractRecord>(
+          result.rows[0].record,
+          "reg.phase1_registry_contracts",
+        )
+      : null;
   }
 
   async lockDriver(

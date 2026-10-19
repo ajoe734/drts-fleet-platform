@@ -323,16 +323,18 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
       completedAssignment.taskId,
     );
     await step(
-      "E low rating with actual contact checkbox unchecked",
+      "E low rating with actual contact switch explicitly turned off",
       async () => {
         await readCompletedByOps(ops, completed);
         await expect
           .poll(async () => (await authority(pax, completed)).payment?.status)
           .toBe("captured");
         await pax.getByRole("button", { name: "2 星", exact: true }).click();
-        await pax
-          .getByRole("checkbox", { name: "需要客服與您聯繫嗎？" })
-          .uncheck();
+        const contactSwitch = pax.getByRole("switch", {
+          name: "需要客服與您聯繫嗎？",
+        });
+        await contactSwitch.uncheck();
+        await expect(contactSwitch).not.toBeChecked();
         const [response] = await Promise.all([
           pax.waitForResponse(
             (r) =>

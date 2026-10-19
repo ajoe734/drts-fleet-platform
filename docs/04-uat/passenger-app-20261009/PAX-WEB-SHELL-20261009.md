@@ -239,3 +239,22 @@ Local logs are machine-specific evidence under `.local/pax-web-shell-r7/` in the
 The first historical replay used an empty default fetch stub and returned 503 on the five admitted POSTs; that incidental mock failure is **not** the authoritative reproduction. It is preserved as `old-bfd4-pre-success-stub.log`. The final tests provide successful metadata/API responses, and `old-bfd4.log` proves all five paths return **200** on old source versus **404 / zero fetch** on repaired source. All historical/current suites were rerun after this refinement, with the results and hashes above.
 
 No product/dev/preview/browser servers, Docker/PG infrastructure, deployment, live SMS, PSP or OAuth requests were started on this VM. Hosted checks, independent reviewer decision, merge and named acceptance must be reported individually from the final candidate's machine evidence, not inferred from this document's historical pass statements.
+
+## 2026-10-19 USER 三頁確認單：共用客服頁尾續辦
+
+本輪沿原 `PAX-WEB-SHELL-20261009` 完整規格、11 個 scope 與原兩項驗收條件，由 Codex2 實作、Codex 獨立審查。基底為已接受的 `daebd72eeef12229cb59d3750b7a288b1dab7448`。上方歷史紀錄保留原版本與結果，不作本輪 CI、部署或正式驗收的替代。
+
+- `app/layout.tsx` 在所有路由共用的 RootLayout 頁面內容之後提供語意化客服頁尾及 `tel:02-2944-0985` 連結。沿用既有 `PASSENGER_SUPPORT_PHONE` 與 `BOOK_T.supportPhone`，電話為「客服 02-2944-0985」；蔡尚志 0988220716 是技術窗口，不放進客服頁尾。
+- 頁尾採靜態伺服器渲染，不新增狀態、effect、網路請求、固定覆蓋層或任何預約／驗證閘門。原 children、DemoBanner 與 ReviewDemoProvider 保留。未改 BFF、cookie、refresh、CSRF、API、Journey 首頁／ETA／評價、NativeReceipt 或依賴。
+- 新 `layout-footer.test.tsx` 以真 RootLayout 靜態渲染後解析 DOM；只替代 Next pathname context，核對原 children、單一共用 footer 的位置、可辨識客服文案、原生撥號連結，以及技術窗口未混入。這是伺服器輸出／DOM 的 unit 證據，不是各路由瀏覽器視覺或真撥號證明。
+
+| 本輪檢查                                                                            | 真結果與界線                                                                                                                                              |
+| ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 新 footer regression 對原 accepted daeb Source                                      | 1 FAIL，精確失敗為實際 RootLayout 無 footer（期望 1、實得 0）；原 log 保留。                                                                              |
+| `pnpm exec vitest run tests/unit/pax-web-shell-20261009/ --maxWorkers=1 --no-cache` | 6 檔、53 PASS、exit 0；含原 BFF、安全標頭、passenger-client、P5 UI／背景測試與新增 footer。                                                               |
+| 範圍限定 true-imports `tsc --noEmit --incremental false`                            | exit 0；使用原 Passenger App tsconfig，files 僅 RootLayout 與新增 unit，沿真實 import 圖，不代替 hosted 全 App build。                                    |
+| lint／format／diff                                                                  | 精確改動範圍執行並在 immutable candidate packet 保存原命令、exit 與 hash。                                                                                |
+| React checklist                                                                     | 共用 Server Component 靜態輸出；沿用文案與電話來源；原生可存取連結；無新增 hook、同步狀態、effect 或額外資料擷取。                                        |
+| 同候選 CI／review／共享部署                                                         | 由本輪 immutable candidate 的正常 CI、獨立 Codex review 與 Root 序列部署各自提供；本段 local 53 PASS 不冒充 hosted build、共享全頁視覺或原兩 key 已完成。 |
+
+機器原始記錄位於 canonical root `.local/passenger-bureau-gap-correction-20261018/shell-customer-footer-20261019/`。原 UAT prefix SHA256 為 `7c427bca531492f5cad78c096fc18b849d51ff925603d6c50e1e7cfadf10dc24`，本輪只附加此段；未啟動 VM 產品／browser／PG／preview server，亦無 live 產品請求、部署或依賴安裝。
