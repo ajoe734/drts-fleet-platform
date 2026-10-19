@@ -32,7 +32,10 @@ import type {
   PassengerTripRatingRecord,
   PassengerRideAccessToken,
 } from "@drts/contracts";
-import type { PassengerIntakeResult } from "./complaint.repository";
+import type {
+  ComplaintPendingCommitRecord,
+  PassengerIntakeResult,
+} from "./complaint.repository";
 import {
   ComplaintCommitOutcomeUnknownError,
   ComplaintPreparedCaseChangedError,
@@ -131,6 +134,8 @@ type PendingUncertainComplaintCommit = {
    * closure. */
   previousCaseSnapshot?: ComplaintCaseRecord | null;
   confirmed?: boolean;
+  /** A missing read cannot disprove this process's ambiguous COMMIT. */
+  locallyUncertain?: boolean;
 };
 
 @Injectable()
@@ -159,6 +164,9 @@ export class ComplaintService implements OnModuleInit {
     string,
     PendingUncertainComplaintCommit
   >();
+
+  /** Invalidates an identity SELECT spanning a local prepare/outcome/DELETE. */
+  private complaintCommandRevision = 0;
 
   private unavailableOrdinaryReadbacks = new Set<string>();
 
@@ -243,7 +251,30 @@ export class ComplaintService implements OnModuleInit {
       return;
     // A failed identity read cannot authorize a fresh allocation on another
     // replica. Surface the failure instead of pretending no prior command exists.
-    const durableRows = await this.complaintRepository!.loadPendingCommits();
+    let revision: number;
+    let beforeRead: Map<string, PendingUncertainComplaintCommit>;
+    let durableRows: ComplaintPendingCommitRecord[];
+    do {
+      revision = this.complaintCommandRevision;
+      beforeRead = new Map(this.complaintCommands);
+      durableRows = await this.complaintRepository!.loadPendingCommits();
+      // A response captured before our DELETE ACK must not resurrect its row.
+      // Equally, an older empty response cannot erase a newer local prepare.
+    } while (revision !== this.complaintCommandRevision);
+    const durableKeys = new Set(durableRows.map((row) => row.commandKey));
+    for (const [key, pending] of beforeRead) {
+      if (
+        !durableKeys.has(key) &&
+        this.complaintCommands.get(key) === pending &&
+        !pending.locallyUncertain &&
+        !this.settlementPersistence.has(pending.complaintCase.caseNo)
+      ) {
+        this.complaintCommands.delete(key);
+        // Another replica can definitively remove a rejected preparation.
+        // Refresh its case even when no other durable identity remains.
+        this.unavailableOrdinaryReadbacks.add(pending.complaintCase.caseNo);
+      }
+    }
     this.caseSequence = Math.max(
       this.caseSequence,
       this.deriveNextCaseSequence(durableRows.map((row) => row.caseSnapshot)),
@@ -264,8 +295,22 @@ export class ComplaintService implements OnModuleInit {
             row.timelineSnapshot.map((entry) => entry.entryId),
           ),
       };
-      const current = this.complaintCommands.get(row.commandKey) ?? pending;
-      if (row.status === "confirmed") current.confirmed = true;
+      const existing = this.complaintCommands.get(row.commandKey);
+      const samePreparation =
+        existing?.complaintCase.caseNo === row.caseNo &&
+        this.stableStringify(existing.complaintTimelines) ===
+          this.stableStringify(row.timelineSnapshot);
+      const current =
+        existing &&
+        (samePreparation ||
+          existing.locallyUncertain ||
+          this.settlementPersistence.has(row.caseNo))
+          ? existing
+          : pending;
+      if (row.status === "confirmed" && samePreparation) {
+        current.confirmed = true;
+        current.locallyUncertain = false;
+      }
       this.complaintCommands.set(row.commandKey, current);
     }
   }
@@ -323,10 +368,10 @@ export class ComplaintService implements OnModuleInit {
     previousCaseSnapshot: ComplaintCaseRecord | null,
     matchCommand: unknown,
     preparedCommandKey?: string,
-  ): Promise<void> {
-    if (!this.canonicalDbEnabled()) return;
+  ): Promise<boolean> {
+    if (!this.canonicalDbEnabled()) return false;
     if (typeof this.complaintRepository?.recordPendingCommit !== "function")
-      return;
+      return false;
     const reserved = await this.complaintRepository.recordPendingCommit({
       commandKey:
         preparedCommandKey ??
@@ -339,6 +384,7 @@ export class ComplaintService implements OnModuleInit {
       previousCaseSnapshot,
       status: "pending",
     });
+    this.complaintCommandRevision += 1;
     if (
       reserved &&
       !this.sameComplaintCommandPayload(reserved.commandPayload, matchCommand)
@@ -363,6 +409,7 @@ export class ComplaintService implements OnModuleInit {
         "The original complaint command is already prepared; retry the same key.",
       );
     }
+    return !!reserved;
   }
 
   /** Best-effort durable clear once a pending commit is no longer uncertain
@@ -383,6 +430,9 @@ export class ComplaintService implements OnModuleInit {
         preparedCommandKey ??
           this.computeCommandKey(action, caseNo, matchCommand),
       )
+      .then(() => {
+        this.complaintCommandRevision += 1;
+      })
       .catch(() => {
         // Best-effort only; a stale durable row is re-reconciled later.
       });
@@ -443,6 +493,7 @@ export class ComplaintService implements OnModuleInit {
       if (!durableTimeline)
         this.mergeTimelineEntriesIntoCache(caseNo, pending.complaintTimelines);
       pending.confirmed = true;
+      pending.locallyUncertain = false;
       if (
         !this.identifiedPayload(pending.matchCommand) &&
         !["create_complaint_case", "escalate_to_incident"].includes(
@@ -2039,6 +2090,9 @@ export class ComplaintService implements OnModuleInit {
             return [{ caseNo, complaintCase, timelineForCase }];
           })
         : [];
+      // A typed error can also be inherited from `previous`; only this
+      // invocation's successfully matched reservation authorizes cleanup.
+      const preparedByThisAttempt = new Set<string>();
       const persistence = Promise.all(previous)
         .then(() => {
           if (
@@ -2059,7 +2113,13 @@ export class ComplaintService implements OnModuleInit {
                   previousCaseSnapshot,
                   matchCommand,
                   preparedCommandKey,
-                ),
+                ).then((matched) => {
+                  if (matched)
+                    preparedByThisAttempt.add(
+                      preparedCommandKey ??
+                        this.computeCommandKey(context, caseNo, matchCommand),
+                    );
+                }),
             ),
           ).then(() => {
             persistPayload.commandKeys = durablePrepareTargets.map(
@@ -2071,6 +2131,7 @@ export class ComplaintService implements OnModuleInit {
           });
         })
         .then(() => {
+          this.complaintCommandRevision += 1;
           for (const caseNo of affectedCaseNos) {
             this.unavailableOrdinaryReadbacks.delete(caseNo);
             const commandKey =
@@ -2113,6 +2174,7 @@ export class ComplaintService implements OnModuleInit {
           }
         })
         .catch(async (error: unknown) => {
+          this.complaintCommandRevision += 1;
           this.complaintRepository!.reportPersistenceFailure(error, context);
           if (error instanceof ComplaintCommitOutcomeUnknownError) {
             if (rollback) {
@@ -2135,6 +2197,7 @@ export class ComplaintService implements OnModuleInit {
                     rollback,
                     matchCommand,
                     previousCaseSnapshot,
+                    locallyUncertain: true,
                   },
                 );
                 // Already durably registered above, before this ambiguous
@@ -2174,7 +2237,8 @@ export class ComplaintService implements OnModuleInit {
               const commandKey =
                 preparedCommandKey ??
                 this.computeCommandKey(context, caseNo, matchCommand);
-              this.complaintCommands.delete(commandKey);
+              if (preparedByThisAttempt.has(commandKey))
+                this.complaintCommands.delete(commandKey);
               // This attempt's own prepared durable marker (if any) never saw
               // a business commit at all, so it must not linger as if it
               // were still an unresolved cross-replica identity.
@@ -2182,7 +2246,10 @@ export class ComplaintService implements OnModuleInit {
               // The typed rejection is after our reservation's IDs matched
               // and before any business write; another reservation's generic
               // IN_PROGRESS error must never authorize clearing its identity.
-              if (rejectedNewPreparation)
+              if (
+                rejectedNewPreparation &&
+                preparedByThisAttempt.has(commandKey)
+              )
                 rejectedPreparationKeys.push(commandKey);
               else if (
                 !(
@@ -2215,7 +2282,9 @@ export class ComplaintService implements OnModuleInit {
             ) {
               await Promise.all(
                 rejectedPreparationKeys.map((key) =>
-                  this.complaintRepository!.clearPendingCommit(key),
+                  this.complaintRepository!.clearPendingCommit(key).then(() => {
+                    this.complaintCommandRevision += 1;
+                  }),
                 ),
               );
             }

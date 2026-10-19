@@ -75,6 +75,39 @@ describe("original R3: all same-case prepared identities survive reconciliation"
       };
       entries: Entry[];
     };
+    delayedDeletedIdentity: Record<
+      string,
+      {
+        first: Outcome;
+        rowsAfterCleanup: Command[];
+        delayedRead: Outcome;
+        retry: Outcome;
+        finalCase: { assigneeId: string };
+        entries: Entry[];
+        unresolved: Command[];
+      }
+    >;
+    localDuringRead: Record<
+      string,
+      {
+        first: Outcome;
+        unrelated: Outcome;
+        retry: Outcome;
+        original: Command;
+        finalCase: { assigneeId: string };
+        entries: Entry[];
+      }
+    >;
+    queuedTypedRejection: {
+      first: Outcome;
+      queued: Outcome;
+      foreign: Outcome;
+      original: Command;
+      remaining: Command[];
+      retry: Outcome;
+      finalCase: { assigneeId: string };
+      entries: Entry[];
+    };
     definitePredecessorFailure: {
       first: Outcome;
       retry: Outcome;
@@ -237,5 +270,69 @@ describe("original R3: all same-case prepared identities survive reconciliation"
       "case_note_added",
     ]);
     expect(row.unresolved).toHaveLength(0);
+  });
+
+  it.each(["same", "other"])(
+    "a late deleted identity converges before same-key retry (%s replica)",
+    (kind) => {
+      const row = observed.delayedDeletedIdentity[kind]!;
+      expect(row.first).toMatchObject({
+        ok: false,
+        code: "IDEMPOTENCY_IN_PROGRESS",
+      });
+      expect(row.rowsAfterCleanup).toHaveLength(0);
+      expect(row.delayedRead.ok).toBe(true);
+      expect(row.retry.ok).toBe(true);
+      expect(row.finalCase.assigneeId).toBe("delayed-owner");
+      expect(row.entries.map((entry) => entry.action)).toEqual([
+        "case_created",
+        "case_assigned",
+        "case_note_added",
+      ]);
+      expect(row.unresolved).toHaveLength(0);
+    },
+  );
+
+  it.each(["unknown", "inflight"])(
+    "an earlier identity reply preserves a newer local command (%s)",
+    (kind) => {
+      const row = observed.localDuringRead[kind]!;
+      expect(row.first.ok).toBe(false);
+      expect(row.unrelated).toMatchObject({
+        ok: false,
+        code: "IDEMPOTENCY_IN_PROGRESS",
+      });
+      expect(row.retry.ok).toBe(true);
+      expect(row.finalCase.assigneeId).toBe("local-A");
+      expect(
+        row.entries
+          .filter((entry) => entry.action === "case_assigned")
+          .map((entry) => entry.entryId),
+      ).toEqual(row.original.timeline_snapshot.map((entry) => entry.entryId));
+    },
+  );
+
+  it("a queued inherited typed failure cannot clear another replica's reservation", () => {
+    const row = observed.queuedTypedRejection;
+    expect(row.first).toMatchObject({
+      ok: false,
+      code: "IDEMPOTENCY_IN_PROGRESS",
+    });
+    expect(row.queued).toMatchObject({
+      ok: false,
+      code: "IDEMPOTENCY_IN_PROGRESS",
+    });
+    expect(row.foreign.ok).toBe(false);
+    expect(row.remaining).toHaveLength(1);
+    expect(row.remaining[0]!.timeline_snapshot).toEqual(
+      row.original.timeline_snapshot,
+    );
+    expect(row.retry.ok).toBe(true);
+    expect(row.finalCase.assigneeId).toBe("queue-owner");
+    expect(
+      row.entries
+        .filter((entry) => entry.action === "case_note_added")
+        .map((entry) => entry.entryId),
+    ).toEqual(row.original.timeline_snapshot.map((entry) => entry.entryId));
   });
 });

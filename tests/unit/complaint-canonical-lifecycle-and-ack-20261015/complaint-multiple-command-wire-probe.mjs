@@ -301,6 +301,236 @@ async function definitePredecessorFailure() {
   };
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => (resolve = done));
+  return { promise, resolve };
+}
+function domainNote(replica, caseNo, note, key) {
+  return replica.service.addComplaintCaseNote(caseNo, { note }, key, {
+    captureAudit: true,
+    commandIdentity: {
+      scope: `crm:complaint:${caseNo}:addComplaintCaseNote`,
+      key,
+    },
+  });
+}
+
+// A real SELECT captures the doomed new preparation before DELETE, but its
+// response arrives after DELETE ACK. Both warm and other-replica caches must
+// converge on the later successful durable identity observation.
+async function delayedDeletedIdentity(otherReplica) {
+  const wire = new Wire();
+  const a = instance(wire);
+  const created = a.service.createComplaintCase(opsPayload);
+  const caseNo = created.caseNo;
+  await a.service.awaitSettlementPersistence(caseNo);
+  const b = await fresh(wire);
+  const reader = otherReplica ? await fresh(wire) : b;
+  await assign(a, caseNo, "delayed-owner", undefined);
+  const originalQuery = wire.query.bind(wire);
+  const captured = deferred(),
+    release = deferred();
+  let armDelete = true,
+    holdRead = false,
+    background;
+  wire.query = async (sql, values = []) => {
+    if (
+      armDelete &&
+      sql.includes("DELETE FROM crm.phase1_complaint_pending_commits")
+    ) {
+      armDelete = false;
+      holdRead = true;
+      background = outcome(() => reader.ops.getComplaintCase(caseNo));
+      await captured.promise;
+      return originalQuery(sql, values);
+    }
+    if (
+      holdRead &&
+      sql.includes("FROM crm.phase1_complaint_pending_commits") &&
+      !sql.includes("FOR UPDATE")
+    ) {
+      holdRead = false;
+      const result = await originalQuery(sql, values);
+      captured.resolve();
+      await release.promise;
+      return result;
+    }
+    return originalQuery(sql, values);
+  };
+  const command = { note: "Note after delayed deleted identity" };
+  const first = await outcome(() =>
+    b.ops.addComplaintCaseNote(
+      caseNo,
+      command,
+      "first-delayed",
+      "delayed-note",
+    ),
+  );
+  const rowsAfterCleanup = copy([...wire.commands.values()]);
+  release.resolve();
+  const delayedRead = await background;
+  const retry = await outcome(() =>
+    reader.ops.addComplaintCaseNote(
+      caseNo,
+      command,
+      "retry-delayed",
+      "delayed-note",
+    ),
+  );
+  return {
+    first,
+    rowsAfterCleanup,
+    delayedRead,
+    retry,
+    finalCase: wire.cases.get(caseNo),
+    entries: [...wire.timelines.values()],
+    unresolved: [...wire.commands.values()].filter(
+      (row) => row.status === "pending",
+    ),
+  };
+}
+
+// A public domain command begins while an actual controller's identity SELECT
+// is in flight. Its PREPARED / ambiguous result must survive that older reply.
+async function localCommandDuringRead(holdCommit) {
+  const wire = new Wire();
+  const { replica, caseNo } = await create(wire);
+  const gate = holdIdentityRead(wire);
+  const read = outcome(() => replica.ops.getComplaintCase(caseNo));
+  await gate.read;
+  const committed = deferred(),
+    release = deferred();
+  if (holdCommit) {
+    const connect = wire.connect.bind(wire);
+    wire.connect = async () => {
+      const client = await connect();
+      const query = client.query.bind(client);
+      client.query = async (sql, values = []) => {
+        if (sql === "COMMIT") {
+          committed.resolve();
+          await release.promise;
+        }
+        return query(sql, values);
+      };
+      return client;
+    };
+  }
+  wire.nextCommit = "unknown-not-landed";
+  const firstPromise = outcome(() =>
+    replica.service.assignComplaintCase(
+      caseNo,
+      { assigneeId: "local-A" },
+      "local-A",
+      {
+        captureAudit: true,
+        commandIdentity: {
+          scope: `crm:complaint:${caseNo}:assignComplaintCase`,
+          key: "local-during-read",
+        },
+      },
+    ),
+  );
+  if (holdCommit) await committed.promise;
+  else await firstPromise;
+  const original = copy(
+    [...wire.commands.values()].find(
+      (row) => row.action === "assign_complaint_case",
+    ),
+  );
+  gate.release();
+  await read;
+  release.resolve();
+  const first = await firstPromise;
+  const unrelated = await outcome(() =>
+    assign(replica, caseNo, "unrelated-B", "unrelated-during-read"),
+  );
+  const retry = await outcome(() =>
+    assign(replica, caseNo, "local-A", "local-during-read"),
+  );
+  return {
+    first,
+    unrelated,
+    retry,
+    original,
+    finalCase: wire.cases.get(caseNo),
+    entries: [...wire.timelines.values()],
+  };
+}
+
+// B never reaches its own PREPARED: Promise.all(previous) propagates A's typed
+// rejection. A third replica has meanwhile actually reserved B's same key.
+// Cleanup may delete A only, never B's independently allocated identity.
+async function queuedTypedRejection() {
+  const wire = new Wire();
+  const a = instance(wire);
+  const created = a.service.createComplaintCase(opsPayload);
+  const caseNo = created.caseNo;
+  await a.service.awaitSettlementPersistence(caseNo);
+  const b = await fresh(wire);
+  await assign(a, caseNo, "queue-owner", undefined);
+  const c = await fresh(wire);
+  const locked = deferred(),
+    release = deferred();
+  const connect = wire.connect.bind(wire);
+  let armLock = true;
+  wire.connect = async () => {
+    const client = await connect();
+    const query = client.query.bind(client);
+    client.query = async (sql, values = []) => {
+      if (armLock && sql.includes("AS matches_prepared")) {
+        armLock = false;
+        locked.resolve();
+        await release.promise;
+      }
+      return query(sql, values);
+    };
+    return client;
+  };
+  const firstPromise = outcome(() =>
+    domainNote(b, caseNo, "stale-first", "queue-first"),
+  );
+  await locked.promise;
+  const queuedPromise = outcome(() =>
+    domainNote(b, caseNo, "reserved elsewhere", "queue-second"),
+  );
+  wire.nextCommit = "unknown-not-landed";
+  const foreign = await outcome(() =>
+    domainNote(c, caseNo, "reserved elsewhere", "queue-second"),
+  );
+  const original = copy(
+    [...wire.commands.values()].find(
+      (row) =>
+        row.command_payload?.complaintCommandIdentity?.key === "queue-second",
+    ),
+  );
+  release.resolve();
+  const first = await firstPromise;
+  const queued = await queuedPromise;
+  const remaining = copy(
+    [...wire.commands.values()].filter((row) => row.status === "pending"),
+  );
+  const reader = await fresh(wire);
+  const retry = await outcome(() =>
+    reader.ops.addComplaintCaseNote(
+      caseNo,
+      { note: "reserved elsewhere" },
+      "queue-retry",
+      "queue-second",
+    ),
+  );
+  return {
+    first,
+    queued,
+    foreign,
+    original,
+    remaining,
+    retry,
+    finalCase: wire.cases.get(caseNo),
+    entries: [...wire.timelines.values()],
+  };
+}
+
 async function run() {
   const hidden = {};
   const multiple = {};
@@ -324,6 +554,15 @@ async function run() {
     legacySla: await legacySla(),
     lifecycle: await canonicalLifecycle(),
     definitePredecessorFailure: await definitePredecessorFailure(),
+    delayedDeletedIdentity: {
+      same: await delayedDeletedIdentity(false),
+      other: await delayedDeletedIdentity(true),
+    },
+    localDuringRead: {
+      unknown: await localCommandDuringRead(false),
+      inflight: await localCommandDuringRead(true),
+    },
+    queuedTypedRejection: await queuedTypedRejection(),
     forbiddenNetworkOrListenAttempts,
     scope:
       "Actual controllers/services/repository and SQL; external SQL rows/response timing only. No real PG/isolation/HTTP/browser acceptance.",
