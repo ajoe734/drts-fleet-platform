@@ -333,24 +333,27 @@ export class RegulatoryRegistryController {
   }
 
   @Post("contracts")
-  createContract(
+  async createContract(
     @Body() command: CreateVehicleContractCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.createContract(command),
+      await this.regulatoryRegistryService.createContract(command),
       requestId,
     );
   }
 
   @Post("contracts/:contractId/activate")
-  activateContract(
+  async activateContract(
     @Param("contractId") contractId: string,
     @Body() command: ActivateVehicleContractCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.activateContract(contractId, command),
+      await this.regulatoryRegistryService.activateContract(
+        contractId,
+        command,
+      ),
       requestId,
     );
   }
@@ -459,24 +462,27 @@ export class RegulatoryRegistryController {
   }
 
   @Post("policies")
-  createInsurancePolicy(
+  async createInsurancePolicy(
     @Body() command: CreateInsurancePolicyCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.createInsurancePolicy(command),
+      await this.regulatoryRegistryService.createInsurancePolicy(command),
       requestId,
     );
   }
 
   @Post("policies/:policyId/activate")
-  activateInsurancePolicy(
+  async activateInsurancePolicy(
     @Param("policyId") policyId: string,
     @Body() command: ActivateInsurancePolicyCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.activateInsurancePolicy(policyId, command),
+      await this.regulatoryRegistryService.activateInsurancePolicy(
+        policyId,
+        command,
+      ),
       requestId,
     );
   }
@@ -492,13 +498,13 @@ export class RegulatoryRegistryController {
   }
 
   @Post("exclusivities/:vehicleId/submit-review")
-  submitExclusivityReview(
+  async submitExclusivityReview(
     @Param("vehicleId") vehicleId: string,
     @Body() command: SubmitExclusivityReviewCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.submitExclusivityReview(
+      await this.regulatoryRegistryService.submitExclusivityReview(
         vehicleId,
         command,
       ),
@@ -507,25 +513,31 @@ export class RegulatoryRegistryController {
   }
 
   @Post("exclusivities/:vehicleId/approve")
-  approveExclusivity(
+  async approveExclusivity(
     @Param("vehicleId") vehicleId: string,
     @Body() command: ApproveExclusivityCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.approveExclusivity(vehicleId, command),
+      await this.regulatoryRegistryService.approveExclusivity(
+        vehicleId,
+        command,
+      ),
       requestId,
     );
   }
 
   @Post("exclusivities/:vehicleId/reject")
-  rejectExclusivity(
+  async rejectExclusivity(
     @Param("vehicleId") vehicleId: string,
     @Body() command: RejectExclusivityCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.rejectExclusivity(vehicleId, command),
+      await this.regulatoryRegistryService.rejectExclusivity(
+        vehicleId,
+        command,
+      ),
       requestId,
     );
   }
