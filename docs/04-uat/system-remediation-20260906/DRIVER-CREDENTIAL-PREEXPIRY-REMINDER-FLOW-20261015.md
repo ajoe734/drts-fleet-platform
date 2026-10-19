@@ -4,7 +4,7 @@ Task: `DRIVER-CREDENTIAL-PREEXPIRY-REMINDER-FLOW-20261015`
 Author: Codex2. Independent reviewer: Codex.  
 Accepted execution base: `1c0c3f954e5d067156732ce973ccc8cbcc2b02c6`.
 
-The original five clauses and five acceptance keys remain binding. The current full specification is `Preexpiry-R4-full-original-plus-one-existing-B4-pagination-query-family-test.task-spec.json`, SHA-256 `856cbe73797a92eabada15abf8d56817e5b9c1c6c9ed29c2259913f205252430`, in the machine evidence directory below. Its seventh scope is the existing B4 pagination test's query-family classification. This adds no product threshold, recipient audience, dispatch restriction, route, migration, cloud job, or mail drain.
+The original five clauses and five acceptance keys remain binding. The current full specification is `Preexpiry-R5-full-original-plus-one-existing-shared-transaction-fixture.task-spec.json`, SHA-256 `4b1353793b07755142e828c910a0edd2805f97af5ce25142106e7cab20c57e75`, in the machine evidence directory below. The seventh scope is the existing B4 pagination test's query-family classification; R5 adds only the existing shared transaction fixture as the eighth scope. This adds no product threshold, recipient audience, dispatch restriction, route, migration, cloud job, or mail drain.
 
 ## Result and production path
 
@@ -28,9 +28,9 @@ The existing `onModuleInit`, optional `ENABLE_EXPIRY_RECONCILIATION_LOOP` period
 | `credential-reminder_actual-production-scheduled-entry-and-safe-preparation` | Actual module startup and original periodic timer cross T30, clean up correctly, and recover through a fresh instance; actual existing awaited controller; canonical bounded scan rather than the expiring-license list. No VM service or cloud action.                                                                             |
 | `credential-reminder_exact-candidate-validation`                             | Original before snapshot and direct exits, 18-file final regression union, API Source typecheck, own test typecheck, lint, original assertion/method preservation proof, managed hooks, immutable handoff manifest. New candidate CI, independent review, protected merge and five acceptance keys remain reviewer/integrator work. |
 
-## Executed checks and retained diagnostics
+## Original a538 checks and retained diagnostics
 
-Machine evidence: `.local/goal-continuation-20261019T0200Z-accepted61fa7-full-CI-and-native-continuation-root/preexpiry-original-source-evidence/`.
+Sealed original a538 machine evidence: `.local/goal-continuation-20261019T0200Z-accepted61fa7-full-CI-and-native-continuation-root/preexpiry-original-source-evidence/`. These results belong to a538 and are not new candidate CI credit.
 
 - `actual-before-collected`: direct exit **1**, original three cases: expired positive **1 PASS**, future T30 and T7 zero-intent failures **2 FAIL**, no skipped cases. `before-original-reminders.test.ts.txt` preserves the original three-case snapshot; `actual-before-source-binding.json` binds the two original production blobs and test snapshot to the accepted base.
 - `first-fixed`: direct exit **0**, the same original three cases **3 PASS**.
@@ -40,6 +40,27 @@ Machine evidence: `.local/goal-continuation-20261019T0200Z-accepted61fa7-full-CI
 - `source-and-assertion-preservation.json` records unchanged Registry members/rails, the retained original three-case AST, and every original B4 assertion statement. The two original 4/6 page counts, 100/2 limits, driver/policy keysets, and event expectations retain their original values; separate assertions cover the new reminder query bindings.
 
 Preparation failures remain in the evidence packet: initial missing workspace dependency link caused zero collection; an early expansion used a partially initialized source cache for unrelated dates and was corrected to pass the actual full license command; own gate generic/optional-property type errors were fixed without changing compiler options; a temporary final-list config used a wrong path, and an output validator initially expected absolute instead of relative paths. None is claimed as a product before result. `affected-initial` is separately retained: 181 PASS / 2 FAIL caused by an existing test counting both SQL query families, corrected only after normal R4 scope coordination. Earlier printer-format comparison diagnostics are retained; the final preservation proof compares the original AST structure.
+
+## R1 actual own-CI repair and current validation
+
+R1 continues ordinary history from `a53884d9bdaf2ad6a6c42abf409ed6f99c8bc1ed`; the accepted execution base remains the original `1c0c3f954e5d067156732ce973ccc8cbcc2b02c6`. Prior Source approval and controlled positives remain historical credit. Actual own Product CI `39276272210`, jobs `118148362623` and `118148362654`, failed with unhandled detached renewal rejections despite passing assertions. The tested checkout was `27a5ab32f9d8e92d48513bc786b48395c66c327f`. This was not a green CI outcome.
+
+The actual driver master save still awaits canonical ACK and then publishes the same driver eligibility and audit. Its separate renewal callback now observes rejection through the existing repository persistence-failure channel. It does not claim that reminder supersession or delivery succeeded. Failed cleanup leaves the existing event/intent and immutable source facts intact for ordinary canonical reconciliation; an explicitly awaited renewal call still rejects to its caller. Fresh-instance rescan checks the committed renewed source and supersedes only its obsolete reminder work, preserving an already accepted real outbox ID and receipt history.
+
+The original shared `storage-fixture.ts` now supplies the actual existing dedicated transaction client/query/release contract. Its original empty-row query behavior and the separate legacy availability-transition fixture remain unchanged. No production missing-connect fallback, global persistence change, test error suppression, assertion weakening, or backend policy change was introduced. The original driver-gap and Webhook test bytes remain unchanged. The Webhook test contains an actual HTTP receiver and is excluded from all VM execution; its complete file awaits this successor's own hosted CI.
+
+New machine evidence is separately retained under `.local/goal-continuation-20261019T0200Z-accepted61fa7-full-CI-and-native-continuation-root/preexpiry-original-source-R1-evidence/`:
+
+- `driver-before-with-errors`: direct **1**, **4 assertion PASS**, **3 unhandled rejections**. A preceding JSON-only run also exited 1; JSON's `success:true` did not describe unhandled-error status, so a default-plus-JSON report captured the errors explicitly.
+- `renewal-before`: direct **1**, **1 PASS / 3 FAIL / 3 unhandled rejections** through the actual service/repository with controlled connect/COMMIT faults and a real accepted notification receipt. The original four-case snapshot is preserved.
+- `renewal-first-fixed`: the identical four cases, direct **0**, **4 PASS / 0 FAIL / 0 unhandled errors**. A fifth new case separately proves the shared fixture really reaches the repository transaction without relying on the rejection observer to conceal a missing contract.
+- Current exact **21-file** regression coverage comprises **222 unique cases**. Initial `final-union` exited **1** with **218 PASS / 4 FAIL / 0 SKIP / 0 unhandled errors**: three PDF cases lacked the existing tracked font in the sparse worktree; one original outbox-writer case reached its unchanged 5000ms timeout. After materializing only the existing font, `failed-two-fixed` reran those two complete files without concurrent typechecks: direct **0**, **33 PASS / 0 FAIL / 0 SKIP / 0 unhandled errors**, with original timeouts/assertions intact. The other 19 files supplied 189 passing cases on these same product bytes. Latest per-file coverage is therefore 222 PASS, without claiming a single 222-case/direct0 execution or adding overlapping reruns.
+- Current `api-source-types`, `own-test-types`, and `lint`: each direct **0**. These retain original compiler flags and do not claim full-root hosted checks.
+- `preservation-fixed`: direct **0**. Only `updateDriverLicenses` changes among existing service members; 158 other members, including reminder producer/renewal, Incident and generic persistence helpers, retain their AST. Repository/controller/module, original 20 reminder cases, B4 pagination test, and original driver-gap caller are byte-exact a538. The Webhook remains unmaterialized and its immutable Git blob is preserved. Removing only the fixture's new `connect` property yields the original fixture AST. All 106 old packet references remain hash-correct, resolving original Source references through immutable a538 Git objects rather than the resumed worktree.
+
+The initial preservation checker compared `SourceFile.text` as well as AST children, so naturally detected the new fixture property even when omitted structurally; this preparation diagnostic is retained. The corrected checker excludes the source-file raw-text field. Neither failure changed product or assertion semantics.
+
+All original five clauses and keys above remain the delivery scope. R1 adds actual callback failure observation and genuine later recovery to the third key, and current-case/direct-exit qualification to the fifth. New candidate CI, complete Webhook hosted verification, independent review, protected merge, and five acceptance records remain pending at author handoff; a538's prior results cannot satisfy them.
 
 ## Validation boundary
 

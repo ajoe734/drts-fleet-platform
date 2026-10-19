@@ -1545,7 +1545,17 @@ export class RegulatoryRegistryService
         );
 
         if (this.regulatoryRegistryRepository) {
-          void this.handleDriverLicenseRenewal(driverId, command);
+          // The master save above is already acknowledged. Renewal cleanup can
+          // still fail; retain its durable pending work for the existing rescan
+          // and observe the failure without claiming supersession or delivery.
+          void this.handleDriverLicenseRenewal(driverId, command).catch(
+            (error: unknown) => {
+              this.regulatoryRegistryRepository!.reportPersistenceFailure(
+                error,
+                "driver_license_renewal_reconciliation",
+              );
+            },
+          );
         }
 
         return this.cloneDriver(updated);
