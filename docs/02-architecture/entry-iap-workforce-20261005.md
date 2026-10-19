@@ -597,3 +597,17 @@ three task files. Their actual commit result, immutable SHA, remote/PR equality,
 new handoff generation, pending/current own CI and independent review are
 recorded in the candidate packet rather than guessed here. No owner approval,
 merge, deployment, or new hosted operational success is claimed.
+
+## 2026-10-19：合併已接受的 UC03 修復後續作原 ENTRY
+
+原 `9be172f4e79ea4981a6755bfd8f22fcdeb59c809`／generation `f44df0b871ee43bda0b89fddf1d4f5c9` 的 mandatory integration CI 因 Passenger UC03 reload 將上車選擇清空而失敗；原 7 PASS／1 FAIL／0 retry 及 blocked 歷史保留，不能以 main 成功或本段測試取代。Root 已獨立接受 Journey `607cf709dabbd115df77b491419506de8cfd61d9`，本分支由原 9be 普通 merge 該 immutable commit，沒有重跑未變的舊候選、rebase、amend 或 force。後續新候選仍須取得自己的完整 CI 與獨立 reviewer 審查。
+
+本次保留原三檔 auth/session READ_HEAVY 修復與完整五項驗收。正式 hook 使用既有 Prettier 3.8.2，僅在 `jwt-auth.service.ts` 與既有 privileged-grant consumer test 產生預先核對的機械排版；其餘 accepted607 peer Source 原樣保留。READ_HEAVY 是既有 authenticated read route 分類，不是任意流量都不會 429 的保證；原五分鐘 block、逐次 durable session 驗證、撤銷、realm／tenant／partner 邊界與 IAP／dev-waiver 條件均未放寬。
+
+真隔離依賴圖由 Root 將已凍結 Complaint worktree 的 26 個 ignored 本地 `node_modules` 目錄可逆 rename 借入；33 項依賴輸入逐 byte 相同，原 ENTRY 22 個目錄停放保留 inode，沒有 install、bulk copy 或外借 Root-global target。搬移後 installed helper check 為 0，實際工具解析皆在本 worktree 的 `.pnpm`。這是本機工具條件，不是 CI 或共享 runtime 驗收。
+
+第一次當前 union 回歸有 192 assertion PASS、兩個既有 key-isolation／module-wiring suite load FAIL：原 `production-loader.ts` 將 contracts Source 宣告的外部 `zod` 一律從 API package 解析，並非依賴沒有安裝。單次 process-scoped `NODE_PATH` 的 21 PASS 僅保留作診斷。正式修復讓每個實際 Source file 用 `createRequire(file)` 解析自己的外部依賴；原 `apiRequire` export、workspace aliases、relative Source 遞迴、cache、decorator metadata 與 evaluation 流程保留，沒有 catch、假的依賴、symlink 或環境 fallback，真正 missing import 仍正常拋錯。
+
+正常 fixed 回歸移除 `NODE_PATH`：原 key-isolation 20 案與 module-wiring 1 案共 21 PASS／0 skip；與前輪未受此 loader 影響且已通過的 192 案合為 213 個不同 assertion，原 auth/session 19 案包含其中，不重複加總診斷或歷史結果。實際 wrapper 51／51 與既有 Fleet consumer 37／37 另列。當前 API production＋原 auth/session test 的真 Source import graph noEmit／incremental false 為 0（19.58 秒）；helper 後續僅做其實際 import graph 的窄 noEmit（1.48 秒），以及 scoped lint／format check，均為 0。未啟動 VM HTTP、產品／browser／PG／Compose 或其他服務。
+
+原五項 Source／安全條件及全部 read dependencies 持續適用。新 immutable candidate 的 full11／5 packet、原始 logs／reports 與後續 own CI 結果交獨立 reviewer；owner 不自行 approve、錄 keys、merge 或 deploy。舊共享 ee1c 的 operational 15／16、六條成功 PDF 鏈及剩餘義務仍各自保留，不能把本機回歸、已接受的 Journey CI 或尚未完成的新 own CI 寫成共享全流程成功。
