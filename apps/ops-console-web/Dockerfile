@@ -21,6 +21,8 @@ FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY packages/ packages/
 COPY apps/ops-console-web/package.json apps/ops-console-web/
+COPY apps/driver-app/package.json apps/driver-app/
+COPY apps/passenger-app-web/package.json apps/passenger-app-web/
 
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
@@ -31,8 +33,19 @@ ENV DRTS_CANDIDATE_SHA=$DRTS_CANDIDATE_SHA
 ARG NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE
 ENV NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE=$NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE
 COPY apps/ops-console-web/ apps/ops-console-web/
+COPY apps/driver-app/ apps/driver-app/
+# Both mounts import these original handlers; do not fork Driver authority.
+COPY apps/passenger-app-web/app/review-driver/ apps/passenger-app-web/app/review-driver/
+COPY apps/passenger-app-web/app/api/review-driver-api/ apps/passenger-app-web/app/api/review-driver-api/
+COPY apps/passenger-app-web/lib/api-upstream.ts apps/passenger-app-web/lib/api-upstream.ts
 COPY runtime/web/control-plane-web-proxy.mjs runtime/web/
 COPY tsconfig.base.json .
+
+RUN EXPO_PUBLIC_API_URL=/api/review-driver-api \
+    EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH=/review-driver \
+    pnpm --filter @drts/driver-app exec expo export --platform web --output-dir dist && \
+    mkdir -p apps/ops-console-web/public/review-driver && \
+    cp -R apps/driver-app/dist/. apps/ops-console-web/public/review-driver/
 
 RUN pnpm --filter @drts/contracts build && \
     pnpm --filter @drts/control-plane-auth build && \

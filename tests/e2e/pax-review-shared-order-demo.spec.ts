@@ -26,7 +26,15 @@ const OPS = process.env.PAX_REVIEW_OPS_ORIGIN || "http://127.0.0.1:3202";
 const PLATFORM_ADMIN =
   process.env.PAX_REVIEW_PLATFORM_ADMIN_ORIGIN ||
   (sharedDev ? "" : "http://127.0.0.1:3204");
-const DRIVER = sharedDev ? `${PAX}/review-driver` : "http://127.0.0.1:3101";
+const privateDriverOrigin = process.env.PAX_REVIEW_DRIVER_ORIGIN?.replace(
+  /\/$/,
+  "",
+);
+if (sharedDev && !privateDriverOrigin)
+  throw new Error("Missing configured private Driver origin");
+const DRIVER = sharedDev
+  ? `${privateDriverOrigin}/review-driver`
+  : "http://127.0.0.1:3101";
 const camel = (value: any): any =>
   Array.isArray(value)
     ? value.map(camel)
@@ -1124,6 +1132,9 @@ function assertCompletedFacts(rows: any[], orderId: string) {
 test("three new PG orders travel through real Passenger, Ops and Driver UIs, including retry/case, cancellation and exception controls", async ({
   browser,
 }, info) => {
+  const publicPassenger =
+    sharedDev && process.env.PAX_REVIEW_PUBLIC_PASSENGER === "true";
+  const mountedDriverBase = sharedDev ? DRIVER : `${PAX}/review-driver`;
   const progress = createJourneyProgress(info.outputPath("safe-progress.json"));
   const step = progress.step;
   const contexts: BrowserContext[] = [];
@@ -1131,8 +1142,12 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
     const outerToken =
       role === "ops"
         ? process.env.PAX_REVIEW_OPS_ID_TOKEN
-        : process.env.PAX_REVIEW_PASSENGER_ID_TOKEN;
-    if (sharedDev && !outerToken)
+        : role === "driver" && sharedDev
+          ? process.env.PAX_REVIEW_DRIVER_ID_TOKEN
+          : role === "pax" && publicPassenger
+            ? undefined
+            : process.env.PAX_REVIEW_PASSENGER_ID_TOKEN;
+    if (sharedDev && !(role === "pax" && publicPassenger) && !outerToken)
       throw new Error(
         `Missing existing private-service access credential for ${role}`,
       );
@@ -1421,13 +1436,13 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
       await createDispatch(ops, retry);
       await assign(ops);
     });
-    // Also exercise the production export mounted in the same private PAX
-    // service, including its real driver BFF and SQLite/WASM headers.
+    // Exercise the production mount and its real Driver BFF/SQLite/WASM headers.
+    // Shared dev hosts it on private Ops; source CI keeps its private PAX mount.
     const mountedDriver = await newRole("driver");
     observe("driver", mountedDriver);
-    activeDriver = { page: mountedDriver, base: `${PAX}/review-driver` };
-    await registerDriver(ops, mountedDriver, `${PAX}/review-driver`, step);
-    await finish(mountedDriver, `${PAX}/review-driver`, pax, retry, ops, step);
+    activeDriver = { page: mountedDriver, base: mountedDriverBase };
+    await registerDriver(ops, mountedDriver, mountedDriverBase, step);
+    await finish(mountedDriver, mountedDriverBase, pax, retry, ops, step);
     await step(
       "B failed payment, same-payment retry, low-rating CRM and document",
       async () => {

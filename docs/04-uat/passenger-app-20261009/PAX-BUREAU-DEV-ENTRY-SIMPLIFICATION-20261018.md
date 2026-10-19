@@ -49,3 +49,60 @@ Next 最佳化編譯、TypeScript 與 14 頁產生，但最終複製 standalone
 Root 才能設定單一 Passenger 開關、正常發布部署並交付實測 HTTPS URL。
 原入口 public key、普通瀏覽器登入、同單全 16 案與正式外部服務驗收
 在本次 Source 單元測試後仍未宣稱完成。
+
+2026-10-19 補齊原私人 Driver 生產與消費端：
+
+初版正常 checkpoint `e88a7d91ddbac9e8634336a8d9add76913bf8dbf` 已由
+owner 自行撤回交審，保留原 PR #2809；這不是獨立 reviewer 的採認。
+靜態追查確認 accepted 4db／e88 沒有另外的 Cloud Driver 服務，
+原 core B、additional、真預約接單逾時與 Ops 拒絕復原仍連 Passenger mount。
+只關閉該 mount 會使上述原驗收中斷。
+
+同 task 正常擴充精確 scopes 後，在既有私有 Ops Docker 映像產生同一
+Driver export，兩個新 Ops routes 直接 re-export 原 handlers，
+沒有複製司機業務邏輯或改用 ops_user。原 handler 的裝置 JWT 透傳與
+metadata runtime identity 分別保持；原上游 API 仍負責 session／task ownership。
+Ops 的 Driver mount 保留原 SQLite isolation／Blob worker headers。
+部署只替 Ops 補原 rehearsal enablement 與明確 private mode，沒有新增服務。
+
+原五支 deployed Passenger 腳本在 public mode 不附 Cloud Run credential。
+四支有 Driver 的腳本使用實際 Ops origin 及同 audience edge token；
+core A／B 皆已接線，沒有刪除原案例、同單證據、真時限或正向斷言。
+source CI 保留原 standalone Driver 與 Passenger private mount。
+
+新增測試呼叫實際 Ops routes；僅 mock 檔案內容、metadata 與遠端 API transport，
+沒有 mock 被測 handler 或 upstream-auth。檢查裝置 Bearer、runtime identity
+分離、匿名原 API 401 透傳、其他角色 route 拒絕及真 Next headers。
+原回歸加新案例共 10 檔／99 項，底層 exit 0；Ops route typegen／tsc exit 0，
+初次七檔 scoped lint exit 0。
+
+原 e88 自身 CI `39179052619` 的 typecheck job `117828076027`
+實際因本 task deploy 測試字串替換的可能 undefined 而失敗；已修正為明確檢查值。
+後續本機 root typecheck 亦抓到新增測試的三處可空 mock-call 索引，以及
+直接匯入 Next config 造成的全域 ProcessEnv 型別污染；已移除該污染，
+headers 測試仍於執行時載入真正 config。原失敗 log 保留，修後結果續記。
+
+修後 `pnpm typecheck:root` 實際 exit 0；最終相同 10 檔／99 項回歸
+再次 exit 0，包含直接載入實際 config 的 headers 測試。Ops config/routes、
+五支原 browser specs 與兩個 unit 共十檔 scoped ESLint
+實際 exit 0。此處並非宣稱整個 monorepo typecheck 或 hosted browser 已通過。
+
+因 core B 換到私有 Driver origin，另跑原 hosted booking／dispatch caller
+與 Driver failure-evidence 三檔，共 40 項通過，底層 exit 0。
+這些原斷言未修改，core callback 的設定保留於 callback 內，原 sandbox
+仍可執行實際 caller；沒有為新入口刪掉失敗取證、清理或 B 路徑檢查。
+
+另以 TypeScript AST 抽出五支實際 spec 的 browser-context factory 執行，
+僅替換 Playwright 建立 context 的外部邊界；檢查 public Passenger 無雲端
+header、原 private Passenger 正向、Driver 專用 audience token，以及缺
+Driver token 不借用其他角色憑證。相同 18 項在原 e88 Source 實際
+13 failed／5 passed、exit 1；修正版 18 passed、exit 0。
+這是實際腳本的路由／憑證回歸，不宣稱已啟動 browser 或完成訂單。
+
+最終合跑原回歸及新 factory 測試，11 檔／117 項通過，exit 0；
+包含新增 factory 測試的根目錄 typecheck 再次 exit 0。
+新增測試的初次 lint 因未使用的 mock 參數 exit 1，明確標記 discard 後
+該檔 lint exit 0，其他十個受影響 TS 檔的既有 scoped lint 仍保留為 exit 0。
+
+Docker 內 Expo export／封裝及完整原 browser 腳本尚待新完整候選自己的
+hosted CI／正常共享部署，不把上述單元、型別或 Source 接線當成已部署驗收。

@@ -19,8 +19,12 @@ const run = workflow.match(
   /- name: Deploy — passenger-app-web\n\s+run: \|\n([\s\S]*?)(?=\n {6}- name:)/,
 )?.[1];
 if (!run) throw new Error("Original Passenger deployment step is missing");
+const opsRun = workflow.match(
+  /- name: Deploy — ops-console-web\n\s+run: \|\n([\s\S]*?)(?=\n {6}- name:)/,
+)?.[1];
+if (!opsRun) throw new Error("Original Ops deployment step is missing");
 
-function deployArgs(publicEntry: boolean) {
+function deployArgs(publicEntry: boolean, runScript = run) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "pax-public-deploy-"));
   try {
     const helper = path.join(
@@ -38,6 +42,12 @@ function deployArgs(publicEntry: boolean) {
       "steps.api_url.outputs.url": "https://private-api.example",
       "needs.prepare.outputs.passenger_app_service":
         "drts-dev-passenger-app-web",
+      "needs.prepare.outputs.ops_console_service": "drts-dev-ops-console-web",
+      "needs.prepare.outputs.ops_console_exposure_flag":
+        "--no-allow-unauthenticated",
+      "steps.api_secrets.outputs.ops": "existing-ops-secrets",
+      "steps.web_env.outputs.vars":
+        "NODE_ENV=production,DRTS_API_URL=https://private-api.example",
       "needs.prepare.outputs.region": "us-central1",
       "needs.prepare.outputs.runtime_service_account":
         "runtime@example.invalid",
@@ -46,12 +56,13 @@ function deployArgs(publicEntry: boolean) {
         ? "--allow-unauthenticated"
         : "--no-allow-unauthenticated",
     };
-    const script = run!.replace(
+    const script = runScript!.replace(
       /\$\{\{\s*([^}]+?)\s*\}\}/g,
       (_, key: string) => {
-        if (!(key.trim() in substitutions))
+        const value = substitutions[key.trim()];
+        if (value === undefined)
           throw new Error(`Unknown deploy input: ${key}`);
-        return substitutions[key.trim()];
+        return value;
       },
     );
     const capture = path.join(dir, "args");
@@ -80,5 +91,14 @@ describe("the real Passenger deploy command couples public access to closed cont
       enabled ? "--allow-unauthenticated" : "--no-allow-unauthenticated",
     );
     expect(args[0]).toBe("drts-dev-passenger-app-web");
+  });
+
+  it("keeps the actual Ops deployment private and enables its original Driver mount", () => {
+    const args = deployArgs(true, opsRun);
+    expect(args[0]).toBe("drts-dev-ops-console-web");
+    expect(args).toContain("--no-allow-unauthenticated");
+    const vars = args[args.indexOf("--set-env-vars") + 1];
+    expect(vars).toContain("PAX_REVIEW_DEMO_ENABLED=true");
+    expect(vars).toContain("PAX_PUBLIC_PASSENGER_ONLY=false");
   });
 });

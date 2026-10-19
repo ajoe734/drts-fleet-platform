@@ -24,8 +24,16 @@ API 與其他後臺維持原設定。不可把尚未包含此修補的舊版直�
   `PAX_REVIEW_DEMO_ENABLED` 仍可供既有合成乘客演練使用，沒有關閉整個乘客流程。
 - 公開模式會略過既有 IAP grant step，不需要為這條入口新增
   Service Usage／Compute／IAP 權限。Root 不再續跑原失敗的 IAP 佈建請求。
-- 非公開的既有 hosted Driver 演練保持原路徑。公開 Passenger 不能冒作
-  private Driver origin；同單跨角色驗證仍用各自正確的 origin／授權。
+- 既有私有 `ops-console-web` 映像同時產生原 Driver Expo export，掛在
+  `/review-driver`，並直接共用原 Driver HTML／狹義 API route handlers。
+  司機裝置 Bearer 及上游 runtime identity 保持分開，不走 Ops 角色代理。
+  原 Driver SQLite／WASM isolation 與 Blob worker headers 只加在此 mount。
+- 原 core A／B、additional、預約接單逾時與 Ops 拒絕指派復原腳本，
+  在 shared-dev 使用 `PAX_REVIEW_DRIVER_ORIGIN`（實際私有 Ops origin）與
+  `PAX_REVIEW_DRIVER_ID_TOKEN`（同 Ops audience），保留原同單斷言。
+  source CI 的 localhost Driver／私人 Passenger mount 行為保持。
+  `PAX_REVIEW_PUBLIC_PASSENGER=true` 時，這些腳本及報價逾時的 Passenger
+  browser context 不附 GCP token；Ops／Driver 仍各用原私有端憑證。
 
 部署後必須從實際服務讀回 URL，無 GCP token 檢查登入頁與操作頁，
 以及 Driver 路徑／靜態檔拒絕、匿名與無效 Passenger session 不可讀個資。
