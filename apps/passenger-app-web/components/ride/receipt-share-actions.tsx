@@ -17,6 +17,24 @@ type SharePdfState =
 interface ReceiptShareActionsProps {
   pdfUrl?: string | null | undefined;
   receiptNo?: string | null | undefined;
+  token: string;
+  authMode?: "id" | "token" | undefined;
+}
+
+/**
+ * The only two legitimate producer shapes (multi-taxi.service.ts
+ * getTrustedPassengerReceiptDownloads / getPassengerReceiptDownloads).
+ * A descriptor that doesn't match the current addressed context exactly
+ * is rejected before any request, rather than trusted as-is.
+ */
+function resolveExpectedArtifactPath(
+  authMode: "id" | "token" | undefined,
+  token: string,
+  format: "pdf" | "html",
+): string {
+  return authMode === "token"
+    ? `/api/passenger-rides/${encodeURIComponent(token.trim())}/receipt/artifacts/${format}`
+    : `/api/passenger-app/rides/${encodeURIComponent(token)}/receipt/artifacts/${format}`;
 }
 
 function isPdfSignature(bytes: Uint8Array): boolean {
@@ -61,6 +79,8 @@ function resolveSameOriginUrl(url: string): URL | null {
 export function ReceiptShareActions({
   pdfUrl,
   receiptNo,
+  token,
+  authMode,
 }: ReceiptShareActionsProps) {
   const [state, setState] = useState<SharePdfState>({ kind: "idle" });
   const requestIdRef = useRef(0);
@@ -71,12 +91,20 @@ export function ReceiptShareActions({
     return () => {
       requestIdRef.current += 1;
     };
-  }, [pdfUrl, receiptNo]);
+  }, [pdfUrl, receiptNo, token, authMode]);
 
   if (!pdfUrl) return null;
 
   const prepare = () => {
     if (state.kind === "preparing") return;
+    const expectedPath = resolveExpectedArtifactPath(authMode, token, "pdf");
+    if (pdfUrl !== expectedPath) {
+      setState({
+        kind: "failed",
+        errorCode: "RECEIPT_DESCRIPTOR_CONTEXT_MISMATCH",
+      });
+      return;
+    }
     const resolvedUrl = resolveSameOriginUrl(pdfUrl);
     if (!resolvedUrl) {
       setState({ kind: "failed", errorCode: "INVALID_RECEIPT_DESCRIPTOR" });

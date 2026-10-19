@@ -2250,6 +2250,8 @@ function Actions({
         <ReceiptShareActions
           pdfUrl={cert?.pdfUrl}
           receiptNo={cert?.receiptNo}
+          token={token}
+          authMode={authMode}
         />
         <Link
           href={authMode === "token" ? `/r/${token}` : `/rides/${token}`}

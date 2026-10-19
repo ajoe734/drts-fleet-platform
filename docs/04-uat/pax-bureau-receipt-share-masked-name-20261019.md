@@ -35,6 +35,35 @@ cannot start a duplicate share` 與
    `ignores a late share settlement after the receipt identity has already
 changed` 兩項測試。
 
+## 第三輪獨立審查退修：窄化後的 caller-context 比對（已實作）
+
+獨立 reviewer 將第一輪「依 authMode/token 自行推導 PDF 目標」的要求窄化為
+更精確、可驗證的版本：不重新推導授權，只在送出請求前比對既有
+`pdfUrl` 是否與目前**已知**定址 context（`authMode` + 父層既有 `token`
+prop，實際上在 id 模式即 `orderId`，token 模式即 `accessToken`——已追蹤
+`PassengerRidePage`／`fetchPassengerRideAuthority`／
+`passengerClient.getRide` 確認）所對應的既有正式路由完全相符：
+
+- account／id 模式：`/api/passenger-app/rides/{orderId}/receipt/artifacts/pdf`
+  （`apps/api/src/modules/multi-taxi/multi-taxi.service.ts`
+  `getTrustedPassengerReceiptDownloads`）
+- token 模式：`/api/passenger-rides/{accessToken}/receipt/artifacts/pdf`
+  （同檔 `getPassengerReceiptDownloads`）
+
+兩個路由樣式都在實際原始碼中逐字核對存在。實作：`receipt-share-
+actions.tsx` 新增必填 `token: string` 與既有 `authMode` prop（由
+`passenger-ride-page.tsx` 掛載處原樣轉傳，不新增任何路由／認證／JWT
+邏輯），送出請求前先以字串完全相等比對 `pdfUrl` 與
+`resolveExpectedArtifactPath(authMode, token, "pdf")`；不符即視為失敗、
+**完全不送出請求**，與既有 origin 防護疊加。`useEffect` 重置世代的依賴
+陣列也加入 `token`／`authMode`，換單／換認證模式即便字串恰好重複仍會
+重置，不沿用舊 File。
+
+新增測試：合法 token 模式描述子成功準備、描述子指向別的訂單被拒、
+描述子套用錯誤模式的路由樣式（id 模式卻給 token 路由樣式）被拒，皆
+斷言 `fetch` 從未被呼叫。既有以假測試 URL 字串建的 fixture（`PDF_URL`／
+`HTML_URL`）已換成由上列真實路由樣式產生，不再是任意字串。
+
 ## 第二輪獨立審查退修：一項修復、一項以證據駁回
 
 獨立 reviewer 再送回兩項 finding；逐項核對實際原始碼與資料路徑後：
@@ -152,18 +181,22 @@ vitest run \
   tests/unit/pax-bureau-journey-coverage-20261018/receipt-pending-screen.test.tsx \
   tests/unit/pax-native-app-20261009/native-stream-and-receipt-adapters.test.ts \
   tests/unit/system-remediation/sr-qa-reports-001/c098-electronic-ride-certificate.test.ts
-  → 7 files, 160 passed, EXIT:0 (2026-10-19T23:08:07Z, after the whitespace-surname fix)
+  → 7 files, 163 passed, EXIT:0 (2026-10-19T23:37:46Z, after the caller-context
+    descriptor check; a prior 160-passed/EXIT:0 run at 23:08:07Z covered the
+    same seven files before that round's 3 additional web-share cases)
 
 (apps/passenger-app) vitest run tests/unit/native-p5-screen.test.ts --config vitest.config.ts
-  → 1 file, 22 passed, EXIT:0 (separate vitest config/project; not part of the 160 above)
+  → 1 file, 22 passed, EXIT:0 (separate vitest config/project; not part of the 163 above)
 ```
 
-Combined: 182 passed／0 failed／0 skipped across the eight regression files listed
-in the original r2 verification plan. `web-share.test.tsx` itself grew from the
-initial 13 cases to 16 (origin-rejection, duplicate-share-disabled,
-stale-settlement-ignored), and `receipt-download.test.ts` gained 2 more
-(whitespace-only surname, both call sites) in the second review round; both are
-included in the 160/182 above, not stacked on top of it.
+Combined: 185 passed／0 failed／0 skipped across the eight regression files listed
+in the original r2 verification plan. `web-share.test.tsx` grew from the initial
+13 cases to 16 (origin-rejection, duplicate-share-disabled, stale-settlement-
+ignored) in the second round, then to 19 (legitimate token-mode descriptor,
+wrong-order rejection, wrong-mode-shape rejection) in this third round;
+`receipt-download.test.ts` gained 2 more (whitespace-only surname, both call
+sites) in the second round. All are included in the 163/185 above, not stacked
+on top of it.
 
 型別檢查（`tsc --noEmit --incremental false`，捕捉真實 compiler exit code，
 不透過 `tail` pipeline）：

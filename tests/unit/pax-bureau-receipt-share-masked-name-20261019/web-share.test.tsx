@@ -22,7 +22,18 @@ afterEach(() => {
   delete (window.navigator as any).share;
 });
 
-const PDF_URL = "/api/passenger-rides/ETA-ORDER/receipt.pdf";
+// The only two legitimate producer shapes, from
+// apps/api/src/modules/multi-taxi/multi-taxi.service.ts
+// (getTrustedPassengerReceiptDownloads / getPassengerReceiptDownloads).
+function accountArtifactPath(orderId: string, format: "pdf" | "html") {
+  return `/api/passenger-app/rides/${encodeURIComponent(orderId)}/receipt/artifacts/${format}`;
+}
+function tokenArtifactPath(accessToken: string, format: "pdf" | "html") {
+  return `/api/passenger-rides/${encodeURIComponent(accessToken)}/receipt/artifacts/${format}`;
+}
+
+const PDF_URL = accountArtifactPath("ETA-ORDER", "pdf");
+const HTML_URL = accountArtifactPath("ETA-ORDER", "html");
 const PDF_BYTES = new TextEncoder().encode(
   "%PDF-1.4\nunit-receipt-body\n%%EOF",
 );
@@ -48,7 +59,7 @@ function receiptFixture(
       consumerServicePhone: "02-2944-0985",
       authorityComplaintPhone: "unit-authority",
       pdfUrl: PDF_URL,
-      htmlUrl: "/api/passenger-rides/ETA-ORDER/receipt.html",
+      htmlUrl: HTML_URL,
       e04Snapshot: {
         fleetOperatorName: "unit-operator",
         driverSurname: "蔡",
@@ -146,7 +157,7 @@ describe("receipt web file sharing (real Actions component, fetch/browser bounda
     ).toBe(PDF_URL);
     expect(
       screen.getByText(t.DownloadHtml).closest("a")?.getAttribute("href"),
-    ).toBe("/api/passenger-rides/ETA-ORDER/receipt.html");
+    ).toBe(HTML_URL);
     expect(screen.getByRole("button", { name: t.SharePdf })).toBeTruthy();
   });
 
@@ -258,7 +269,7 @@ describe("receipt web file sharing (real Actions component, fetch/browser bounda
   it("ignores a stale in-flight fetch after the receipt/order identity changes", async () => {
     const { fixture: fixtureA } = buildP5_10Fixture();
     const { fixture: fixtureB } = buildP5_10Fixture({
-      pdfUrl: "/api/passenger-rides/OTHER-ORDER/receipt.pdf",
+      pdfUrl: accountArtifactPath("OTHER-ORDER", "pdf"),
     });
     let resolveFirst: (value: Response) => void = () => {};
     const fetchMock = vi
@@ -275,7 +286,7 @@ describe("receipt web file sharing (real Actions component, fetch/browser bounda
     fireEvent.click(screen.getByRole("button", { name: t.SharePdf }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    rerender(<Actions fixture={fixtureB} token="ETA-ORDER" authMode="id" />);
+    rerender(<Actions fixture={fixtureB} token="OTHER-ORDER" authMode="id" />);
     resolveFirst(pdfResponse());
     await Promise.resolve();
     await Promise.resolve();
@@ -350,7 +361,7 @@ describe("receipt web file sharing (real Actions component, fetch/browser bounda
   it("ignores a late share settlement after the receipt identity has already changed", async () => {
     const { fixture: fixtureA } = buildP5_10Fixture();
     const { fixture: fixtureB } = buildP5_10Fixture({
-      pdfUrl: "/api/passenger-rides/OTHER-ORDER/receipt.pdf",
+      pdfUrl: accountArtifactPath("OTHER-ORDER", "pdf"),
     });
     const fetchMock = vi.fn().mockResolvedValue(pdfResponse());
     vi.stubGlobal("fetch", fetchMock);
@@ -367,11 +378,67 @@ describe("receipt web file sharing (real Actions component, fetch/browser bounda
       expect(screen.getByText(t.ShareInProgress)).toBeTruthy();
     });
 
-    rerender(<Actions fixture={fixtureB} token="ETA-ORDER" authMode="id" />);
+    rerender(<Actions fixture={fixtureB} token="OTHER-ORDER" authMode="id" />);
     resolveShare();
     await Promise.resolve();
     await Promise.resolve();
 
     expect(screen.queryByText(t.ShareFinished)).toBeNull();
+  });
+
+  it("accepts a legitimate token-mode descriptor matching the current access token", async () => {
+    const { fixture } = buildP5_10Fixture({
+      pdfUrl: tokenArtifactPath("unit-access-token-1", "pdf"),
+      htmlUrl: tokenArtifactPath("unit-access-token-1", "html"),
+    });
+    const fetchMock = vi.fn().mockResolvedValue(pdfResponse());
+    vi.stubGlobal("fetch", fetchMock);
+    stubShareCapable();
+    render(
+      <Actions
+        fixture={fixture}
+        token="unit-access-token-1"
+        authMode="token"
+      />,
+    );
+    await prepareAndGetReady(fetchMock);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(
+      new URL(
+        tokenArtifactPath("unit-access-token-1", "pdf"),
+        window.location.origin,
+      ).toString(),
+    );
+  });
+
+  it("rejects a descriptor pointing at a different order than the one actually addressed", async () => {
+    const { fixture } = buildP5_10Fixture({
+      pdfUrl: accountArtifactPath("SOME-OTHER-ORDER", "pdf"),
+    });
+    const fetchMock = vi.fn().mockResolvedValue(pdfResponse());
+    vi.stubGlobal("fetch", fetchMock);
+    stubShareCapable();
+    render(<Actions fixture={fixture} token="ETA-ORDER" authMode="id" />);
+    fireEvent.click(screen.getByRole("button", { name: t.SharePdf }));
+    await waitFor(() => {
+      expect(screen.getByText(t.ShareFailed)).toBeTruthy();
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a descriptor shaped for the other auth mode even though it is otherwise same-origin", async () => {
+    const { fixture } = buildP5_10Fixture({
+      // Token-route shape for the same identifier, while the page is
+      // actually addressed in account/id mode.
+      pdfUrl: tokenArtifactPath("ETA-ORDER", "pdf"),
+    });
+    const fetchMock = vi.fn().mockResolvedValue(pdfResponse());
+    vi.stubGlobal("fetch", fetchMock);
+    stubShareCapable();
+    render(<Actions fixture={fixture} token="ETA-ORDER" authMode="id" />);
+    fireEvent.click(screen.getByRole("button", { name: t.SharePdf }));
+    await waitFor(() => {
+      expect(screen.getByText(t.ShareFailed)).toBeTruthy();
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
