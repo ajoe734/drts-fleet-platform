@@ -16,6 +16,14 @@ import {
   readAssignedTripAndAccept,
 } from "./pax-review-shared-order/additional-journey";
 
+const publicPassenger = process.env.PAX_REVIEW_PUBLIC_PASSENGER === "true";
+const privateDriverOrigin = process.env.PAX_REVIEW_DRIVER_ORIGIN?.replace(
+  /\/$/,
+  "",
+);
+if (sharedDev && !privateDriverOrigin)
+  throw new Error("Missing configured private Driver origin");
+
 test("Ops recovers after a real declined assignment and keeps the original backend order", async ({
   browser,
 }, info) => {
@@ -26,8 +34,12 @@ test("Ops recovers after a real declined assignment and keeps the original backe
     const token =
       name === "ops"
         ? process.env.PAX_REVIEW_OPS_ID_TOKEN
-        : process.env.PAX_REVIEW_PASSENGER_ID_TOKEN;
-    if (sharedDev && !token)
+        : name === "driver" && sharedDev
+          ? process.env.PAX_REVIEW_DRIVER_ID_TOKEN
+          : name === "pax" && publicPassenger
+            ? undefined
+            : process.env.PAX_REVIEW_PASSENGER_ID_TOKEN;
+    if (sharedDev && !(name === "pax" && publicPassenger) && !token)
       throw new Error(
         `Missing existing private-service credential for ${name}`,
       );
@@ -57,7 +69,7 @@ test("Ops recovers after a real declined assignment and keeps the original backe
   const pax = await step("Recovery Passenger context", () => role("pax"));
   const ops = await step("Recovery Ops context", () => role("ops"));
   const driver = await step("Recovery Driver context", () => role("driver"));
-  const driverBase = `${PAX}/review-driver`;
+  const driverBase = `${sharedDev ? privateDriverOrigin : PAX}/review-driver`;
   const cleanup = new Set<string>();
   let supplyPaused = false;
   try {

@@ -66,14 +66,17 @@ test("a real fifteen-minute quote expires without booking, then requotes and can
   let orderId = "";
   let cancelled = false;
   let browserRidePOSTCount = 0;
+  const publicPassenger = process.env.PAX_REVIEW_PUBLIC_PASSENGER === "true";
   const role = async (name: "pax" | "ops") => {
     const token =
-      process.env[
-        name === "pax"
-          ? "PAX_REVIEW_PASSENGER_ID_TOKEN"
-          : "PAX_REVIEW_OPS_ID_TOKEN"
-      ];
-    if (sharedDev && !token)
+      name === "pax" && publicPassenger
+        ? undefined
+        : process.env[
+            name === "pax"
+              ? "PAX_REVIEW_PASSENGER_ID_TOKEN"
+              : "PAX_REVIEW_OPS_ID_TOKEN"
+          ];
+    if (sharedDev && !(name === "pax" && publicPassenger) && !token)
       throw new Error(`Missing existing credential for ${name}`);
     const context = await browser.newContext({
       viewport: { width: 1440, height: 1000 },

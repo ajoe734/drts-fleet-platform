@@ -34,6 +34,7 @@ RUN EXPO_PUBLIC_API_URL=/api/review-driver-api \
     cp -R apps/driver-app/dist/. apps/passenger-app-web/public/review-driver/
 RUN mkdir -p apps/passenger-app-web/public && \
     pnpm --filter @drts/contracts build && \
+    pnpm --filter @drts/control-plane-auth build && \
     pnpm --filter @drts/ui-tokens build && \
     pnpm --filter @drts/ui-web build && \
     pnpm --filter @drts/passenger-client build && \

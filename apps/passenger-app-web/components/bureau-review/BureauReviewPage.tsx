@@ -16,16 +16,16 @@ import { t } from "./translations";
 // operations/deployment/passenger-bureau-entry/setup-passenger-public-entry.sh
 // and docs/03-runbooks/passenger-bureau-browser-entry-20261018.md).
 //
-// Earlier drafts of this page claimed a single Google-identity
-// roles/run.invoker grant plus "Cloud Run's built-in login page" made this
-// service reachable from an ordinary browser. That is not how Cloud Run
-// authentication works (no such login page exists outside Cloud IAP) — see
-// entry-R1-ordinary-browser-authentication-finding.md. The actual fix is a
-// Cloud Load Balancer + Cloud IAP front door; this component only describes
-// that mechanism, it never implements or assumes network/IAM behavior
-// itself.
+// Public development mode uses this origin and the original Passenger login.
+// The optional custom-host/private-IAP mode is retained for existing callers.
 export function BureauReviewPage() {
+  const passengerOnly = process.env.PAX_PUBLIC_PASSENGER_ONLY === "true";
   const publicEntryHost = process.env.PAX_BUREAU_ENTRY_HOST?.trim();
+  const entryBase = passengerOnly
+    ? ""
+    : publicEntryHost
+      ? `https://${publicEntryHost}`
+      : null;
 
   return (
     <main style={{ padding: 18, maxWidth: 860 }}>
@@ -40,20 +40,16 @@ export function BureauReviewPage() {
 
       <section>
         <h2>{t.accessHeading}</h2>
-        {publicEntryHost ? (
+        {entryBase !== null ? (
           <>
             <p>{t.accessAvailableIntro}</p>
             <ul>
               <li>
-                <a href={`https://${publicEntryHost}/login`}>
-                  https://{publicEntryHost}/login
-                </a>{" "}
+                <a href={`${entryBase}/login`}>{entryBase}/login</a>{" "}
                 {t.loginLinkDesc}
               </li>
               <li>
-                <a href={`https://${publicEntryHost}/review`}>
-                  https://{publicEntryHost}/review
-                </a>{" "}
+                <a href={`${entryBase}/review`}>{entryBase}/review</a>{" "}
                 {t.reviewLinkDesc}
               </li>
             </ul>
@@ -70,13 +66,15 @@ export function BureauReviewPage() {
           </p>
         )}
         <p>{t.driverScopeNote}</p>
-        <p>
-          {t.fullConfigPrefix}{" "}
-          <code>
-            docs/03-runbooks/passenger-bureau-browser-entry-20261018.md
-          </code>
-          {t.fullConfigSuffix}
-        </p>
+        {!passengerOnly && (
+          <p>
+            {t.fullConfigPrefix}{" "}
+            <code>
+              docs/03-runbooks/passenger-bureau-browser-entry-20261018.md
+            </code>
+            {t.fullConfigSuffix}
+          </p>
+        )}
       </section>
 
       <section>
@@ -85,9 +83,7 @@ export function BureauReviewPage() {
           {t.sourceSnapshotLabel}
           <code>{BUREAU_REVIEW_SOURCE.release}</code>（
           <code>{BUREAU_REVIEW_SOURCE.sourceSha}</code>
-          {t.sourceSnapshotSeparator}
-          {" "}
-          {BUREAU_REVIEW_SOURCE.checkedAtUtc}。
+          {t.sourceSnapshotSeparator} {BUREAU_REVIEW_SOURCE.checkedAtUtc}。
         </p>
         <table>
           <thead>
@@ -102,7 +98,11 @@ export function BureauReviewPage() {
               <tr key={group.label}>
                 <td>{group.label}</td>
                 <td>{group.count}</td>
-                <td>{group.allSingleAttemptPassed ? "單次嘗試全數通過" : "未全數通過"}</td>
+                <td>
+                  {group.allSingleAttemptPassed
+                    ? "單次嘗試全數通過"
+                    : "未全數通過"}
+                </td>
               </tr>
             ))}
             <tr>
@@ -165,8 +165,7 @@ export function BureauReviewPage() {
         <p>
           {t.archivePrefix}
           <code>{BUREAU_REVIEW_SOURCE.offlinePackage.fileEntries}</code>{" "}
-          {t.archiveMid}
-          {" "}
+          {t.archiveMid}{" "}
           <code>{BUREAU_REVIEW_SOURCE.offlinePackage.sha256}</code>
           {t.archiveSuffix}
         </p>

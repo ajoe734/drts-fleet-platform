@@ -9,9 +9,12 @@ import {
 } from "../../../apps/passenger-app-web/components/bureau-review/content";
 
 const originalHost = process.env.PAX_BUREAU_ENTRY_HOST;
+const originalMode = process.env.PAX_PUBLIC_PASSENGER_ONLY;
 
 afterEach(() => {
   cleanup();
+  if (originalMode === undefined) delete process.env.PAX_PUBLIC_PASSENGER_ONLY;
+  else process.env.PAX_PUBLIC_PASSENGER_ONLY = originalMode;
   if (originalHost === undefined) {
     delete process.env.PAX_BUREAU_ENTRY_HOST;
   } else {
@@ -20,6 +23,19 @@ afterEach(() => {
 });
 
 describe("PAX-BUREAU-BROWSER-ENTRY-20261018: BureauReviewPage", () => {
+  it("uses this Passenger origin in public mode even when the old custom host is not provisioned", () => {
+    process.env.PAX_PUBLIC_PASSENGER_ONLY = "true";
+    process.env.PAX_BUREAU_ENTRY_HOST = "not-provisioned.example";
+    const { container } = render(<BureauReviewPage />);
+    expect(container.querySelector('a[href="/login"]')).not.toBeNull();
+    expect(container.querySelector('a[href="/review"]')).not.toBeNull();
+    expect(
+      container.querySelector('a[href*="not-provisioned.example"]'),
+    ).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(BUREAU_REVIEW_CASES).toHaveLength(16);
+  });
+
   it("renders a read-only notice and the full stage-group evidence", () => {
     render(<BureauReviewPage />);
 
