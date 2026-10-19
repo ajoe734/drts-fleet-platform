@@ -149,6 +149,12 @@
       "amended_at": "2026-10-18",
       "scope": "Append V0121 to voice_callback_allocations; original allocation entries unchanged",
       "reason": "Extends the callback functionality on exact parent48bf70e, whose highest reserved migration is V0120. Existing allocation collectors already include voice_callback_allocations; no guard or assertion is changed."
+    },
+    {
+      "amended_by_task_id": "AUDIT-VOICE-APPLICATION-REGRESSION-20261018",
+      "amended_at": "2026-10-18",
+      "scope": "Append V0122 to voice_application_allocations; original V0106 entry and all other groups/amendments unchanged",
+      "reason": "Registers the durable contact-role revision ledger for VoiceContactService (SD §6.4), reserved by Root at exact parent 4db295df5129b57b66a27950348f6a1fbb2ae049 (.local/passenger-bureau-gap-correction-20261018/Voice-C-V0122-exact-root-allocation-20261018/result.json, sha256 b1c388065f8243ef63a4d65ee63031b3e768d9802f0c7799c12c8f0eeda9c86c). Existing allocation collectors already include voice_application_allocations; no guard or assertion beyond the group's own length is changed."
     }
   ],
   "voice_application_allocations": [
@@ -174,6 +180,23 @@
       ],
       "description": "Versioned encrypted candidate-dialogue snapshots for trusted voice persistence/restoration, reserved by the original audit execution scope; no booking-draft or consent authority is introduced. V0106 also carries a bounded, non-content purge-receipt table so a governed purge cannot be mistaken for proof a write never landed, plus a session-level floor so that receipt's own governed metadata retention can age it out without either reopening its key for write reuse or being mistaken for proof the write never landed.",
       "downstream_tasks": ["AUDIT-SHARED-DEV-VERIFY-20261002"]
+    },
+    {
+      "task_id": "AUDIT-VOICE-APPLICATION-REGRESSION-20261018",
+      "version": "V0122",
+      "migration_filename": "V0122__voice_contact_role_revision.sql",
+      "domain": "voice_contact_role_revision",
+      "target_schema": "voice",
+      "primary_tables": ["voice.contact_role_revision"],
+      "referenced_tables": ["voice.session"],
+      "table_invariants": [
+        "revision_id uuid PRIMARY KEY DEFAULT gen_random_uuid(); voice_session_id uuid NOT NULL REFERENCES voice.session(voice_session_id); UNIQUE (voice_session_id, revision_number) -- revision_number is a single counter shared across every role for a session (matching VoiceContactService.updateContactRole's existing ++latestRevisionNumber contract), not re-scoped per role.",
+        "role text NOT NULL CHECK (role IN ('caller','booker','passenger','driverContact','callbackRecipient')); replaced_revision references the prior revision_number this row supersedes for the same role, or NULL for a role's first revision.",
+        "phone_key_version, phone_nonce, phone_ciphertext and phone_auth_tag store the phone number under the SAME AES-256-GCM envelope convention as voice.dialogue_snapshot.content_ciphertext (apps/api/src/modules/voice-booking/voice-dialogue-snapshot-crypto.ts), keyed server-side at apps/api only; consent_ref is nullable (an opaque reference into existing consent evidence, not a new consent record). Transactional append authority, cold reconstruction and selective confirmation-invalidation behavior remain application/schema verification obligations, not claims certified by this allocation entry.",
+        "Append-only (voice._make_append_only); no row is ever updated or deleted -- a role correction appends a new revision_number, it never rewrites an existing row."
+      ],
+      "description": "Durable, append-only revision ledger making VoiceContactService's existing role-separation/revision/consent contract (SD §6.4) survive a restart or a second instance; replaces its prior process-local RAM-only Map. No new consent authority, callback_task DDL or production HTTP route is introduced by this allocation entry.",
+      "downstream_tasks": []
     }
   ],
   "voice_callback_allocations": [

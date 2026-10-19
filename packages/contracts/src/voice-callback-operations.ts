@@ -59,6 +59,16 @@ export interface VoiceCallbackTaskView {
   brandId: string;
   callId: string;
   linkedOrderId?: string | null;
+  /**
+   * AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C/D: the server-
+   * resolved, sealed callback recipient's name and the consent reference
+   * backing it (`VoiceContactService`/`voice.contact_role_revision`), NOT
+   * the caller-supplied create-request fields. Empty string when no
+   * durable contact state has ever been recorded for this session -- an
+   * honest "not yet known" value, never a fabricated placeholder.
+   */
+  contactName: string;
+  consentRef: string;
   reason: string;
   priority: "normal" | "urgent" | "emergency";
   dueAt: string;

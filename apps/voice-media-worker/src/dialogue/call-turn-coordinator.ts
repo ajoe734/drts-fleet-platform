@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   voiceDialogueSnapshotContentSchema,
+  type VoiceCapabilityScope,
   type VoiceDialogueOutput,
 } from "@drts/contracts";
 import {
@@ -337,10 +338,6 @@ interface TurnSession {
 }
 
 const DEFAULT_TURN_TIMEOUT_MS = 8_000;
-const HANDOFF_CAPABILITY_SCOPES: readonly ["session_execute", "handoff_request"] = [
-  "session_execute",
-  "handoff_request",
-];
 
 /**
  * The real session.event -> bounded-turn composition that
@@ -1684,15 +1681,23 @@ export class VoiceCallTurnCoordinator {
   ): Promise<unknown[]> {
     const { state } = turnSession;
     if (output.tools.length === 0) return [];
-    const onlyHandoffRequested = output.tools.every(
-      (tool) => tool.name === "request_handoff",
+    // AUDIT-VOICE-APPLICATION-REGRESSION-20261018: `resolve_location`/
+    // `check_booking_eligibility`/`get_bound_booking_status`/
+    // `request_handoff` now have real apps/api domain backing (see
+    // `VoiceDomainToolPorts`'s own doc) once this attachment has a real
+    // `VoiceSessionBinding` and the coordinator has a real `apiClient` --
+    // the same reachability gate `request_handoff` alone used before this
+    // task. `prepare_booking_readback` alone is still honestly
+    // unreachable: it requires the durable, server-resolved contact-role/
+    // sealed-consent snapshot the contact/consent unit of this same task
+    // has not landed yet (see that port's own doc), so a batch containing
+    // it is still forced into the same honest unavailable/handoff outcome
+    // a genuinely unavailable provider would produce for the WHOLE batch,
+    // exactly as every non-handoff tool was before this task.
+    const hasUnreachableTool = output.tools.some(
+      (tool) => tool.name === "prepare_booking_readback",
     );
-    if (!onlyHandoffRequested) {
-      // A tool other than `request_handoff` needs the unreachable
-      // domain-execution channel (see class doc) to resolve honestly.
-      // Force the same outcome a genuinely unavailable provider would
-      // produce, instead of fabricating a location/eligibility/readback/
-      // booking-status result this worker has no way to verify.
+    if (hasUnreachableTool || !turnSession.binding || !this.apiClient) {
       state.handoff = { reason: "provider_unavailable", intent: output.intent };
       return output.tools.map(() => ({
         status: "unavailable" as const,
@@ -1700,13 +1705,19 @@ export class VoiceCallTurnCoordinator {
       }));
     }
 
-    // Codex reopen round 5/6, R4: when this attachment has a real
-    // `VoiceSessionBinding` and the coordinator has a real `apiClient`,
-    // `request_handoff` is executed through the actual
-    // `VoiceToolGatewayService.execute` repair anchor (apps/api) instead of
-    // a local stub -- see `attach()`'s doc. Any other attachment (today,
-    // every one -- no call-admission flow supplies a binding yet) keeps
-    // the existing honest local stub unchanged.
+    // Codex reopen round 5/6, R4 (generalized, AUDIT-VOICE-APPLICATION-
+    // REGRESSION-20261018): when this attachment has a real
+    // `VoiceSessionBinding` and the coordinator has a real `apiClient`, the
+    // WHOLE batch of (reachable) tool proposals is executed in one call
+    // through the actual `VoiceToolGatewayService.execute` repair anchor
+    // (apps/api) instead of a local stub -- see `attach()`'s doc. The
+    // gateway itself already loops over every proposal in `output.tools`
+    // (or its own authoritative override, e.g. forcing a single
+    // `request_handoff` for an emergency/complaint intent) inside that one
+    // HTTP call; a worker-side per-tool loop calling the SAME endpoint
+    // once per matching tool would redundantly re-submit the identical
+    // `output` and double-count `response.results` for a batch with more
+    // than one matching proposal.
     //
     // R6 (same reopen, residual): `request.signal` is this stage's own
     // bounded controller (see `dialogue-engine.ts#boundedStage`) -- already
@@ -1722,47 +1733,45 @@ export class VoiceCallTurnCoordinator {
     // counter, which may already have been bumped past this turn's own
     // admitted value by the same supersession that aborted
     // `request.signal`) and never the pre-residual `request.inputEpoch`
-    // either -- is what is submitted, so this turn's `request_handoff`
-    // CAS references the SAME authoritative watermark `persist` already
+    // either -- is what is submitted, so this turn's tool-execution CAS
+    // references the SAME authoritative watermark `persist` already
     // admitted it under, and a stale proposal can never be laundered
     // under a newer epoch merely because the HTTP call happened to still
     // be let through. `execute` only ever runs after this same turn's
     // `persist` stage has already set it (see `VoiceDialogueEngine.turn`'s
     // own stage order), so this is never undefined on a bound attachment
     // in practice; the local counter is kept as a defensive fallback only.
-    if (turnSession.binding && this.apiClient) {
-      const binding = turnSession.binding;
-      const authoritativeInputEpoch =
-        turnSession.authoritativeInputEpoch ?? request.inputEpoch;
-      const results: unknown[] = [];
-      for (const tool of output.tools) {
-        if (tool.name !== "request_handoff") continue;
-        request.signal.throwIfAborted();
-        const capability = await this.apiClient.issueCapability(
-          {
-            voiceSessionId: binding.voiceSessionId,
-            resourceScopeId: binding.resourceScopeId,
-            routeProfileVersion: binding.routeProfileVersion,
-            leaseEpoch: binding.leaseEpoch,
-            scopes: HANDOFF_CAPABILITY_SCOPES,
-          },
-          request.signal,
-        );
-        request.signal.throwIfAborted();
-        const response = await this.apiClient.requestHandoff(
-          binding.voiceSessionId,
-          capability.token,
-          { inputEpoch: authoritativeInputEpoch, output },
-          request.signal,
-        );
-        results.push(...response.results);
-      }
-      return results;
+    const binding = turnSession.binding;
+    const authoritativeInputEpoch =
+      turnSession.authoritativeInputEpoch ?? request.inputEpoch;
+    // Each tool proposal needs its own scope on the minted capability (SD
+    // §6.3 tool-level scope fencing -- see `assertVoiceCapabilityScope`);
+    // `session_execute` is required for every proposal regardless of name.
+    const scopes = new Set<VoiceCapabilityScope>(["session_execute"]);
+    for (const tool of output.tools) {
+      if (tool.name === "resolve_location") scopes.add("address_resolve");
+      else if (tool.name === "get_bound_booking_status")
+        scopes.add("order_read_bound");
+      else if (tool.name === "request_handoff") scopes.add("handoff_request");
     }
-
-    return output.tools.map(() => ({
-      status: "unavailable" as const,
-      handoffId: null,
-    }));
+    request.signal.throwIfAborted();
+    const capability = await this.apiClient.issueCapability(
+      {
+        voiceSessionId: binding.voiceSessionId,
+        resourceScopeId: binding.resourceScopeId,
+        routeProfileVersion: binding.routeProfileVersion,
+        leaseEpoch: binding.leaseEpoch,
+        scopes: [...scopes],
+      },
+      request.signal,
+    );
+    request.signal.throwIfAborted();
+    const response = await this.apiClient.requestHandoff(
+      binding.voiceSessionId,
+      capability.token,
+      { inputEpoch: authoritativeInputEpoch, output },
+      request.signal,
+    );
+    return [...response.results];
   }
 }

@@ -324,6 +324,10 @@ export default function VoiceCallbacksPage() {
                 <dd>{task.callId}</dd>
                 <dt>{copy.order}</dt>
                 <dd>{task.linkedOrderId || "—"}</dd>
+                <dt>{copy.contact}</dt>
+                <dd>{task.contactName || copy.contactUnknown}</dd>
+                <dt>{copy.consent}</dt>
+                <dd>{task.consentRef || copy.contactUnknown}</dd>
                 <dt>{copy.owner}</dt>
                 <dd>{task.assignedOperatorId || copy.none}</dd>
                 <dt>{copy.due}</dt>

@@ -32,6 +32,9 @@ import { VoiceBookingAuthorizationService } from "./voice-booking-authorization.
 import { VoiceHandoffService } from "./voice-handoff.service";
 import { VoiceToolGatewayService } from "./voice-tool-gateway.service";
 import { VoiceHandoffOnlyToolPorts } from "./voice-handoff-tool-ports";
+import { VoiceDomainToolPorts } from "./voice-domain-tool-ports";
+import { GeoService } from "../geo/geo.service";
+import { VoiceDispatchProjectionService } from "./voice-dispatch-projection.service";
 
 const DEFAULT_TOOL_TURN_TIMEOUT_MS = 8_000;
 const MAX_TOOL_TURN_TIMEOUT_MS = 30_000;
@@ -57,6 +60,10 @@ export class VoiceBookingController {
     private readonly voiceHandoffService?: VoiceHandoffService,
     @Optional()
     private readonly idempotencyService?: IdempotencyService,
+    @Optional()
+    private readonly geoService?: GeoService,
+    @Optional()
+    private readonly voiceDispatchProjectionService?: VoiceDispatchProjectionService,
   ) {}
 
   /**
@@ -443,9 +450,11 @@ export class VoiceBookingController {
 
   /**
    * Backs `VoiceCallTurnCoordinator.executeTools`'s (apps/voice-media-worker)
-   * only real tool outcome, `request_handoff`, through the actual
-   * `VoiceToolGatewayService.execute` repair anchor (Codex reopen round
-   * 5/6, R4) instead of leaving it an unconsumed interface. `headers` is
+   * real tool outcomes through the actual `VoiceToolGatewayService.execute`
+   * repair anchor (Codex reopen round 5/6, R4; generalized beyond
+   * `request_handoff` to `resolve_location`/`get_bound_booking_status` by
+   * AUDIT-VOICE-APPLICATION-REGRESSION-20261018's `VoiceDomainToolPorts`)
+   * instead of leaving it an unconsumed interface. `headers` is
    * forwarded as-is to the gateway, which re-authenticates the capability
    * itself (`this.guard.authenticate`) on every proposal, immediately
    * before and after calling the domain port -- this route performs no
@@ -500,9 +509,10 @@ export class VoiceBookingController {
       voiceCapabilityGuard,
       voiceBookingRepository,
       voiceBookingAuthorizationService,
-      new VoiceHandoffOnlyToolPorts(
-        voiceBookingRepository,
-        voiceHandoffService,
+      new VoiceDomainToolPorts(
+        new VoiceHandoffOnlyToolPorts(voiceBookingRepository, voiceHandoffService),
+        this.geoService,
+        this.voiceDispatchProjectionService,
       ),
       {
         headers,

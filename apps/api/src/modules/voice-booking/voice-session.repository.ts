@@ -404,6 +404,81 @@ function mapConfirmationRow(
   };
 }
 
+/**
+ * AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C:
+ * `voice.contact_role_revision` (V0122__voice_contact_role_revision.sql).
+ * `phoneKeyVersion`/`phoneNonce`/`phoneCiphertext`/`phoneAuthTag` are the
+ * SAME AES-256-GCM envelope shape `voice-dialogue-snapshot-crypto.ts`
+ * already produces for `voice.dialogue_snapshot` -- this repository stores
+ * and returns the envelope opaquely; `VoiceContactService` is the only
+ * caller that ever encrypts/decrypts it.
+ */
+export type InsertContactRoleRevisionInput = {
+  voiceSessionId: string;
+  role: "caller" | "booker" | "passenger" | "driverContact" | "callbackRecipient";
+  revisionNumber: number;
+  name: string;
+  phoneKeyVersion: string;
+  phoneNonce: Buffer;
+  phoneCiphertext: Buffer;
+  phoneAuthTag: Buffer;
+  consentRef: string | null;
+  reason: string;
+  replacedRevision: number | null;
+};
+
+export type ContactRoleRevisionRow = {
+  revisionId: string;
+  voiceSessionId: string;
+  role: "caller" | "booker" | "passenger" | "driverContact" | "callbackRecipient";
+  revisionNumber: number;
+  name: string;
+  phoneKeyVersion: string;
+  phoneNonce: Buffer;
+  phoneCiphertext: Buffer;
+  phoneAuthTag: Buffer;
+  consentRef: string | null;
+  reason: string;
+  replacedRevision: number | null;
+  createdAt: string;
+};
+
+type VoiceContactRoleRevisionRow = QueryResultRow & {
+  revision_id: string;
+  voice_session_id: string;
+  role: string;
+  revision_number: number;
+  name: string;
+  phone_key_version: string;
+  phone_nonce: Buffer;
+  phone_ciphertext: Buffer;
+  phone_auth_tag: Buffer;
+  consent_ref: string | null;
+  reason: string;
+  replaced_revision: number | null;
+  created_at: Date | string;
+};
+
+function mapContactRoleRevisionRow(
+  row: VoiceContactRoleRevisionRow,
+): ContactRoleRevisionRow {
+  return {
+    revisionId: row.revision_id,
+    voiceSessionId: row.voice_session_id,
+    role: row.role as ContactRoleRevisionRow["role"],
+    revisionNumber: row.revision_number,
+    name: row.name,
+    phoneKeyVersion: row.phone_key_version,
+    phoneNonce: row.phone_nonce,
+    phoneCiphertext: row.phone_ciphertext,
+    phoneAuthTag: row.phone_auth_tag,
+    consentRef: row.consent_ref,
+    reason: row.reason,
+    replacedRevision: row.replaced_revision,
+    createdAt: new Date(row.created_at).toISOString(),
+  };
+}
+
 type VoiceCommandReceiptRow = QueryResultRow & {
   command_id: string;
   intent_id: string;
@@ -748,6 +823,110 @@ export class VoiceSessionRepository {
         WHERE voice_session_id = $1
           AND state IN ('readback_playing', 'awaiting_answer', 'accepted')
         RETURNING *
+      `,
+      [voiceSessionId],
+    );
+    const row = result.rows[0];
+    return row ? mapConfirmationRow(row) : null;
+  }
+
+  /**
+   * AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C: append-only
+   * insert into `voice.contact_role_revision`. `revisionNumber` is the
+   * session-wide counter `VoiceContactService` already allocates
+   * (`++state.latestRevisionNumber`); `UNIQUE (voice_session_id,
+   * revision_number)` makes a retried insert at an already-used number a
+   * conflict, never a silent duplicate or overwrite -- the caller must
+   * allocate a fresh number and retry, exactly like a CAS failure.
+   */
+  async insertContactRoleRevision(
+    input: InsertContactRoleRevisionInput,
+    executor?: VoiceQueryExecutor,
+  ): Promise<ContactRoleRevisionRow> {
+    const exec = executor ?? this.requireDatabase();
+    const result = await exec.query<VoiceContactRoleRevisionRow>(
+      `
+        INSERT INTO voice.contact_role_revision (
+          voice_session_id, role, revision_number, name,
+          phone_key_version, phone_nonce, phone_ciphertext, phone_auth_tag,
+          consent_ref, reason, replaced_revision
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        RETURNING *
+      `,
+      [
+        input.voiceSessionId,
+        input.role,
+        input.revisionNumber,
+        input.name,
+        input.phoneKeyVersion,
+        input.phoneNonce,
+        input.phoneCiphertext,
+        input.phoneAuthTag,
+        input.consentRef,
+        input.reason,
+        input.replacedRevision,
+      ],
+    );
+    return mapContactRoleRevisionRow(result.rows[0]!);
+  }
+
+  /**
+   * Cold reconstruction read: every revision ever written for this
+   * session, oldest first -- the same order `VoiceContactService`'s
+   * in-memory `revisions` array is built in, so a process restart can
+   * replay this list to rebuild identical derived state (active
+   * per-role contact, `latestRevisionNumber`) without re-deriving it from
+   * anything but this append-only history.
+   */
+  async listContactRoleRevisions(
+    voiceSessionId: string,
+    executor?: VoiceQueryExecutor,
+  ): Promise<ContactRoleRevisionRow[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+    const exec = executor ?? this.requireDatabase();
+    const result = await exec.query<VoiceContactRoleRevisionRow>(
+      `
+        SELECT * FROM voice.contact_role_revision
+        WHERE voice_session_id = $1
+        ORDER BY revision_number ASC
+      `,
+      [voiceSessionId],
+    );
+    return result.rows.map(mapContactRoleRevisionRow);
+  }
+
+  /**
+   * SD §6.4 "允許新 revision 取代有效值並使相關確認失效" for a contact-role
+   * correction specifically -- deliberately NOT the same rule as
+   * `invalidateActiveConfirmationForSession` above (a blanket SD §5.4
+   * substantive-correction invalidation that includes `accepted`
+   * confirmations). A contact change must still invalidate an unconsumed
+   * `readback_playing`/`awaiting_answer` draft confirmation (the customer
+   * has not yet heard/approved anything using the stale contact), but must
+   * NOT void a confirmation whose underlying command has already reached
+   * `commit_status = 'pending'` on `voice.session` -- that confirmation's
+   * proof is already sealed into an in-flight command execution (same
+   * "preservedPendingProof" rule `VoiceConfirmationService.invalidate`
+   * applies per-intent; this is the session-wide equivalent for a contact
+   * correction that is not scoped to one intent).
+   */
+  async invalidateUnconsumedConfirmationForContactChange(
+    voiceSessionId: string,
+    executor?: VoiceQueryExecutor,
+  ): Promise<VoiceConfirmationRecord | null> {
+    const exec = executor ?? this.requireDatabase();
+    const result = await exec.query<VoiceConfirmationRow>(
+      `
+        UPDATE voice.confirmation c
+        SET state = 'invalidated'
+        FROM voice.session s
+        WHERE c.voice_session_id = $1
+          AND s.voice_session_id = $1
+          AND s.commit_status IS DISTINCT FROM 'pending'
+          AND c.state IN ('readback_playing', 'awaiting_answer', 'accepted')
+        RETURNING c.*
       `,
       [voiceSessionId],
     );
