@@ -32,7 +32,13 @@ export class AuditController {
   listAuditLogs(
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
+    @Query("auditId") auditId?: string,
   ) {
+    if (auditId) {
+      return this.auditNotificationService
+        .readAuditLogById(auditId, identity, requestId)
+        .then((items) => toApiSuccessEnvelope({ items }, requestId));
+    }
     return toApiSuccessEnvelope(
       {
         items: this.auditNotificationService.listAuditLogs(identity, requestId),

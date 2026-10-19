@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { IncidentRecord } from "@drts/contracts";
 import {
+  applyCanonicalSosDuty,
+  getSosSupplementText,
   buildDriverNameMap,
   buildSosQueueRows,
   collectUnreportedSosIncidentIds,
@@ -46,6 +48,43 @@ describe("sos-view-model", () => {
     expect(collectUnreportedSosIncidentIds(rows, new Set(["inc-1"]))).toEqual([
       "inc_0215",
     ]);
+  });
+
+  it("recognizes the actual API event number and retains legacy numbers without treating generated text as a supplement", () => {
+    const eventNo = "SOS-20261019030159-A12F90";
+    const actual = buildIncident({
+      title: `Traffic accident ${eventNo}`,
+      description: `Driver SOS ${eventNo} submitted from the driver app.`,
+    });
+    expect(isSosIncident(actual)).toBe(true);
+    expect(buildSosQueueRows([actual], { nowMs: Date.now() })[0]?.eventNo).toBe(
+      eventNo,
+    );
+    expect(getSosSupplementText(actual)).toBeNull();
+    expect(isSosIncident(buildIncident())).toBe(true);
+  });
+
+  it("uses actual canonical duty ownership independently of an Incident assignment", () => {
+    const pending = applyCanonicalSosDuty(
+      buildIncident({ assignedTo: "generic-owner" }),
+      {
+        status: "submitted",
+        dutyAcknowledgement: {
+          acknowledgedAt: null,
+          acknowledgedByActorId: null,
+        },
+      },
+    );
+    expect(pending.assignedTo).toBeNull();
+    const acknowledged = applyCanonicalSosDuty(pending, {
+      status: "investigating",
+      dutyAcknowledgement: {
+        acknowledgedAt: "2026-10-19T00:00:00.000Z",
+        acknowledgedByActorId: "canonical-owner",
+      },
+    });
+    expect(acknowledged.assignedTo).toBe("canonical-owner");
+    expect(acknowledged.status).toBe("investigating");
   });
 
   it("detects only SOS incidents by event number", () => {

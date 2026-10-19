@@ -8,6 +8,7 @@ import type {
   DispatchCandidate,
 } from "@drts/contracts";
 import { getOpsClient } from "../../lib/api-client";
+import { ApiClientError } from "@drts/api-client";
 
 const SUPPLY = ["a", "b"].map((suffix) => ({
   driverId: `pax-review-driver-${suffix}`,
@@ -39,7 +40,7 @@ export default function SharedOrderReviewOps() {
       new URLSearchParams(window.location.search).get("orderId") ?? "",
     );
     void client
-      .get<{ enabled: boolean }>("/api/passenger-app/review-demo/config")
+      .get<{ enabled: boolean }>("/api/ops/review-demo/config")
       .then((r) => setEnabled(r.enabled))
       .catch(() => setEnabled(false));
   }, [client]);
@@ -69,15 +70,30 @@ export default function SharedOrderReviewOps() {
     )
       throw new Error(t.pendingCommand);
     pending.current ??= { path, body, key: crypto.randomUUID() };
-    const result = await client.post<T>(path, {
-      body,
-      headers: {
-        "Idempotency-Key": pending.current.key,
-        "X-Idempotency-Key": pending.current.key,
-      },
-    });
-    pending.current = undefined;
-    return result;
+    try {
+      const result = await client.post<T>(path, {
+        body,
+        headers: {
+          "Idempotency-Key": pending.current.key,
+          "X-Idempotency-Key": pending.current.key,
+        },
+      });
+      pending.current = undefined;
+      return result;
+    } catch (error) {
+      if (
+        error instanceof ApiClientError &&
+        error.statusCode >= 400 &&
+        error.statusCode < 500 &&
+        error.traceId &&
+        !error.retryable
+      ) {
+        // A structured, nonretryable domain refusal acknowledged this command.
+        // The operator can correct its cause and issue the next command.
+        pending.current = undefined;
+      }
+      throw error;
+    }
   }
   async function load() {
     if (!/^[0-9a-f-]{36}$/i.test(orderId)) throw new Error(t.invalidOrderId);
@@ -226,10 +242,8 @@ export default function SharedOrderReviewOps() {
                 <p>
                   {order.pickup.address} → {order.dropoff.address}
                 </p>
-                <a href={`/dispatch/${job?.dispatchJobId ?? orderId}`}>
-                  {t.dispatchDetails}
-                </a>{" "}
-                · <a href="/dispatch">{t.dispatchBoard}</a>
+                <a href={`/dispatch/${orderId}`}>{t.dispatchDetails}</a> ·{" "}
+                <a href="/dispatch">{t.dispatchBoard}</a>
                 <button
                   disabled={busy || !!job}
                   onClick={() =>

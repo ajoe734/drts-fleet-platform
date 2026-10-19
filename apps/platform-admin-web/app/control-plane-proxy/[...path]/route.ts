@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyIdentitySessionCsrf } from "../../../lib/identity-session-csrf.server";
 import {
   CONTROL_PLANE_DEFAULT_EMAILS,
   CONTROL_PLANE_REQUEST_HEADER_BLOCKLIST,
@@ -179,6 +180,36 @@ async function forward(
   const { path } = await params;
   const method = request.method.toUpperCase();
   const targetUrl = buildTargetUrl(request, path);
+  // Match the resulting API route (including normalized/decoded catch-all
+  // segments), with Express's case-insensitive and optional trailing slash.
+  if (
+    method === "POST" &&
+    /^\/api\/identity\/sessions\/[^/]+\/revoke\/?$/i.test(targetUrl.pathname)
+  ) {
+    try {
+      if (!verifyIdentitySessionCsrf(request)) {
+        return NextResponse.json(
+          {
+            error: {
+              code: "CSRF_TOKEN_INVALID",
+              message: "Session revocation requires same-origin CSRF proof.",
+            },
+          },
+          { status: 403, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+    } catch {
+      return NextResponse.json(
+        {
+          error: {
+            code: "CSRF_PROOF_UNAVAILABLE",
+            message: "Session CSRF verification is unavailable.",
+          },
+        },
+        { status: 503, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+  }
   const headers = copyRequestHeaders(request);
 
   try {

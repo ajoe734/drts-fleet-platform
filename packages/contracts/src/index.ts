@@ -18,6 +18,7 @@ import type {
 } from "./phase2-tesla-fsd-sandbox";
 import type { PartnerType } from "./referral-channel";
 import type {
+  ActionReceipt,
   CrossAppResourceLink,
   DriverMatchingSuppression,
   EmptyStateEnvelope,
@@ -739,6 +740,7 @@ export interface ApiSuccessEnvelope<T> {
   meta: {
     requestId: string;
     timestamp: string;
+    actionReceipt?: ActionReceipt;
   };
 }
 
@@ -4114,6 +4116,17 @@ export const DRIVER_TASK_AUTHORITY_MODES = [
 export type DriverTaskAuthorityMode =
   (typeof DRIVER_TASK_AUTHORITY_MODES)[number];
 
+export type DriverTaskOrderSummary = Pick<
+  OwnedOrderRecord,
+  | "orderId"
+  | "serviceBucket"
+  | "serviceProductCode"
+  | "businessDispatchSubtype"
+  | "dispatchSemantics"
+  | "fixedPrice"
+  | "quotedFare"
+>;
+
 export interface UnifiedDriverTaskView {
   taskId: string;
   orderId: string;
@@ -4135,6 +4148,8 @@ export interface UnifiedDriverTaskView {
   blockingReason: string | null;
   pickupSummary: string | null;
   dropoffSummary: string | null;
+  /** Already batch-read display data; omitted by older task-view producers. */
+  orderSummary?: DriverTaskOrderSummary | null;
   deadlineAt: string | null;
   updatedAt: string;
 }
@@ -4689,7 +4704,14 @@ export type CallType = (typeof CALL_TYPES)[number];
 export const CALL_SESSION_STATUSES = ["active", "closed"] as const;
 export type CallSessionStatus = (typeof CALL_SESSION_STATUSES)[number];
 
-export const CALLBACK_TASK_STATUSES = ["pending", "completed"] as const;
+export const CALLBACK_TASK_STATUSES = [
+  "pending",
+  "claimed",
+  "in_progress",
+  "completed",
+  "cancelled",
+  "unreachable",
+] as const;
 export type CallbackTaskStatus = (typeof CALLBACK_TASK_STATUSES)[number];
 
 export interface OpenCallSessionCommand {
@@ -4748,6 +4770,18 @@ export interface CallbackTaskRecord {
   status: CallbackTaskStatus;
   createdAt: string;
   updatedAt: string;
+  version?: number;
+  assignedOperatorId?: string | null;
+  attemptCount?: number;
+  lastOutcome?: string | null;
+  attempts?: Array<{
+    attemptId: string;
+    operatorId: string;
+    outcome: string;
+    notes: string | null;
+    recordedAt: string;
+    hangupConfirmed: boolean;
+  }>;
 }
 
 export type CallRecordingState = "ready" | "pending" | "missing";
@@ -4770,6 +4804,7 @@ export interface CallSessionRecord {
   lastEtaQuotedMinutes: number | null;
   lastEtaQuotedAt: string | null;
   callbackTask: CallbackTaskRecord | null;
+  callbackTaskHistory?: CallbackTaskRecord[];
   recordingState: CallRecordingState;
   flags: string[];
 }
@@ -5261,6 +5296,8 @@ export type FleetRevenueShareFormula =
 
 export interface FleetPartnerRecord {
   fleetPartnerId: string;
+  /** Explicit operating-authority operator IDs; never inferred from affiliation. */
+  multiTaxiOperatorIds?: string[];
   legalName: string;
   displayName: string;
   businessRegistrationNo: string;
@@ -5271,6 +5308,7 @@ export interface FleetPartnerRecord {
 }
 
 export interface CreateFleetPartnerCommand {
+  multiTaxiOperatorIds?: string[];
   legalName: string;
   displayName: string;
   businessRegistrationNo: string;
@@ -5281,6 +5319,7 @@ export interface CreateFleetPartnerCommand {
 }
 
 export interface UpdateFleetPartnerCommand {
+  multiTaxiOperatorIds?: string[];
   legalName?: string;
   displayName?: string;
   businessRegistrationNo?: string;
@@ -7740,6 +7779,7 @@ export * from "./phase1-p5-s3-multi-taxi";
 export * from "./p5-fare-anomaly-admin";
 export * from "./unattended-voice";
 export * from "./voice-dialogue";
+export * from "./voice-callback-operations";
 export * from "./system-remediation";
 export * from "./remittance-proof";
 export * from "./reimbursement-workflow";

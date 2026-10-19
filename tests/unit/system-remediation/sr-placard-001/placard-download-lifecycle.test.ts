@@ -88,7 +88,7 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     const { platformAdminService } = createService(store);
     const downloadController = new ControlledDownloadController(store);
 
-    const publicInfo = platformAdminService.createPublicInfoVersion({
+    const publicInfo = await platformAdminService.createPublicInfoVersion({
       title: "Hualien Expiry Test Disclosure",
       callPhone: "0800-999-000",
     });
@@ -170,7 +170,7 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     const store = new InMemoryDocumentArtifactStore();
     const { platformAdminService } = createService(store);
 
-    const publicInfo = platformAdminService.createPublicInfoVersion({
+    const publicInfo = await platformAdminService.createPublicInfoVersion({
       title: "Durable Restart Test Disclosure",
       callPhone: "0800-777-111",
       fareText: "Flat fare NT$50",
@@ -229,7 +229,7 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     const { platformAdminService } = createService(store);
     const downloadController = new ControlledDownloadController(store);
 
-    const publicInfo = platformAdminService.createPublicInfoVersion({
+    const publicInfo = await platformAdminService.createPublicInfoVersion({
       title: "Draft to Publish Disclosure",
       callPhone: "0800-333-444",
     });
@@ -303,11 +303,11 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     const { platformAdminService } = createService(store);
 
     // 1. Create first version and publish it
-    const publicInfo1 = platformAdminService.createPublicInfoVersion({
+    const publicInfo1 = await platformAdminService.createPublicInfoVersion({
       title: "First Disclosure",
       callPhone: "0800-000-111",
     });
-    platformAdminService.publishPublicInfoVersion(
+    await platformAdminService.publishPublicInfoVersion(
       publicInfo1.versionId,
       {},
       "req-1",
@@ -315,11 +315,11 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     );
 
     // 2. Publish a second disclosure, which automatically retires publicInfo1
-    const publicInfo2 = platformAdminService.createPublicInfoVersion({
+    const publicInfo2 = await platformAdminService.createPublicInfoVersion({
       title: "Second Disclosure",
       callPhone: "0800-000-222",
     });
-    platformAdminService.publishPublicInfoVersion(
+    await platformAdminService.publishPublicInfoVersion(
       publicInfo2.versionId,
       {},
       "req-2",
@@ -372,7 +372,7 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     const { platformAdminService } = createService(store);
     const downloadController = new ControlledDownloadController(store);
 
-    const publicInfo = platformAdminService.createPublicInfoVersion({
+    const publicInfo = await platformAdminService.createPublicInfoVersion({
       title: "Tamper Test",
     });
     const placard = await platformAdminService.generatePlacardVersion({

@@ -13,6 +13,7 @@ import type {
   VoiceCommandReceiptRecord,
 } from "../../apps/api/src/modules/voice-booking/voice-booking.repository";
 import type { QueryResult, QueryResultRow } from "pg";
+import type { VoiceMediaRecordingAdapter } from "../../apps/api/src/modules/voice-booking/voice-evidence.service";
 
 // In-memory mock database / query executor for hermetic integration testing
 interface MockWorkItemRow {
@@ -32,6 +33,10 @@ interface MockWorkItemRow {
 
 class MockVoiceWorkDatabase {
   readonly items = new Map<string, MockWorkItemRow>();
+  readonly recordingContexts = new Map<
+    string,
+    { call_id: string; brand_id: string; bound_order_id: string | null }
+  >();
   readonly receipts = new Map<
     string,
     { commandId: string; status: string; orderId?: string }
@@ -82,6 +87,13 @@ class MockVoiceWorkDatabase {
           fields: [],
           rows,
         });
+
+        if (
+          sql.includes("SELECT s.call_id, scope.brand_id, i.bound_order_id")
+        ) {
+          const context = this.recordingContexts.get(values?.[0] as string);
+          return wrapResult(context ? [context as unknown as T] : []);
+        }
 
         // Query for candidate work items (lease claim)
         if (
@@ -203,11 +215,39 @@ describe("UV-EXEC-023: 獨立媒體部署、持續背景工作及回退", () => 
       const mockOrdersRepo = {} as unknown as OwnedMobilityRepository;
       const callbackService = new VoiceCallbackService();
 
+      // External recorder is explicitly SIM. Keep the real runner's configured
+      // adapter and complete immutable-manifest validation on this idle positive.
+      const simulatedRecorder: VoiceMediaRecordingAdapter = {
+        async finalizeRecording(params) {
+          return {
+            scope: { ...params.scope, legId: params.scope.legId! },
+            recordingId: params.scope.recordingId,
+            manifestRef: {
+              objectKey: "SIM/idle-recording/manifest.json",
+              objectVersion: "SIM-idle-v1",
+              checksum: "a".repeat(64),
+              byteLength: 128,
+              durableAt: "2026-10-18T00:00:01.000Z",
+            },
+            coverage: {
+              startMs: 0,
+              endMs: 1000,
+              channels: ["inbound", "outbound"],
+              closedEventId: "SIM-idle-recorder-close",
+              endedAt: "2026-10-18T00:00:00.000Z",
+            },
+            verifiedAt: "2026-10-18T00:00:02.000Z",
+          };
+        },
+      };
+
       const runner = new VoiceCommandRunnerService(
         mockCommandsService,
         mockOrdersRepo,
         undefined, // dispatchExecutor
         callbackService,
+        undefined, // evidenceService
+        simulatedRecorder,
       );
 
       // Create a consented callback task in the callback service
@@ -247,13 +287,21 @@ describe("UV-EXEC-023: 獨立媒體部署、持續背景工作及回退", () => 
       });
 
       // 3. recording finalize work item
+      db.recordingContexts.set("session-closed-1", {
+        call_id: "call-closed-1",
+        brand_id: "brand-1",
+        bound_order_id: null,
+      });
       db.insertWorkItem({
         workId: "work-rec-1",
         commandId: null,
         voiceSessionId: "session-closed-1",
         workType: "finalize_recording",
         dedupeKey: "session-closed-1:finalize_recording",
-        payloadRef: JSON.stringify({ recordingId: "rec-999" }),
+        payloadRef: JSON.stringify({
+          recordingId: "rec-999",
+          legId: "SIM-idle-leg",
+        }),
       });
 
       // 4. consented callback task execution
@@ -267,7 +315,9 @@ describe("UV-EXEC-023: 獨立媒體部署、持續背景工作及回退", () => 
       });
 
       // Mock execute(commandId) to simulate order creation on pending receipt
-      runner.execute = async (id: string): Promise<VoiceCommandReceiptRecord> => {
+      runner.execute = async (
+        id: string,
+      ): Promise<VoiceCommandReceiptRecord> => {
         const receipt = db.receipts.get(id);
         if (receipt) {
           receipt.status = "succeeded";

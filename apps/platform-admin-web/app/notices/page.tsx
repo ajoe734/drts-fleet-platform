@@ -1,13 +1,12 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import type { AssistantEntityRef } from "@/components/assistant/assistant-types";
 import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
   formatNoticeWindow,
-  getNoticeHistoryDeliveryLabel,
   getNoticeSeverityLabel,
   getNoticeStatusLabel,
   getNoticesAudienceLabel,
@@ -28,10 +27,17 @@ import {
 } from "@drts/ui-web";
 import type {
   PlatformMaintenanceModeRecord,
-  PlatformNoticeRecord,
-  PlatformNoticeSeverity,
   PlatformNoticeStatus,
 } from "@drts/contracts";
+
+import {
+  useCanonicalRead,
+  postNoticeFlagsWithStepUp,
+  localNoticeTime,
+  type NoticeRecord as PlatformNoticeRecord,
+  type NoticeSeverity as PlatformNoticeSeverity,
+  type NoticeCommand,
+} from "../../lib/notice-flags-canonical-flow";
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
@@ -135,6 +141,7 @@ const severityToneMap: Record<PlatformNoticeSeverity, CanvasTone> = {
   info: "neutral",
   warning: "warn",
   critical: "danger",
+  maintenance: "warn",
 };
 
 const statusToneMap: Record<PlatformNoticeStatus, CanvasTone> = {
@@ -182,9 +189,7 @@ function toDatetimeLocalValue(value: string | null) {
 }
 
 function fromDatetimeLocalValue(value: string) {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  return localNoticeTime(value);
 }
 
 export default function NoticesPage() {
@@ -220,33 +225,44 @@ export default function NoticesPage() {
   const [maintEnd, setMaintEnd] = useState("");
   const [confirmReason, setConfirmReason] = useState("");
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [noticeResult, maintenanceResult] = await Promise.all([
-        client.listPlatformNotices(),
-        client.getMaintenanceMode(),
+  const hydratedMaintenance = useRef(false);
+  const [noticeStart, setNoticeStart] = useState("");
+  const [noticeExpiry, setNoticeExpiry] = useState("");
+  const [noticeReason, setNoticeReason] = useState("");
+  const [noticeConfirmed, setNoticeConfirmed] = useState(false);
+  const readData = useCallback(
+    async (signal: AbortSignal) => {
+      const [items, mode] = await Promise.all([
+        client.getList<PlatformNoticeRecord>("/api/platform-admin/notices", {
+          signal,
+        }),
+        client.get<PlatformMaintenanceModeRecord>(
+          "/api/platform-admin/maintenance-mode",
+          { signal },
+        ),
       ]);
-      setNotices(noticeResult ?? []);
-      setMaintenance(maintenanceResult);
-      setMaintEnabled(maintenanceResult.enabled);
-      setMaintReason(maintenanceResult.reason ?? "");
-      setMaintStart(toDatetimeLocalValue(maintenanceResult.scheduledStart));
-      setMaintEnd(toDatetimeLocalValue(maintenanceResult.scheduledEnd));
-      setConfirmReason(maintenanceResult.reason ?? "");
-    } catch (nextError: unknown) {
-      setError(
-        nextError instanceof Error ? nextError.message : String(nextError),
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [client]);
-
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
+      return { items, mode };
+    },
+    [client],
+  );
+  const loadData = useCanonicalRead(
+    readData,
+    ({ items, mode }) => {
+      setError(null);
+      setNotices(items);
+      setMaintenance(mode);
+      if (!hydratedMaintenance.current) {
+        hydratedMaintenance.current = true;
+        setMaintEnabled(mode.enabled);
+        setMaintReason(mode.reason ?? "");
+        setMaintStart(toDatetimeLocalValue(mode.scheduledStart));
+        setMaintEnd(toDatetimeLocalValue(mode.scheduledEnd));
+        setConfirmReason(mode.reason ?? "");
+      }
+    },
+    (e) => setError(e instanceof Error ? e.message : String(e)),
+    () => setLoading(false),
+  );
 
   const sortedNotices = useMemo(
     () =>
@@ -313,16 +329,21 @@ export default function NoticesPage() {
         title: notice.title,
         severity: notice.severity,
         targets: audienceTargets(notice.targetAudience, locale),
-        delivery: getNoticeHistoryDeliveryLabel(
-          locale,
-          notice.status,
-          notice.targetAudience,
-        ),
+        delivery:
+          `${notice.status === "resolved" ? `${notice.downlistedReason === "expired" ? copy.expired : copy.archived} · ` : ""}` +
+          (notice.outcomes?.length
+            ? notice.outcomes
+                .map(
+                  (o) =>
+                    `${o.audience}: ${o.state}${o.notificationId ? ` (${o.notificationId})` : ""}`,
+                )
+                .join(" · ")
+            : copy.unknown),
         broadcastAt: formatDateTime(
           notice.scheduledAt ?? notice.updatedAt ?? notice.createdAt,
         ),
       })),
-    [locale, sortedNotices],
+    [locale, sortedNotices, copy.archived, copy.expired, copy.unknown],
   );
 
   const noticeColumns = useMemo<CanvasTableColumn<NoticeRow>[]>(
@@ -423,7 +444,7 @@ export default function NoticesPage() {
         h: copy.delivery,
         w: 180,
         r: (row: BroadcastRow) => (
-          <CanvasPill theme={theme} tone="success" dot>
+          <CanvasPill theme={theme} tone="neutral" dot>
             {row.delivery}
           </CanvasPill>
         ),
@@ -489,12 +510,26 @@ export default function NoticesPage() {
     setCreating(true);
     setError(null);
     try {
-      await client.createPlatformNotice({
+      const command: NoticeCommand = {
+        scheduledAt: localNoticeTime(noticeStart),
+        expiresAt: localNoticeTime(noticeExpiry),
+        reason: noticeReason.trim(),
+        confirmed: noticeConfirmed,
         title: noticeTitle.trim(),
         body: noticeBody.trim(),
         severity: noticeSeverity,
         targetAudience: noticeAudience,
-      });
+      };
+      const ack = await client.post<PlatformNoticeRecord>(
+        "/api/platform-admin/notices",
+        { body: command },
+      );
+      if (!ack?.noticeId || ack.storageMode !== "process_memory")
+        throw new Error("Notice write was not acknowledged");
+      setNoticeStart("");
+      setNoticeExpiry("");
+      setNoticeReason("");
+      setNoticeConfirmed(false);
       setNoticeTitle("");
       setNoticeBody("");
       setNoticeSeverity("info");
@@ -535,12 +570,23 @@ export default function NoticesPage() {
     setUpdatingMaintenance(true);
     setError(null);
     try {
-      await client.setMaintenanceMode({
-        enabled: maintEnabled,
-        reason: effectiveReason,
-        scheduledStart: fromDatetimeLocalValue(maintStart),
-        scheduledEnd: fromDatetimeLocalValue(maintEnd),
-      });
+      const ack =
+        await postNoticeFlagsWithStepUp<PlatformMaintenanceModeRecord>(
+          client,
+          "/api/platform-admin/maintenance-mode",
+          {
+            enabled: maintEnabled,
+            reason: effectiveReason,
+            scheduledStart: fromDatetimeLocalValue(maintStart),
+            scheduledEnd: fromDatetimeLocalValue(maintEnd),
+          },
+        );
+      if (
+        !ack?.updatedAt ||
+        ack.enabled !== maintEnabled ||
+        ack.reason !== effectiveReason
+      )
+        throw new Error("Maintenance write was not acknowledged");
       setShowMaintenanceConfirm(false);
       await loadData();
     } catch (nextError: unknown) {
@@ -888,6 +934,7 @@ export default function NoticesPage() {
                       required
                     >
                       <input
+                        aria-label={copy.noticeTitle}
                         value={noticeTitle}
                         onChange={(event) => setNoticeTitle(event.target.value)}
                         style={textInputStyle}
@@ -900,6 +947,7 @@ export default function NoticesPage() {
                       required
                     >
                       <select
+                        aria-label={copy.noticeSeverity}
                         value={noticeSeverity}
                         onChange={(event) =>
                           setNoticeSeverity(
@@ -917,6 +965,9 @@ export default function NoticesPage() {
                         <option value="critical">
                           {copy.severityOptions.critical}
                         </option>
+                        <option value="maintenance">
+                          {copy.severityOptions.maintenance}
+                        </option>
                       </select>
                     </CanvasField>
                     <CanvasField
@@ -925,6 +976,7 @@ export default function NoticesPage() {
                       required
                     >
                       <select
+                        aria-label={copy.noticeAudience}
                         value={noticeAudience}
                         onChange={(event) =>
                           setNoticeAudience(
@@ -947,8 +999,54 @@ export default function NoticesPage() {
                       </select>
                     </CanvasField>
                   </div>
+                  <CanvasField theme={theme} label={copy.scheduledStart}>
+                    <input
+                      aria-label={copy.scheduledStart}
+                      type="datetime-local"
+                      value={noticeStart}
+                      onChange={(e) => setNoticeStart(e.target.value)}
+                      style={textInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField theme={theme} label={copy.expiry}>
+                    <input
+                      aria-label={copy.expiry}
+                      type="datetime-local"
+                      value={noticeExpiry}
+                      onChange={(e) => setNoticeExpiry(e.target.value)}
+                      style={textInputStyle}
+                    />
+                  </CanvasField>
+                  {(noticeSeverity === "critical" ||
+                    noticeSeverity === "maintenance") && (
+                    <>
+                      <CanvasField
+                        theme={theme}
+                        label={copy.internalReason}
+                        required
+                      >
+                        <textarea
+                          aria-label={copy.internalReason}
+                          required
+                          value={noticeReason}
+                          onChange={(e) => setNoticeReason(e.target.value)}
+                          style={textareaStyle}
+                        />
+                      </CanvasField>
+                      <label>
+                        <input
+                          type="checkbox"
+                          required
+                          checked={noticeConfirmed}
+                          onChange={(e) => setNoticeConfirmed(e.target.checked)}
+                        />
+                        {copy.highRiskConfirmation}
+                      </label>
+                    </>
+                  )}
                   <CanvasField theme={theme} label={copy.noticeBody} required>
                     <textarea
+                      aria-label={copy.noticeBody}
                       value={noticeBody}
                       onChange={(event) => setNoticeBody(event.target.value)}
                       style={textareaStyle}

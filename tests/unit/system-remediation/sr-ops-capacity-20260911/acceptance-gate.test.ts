@@ -80,11 +80,11 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
     summary: {
       preparationStartedAt: "2026-10-12T00:00:00.000Z",
       startedAt: "2026-10-12T00:00:00.000Z",
-      endedAt: "2026-10-12T00:14:59.800Z",
+      endedAt: "2026-10-12T00:15:00.000Z",
       result: "measurements_within_targets",
       durationSeconds: 900,
       fullBurstSchedule: true,
-      elapsedMs: 899800, // elapsedMs must be at least 899800 for a 900s run
+      elapsedMs: 900000, // The observation covers the complete900s window.
       maxInFlight: 500, // Valid configuration value
       workflows: {
         booking: {
@@ -593,6 +593,17 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 acceptance gate", () => {
       /invalid elapsedMs/,
     );
   });
+
+  it.each([899800, 899890.790587, 899999.999])(
+    "rejects an otherwise complete baseline with only%s milliseconds of observation",
+    (elapsedMs) => {
+      const invalid = structuredClone(validAcceptance);
+      invalid.summary.elapsedMs = elapsedMs;
+      expect(() => assertAcceptancePassed(invalid)).toThrowError(
+        /invalid elapsedMs, must be at least 900000/,
+      );
+    },
+  );
 
   it("rejects when maxInFlight is zero", () => {
     const invalid = structuredClone(validAcceptance);

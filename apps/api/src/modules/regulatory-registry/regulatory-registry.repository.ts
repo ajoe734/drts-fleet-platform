@@ -250,6 +250,29 @@ export class RegulatoryRegistryRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
+  async findDriverPublicRegistrationCredential(
+    driverId: string,
+  ): Promise<DriverPublicRegistrationCredential | null> {
+    if (!this.isEnabled()) return null;
+    const result =
+      await this.databaseService!.query<DriverPublicRegistrationCredentialRow>(
+        `SELECT * FROM reg.driver_public_registration_credentials WHERE driver_id=$1`,
+        [driverId],
+      );
+    return result.rows[0] ? this.mapDriverCredentialRow(result.rows[0]) : null;
+  }
+
+  async findCompletionOperatorId(
+    authorizationId: string,
+  ): Promise<string | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<{ operator_id: string }>(
+      `SELECT operator_id FROM reg.multi_taxi_operating_authorizations WHERE authorization_id=$1`,
+      [authorizationId],
+    );
+    return result.rows[0]?.operator_id ?? null;
+  }
+
   async ensureLiveMapTestDriver() {
     return ensureLiveMapFixture(this.databaseService);
   }

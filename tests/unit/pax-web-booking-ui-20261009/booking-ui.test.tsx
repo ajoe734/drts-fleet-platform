@@ -282,6 +282,45 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
     click("試算車資");
     await screen.findByText("預約時間不符合最短前置時間規定");
     expect(calls("/quotes")).toHaveLength(0);
+    expect(calls("/rides")).toHaveLength(0);
+
+    // Clear the old refusal through the real refresh control. The next error
+    // must belong to a future draft, rather than reuse the past-time message.
+    click("重新載入費用與設定");
+    await form();
+    await waitFor(() =>
+      expect(screen.queryByText("預約時間不符合最短前置時間規定")).toBeNull(),
+    );
+    const minimum = (f.settings as { minLeadTimeMinutes: number })
+      .minLeadTimeMinutes;
+    const now = Date.now();
+    const future = new Date(now + (minimum * 60_000) / 2);
+    future.setSeconds(0, 0);
+    expect(future.getTime()).toBeGreaterThan(now);
+    expect(future.getTime() - now).toBeLessThan(minimum * 60_000);
+    const pad = (value: number) => String(value).padStart(2, "0");
+    const local = `${future.getFullYear()}-${pad(future.getMonth() + 1)}-${pad(future.getDate())}T${pad(future.getHours())}:${pad(future.getMinutes())}`;
+    fireEvent.change(screen.getByLabelText("預約時間"), {
+      target: { value: local },
+    });
+    click("試算車資");
+    await screen.findByText("預約時間不符合最短前置時間規定");
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "試算車資" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    expect(future.getTime()).toBeGreaterThan(Date.now());
+    expect(calls("/quotes")).toHaveLength(0);
+    expect(calls("/rides")).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("預約時間"), {
+      target: { value: "2099-10-11T12:00" },
+    });
+    click("試算車資");
+    await screen.findByLabelText("我已確認費用與優惠說明");
+    expect(calls("/quotes")).toHaveLength(1);
+    expect(calls("/rides")).toHaveLength(0);
   });
   it("not-serviceable is a refusal, never an E19b successful quote", async () => {
     f.serviceable = false;
@@ -392,6 +431,9 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
         await form();
         await selectAddress(0, "上車");
         await selectAddress(1, "下車");
+        fireEvent.change(screen.getByLabelText("預約時間"), {
+          target: { value: "2099-10-11T12:00" },
+        });
         f.errors.set("POST /api/passenger-app/quotes", {
           status: 401,
           code: "unauthorized",
@@ -410,6 +452,9 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
     await form();
     await selectAddress(0, "上車");
     await selectAddress(1, "下車");
+    fireEvent.change(screen.getByLabelText("預約時間"), {
+      target: { value: "2099-10-11T12:00" },
+    });
     click("試算車資");
     await screen.findByText("目前無法取得正式報價");
     expect(

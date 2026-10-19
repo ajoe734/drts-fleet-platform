@@ -579,6 +579,36 @@ def upsert_review_pr(config: dict[str, Any], bus_state: dict[str, Any], status: 
     entry = task_bus_entry(bus_state, task["id"])
     pr_ref = entry.get("review_pr")
     candidate_sha = str(task.get("candidate_sha") or "").strip()
+    candidate_branch = str(task.get("candidate_branch") or "").strip()
+    task_pr = bound_task_pr(task, candidate_branch, candidate_sha)
+    if task_pr:
+        # A handoff-bound PR is authoritative, even over a stale cached PR.
+        # Never fall back to an owner/current branch or another PR when the
+        # locked identity is absent or the live observation cannot confirm it.
+        if (
+            not re.fullmatch(r"[0-9a-f]{40}", candidate_sha)
+            or not candidate_branch
+            or candidate_branch == "not_applicable"
+            or task.get("mutates_canonical") is False
+        ):
+            return False
+        observation = candidate_pr_observation(repo, int(task_pr["number"]))
+        if (
+            observation.get("state") != "OPEN"
+            or observation.get("headRefOid") != candidate_sha
+            or observation.get("headRefName") != candidate_branch
+            or not isinstance(observation.get("isDraft"), bool)
+        ):
+            return False
+        # Cache equality is not freshness: observe on every tick, including
+        # identical warm entries. Errors propagate to the normal outbound
+        # defer/log path without overwriting previously valid metadata.
+        readied = observation["isDraft"]
+        if readied:
+            run_gh(["pr", "ready", str(task_pr["number"]), "--repo", repo])
+        changed = entry.get("review_pr") != task_pr or readied
+        entry["review_pr"] = task_pr
+        return changed
     if not candidate_sha or candidate_sha == "not_applicable":
         skip_hash = json.dumps(
             {"state": "skipped_no_candidate", "task_id": task["id"]},
@@ -630,12 +660,6 @@ def upsert_review_pr(config: dict[str, Any], bus_state: dict[str, Any], status: 
     base = default_branch(config)
     title = f"[ReviewBus] {task['id']} {task['title']}"
     head_sha = candidate_sha
-    task_pr = bound_task_pr(task, branch, candidate_sha)
-    if task_pr:
-        if entry.get("review_pr") == task_pr:
-            return False
-        entry["review_pr"] = task_pr
-        return True
     if not cached_pr_matches_candidate(pr_ref, branch, candidate_sha):
         pr_ref = None
         entry["review_pr"] = None

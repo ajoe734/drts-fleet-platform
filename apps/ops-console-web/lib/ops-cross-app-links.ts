@@ -3,9 +3,19 @@ import type { CrossAppResourceLink } from "@drts/contracts";
 export const DEFAULT_PLATFORM_ADMIN_BASE = "/_apps/platform-admin";
 
 export function resolvePlatformAdminBase(): string {
+  const runtimeValue =
+    typeof window === "undefined"
+      ? ""
+      : (
+          window as unknown as {
+            __DRTS_RUNTIME_CONFIG__?: { platformAdminBaseUrl?: string };
+          }
+        ).__DRTS_RUNTIME_CONFIG__?.platformAdminBaseUrl;
   const envValue =
-    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ??
-    process.env.DRTS_PLATFORM_ADMIN_URL ??
+    runtimeValue ||
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ||
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN ||
+    process.env.DRTS_PLATFORM_ADMIN_URL ||
     "";
   const trimmed = envValue.trim().replace(/\/$/, "");
   return trimmed || DEFAULT_PLATFORM_ADMIN_BASE;
@@ -62,7 +72,9 @@ export function platformAdminAuditLink(options?: {
   };
 }
 
-export function platformAdminAdapterRegistryLink(label?: string): CrossAppResourceLink {
+export function platformAdminAdapterRegistryLink(
+  label?: string,
+): CrossAppResourceLink {
   return {
     targetApp: "platform-admin",
     route: "/adapter-registry",

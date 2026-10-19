@@ -6,6 +6,7 @@ import type {
   DriverSosAlertRenderObservation,
   DriverSosAttachmentRecord,
   DriverSosAttachmentType,
+  DriverSosEventRecord,
   DriverSosTimelineEntry,
   DriverSosUrgentAlertOutboxRecord,
 } from "@drts/contracts";
@@ -74,6 +75,46 @@ type AlertObservationRow = QueryResultRow & {
   ops_alert_receipt_recorded_at: Date | string;
   alert_to_ops_latency_ms: number | string;
 };
+
+type DutyAckRow = QueryResultRow & {
+  duty_ack_snapshot: { acknowledgedByActorId: string; acknowledgedAt: string };
+  status: DriverSosEventRecord["status"];
+};
+
+/**
+ * Rank of the forward (non-false-alarm) S-3 progression, inlined as SQL so
+ * the database itself -- not just the in-process cache -- can refuse to
+ * move a `driver_sos_events.status` column backward across competing
+ * writers/instances. Must stay in sync with
+ * `DriverSosService.SOS_PROGRESS_RANK`.
+ */
+function sosStatusRankSql(expression: string): string {
+  return `
+    CASE ${expression}
+      WHEN 'submitted' THEN 0
+      WHEN 'duty_alerted' THEN 1
+      WHEN 'acknowledged' THEN 2
+      WHEN 'investigating' THEN 3
+      WHEN 'resolved' THEN 4
+      WHEN 'closed' THEN 5
+      ELSE -1
+    END
+  `;
+}
+
+export interface DriverSosDutyAcknowledgementPersistResult {
+  /** False when a different writer already won at the database layer. */
+  accepted: boolean;
+  acknowledgedByActorId: string;
+  acknowledgedAt: string;
+  /** The event's actual durable status after this write (never regressed). */
+  status: DriverSosEventRecord["status"];
+}
+
+export interface DriverSosDutyAlertDispatchPlan {
+  event: DriverSosEventRecord;
+  timeline: DriverSosTimelineEntry;
+}
 
 type AlertLatencySummaryRow = QueryResultRow & {
   sample_count: number | string;
@@ -280,21 +321,30 @@ export class DriverSosVerificationRepository {
     outbox: DriverSosUrgentAlertOutboxRecord,
     timeline: DriverSosTimelineEntry,
     observation: DriverSosAlertRenderObservation,
-  ) {
+    dutyAlert: DriverSosDutyAlertDispatchPlan | null = null,
+  ): Promise<DriverSosAlertRenderObservation & { dutyAlertApplied: boolean }> {
     if (!this.isEnabled()) {
-      return observation;
+      return { ...observation, dutyAlertApplied: Boolean(dutyAlert) };
     }
 
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
+      // Match the duty ACK/cleanup lock order before touching its outbox.
+      // A simultaneous first render and ACK must not wait in opposite orders.
+      await client.query(
+        "SELECT sos_event_id FROM safety.driver_sos_events WHERE sos_event_id = $1 FOR UPDATE",
+        [outbox.sosEventId],
+      );
       const updated = await client.query<AlertObservationRow>(
         `
           UPDATE safety.driver_sos_urgent_alert_outbox
           SET ops_alert_rendered_at = $2::timestamptz,
               ops_alert_receipt_recorded_at = $3::timestamptz,
               alert_to_ops_latency_ms = $4::bigint,
-              payload = payload || $5::jsonb
+              payload = payload || $5::jsonb,
+              status = CASE WHEN status IN ('failed', 'acknowledged') THEN status ELSE 'delivered' END,
+              delivered_at = COALESCE(delivered_at, $3::timestamptz)
           WHERE outbox_id = $1
             AND ops_alert_rendered_at IS NULL
           RETURNING
@@ -318,8 +368,29 @@ export class DriverSosVerificationRepository {
       );
       let row = updated.rows[0];
       let duplicate = false;
+      let dutyAlertApplied = false;
       if (row) {
         await this.appendTimelineWith(client, timeline);
+        if (dutyAlert) {
+          const dutyAlertUpdate = await client.query(
+            `
+              UPDATE safety.driver_sos_events
+              SET status = $2,
+                  updated_at = $3
+              WHERE sos_event_id = $1
+                AND status = 'submitted'
+            `,
+            [
+              dutyAlert.event.sosEventId,
+              dutyAlert.event.status,
+              dutyAlert.event.updatedAt,
+            ],
+          );
+          if ((dutyAlertUpdate.rowCount ?? 0) > 0) {
+            dutyAlertApplied = true;
+            await this.appendTimelineWith(client, dutyAlert.timeline);
+          }
+        }
       } else {
         duplicate = true;
         const existing = await client.query<AlertObservationRow>(
@@ -353,7 +424,190 @@ export class DriverSosVerificationRepository {
         ),
         alertToOpsLatencyMs: Number(row.alert_to_ops_latency_ms),
         duplicate,
+        dutyAlertApplied,
       };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Conditional first-writer-wins: the UPDATE only takes effect while no
+   * acknowledgment has been recorded yet, so two overlapping writers (across
+   * processes, not just in-process) cannot both commit a duty_acknowledged
+   * timeline entry for the same event.
+   *
+   * The `status` column is only ever advanced, never regressed: a stale
+   * caller computing `acknowledged` from an in-memory snapshot that
+   * predates a concurrent writer's own authoritative progression (e.g. the
+   * Incident module already durably advancing this event to
+   * `investigating`) must not claw the durable status back down just
+   * because it still legitimately wins the owner-null race (F2).
+   */
+  async persistDutyAcknowledgement(
+    event: DriverSosEventRecord,
+    timeline: DriverSosTimelineEntry,
+  ): Promise<DriverSosDutyAcknowledgementPersistResult> {
+    if (!this.isEnabled())
+      return {
+        accepted: true,
+        acknowledgedByActorId: event.dutyAcknowledgement.acknowledgedByActorId!,
+        acknowledgedAt: event.dutyAcknowledgement.acknowledgedAt!,
+        status: event.status,
+      };
+    const client = await this.databaseService!.connect();
+    let commitAttempted = false;
+    try {
+      await client.query("BEGIN");
+      // The same SOS→Incident lock order is used by rejected-claim cleanup.
+      // This serializes a same-owner retry with another instance's cleanup:
+      // a committed duty ACK can never subsequently lose its Incident owner.
+      const locked = await client.query<DutyAckRow>(
+        `SELECT duty_ack_snapshot, status FROM safety.driver_sos_events
+         WHERE sos_event_id = $1 FOR UPDATE`,
+        [event.sosEventId],
+      );
+      const existing = locked.rows[0];
+      if (!existing)
+        throw new Error(`Driver SOS event ${event.sosEventId} is not durable.`);
+      let owner = existing.duty_ack_snapshot.acknowledgedByActorId;
+      if (event.incidentId) {
+        const incident = await client.query<{ assigned_to: string | null }>(
+          "SELECT assigned_to FROM ops.phase1_incidents WHERE incident_id = $1 FOR UPDATE",
+          [event.incidentId],
+        );
+        if (!incident.rows[0])
+          throw new Error(`Incident ${event.incidentId} is not durable.`);
+        owner = owner ?? incident.rows[0].assigned_to;
+      }
+      owner = owner ?? event.dutyAcknowledgement.acknowledgedByActorId;
+      if (!owner) throw new Error("A verified current duty owner is required.");
+      const snapshot = {
+        ...event.dutyAcknowledgement,
+        acknowledgedByActorId: owner,
+      };
+      const claimed = await client.query<DutyAckRow>(
+        `UPDATE safety.driver_sos_events
+         SET status = CASE
+               WHEN (${sosStatusRankSql("status")}) < (${sosStatusRankSql("$2::text")}) THEN $2 ELSE status END,
+             duty_ack_snapshot = $3::jsonb, updated_at = $4
+         WHERE sos_event_id = $1 AND duty_ack_snapshot->>'acknowledgedByActorId' IS NULL
+         RETURNING duty_ack_snapshot, status`,
+        [
+          event.sosEventId,
+          event.status,
+          JSON.stringify(snapshot),
+          event.updatedAt,
+        ],
+      );
+      const accepted = Boolean(claimed.rows[0]);
+      const row = claimed.rows[0] ?? existing;
+      const actualOwner = row.duty_ack_snapshot.acknowledgedByActorId;
+      if (!actualOwner)
+        throw new Error("The canonical duty owner was not available.");
+      if (event.incidentId) {
+        await client.query(
+          `UPDATE ops.phase1_incidents
+           SET assigned_to = $2::text, updated_at = GREATEST(updated_at, $3::timestamptz),
+               record = jsonb_set(jsonb_set(record, '{assignedTo}', to_jsonb($2::text), true),
+                 '{updatedAt}', to_jsonb(GREATEST(updated_at, $3::timestamptz)::text), true)
+           WHERE incident_id = $1`,
+          [event.incidentId, actualOwner, event.updatedAt],
+        );
+      }
+      if (accepted)
+        await this.appendTimelineWith(client, {
+          ...timeline,
+          actorId: actualOwner,
+          payload: { ...timeline.payload, acknowledgedByActorId: actualOwner },
+        });
+      await client.query(
+        `UPDATE safety.driver_sos_urgent_alert_outbox SET status = 'acknowledged'
+         WHERE sos_event_id = $1`,
+        [event.sosEventId],
+      );
+      commitAttempted = true;
+      await client.query("COMMIT");
+      return {
+        accepted,
+        acknowledgedByActorId: actualOwner,
+        acknowledgedAt: row.duty_ack_snapshot.acknowledgedAt,
+        status: row.status,
+      };
+    } catch (error) {
+      let outcome = commitAttempted ? "unknown" : "rolled_back";
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        outcome = "unknown";
+      }
+      throw Object.assign(
+        error instanceof Error ? error : new Error(String(error)),
+        { dutyCommitOutcome: outcome },
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Reconciles the Incident module's own status progression (investigating /
+   * resolved / closed) onto the correlated DriverSosEvent + timeline. The
+   * caller (service layer) only determines a transition is new from its own
+   * in-memory/just-reloaded snapshot, which a second, independent instance
+   * can also be computing concurrently from an equally stale snapshot, and
+   * each instance's `timelineEntries` are built to cover every intermediate
+   * rank from *its own* stale starting point up to its target -- a rank-only
+   * guard (durable rank < target rank) is not enough to stop that: a second
+   * instance observing a durable row an earlier writer already advanced can
+   * still durably "win" a further target and re-append the exact
+   * intermediate entries the first writer already committed (F2 overlapping
+   * forward ranges). The UPDATE is therefore an exact compare-and-swap on
+   * `fromStatus` -- the precise durable status this call's `timelineEntries`
+   * were computed against -- not merely a rank inequality: it only takes
+   * effect while the durable row is still exactly at that starting status,
+   * so two instances can never both append timeline entries for an
+   * overlapping range, and a delayed stale-start write can never land on
+   * top of a row another writer already moved off of. Returns whether this
+   * call's transition actually won; the caller must not apply the
+   * transition to its own in-memory state (or append its timeline entries a
+   * second time) when it did not -- it must re-derive the transition from a
+   * fresh authoritative read instead.
+   */
+  async persistStatusTransition(
+    event: DriverSosEventRecord,
+    timelineEntries: DriverSosTimelineEntry[],
+    fromStatus: DriverSosEventRecord["status"],
+  ): Promise<boolean> {
+    if (!this.isEnabled()) {
+      return true;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const updated = await client.query(
+        `
+          UPDATE safety.driver_sos_events
+          SET status = $2,
+              updated_at = $3
+          WHERE sos_event_id = $1
+            AND status = $4
+          RETURNING sos_event_id
+        `,
+        [event.sosEventId, event.status, event.updatedAt, fromStatus],
+      );
+      const applied = (updated.rowCount ?? 0) > 0;
+      if (applied) {
+        for (const entry of timelineEntries) {
+          await this.appendTimelineWith(client, entry);
+        }
+      }
+      await client.query("COMMIT");
+      return applied;
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;

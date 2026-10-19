@@ -36,7 +36,7 @@ export class FeatureFlagRepository {
       return result.rows.map((row) => this.mapRow(row));
     } catch (error) {
       this.logger.warn(`Failed to load feature flags: ${error}`);
-      return [];
+      throw error;
     }
   }
 
@@ -73,7 +73,7 @@ export class FeatureFlagRepository {
       return this.mapRow(row);
     } catch (error) {
       this.logger.warn(`Failed to find feature flag ${key}: ${error}`);
-      return undefined;
+      throw error;
     }
   }
 
@@ -99,7 +99,7 @@ export class FeatureFlagRepository {
       return this.mapRow(row);
     } catch (error) {
       this.logger.warn(`Failed to update feature flag ${key}: ${error}`);
-      return undefined;
+      throw error;
     }
   }
 
@@ -130,7 +130,7 @@ export class FeatureFlagRepository {
       this.logger.warn(
         `Failed to upsert tenant override for ${key}/${tenantId}: ${error}`,
       );
-      return undefined;
+      throw error;
     }
   }
 
