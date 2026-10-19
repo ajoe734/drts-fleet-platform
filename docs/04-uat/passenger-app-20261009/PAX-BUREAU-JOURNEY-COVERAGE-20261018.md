@@ -360,3 +360,11 @@ React checklist 已套用於兩個修改的 TSX 元件：hooks 無條件呼叫�
 以上是 Source 與 socket-free 檢查，尚不是新 immutable 候選的自身 hosted CI 或 shared runtime。仍須正常 commit／plain push／新 PR、完整 handoff、自身必要 CI、Root獨立 review／protected merge，以及 Root 統一版本的實際操作。原正式來源、真車、真支付、福利無障礙與所有逐案缺項保留，不因本輪時刻／距離／入口／switch 改善而標為全16通過。
 
 最後逐字自查補上前述 omitted／null tracking 缺口後，`final-missing-tracking-units.json` 同九個受影響檔實際單輪113PASS／0FAIL／0skip（包含新增兩個 missing tracking 負向），不以之前跨次的111案組合冒充此結果。先前110／1、37／0與29／0原物仍保留。採 Root 正常更新的 R3 規格 `Journey-full-original-continuation-new-screenshot-ETA-rating-home.r3-defaultON.task-spec.json`（SHA256 `4c6d06ff707bce9d397d954c0436a210331286cfc317fdb3d9be849d57019d8f`），原36scopes、五群及兩keys未縮減。後續 compiler／hooks／候選與CI依各自精確Source hash另錄，不能把本地113案當共享旅程或全部16案例通過。
+
+## fb568 自身 CI 的 i18n 退修（原任務 R4）
+
+`fb568a3c9161f1781dfeb6cdc9006104f362820b` 的 integration run `39272198844`，job `118128472952` 原「Run pnpm run i18n:guard」失敗。作者交接前漏跑既有 guard；凍結 Source 上同原命令真 exit1，688檔／81原豁免，定位首頁 nav aria-label 及行程 ETA 暫無資料提示兩個 inline literal。原 workflow 尚進行時，GitHub job log collector 明確表示須等 workflow 完成，該失敗與原 annotations／local raw 均保留，沒有冒稱已下載該 CI 原 log。
+
+Root 正常 reopen 原任務並協調37scopes／原五群／兩keys及 R4（SHA256 `769fc53d06ff8eaabc3b494ee5a410470ab16f78728bf183fbf88cab2a518468`）。最小修正只把首頁 aria-label 改用既有 `BOOK_T.disclosure`，以及在 Ride translations 增加原句 `LiveRouteEstimateUnavailable` 供原 ETA 控制項取用；Receipt 作者同檔的分享 keys 保留獨立層。沒有更動 baseline、豁免、規則、狀態、路線、授權或任何期限，也沒有新增鏡像字串測試。
+
+修後同原 `pnpm run i18n:guard` 真 exit0（688檔／81原豁免），四個受影響既有 UI 檔45PASS／0FAIL／0skip；scoped lint另留實際 receipt。前述113單輪、API159及 coherent typecheck 只保留各自 hash／執行時點，純字串資源修正不重跑不相關大 API／compiler。舊fb568的60秒／decline兩專用run真SUCCESS保留窄信用，不能當新候選已通過；其他舊jobs依實際失敗、自然終態或正常新push觸發的自動supersede記錄，不手動取消、重跑或造未執行案例的結果。新 Source 仍須新不可變候選／gen、自身 CI、Root 獨立審查及後續同版本共享操作。

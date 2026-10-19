@@ -580,7 +580,7 @@ function EtaBlock({ fixture }: { fixture: PassengerRideFixture }) {
   if (unavailable) {
     return fixture.screenId === "P5-07" ? (
       <div role="status" style={{ margin: "0 14px 12px", textAlign: "center" }}>
-        目前無法預估抵達時間與剩餘距離
+        {t.LiveRouteEstimateUnavailable}
       </div>
     ) : null;
   }

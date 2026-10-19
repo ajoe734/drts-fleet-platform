@@ -157,7 +157,7 @@ export function PaymentBookingHome() {
   );
   return (
     <>
-      <nav aria-label="費用與優惠" style={{ padding: "12px 16px" }}>
+      <nav aria-label={BOOK_T.disclosure} style={{ padding: "12px 16px" }}>
         <a href="/fares">{BOOK_T.fullFees}</a>
       </nav>
       {unpaid && <UnpaidPaymentNotice />}
