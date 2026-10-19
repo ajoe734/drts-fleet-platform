@@ -56,7 +56,7 @@ function authority(
       eta: {
         minutes: 30,
         calculatedAt: "2026-10-17T04:53:00Z",
-        locationFreshness: "fresh",
+        locationFreshness: "missing",
       },
       routeFare: {
         routeSnapshotId: "ETA-ROUTE",
@@ -95,6 +95,19 @@ function authority(
       },
       createdAt: "2026-10-17T04:53:00Z",
       supersededAt: null,
+    },
+    tracking: {
+      assignmentId: "ETA-ASSIGNMENT",
+      driverId: "ETA-DRIVER",
+      vehicleId: "ETA-VEHICLE",
+      locationFreshness: "fresh",
+      location: {
+        lat: 25,
+        lng: 121,
+        accuracyM: 8,
+        recordedAt: "2026-10-17T04:53:00Z",
+      },
+      pickupEta: { minutes: 30, calculatedAt: "2026-10-17T04:53:00Z" },
     },
     rating: null,
     payment: null,

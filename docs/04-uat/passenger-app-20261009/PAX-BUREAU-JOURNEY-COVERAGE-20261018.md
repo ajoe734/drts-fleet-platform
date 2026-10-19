@@ -328,7 +328,7 @@ unknown COMMIT只採原booking/receipt範圍，非全部audit／outbox／通知�
 
 完整圖的聯絡開關其實為「預設開」。Root 最初讀成「關」的錯誤前提已在正常後續修改中更正，沒有 reset、amend 或重寫 checkpoint `5218e22385d23331c0a9564c0e9d9d302b7a217c`。該 checkpoint 的 9 案 before／fixed、56 案及其後 109 案回歸原物保留為當時歷史，不能以其中預設關閉的正向當成本次正確規格信用。現行低分開關維持初始 true，使用可鍵盤操作、有名稱的原生 switch；帳戶及 token 提交皆只有明確關閉才傳 false，三至五星仍傳 false。使用者另已確認「兩星以下都建案，開關只決定聯絡」，由原客訴作者處理後端政策；本續作不自行聲稱已改建案政策，歷史「拒絕聯絡無案」紀錄也不代表新規格。
 
-接車頁同時顯示原「預計 N 分鐘抵達」、原更新時間及「約 HH:MM 抵達」。時刻由已接受的 `pickupEta.calculatedAt + minutes` 推算，固定 Asia/Taipei 的 24 小時表示法，跨午夜仍正確；不以瀏覽器現在時間或事件接收時間改寫估計基準。現行 tracking 為 missing／stale／low_accuracy、無有效估計或已到站／終態時，不復活舊接車 ETA。舊 producer 省略 tracking 的相容分支只接受原 assignment 明確標示 fresh 的估計；原 pickup ETA 正向 fixture 因此前提由 missing 校正為 fresh，Web／Native 原斷言全保留，另以真 tracking 負向驗證拒絕舊估計。
+接車頁同時顯示原「預計 N 分鐘抵達」、原更新時間及「約 HH:MM 抵達」。時刻由已接受的 `pickupEta.calculatedAt + minutes` 推算，固定 Asia/Taipei 的 24 小時表示法，跨午夜仍正確；不以瀏覽器現在時間或事件接收時間改寫估計基準。現行 tracking 為 missing／stale／low_accuracy、無有效估計或已到站／終態時，不復活舊接車 ETA。Web 也不以省略 tracking 當作復活指派舊估計的許可；omitted／null tracking 皆無 ETA。原 pickup ETA 正向 fixture 補入真 fresh tracking，原不可變 assignment 仍保留 missing，Web／Native 原斷言全保留。最後自查的 omitted/null before 真一失敗／一通過（其餘24案被名稱篩選而未執行，不當通過），證明舊 fallback 在 omitted 時確會復活30分鐘舊估計，已在正常後續提交移除。
 
 行程中的 `dropoffRoute` 是獨立、可為空的 live contract，不改不可變報價總距離。既有 `GeoService.route` 使用當前已指派司機／車輛／on-trip 任務的準確新鮮 GPS，路線終點為訂單的 canonical dropoff；回傳 provider、生成時間、GPS 觀測、指派版本、道路剩餘公尺及秒數。只有綁定一致且有效才顯示「約 HH:MM 抵達目的地」與「剩餘 X.X 公里」。沒有拿原報價總里程、已行駛里程或自行直線計算代替剩餘道路距離，也沒有新增供應商、憑證、端點或資料表。
 
@@ -358,3 +358,5 @@ React checklist 已套用於兩個修改的 TSX 元件：hooks 無條件呼叫�
 - `final-true-imports` noEmit／incrementalfalse exit0（26.79秒）；`final-passenger-noemit` 同參數完整 Passenger app exit0（15.96秒）。後續只加強 route unit 的 fixture 數值與同型別欄位，未改產品；不宣稱 compiler 讀過未來測試 bytes。scoped ESLint 及後續受影響 UI／tests ESLint 均exit0，正常 hooks仍必須執行。
 
 以上是 Source 與 socket-free 檢查，尚不是新 immutable 候選的自身 hosted CI 或 shared runtime。仍須正常 commit／plain push／新 PR、完整 handoff、自身必要 CI、Root獨立 review／protected merge，以及 Root 統一版本的實際操作。原正式來源、真車、真支付、福利無障礙與所有逐案缺項保留，不因本輪時刻／距離／入口／switch 改善而標為全16通過。
+
+最後逐字自查補上前述 omitted／null tracking 缺口後，`final-missing-tracking-units.json` 同九個受影響檔實際單輪113PASS／0FAIL／0skip（包含新增兩個 missing tracking 負向），不以之前跨次的111案組合冒充此結果。先前110／1、37／0與29／0原物仍保留。採 Root 正常更新的 R3 規格 `Journey-full-original-continuation-new-screenshot-ETA-rating-home.r3-defaultON.task-spec.json`（SHA256 `4c6d06ff707bce9d397d954c0436a210331286cfc317fdb3d9be849d57019d8f`），原36scopes、五群及兩keys未縮減。後續 compiler／hooks／候選與CI依各自精確Source hash另錄，不能把本地113案當共享旅程或全部16案例通過。

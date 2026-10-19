@@ -343,16 +343,13 @@ export function mapPassengerRideAuthorityToFixture(
     "driver_accepted",
     "enroute_pickup",
   ].includes(view.order.status);
-  const pickupEta =
-    view.tracking === undefined ? assignment?.eta : view.tracking?.pickupEta;
+  const pickupEta = view.tracking?.pickupEta;
   const pickupClock = pickupEta
     ? arrivalClock(pickupEta.calculatedAt, pickupEta.minutes * 60)
     : null;
   const pickupFresh =
-    view.tracking === undefined
-      ? assignment?.eta?.locationFreshness === "fresh"
-      : view.tracking?.locationFreshness === "fresh" &&
-        Boolean(view.tracking.location);
+    view.tracking?.locationFreshness === "fresh" &&
+    Boolean(view.tracking.location);
   const canShowPickupEta =
     showPickupEta &&
     pickupFresh &&

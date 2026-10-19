@@ -345,3 +345,19 @@ it("the shared observation clock expires an ETA even while SSE stays connected w
   expect(screen.getByText("目前無法預估抵達時間與剩餘距離")).toBeTruthy();
   expect(screen.getByText("司機位置更新稍有延遲")).toBeTruthy();
 });
+
+it.each(["omitted", "null"] as const)(
+  "%s without actual tracking cannot revive the retained assignment ETA",
+  (mode) => {
+    const input: PassengerRideAuthorityView = view();
+    input.assignment!.eta.locationFreshness = "fresh";
+    if (mode === "omitted") delete input.tracking;
+    else input.tracking = null;
+    const result = mapPassengerRideAuthorityToFixture(
+      input,
+      input.order.orderId,
+    );
+    expect(result.etaMain).toBeUndefined();
+    expect(result.etaSub).toBeUndefined();
+  },
+);
