@@ -52,7 +52,10 @@ export class SqlTransport {
   tables: Record<string, Array<Record<string, unknown>>> = {};
   private tail = Promise.resolve();
   constructor(row: OwnedOrderRecord) {
-    this.committed = clone({ ...row, aggregateVersion: row.aggregateVersion ?? 1 });
+    this.committed = clone({
+      ...row,
+      aggregateVersion: row.aggregateVersion ?? 1,
+    });
   }
   isEnabled() {
     return true;
@@ -98,7 +101,8 @@ export class SqlTransport {
     tables = this.tables,
   ) {
     this.statements.push(sql);
-    if (/SELECT\s+COUNT\(/i.test(sql)) return { rows: [{ count: 0 }], rowCount: 1 };
+    if (/SELECT\s+COUNT\(/i.test(sql))
+      return { rows: [{ count: 0 }], rowCount: 1 };
     if (/SELECT[\s\S]*FROM ops\.phase1_owned_orders/.test(sql)) {
       const row = read();
       return {
