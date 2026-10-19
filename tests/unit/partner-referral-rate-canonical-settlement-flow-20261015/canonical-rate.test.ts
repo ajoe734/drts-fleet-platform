@@ -890,3 +890,136 @@ describe("original attribution and issued financial snapshot regressions", () =>
     ).toEqual(configured);
   });
 });
+
+describe("R1 production canonical trip boundary", () => {
+  async function productionServices() {
+    vi.stubEnv("APP_ENV", "test");
+    const fixture = await setup();
+    // Existing legal entry/history is an explicit external SQL fixture. Build
+    // the actual application instances after switching to production mode.
+    vi.stubEnv("APP_ENV", "production");
+    const actual = await setup(fixture.db);
+    await actual.service.onModuleInit();
+    await actual.billing.onModuleInit();
+    await actual.controller.upsertReferralRevenueShareRule(command);
+    return actual;
+  }
+
+  it("does not bill private demo trips when production canonical completed rows are empty", async () => {
+    const { controller, billing, db } = await productionServices();
+    const readback = await controller.listReferralRevenueShareRules(
+      command.partnerEntrySlug,
+    );
+    const statement = await billing.getReferralStatement(
+      command.partnerEntrySlug,
+      "2026-06",
+    );
+    console.log(
+      "R1 production empty canonical rows",
+      JSON.stringify({
+        mode: process.env.APP_ENV,
+        rate: readback.data.items[0]?.value,
+        totals: statement.totals,
+        tripIds: statement.lines.map((line) => line.tripId),
+      }),
+    );
+    expect(readback.data.items[0]?.value).toBe(20);
+    expect(
+      db.sql.some((query) =>
+        query.text.includes("FROM ops.phase1_driver_tasks AS tasks"),
+      ),
+    ).toBe(true);
+    expect(statement.totals.tripCount).toBe(0);
+    expect(statement.totals.gmv.amountMinor).toBe(0);
+    expect(statement.totals.shareTotal.amountMinor).toBe(0);
+    expect(statement.lines).toEqual([]);
+    expect(
+      await billing.listReferralStatements(command.partnerEntrySlug),
+    ).toEqual([]);
+  });
+
+  it.each(["SQL", "event"])(
+    "keeps the actual production %s completed-trip positive while excluding seed rows",
+    async (source) => {
+      const { billing, db, audit } = await productionServices();
+      const entry = db.entries.get(command.partnerEntrySlug)!;
+      const completedAt = "2026-06-10T08:00:00.000Z";
+      const orderId = `r1-production-${source.toLowerCase()}`;
+      const grossEarning = { currency: "TWD", amountMinor: 10001 };
+      if (source === "SQL") {
+        const owned = new OwnedMobilityService(
+          undefined!,
+          audit,
+          undefined!,
+          undefined!,
+        );
+        const order: OwnedOrderRecord = {
+          ...owned.listOrders()[0]!,
+          orderId,
+          tenantId: entry.tenantId,
+          partnerId: entry.partnerId,
+          partnerProgramId: entry.programId,
+          partnerEntrySlug: entry.entrySlug,
+          orderSource: "portal",
+          serviceBucket: "business_dispatch",
+          businessDispatchSubtype: "enterprise_dispatch",
+        };
+        const task: DriverTaskRecord = {
+          ...owned.listDriverTasks()[0]!,
+          taskId: "r1-production-task",
+          orderId,
+          driverId: "drv-demo-002",
+          status: "completed",
+          completedAt,
+          fare: grossEarning,
+        };
+        db.liveRows = [{ order_record: order, task_record: task }];
+      } else {
+        await billing.handleOwnedMobilityTripCompleted({
+          tenantId: entry.tenantId,
+          driverId: "drv-demo-002",
+          orderId,
+          bookingId: "r1-production-booking",
+          completedAt,
+          grossEarning,
+          orderSource: "portal",
+          serviceBucket: "business_dispatch",
+          businessDispatchSubtype: "enterprise_dispatch",
+          costCenterCode: null,
+          riderId: "r1-production-rider",
+          partnerId: entry.partnerId,
+          partnerProgramId: entry.programId,
+          partnerEntrySlug: entry.entrySlug,
+          eligibilityVerificationId: null,
+          issuerAuthorizationRef: null,
+          benefitReference: null,
+          serviceProduct: "enterprise_dispatch",
+          tenantServiceProgramId: null,
+          sourcePlatform: "portal",
+        });
+      }
+      const statement = await billing.getReferralStatement(
+        entry.entrySlug,
+        "2026-06",
+      );
+      console.log(
+        "R1 production actual positive",
+        JSON.stringify({
+          source,
+          mode: process.env.APP_ENV,
+          totals: statement.totals,
+          tripIds: statement.lines.map((line) => line.tripId),
+        }),
+      );
+      expect(statement.lines.map((line) => line.tripId)).toEqual([orderId]);
+      expect(statement.totals.tripCount).toBe(1);
+      expect(statement.totals.gmv.amountMinor).toBe(10001);
+      expect(statement.totals.shareTotal.amountMinor).toBe(2000);
+      expect(
+        (await billing.listReferralStatements(entry.entrySlug)).map(
+          (item) => item.period,
+        ),
+      ).toEqual(["2026-06"]);
+    },
+  );
+});

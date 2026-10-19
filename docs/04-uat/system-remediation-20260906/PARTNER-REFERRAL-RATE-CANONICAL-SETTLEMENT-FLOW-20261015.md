@@ -2,9 +2,9 @@
 
 原 C103 full4 Source 修復；owner Codex2，獨立 reviewer Codex。原 Gemini/Gemini2 設計、QA 與前置已採認成果保持原作者信用；本次實作由 Codex2 完成。
 
-Base: `79daefbf5097e0622320762d2f02fd094969e3aa`。Branch: `codex2/partner-referral-rate-canonical-settlement-flow-20261015-root-20261019`。最終完整 candidate SHA、generation、PR 與逐檔 manifest 由同次正常 immutable handoff 的 `partner-referral-original-source-evidence/delivery.json` 封存；本檔隨該 candidate 受版本控制。
+Base: `79daefbf5097e0622320762d2f02fd094969e3aa`。Branch: `codex2/partner-referral-rate-canonical-settlement-flow-20261015-root-20261019`。最終完整 candidate SHA、generation、PR 與逐檔 manifest 由同次正常 immutable handoff 的 `partner-referral-original-source-R1-evidence/delivery.json` 封存；本檔隨該 candidate 受版本控制。
 
-Spec R5 SHA-256: `ff5f271e5988f3179f10aaab7b19aecca3b57d75437296088b6b65d6c415f347`。原四條、四 keys、十二 scopes 保留；R5 僅追加既有 artifact unit caller 的 await 適配，合計十三 scopes。
+Spec R6 SHA-256: `370038a13e36ffad2b9613038c5fea8c98fd09f00edc8f6ad8cd5b6eb9630eae`。原四條、四 keys 與 R5 十三 scopes 完整保留；R6 僅追加既有 channel-overview unit caller 的 await 與 E2E-016 scenario canonical rate POST setup，合計十五 scopes。R1 parent 為 `6a72216eeb9b2c2ab4198d82dd078c3d4b8fb3b5`，原 R5 spec、candidate／generation／PR 與整份舊證據均凍結保留。
 
 ## 原完整條件
 
@@ -32,7 +32,7 @@ Billing resolver、單期／期間清單、dashboard／usage／revenue／stateme
 | enabled write未等ACK           | completed=true，expectedfalse | deferred COMMIT期間舊值15、無成功audit；ACK後20／單次audit |
 | fresh restore遺失              | expected20/actual15           | 新 Repository/service onModuleInit及讀回20                 |
 
-原 before: 3 collected / 3 failed，before-three.json/log。最初診斷 shell 在印報告後回0，內層 Vitest exit未單獨保存；不將該 wrapper0稱為測試通過。after-three 為 direct0 / 3pass。最終 exact-seven-after 為 direct0 / 7files / 110pass / 0fail / 0skip，其中25個本次真 producer/consumer cases，85個原有回歸。
+原 before: 3 collected / 3 failed，before-three.json/log。最初診斷 shell 在印報告後回0，內層 Vitest exit未單獨保存；不將該 wrapper0稱為測試通過。after-three 為 direct0 / 3pass。原 6a72 exact-seven-after 為 direct0 / 7files / 110pass / 0fail / 0skip，其中25個本次真 producer/consumer cases，85個原有回歸。
 
 新增案例包括拒絕COMMIT後舊狀態／audit／重試、實際BootstrapAuthGuard既有scope正反面、unknown/inactive/revoked/bank/foreign partner、effective history/per_trip123 minor/zero、fresh module、真 SQL trip＋completed event、真 portal client mapper＋Controller drained CSV、post-change實際JWT handoff、原已發行PDF bytes/hash與record、stale entry治理write保留費率。
 
@@ -62,3 +62,19 @@ Billing resolver、單期／期間清單、dashboard／usage／revenue／stateme
 | partner-referral-rate_exact-candidate-validation                       | 新immutable SHA/normal managedhooks/trailers/plainpush/fullhandoff；mandatoryCI與protectedmerge/fourkeys由Root獨立處理 |
 
 作者未自批、未record acceptance keys、未DONE、未部署。
+
+## R1 — 原 full4 退修與新候選
+
+Root 6a72 原 full4 review SHA-256 `8bf18832ae9cb37498d560a714b198387000bf7ad264a3bbc353cd0a005be472` 找到 production canonical 已完成資料零列仍重啟示範 trip 的缺口；正常 reopen／R6 scope coordination 後由同一 Codex2 作者在原分支續修。R6 六個 peer 僅正常 readdep 協調，原 roles／NEXT／HOLD／條款／keys 保持。沒有另開等價任務或新增政策。
+
+`listReferralTrips` 現只在既有非 strict 模式枚舉 private demo `settlementTrips`；原 live completed SQL／event loops、rate selection、金融計算與其他 ledger consumers 完整保留。沒有清空共用 trip array 或更改 driver／invoice 領域。合法 test/dev/noDB 的 June15%／2trips／22500 示範例仍通過；production 的 canonical 資料空集合不產生示範金額。
+
+本輪乾淨 before（producer 仍 exact6a72）三個 selected case direct1／3fail，原25未選取：零 canonical rows 卻返回 seed2、GMV150000／share30000；SQL／event 各有真完成一筆時仍混入 seed2。固定後相同 selected direct0／3pass：零列 GMV／share皆0；真 SQL 與真 event 各保留1trip，GMV10001／share2000（原20%整數 rounding）。第一輪 mixed-before 的兩個 production portal demo-tenant 拒絕屬新測試準備診斷；未改 portal guard，正例使用本輪要驗證的 Billing 公開讀取介面，原 rejection／identity assertions 全留。
+
+既有 `channel-overview-export.test.ts` 只增加 `await getReferralStatement`，原17個 assertions不變；此缺漏也是6a72真 fullRootTSC 六個 TS2339 與 unit shard sole failure 的共同原因。E2E-016 僅在原 entry GET 與 rate GET 之間，由既有 platform actor／http_call 實際 POST percent15／TWD／June1／nullUntil，等成功後仍跑原 GET 與所有22500／2trip／handoff／portal assertions。扣除新增 setup block，其餘 shell script byteexact；VM僅 `bash -n` direct0，未執行任何 HTTP／E2E。
+
+新八檔 effective include 已先由 `vitest list --filesOnly` 精確核對，使用 spread override，沒有 mergeConfig 陣列串接。新 `full-eight-after` direct0／116pass／0fail／0skip（原110＋新production3＋既有channel3）；原6a72綠燈不轉借新候選。全 API Source paths 投影及六份受影響 root-unit Source paths 投影 tsc 均0；這些是明示範圍的 source-path checks，沒有宣稱完整預設root／Turbo／hosted CI已綠。受影響 lint0，原timeout／type flags／assertions未放寬。
+
+原775個其他 production members與原314個 legacy assertions保持；新增 scope 的原17個 assertions亦保持，共331既有 assertions。原 own25測試 Source prefix exact；新production案例只追加。證據與完整命令／before／after／AST／bash-n／新 candidate manifest 全封於 `partner-referral-original-source-R1-evidence`；原 `partner-referral-original-source-evidence` 與 Root sealed support 包不改。
+
+本輪完整 Source 仍由 Root 對新 immutable SHA 獨立 full4 review／必要 ownCI／protected merge／原四 keys 採認。真 PG、hosted E2E／browser 與部署尚未由本機驗證；作者不自批／不記 keys／不DONE／不部署。

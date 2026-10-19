@@ -4034,8 +4034,10 @@ export class BillingSettlementService implements OnModuleInit {
           trip.partnerId === context.entry.partnerId)) &&
       this.selectReferralRevenueShareRule(context.rules, trip.completedAt) !==
         null;
-    for (const trip of this.settlementTrips)
-      if (matches(trip)) trips.set(trip.orderId, trip);
+    if (!isStrictAuthEnvironment()) {
+      for (const trip of this.settlementTrips)
+        if (matches(trip)) trips.set(trip.orderId, trip);
+    }
     for (const trip of this.liveSettlementTrips.values()) {
       const snapshot = this.mapLiveTripToSettlementSnapshot(trip);
       if (matches(snapshot)) trips.set(snapshot.orderId, snapshot);
