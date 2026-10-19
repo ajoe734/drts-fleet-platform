@@ -1444,6 +1444,11 @@ jobs:
           # Dedicated BFF env: no tenant identity, client secret, or browser API URL.
           env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},DRTS_API_URL=${{ steps.api_url.outputs.url }},DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}"
           env_vars="${env_vars},PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
+          passenger_public_only=false
+          if [[ "${{ needs.prepare.outputs.passenger_app_exposure_flag }}" == "--allow-unauthenticated" ]]; then
+            passenger_public_only=true
+          fi
+          env_vars="${env_vars},PAX_PUBLIC_PASSENGER_ONLY=${passenger_public_only}"
           env_vars="${env_vars},PAX_BUREAU_ENTRY_HOST=${DEV_PAX_BUREAU_ENTRY_HOST:-}"
           operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.passenger_app_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \

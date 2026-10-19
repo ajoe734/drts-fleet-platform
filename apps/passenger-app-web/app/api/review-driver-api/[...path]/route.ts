@@ -7,7 +7,10 @@ async function forward(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
 ) {
-  if (process.env.PAX_REVIEW_DEMO_ENABLED !== "true")
+  if (
+    process.env.PAX_PUBLIC_PASSENGER_ONLY === "true" ||
+    process.env.PAX_REVIEW_DEMO_ENABLED !== "true"
+  )
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   const { path } = await context.params;
   if (path.some((s) => !/^[A-Za-z0-9_-]+$/.test(s)))

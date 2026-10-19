@@ -1,6 +1,40 @@
 # 交通局可實際開啟的乘客審查入口 Runbook
 
 **Task：** `PAX-BUREAU-BROWSER-ENTRY-20261018`
+
+## 本次開發驗收：直接使用乘客 App 登入
+
+2026-10-18 使用者要求移除未完成功能前的複雜雲端前置。
+本次開發驗收採 Cloud Run 現有 HTTPS 入口及原乘客 OTP／同意／session 流程，
+不用先完成下文的可選 IAP／負載平衡器／自訂網域設定。
+
+正常審查、同 SHA CI 與合併後，Root 才把共享開發專案的
+`DEV_PASSENGER_APP_ALLOW_UNAUTHENTICATED` 設為 `true`，使用包含本修補的
+不可變 publish/release 部署。這個既有開關只控制 Passenger 服務；
+API 與其他後臺維持原設定。不可把尚未包含此修補的舊版直接公開。
+
+部署同時設定 `PAX_PUBLIC_PASSENGER_ONLY=true`：
+
+- `/login`、`/review`、`/bureau-review` 使用同一個實際 Cloud Run origin。
+  操作頁使用相對連結，不再把未建立的 `bureau.smarttransport.tw` 當作可用網址。
+- `apps/passenger-app-web/proxy.ts` 在 filesystem 路由前關閉
+  `/review-driver` 全部頁面／靜態檔及 `/api/review-driver-api` 全部路徑；
+  兩個既有 route handlers 也在讀檔／取得 upstream authority 前拒絕。
+- 原乘客應用登入、cookie、API 權限及資料存取流程不變。
+  `PAX_REVIEW_DEMO_ENABLED` 仍可供既有合成乘客演練使用，沒有關閉整個乘客流程。
+- 公開模式會略過既有 IAP grant step，不需要為這條入口新增
+  Service Usage／Compute／IAP 權限。Root 不再續跑原失敗的 IAP 佈建請求。
+- 非公開的既有 hosted Driver 演練保持原路徑。公開 Passenger 不能冒作
+  private Driver origin；同單跨角色驗證仍用各自正確的 origin／授權。
+
+部署後必須從實際服務讀回 URL，無 GCP token 檢查登入頁與操作頁，
+以及 Driver 路徑／靜態檔拒絕、匿名與無效 Passenger session 不可讀個資。
+再由既有 hosted browser 驗真實登入與完整旅程。單元測試或設定了開關，
+都不等於一般瀏覽器已可使用；原 16 案／六缺口與所有未驗項繼續保留。
+
+下文保留舊 private service／可選 IAP 架構及歷史失敗的操作方法，
+供需要該模式的既有呼叫者使用，不是本次直接開發入口的前置。
+
 **前置閱讀：** `docs/03-runbooks/smarttransport-tw-custom-domains.md`（既有 domain mapping 與
 passenger-app-web 既有 `--no-allow-unauthenticated` 曝光狀態）
 
@@ -59,10 +93,10 @@ URL map 對不符任何 `hostRules` 的 Host（包含直接用 IP 或偽造 Host
 
 ## 2. 提供的腳本（`operations/deployment/passenger-bureau-entry/`）
 
-| 腳本 | 用途 |
-| --- | --- |
-| `grant-passenger-app-iap-invoker.sh <service> <region> <project>` | 先 `gcloud services enable iap.googleapis.com --quiet`，再以冪等的 `gcloud beta services identity create --service=iap.googleapis.com --quiet` 確保 Cloud IAP service agent（`service-<project-number>@gcp-sa-iap.iam.gserviceaccount.com`）本身存在，最後對它授予 `roles/run.invoker`；純增量，不會移除既有 binding，也絕不觸碰 `allUsers`／`allAuthenticatedUsers`（`enforce-no-public-access.sh` 仍會攔截這兩者）。`--quiet` 同時讓冷 Cloud SDK 的 beta 元件安裝確認不卡在互動提示（見 §6a）。 |
-| `setup-passenger-public-entry.sh <service> <region> <project> <host>` | 先 `gcloud services enable compute.googleapis.com iap.googleapis.com --quiet`（見 §6a），再建立／對齊 serverless NEG、兩個 backend service、guard-backend 無公開授權的驗證、public-backend 的 `allUsers` IAP 授權、URL map、受管憑證、靜態 IP、HTTPS proxy 與 forwarding rule。所有資源建立前先以 `list --filter=name=...` 查存在性（idempotent）；URL map 一律用 `import` 整份宣告式重套，不做局部 `add-path-matcher`。 |
+| 腳本                                                                  | 用途                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `grant-passenger-app-iap-invoker.sh <service> <region> <project>`     | 先 `gcloud services enable iap.googleapis.com --quiet`，再以冪等的 `gcloud beta services identity create --service=iap.googleapis.com --quiet` 確保 Cloud IAP service agent（`service-<project-number>@gcp-sa-iap.iam.gserviceaccount.com`）本身存在，最後對它授予 `roles/run.invoker`；純增量，不會移除既有 binding，也絕不觸碰 `allUsers`／`allAuthenticatedUsers`（`enforce-no-public-access.sh` 仍會攔截這兩者）。`--quiet` 同時讓冷 Cloud SDK 的 beta 元件安裝確認不卡在互動提示（見 §6a）。 |
+| `setup-passenger-public-entry.sh <service> <region> <project> <host>` | 先 `gcloud services enable compute.googleapis.com iap.googleapis.com --quiet`（見 §6a），再建立／對齊 serverless NEG、兩個 backend service、guard-backend 無公開授權的驗證、public-backend 的 `allUsers` IAP 授權、URL map、受管憑證、靜態 IP、HTTPS proxy 與 forwarding rule。所有資源建立前先以 `list --filter=name=...` 查存在性（idempotent）；URL map 一律用 `import` 整份宣告式重套，不做局部 `add-path-matcher`。                                                                          |
 
 兩個腳本都遵守既有 `set -euo pipefail` fail-closed 慣例：任何 `gcloud`
 讀取失敗（例如 guard backend 的 IAP policy 讀不到）都視為「未知」而中止，不會
@@ -185,13 +219,13 @@ answers for all prompts.`——這不是 IAP API 未啟用，也不是 IAM 權�
 
 - `setup-passenger-public-entry.sh` 在第一個 Compute／IAP 指令之前，先呼叫
   `gcloud services enable compute.googleapis.com iap.googleapis.com
-  --project="$project" --quiet`。`services enable` 本身對已啟用的 API 是
+--project="$project" --quiet`。`services enable` 本身對已啟用的 API 是
   idempotent 的 no-op，所以每次執行都直接呼叫，不另外查詢「是否已啟用」；
   這個呼叫失敗（例如呼叫者缺 `serviceusage.services.enable`）會在
   `set -euo pipefail` 下直接中止腳本，後面的 Compute／IAP 變更都不會被嘗試。
 - `grant-passenger-app-iap-invoker.sh` 在 `beta services identity create` 之前
   先用同樣方式 `gcloud services enable iap.googleapis.com --project="$project"
-  --quiet`；`beta services identity create` 呼叫本身也加上 `--quiet`——這正是
+--quiet`；`beta services identity create` 呼叫本身也加上 `--quiet`——這正是
   上述 gcloud 錯誤訊息要求的修法，讓冷 SDK 的元件安裝確認自動採預設答案，不
   再需要互動輸入。
 

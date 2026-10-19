@@ -7,7 +7,10 @@ export const dynamic = "force-dynamic";
  * Static JS/WASM/assets are served from public/review-driver at the same SHA.
  */
 export async function GET() {
-  if (process.env.PAX_REVIEW_DEMO_ENABLED !== "true")
+  if (
+    process.env.PAX_PUBLIC_PASSENGER_ONLY === "true" ||
+    process.env.PAX_REVIEW_DEMO_ENABLED !== "true"
+  )
     return new Response("Not found", { status: 404 });
   try {
     const html = await readFile(
