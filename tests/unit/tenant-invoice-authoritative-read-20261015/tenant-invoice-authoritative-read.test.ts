@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { parsePdf } from "../billing-pdf-chinese-printable-content-20261016/pdf-parser";
 
 import type { TenantBillingProfile } from "@drts/contracts";
 import type { BootstrapRequestIdentity } from "../../../apps/api/src/common/auth";
@@ -220,9 +221,7 @@ async function createAuthoritativeReadHarness(options?: {
     }
 
     if (sql.includes("INSERT INTO billing.phase1_tenant_invoices")) {
-      const record = JSON.parse(
-        String(values[7]),
-      ) as StoredTenantInvoiceRecord;
+      const record = JSON.parse(String(values[7])) as StoredTenantInvoiceRecord;
       state.invoiceInsertCalls.push(structuredClone(record));
       state.persistedInvoices.set(record.invoiceId, structuredClone(record));
       return { rows: [], rowCount: 1 };
@@ -662,8 +661,12 @@ describe("TENANT-INVOICE-AUTHORITATIVE-READ-20261015: authoritative tenant invoi
         TRIP_B.orderId,
         TRIP_A.orderId,
       ]);
-      const lineA = invoice.lines.find((line) => line.orderId === TRIP_A.orderId);
-      const lineB = invoice.lines.find((line) => line.orderId === TRIP_B.orderId);
+      const lineA = invoice.lines.find(
+        (line) => line.orderId === TRIP_A.orderId,
+      );
+      const lineB = invoice.lines.find(
+        (line) => line.orderId === TRIP_B.orderId,
+      );
       expect(lineA?.amount.amountMinor).toBe(12500);
       expect(lineB?.amount.amountMinor).toBe(20000);
       expect(invoice.amount).toEqual({
@@ -675,7 +678,8 @@ describe("TENANT-INVOICE-AUTHORITATIVE-READ-20261015: authoritative tenant invoi
 
   describe("3. tenant-invoice_original-offline-driver-scope-and-artifact-regressions", () => {
     it("preserves deliberate noDB/demo offline invoice issuance when repository is disabled or absent", async () => {
-      const BillingSettlementService = await loadBillingSettlementServiceClass();
+      const BillingSettlementService =
+        await loadBillingSettlementServiceClass();
       const auditService = new AuditNotificationService();
       const store = new InMemoryDocumentArtifactStore();
       const offlineService = new BillingSettlementService(
@@ -718,7 +722,8 @@ describe("TENANT-INVOICE-AUTHORITATIVE-READ-20261015: authoritative tenant invoi
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-17T12:00:00.000Z"));
 
-      const BillingSettlementService = await loadBillingSettlementServiceClass();
+      const BillingSettlementService =
+        await loadBillingSettlementServiceClass();
       const repository = {
         isEnabled: vi.fn(() => true),
         persistChanges: vi.fn(async () => undefined),
@@ -842,12 +847,9 @@ describe("TENANT-INVOICE-AUTHORITATIVE-READ-20261015: authoritative tenant invoi
       const pdfBytes = await drain(resolvedFile.getStream());
       expect(pdfBytes.subarray(0, 8).toString("latin1")).toBe("%PDF-1.4");
       expect(pdfBytes.toString("latin1")).toContain("%%EOF");
-      expect(pdfBytes.toString("latin1")).toContain(
-        `Tenant Invoice ${invoice.invoiceId}`,
-      );
-      expect(pdfBytes.toString("latin1")).toContain(
-        "Taiwan Fleet PDF & Mail Verification Ltd.",
-      );
+      const text = (await parsePdf(pdfBytes)).text;
+      expect(text).toContain(`Tenant Invoice ${invoice.invoiceId}`);
+      expect(text).toContain("Taiwan Fleet PDF & Mail Verification Ltd.");
       expect(sha256(pdfBytes)).toBe(
         invoice.artifactDownloadMetadata.manifestHash,
       );

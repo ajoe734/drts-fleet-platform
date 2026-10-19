@@ -1,3 +1,4 @@
+import { parsePdf } from "../../billing-pdf-chinese-printable-content-20261016/pdf-parser";
 import { describe, expect, it } from "vitest";
 
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -253,7 +254,7 @@ describe("SR-QA-FINANCE-001 - C077, C078 & C079: 租戶請款、真實 PDF 下�
       const pdfString = pdfBytes.toString("utf-8");
       expect(pdfString.startsWith("%PDF-")).toBe(true);
       expect(pdfString).toContain("%%EOF");
-      expect(pdfString).toContain(invoice.invoiceId);
+      expect((await parsePdf(pdfBytes)).text).toContain(invoice.invoiceId);
     });
   });
 
@@ -302,8 +303,8 @@ describe("SR-QA-FINANCE-001 - C077, C078 & C079: 租戶請款、真實 PDF 下�
       // In-app ops notice was recorded by the service
       const notifications = auditNotificationService.listNotifications();
       expect(notifications.length).toBeGreaterThan(0);
-      const invoiceNotice = notifications.find(
-        (n) => n.message.includes(invoice.invoiceId),
+      const invoiceNotice = notifications.find((n) =>
+        n.message.includes(invoice.invoiceId),
       );
       expect(invoiceNotice).toBeDefined();
       expect(invoiceNotice?.channel).toBe("ops_notice");

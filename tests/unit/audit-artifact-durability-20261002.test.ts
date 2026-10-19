@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { PlacardVersionRecord } from "@drts/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { parsePdf } from "./billing-pdf-chinese-printable-content-20261016/pdf-parser";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { createControlledDownloadMetadata } from "../../apps/api/src/common/controlled-download";
@@ -292,7 +293,7 @@ describe("document artifacts survive a restart / a sibling Cloud Run instance (A
       const bytes = await drain(file.getStream());
 
       expect(sha256(bytes)).toBe(originalHash);
-      const text = bytes.toString("latin1");
+      const text = (await parsePdf(bytes)).text;
       // The served bytes still show what was actually issued (P1), proving
       // they are the durably stored original bytes, not re-derived from the
       // now-current P2 profile.
@@ -353,7 +354,7 @@ describe("document artifacts survive a restart / a sibling Cloud Run instance (A
       const bytes = await drain(file.getStream());
 
       expect(sha256(bytes)).toBe(originalHash);
-      const text = bytes.toString("latin1");
+      const text = (await parsePdf(bytes)).text;
       expect(text).toContain("Payout Status: pending");
       expect(text).not.toContain("Payout Status: paid");
     });
@@ -1110,7 +1111,7 @@ describe("R6: an existing-object hash mismatch must deny without invoking the re
     )) as unknown as StreamableFileLike;
     const bytes = await drain(file.getStream());
     expect(sha256(bytes)).toBe(originalHash);
-    const text = bytes.toString("latin1");
+    const text = (await parsePdf(bytes)).text;
     expect(text).toContain(DEMO_PROFILE_P1.invoiceTitle);
     expect(text).not.toContain(DEMO_PROFILE_P2.invoiceTitle);
   });

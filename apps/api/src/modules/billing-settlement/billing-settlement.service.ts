@@ -91,6 +91,7 @@ import {
   UnavailablePaymentRecoveryPort,
 } from "./payment-recovery.port";
 import { RemittanceProofService } from "./remittance-proof.service";
+import { renderBillingDocumentPdf } from "./billing-document-pdf.renderer";
 import {
   DEFAULT_CONTROLLED_DOWNLOAD_HOST,
   DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID,
@@ -527,29 +528,10 @@ function createInitialReferralRevenueShareRules(): ReferralRevenueShareRule[] {
   return isStrictAuthEnvironment() ? [] : cloneReferralRevenueShareRuleSeed();
 }
 
-// ── Tenant invoice PDF rendering (SR-INVOICE-001) ───────────────────────────
-// A dependency-free, hand-rolled minimal PDF writer. `pdfkit` resolves from
-// this workspace's node_modules but is absent from pnpm-lock.yaml -- a clean
-// `pnpm install` in CI would not produce it, so depending on it here would be
-// a phantom dependency that only happens to work in this checkout. Adding a
-// real dependency is also out of this task's write_scopes (`package.json` /
-// the lockfile belong to SR-DEPS-001). The tradeoff is base-14 Helvetica only
-// supports Latin-1: any non-ASCII byte in tenant-supplied text (a CJK
-// invoice title, say) is rendered as `?` rather than dropped or corrupting
-// the byte stream -- every order id, amount, date and channel key on the
-// statement itself is ASCII, so the audited line items are unaffected.
-
-const TENANT_INVOICE_PDF_LINES_PER_PAGE = 48;
-
-function toPdfAsciiText(value?: string | null): string {
-  return String(value ?? "").replace(/[^\x20-\x7e]/g, "?");
-}
-
-function escapePdfLiteralText(value: string): string {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/\(/g, "\\(")
-    .replace(/\)/g, "\\)");
+// Finance document rows preserve the producer's original Unicode text. The
+// shared renderer embeds the already packaged CJK font and wraps complete rows.
+function toPdfText(value?: string | null): string {
+  return String(value ?? "");
 }
 
 function formatMoneyForPdf(amount: MoneyAmount): string {
@@ -558,81 +540,6 @@ function formatMoneyForPdf(amount: MoneyAmount): string {
   const whole = Math.floor(absMinor / 100);
   const cents = String(absMinor % 100).padStart(2, "0");
   return `${sign}${amount.currency} ${whole}.${cents}`;
-}
-
-function chunkPdfLines(lines: string[], size: number): string[][] {
-  const chunks: string[][] = [];
-  for (let index = 0; index < lines.length; index += size) {
-    chunks.push(lines.slice(index, index + size));
-  }
-  return chunks.length > 0 ? chunks : [[]];
-}
-
-function buildPdfPageContentStream(lines: string[]): string {
-  const operators: string[] = ["BT", "/F1 10 Tf", "40 760 Td"];
-  lines.forEach((line, index) => {
-    if (index > 0) {
-      operators.push("0 -14 Td");
-    }
-    operators.push(`(${escapePdfLiteralText(toPdfAsciiText(line))}) Tj`);
-  });
-  operators.push("ET");
-  return operators.join("\n");
-}
-
-/**
- * Builds a minimal, valid, byte-real PDF (1.4, uncompressed, one Type1
- * Helvetica text object per page) out of plain text rows. It is real bytes a
- * PDF reader can open and a text-extraction tool can parse back into these
- * same rows -- not a fixture standing in for a renderer.
- */
-function buildMinimalPdf(lines: string[]): Buffer {
-  const pages = chunkPdfLines(lines, TENANT_INVOICE_PDF_LINES_PER_PAGE);
-  const pageCount = pages.length;
-  const fontId = 3 + pageCount * 2;
-  const totalObjects = fontId;
-  const objectBodies: string[] = new Array(totalObjects + 1).fill("");
-  const kids = Array.from(
-    { length: pageCount },
-    (_, index) => `${3 + index * 2} 0 R`,
-  ).join(" ");
-
-  objectBodies[1] = `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`;
-  objectBodies[2] = `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>\nendobj\n`;
-
-  pages.forEach((pageLines, index) => {
-    const pageId = 3 + index * 2;
-    const contentId = 4 + index * 2;
-    const content = buildPdfPageContentStream(pageLines);
-    const contentByteLength = Buffer.byteLength(content, "latin1");
-    objectBodies[pageId] =
-      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 ${fontId} 0 R >> >> /MediaBox [0 0 612 792] /Contents ${contentId} 0 R >>\nendobj\n`;
-    objectBodies[contentId] =
-      `${contentId} 0 obj\n<< /Length ${contentByteLength} >>\nstream\n${content}\nendstream\nendobj\n`;
-  });
-
-  objectBodies[fontId] =
-    `${fontId} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`;
-
-  const header = "%PDF-1.4\n";
-  const offsets: number[] = new Array(totalObjects + 1).fill(0);
-  let offset = Buffer.byteLength(header, "latin1");
-  let body = "";
-  for (let id = 1; id <= totalObjects; id += 1) {
-    offsets[id] = offset;
-    const objectBody = objectBodies[id]!;
-    body += objectBody;
-    offset += Buffer.byteLength(objectBody, "latin1");
-  }
-
-  let xref = `xref\n0 ${totalObjects + 1}\n0000000000 65535 f \n`;
-  const xrefOffset = offset;
-  for (let id = 1; id <= totalObjects; id += 1) {
-    xref += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
-  }
-  const trailer = `trailer\n<< /Size ${totalObjects + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-
-  return Buffer.from(header + body + xref + trailer, "latin1");
 }
 
 function buildTenantInvoicePdfRows(input: {
@@ -647,12 +554,12 @@ function buildTenantInvoicePdfRows(input: {
 }): string[] {
   return [
     `Tenant Invoice ${input.invoiceId}`,
-    `Bill To: ${toPdfAsciiText(input.billingProfile.invoiceTitle)} (${input.tenantId})`,
+    `Bill To: ${toPdfText(input.billingProfile.invoiceTitle)} (${input.tenantId})`,
     ...(input.billingProfile.taxId
-      ? [`Tax ID: ${toPdfAsciiText(input.billingProfile.taxId)}`]
+      ? [`Tax ID: ${toPdfText(input.billingProfile.taxId)}`]
       : []),
     ...(input.billingProfile.address
-      ? [`Address: ${toPdfAsciiText(input.billingProfile.address)}`]
+      ? [`Address: ${toPdfText(input.billingProfile.address)}`]
       : []),
     `Billing Period: ${input.periodStart} to ${input.periodEnd}`,
     `Generated At: ${input.generatedAt}`,
@@ -661,7 +568,7 @@ function buildTenantInvoicePdfRows(input: {
     "----------------------------------------------------------------",
     ...input.lines.map(
       (line) =>
-        `${line.orderId} | ${toPdfAsciiText(line.description)} | ${
+        `${line.orderId} | ${toPdfText(line.description)} | ${
           line.channelKey ?? "-"
         } | ${formatMoneyForPdf(line.amount)}`,
     ),
@@ -691,7 +598,7 @@ function buildDriverStatementPdfRows(
     "----------------------------------------------------------------",
     ...statement.lines.map(
       (line) =>
-        `${line.orderId} | ${toPdfAsciiText(line.channelKey ?? "-")} | ${formatMoneyForPdf(line.netAmount)} | ${line.reimbursementRequired ? "yes" : "no"}`,
+        `${line.orderId} | ${toPdfText(line.channelKey ?? "-")} | ${formatMoneyForPdf(line.netAmount)} | ${line.reimbursementRequired ? "yes" : "no"}`,
     ),
     "----------------------------------------------------------------",
     `Total Lines: ${statement.lines.length}`,
@@ -722,7 +629,7 @@ function buildReimbursementBatchExportPdfRows(
     "----------------------------------------------------------------",
     ...batch.items.map(
       (item) =>
-        `${item.orderId} | ${toPdfAsciiText(item.channelKey ?? "-")} | ${formatMoneyForPdf(item.amount)} | ${toPdfAsciiText(item.reason)}`,
+        `${item.orderId} | ${toPdfText(item.channelKey ?? "-")} | ${formatMoneyForPdf(item.amount)} | ${toPdfText(item.reason)}`,
     ),
     "----------------------------------------------------------------",
     `Total (${batch.items.length} line${batch.items.length === 1 ? "" : "s"}): ${formatMoneyForPdf(batch.totalAmount)}`,
@@ -1470,7 +1377,7 @@ export class BillingSettlementService implements OnModuleInit {
       kind: "tenant-invoice",
       subjectId: invoiceId,
       mimeType: "application/pdf",
-      bytes: buildMinimalPdf(
+      bytes: await renderBillingDocumentPdf(
         buildTenantInvoicePdfRows({
           invoiceId,
           tenantId: command.tenantId,
@@ -1782,7 +1689,7 @@ export class BillingSettlementService implements OnModuleInit {
       kind: "tenant-invoice",
       subjectId: invoice.invoiceId,
       mimeType: "application/pdf",
-      bytes: buildMinimalPdf(
+      bytes: await renderBillingDocumentPdf(
         buildTenantInvoicePdfRows({
           invoiceId: invoice.invoiceId,
           tenantId: invoice.tenantId,
@@ -2241,7 +2148,9 @@ export class BillingSettlementService implements OnModuleInit {
         kind: "report",
         subjectId: statementId,
         mimeType: "application/pdf",
-        bytes: buildMinimalPdf(buildDriverStatementPdfRows(statement)),
+        bytes: await renderBillingDocumentPdf(
+          buildDriverStatementPdfRows(statement),
+        ),
       });
       const artifactDownloadMetadata = createControlledDownloadMetadata({
         kind: "report",
@@ -2430,7 +2339,9 @@ export class BillingSettlementService implements OnModuleInit {
       kind: "report",
       subjectId: statement.statementId,
       mimeType: "application/pdf",
-      bytes: buildMinimalPdf(buildDriverStatementPdfRows(statement)),
+      bytes: await renderBillingDocumentPdf(
+        buildDriverStatementPdfRows(statement),
+      ),
     });
     return record;
   }
@@ -3331,7 +3242,7 @@ export class BillingSettlementService implements OnModuleInit {
       kind: "report",
       subjectId: batch.batchId,
       mimeType: "application/pdf",
-      bytes: buildMinimalPdf(
+      bytes: await renderBillingDocumentPdf(
         buildReimbursementBatchExportPdfRows(
           batch,
           relatedStatement?.feePlanVersion ?? null,
@@ -3555,7 +3466,7 @@ export class BillingSettlementService implements OnModuleInit {
         kind: "report",
         subjectId: batch.batchId,
         mimeType: "application/pdf",
-        bytes: buildMinimalPdf(
+        bytes: await renderBillingDocumentPdf(
           buildReimbursementBatchExportPdfRows(
             batch,
             relatedStatement?.feePlanVersion ?? null,
