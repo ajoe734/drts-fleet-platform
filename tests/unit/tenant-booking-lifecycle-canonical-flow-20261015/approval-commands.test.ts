@@ -56,6 +56,7 @@ async function approvalHarness(durable = true, consumed = false) {
       businessDispatchSubtype: "enterprise_dispatch",
       costCenter,
       reservationWindowStart: new Date(Date.now() + 3 * 3600_000).toISOString(),
+      reservationWindowEnd: new Date(Date.now() + 4 * 3600_000).toISOString(),
       pickup: { address: "A" },
       dropoff: { address: "B" },
       passenger: { name: "Lifecycle", phone: "0912000000" },
@@ -144,7 +145,46 @@ async function approvalHarness(durable = true, consumed = false) {
             tenantId,
             "lifecycle-approve",
           );
-  return { ...h, tenant, controller, db, request, booking, before, decide };
+  const opsActor = {
+    actorType: "ops_user",
+    actorId: "ops-lifecycle-reviewer",
+    realm: "ops",
+    roles: ["ops_dispatcher"],
+  } as never;
+  const opsDecide = (action: "approve" | "reject" | "escalate" = "approve") =>
+    action === "reject"
+      ? controller.rejectOpsApprovalRequest(
+          request.approvalRequestId,
+          { reasonCode: "budget_exceeded" },
+          opsActor,
+          "ops-lifecycle-reject",
+        )
+      : action === "escalate"
+        ? controller.escalateOpsApprovalRequest(
+            request.approvalRequestId,
+            {},
+            opsActor,
+            "ops-lifecycle-escalate",
+          )
+        : controller.approveOpsApprovalRequest(
+            request.approvalRequestId,
+            {},
+            opsActor,
+            "ops-lifecycle-approve",
+          );
+  return {
+    ...h,
+    tenant,
+    controller,
+    db,
+    request,
+    booking,
+    before,
+    decide,
+    opsDecide,
+    opsActor,
+    tenantAudit: audit,
+  };
 }
 
 describe("original mounted approval → request/decision/order/quota canonical closure", () => {
@@ -368,5 +408,282 @@ describe("original mounted approval → request/decision/order/quota canonical c
     expect(h.db.committed.reservationWindowStart).toBe(
       beforeOrder.reservationWindowStart,
     );
+  });
+  it("moves only the original cost-center reserve and keeps the tenant total at one", async () => {
+    const h = await approvalHarness();
+    const previous = h.db.committed.costCenter;
+    const other = h.tenant
+      .listCostCenters(tenantId)
+      .find((row) => row.activeFlag && row.code !== previous)!;
+    expect(other).toBeDefined();
+    await h.service.updateTenantBooking(tenantId, h.booking.bookingId, {
+      costCenter: other.code,
+    });
+    const snapshots =
+      h.tenant.createGovernanceMutationSnapshot().quotaMonthlySnapshots;
+    expect(
+      snapshots.find((row) => row.costCenterCode === null)!.usage
+        .pendingReservedBookingCount,
+    ).toBe(1);
+    expect(
+      snapshots.find((row) => row.costCenterCode === previous)!.usage
+        .pendingReservedBookingCount,
+    ).toBe(0);
+    expect(
+      snapshots.find((row) => row.costCenterCode === other.code)!.usage
+        .pendingReservedBookingCount,
+    ).toBe(1);
+    const ledger = clone(h.db.tables[ledgerTable]!);
+    await h.service.updateTenantBooking(tenantId, h.booking.bookingId, {
+      costCenter: other.code,
+    });
+    expect(h.db.tables[ledgerTable]).toEqual(ledger);
+  });
+  it("can move back to an original period and reject the current request without stranded/double release", async () => {
+    const h = await approvalHarness();
+    const later = new Date(Date.now());
+    later.setUTCMonth(later.getUTCMonth() + 1);
+    later.setUTCHours(14, 0, 0, 0);
+    await h.service.updateTenantBooking(tenantId, h.booking.bookingId, {
+      reservationWindowStart: later.toISOString(),
+    });
+    await h.service.updateTenantBooking(tenantId, h.booking.bookingId, {
+      reservationWindowStart: new Date(Date.now() + 5 * 3600_000).toISOString(),
+    });
+    const current = h.tenant.listApprovalRequests(tenantId, {
+      bookingId: h.booking.bookingId,
+      status: "pending",
+    })[0]!;
+    expect(
+      h.service.getTenantBooking(tenantId, h.booking.bookingId)
+        .approvalRequestIds,
+    ).toEqual([current.approvalRequestId]);
+    await h.controller.rejectApprovalRequest(
+      current.approvalRequestId,
+      { reasonCode: "budget_exceeded" },
+      {
+        actorType: "tenant_admin",
+        realm: "tenant",
+        actorId: current.resolvedApproverUserIds[0],
+        tenantId,
+      } as never,
+      tenantId,
+    );
+    expect(h.db.committed.status).toBe("cancelled");
+    expect(
+      h.tenant
+        .createGovernanceMutationSnapshot()
+        .quotaMonthlySnapshots.every(
+          (row) =>
+            row.usage.pendingReservedBookingCount === 0 &&
+            row.usage.pendingReservedAmountMinor === 0,
+        ),
+    ).toBe(true);
+  });
+});
+
+describe("C025 actual Ops Controller decision → durable order/quota/audit closure", () => {
+  it("Ops approve updates the same durable order and retains the original Ops actor audit", async () => {
+    const h = await approvalHarness();
+    const result = await h.opsDecide();
+    expect(result.data.status).toBe("approved");
+    expect(h.db.committed.approvalState).toBe("approved");
+    expect(h.service.getOrder(h.booking.orderId).approvalState).toBe(
+      "approved",
+    );
+    expect(
+      h.tenant.getApprovalRequest(tenantId, h.request.approvalRequestId)
+        .decisions,
+    ).toHaveLength(1);
+    expect(h.tenantAudit.getAuditLogsSnapshot()).toContainEqual(
+      expect.objectContaining({
+        actionName: "booking.approval_request.approved",
+        actorId: "ops-lifecycle-reviewer",
+        actorType: "ops_user",
+        resourceId: h.booking.bookingId,
+      }),
+    );
+  });
+  it("Ops reject cancels the same order and releases tenant and cost-center reserves exactly once", async () => {
+    const h = await approvalHarness();
+    const result = await h.opsDecide("reject");
+    expect(result.data.status).toBe("rejected");
+    expect(h.db.committed.status).toBe("cancelled");
+    const releases = h.db.tables[ledgerTable]!.filter(
+      (row) => row.entryType === "release",
+    );
+    expect(releases).toHaveLength(h.before.quotaLedger.length);
+    for (const snapshot of h.db.tables[snapshotTable]!)
+      expect(
+        (snapshot.usage as { pendingReservedBookingCount: number })
+          .pendingReservedBookingCount,
+      ).toBe(0);
+    await expect(h.opsDecide("reject")).rejects.toBeDefined();
+    expect(
+      h.db.tables[ledgerTable]!.filter((row) => row.entryType === "release"),
+    ).toHaveLength(releases.length);
+  });
+  it.each(["request", "order"] as const)(
+    "Ops %s SQL rejection retains request/decision/order and allows retry",
+    async (failure) => {
+      const h = await approvalHarness();
+      h.db.failTable = failure === "request" ? requestTable : null;
+      h.db.failWrite = failure === "order";
+      await expect(h.opsDecide()).rejects.toThrow("controlled real repository");
+      expect(
+        h.tenant.getApprovalRequest(tenantId, h.request.approvalRequestId),
+      ).toEqual(h.request);
+      expect(
+        h.tenant.createGovernanceMutationSnapshot().approvalDecisions,
+      ).toEqual(h.before.approvalDecisions);
+      expect(h.db.tables[requestTable]![0]!.status).toBe("pending");
+      expect(h.db.committed.approvalState).toBe("pending");
+      h.db.failTable = null;
+      h.db.failWrite = false;
+      expect((await h.opsDecide()).data.status).toBe("approved");
+      expect(h.db.committed.approvalState).toBe("approved");
+    },
+  );
+  it("Ops escalate performs the order write before ACK rather than independent request-only success", async () => {
+    const h = await approvalHarness();
+    h.db.failWrite = true;
+    await expect(h.opsDecide("escalate")).rejects.toThrow(
+      "controlled real repository",
+    );
+    expect(
+      h.tenant.getApprovalRequest(tenantId, h.request.approvalRequestId),
+    ).toEqual(h.request);
+    expect(h.db.tables[requestTable]![0]!.escalatedAt).toBe(
+      h.request.escalatedAt,
+    );
+    h.db.failWrite = false;
+    const result = await h.opsDecide("escalate");
+    expect(result.data.status).toBe("pending");
+    expect(result.data.escalatedAt).toBeTruthy();
+    expect(h.db.committed.approvalRequestIds).toEqual([
+      h.request.approvalRequestId,
+    ]);
+  });
+});
+
+describe("C025 Ops current authority and acknowledgement preservation", () => {
+  it.each(["approve", "reject", "escalate"] as const)(
+    "Ops %s awaits shared COMMIT with no tentative request/order/audit visibility",
+    async (action) => {
+      const h = await approvalHarness();
+      const hold = deferred();
+      h.db.holdCommit = hold;
+      const auditCount = h.tenantAudit.getAuditLogsSnapshot().length;
+      let settled = false;
+      const command = h.opsDecide(action).then((result) => {
+        settled = true;
+        return result;
+      });
+      await h.db.enteredCommit.promise;
+      const observed = {
+        settled,
+        request: h.tenant.getApprovalRequest(
+          tenantId,
+          h.request.approvalRequestId,
+        ),
+        order: h.service.getOrder(h.booking.orderId),
+        auditCount: h.tenantAudit.getAuditLogsSnapshot().length,
+      };
+      hold.resolve();
+      await command;
+      expect(observed.settled).toBe(false);
+      expect(observed.request).toEqual(h.request);
+      expect(observed.order.approvalState).toBe("pending");
+      expect(observed.auditCount).toBe(auditCount);
+      const locks = h.db.statements.filter((sql) => sql.includes("FOR UPDATE"));
+      expect(locks[0]).toContain("ops.phase1_owned_orders");
+      expect(locks[1]).toContain(requestTable);
+    },
+  );
+  it("discovers the canonical Ops tenant/order even when the worker request cache is empty", async () => {
+    const h = await approvalHarness();
+    Object.assign(h.tenant, { approvalRequests: [] });
+    const result = await h.opsDecide();
+    expect(result.data.tenantId).toBe(tenantId);
+    expect(h.db.committed.approvalState).toBe("approved");
+  });
+  it("rejects a canonical resolved request despite a stale pending Ops cache", async () => {
+    const h = await approvalHarness();
+    h.db.tables[requestTable]![0]!.status = "approved";
+    await expect(h.opsDecide()).rejects.toMatchObject({
+      code: "APPROVAL_REQUEST_NOT_PENDING",
+    });
+    expect(h.db.tables[decisionTable]).toHaveLength(0);
+    expect(h.db.committed.approvalState).toBe("pending");
+  });
+  it.each(["approve", "reject", "escalate"] as const)(
+    "preserves the existing Ops guard for %s before any write",
+    async (action) => {
+      const h = await approvalHarness();
+      const invalid = {
+        actorType: "tenant_admin",
+        actorId: "tenant-user-demo-001",
+        realm: "tenant",
+        tenantId,
+      } as never;
+      const call =
+        action === "approve"
+          ? h.controller.approveOpsApprovalRequest(
+              h.request.approvalRequestId,
+              {},
+              invalid,
+            )
+          : action === "reject"
+            ? h.controller.rejectOpsApprovalRequest(
+                h.request.approvalRequestId,
+                { reasonCode: "budget_exceeded" },
+                invalid,
+              )
+            : h.controller.escalateOpsApprovalRequest(
+                h.request.approvalRequestId,
+                {},
+                invalid,
+              );
+      await expect(call).rejects.toMatchObject({
+        code: "APPROVAL_NOT_AUTHORIZED",
+      });
+      expect(h.db.statements).toHaveLength(0);
+      expect(
+        h.tenant.getApprovalRequest(tenantId, h.request.approvalRequestId),
+      ).toEqual(h.request);
+    },
+  );
+  it.each(["approve", "reject", "escalate"] as const)(
+    "preserves lawful Ops %s and original output shape in noDB mode",
+    async (action) => {
+      const h = await approvalHarness(false);
+      const result = await h.opsDecide(action);
+      expect(result.data.availableActions).toBeDefined();
+      expect(h.service.getOrder(h.booking.orderId).approvalState).toBe(
+        action === "approve"
+          ? "approved"
+          : action === "reject"
+            ? "rejected"
+            : "pending",
+      );
+      if (action === "reject")
+        expect(h.service.getOrder(h.booking.orderId).status).toBe("cancelled");
+      if (action === "escalate") expect(result.data.escalatedAt).toBeTruthy();
+    },
+  );
+  it("serializes a Tenant approval against an Ops rejection without double decisions or quota release", async () => {
+    const h = await approvalHarness();
+    const results = await Promise.allSettled([
+      h.opsDecide("reject"),
+      h.decide(),
+    ]);
+    expect(
+      results.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(h.db.tables[decisionTable]).toHaveLength(1);
+    expect(h.db.committed.status).toBe("cancelled");
+    expect(
+      h.db.tables[ledgerTable]!.filter((row) => row.entryType === "release"),
+    ).toHaveLength(h.before.quotaLedger.length);
   });
 });

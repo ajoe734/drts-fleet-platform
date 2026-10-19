@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { harness, order, SqlTransport, deferred, tenantId } from "./fixtures";
 const put = (h: ReturnType<typeof harness>, command: Record<string, unknown>) =>
   h.controller.updateTenantBooking(
@@ -22,19 +22,22 @@ describe("original Tenant mounted command and SQL-boundary regressions", () => {
     },
   );
   it.each([
-    "not-an-ISO-date",
-    "2000-01-01T00:00:00.000Z",
-    () => new Date(Date.now() + 60_000).toISOString(),
+    { value: "not-an-ISO-date", code: "INVALID_RESERVATION_WINDOW_START" },
+    { value: "2000-01-01T00:00:00.000Z", code: "TOO_SOON_TO_BOOK" },
+    {
+      value: () => new Date(Date.now() + 60_000).toISOString(),
+      code: "TOO_SOON_TO_BOOK",
+    },
   ])(
     "rejects changed invalid/past/too-soon start before any mutation (%s)",
-    async (value) => {
+    async ({ value, code }) => {
       const h = harness();
       const before = h.service.getOrder("tenant-lifecycle-order");
       await expect(
         put(h, {
           reservationWindowStart: typeof value === "function" ? value() : value,
         }),
-      ).rejects.toBeDefined();
+      ).rejects.toMatchObject({ code });
       expect(h.service.getOrder(before.orderId)).toEqual(before);
     },
   );
@@ -44,6 +47,8 @@ describe("original Tenant mounted command and SQL-boundary regressions", () => {
     const hold = deferred();
     db.holdWrite = hold;
     const h = harness(initial, db);
+    const audit = vi.spyOn(h.audit, "recordAuditLog");
+    const traceBefore = h.service.listDispatchTrace(initial.orderId);
     let settled = false;
     const command = put(h, { notes: "committed notes" }).then((result) => {
       settled = true;
@@ -53,12 +58,18 @@ describe("original Tenant mounted command and SQL-boundary regressions", () => {
     const pendingObservation = {
       settled,
       notes: h.service.getOrder(initial.orderId).notes,
+      trace: h.service.listDispatchTrace(initial.orderId),
+      successAudits: audit.mock.calls.filter(
+        ([input]) => input.actionName === "update_booking",
+      ).length,
     };
     hold.resolve();
     const result = await command;
     expect(pendingObservation).toEqual({
       settled: false,
       notes: initial.notes,
+      trace: traceBefore,
+      successAudits: 0,
     });
     expect(result.data.notes).toBe("committed notes");
     expect(db.committed.notes).toBe("committed notes");
@@ -70,11 +81,17 @@ describe("original Tenant mounted command and SQL-boundary regressions", () => {
     db.failWrite = true;
     const h = harness(initial, db);
     const before = h.service.getOrder(initial.orderId);
+    const traceBefore = h.service.listDispatchTrace(initial.orderId);
+    const audit = vi.spyOn(h.audit, "recordAuditLog");
     await expect(put(h, { notes: "first rejected" })).rejects.toThrow(
       "controlled real repository",
     );
     expect(db.committed).toEqual(initial);
     expect(h.service.getOrder(initial.orderId)).toEqual(before);
+    expect(h.service.listDispatchTrace(initial.orderId)).toEqual(traceBefore);
+    expect(
+      audit.mock.calls.some(([input]) => input.actionName === "update_booking"),
+    ).toBe(false);
     db.failWrite = false;
     const result = await put(h, { notes: "valid retry" });
     expect(result.data.notes).toBe("valid retry");

@@ -1599,7 +1599,7 @@ export class TenantPartnerRepository {
    * Decisions are embedded in the same canonical record by the existing writer.
    */
   async findApprovalRequest(
-    tenantId: string,
+    tenantId: string | null,
     approvalRequestId: string,
     executor?: TenantPartnerQueryExecutor,
   ): Promise<TenantBookingApprovalRequestRecord | null> {
@@ -1608,9 +1608,9 @@ export class TenantPartnerRepository {
       executor ?? this.databaseService!
     ).query<JsonRecordRow>(
       `SELECT record FROM core.phase1_tenant_approval_requests
-       WHERE tenant_id = $1 AND approval_request_id = $2
+       WHERE ${tenantId === null ? "approval_request_id = $1" : "tenant_id = $1 AND approval_request_id = $2"}
        ${executor ? "FOR UPDATE" : ""}`,
-      [tenantId, approvalRequestId],
+      tenantId === null ? [approvalRequestId] : [tenantId, approvalRequestId],
     );
     return result.rows[0]
       ? this.parseRecord<TenantBookingApprovalRequestRecord>(

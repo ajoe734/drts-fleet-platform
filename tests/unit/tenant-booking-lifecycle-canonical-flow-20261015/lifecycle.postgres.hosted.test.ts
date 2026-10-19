@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import type { TenantUserRoleRecord, OwnedOrderRecord } from "@drts/contracts";
+import type {
+  TenantUserRoleRecord,
+  OwnedOrderRecord,
+  TenantQuotaPolicyRecord,
+} from "@drts/contracts";
 import { DatabaseService } from "../../../apps/api/src/common/db";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { OwnedMobilityRepository } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
@@ -50,7 +54,8 @@ function transport(
         query: async (sql: string, values?: unknown[]) => {
           if (
             options.failTable &&
-            sql.includes(`INSERT INTO ${options.failTable}`)
+            (sql.includes(`INSERT INTO ${options.failTable}`) ||
+              sql.includes(`UPDATE ${options.failTable}`))
           )
             throw new Error("controlled hosted SQL write failure");
           if (sql.trim() === "COMMIT" && options.holdCommit) {
@@ -97,6 +102,7 @@ async function approval(
     {
       businessDispatchSubtype: "enterprise_dispatch",
       reservationWindowStart: new Date(Date.now() + 3 * 3600_000).toISOString(),
+      reservationWindowEnd: new Date(Date.now() + 4 * 3600_000).toISOString(),
       pickup: { address: "A" },
       dropoff: { address: "B" },
       passenger: { name: "Hosted fixture", phone: "0912000000" },
@@ -115,14 +121,7 @@ async function approval(
   const policies = [
     ...(
       tenant as unknown as {
-        quotaPolicies: Map<
-          string,
-          Parameters<
-            TenantPartnerRepository["persistChanges"]
-          >[0]["quotaPolicies"] extends readonly (infer P)[] | undefined
-            ? P
-            : never
-        >;
+        quotaPolicies: Map<string, TenantQuotaPolicyRecord>;
       }
     ).quotaPolicies.values(),
   ];
@@ -273,6 +272,93 @@ describe.skipIf(!hosted)(
         await db.onModuleDestroy();
       }
     });
+    it.each(["approve", "reject", "escalate"] as const)(
+      "actual Ops %s rolls back failed order SQL and commits request/order/quota together on retry",
+      async (action) => {
+        const db = new DatabaseService();
+        const tenantId = `tenant-lifecycle-${randomUUID()}`;
+        const options = {
+          failTable: "ops.phase1_owned_orders" as string | null,
+        };
+        try {
+          const h = await approval(db, tenantId, options);
+          const actor = {
+            realm: "ops",
+            actorType: "ops_user",
+            actorId: "ops-lifecycle-hosted",
+            roles: ["ops_dispatcher"],
+          } as never;
+          const decide = () =>
+            action === "approve"
+              ? h.controller.approveOpsApprovalRequest(
+                  h.request.approvalRequestId,
+                  {},
+                  actor,
+                )
+              : action === "reject"
+                ? h.controller.rejectOpsApprovalRequest(
+                    h.request.approvalRequestId,
+                    { reasonCode: "budget_exceeded" },
+                    actor,
+                  )
+                : h.controller.escalateOpsApprovalRequest(
+                    h.request.approvalRequestId,
+                    {},
+                    actor,
+                  );
+          await expect(decide()).rejects.toThrow(
+            "controlled hosted SQL write failure",
+          );
+          const failedRequest = await new TenantPartnerRepository(
+            db,
+          ).findApprovalRequest(tenantId, h.request.approvalRequestId);
+          expect(failedRequest).toEqual(h.request);
+          expect(
+            h.tenant.getApprovalRequest(tenantId, h.request.approvalRequestId),
+          ).toEqual(h.request);
+          options.failTable = null;
+          const result = await decide();
+          const currentRequest = await new TenantPartnerRepository(
+            db,
+          ).findApprovalRequest(tenantId, h.request.approvalRequestId);
+          const currentOrder = await new OwnedMobilityRepository(
+            db,
+          ).findOrderByBookingId(h.booking.bookingId, tenantId);
+          expect(currentRequest?.status).toBe(
+            action === "approve"
+              ? "approved"
+              : action === "reject"
+                ? "rejected"
+                : "pending",
+          );
+          expect(result.data.availableActions).toBeDefined();
+          expect(currentOrder?.approvalState).toBe(currentRequest?.status);
+          if (action === "reject") {
+            expect(currentOrder?.status).toBe("cancelled");
+            const snapshots = await db.query<{
+              record: { usage: { pendingReservedBookingCount: number } };
+            }>(
+              "SELECT record FROM core.phase1_tenant_quota_monthly_snapshots WHERE tenant_id=$1",
+              [tenantId],
+            );
+            expect(snapshots.rows.length).toBeGreaterThan(0);
+            expect(
+              snapshots.rows.every(
+                (row) => row.record.usage.pendingReservedBookingCount === 0,
+              ),
+            ).toBe(true);
+          } else if (action === "escalate") {
+            expect(currentRequest?.escalatedAt).toBeTruthy();
+            expect(currentOrder?.approvalRequestIds).toEqual([
+              h.request.approvalRequestId,
+            ]);
+          }
+        } finally {
+          await cleanup(db, tenantId);
+          await db.onModuleDestroy();
+        }
+      },
+    );
     it("preserves the same-booking reservation on same-period edit and moves only the original period delta", async () => {
       const db = new DatabaseService();
       const tenantId = `tenant-lifecycle-${randomUUID()}`;

@@ -3976,18 +3976,29 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: ApproveTenantBookingApprovalRequestCommand,
     identity: IdentityContext | null,
     requestId?: string,
+    context?: TenantApprovalCommandContext,
   ) {
     const actor = this.requireOpsApprovalQueueIdentity(identity);
-    return this.recordOpsApprovalDecision({
-      approvalRequestId,
-      actorId: actor.actorId,
-      actorType: actor.actorType,
-      actorRoleCode: this.resolveOpsApprovalQueueRoleCode(identity),
-      decision: "approve",
-      reasonCode: null,
-      reasonNote: this.normalizeNullableText(command.reasonNote),
-      ...(requestId ? { requestId } : {}),
-    });
+    const request =
+      context?.request ??
+      (await this.resolveOpsApprovalRequestForCommand(
+        approvalRequestId,
+        identity,
+      ));
+    return this.recordOpsApprovalDecision(
+      {
+        tenantId: request.tenantId,
+        approvalRequestId,
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        actorRoleCode: this.resolveOpsApprovalQueueRoleCode(identity),
+        decision: "approve",
+        reasonCode: null,
+        reasonNote: this.normalizeNullableText(command.reasonNote),
+        ...(requestId ? { requestId } : {}),
+      },
+      context,
+    );
   }
 
   async rejectOpsApprovalRequest(
@@ -3995,18 +4006,29 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: RejectTenantBookingApprovalRequestCommand,
     identity: IdentityContext | null,
     requestId?: string,
+    context?: TenantApprovalCommandContext,
   ) {
     const actor = this.requireOpsApprovalQueueIdentity(identity);
-    return this.recordOpsApprovalDecision({
-      approvalRequestId,
-      actorId: actor.actorId,
-      actorType: actor.actorType,
-      actorRoleCode: this.resolveOpsApprovalQueueRoleCode(identity),
-      decision: "reject",
-      reasonCode: this.requireNonBlank(command.reasonCode, "reasonCode"),
-      reasonNote: this.normalizeNullableText(command.reasonNote),
-      ...(requestId ? { requestId } : {}),
-    });
+    const request =
+      context?.request ??
+      (await this.resolveOpsApprovalRequestForCommand(
+        approvalRequestId,
+        identity,
+      ));
+    return this.recordOpsApprovalDecision(
+      {
+        tenantId: request.tenantId,
+        approvalRequestId,
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        actorRoleCode: this.resolveOpsApprovalQueueRoleCode(identity),
+        decision: "reject",
+        reasonCode: this.requireNonBlank(command.reasonCode, "reasonCode"),
+        reasonNote: this.normalizeNullableText(command.reasonNote),
+        ...(requestId ? { requestId } : {}),
+      },
+      context,
+    );
   }
 
   async escalateOpsApprovalRequest(
@@ -4014,18 +4036,27 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: EscalateTenantBookingApprovalRequestCommand,
     identity: IdentityContext | null,
     requestId?: string,
+    context?: TenantApprovalCommandContext,
   ) {
     const actor = this.requireOpsApprovalQueueIdentity(identity);
-    const request = this.requirePendingApprovalRequestById(approvalRequestId);
-    return this.buildOpsPendingApprovalRequestRecord(
-      await this.escalateApprovalRequestInternal({
-        tenantId: request.tenantId,
+    const request =
+      context?.request ??
+      (await this.resolveOpsApprovalRequestForCommand(
         approvalRequestId,
-        actorUserId: actor.actorId,
-        actorType: actor.actorType,
-        reasonNote: this.normalizeNullableText(command.reasonNote),
-        ...(requestId ? { requestId } : {}),
-      }),
+        identity,
+      ));
+    return this.buildOpsPendingApprovalRequestRecord(
+      await this.escalateApprovalRequestInternal(
+        {
+          tenantId: request.tenantId,
+          approvalRequestId,
+          actorUserId: actor.actorId,
+          actorType: actor.actorType,
+          reasonNote: this.normalizeNullableText(command.reasonNote),
+          ...(requestId ? { requestId } : {}),
+        },
+        context,
+      ),
     );
   }
 
@@ -13823,6 +13854,29 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return dispatchResult;
   }
 
+  async resolveOpsApprovalRequestForCommand(
+    approvalRequestId: string,
+    identity: IdentityContext | null,
+  ) {
+    this.requireOpsApprovalQueueIdentity(identity);
+    if (!this.tenantPartnerRepository?.isEnabled())
+      return this.cloneApprovalRequest(
+        this.requirePendingApprovalRequestById(approvalRequestId),
+      );
+    const request = await this.tenantPartnerRepository.findApprovalRequest(
+      null,
+      approvalRequestId,
+    );
+    if (!request)
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "APPROVAL_REQUEST_NOT_FOUND",
+        "Approval request was not found.",
+        { approvalRequestId },
+      );
+    return this.cloneApprovalRequest(request);
+  }
+
   async resolveApprovalRequestForCommand(
     tenantId: string,
     approvalRequestId: string,
@@ -14010,88 +14064,101 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private async recordOpsApprovalDecision(input: {
-    approvalRequestId: string;
-    actorId: string;
-    actorType: Extract<
-      AuditLogRecord["actorType"],
-      "ops_user" | "platform_admin"
-    >;
-    actorRoleCode: string | null;
-    decision: "approve" | "reject";
-    reasonCode: string | null;
-    reasonNote: string | null;
-    requestId?: string;
-  }) {
-    const request = this.requirePendingApprovalRequestById(
+  private async recordOpsApprovalDecision(
+    input: {
+      tenantId: string;
+      approvalRequestId: string;
+      actorId: string;
+      actorType: Extract<
+        AuditLogRecord["actorType"],
+        "ops_user" | "platform_admin"
+      >;
+      actorRoleCode: string | null;
+      decision: "approve" | "reject";
+      reasonCode: string | null;
+      reasonNote: string | null;
+      requestId?: string;
+    },
+    context?: TenantApprovalCommandContext,
+  ) {
+    return this.runApprovalCommand(
+      input.tenantId,
       input.approvalRequestId,
-    );
-    const decidedAt = new Date().toISOString();
-    const decision: TenantBookingApprovalDecisionRecord = {
-      decisionId: `approval-decision-${randomUUID()}`,
-      approvalRequestId: request.approvalRequestId,
-      actorUserId: input.actorId,
-      actorRoleCode: input.actorRoleCode,
-      decision: input.decision,
-      reasonCode: input.reasonCode,
-      reasonNote: input.reasonNote,
-      decidedAt,
-    };
-    const persistedRequest: TenantBookingApprovalRequestRecord = {
-      ...request,
-      decisions: [...request.decisions, this.cloneApprovalDecision(decision)],
-      status: input.decision === "approve" ? "approved" : "rejected",
-      resolvedAt: decidedAt,
-    };
-
-    this.approvalDecisions = [
-      this.cloneApprovalDecision(decision),
-      ...this.approvalDecisions.filter(
-        (candidate) => candidate.decisionId !== decision.decisionId,
-      ),
-    ];
-    this.replaceApprovalRequest(persistedRequest);
-    await this.persistApprovalWorkflow({
-      approvalRequests: [persistedRequest],
-      approvalDecisions: [decision],
-      context: "record ops approval decision",
-    });
-
-    this.recordTenantAudit(
-      {
-        actorId: input.actorId,
-        actorType: input.actorType,
-        tenantId: request.tenantId,
-        moduleName: "tenant-partner",
-        actionName:
-          input.decision === "approve"
-            ? "booking.approval_request.approved"
-            : "booking.approval_request.rejected",
-        resourceType: "booking",
-        resourceId: persistedRequest.bookingId,
-        newValuesSummary: {
+      context,
+      async (workflow) => {
+        const request = workflow.request;
+        const decidedAt = new Date().toISOString();
+        const decision: TenantBookingApprovalDecisionRecord = {
+          decisionId: `approval-decision-${randomUUID()}`,
           approvalRequestId: request.approvalRequestId,
-          bookingId: persistedRequest.bookingId,
-          orderId: persistedRequest.orderId,
+          actorUserId: input.actorId,
+          actorRoleCode: input.actorRoleCode,
+          decision: input.decision,
           reasonCode: input.reasonCode,
           reasonNote: input.reasonNote,
-          actorRoleCode: input.actorRoleCode,
-        },
-      },
-      input.requestId,
-    );
-    await this.dispatchApprovalNotifications(
-      input.decision === "approve" ? "approved" : "rejected",
-      persistedRequest,
-      {
-        actorUserId: input.actorId,
-        reasonCode: input.reasonCode,
-        reasonNote: input.reasonNote,
-        ...(input.requestId ? { requestId: input.requestId } : {}),
-      },
-    );
+          decidedAt,
+        };
+        const persistedRequest: TenantBookingApprovalRequestRecord = {
+          ...request,
+          decisions: [
+            ...request.decisions,
+            this.cloneApprovalDecision(decision),
+          ],
+          status: input.decision === "approve" ? "approved" : "rejected",
+          resolvedAt: decidedAt,
+        };
 
-    return this.buildOpsPendingApprovalRequestRecord(persistedRequest);
+        await this.persistApprovalWorkflow({
+          tx: workflow.tx,
+          approvalRequests: [persistedRequest],
+          approvalDecisions: [decision],
+          context: "record ops approval decision",
+        });
+        workflow.afterCommit.push(async () => {
+          this.approvalDecisions = [
+            this.cloneApprovalDecision(decision),
+            ...this.approvalDecisions.filter(
+              (candidate) => candidate.decisionId !== decision.decisionId,
+            ),
+          ];
+          this.replaceApprovalRequest(persistedRequest);
+          this.recordTenantAudit(
+            {
+              actorId: input.actorId,
+              actorType: input.actorType,
+              tenantId: request.tenantId,
+              moduleName: "tenant-partner",
+              actionName:
+                input.decision === "approve"
+                  ? "booking.approval_request.approved"
+                  : "booking.approval_request.rejected",
+              resourceType: "booking",
+              resourceId: persistedRequest.bookingId,
+              newValuesSummary: {
+                approvalRequestId: request.approvalRequestId,
+                bookingId: persistedRequest.bookingId,
+                orderId: persistedRequest.orderId,
+                reasonCode: input.reasonCode,
+                reasonNote: input.reasonNote,
+                actorRoleCode: input.actorRoleCode,
+              },
+            },
+            input.requestId,
+          );
+          await this.dispatchApprovalNotifications(
+            input.decision === "approve" ? "approved" : "rejected",
+            persistedRequest,
+            {
+              actorUserId: input.actorId,
+              reasonCode: input.reasonCode,
+              reasonNote: input.reasonNote,
+              ...(input.requestId ? { requestId: input.requestId } : {}),
+            },
+          );
+        });
+        return this.buildOpsPendingApprovalRequestRecord(persistedRequest);
+      },
+    );
   }
 
   private async recordApprovalDecision(
