@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { VoiceCommandRunnerService } from "../../../apps/api/src/modules/voice-booking/voice-command-runner.service";
+import { VoiceCommandRunnerService as CurrentRunner } from "../../../apps/api/src/modules/voice-booking/voice-command-runner.service";
 
 /**
  * AUDIT-VOICE-APPLICATION-REGRESSION-20261018 review round 2 (F3): before
@@ -14,9 +14,30 @@ import { VoiceCommandRunnerService } from "../../../apps/api/src/modules/voice-b
  * was actually requested (`scope.recordingId`), rejecting (never
  * completing the work item) when any piece is missing or mismatched.
  */
+import { resolve } from "node:path";
+import { sourceModuleLoader } from "./source-module-loader";
+const VoiceCommandRunnerService = process.env.VOICE_ORIGINAL_REF
+  ? sourceModuleLoader({}, [
+      "apps/api/src/modules/voice-booking/voice-command-runner.service.ts",
+    ])<{ VoiceCommandRunnerService: typeof CurrentRunner }>(
+      resolve(
+        "apps/api/src/modules/voice-booking/voice-command-runner.service.ts",
+      ),
+    ).VoiceCommandRunnerService
+  : CurrentRunner;
+const coverage = {
+  startMs: 0,
+  endMs: 1000,
+  channels: ["inbound", "outbound"],
+  closedEventId: "provider-close",
+  endedAt: "2026-09-01T00:00:00.000Z",
+};
 function buildTx() {
   const query = vi.fn(async (sql: string) => {
-    if (sql.includes("UPDATE voice.work_item") && sql.includes("status = 'completed'")) {
+    if (
+      sql.includes("UPDATE voice.work_item") &&
+      sql.includes("status = 'completed'")
+    ) {
       return { rows: [{ work_id: "work-1" }], rowCount: 1 };
     }
     if (sql.includes("to_regclass")) {
@@ -47,7 +68,7 @@ const record = {
 const validManifestRef = {
   objectKey: "obj-1",
   objectVersion: "1",
-  checksum: "sha256-abc",
+  checksum: "a".repeat(64),
   byteLength: 2048,
   durableAt: new Date().toISOString(),
 };
@@ -57,9 +78,15 @@ describe("VoiceCommandRunnerService.completeWorkItemWithDomainState finalize_rec
     const { query } = buildTx();
     await expect(
       runner().completeWorkItemWithDomainState({ query } as never, record, {
-        scope: { brandId: "default", callId: "call-1", recordingId: "rec-1" },
+        scope: {
+          brandId: "default",
+          callId: "call-1",
+          recordingId: "rec-1",
+          legId: "leg-1",
+        },
         manifestRef: validManifestRef,
         recordingId: "rec-1",
+        coverage,
         verifiedAt: new Date().toISOString(),
       }),
     ).resolves.not.toThrow();
@@ -69,9 +96,15 @@ describe("VoiceCommandRunnerService.completeWorkItemWithDomainState finalize_rec
     const { query } = buildTx();
     await expect(
       runner().completeWorkItemWithDomainState({ query } as never, record, {
-        scope: { brandId: "default", callId: "call-1", recordingId: "rec-1" },
-        manifestRef: { objectKey: "obj-1", checksum: "sha256-abc" },
+        scope: {
+          brandId: "default",
+          callId: "call-1",
+          recordingId: "rec-1",
+          legId: "leg-1",
+        },
+        manifestRef: { objectKey: "obj-1", checksum: "a".repeat(64) },
         recordingId: "rec-1",
+        coverage,
         verifiedAt: new Date().toISOString(),
       }),
     ).rejects.toThrow(/voice_recording_manifest_unverified/);
@@ -81,8 +114,14 @@ describe("VoiceCommandRunnerService.completeWorkItemWithDomainState finalize_rec
     const { query } = buildTx();
     await expect(
       runner().completeWorkItemWithDomainState({ query } as never, record, {
-        scope: { brandId: "default", callId: "call-1", recordingId: "rec-1" },
+        scope: {
+          brandId: "default",
+          callId: "call-1",
+          recordingId: "rec-1",
+          legId: "leg-1",
+        },
         manifestRef: validManifestRef,
+        coverage,
         verifiedAt: new Date().toISOString(),
       }),
     ).rejects.toThrow(/voice_recording_manifest_unverified/);
@@ -92,7 +131,12 @@ describe("VoiceCommandRunnerService.completeWorkItemWithDomainState finalize_rec
     const { query } = buildTx();
     await expect(
       runner().completeWorkItemWithDomainState({ query } as never, record, {
-        scope: { brandId: "default", callId: "call-1", recordingId: "rec-1" },
+        scope: {
+          brandId: "default",
+          callId: "call-1",
+          recordingId: "rec-1",
+          legId: "leg-1",
+        },
         manifestRef: validManifestRef,
         recordingId: "rec-1",
       }),
@@ -103,11 +147,85 @@ describe("VoiceCommandRunnerService.completeWorkItemWithDomainState finalize_rec
     const { query } = buildTx();
     await expect(
       runner().completeWorkItemWithDomainState({ query } as never, record, {
-        scope: { brandId: "default", callId: "call-1", recordingId: "rec-REQUESTED" },
+        scope: {
+          brandId: "default",
+          callId: "call-1",
+          recordingId: "rec-REQUESTED",
+          legId: "leg-1",
+        },
         manifestRef: validManifestRef,
         recordingId: "rec-DIFFERENT",
+        coverage,
         verifiedAt: new Date().toISOString(),
       }),
     ).rejects.toThrow(/voice_recording_manifest_unverified/);
   });
 });
+
+it.each([
+  ["missing coverage", { coverage: undefined }],
+  [
+    "invalid checksum",
+    { manifestRef: { ...validManifestRef, checksum: "not-a-checksum" } },
+  ],
+  [
+    "missing immutable version",
+    { manifestRef: { ...validManifestRef, objectVersion: " " } },
+  ],
+  [
+    "nonfinite bytes",
+    { manifestRef: { ...validManifestRef, byteLength: Infinity } },
+  ],
+  ["invalid verification time", { verifiedAt: "not-a-time" }],
+  [
+    "wrong original requested call",
+    {
+      scope: {
+        brandId: "default",
+        callId: "other-call",
+        recordingId: "rec-1",
+        legId: "leg-1",
+      },
+    },
+  ],
+])(
+  "F3 custom-handler completion rejects %s before domain writes",
+  async (_label, patch) => {
+    const { query } = buildTx();
+    const result = {
+      scope: {
+        brandId: "default",
+        callId: "call-1",
+        recordingId: "rec-1",
+        legId: "leg-1",
+      },
+      recordingId: "rec-1",
+      manifestRef: validManifestRef,
+      coverage,
+      verifiedAt: new Date().toISOString(),
+      ...patch,
+    };
+    await expect(
+      runner().completeWorkItemWithDomainState(
+        { query } as never,
+        {
+          ...record,
+          payloadRef: JSON.stringify({
+            brandId: "default",
+            callId: "call-1",
+            recordingId: "rec-1",
+            legId: "leg-1",
+          }),
+        },
+        result,
+      ),
+    ).rejects.toThrow(/voice_recording_manifest_unverified/);
+    expect(
+      query.mock.calls.some(
+        ([sql]) =>
+          sql.includes("UPDATE crm.phase1_call_sessions") ||
+          sql.includes("UPDATE ops.phase1_owned_orders"),
+      ),
+    ).toBe(false);
+  },
+);

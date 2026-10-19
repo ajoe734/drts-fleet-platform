@@ -415,7 +415,10 @@ function mapConfirmationRow(
  * and returns the envelope opaquely; `VoiceContactService` is the only
  * caller that ever encrypts/decrypts it.
  */
-export type ContactRoleSource = "default_pointer" | "explicit";
+export type ContactRoleSource =
+  | "default_pointer"
+  | "selected_pointer"
+  | "explicit";
 
 export type InsertContactRoleRevisionInput = {
   voiceSessionId: string;

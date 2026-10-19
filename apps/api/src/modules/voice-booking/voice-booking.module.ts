@@ -1,3 +1,9 @@
+import {
+  createVoiceMediaRecordingAdapter,
+  VOICE_RECORDING_FINALIZE_AUTHORITY,
+  type VoiceRecordingFinalizeAuthority,
+} from "./voice-media-recording.adapter";
+import { VOICE_MEDIA_RECORDING_ADAPTER } from "./voice-evidence.service";
 import { ApiRequestError } from "../../common/api-envelope";
 import { assertVoiceCapabilityScope } from "../../common/auth/voice-capability.service";
 import {
@@ -112,6 +118,17 @@ import {
     },
     VoiceCheckpointRepository,
     VoiceEvidenceService,
+    {
+      provide: VOICE_MEDIA_RECORDING_ADAPTER,
+      inject: [
+        VoiceBookingRepository,
+        { token: VOICE_RECORDING_FINALIZE_AUTHORITY, optional: true },
+      ],
+      useFactory: (
+        repository: VoiceBookingRepository,
+        authority?: VoiceRecordingFinalizeAuthority,
+      ) => createVoiceMediaRecordingAdapter(repository, authority),
+    },
     VoiceBookingRepository,
     VoiceBookingAuthorizationService,
     VoiceLineScopeService,

@@ -819,17 +819,29 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
       );
 
       await runner.completeWorkItemWithDomainState(db as any, workItem as any, {
-        scope: { brandId: "default", callId, recordingId: `rec-${callId}` },
+        scope: {
+          brandId: "default",
+          callId,
+          recordingId: `rec-${callId}`,
+          legId: "leg-fixture",
+        },
         manifestRef: {
           objectKey: "manifest-key-001",
           objectVersion: "1",
-          checksum: "manifest-sha256",
+          checksum: "a".repeat(64),
           byteLength: 4096,
           durableAt: new Date().toISOString(),
         },
         recordingId: `rec-${callId}`,
         recordingUrl: `https://storage.drts.local/rec-${callId}.opus`,
         linkedOrderId: null,
+        coverage: {
+          startMs: 0,
+          endMs: 1000,
+          channels: ["inbound", "outbound"],
+          closedEventId: "provider-close-fixture",
+          endedAt: "2026-09-01T00:00:00.000Z",
+        },
         verifiedAt: new Date().toISOString(),
       });
 
@@ -906,7 +918,7 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
           finalizeRecording: async (p: any) => ({
             manifestRef: {
               objectKey: "obj-ord-555",
-              checksum: "sha256-order-evidence",
+              checksum: "a".repeat(64),
             },
             recordingId: p.scope.recordingId,
             scope: p.scope,
@@ -916,17 +928,29 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
       );
 
       await runner.completeWorkItemWithDomainState(db as any, workItem as any, {
-        scope: { brandId: "default", callId, recordingId: `rec-${callId}` },
+        scope: {
+          brandId: "default",
+          callId,
+          recordingId: `rec-${callId}`,
+          legId: "leg-fixture",
+        },
         manifestRef: {
           objectKey: "obj-ord-555",
           objectVersion: "1",
-          checksum: "sha256-order-evidence",
+          checksum: "a".repeat(64),
           byteLength: 4096,
           durableAt: new Date().toISOString(),
         },
         recordingId: `rec-${callId}`,
         recordingUrl: `https://storage.drts.local/rec-${callId}.opus`,
         linkedOrderId: orderId,
+        coverage: {
+          startMs: 0,
+          endMs: 1000,
+          channels: ["inbound", "outbound"],
+          closedEventId: "provider-close-fixture",
+          endedAt: "2026-09-01T00:00:00.000Z",
+        },
         verifiedAt: new Date().toISOString(),
       });
 
@@ -999,7 +1023,7 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
           finalizeRecording: async () => ({
             manifestRef: {
               objectKey: "ai-manifest",
-              checksum: "sha256-ai-hash",
+              checksum: "a".repeat(64),
             },
             recordingId: `rec-${voiceSessionId}`,
           }),
@@ -1012,15 +1036,23 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
           brandId: "brand-tw",
           callId,
           recordingId: `rec-${voiceSessionId}`,
+          legId: "leg-fixture",
         },
         manifestRef: {
           objectKey: "ai-manifest",
           objectVersion: "1",
-          checksum: "sha256-ai-hash",
+          checksum: "a".repeat(64),
           byteLength: 4096,
           durableAt: new Date().toISOString(),
         },
         recordingId: `rec-${voiceSessionId}`,
+        coverage: {
+          startMs: 0,
+          endMs: 1000,
+          channels: ["inbound", "outbound"],
+          closedEventId: "provider-close-fixture",
+          endedAt: "2026-09-01T00:00:00.000Z",
+        },
         verifiedAt: new Date().toISOString(),
       });
 
@@ -1653,15 +1685,23 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
               brandId: "default",
               callId: "call-no-audit",
               recordingId: "rec-call-no-audit",
+              legId: "leg-fixture",
             },
             manifestRef: {
               objectKey: "obj-no-audit-001",
               objectVersion: "1",
-              checksum: "sha256-no-audit-001",
+              checksum: "a".repeat(64),
               byteLength: 4096,
               durableAt: new Date().toISOString(),
             },
             recordingId: "rec-call-no-audit",
+            coverage: {
+              startMs: 0,
+              endMs: 1000,
+              channels: ["inbound", "outbound"],
+              closedEventId: "provider-close-fixture",
+              endedAt: "2026-09-01T00:00:00.000Z",
+            },
             verifiedAt: new Date().toISOString(),
           },
         ),

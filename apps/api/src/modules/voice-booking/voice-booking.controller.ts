@@ -364,6 +364,56 @@ export class VoiceBookingController {
     return toApiSuccessEnvelope({ session }, requestId);
   }
 
+  @Post("sessions/:sessionId/recording-events")
+  @RequireRealms("system")
+  @RequireScopes("voice:capability:issue")
+  async recordRecordingEvent(
+    @Param("sessionId") sessionId: string,
+    @Body() body: unknown,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const repository = this.requireVoiceApplicationDependency(
+      this.voiceBookingRepository,
+      "voiceBookingRepository",
+    );
+    return toApiSuccessEnvelope(
+      { event: await repository.appendRecordingContinuation(sessionId, body) },
+      requestId,
+    );
+  }
+  @Get("sessions/:sessionId/recording-events")
+  @RequireRealms("system")
+  @RequireScopes("voice:capability:issue")
+  async getRecordingEvents(
+    @Param("sessionId") sessionId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const repository = this.requireVoiceApplicationDependency(
+      this.voiceBookingRepository,
+      "voiceBookingRepository",
+    );
+    return toApiSuccessEnvelope(
+      { events: await repository.readRecordingContinuation(sessionId) },
+      requestId,
+    );
+  }
+
+  @Get("sessions/:sessionId/contacts")
+  @RequireRealms("ops", "platform")
+  async getContacts(
+    @Param("sessionId") sessionId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const contacts = this.requireVoiceApplicationDependency(
+      this.voiceContactService,
+      "voiceContactService",
+    );
+    return toApiSuccessEnvelope(
+      { contacts: await contacts.getEffectiveContactsDurable(sessionId) },
+      requestId,
+    );
+  }
+
   @Post("sessions/:sessionId/contacts")
   @RequireRealms("ops", "platform")
   async writeContacts(

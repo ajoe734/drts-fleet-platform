@@ -133,9 +133,9 @@ export interface CreateVoiceCallbackDurableInput {
   replacesTaskId?: string | undefined;
   actionKey?: string | undefined;
   voiceSessionId: string;
-  contactPhoneEncrypted: string;
-  contactPhoneLookupToken: string;
-  consentSnapshotHash: string;
+  contactPhoneEncrypted?: string | undefined;
+  contactPhoneLookupToken?: string | undefined;
+  consentSnapshotHash?: string | undefined;
   reason?: string | undefined;
   resourceScopeId?: string | null | undefined;
   priority?: CallbackPriority | undefined;
@@ -1558,9 +1558,9 @@ export class VoiceCallbackService {
     return this.sha256(
       JSON.stringify({
         voiceSessionId: input.voiceSessionId,
-        contactPhoneEncrypted: input.contactPhoneEncrypted.trim(),
-        contactPhoneLookupToken: input.contactPhoneLookupToken,
-        consentSnapshotHash: input.consentSnapshotHash.trim(),
+        contactPhoneEncrypted: input.contactPhoneEncrypted?.trim() ?? null,
+        contactPhoneLookupToken: input.contactPhoneLookupToken ?? null,
+        consentSnapshotHash: input.consentSnapshotHash?.trim() ?? null,
         reason: input.reason ?? null,
         resourceScopeId: input.resourceScopeId ?? null,
         priority: input.priority ?? "normal",
@@ -1635,7 +1635,7 @@ export class VoiceCallbackService {
       );
     }
     const consentSnapshotHash = input.consentSnapshotHash?.trim();
-    if (!consentSnapshotHash) {
+    if (!consentSnapshotHash && input.contactRevisionNumber === undefined) {
       throw new ApiRequestError(
         400,
         "CALLBACK_CONSENT_REQUIRED",
@@ -1643,7 +1643,7 @@ export class VoiceCallbackService {
       );
     }
     const contactPhoneEncrypted = input.contactPhoneEncrypted?.trim();
-    if (!contactPhoneEncrypted) {
+    if (!contactPhoneEncrypted && input.contactRevisionNumber === undefined) {
       throw new ApiRequestError(
         400,
         "INVALID_CONTACT_PHONE",
@@ -1672,6 +1672,7 @@ export class VoiceCallbackService {
       );
       let bindRevisionNumber: number | null = null;
       let sealedPhone = contactPhoneEncrypted;
+      let lookupToken = input.contactPhoneLookupToken;
       let sealedConsentHash = consentSnapshotHash;
       if (this.contactService) {
         if (
@@ -1718,6 +1719,7 @@ export class VoiceCallbackService {
           ciphertext: encrypted.ciphertext.toString("base64"),
           authTag: encrypted.authTag.toString("base64"),
         });
+        lookupToken = this.sha256(effective.callbackRecipient.phone);
         sealedConsentHash = this.sha256(
           JSON.stringify({
             voiceSessionId: input.voiceSessionId,
@@ -1752,7 +1754,7 @@ export class VoiceCallbackService {
         [
           input.voiceSessionId,
           sealedPhone,
-          input.contactPhoneLookupToken,
+          lookupToken,
           sealedConsentHash,
           input.reason ?? null,
           input.resourceScopeId ?? null,

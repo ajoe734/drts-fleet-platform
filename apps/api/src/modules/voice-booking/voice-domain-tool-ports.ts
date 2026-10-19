@@ -137,6 +137,17 @@ export class VoiceDomainToolPorts implements VoiceToolDomainPorts {
       session.dialogState === "closed"
     )
       throw new Error("voice_tool_stale_snapshot");
+    await b.contacts.synchronizeDialogueContacts({
+      voiceSessionId: session.voiceSessionId,
+      snapshotId: snapshot.snapshotId,
+      inputEpoch: context.inputEpoch,
+      leaseEpoch: context.claims.leaseEpoch,
+      resourceScopeId: context.claims.resourceScopeId,
+      routeProfileVersion: context.claims.routeProfileVersion,
+      content: snapshot.content,
+      signal: context.signal,
+    });
+    context.signal.throwIfAborted();
     const contacts = await b.contacts.getEffectiveContactsDurable(
       session.voiceSessionId,
     );
@@ -157,7 +168,7 @@ export class VoiceDomainToolPorts implements VoiceToolDomainPorts {
       context.signal,
     );
     const time = snapshot.content.slots.time;
-    if (!time?.normalizedValue)
+    if (!(time?.normalizedValue ?? time?.candidate))
       throw new ApiRequestError(
         409,
         "VOICE_ABSOLUTE_TIME_REQUIRED",
@@ -167,7 +178,7 @@ export class VoiceDomainToolPorts implements VoiceToolDomainPorts {
       pickup,
       dropoff,
       timingMode: "on_demand" as const,
-      requestedAt: time.normalizedValue,
+      requestedAt: time.normalizedValue ?? time.candidate,
       timeZone: "Asia/Taipei" as const,
       requirements: {
         passengerCount: Number(

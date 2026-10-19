@@ -766,7 +766,7 @@ describe("AUDIT-VOICE-APPLICATION-REGRESSION-20261018: VoiceCallTurnCoordinator 
     expect(scopedCall).toBeDefined();
   });
 
-  it("still forces the honest unavailable/handoff outcome for prepare_booking_readback even on a bound attachment with a real apiClient", async () => {
+  it("forwards prepare_booking_readback to the configured API, preserving the no-API unavailable control", async () => {
     const sessionBinding = binding({
       voiceSessionId: "cccccccc-cccc-cccc-cccc-cccccccccccc",
       resourceScopeId: "dddddddd-dddd-dddd-dddd-dddddddddddd",
@@ -793,8 +793,8 @@ describe("AUDIT-VOICE-APPLICATION-REGRESSION-20261018: VoiceCallTurnCoordinator 
     coordinator.handle(attachment, finalSegment("確認叫車"), speaker);
     await flush();
 
-    expect(requestHandoff).not.toHaveBeenCalled();
-    expect(speaker.calls).toHaveLength(1);
-    expect(speaker.calls[0]!.text).toBe("已停止叫車資料蒐集。");
+    expect(requestHandoff).toHaveBeenCalledTimes(1);
+    expect(requestHandoff.mock.calls[0]?.[2].output).toEqual(readbackOutput);
+    expect(speaker.calls).toHaveLength(0);
   });
 });

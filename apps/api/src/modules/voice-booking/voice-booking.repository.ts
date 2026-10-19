@@ -1,3 +1,8 @@
+import { isDeepStrictEqual } from "node:util";
+import {
+  voiceRecordingContinuationEventSchema,
+  type VoiceRecordingContinuationEvent,
+} from "@drts/contracts";
 import { randomUUID } from "node:crypto";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { PoolClient, QueryResult, QueryResultRow } from "pg";
@@ -799,6 +804,147 @@ export class VoiceBookingRepository {
       [voiceSessionId, sinceSequence],
     );
     return result.rows.map(mapSessionEventRow);
+  }
+
+  async readRecordingContinuation(
+    voiceSessionId: string,
+    scope?: {
+      brandId: string;
+      callId: string;
+      recordingId: string;
+      legId: string;
+    },
+    executor?: VoiceQueryExecutor,
+  ): Promise<VoiceRecordingContinuationEvent[]> {
+    const result = await (executor ?? this.requireDatabase()).query<{
+      payload: unknown;
+    }>(
+      `SELECT payload FROM voice.recording_continuation_event WHERE voice_session_id = $1 ORDER BY created_at,event_id`,
+      [voiceSessionId],
+    );
+    const events = result.rows.map((row) =>
+      voiceRecordingContinuationEventSchema.parse(row.payload),
+    );
+    return scope
+      ? events.filter((e) => isDeepStrictEqual(e.scope, scope))
+      : events;
+  }
+  async appendRecordingContinuation(
+    voiceSessionId: string,
+    raw: unknown,
+  ): Promise<VoiceRecordingContinuationEvent> {
+    const event = voiceRecordingContinuationEventSchema.parse(raw);
+    return this.withTransaction(async (tx) => {
+      await tx.query(
+        "SELECT voice_session_id FROM voice.session WHERE voice_session_id = $1 FOR UPDATE",
+        [voiceSessionId],
+      );
+      const session = await this.findSessionById(voiceSessionId, tx);
+      const scope =
+        session &&
+        (await this.findResourceScopeById(session.resourceScopeId, tx));
+      if (
+        !session ||
+        scope?.brandId !== event.scope.brandId ||
+        session.callId !== event.scope.callId
+      )
+        throw new Error("voice_recording_context_mismatch");
+      const history = await this.readRecordingContinuation(
+        voiceSessionId,
+        undefined,
+        tx,
+      );
+      if (
+        history.some(
+          (e) =>
+            e.scope.recordingId === event.scope.recordingId &&
+            !isDeepStrictEqual(e.scope, event.scope),
+        )
+      )
+        throw new Error("voice_recording_scope_reassigned");
+      if (
+        (event.kind === "segment" || event.kind === "checkpoint") &&
+        history.some(
+          (e) =>
+            e.scope.recordingId === event.scope.recordingId &&
+            e.kind === "closure",
+        ) &&
+        !history.some(
+          (e) =>
+            e.scope.recordingId === event.scope.recordingId &&
+            e.eventKey === event.eventKey &&
+            isDeepStrictEqual(e, event),
+        )
+      )
+        throw new Error("voice_recording_closed_history_immutable");
+      if (event.kind === "closure") {
+        const payload = JSON.stringify({ ...event.scope, voiceSessionId });
+        const dedupeKey = `finalize_recording:recording:${voiceSessionId}:${event.scope.recordingId}`;
+        await tx.query(
+          `INSERT INTO voice.work_item (voice_session_id,work_type,dedupe_key,payload_ref)
+          VALUES ($1,'finalize_recording',$2,$3) ON CONFLICT (dedupe_key) DO NOTHING`,
+          [voiceSessionId, dedupeKey, payload],
+        );
+        const work = await tx.query<{
+          voice_session_id: string;
+          work_type: string;
+          payload_ref: string;
+        }>(
+          "SELECT voice_session_id,work_type,payload_ref FROM voice.work_item WHERE dedupe_key = $1",
+          [dedupeKey],
+        );
+        if (
+          work.rows[0]?.voice_session_id !== voiceSessionId ||
+          work.rows[0]?.work_type !== "finalize_recording" ||
+          !isDeepStrictEqual(
+            JSON.parse(work.rows[0].payload_ref),
+            JSON.parse(payload),
+          )
+        )
+          throw new Error("voice_recording_work_payload_conflict");
+      }
+      const inserted = await tx.query<{ payload: unknown }>(
+        `INSERT INTO voice.recording_continuation_event
+        (voice_session_id,recording_id,leg_id,event_key,event_kind,payload) VALUES ($1,$2,$3,$4,$5,$6::jsonb)
+        ON CONFLICT (voice_session_id,recording_id,event_key) DO NOTHING RETURNING payload`,
+        [
+          voiceSessionId,
+          event.scope.recordingId,
+          event.scope.legId,
+          event.eventKey,
+          event.kind,
+          JSON.stringify(event),
+        ],
+      );
+      if (inserted.rows[0])
+        return voiceRecordingContinuationEventSchema.parse(
+          inserted.rows[0].payload,
+        );
+      const prior = await tx.query<{ payload: unknown }>(
+        `SELECT payload FROM voice.recording_continuation_event
+        WHERE voice_session_id = $1 AND recording_id = $2 AND event_key = $3`,
+        [voiceSessionId, event.scope.recordingId, event.eventKey],
+      );
+      const saved = voiceRecordingContinuationEventSchema.parse(
+        prior.rows[0]?.payload,
+      );
+      if (!isDeepStrictEqual(saved, event))
+        throw new Error("voice_recording_event_payload_conflict");
+      return saved;
+    });
+  }
+  async resolveRecordingContinuationScope(voiceSessionId: string, executor?:VoiceQueryExecutor) {
+    const events = await this.readRecordingContinuation(voiceSessionId,undefined,executor);
+    const scopes = events
+      .filter((e) => e.kind === "closure")
+      .map((e) => e.scope);
+    const unique = scopes.filter(
+      (scope, index) =>
+        scopes.findIndex((other) => isDeepStrictEqual(scope, other)) === index,
+    );
+    if (unique.length !== 1)
+      throw new Error("voice_recording_identity_unavailable");
+    return unique[0]!;
   }
 
   /** Promote a qualified candidate using the original session/intent/draft

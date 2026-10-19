@@ -284,3 +284,54 @@ source-path configuration then exposed one exact-optional input mismatch, now
 fixed. Final typecheck/lint and complete regression results are recorded by
 later checkpoints. No VM servers, provider calls, hosted PG/browser runs or
 production readiness have been claimed here.
+
+### Functional continuation checkpoint 2 (Codex2)
+
+This remains a progress anchor, not a review candidate. Source now connects the
+original services rather than leaving internally implementable units as an
+external-provider omission:
+
+- F1: durable explicit provider candidate/entrance selection re-resolves through
+  Geo/VoiceLocation, calls the original qualifier, transactionally promotes an
+  immutable intent/draft, then consumes the original beginReadback plan. The
+  worker publishes the server-controlled playback identity under existing
+  generation/cancellation fences. No playback completion becomes consent.
+- F2/F3: the actual composer subscribes to an independent normalized recording
+  fork/closure source. SealedRecorder writes and reads actual immutable audio
+  objects; first-party client/controller/repository preserve segment/checkpoint/
+  closure/finalized metadata in allocated V0125. Closure and original finalize
+  work insertion share the session transaction. First-party adapter and worker
+  continuation read this journal, verify the full immutable final manifest and
+  persist its exact identity for fresh-process/lost-response replay. ASR/TTS and
+  WebSocket close do not produce recorded channels or call closure.
+- F4/F6/F7: worker binding read seeds immutable ANI from durable CRM. The original
+  current dialogue snapshot can correct typed A/B contact data under its session
+  authority/epoch/snapshot lock, without inferring consent. Typed default versus
+  explicit role selection survives restart. When A admits before B's details
+  arrive, automatic driver default follows B; an explicitly selected role stays
+  selected. Warm reads and all durable revision allocation use authoritative data.
+- F5/F8: callback creation selects a server revision/consent in the transaction;
+  sealed phone/hash/lookup projection derive from that same server contact. Older
+  task and receipt identity remains immutable. The mounted zh/en workbench saves
+  explicit corrections, shows genuine role/revision/phone/evidence/history and
+  creates a related replacement only after the original is cancelled with fresh
+  consent. Ambiguous creation retries recover the original receipt/key.
+
+Evidence under this worktree's `.local/voice-evidence/`:
+
+| Item                   | Immutable before                                                                                                                      | Current scoped result                                                                                                                                                                                               | Limits                                                                                                                                                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1 original ports      | 1b05: actual qualifier/readback continuation two failures (501)                                                                       | `qualified-after-final.log`: 2 passed using real qualifier/location/service-area/product/repository/confirmation                                                                                                    | Geo, issuer and SQL transport doubles; no PostgreSQL transaction claim                                                                                                                                         |
+| Controlled playback    | 1b05: actual registration returned sandbox random ID, one failure                                                                     | `playback-after.log`: new playback case and original UV008 passed                                                                                                                                                   | Upstream ASR/TTS are explicit SIM                                                                                                                                                                              |
+| F2 producer/consumer   | Original fullreview source trace retained                                                                                             | `recording-continuation-after.log`: 2 passed through composer, sealed audio/object readback, actual HTTP client/controller/repository, closure/work and first-party finalization; cold replay retains exact version | SQL/HTTP/object-store transport and upstream recording authority are doubled; formal hosted PG pending                                                                                                         |
+| F3 completion boundary | `manifest-before-source.log`: 6 failed / 5 passed at 1b05; prior loader errors are not reproduction evidence                          | `recording-all-fixed.log`: 34 passed, including all original zero/one-order, late linked-order and no-audit-table positives                                                                                         | Socket-free transaction transport; hosted rollback/races pending                                                                                                                                               |
+| F4 session producer    | `contact-producer-before.log`: filtered actual original getSession case failed with zero durable rows; three other cases not selected | `contact-producer-and-real-mounted.log`: 9 passed including actual ANI seed, later A-for-B defaults and real services consumed by mounted SDK/workbench                                                             | Transport doubles; mounted JSDOM, not a hosted browser                                                                                                                                                         |
+| Original R34 default   | `original-default-5000-snapshot.log`: 61 passed / one timeout (8385ms)                                                                | `original-default-5000-snapshot-fixed.log`: all 62 passed, test runtime 3.72s, command exit 0                                                                                                                       | Only SQL transport helper key/date decoration changed; each query remains fresh with identical filter/order/page. Original 10000 held rows, three previews, all 62 assertions and default5000 remain unchanged |
+
+Normal root typecheck failed against stale/missing shared workspace package dist;
+API and worker source checks passed. A complete source-alias root check, scoped
+lint, final full regression, formal hosted PG/browser and same-candidate CI are
+still pending. No result from these socket-free doubles certifies genuine
+external recording authority, S3 resources, CTI, issuer, model or PSTN. Actual
+main composition keeps those unconfigured boundaries visible and
+productionCapable remains false. No VM runtime/server/database was started.

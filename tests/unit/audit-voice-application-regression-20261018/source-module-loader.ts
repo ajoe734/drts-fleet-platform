@@ -32,9 +32,11 @@ export function sourceModuleLoader(
             encoding: "utf8",
           })
         : readFileSync(path, "utf8");
+    if (path.endsWith(".json")) return JSON.parse(source) as T;
     const module = { exports: {} };
     cache.set(path, module.exports);
     const output = ts.transpileModule(source, {
+      fileName:path,
       compilerOptions: {
         module: ts.ModuleKind.CommonJS,
         target: ts.ScriptTarget.ES2022,
@@ -58,11 +60,8 @@ export function sourceModuleLoader(
       if (id.startsWith(".")) return load(resolve(moduleDirectory, id));
       return actualRequire(id);
     }
-    new Function("require", "module", "exports", output)(
-      requireSource,
-      module,
-      module.exports,
-    );
+    try { new Function("require", "module", "exports", output)(requireSource,module,module.exports); }
+    catch(error) { throw new Error(`source_load_failed:${repoPath}`,{cause:error}); }
     return module.exports as T;
   }
   return load;

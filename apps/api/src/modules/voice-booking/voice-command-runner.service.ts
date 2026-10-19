@@ -1,3 +1,4 @@
+import { validateFinalRecordingResult } from "./voice-media-recording.adapter";
 import {
   forwardRef,
   Inject,
@@ -128,6 +129,9 @@ export class VoiceCommandRunnerService
         "request_dispatch",
         "publish_booking_audit",
         "notify_booking_result",
+        ...(this.mediaAdapter || this.evidenceService?.hasMediaAdapter()
+          ? ["finalize_recording"]
+          : []),
       ],
     });
   }
@@ -583,36 +587,24 @@ export class VoiceCommandRunnerService
       // work item exactly as `leased` for `executeNextWorkItem`'s own
       // existing retry/fencing catch to handle, the same as any other
       // execution failure.
-      const manifestRef = finalResult.manifestRef;
-      const manifestDefects: string[] = [];
-      if (!manifestRef?.objectKey) manifestDefects.push("manifestRef.objectKey");
-      if (!manifestRef?.objectVersion)
-        manifestDefects.push("manifestRef.objectVersion");
-      if (!manifestRef?.checksum) manifestDefects.push("manifestRef.checksum");
+      const verified = validateFinalRecordingResult(finalResult);
       if (
-        typeof manifestRef?.byteLength !== "number" ||
-        !(manifestRef.byteLength > 0)
+        (typeof parsedPayload.recordingId === "string" &&
+          parsedPayload.recordingId !== verified.recordingId) ||
+        (!voiceSessionId &&
+          typeof parsedPayload.callId === "string" &&
+          parsedPayload.callId !== verified.scope.callId) ||
+        (!voiceSessionId &&
+          typeof parsedPayload.brandId === "string" &&
+          parsedPayload.brandId !== verified.scope.brandId) ||
+        (typeof parsedPayload.legId === "string" &&
+          parsedPayload.legId !== verified.scope.legId)
       )
-        manifestDefects.push("manifestRef.byteLength");
-      if (!manifestRef?.durableAt) manifestDefects.push("manifestRef.durableAt");
-      if (!finalResult.recordingId) manifestDefects.push("recordingId");
-      if (!finalResult.verifiedAt) manifestDefects.push("verifiedAt");
-      if (
-        finalResult.scope?.recordingId &&
-        finalResult.recordingId &&
-        finalResult.scope.recordingId !== finalResult.recordingId
-      ) {
-        manifestDefects.push(
-          "recordingId does not match the recording that was requested (scope.recordingId)",
-        );
-      }
-      if (manifestDefects.length > 0) {
         throw new Error(
-          `voice_recording_manifest_unverified: finalize_recording completion is missing verified manifest evidence (${manifestDefects.join(", ")})`,
+          "voice_recording_manifest_unverified: requested recording scope mismatch",
         );
-      }
-      const recordingId = finalResult.recordingId!;
-      const manifestEvidenceRef = manifestRef!.objectKey!;
+      const recordingId = verified.recordingId;
+      const manifestEvidenceRef = verified.manifestRef.objectKey;
 
       if (voiceSessionId) {
         // Booking commits hold the original session before touching the call.
@@ -623,6 +615,17 @@ export class VoiceCommandRunnerService
         );
         const context = await readVoiceRecordingContext(tx, voiceSessionId);
         if (!context) throw new Error("Voice recording context unavailable");
+        if (
+          verified.scope.callId !== context.callId ||
+          verified.scope.brandId !== context.brandId
+        )
+          throw new Error(
+            "voice_recording_manifest_unverified: original session scope mismatch",
+          );
+        if (!parsedPayload.recordingId) {
+          const canonical=await this.commands.repository.resolveRecordingContinuationScope(voiceSessionId,tx);
+          if (!isDeepStrictEqual(canonical,verified.scope)) throw new Error("voice_recording_manifest_unverified: durable recording identity mismatch");
+        }
         callId = context.callId;
         linkedOrderId = context.linkedOrderId;
       }
@@ -1403,7 +1406,7 @@ export class VoiceCommandRunnerService
       (payload.callId as string | undefined) ??
       work.dedupeKey.replace(/^finalize_recording:(ai:|call:)?/, "");
     let brandId = (payload.brandId as string | undefined) ?? "default";
-    const legId = (payload.legId as string | undefined) ?? null;
+    let legId = (payload.legId as string | undefined) ?? null;
     let linkedOrderId = (payload.linkedOrderId as string | undefined) ?? null;
 
     if (work.voiceSessionId) {
@@ -1415,8 +1418,12 @@ export class VoiceCommandRunnerService
       brandId = context.brandId;
       linkedOrderId = context.linkedOrderId;
     }
-    const recordingId =
-      (payload.recordingId as string | undefined) ?? `rec-${callId}`;
+    let recordingId = (payload.recordingId as string | undefined) ?? "";
+    if (work.voiceSessionId && (!recordingId || !legId)) {
+      const canonical = await this.commands.repository.resolveRecordingContinuationScope(work.voiceSessionId);
+      if (canonical.brandId !== brandId || canonical.callId !== callId) throw new Error("voice_recording_context_mismatch");
+      recordingId=canonical.recordingId;legId=canonical.legId;
+    }
 
     let finalResult: unknown;
     if (this.mediaAdapter) {
@@ -1441,8 +1448,9 @@ export class VoiceCommandRunnerService
     // adapter finalizing a different segment than requested must surface as
     // a mismatch at `completeWorkItemWithDomainState`'s verification choke
     // point, not be silently overwritten by the unverified guess.
-    const verifiedRecordingId =
-      (finalResult as { recordingId?: unknown } | undefined)?.recordingId;
+    const verifiedRecordingId = (
+      finalResult as { recordingId?: unknown } | undefined
+    )?.recordingId;
     const verifiedAt = (finalResult as { verifiedAt?: unknown } | undefined)
       ?.verifiedAt;
 
@@ -1454,10 +1462,11 @@ export class VoiceCommandRunnerService
       recordingId:
         typeof verifiedRecordingId === "string" && verifiedRecordingId
           ? verifiedRecordingId
-          : recordingId,
+          : null,
       requestedRecordingId: recordingId,
       linkedOrderId,
-      scope: { brandId, callId, recordingId, legId },
+      scope: (finalResult as any)?.scope ?? null,
+      coverage: (finalResult as any)?.coverage ?? null,
       manifestRef: (finalResult as any)?.manifestRef ?? null,
       recordingUrl: (finalResult as any)?.recordingUrl ?? null,
       verifiedAt: typeof verifiedAt === "string" ? verifiedAt : null,

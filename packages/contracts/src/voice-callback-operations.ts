@@ -24,9 +24,9 @@ export const VoiceContactCorrectionSchema = z
   .strict();
 export const VoiceCallbackCreateRequestSchema = z
   .object({
-    contactPhoneEncrypted: z.string().min(1),
-    contactPhoneLookupToken: z.string().min(1),
-    consentSnapshotHash: z.string().min(1),
+    contactPhoneEncrypted: z.string().min(1).optional(),
+    contactPhoneLookupToken: z.string().min(1).optional(),
+    consentSnapshotHash: z.string().min(1).optional(),
     contactRevisionNumber: z.number().int().positive().optional(),
     consentRef: z.string().trim().min(1).optional(),
     replacesTaskId: z.string().uuid().optional(),
@@ -35,7 +35,29 @@ export const VoiceCallbackCreateRequestSchema = z
     scheduledAt: z.string().datetime({ offset: true }).nullable().optional(),
     dueAt: z.string().datetime({ offset: true }).nullable().optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      (value.contactRevisionNumber !== undefined && !!value.consentRef) ||
+      (!!value.contactPhoneEncrypted &&
+        !!value.contactPhoneLookupToken &&
+        !!value.consentSnapshotHash),
+    {
+      message:
+        "An explicit revision/consent or complete legacy sealed snapshot is required.",
+    },
+  );
+export interface VoiceContactRolesView {
+  voiceSessionId: string;
+  callbackRecipient: { name: string; phone: string };
+  callbackRecipientRole: "booker" | "passenger" | "custom";
+  callbackRecipientConsentRef: string | null;
+  callbackRecipientRevisionNumber: number | null;
+  totalRevisions: number;
+}
+export type VoiceContactCorrection = z.infer<
+  typeof VoiceContactCorrectionSchema
+>;
 export const VoiceCallbackOperationRequestSchema = z
   .object({
     expectedVersion: z.number().int().positive(),

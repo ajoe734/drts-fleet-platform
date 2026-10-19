@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Injectable, Optional } from "@nestjs/common";
-import { type BookingRequirements } from "@drts/contracts";
+import {
+  voiceDialogueContactCandidateSchema,
+  type VoiceDialogueSnapshotContent,
+  type BookingRequirements,
+} from "@drts/contracts";
 import { ApiRequestError } from "../../common/api-envelope";
 import {
   VoiceSessionRepository,
@@ -303,9 +307,7 @@ export class VoiceContactService {
     for (const rev of revisions) {
       if (rev.role !== "driverContact") continue;
       const pointer =
-        rev.roleSource === "default_pointer"
-          ? defaultPointer.exec(rev.reason)
-          : null;
+        rev.roleSource !== "explicit" ? defaultPointer.exec(rev.reason) : null;
       if (pointer) {
         driverContactRole = pointer[1] as "booker" | "passenger";
         customDriverContact = null;
@@ -319,9 +321,7 @@ export class VoiceContactService {
     for (const rev of revisions) {
       if (rev.role !== "callbackRecipient") continue;
       const pointer =
-        rev.roleSource === "default_pointer"
-          ? defaultPointer.exec(rev.reason)
-          : null;
+        rev.roleSource !== "explicit" ? defaultPointer.exec(rev.reason) : null;
       if (pointer) {
         callbackRecipientRole = pointer[1] as "booker" | "passenger";
         customCallbackRecipient = null;
@@ -381,6 +381,111 @@ export class VoiceContactService {
     const state = this.states.get(voiceSessionId);
     if (!state) return null;
     return this.getEffectiveContacts(voiceSessionId);
+  }
+
+  /** Consume only the current durable turn's typed contact data. A proposal
+   * cannot overwrite ANI or create consent. Both A/B corrections and proof
+   * invalidation commit under the original session lock. */
+  async synchronizeDialogueContacts(input: {
+    voiceSessionId: string;
+    snapshotId: string;
+    inputEpoch: number;
+    leaseEpoch: number;
+    resourceScopeId: string;
+    routeProfileVersion: number;
+    content: VoiceDialogueSnapshotContent;
+    signal: AbortSignal;
+  }) {
+    const changes: Array<{
+      role: "booker" | "passenger";
+      contact: ContactInfo;
+    }> = [];
+    for (const [field, role] of [
+      ["bookerContact", "booker"],
+      ["passengerContact", "passenger"],
+    ] as const) {
+      const slot = input.content.slots[field];
+      if (!slot) continue;
+      let candidate: unknown;
+      try {
+        candidate = JSON.parse(slot.normalizedValue ?? slot.candidate);
+      } catch {
+        continue;
+      }
+      const parsed = voiceDialogueContactCandidateSchema.safeParse(candidate);
+      if (parsed.success) changes.push({ role, contact: parsed.data });
+    }
+    if (!changes.length) return;
+    if (!this.isDbBacked())
+      throw new ApiRequestError(
+        503,
+        "VOICE_CONTACT_PERSISTENCE_REQUIRED",
+        "Durable contact storage is required.",
+      );
+    const key = this.requireEncryptionKey();
+    await this.sessionRepository!.withTransaction(async (tx) => {
+      input.signal.throwIfAborted();
+      const session = await this.sessionRepository!.findSessionById(
+        input.voiceSessionId,
+        tx,
+        true,
+      );
+      const snapshot = await this.sessionRepository!.findLatestDialogueSnapshot(
+        input.voiceSessionId,
+        tx,
+      );
+      if (
+        !session ||
+        snapshot?.snapshotId !== input.snapshotId ||
+        session.inputEpoch !== input.inputEpoch ||
+        session.leaseEpoch !== input.leaseEpoch ||
+        session.resourceScopeId !== input.resourceScopeId ||
+        session.routeProfileVersion !== input.routeProfileVersion ||
+        session.controlOwner !== "ai" ||
+        session.dialogState === "closed"
+      )
+        throw new Error("voice_contact_dialogue_stale");
+      const state = await this.coldReconstructState(input.voiceSessionId, tx);
+      if (!state)
+        throw new ApiRequestError(
+          409,
+          "VOICE_CONTACT_NOT_FOUND",
+          "Admit the original caller before contact correction.",
+        );
+      let next = state.latestRevisionNumber,
+        changed = false;
+      for (const { role, contact } of changes) {
+        const prior = [...state.revisions]
+          .reverse()
+          .find((revision) => revision.role === role);
+        if (prior?.name === contact.name && prior.phone === contact.phone)
+          continue;
+        input.signal.throwIfAborted();
+        await this.persistRevision(
+          input.voiceSessionId,
+          {
+            revision: ++next,
+            role,
+            ...contact,
+            consentRef: null,
+            reason: `dialogue_snapshot:${input.snapshotId}`,
+            roleSource: "explicit",
+            updatedAt: new Date().toISOString(),
+            replacedRevision: prior?.revision ?? null,
+          },
+          key,
+          tx,
+        );
+        changed = true;
+      }
+      if (changed)
+        await this.refreshDefaultDriverRole(input.voiceSessionId, tx, key);
+      if (changed)
+        await this.sessionRepository!.invalidateUnconsumedConfirmationForContactChange(
+          input.voiceSessionId,
+          tx,
+        );
+    });
   }
 
   /**
@@ -564,7 +669,10 @@ export class VoiceContactService {
         phone: driverContactRole === "booker" ? callerPhone : passengerPhone,
         consentRef: null,
         reason: `default_role:${driverContactRole}`,
-        roleSource: "default_pointer",
+        roleSource:
+          input.driverContactRole === undefined
+            ? "default_pointer"
+            : "selected_pointer",
         updatedAt: now,
         replacedRevision: null,
       });
@@ -590,7 +698,10 @@ export class VoiceContactService {
             callbackRecipientRole === "booker" ? callerPhone : passengerPhone,
           consentRef: null,
           reason: `default_role:${callbackRecipientRole}`,
-          roleSource: "default_pointer",
+          roleSource:
+            input.callbackRecipientRole === undefined
+              ? "default_pointer"
+              : "selected_pointer",
           updatedAt: now,
           replacedRevision: null,
         });
@@ -818,6 +929,42 @@ export class VoiceContactService {
 
   /** The original session row lock serializes revision allocation and proof
    * invalidation. A contact edit never rewrites an existing task's snapshot. */
+  private async refreshDefaultDriverRole(
+    voiceSessionId: string,
+    tx: VoiceQueryExecutor,
+    key: DialogueSnapshotEncryptionKey,
+  ) {
+    const state = await this.coldReconstructState(voiceSessionId, tx);
+    if (!state) return;
+    const pointer = [...state.revisions]
+      .reverse()
+      .find((revision) => revision.role === "driverContact");
+    if (pointer?.roleSource !== "default_pointer" || state.customDriverContact)
+      return;
+    const thirdParty =
+      state.bookerContact.phone !== state.passengerContact.phone ||
+      state.bookerContact.name !== state.passengerContact.name;
+    const role = thirdParty ? "passenger" : "booker";
+    if (role === state.driverContactRole) return;
+    const contact =
+      role === "passenger" ? state.passengerContact : state.bookerContact;
+    await this.persistRevision(
+      voiceSessionId,
+      {
+        revision: state.latestRevisionNumber + 1,
+        role: "driverContact",
+        ...contact,
+        consentRef: null,
+        reason: `default_role:${role}`,
+        roleSource: "default_pointer",
+        updatedAt: new Date().toISOString(),
+        replacedRevision: pointer.revision,
+      },
+      key,
+      tx,
+    );
+  }
+
   private async updateContactRoleDurable(
     input: UpdateContactRoleInput,
     normalizedPhone: string,
@@ -922,6 +1069,8 @@ export class VoiceContactService {
       };
 
       await this.persistRevision(input.voiceSessionId, newRevision, key, tx);
+      if (input.role === "booker" || input.role === "passenger")
+        await this.refreshDefaultDriverRole(input.voiceSessionId, tx, key);
 
       if (input.invalidateConfirmation !== false) {
         const invalidated =

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   voiceDialogueSnapshotContentSchema,
   type VoiceCapabilityScope,
@@ -46,6 +46,7 @@ export interface VoiceCallTurnSpeaker {
     languageCode: string,
     signal: AbortSignal,
     mediaEpoch: number,
+    controlledPlaybackId?: string,
   ): Promise<void>;
   /** The session's *live* media-authority epoch, read fresh on every call
    * -- never the snapshot captured when a transcript arrived (Codex
@@ -1640,7 +1641,36 @@ export class VoiceCallTurnCoordinator {
       !turnSession.released &&
       turnSession.activeAbort === abortController &&
       !abortController.signal.aborted;
-    if (result.prompt && isCurrent) {
+    const readback = result.results.find(
+      (value: unknown) =>
+        typeof value === "object" && value !== null && "confirmation" in value,
+    ) as
+      | {
+          confirmation: {
+            confirmationId: string;
+            readbackPlaybackId: string;
+            script: string;
+            readbackScriptHash: string;
+            expiresAt: string;
+            templateVersion: string;
+            expectedDigit: string;
+          };
+        }
+      | undefined;
+    const plan = readback?.confirmation;
+    if (
+      plan &&
+      (plan.templateVersion !== "zh-TW-booking-v1" ||
+        plan.expectedDigit !== "1" ||
+        createHash("sha256").update(plan.script).digest("hex") !==
+          plan.readbackScriptHash ||
+        !Number.isFinite(Date.parse(plan.expiresAt)) ||
+        Date.parse(plan.expiresAt) <= Date.now())
+    )
+      throw new Error("voice_readback_invalid");
+    const spoken = plan?.script ?? result.prompt;
+    if (plan) turnSession.state.confirmationId = plan.confirmationId;
+    if (spoken && isCurrent) {
       // Deliberately not awaited (Codex reopen round 3, R3): the engine
       // stage above (`propose`/`persist`/`execute`) is what needs
       // per-attachment serialization against `VoiceDialogueEngine`'s own
@@ -1656,7 +1686,13 @@ export class VoiceCallTurnCoordinator {
       // `VoiceSessionComposer.attach`), so a superseded result it
       // eventually produces is still fenced from ever reaching the caller.
       void speaker
-        .speak(result.prompt, languageCode, abortController.signal, mediaEpoch)
+        .speak(
+          spoken,
+          languageCode,
+          abortController.signal,
+          mediaEpoch,
+          plan?.readbackPlaybackId,
+        )
         .catch((error) => {
           if (!this.isExpectedSupersession(error)) {
             console.error("[voice-call-turn-coordinator] speak failed", error);

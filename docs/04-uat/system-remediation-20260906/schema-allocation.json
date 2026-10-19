@@ -187,15 +187,35 @@
       "migration_filename": "V0122__voice_contact_role_revision.sql",
       "domain": "voice_contact_role_revision",
       "target_schema": "voice",
-      "primary_tables": ["voice.contact_role_revision"],
-      "referenced_tables": ["voice.session"],
+      "primary_tables": [
+        "voice.contact_role_revision",
+        "voice.callback_task_contact_binding"
+      ],
+      "referenced_tables": ["voice.session", "voice.callback_task"],
       "table_invariants": [
         "revision_id uuid PRIMARY KEY DEFAULT gen_random_uuid(); voice_session_id uuid NOT NULL REFERENCES voice.session(voice_session_id); UNIQUE (voice_session_id, revision_number) -- revision_number is a single counter shared across every role for a session (matching VoiceContactService.updateContactRole's existing ++latestRevisionNumber contract), not re-scoped per role.",
         "role text NOT NULL CHECK (role IN ('caller','booker','passenger','driverContact','callbackRecipient')); replaced_revision references the prior revision_number this row supersedes for the same role, or NULL for a role's first revision.",
         "phone_key_version, phone_nonce, phone_ciphertext and phone_auth_tag store the phone number under the SAME AES-256-GCM envelope convention as voice.dialogue_snapshot.content_ciphertext (apps/api/src/modules/voice-booking/voice-dialogue-snapshot-crypto.ts), keyed server-side at apps/api only; consent_ref is nullable (an opaque reference into existing consent evidence, not a new consent record). Transactional append authority, cold reconstruction and selective confirmation-invalidation behavior remain application/schema verification obligations, not claims certified by this allocation entry.",
-        "Append-only (voice._make_append_only); no row is ever updated or deleted -- a role correction appends a new revision_number, it never rewrites an existing row."
+        "Append-only (voice._make_append_only); no row is ever updated or deleted -- a role correction appends a new revision_number, it never rewrites an existing row.",
+        "role_source is an explicit/default_pointer discriminator; one immutable callback creation binding per task pins the exact revision; explicit cancelled-task replacements retain replaces_task_id history."
       ],
-      "description": "Durable, append-only revision ledger making VoiceContactService's existing role-separation/revision/consent contract (SD §6.4) survive a restart or a second instance; replaces its prior process-local RAM-only Map. No new consent authority, callback_task DDL or production HTTP route is introduced by this allocation entry.",
+      "description": "Durable encrypted contact-role revisions and immutable callback creation bindings, preserving the original role/consent and controlled replacement contract.",
+      "downstream_tasks": []
+    },
+    {
+      "task_id": "AUDIT-VOICE-APPLICATION-REGRESSION-20261018",
+      "version": "V0125",
+      "migration_filename": "V0125__voice_recording_continuation_event.sql",
+      "domain": "voice_recording_continuation",
+      "target_schema": "voice",
+      "primary_tables": ["voice.recording_continuation_event"],
+      "referenced_tables": ["voice.session"],
+      "table_invariants": [
+        "Append-only recording/leg/event key metadata with real session FK; UNIQUE(session,recording,event_key).",
+        "Same payload replays the original event; a different payload at the same identity is rejected by the production repository under the original session lock.",
+        "No voice.session_event sequence or control watermark is consumed; sealed segment/checkpoint/authority closure/final manifest references retain immutable object versions and full coverage."
+      ],
+      "description": "Original Voice B durable continuation journal, allocated by Root 2026-10-19; external recording ingress/call authority remains explicit.",
       "downstream_tasks": []
     }
   ],

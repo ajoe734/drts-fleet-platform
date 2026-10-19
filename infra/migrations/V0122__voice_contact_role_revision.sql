@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS voice.contact_role_revision (
   consent_ref       text,
   reason            text NOT NULL,
   role_source       text NOT NULL DEFAULT 'explicit' CHECK (
-    role_source IN ('default_pointer', 'explicit')
+    role_source IN ('default_pointer', 'selected_pointer', 'explicit')
   ),
   replaced_revision integer,
   created_at        timestamptz NOT NULL DEFAULT now(),

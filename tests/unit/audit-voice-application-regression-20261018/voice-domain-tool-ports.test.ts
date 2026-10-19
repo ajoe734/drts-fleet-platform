@@ -234,7 +234,7 @@ describe("VoiceDomainToolPorts.execute get_bound_booking_status", () => {
 });
 
 describe("VoiceDomainToolPorts.execute delegates everything else to the existing honest fallback", () => {
-  it("still fails closed with VOICE_TOOL_NOT_IMPLEMENTED for check_booking_eligibility and prepare_booking_readback -- a precise, documented boundary, not a fabricated result", async () => {
+  it("fails closed when the configured booking continuation dependencies are absent", async () => {
     const ports = new VoiceDomainToolPorts(buildFallback(), undefined, undefined);
 
     await expect(
@@ -242,10 +242,10 @@ describe("VoiceDomainToolPorts.execute delegates everything else to the existing
     ).rejects.toBeInstanceOf(ApiRequestError);
     await expect(
       ports.execute({ name: "check_booking_eligibility", args: {} }, context()),
-    ).rejects.toMatchObject({ code: "VOICE_TOOL_NOT_IMPLEMENTED" });
+    ).rejects.toMatchObject({ code: "VOICE_BOOKING_CONTINUATION_UNAVAILABLE" });
     await expect(
       ports.execute({ name: "prepare_booking_readback", args: {} }, context()),
-    ).rejects.toMatchObject({ code: "VOICE_TOOL_NOT_IMPLEMENTED" });
+    ).rejects.toMatchObject({ code: "VOICE_BOOKING_CONTINUATION_UNAVAILABLE" });
   });
 
   it("delegates request_handoff to the real VoiceHandoffOnlyToolPorts instead of reimplementing it", async () => {

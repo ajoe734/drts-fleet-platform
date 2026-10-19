@@ -4,11 +4,22 @@ import { composeVoiceMediaProviders } from "./server/provider-composition";
 import { VoiceSessionComposer } from "./server/session-composer";
 import { VoiceCallTurnCoordinator } from "./dialogue/call-turn-coordinator";
 import { composeVoiceDialogueProvider } from "./dialogue/dialogue-provider-composition";
+import { createVoiceRecordingContinuation } from "./recording/recording-adapter-factory";
+import type {
+  RecordingContinuationSource,
+  RecordingContinuationJournal,
+} from "./recording/recording-continuation";
+import type { VoiceCallAuthorityVerifier } from "./server/call-authority";
 import { createVoiceRecordingAdapter } from "./recording/recording-adapter-factory";
 import { createVoiceApiClient } from "./server/voice-api-client-factory";
 import type { VoiceSessionBindingResolver } from "./dialogue/voice-session-binding";
 
-async function main() {
+async function main(
+  options: {
+    recordingSource?: RecordingContinuationSource;
+    callAuthorityVerifier?: VoiceCallAuthorityVerifier;
+  } = {},
+) {
   const composition = composeVoiceMediaProviders();
   // Opt-in, fail-closed-when-absent (see
   // ./server/voice-api-client-factory.ts) -- `undefined` in every
@@ -81,14 +92,48 @@ async function main() {
     false,
     voiceApiClient,
   );
+  const recordingJournal: RecordingContinuationJournal | undefined =
+    voiceApiClient
+      ? {
+          append: async (session, event) =>
+            (
+              await voiceApiClient.appendRecordingEvent(
+                session,
+                event,
+                AbortSignal.timeout(8000),
+              )
+            ).event,
+          read: async (session, scope) =>
+            (
+              await voiceApiClient.getRecordingEvents(
+                session,
+                AbortSignal.timeout(8000),
+              )
+            ).events.filter((event) =>
+              ["brandId", "callId", "recordingId", "legId"].every(
+                (key) =>
+                  event.scope[key as keyof typeof scope] ===
+                  scope[key as keyof typeof scope],
+              ),
+            ),
+        }
+      : undefined;
+  const recordingContinuation = createVoiceRecordingContinuation(
+    process.env,
+    options.recordingSource,
+    recordingJournal,
+  );
   const sessionComposer = new VoiceSessionComposer(
     composition.providerFactory,
     turnCoordinator,
+    recordingContinuation,
   );
 
   const server = new MediaWorkerServer({
     sessionComposer,
     sessionBindingResolver,
+    recordingContinuation,
+    callAuthorityVerifier: options.callAuthorityVerifier,
     voiceRuntimeProductionCapable: composition.productionCapable,
     voiceRuntimeNotCapableReason: composition.notCapableReason,
     // `recordingAdapter` is now constructed whenever this worker's own

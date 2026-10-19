@@ -242,3 +242,108 @@ export const voiceDialogueSnapshotContentSchema = z
 export type VoiceDialogueSnapshotContent = z.infer<
   typeof voiceDialogueSnapshotContentSchema
 >;
+
+/** Shared first-party recording continuation metadata. Byte provenance is
+ * established by SealedRecorder/object-store readback, never this DTO alone. */
+export const voiceRecordingScopeSchema = z
+  .object({ brandId: text, callId: text, recordingId: text, legId: text })
+  .strict();
+export const voiceRecordingManifestRefSchema = z
+  .object({
+    objectKey: label,
+    objectVersion: label,
+    checksum: z.string().regex(/^[a-f0-9]{64}$/),
+    byteLength: z.number().int().positive(),
+    durableAt: z.string().datetime(),
+  })
+  .strict();
+export const voiceRecordingSegmentSchema = voiceRecordingScopeSchema
+  .extend({
+    channel: z.enum(["inbound", "outbound"]),
+    startMs: z.number().int().nonnegative(),
+    endMs: z.number().int().positive(),
+    utcStart: z.string().datetime(),
+    utcEnd: z.string().datetime(),
+    ...voiceRecordingManifestRefSchema.shape,
+  })
+  .strict();
+export const voiceRecordingClosureSchema = z
+  .object({
+    closedEventId: label,
+    endedAt: z.string().datetime(),
+    endMs: z.number().int().positive(),
+    checkpointRefs: z.array(voiceRecordingManifestRefSchema),
+  })
+  .strict();
+export const voiceRecordingFinalizationSchema = z
+  .object({
+    scope: voiceRecordingScopeSchema,
+    recordingId: label,
+    manifestRef: voiceRecordingManifestRefSchema,
+    coverage: z
+      .object({
+        startMs: z.literal(0),
+        endMs: z.number().int().positive(),
+        channels: z.tuple([z.literal("inbound"), z.literal("outbound")]),
+        closedEventId: label,
+        endedAt: z.string().datetime(),
+      })
+      .strict(),
+    verifiedAt: z.string().datetime(),
+  })
+  .strict();
+export const voiceRecordingContinuationEventSchema = z.discriminatedUnion(
+  "kind",
+  [
+    z
+      .object({
+        kind: z.literal("segment"),
+        eventKey: label,
+        scope: voiceRecordingScopeSchema,
+        payload: voiceRecordingSegmentSchema,
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("checkpoint"),
+        eventKey: label,
+        scope: voiceRecordingScopeSchema,
+        payload: voiceRecordingManifestRefSchema,
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("closure"),
+        eventKey: label,
+        scope: voiceRecordingScopeSchema,
+        payload: voiceRecordingClosureSchema,
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("finalized"),
+        eventKey: label,
+        scope: voiceRecordingScopeSchema,
+        payload: voiceRecordingFinalizationSchema,
+      })
+      .strict(),
+  ],
+);
+export type VoiceRecordingContinuationEvent = z.infer<
+  typeof voiceRecordingContinuationEventSchema
+>;
+export type VoiceRecordingFinalization = z.infer<
+  typeof voiceRecordingFinalizationSchema
+>;
+
+/** Parsed contact proposals carry data only; they never infer consent from ASR.
+ * The original asserted caller identity is obtained from durable CRM admission. */
+export const voiceDialogueContactCandidateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    phone: z
+      .string()
+      .trim()
+      .regex(/^\+?\d{8,15}$/),
+  })
+  .strict();

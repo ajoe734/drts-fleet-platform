@@ -1,3 +1,4 @@
+import type { RecordingContinuation } from "../recording/recording-continuation";
 import {
   createServer,
   type IncomingMessage,
@@ -46,6 +47,7 @@ export interface MediaWorkerServerConfig {
   drainTimeoutMs?: number | undefined;
   serviceVersion?: string | undefined;
   recordingAdapter?: MediaRecordingAdapter | undefined;
+  recordingContinuation?: RecordingContinuation | undefined;
   /** Shared secret callers must present via the `x-drts-internal-key` header
    * to reach `/drain`, `/sessions`, `/recording/finalize`, or open a
    * WebSocket session. Defaults to `VOICE_MEDIA_INTERNAL_KEY`. */
@@ -131,6 +133,7 @@ export class MediaWorkerServer extends EventEmitter {
   private totalAdmitted = 0;
   private isRunning = false;
   private recordingAdapter?: MediaRecordingAdapter | undefined;
+  private readonly recordingContinuation?: RecordingContinuation | undefined;
   private readonly callAuthorityVerifier:
     | VoiceCallAuthorityVerifier
     | undefined;
@@ -142,6 +145,7 @@ export class MediaWorkerServer extends EventEmitter {
   constructor(config?: MediaWorkerServerConfig) {
     super();
     this.recordingAdapter = config?.recordingAdapter;
+    this.recordingContinuation = config?.recordingContinuation;
     this.callAuthorityVerifier = config?.callAuthorityVerifier;
     this.sessionComposer = config?.sessionComposer;
     this.sessionBindingResolver = config?.sessionBindingResolver;
@@ -456,10 +460,7 @@ export class MediaWorkerServer extends EventEmitter {
     // keeps running harmlessly in the background -- never awaited again,
     // never allowed to mutate anything after this point.
     const controller = new AbortController();
-    const timer = setTimeout(
-      () => controller.abort(),
-      this.sessionGrantTtlMs,
-    );
+    const timer = setTimeout(() => controller.abort(), this.sessionGrantTtlMs);
     let onAbort: () => void = () => {};
     try {
       return await new Promise<VoiceSessionBinding | undefined>(
@@ -942,7 +943,7 @@ export class MediaWorkerServer extends EventEmitter {
       this.readBoundedBody(req, this.config.maxHttpBodyBytes)
         .then(async (body) => {
           try {
-            if (!this.recordingAdapter) {
+            if (!this.recordingAdapter && !this.recordingContinuation) {
               res.statusCode = 503;
               res.end(
                 JSON.stringify({
@@ -1072,10 +1073,12 @@ export class MediaWorkerServer extends EventEmitter {
             const segments = Array.isArray(parsed.segments)
               ? parsed.segments
               : [];
-            const result = await this.recordingAdapter.sealFinalRecording({
-              scope,
-              segments,
-            });
+            const result = this.recordingContinuation
+              ? await this.recordingContinuation.finalize(sessionId, scope)
+              : await this.recordingAdapter!.sealFinalRecording({
+                  scope,
+                  segments,
+                });
             // Completed, not released: an authorized retry (lost response,
             // retried request) for this exact session/epoch must still
             // resolve this scope and reach the adapter's own reentrant
@@ -1232,7 +1235,12 @@ export class MediaWorkerServer extends EventEmitter {
     // reporting not-ready) -- that must close the channel, never crash the
     // worker or leave the socket silently unattended.
     try {
-      this.sessionComposer?.attach(sessionId, channel, session.binding);
+      this.sessionComposer?.attach(
+        sessionId,
+        channel,
+        session.binding,
+        this.sessionAuthority.getAuthoritativeScope(sessionId),
+      );
     } catch (err) {
       // The channel's own "close" listener (registered above) performs the
       // actual activeSessions/session.closed cleanup once this reaches the

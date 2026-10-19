@@ -1,3 +1,8 @@
+import { callbackTransport } from "../audit-voice-application-regression-20261018/callback-transport";
+import { VoiceCallbackService } from "../../../apps/api/src/modules/voice-booking/voice-callback.service";
+import { VoiceCallbackController } from "../../../apps/api/src/modules/voice-booking/voice-callback.controller";
+import { VoiceBookingController } from "../../../apps/api/src/modules/voice-booking/voice-booking.controller";
+import { randomBytes } from "node:crypto";
 // @vitest-environment jsdom
 import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -34,6 +39,8 @@ beforeEach(() => {
       brandId: "SIM-brand",
       callId: "original-call",
       linkedOrderId: "original-order",
+      contactName: "",
+      consentRef: "",
       reason: "SIM callback request",
       priority: "normal",
       dueAt: "2026-10-19T00:00:00Z",
@@ -214,4 +221,133 @@ it("renders sealed role/revision/phone/evidence and original-replacement history
   expect(screen.getByText("代叫聯絡人")).toBeTruthy();
   expect(screen.getByText("replacement-task-C")).toBeTruthy();
   expect(screen.getByText(/original consent/)).toBeTruthy();
+});
+
+it("actual mounted replacement controls consume production sealed roles and recover a lost create response through the original receipt", async () => {
+  process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = "v1";
+  process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY =
+    randomBytes(32).toString("base64");
+  try {
+    const h = callbackTransport();
+    const session = "66666666-6666-4666-8666-666666666666";
+    await h.contacts.initializeContacts({
+      voiceSessionId: session,
+      callerPhone: "0911000111",
+      bookerName: "A",
+      consentRef: "consent-A",
+    });
+    const callbacks = new VoiceCallbackService(
+        h.repo,
+        h.db as never,
+        h.contacts,
+      ),
+      controller = new VoiceCallbackController(callbacks, h.repo);
+    const contacts = new VoiceBookingController(
+      {} as never,
+      {} as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      h.contacts,
+      h.repo,
+    );
+    const original = await callbacks.createCallbackDurable({
+      voiceSessionId: session,
+      contactRevisionNumber: 2,
+      consentRef: "consent-A",
+      actionKey: "original",
+    });
+    h.tasks[0]!.status = "cancelled";
+    let selected = original.task.taskId,
+      lost = false;
+    const replacementWrites: Array<{ key: string; body: unknown }> = [];
+    vi.stubGlobal("fetch", async (raw: string, init?: RequestInit) => {
+      const url = new URL(raw);
+      let envelope: unknown;
+      if (url.pathname.endsWith("/callback-scopes"))
+        envelope = {
+          data: {
+            items: [
+              {
+                resourceScopeId: "6cd363c9-fda1-4da8-b523-e830d369babb",
+                brandId: "brand-1",
+              },
+            ],
+          },
+        };
+      else if (url.pathname.endsWith("/contacts"))
+        envelope =
+          init?.method === "POST"
+            ? await contacts.writeContacts(
+                session,
+                JSON.parse(String(init.body)),
+              )
+            : await contacts.getContacts(session);
+      else if (url.pathname.endsWith("/callback-receipts"))
+        envelope = await controller.receipt(url.searchParams.get("actionKey")!);
+      else if (url.pathname.endsWith("/callbacks") && init?.method === "POST") {
+        const key = new Headers(init.headers).get("Idempotency-Key")!,
+          body = JSON.parse(String(init.body));
+        replacementWrites.push({ key, body });
+        const result = await controller.create(session, body, key);
+        selected = result.data.task!.taskId;
+        if (!lost) {
+          lost = true;
+          throw Error("SIM response lost after actual server commit");
+        }
+        envelope = result;
+      } else if (url.pathname.endsWith("/callbacks"))
+        envelope = {
+          data: { items: [await callbacks.getTaskForRead(selected)] },
+        };
+      else envelope = await controller.get(url.pathname.split("/").at(-1)!);
+      return Response.json(envelope);
+    });
+    state.client = new ApiClient({ baseUrl: "https://api.example.test" });
+    render(<VoiceCallbacksPage />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: original.task.taskId + " · 已取消",
+      }),
+    );
+    await screen.findByText("0911000111");
+    for (const [label, value] of [
+      ["新聯絡人姓名", "C"],
+      ["新聯絡電話", "0933000333"],
+      ["新同意依據", "consent-C"],
+      ["聯絡人更正原因", "recipient changed"],
+    ])
+      fireEvent.change(screen.getByLabelText(label!), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "儲存新聯絡人" }));
+    await screen.findByText("新聯絡人已儲存；原待辦保留原快照。");
+    expect(screen.getByText("0911000111")).toBeTruthy(); // original task still A
+    fireEvent.click(
+      screen.getByRole("button", { name: "建立替換待辦／查回上次結果" }),
+    );
+    await screen.findByText("替換待辦結果尚未確認，請使用同一按鈕查回原操作。");
+    fireEvent.click(
+      screen.getByRole("button", { name: "建立替換待辦／查回上次結果" }),
+    );
+    await screen.findByText("操作已儲存");
+    expect(replacementWrites).toHaveLength(1); // retry recovered the actual receipt
+    expect(replacementWrites[0]!.body).toMatchObject({
+      contactRevisionNumber: 6,
+      consentRef: "consent-C",
+      replacesTaskId: original.task.taskId,
+    });
+    expect(await screen.findByText("0933000333")).toBeTruthy();
+    expect(
+      (await callbacks.getTaskForRead(original.task.taskId))?.contactPhone,
+    ).toBe("0911000111");
+  } finally {
+    delete process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION;
+    delete process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY;
+  }
 });

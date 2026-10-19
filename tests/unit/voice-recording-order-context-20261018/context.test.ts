@@ -72,6 +72,12 @@ function fixture(appliedMediaEpoch = 0) {
   });
   const repository = {
     isEnabled: () => true,
+    resolveRecordingContinuationScope: async () => ({
+      brandId: context.brand_id,
+      callId: session.callId,
+      recordingId: "original-recording",
+      legId: "original-leg",
+    }),
     findSessionById: async () => session,
     findAppliedMediaEpoch: async () => appliedMediaEpoch,
     casUpdateSessionControl: async (...args: [string, number, object]) => ({
@@ -84,7 +90,27 @@ function fixture(appliedMediaEpoch = 0) {
   };
   const service = new VoiceSessionService(repository as never);
   const finalize = vi.fn<
-    (params: { scope: { recordingId: string } }) => Promise<{
+    (params: {
+      scope: {
+        brandId: string;
+        callId: string;
+        recordingId: string;
+        legId: string;
+      };
+    }) => Promise<{
+      scope: {
+        brandId: string;
+        callId: string;
+        recordingId: string;
+        legId: string;
+      };
+      coverage: {
+        startMs: number;
+        endMs: number;
+        channels: string[];
+        closedEventId: string;
+        endedAt: string;
+      };
       recordingId: string;
       manifestRef: {
         objectKey: string;
@@ -100,11 +126,19 @@ function fixture(appliedMediaEpoch = 0) {
     // asked to -- the requested `scope.recordingId`, not an unrelated
     // identity (AUDIT-VOICE-APPLICATION-REGRESSION-20261018 review round 2
     // F3's scope/recordingId correlation requirement).
+    scope: params.scope,
+    coverage: {
+      startMs: 0,
+      endMs: 1000,
+      channels: ["inbound", "outbound"],
+      closedEventId: "provider-close-fixture",
+      endedAt: "2026-09-01T00:00:00.000Z",
+    },
     recordingId: params.scope.recordingId,
     manifestRef: {
       objectKey: "simulation/manifest",
       objectVersion: "1",
-      checksum: "simulation-checksum",
+      checksum: "a".repeat(64),
       byteLength: 4096,
       durableAt: new Date().toISOString(),
     },
@@ -182,8 +216,8 @@ describe("the original voice recording brand and order", () => {
         scope: {
           brandId: "actual-brand",
           callId: "original-call",
-          recordingId: "rec-original-call",
-          legId: null,
+          recordingId: "original-recording",
+          legId: "original-leg",
         },
         linkedOrderId: "original-order",
       }),
@@ -200,11 +234,13 @@ describe("the original voice recording brand and order", () => {
     h.finalize.mockImplementationOnce(async (params) => {
       h.context.bound_order_id = "original-order";
       return {
+        scope:params.scope,
+        coverage:{startMs:0,endMs:1000,channels:["inbound","outbound"],closedEventId:"provider-close-fixture",endedAt:"2026-09-01T00:00:00.000Z"},
         recordingId: params.scope.recordingId,
         manifestRef: {
           objectKey: "simulation/manifest",
           objectVersion: "1",
-          checksum: "simulation-checksum",
+          checksum: "a".repeat(64),
           byteLength: 4096,
           durableAt: new Date().toISOString(),
         },

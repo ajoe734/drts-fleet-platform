@@ -54,9 +54,13 @@ function fakeContactRepository() {
     | "invalidateUnconsumedConfirmationForContactChange"
   > = {
     isEnabled: () => true,
-    withTransaction: async (
-      work: (tx: VoiceQueryExecutor) => Promise<unknown>,
-    ) => {
+    withTransaction: async <T>(
+      work: (
+        tx: Parameters<
+          Parameters<VoiceSessionRepository["withTransaction"]>[0]
+        >[0],
+      ) => Promise<T>,
+    ): Promise<T> => {
       const previous = pending;
       let release!: () => void;
       pending = new Promise<void>((done) => {
@@ -65,7 +69,11 @@ function fakeContactRepository() {
       await previous;
       const snapshot = rows.slice();
       try {
-        return await work({} as VoiceQueryExecutor);
+        return await work(
+          {} as Parameters<
+            Parameters<VoiceSessionRepository["withTransaction"]>[0]
+          >[0],
+        );
       } catch (error) {
         rows.splice(0, rows.length, ...snapshot);
         throw error;
