@@ -79,7 +79,7 @@ const supplyReviewEn = {
   "supplyReview.detail.startReview": "Start Review",
   "supplyReview.detail.requestRevision": "Request Revision",
   "supplyReview.detail.reject": "Reject",
-  "supplyReview.detail.approveProvision": "Approve & Provision",
+  "supplyReview.detail.approveProvision": "Approve and update records",
   "supplyReview.detail.reload": "Reload",
   "supplyReview.detail.opError": "Operation Error",
   "supplyReview.detail.diffTitle":
@@ -103,26 +103,27 @@ const supplyReviewEn = {
   "supplyReview.detail.approveNoNote": "— N/A for Approval —",
   "supplyReview.detail.commentPlaceholder":
     "Enter reviewer comment for fleet partner...",
-  "supplyReview.detail.canonicalPreviewTitle": "Canonical Provision Preview",
+  "supplyReview.detail.canonicalPreviewTitle": "Changes after approval",
   "supplyReview.detail.previewSubtitle":
-    "VQ-4 · Approval mutates registry (irreversible)",
+    "Approval updates official records and cannot be undone here",
   "supplyReview.detail.previewWarn":
-    "Approval is a single transaction: provision canonical + affiliation + readiness + audit. Integrity check failures prevent approval.",
-  "supplyReview.detail.guardrailTitle": "Guardrail",
+    "Approval creates or updates official driver or vehicle records, links them to the fleet partner, rechecks service requirements, and saves the review history and notifications in one transaction. Complete missing fields or documents before approval.",
+  "supplyReview.detail.guardrailTitle": "Review requirements",
   "supplyReview.detail.guardrailBody":
-    "Reviewers cannot approve self-submitted fleet data (REVIEWER_SELF_APPROVAL_DENIED) and cannot bypass required documents.",
+    "You cannot approve a fleet submission you sent yourself. Ask another authorized reviewer to handle it. Required documents must be complete before approval.",
   "supplyReview.detail.auditReceiptTitle": "Audit Receipt",
   "supplyReview.detail.confirmApproveTitle":
-    "Confirm Approval and Provision Canonical?",
+    "Confirm approval and record updates?",
   "supplyReview.detail.confirmApproveIntro":
-    "This action will approve submission ({submissionId}) and within a single transaction:",
+    "The following changes for application {submissionId} will be saved together:",
   "supplyReview.detail.confirmApproveStep1":
-    "1. Provision / update canonical record",
+    "1. Create or update the official driver or vehicle record",
   "supplyReview.detail.confirmApproveStep2":
-    "2. Bind fleet partner affiliation relationship",
-  "supplyReview.detail.confirmApproveStep3": "3. Recalculate readiness",
+    "2. Link the driver or vehicle to the fleet partner",
+  "supplyReview.detail.confirmApproveStep3":
+    "3. Recheck whether service requirements are met",
   "supplyReview.detail.confirmApproveStep4":
-    "4. Write audit log and send notifications",
+    "4. Save the review history and notify the fleet partner and driver",
   "supplyReview.detail.cancel": "Cancel",
   "supplyReview.detail.selectReason": "— Select Reason —",
   "supplyReview.detail.actionCommentPlaceholder":
@@ -226,9 +227,9 @@ const supplyReviewEn = {
   "supplyReview.banner.conflictTitle": "SUBMISSION_REVISION_CONFLICT · 409",
   "supplyReview.banner.conflictBody":
     "This submission has been updated (revision {rev}). Please reload before reviewing.",
-  "supplyReview.banner.selfApprovalTitle": "REVIEWER_SELF_APPROVAL_DENIED",
+  "supplyReview.banner.selfApprovalTitle": "Another reviewer is required",
   "supplyReview.banner.selfApprovalBody":
-    "Reviewers cannot approve submissions submitted by themselves as fleet partners (REVIEWER_SELF_APPROVAL_DENIED).",
+    "You cannot approve a fleet submission you sent yourself. Ask another authorized reviewer to review this application.",
   "supplyReview.banner.loadingBody":
     "Loading submission details from server...",
   "supplyReview.banner.processing": "Processing, please wait...",
@@ -239,7 +240,7 @@ const supplyReviewEn = {
   "supplyReview.validation.completeBody":
     "All required fields complete · Document types complete · No duplicate targets.",
   "supplyReview.validation.completeInfo":
-    "Insurance policies and affiliation contracts verified. Approving will sync canonical records and readiness.",
+    "Insurance policies and fleet contracts have been checked. Approval updates official records and checks whether service requirements are met.",
   "supplyReview.validation.missingDocs":
     "Missing required documents (Vehicle Registration / Insurance Policy). Integrity check failed, cannot approve.",
   "supplyReview.validation.docExpired":
@@ -248,8 +249,8 @@ const supplyReviewEn = {
   // DL items & Modal
   "supplyReview.dl.createUpdateVehicle": "Create / Update vehicle",
   "supplyReview.dl.createUpdateDriver": "Create / Update driver",
-  "supplyReview.dl.affiliation": "Affiliation",
-  "supplyReview.dl.recalcReadiness": "Recalculate readiness",
+  "supplyReview.dl.affiliation": "Fleet relationship",
+  "supplyReview.dl.recalcReadiness": "Service requirement checks",
   "supplyReview.dl.notifications": "Notifications",
   "supplyReview.dl.notifyTargets": "Fleet Partner + Driver",
   "supplyReview.modal.confirmRevisionTitle":
@@ -258,7 +259,7 @@ const supplyReviewEn = {
   "supplyReview.modal.reasonLabel": "Reason Code (Required)",
   "supplyReview.modal.commentLabel": "Comment (Required)",
   "supplyReview.modal.processing": "Processing...",
-  "supplyReview.modal.confirmApproveBtn": "Confirm Approval · provision",
+  "supplyReview.modal.confirmApproveBtn": "Confirm approval",
   "supplyReview.modal.confirmRevisionBtn": "Confirm Revision",
   "supplyReview.modal.confirmRejectBtn": "Confirm Reject",
   "supplyReview.defaultCommentStart": "Platform reviewer starting review",
@@ -332,7 +333,7 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
   "supplyReview.detail.startReview": "受理審核 · start review",
   "supplyReview.detail.requestRevision": "退回補正",
   "supplyReview.detail.reject": "駁回",
-  "supplyReview.detail.approveProvision": "核可 · provision",
+  "supplyReview.detail.approveProvision": "核可並更新資料",
   "supplyReview.detail.reload": "重新載入",
   "supplyReview.detail.opError": "操作錯誤",
   "supplyReview.detail.diffTitle": "逐欄位對照 · submission vs canonical",
@@ -352,23 +353,22 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
   "supplyReview.detail.noteSubtitle": "VQ-3 · 退補 / 駁回需填 reason code",
   "supplyReview.detail.approveNoNote": "— 核可免填 —",
   "supplyReview.detail.commentPlaceholder": "輸入給車行的審核說明…",
-  "supplyReview.detail.canonicalPreviewTitle": "核可將寫入 · canonical preview",
-  "supplyReview.detail.previewSubtitle":
-    "VQ-4 · approve 會改動 registry（不可逆）",
+  "supplyReview.detail.canonicalPreviewTitle": "核可後的資料異動",
+  "supplyReview.detail.previewSubtitle": "核可會更新正式資料，本頁無法復原",
   "supplyReview.detail.previewWarn":
-    "核可為單一交易：provision canonical + affiliation + readiness + audit。完整性未過則 SUBMISSION_INCOMPLETE，不可核可。",
-  "supplyReview.detail.guardrailTitle": "把關 · guardrail",
+    "核可會在同一筆交易中建立或更新司機／車輛正式資料、綁定車行關係、重新檢查服務條件，並保存審核紀錄及通知。資料或文件未齊全時無法核可，請先退回補正。",
+  "supplyReview.detail.guardrailTitle": "審核須知",
   "supplyReview.detail.guardrailBody":
-    "審核人不得核可自己以車行身分提交的資料（REVIEWER_SELF_APPROVAL_DENIED），不得繞過必填文件。",
+    "不得核可自己以車行身分提交的資料，請交由其他具審核權限的人員處理。必要文件須齊全，不得略過檢查。",
   "supplyReview.detail.auditReceiptTitle": "審核憑證 · audit receipt",
-  "supplyReview.detail.confirmApproveTitle": "確認核可並寫入 canonical？",
+  "supplyReview.detail.confirmApproveTitle": "確認核可並更新正式資料？",
   "supplyReview.detail.confirmApproveIntro":
-    "此動作將把該筆 submission ({submissionId}) 核可，並在單一交易內：",
-  "supplyReview.detail.confirmApproveStep1":
-    "1. Provision / 更新 canonical 紀錄",
-  "supplyReview.detail.confirmApproveStep2": "2. 綁定車行 affiliation 關係",
-  "supplyReview.detail.confirmApproveStep3": "3. 重新計算 readiness",
-  "supplyReview.detail.confirmApproveStep4": "4. 寫入 audit log 並發送通知",
+    "即將核可申請 {submissionId}，以下異動會在同一筆交易中完成：",
+  "supplyReview.detail.confirmApproveStep1": "1. 建立或更新司機／車輛正式資料",
+  "supplyReview.detail.confirmApproveStep2":
+    "2. 建立司機／車輛與車行的歸屬關係",
+  "supplyReview.detail.confirmApproveStep3": "3. 重新檢查是否符合服務條件",
+  "supplyReview.detail.confirmApproveStep4": "4. 保存審核紀錄並通知車行與司機",
   "supplyReview.detail.cancel": "取消",
   "supplyReview.detail.selectReason": "— 請選擇 —",
   "supplyReview.detail.actionCommentPlaceholder": "說明具體補正要求或駁回原因…",
@@ -473,17 +473,17 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
   "supplyReview.validation.completeBody":
     "必填欄位齊全 · 文件類型完整 · 無重複標的。",
   "supplyReview.validation.completeInfo":
-    "保險保單與加盟合約已完成校對，核可後將同步更新 canonical 紀錄與 readiness。",
+    "保險保單與車行合約已完成校對，核可後將更新正式資料並檢查是否符合服務條件。",
   "supplyReview.validation.missingDocs":
     "缺必要文件（行照 / 保險保單），完整性未過，不可核可。",
   "supplyReview.validation.docExpired":
     "文件過期：{name} 已於 {until} 到期，需要求車行補正。",
 
   // DL items & Modal
-  "supplyReview.dl.createUpdateVehicle": "建立 / 更新 vehicle",
-  "supplyReview.dl.createUpdateDriver": "建立 / 更新 driver",
-  "supplyReview.dl.affiliation": "affiliation",
-  "supplyReview.dl.recalcReadiness": "重算 readiness",
+  "supplyReview.dl.createUpdateVehicle": "建立／更新車輛資料",
+  "supplyReview.dl.createUpdateDriver": "建立／更新司機資料",
+  "supplyReview.dl.affiliation": "車行歸屬",
+  "supplyReview.dl.recalcReadiness": "服務條件檢查",
   "supplyReview.dl.notifications": "通知",
   "supplyReview.dl.notifyTargets": "車行 + 司機",
   "supplyReview.modal.confirmRevisionTitle": "確認退回車行補正？",
@@ -491,7 +491,7 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
   "supplyReview.modal.reasonLabel": "reason code（必填）",
   "supplyReview.modal.commentLabel": "說明 / comment（必填）",
   "supplyReview.modal.processing": "處理中…",
-  "supplyReview.modal.confirmApproveBtn": "確認核可 · provision",
+  "supplyReview.modal.confirmApproveBtn": "確認核可",
   "supplyReview.modal.confirmRevisionBtn": "確認退補",
   "supplyReview.modal.confirmRejectBtn": "確認駁回",
   "supplyReview.defaultCommentStart": "平台審核人受理審核",

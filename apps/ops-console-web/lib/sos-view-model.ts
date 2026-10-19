@@ -1,5 +1,6 @@
 import type {
   DriverRegistryRecord,
+  DriverSosEventRecord,
   IncidentRecord,
   IncidentSeverity,
   IncidentTimelineEntry,
@@ -7,9 +8,11 @@ import type {
 } from "@drts/contracts";
 import type { CanvasTone } from "@drts/ui-web";
 
-const SOS_EVENT_NO_PATTERN = /SOS-\d{8}-\d{4}/;
-const GENERATED_DESCRIPTION_PATTERN =
-  /^Driver SOS SOS-\d{8}-\d{4} submitted from the driver app\.$/;
+// Accept the actual API producer and the original displayed event numbers.
+const SOS_EVENT_NO_PATTERN = /SOS-(?:\d{14}-[0-9A-Fa-f]{6}|\d{8}-\d{4})\b/;
+const GENERATED_DESCRIPTION_PATTERN = new RegExp(
+  `^Driver SOS ${SOS_EVENT_NO_PATTERN.source} submitted from the driver app\\.$`,
+);
 
 export type SosPillTone = Exclude<CanvasTone, "neutral">;
 
@@ -83,6 +86,25 @@ export function extractSosEventNo(
     incident.description.match(SOS_EVENT_NO_PATTERN)?.[0] ??
     null
   );
+}
+
+/** Ops duty ownership comes from the canonical SOS acknowledgment, not a
+ * generic Incident assignment which can exist before any operator ACK. */
+export function applyCanonicalSosDuty(
+  incident: IncidentRecord,
+  event: Pick<DriverSosEventRecord, "status" | "dutyAcknowledgement">,
+): IncidentRecord {
+  const status =
+    event.status === "investigating" ||
+    event.status === "resolved" ||
+    event.status === "closed"
+      ? event.status
+      : incident.status;
+  return {
+    ...incident,
+    status,
+    assignedTo: event.dutyAcknowledgement.acknowledgedByActorId,
+  };
 }
 
 export function isSosIncident(
