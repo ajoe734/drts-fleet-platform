@@ -92,7 +92,7 @@ describe("forwarder service", () => {
     const { auditService, ownedMobilityService, forwarderService } =
       createServices();
 
-    const inbound = forwarderService.ingestExternalOrder(
+    const inbound = await forwarderService.ingestExternalOrder(
       {
         platformCode: PLATFORM_CODE_UBER,
         externalOrderId: "UBER-ORDER-0001",
@@ -104,7 +104,7 @@ describe("forwarder service", () => {
       "forwarder-inbound-001",
     );
 
-    const broadcast = forwarderService.broadcastOrder(
+    const broadcast = await forwarderService.broadcastOrder(
       inbound.mirrorOrderId,
       {
         candidateDriverIds: ["drv-demo-001"],
@@ -118,7 +118,7 @@ describe("forwarder service", () => {
       },
       "forwarder-accept-001",
     );
-    const synced = forwarderService.syncNativeStatus(
+    const synced = await forwarderService.syncNativeStatus(
       inbound.mirrorOrderId,
       {
         nativeStatus: "confirmed_by_platform",
@@ -148,7 +148,7 @@ describe("forwarder service", () => {
   it("covers SC-016 lost_race after a local accept while preserving authoritative snapshot", async () => {
     const { forwarderService, ownedMobilityService } = createServices();
 
-    const inbound = forwarderService.ingestExternalOrder({
+    const inbound = await forwarderService.ingestExternalOrder({
       platformCode: PLATFORM_CODE_UBER,
       externalOrderId: "UBER-ORDER-0002",
       payload: {
@@ -156,13 +156,13 @@ describe("forwarder service", () => {
       },
     });
 
-    forwarderService.broadcastOrder(inbound.mirrorOrderId, {
+    await forwarderService.broadcastOrder(inbound.mirrorOrderId, {
       candidateDriverIds: ["drv-demo-001"],
     });
     await forwarderService.relayDriverAccept(inbound.mirrorOrderId, {
       driverId: "drv-demo-001",
     });
-    const synced = forwarderService.syncNativeStatus(inbound.mirrorOrderId, {
+    const synced = await forwarderService.syncNativeStatus(inbound.mirrorOrderId, {
       nativeStatus: "lost_race",
       payload: {
         externalWinner: "other-fleet",
@@ -177,10 +177,10 @@ describe("forwarder service", () => {
     expect(ownedMobilityService.listOrders()).toHaveLength(0);
   });
 
-  it("covers SC-017 cancelled_by_platform after mirror creation and keeps adapter health visible", () => {
+  it("covers SC-017 cancelled_by_platform after mirror creation and keeps adapter health visible", async () => {
     const { forwarderService } = createServices();
 
-    const inbound = forwarderService.ingestExternalOrder({
+    const inbound = await forwarderService.ingestExternalOrder({
       platformCode: PLATFORM_CODE_LINE_TAXI,
       externalOrderId: "LT-ORDER-0003",
       payload: {
@@ -188,7 +188,7 @@ describe("forwarder service", () => {
       },
     });
 
-    const synced = forwarderService.syncNativeStatus(inbound.mirrorOrderId, {
+    const synced = await forwarderService.syncNativeStatus(inbound.mirrorOrderId, {
       nativeStatus: "cancelled_by_platform",
       payload: {
         cancelReason: "external_customer_cancelled",
@@ -267,7 +267,7 @@ describe("forwarder service", () => {
       "FWD-persisted-001",
     );
 
-    forwarderService.syncNativeStatus("FWD-persisted-001", {
+    await forwarderService.syncNativeStatus("FWD-persisted-001", {
       nativeStatus: "confirmed_by_platform",
       payload: {
         confirmationCode: "CONF-PERSISTED-001",
