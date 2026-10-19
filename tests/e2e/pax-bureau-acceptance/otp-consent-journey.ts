@@ -88,9 +88,14 @@ export function directOtpVerify(
   page: Page,
   body: { target: string; provider: "phone"; code: string; challenge: string },
 ): Promise<APIResponse> {
+  // The Next.js BFF's checkCSRF (app/api/passenger-app/[...path]/route.ts)
+  // requires a same-origin Origin header on every non-GET call, which a real
+  // browser fetch() sends automatically but page.request does not; without
+  // this header the BFF returns 403 CSRF_CHECK_FAILED before ever reaching
+  // the real OTP verify logic, not the 400 invalid_code these tests assert.
   return page.request.post(`${PAX}/api/passenger-app/auth/otp/verify`, {
     data: body,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Origin: PAX },
   });
 }
 
