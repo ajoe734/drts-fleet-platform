@@ -139,13 +139,13 @@ export class RegulatoryRegistryController {
   }
 
   @Post("vehicles/:vehicleId/offboarding")
-  initiateVehicleOffboarding(
+  async initiateVehicleOffboarding(
     @Param("vehicleId") vehicleId: string,
     @Body() command: InitiateVehicleOffboardingCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.initiateVehicleOffboarding(
+      await this.regulatoryRegistryService.initiateVehicleOffboarding(
         vehicleId,
         command,
       ),
@@ -154,13 +154,13 @@ export class RegulatoryRegistryController {
   }
 
   @Post("vehicles/:vehicleId/offboarding/complete-debranding")
-  completeVehicleDebranding(
+  async completeVehicleDebranding(
     @Param("vehicleId") vehicleId: string,
     @Body() command: CompleteVehicleDebrandingCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.completeVehicleDebranding(
+      await this.regulatoryRegistryService.completeVehicleDebranding(
         vehicleId,
         command,
       ),

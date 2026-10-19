@@ -436,7 +436,9 @@ describe("RegulatoryRegistryService", () => {
   it("does not fabricate profile metadata for drivers without a stored profile", () => {
     const { service } = createService();
 
-    (service as { drivers: Array<Record<string, unknown>> }).drivers.unshift({
+    (
+      service as unknown as { drivers: Array<Record<string, unknown>> }
+    ).drivers.unshift({
       driverId: "drv-no-profile-001",
       name: "No Profile Driver",
       supportedServiceBuckets: ["standard_taxi"],
@@ -465,16 +467,25 @@ describe("RegulatoryRegistryService", () => {
     });
   });
 
-  it("tracks debranding work during vehicle offboarding", () => {
+  it("tracks debranding work during vehicle offboarding, and the completed final exit stays excluded from dispatch and candidates (C073 正式退場: debranding 閉環後不得回候選)", async () => {
     const { service } = createService();
 
-    const offboarded = service.initiateVehicleOffboarding("veh-demo-001", {
-      reason: "Partner exit",
-      requestedBy: "ops-lead",
-      debrandingRequired: true,
-      debrandingDueAt: "2026-05-02T00:00:00.000Z",
-      debrandingTicketId: "DEBRAND-001",
-    });
+    // veh-demo-001 is a real, already-paired, fully-compliant seed vehicle
+    // (drv-demo-001, active contract/insurance/exclusivity); it is dispatchable
+    // before offboarding starts, so any post-completion exclusion below is
+    // caused by the final-exit rule itself, not by missing supply.
+    expect(service.getVehicleDispatchability("veh-demo-001")).toBe(true);
+
+    const offboarded = await service.initiateVehicleOffboarding(
+      "veh-demo-001",
+      {
+        reason: "Partner exit",
+        requestedBy: "ops-lead",
+        debrandingRequired: true,
+        debrandingDueAt: "2026-05-02T00:00:00.000Z",
+        debrandingTicketId: "DEBRAND-001",
+      },
+    );
 
     expect(offboarded).toMatchObject({
       dispatchableFlag: false,
@@ -493,7 +504,7 @@ describe("RegulatoryRegistryService", () => {
       },
     });
 
-    const completed = service.completeVehicleDebranding("veh-demo-001", {
+    const completed = await service.completeVehicleDebranding("veh-demo-001", {
       debrandingTicketId: "DEBRAND-001",
       notes: "Branding removed at depot",
     });
@@ -503,9 +514,48 @@ describe("RegulatoryRegistryService", () => {
       debrandingStatus: "completed",
       debrandingTicketId: "DEBRAND-001",
     });
-    expect(completed.supplyLifecycle.dispatch.blockedReasons).not.toContain(
+    // Original Source QA restoration note superseded by the C073 final-exit
+    // authority: a vehicle that has closed out its debranding work order is
+    // retired for good, not merely unblocked from a *pending* debranding
+    // hold. This is deliberately the opposite of what this assertion used to
+    // check (it previously asserted the reason was gone, i.e. the vehicle
+    // regained eligibility) — that was the exact bug C073 closes.
+    expect(completed.supplyLifecycle.dispatch.blockedReasons).toContain(
       "offboarding_pending_debranding",
     );
+    expect(completed.dispatchableFlag).toBe(false);
+    expect(service.getVehicleDispatchability("veh-demo-001")).toBe(false);
+    expect(
+      service
+        .getEligibleCandidates("standard_taxi")
+        .some((candidate) => candidate.vehicleId === "veh-demo-001"),
+    ).toBe(false);
+  });
+
+  it("a canonical write failure during final exit rejects the caller and reports the failure, instead of a log-only catch (C073 正式退場: canonical write 失敗需誠實回傳)", async () => {
+    const persistError = new Error("canonical registry write failed");
+    const { service, regulatoryRegistryRepository } = createService({
+      persistChanges: vi.fn().mockRejectedValue(persistError),
+    });
+
+    await expect(
+      service.initiateVehicleOffboarding("veh-demo-001", {
+        reason: "Partner exit",
+        requestedBy: "ops-lead",
+        debrandingRequired: false,
+      }),
+    ).rejects.toThrow(persistError);
+    expect(
+      regulatoryRegistryRepository.reportPersistenceFailure,
+    ).toHaveBeenCalledWith(persistError, "initiate_vehicle_offboarding");
+
+    // The rejected staged command must not replace the canonical read model.
+    expect(
+      service
+        .listVehicles()
+        .find((vehicle) => vehicle.vehicleId === "veh-demo-001")
+        ?.supplyLifecycle.offboarding.status,
+    ).toBe("none");
   });
 
   it("surfaces rejected exclusivity in vehicle lifecycle", () => {

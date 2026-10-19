@@ -165,8 +165,18 @@ export class FleetPartnerController {
     return actorId;
   }
 
-  private actorId(actorId?: string) {
-    return actorId?.trim() || "fleet-partner-portal";
+  // The undecorated _untrustedActorId positions retain direct-call source
+  // compatibility only. HTTP attribution always comes from CurrentIdentity.
+  private requirePartnerActorId(identity: BootstrapRequestIdentity | null) {
+    const actorId = identity?.actorId?.trim();
+    if (!actorId) {
+      throw new ApiRequestError(
+        401,
+        "AUTHENTICATION_REQUIRED",
+        "A verified partner actor is required.",
+      );
+    }
+    return actorId;
   }
 
   @Get("admin/fleet-partners")
@@ -433,7 +443,7 @@ export class FleetPartnerController {
   @Post("fleet-partner/statements/:statementId/confirm")
   async confirmPortalStatement(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
-    @Headers("x-actor-id") actorId: string | undefined,
+    _untrustedActorId: string | undefined,
     @Param("statementId") statementId: string,
     @Body() command: ConfirmFleetPartnerStatementCommand,
     @Headers("x-request-id") requestId?: string,
@@ -442,7 +452,7 @@ export class FleetPartnerController {
     const statement = await this.fleetPartnerService.recordStatementDecision(
       this.documentPartner(fleetPartnerId, identity),
       statementId,
-      this.actorId(identity?.actorId ?? actorId),
+      this.requirePartnerActorId(identity),
       "confirmed",
       command?.note,
     );
@@ -452,7 +462,7 @@ export class FleetPartnerController {
   @Post("fleet-partner/statements/:statementId/dispute")
   async disputePortalStatement(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
-    @Headers("x-actor-id") actorId: string | undefined,
+    _untrustedActorId: string | undefined,
     @Param("statementId") statementId: string,
     @Body() command: DisputeFleetPartnerStatementCommand,
     @Headers("x-request-id") requestId?: string,
@@ -461,7 +471,7 @@ export class FleetPartnerController {
     const statement = await this.fleetPartnerService.recordStatementDecision(
       this.documentPartner(fleetPartnerId, identity),
       statementId,
-      this.actorId(identity?.actorId ?? actorId),
+      this.requirePartnerActorId(identity),
       "disputed",
       command?.reason,
     );
@@ -544,14 +554,15 @@ export class FleetPartnerController {
   @Post("fleet-partner/supply-submissions/drivers")
   async createDriverSupplySubmission(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
-    @Headers("x-actor-id") actorId: string | undefined,
+    _untrustedActorId: string | undefined,
     @Body() command: CreateDriverSupplySubmissionCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       await this.supplySubmissionService.createDriverDraft(
-        this.requireFleetPartnerId(fleetPartnerId),
-        this.actorId(actorId),
+        this.documentPartner(fleetPartnerId, identity),
+        this.requirePartnerActorId(identity),
         command,
         requestId,
       ),
@@ -562,16 +573,17 @@ export class FleetPartnerController {
   @Put("fleet-partner/supply-submissions/:submissionId/driver")
   async updateDriverSupplySubmission(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
-    @Headers("x-actor-id") actorId: string | undefined,
+    _untrustedActorId: string | undefined,
     @Param("submissionId") submissionId: string,
     @Body() command: UpdateDriverSupplySubmissionCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       await this.supplySubmissionService.updateDriverDraft(
-        this.requireFleetPartnerId(fleetPartnerId),
+        this.documentPartner(fleetPartnerId, identity),
         submissionId,
-        this.actorId(actorId),
+        this.requirePartnerActorId(identity),
         command,
         requestId,
       ),
@@ -582,14 +594,15 @@ export class FleetPartnerController {
   @Post("fleet-partner/supply-submissions/vehicles")
   async createVehicleSupplySubmission(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
-    @Headers("x-actor-id") actorId: string | undefined,
+    _untrustedActorId: string | undefined,
     @Body() command: CreateVehicleSupplySubmissionCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       await this.supplySubmissionService.createVehicleDraft(
-        this.requireFleetPartnerId(fleetPartnerId),
-        this.actorId(actorId),
+        this.documentPartner(fleetPartnerId, identity),
+        this.requirePartnerActorId(identity),
         command,
         requestId,
       ),
@@ -600,16 +613,17 @@ export class FleetPartnerController {
   @Put("fleet-partner/supply-submissions/:submissionId/vehicle")
   async updateVehicleSupplySubmission(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
-    @Headers("x-actor-id") actorId: string | undefined,
+    _untrustedActorId: string | undefined,
     @Param("submissionId") submissionId: string,
     @Body() command: UpdateVehicleSupplySubmissionCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       await this.supplySubmissionService.updateVehicleDraft(
-        this.requireFleetPartnerId(fleetPartnerId),
+        this.documentPartner(fleetPartnerId, identity),
         submissionId,
-        this.actorId(actorId),
+        this.requirePartnerActorId(identity),
         command,
         requestId,
       ),
@@ -620,7 +634,7 @@ export class FleetPartnerController {
   @Post("fleet-partner/supply-submissions/:submissionId/documents/upload-url")
   async createSupplyDocumentUploadUrl(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
-    @Headers("x-actor-id") actorId: string | undefined,
+    _untrustedActorId: string | undefined,
     @Param("submissionId") submissionId: string,
     @Body() command: CreateSupplyDocumentUploadUrlCommand,
     @Headers("x-request-id") requestId?: string,
@@ -630,7 +644,7 @@ export class FleetPartnerController {
       await this.supplyDocumentService.createUploadUrl(
         this.documentPartner(fleetPartnerId, identity),
         submissionId,
-        this.actorId(actorId),
+        this.requirePartnerActorId(identity),
         command,
         requestId,
       ),
@@ -709,7 +723,7 @@ export class FleetPartnerController {
   @Post("fleet-partner/supply-submissions/:submissionId/documents/confirm")
   async confirmSupplyDocumentUpload(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
-    @Headers("x-actor-id") actorId: string | undefined,
+    _untrustedActorId: string | undefined,
     @Param("submissionId") submissionId: string,
     @Body() command: ConfirmSupplyDocumentUploadCommand,
     @Headers("x-request-id") requestId?: string,
@@ -719,7 +733,7 @@ export class FleetPartnerController {
       await this.supplyDocumentService.confirmUpload(
         this.documentPartner(fleetPartnerId, identity),
         submissionId,
-        this.actorId(actorId),
+        this.requirePartnerActorId(identity),
         command,
         requestId,
       ),
@@ -732,7 +746,7 @@ export class FleetPartnerController {
   )
   async deleteSupplyDocument(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
-    @Headers("x-actor-id") actorId: string | undefined,
+    _untrustedActorId: string | undefined,
     @Param("submissionId") submissionId: string,
     @Param("documentId") documentId: string,
     @Body() command: DeleteSupplyDocumentCommand,
@@ -744,7 +758,7 @@ export class FleetPartnerController {
         this.documentPartner(fleetPartnerId, identity),
         submissionId,
         documentId,
-        this.actorId(actorId),
+        this.requirePartnerActorId(identity),
         command,
         requestId,
       ),
@@ -755,16 +769,17 @@ export class FleetPartnerController {
   @Post("fleet-partner/supply-submissions/:submissionId/submit")
   async submitSupplySubmission(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
-    @Headers("x-actor-id") actorId: string | undefined,
+    _untrustedActorId: string | undefined,
     @Param("submissionId") submissionId: string,
     @Body() command: SubmitSupplySubmissionCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       await this.supplySubmissionService.submitSupplySubmission(
-        this.requireFleetPartnerId(fleetPartnerId),
+        this.documentPartner(fleetPartnerId, identity),
         submissionId,
-        this.actorId(actorId),
+        this.requirePartnerActorId(identity),
         command,
         requestId,
       ),
@@ -775,16 +790,17 @@ export class FleetPartnerController {
   @Post("fleet-partner/supply-submissions/:submissionId/withdraw")
   async withdrawSupplySubmission(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
-    @Headers("x-actor-id") actorId: string | undefined,
+    _untrustedActorId: string | undefined,
     @Param("submissionId") submissionId: string,
     @Body() command: WithdrawSupplySubmissionCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       await this.supplySubmissionService.withdrawSupplySubmission(
-        this.requireFleetPartnerId(fleetPartnerId),
+        this.documentPartner(fleetPartnerId, identity),
         submissionId,
-        this.actorId(actorId),
+        this.requirePartnerActorId(identity),
         command,
         requestId,
       ),
@@ -909,7 +925,7 @@ export class FleetPartnerController {
   @Post("fleet-partner/cases/:caseId/reply")
   async submitPortalCaseReply(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
-    @Headers("x-actor-id") actorId: string | undefined,
+    _untrustedActorId: string | undefined,
     @Param("caseId") caseId: string,
     @Body() command: SubmitFleetCaseReplyCommand,
     @Headers("x-request-id") requestId?: string,
@@ -918,7 +934,7 @@ export class FleetPartnerController {
     const result = await this.caseService.submitReply(
       this.documentPartner(fleetPartnerId, identity),
       caseId,
-      this.actorId(actorId),
+      this.requirePartnerActorId(identity),
       command,
       requestId,
     );
@@ -928,7 +944,7 @@ export class FleetPartnerController {
   @Post("fleet-partner/cases/:caseId/attachments/upload-url")
   async createPortalCaseAttachmentUploadUrl(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
-    @Headers("x-actor-id") actorId: string | undefined,
+    _untrustedActorId: string | undefined,
     @Param("caseId") caseId: string,
     @Body() command: CreateCaseAttachmentUploadUrlCommand,
     @Headers("x-request-id") requestId?: string,
@@ -937,7 +953,7 @@ export class FleetPartnerController {
     const result = await this.caseService.createAttachmentUploadUrl(
       this.documentPartner(fleetPartnerId, identity),
       caseId,
-      this.actorId(actorId),
+      this.requirePartnerActorId(identity),
       command,
     );
     return toApiSuccessEnvelope(result, requestId);
@@ -987,7 +1003,7 @@ export class FleetPartnerController {
   @Post("fleet-partner/cases/:caseId/attachments/confirm")
   async confirmPortalCaseAttachmentUpload(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
-    @Headers("x-actor-id") actorId: string | undefined,
+    _untrustedActorId: string | undefined,
     @Param("caseId") caseId: string,
     @Body() command: ConfirmCaseAttachmentUploadCommand,
     @Headers("x-request-id") requestId?: string,
@@ -996,7 +1012,7 @@ export class FleetPartnerController {
     const result = await this.caseService.confirmAttachmentUpload(
       this.documentPartner(fleetPartnerId, identity),
       caseId,
-      this.actorId(actorId),
+      this.requirePartnerActorId(identity),
       command,
     );
     return toApiSuccessEnvelope(result, requestId);

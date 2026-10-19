@@ -756,7 +756,7 @@ describe("PRD 9.10.1 regulatory rosters", () => {
     const vehicles = services.regulatoryRegistryService.listVehicles();
     const target = vehicles[0]!;
 
-    services.regulatoryRegistryService.initiateVehicleOffboarding(
+    await services.regulatoryRegistryService.initiateVehicleOffboarding(
       target.vehicleId,
       {
         reason: "sold",
@@ -828,7 +828,7 @@ describe("PRD 9.10.1 regulatory rosters", () => {
   it("keeps the running total right when one month is requested", async () => {
     const services = createServices();
     const vehicles = services.regulatoryRegistryService.listVehicles();
-    services.regulatoryRegistryService.initiateVehicleOffboarding(
+    await services.regulatoryRegistryService.initiateVehicleOffboarding(
       vehicles[0]!.vehicleId,
       {
         reason: "sold",

@@ -4,6 +4,31 @@ export interface FleetDocumentUploadIntent {
   headers: Record<string, string>;
 }
 
+/** Carry the existing browser session's CSRF cookie on its mutation requests. */
+export function fleetMutationHeaders(init: RequestInit): Headers {
+  const headers = new Headers(init.headers);
+  if (
+    typeof document !== "undefined" &&
+    ["POST", "PUT", "PATCH", "DELETE"].includes(
+      (init.method ?? "GET").toUpperCase(),
+    )
+  ) {
+    const cookie = document.cookie
+      .split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith("drts_csrf="));
+    if (cookie) {
+      try {
+        const token = decodeURIComponent(cookie.slice("drts_csrf=".length));
+        if (token) headers.set("x-csrf-token", token);
+      } catch {
+        // An invalid cookie remains subject to the existing middleware check.
+      }
+    }
+  }
+  return headers;
+}
+
 export function fleetDocumentProxyPath(path: string) {
   if (!/^\/api\/fleet-partner\/(cases|supply-submissions)\//.test(path)) {
     throw new Error("無效的文件傳輸路徑");
@@ -27,9 +52,12 @@ export async function fleetDocumentRequest<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
+  const headers = fleetMutationHeaders(init ?? {});
+  if (!headers.has("content-type"))
+    headers.set("content-type", "application/json");
   const response = await fetch(fleetDocumentProxyPath(path), {
     ...init,
-    headers: { "content-type": "application/json", ...init?.headers },
+    headers,
   });
   const payload = camelize(await response.json()) as {
     data?: T;
@@ -52,7 +80,9 @@ export async function putFleetDocument(
   if (intent.method !== "PUT") throw new Error("無效的上傳方式");
   const response = await fetch(fleetDocumentProxyPath(intent.uploadUrl), {
     method: "PUT",
-    headers: intent.headers,
+    headers: Object.fromEntries(
+      fleetMutationHeaders({ method: "PUT", headers: intent.headers }),
+    ),
     body: file,
   });
   if (!response.ok) {
