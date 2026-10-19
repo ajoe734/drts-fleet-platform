@@ -178,6 +178,7 @@ export async function completedOrderAftercare(
         const complaint = await read();
         expect(complaint).toMatchObject({
           caseNo,
+          status: "new",
           relatedOrderId: orderId,
           category: category === "fare" ? "fare_dispute" : "driver_service",
         });
@@ -187,7 +188,11 @@ export async function completedOrderAftercare(
         );
         const receipts = [];
         for (const action of [
-          { path: "notes", label: "新增備註", status: "new" },
+          {
+            path: "notes",
+            label: "新增備註",
+            status: "under_investigation",
+          },
           { path: "assign", label: "指派 / 重新指派", status: "assigned" },
           { path: "resolve", label: "結案處理", status: "resolved" },
           { path: "close", label: "關閉案件", status: "closed" },
