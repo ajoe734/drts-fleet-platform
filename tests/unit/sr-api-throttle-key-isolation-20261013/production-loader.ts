@@ -14,6 +14,7 @@ export function production<T>(relative: string): T {
   const file = resolve(root, relative);
   const cached = cache.get(file);
   if (cached) return cached.exports as T;
+  const sourceRequire = createRequire(file);
   const module = { exports: {} as unknown };
   cache.set(file, module);
   const output = ts.transpileModule(readFileSync(file, "utf8"), {
@@ -41,7 +42,7 @@ export function production<T>(relative: string): T {
         if (existsSync(candidate)) return production(candidate);
       }
     }
-    return apiRequire(id);
+    return sourceRequire(id);
   };
   const evaluate = runInThisContext(
     `(function(require,module,exports,__filename,__dirname){${output.outputText}\n})`,
