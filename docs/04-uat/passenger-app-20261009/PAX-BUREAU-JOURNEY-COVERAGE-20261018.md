@@ -201,6 +201,18 @@ Bureau原artifact `12170654559` ZIP SHA256=`31dc0ba7d15e12762a579ff6fe8b8dfc781c
 
 本輪Source仍完整39 paths／27 scopes、五組／UC01–16／兩keys及所有外部E04／USER／真車供給／same-runtime shared界線不變。7bd清理正向、七案正向及唯一consumer失敗各自保留；新reference selector與完整終態／雙申訴仍待新immutable hosted結果。
 
+## 第八輪 2e3e 全部 CI 正向與 lostACK 地圖文案退修
+
+候選 `2e3e0035cb54c9ec486903e2512c6a504c075fd2` 五 runs 全部自然success：main `39221019883` 為17 success／3原scope skip，integration `39221019783` 為22 success／4 skip；quote `39221019796`、60秒 `39221019757`、decline `39221019939` 各真1 pass（15.4分鐘／1.7分鐘／29.6秒），三者實際checkout均完整2e3e。Integration四個skip精確為readonly-dev-metadata、readonly-api-startup-readback、shared-bureau-acceptance與orchestrator-tests，沒有把PR未觸發的shared dispatch列通過。core／additional原log各1 pass（9.7／7.1分鐘）。最終證據 `source-checks/hosted-2e3e00-watch/final-enriched-evidence.json` SHA256=`bf3aa4c53640376c4b6fd472df0296b15678a25c4f3daab8e8e0a36406ed37ce`；所有歷史失敗、skip與collector初次相等檢查exit1均保留。
+
+main／integration各job自己的原git marker為synthetic checkout `c6ffa034851eb8a71b56af695c015fa371ee5d08`，parents是新accepted Fleet `ec454273715c84df0972b54d5fccf1cdd19e723f` 與2e3e；**整棵tree不同**。GitHub primary完整tree逐blob核原39個Journey檔與candidate相同，新增29個Fleet差異與accepted peer相同，沒有為正常accepted peer漂移重推／重跑。兩lane各自booking native四案、receipt四案、on_trip control兩案與C114完整六案suite／job全pass、0 skip；C114原logs各2591 pass／19 skip，無hook／unhandled錯誤。巢狀原JSON的早期pending文字保留，由各job原raw／actualJobBindings補足，不改標VM的19 skip或其他SHA的窄信用。
+
+Bureau原artifact `12172104496` ZIP SHA256=`4c7dd3862b2eef6c2c5394ddf4fb665ece55e9b65328c2fbd900ab73431ec769`，真 **8 pass／0 fail／0 skip／0 timeout／0 retry**，25份JSON facts／36張原PNG。ordinary90為109218ms、on_trip及售後251485ms、reliability63875ms、五OTP為772／57108／61500／301603／60540ms，原期限未變。新terminal facts與原完程圖已核Passenger原ride完成／live marker0，Driver仍原/trip、原task及完整task／order pair、追蹤已結束與停止定位。UC15原order `99eccb0b-74f4-4f59-828c-6979a68d2ebc` 的fare案 `PAX-5007682f-05fe-4711-b471-74b8d8c94037` 與service案 `PAX-d4308767-2fd9-403f-899e-908ea0b368a3` 各4個completed action receipts／audit UUID及精確五筆timeline均完整，humanContactExecuted=false。這些是2e3e自身hosted disposable結果，仍不是same-runtime shared／正式E04／真車供給驗證。
+
+Root／supervisor另親看本輪原 `32-UC10-lost-ACK-UI.png`（SHA256=`67484866716f3ffe7134f7033a132834af7ca72fa2bfbfd9e6980f61031abf1d`）發現新產品文案錯誤：上方已如實顯示尚未確認叫車結果，下方Booking unavailable使用的共用P5Map missing fallback卻固定稱「正在取得司機位置」。正常reopen並精確加配兩個既有paths後，只把共用fallback改為「目前沒有可顯示的地圖資料」，同步原既有P5Map fresh-without-position測試的expected literal；不新增測試、state、prop或framework，不改導航、位置marker、binding、重送／同key／原UUID、費用或任何期限。原三個既有case及所有marker／route／registration斷言保留，正常hook必要同檔機械排版如實記錄。
+
+本次完整Source為41 paths／29 scopes，原五組／UC01–16／兩keys不變；必要scoped lint與既有三案須保留實際結果，不重跑未變47案／native fixture或大型compiler。2e3e全五CI與八案正向原物不改寫，新中性文案仍須新immutable候選自己的CI與原lostACK畫面驗證。正常一次納入最新accepted dev後freeze；正式approve／merge／shared部署與外部條件仍由Root沿原流程處理。
+
 ## 原兩個 acceptance keys
 
 - `pax-bureau-coverage_each-finding-real-evidence-and-applicability`

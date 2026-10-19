@@ -337,7 +337,7 @@ export function P5Map({
           }}
         >
           <P5Icon name="pin" size={20} />
-          正在取得司機位置
+          目前沒有可顯示的地圖資料
         </div>
       )}
       <div
