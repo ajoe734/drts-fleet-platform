@@ -135,7 +135,19 @@ async function fixture() {
     );
   }
 
-  return { repo, tenant, delivery, user, oidc, signer, governance, billing, sign, mockGoogle, callback };
+  return {
+    repo,
+    tenant,
+    delivery,
+    user,
+    oidc,
+    signer,
+    governance,
+    billing,
+    sign,
+    mockGoogle,
+    callback,
+  };
 }
 
 describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () => {
@@ -151,7 +163,10 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
     vi.stubEnv("AUTH_ALLOWED_ORIGINS", "https://tenant.example");
     vi.stubEnv("DRTS_DEV_MFA_WAIVED", "false");
     vi.stubEnv("AUTH_REQUIRE_ORDINARY_LOGIN_MFA", "false");
-    vi.stubEnv("STEP_UP_PROOF_SECRET", "test_configured_high_entropy_secret_key_32bytes");
+    vi.stubEnv(
+      "STEP_UP_PROOF_SECRET",
+      "test_configured_high_entropy_secret_key_32bytes",
+    );
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -188,27 +203,36 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
         targetUserId: f.user.userId,
         targetMembershipId: membershipId,
         roleCode: "tenant_finance_admin",
-        reason: "Quarter-end billing close requires temporary finance authority.",
+        reason:
+          "Quarter-end billing close requires temporary finance authority.",
         tenantId,
       },
       requester,
     );
-    const { grant } = await f.governance.approveRequest(request.requestId, approver, {
-      approvalRequestId: request.requestId,
-      mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
-    });
+    const { grant } = await f.governance.approveRequest(
+      request.requestId,
+      approver,
+      {
+        approvalRequestId: request.requestId,
+        mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+      },
+    );
     expect(grant.status).toBe("active");
     expect(grant.roleCode).toBe("tenant_finance_admin");
 
     // C010 credit: the pre-grant session is revoked before the fresh login.
     await f.signer.revokeCurrentSession(baseDecoded.sid as string);
-    expect(await f.signer.verifyAccessToken(baseSession.accessToken)).toBeNull();
+    expect(
+      await f.signer.verifyAccessToken(baseSession.accessToken),
+    ).toBeNull();
 
     const elevatedSession = await f.callback();
     expect(elevatedSession.identity.roles).toEqual(["tenant_finance_admin"]);
     expect(elevatedSession.identity.scopes).toContain("tenant:billing:write");
 
-    const payload = await f.signer.verifyAccessToken(elevatedSession.accessToken);
+    const payload = await f.signer.verifyAccessToken(
+      elevatedSession.accessToken,
+    );
     expect(payload).not.toBeNull();
     expect(payload!.tenantPrivilegedGrantId).toBe(grant.grantId);
     const identity = f.signer.toRequestIdentity(payload!);
@@ -218,10 +242,13 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
       tenantId,
       "tenant:billing:write",
     );
-    const updated = await f.billing.updateTenantBillingProfile(authorizedTenantId, {
-      invoiceTitle: "Elevated Co",
-      email: "billing@acme.example",
-    });
+    const updated = await f.billing.updateTenantBillingProfile(
+      authorizedTenantId,
+      {
+        invoiceTitle: "Elevated Co",
+        email: "billing@acme.example",
+      },
+    );
     expect(updated.invoiceTitle).toBe("Elevated Co");
     const readback = f.billing.getTenantBillingProfile(tenantId);
     expect(readback.invoiceTitle).toBe("Elevated Co");
@@ -260,7 +287,9 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
     });
 
     const elevatedSession = await f.callback();
-    const payloadBefore = await f.signer.verifyAccessToken(elevatedSession.accessToken);
+    const payloadBefore = await f.signer.verifyAccessToken(
+      elevatedSession.accessToken,
+    );
     expect(payloadBefore).not.toBeNull();
 
     await f.governance.removeGrant(
@@ -276,7 +305,9 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
     // Same still-live session/token, re-validated: the grant it depends on is
     // gone now, so it must fail closed instead of continuing to admit the
     // elevated role for the rest of the token's lifetime.
-    const payloadAfter = await f.signer.verifyAccessToken(elevatedSession.accessToken);
+    const payloadAfter = await f.signer.verifyAccessToken(
+      elevatedSession.accessToken,
+    );
     expect(payloadAfter).toBeNull();
 
     // A brand new login after removal reverts to the durable base role.
@@ -307,10 +338,14 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
       },
       requester,
     );
-    const { grant } = await f.governance.approveRequest(request.requestId, approver, {
-      approvalRequestId: request.requestId,
-      mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
-    });
+    const { grant } = await f.governance.approveRequest(
+      request.requestId,
+      approver,
+      {
+        approvalRequestId: request.requestId,
+        mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+      },
+    );
 
     // Directly age the grant past its validTo, the same way other tests in
     // this repository fast-forward time-bound records without a live clock.
@@ -319,10 +354,11 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
       validTo: new Date(Date.now() - 1_000).toISOString(),
     });
 
-    const activeAfterExpiry = await f.repo.findActivePrivilegedGrantsForMembership(
-      membershipId,
+    const activeAfterExpiry =
+      await f.repo.findActivePrivilegedGrantsForMembership(membershipId);
+    expect(activeAfterExpiry.some((g) => g.grantId === grant.grantId)).toBe(
+      false,
     );
-    expect(activeAfterExpiry.some((g) => g.grantId === grant.grantId)).toBe(false);
 
     const sessionAfterExpiry = await f.callback();
     expect(sessionAfterExpiry.identity.roles).toEqual(["tenant_viewer"]);
@@ -345,14 +381,18 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
       approver,
       {
         approvalRequestId: futureRequest.requestId,
-        mutation: { expectedVersion: futureRequest.version, reasonCode: "APPROVE" },
+        mutation: {
+          expectedVersion: futureRequest.version,
+          reasonCode: "APPROVE",
+        },
       },
     );
     expect(futureGrant.status).toBe("pending_activation");
-    const activeNow = await f.repo.findActivePrivilegedGrantsForMembership(
-      membershipId,
+    const activeNow =
+      await f.repo.findActivePrivilegedGrantsForMembership(membershipId);
+    expect(activeNow.some((g) => g.grantId === futureGrant.grantId)).toBe(
+      false,
     );
-    expect(activeNow.some((g) => g.grantId === futureGrant.grantId)).toBe(false);
   });
 
   it("a grant scoped to a different tenant never projects into this membership's active grants", async () => {
@@ -380,9 +420,8 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
       updatedAt: now,
     });
 
-    const activeGrants = await f.repo.findActivePrivilegedGrantsForMembership(
-      membershipId,
-    );
+    const activeGrants =
+      await f.repo.findActivePrivilegedGrantsForMembership(membershipId);
     expect(activeGrants).toHaveLength(0);
 
     const session = await f.callback();
@@ -431,7 +470,9 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
       f.user.userId,
     ))!;
 
-    const requester = createGovernanceIdentity({ actorId: "usr_requester_mfa" });
+    const requester = createGovernanceIdentity({
+      actorId: "usr_requester_mfa",
+    });
     const approver = createGovernanceIdentity({ actorId: "usr_approver_mfa" });
     const request = await f.governance.createRequest(
       {
@@ -443,10 +484,14 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
       },
       requester,
     );
-    const { grant } = await f.governance.approveRequest(request.requestId, approver, {
-      approvalRequestId: request.requestId,
-      mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
-    });
+    const { grant } = await f.governance.approveRequest(
+      request.requestId,
+      approver,
+      {
+        approvalRequestId: request.requestId,
+        mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+      },
+    );
     expect(grant.roleCode).toBe("tenant_admin");
 
     // A fresh ordinary-login callback carries no amr/acr trusted MFA proof,
@@ -473,8 +518,12 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
     expect(baseDecoded.principalId).not.toBe(f.user.userId);
     expect(baseDecoded.membershipId).toBe(membershipId);
 
-    const requester = createGovernanceIdentity({ actorId: "usr_requester_canonical" });
-    const approver = createGovernanceIdentity({ actorId: "usr_approver_canonical" });
+    const requester = createGovernanceIdentity({
+      actorId: "usr_requester_canonical",
+    });
+    const approver = createGovernanceIdentity({
+      actorId: "usr_approver_canonical",
+    });
     const request = await f.governance.createRequest(
       {
         // A real caller targets the canonical principal, exactly like the
@@ -482,25 +531,34 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
         targetUserId: membership.principalId,
         targetMembershipId: membershipId,
         roleCode: "tenant_finance_admin",
-        reason: "Quarter-end billing close requires temporary finance authority.",
+        reason:
+          "Quarter-end billing close requires temporary finance authority.",
         tenantId,
       },
       requester,
     );
-    const { grant } = await f.governance.approveRequest(request.requestId, approver, {
-      approvalRequestId: request.requestId,
-      mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
-    });
+    const { grant } = await f.governance.approveRequest(
+      request.requestId,
+      approver,
+      {
+        approvalRequestId: request.requestId,
+        mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+      },
+    );
     expect(grant.status).toBe("active");
 
     // No manual revokeCurrentSession call: approval alone, keyed on the
     // canonical principal, must already have revoked the pre-elevation
     // session's token.
-    expect(await f.signer.verifyAccessToken(baseSession.accessToken)).toBeNull();
+    expect(
+      await f.signer.verifyAccessToken(baseSession.accessToken),
+    ).toBeNull();
 
     const elevatedSession = await f.callback();
     expect(elevatedSession.identity.roles).toEqual(["tenant_finance_admin"]);
-    const elevatedDecoded = jwt.decode(elevatedSession.accessToken) as jwt.JwtPayload;
+    const elevatedDecoded = jwt.decode(
+      elevatedSession.accessToken,
+    ) as jwt.JwtPayload;
     expect(elevatedDecoded.principalId).toBe(membership.principalId);
     expect(elevatedDecoded.membershipId).toBe(membershipId);
   });
@@ -530,8 +588,12 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
       updatedAt: now,
     });
 
-    const requester = createGovernanceIdentity({ actorId: "usr_requester_other_membership" });
-    const approver = createGovernanceIdentity({ actorId: "usr_approver_other_membership" });
+    const requester = createGovernanceIdentity({
+      actorId: "usr_requester_other_membership",
+    });
+    const approver = createGovernanceIdentity({
+      actorId: "usr_approver_other_membership",
+    });
     const request = await f.governance.createRequest(
       {
         targetUserId: membership.principalId,
@@ -543,10 +605,14 @@ describe("TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015 (C011-F1)", () 
       },
       requester,
     );
-    const { grant } = await f.governance.approveRequest(request.requestId, approver, {
-      approvalRequestId: request.requestId,
-      mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
-    });
+    const { grant } = await f.governance.approveRequest(
+      request.requestId,
+      approver,
+      {
+        approvalRequestId: request.requestId,
+        mutation: { expectedVersion: request.version, reasonCode: "APPROVE" },
+      },
+    );
     expect(grant.targetMembershipId).toBe(otherMembershipId);
 
     const activeGrantsForThisMembership =
