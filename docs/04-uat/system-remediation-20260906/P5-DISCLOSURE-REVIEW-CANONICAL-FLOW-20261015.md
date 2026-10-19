@@ -1,6 +1,7 @@
 # P5 disclosure and correction canonical flow
 
-Task: `P5-DISCLOSURE-REVIEW-CANONICAL-FLOW-20261015`  
+Task: `P5-DISCLOSURE-REVIEW-CANONICAL-FLOW-20261015`
+
 Source owner: Codex2; independent reviewer: Codex. This is the original four-clause, four-key, eight-scope task. The immutable candidate/branch/PR/generation are recorded by the normal owner handoff and its machine evidence; this document does not grant approval, CI success, protected merge or acceptance.
 
 ## Authority and retained scope
