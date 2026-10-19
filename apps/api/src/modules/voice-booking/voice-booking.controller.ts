@@ -361,7 +361,25 @@ export class VoiceBookingController {
           callerPhone,
         });
     }
-    return toApiSuccessEnvelope({ session }, requestId);
+    const resourceScope = this.voiceBookingRepository
+      ? await this.voiceBookingRepository.findResourceScopeById(
+          session.resourceScopeId,
+        )
+      : undefined;
+    return toApiSuccessEnvelope(
+      {
+        session,
+        ...(resourceScope?.brandId
+          ? {
+              recordingContext: {
+                brandId: resourceScope.brandId,
+                callId: session.callId,
+              },
+            }
+          : {}),
+      },
+      requestId,
+    );
   }
 
   @Post("sessions/:sessionId/recording-events")

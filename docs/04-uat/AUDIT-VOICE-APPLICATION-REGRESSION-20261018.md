@@ -574,3 +574,110 @@ producer → serialized cold snapshot → qualifier/draft path and four malforme
 explicit-slot refusals. UV013's real candidate/assignment path continues rejecting
 changed luggage capacity. SQL/model/provider transport is SIM locally; actual
 formal-schema and browser evidence still must bind to the final successor.
+
+### Original configured admission and actual cold finalize follow-through
+
+Independent support reviewed the complete d656 four-key/F1–F8/17-clause scope
+(`voice-d656-original-full-independent-support-review-20261019/review.md`,
+SHA256 `6b320b42cd520141b5c1c54ddf5850dd6492702191ca7041233511f5b9ce96af`).
+Its R1/R2/R3 identify unfinished original functionality. Neither original guard
+is misrepresented as a newly introduced regression. R3 is repaired above.
+Root normally coordinated the genuine binding interface/fixture and original
+session-authority seam as scopes 64–66; all original scopes/spec/keys remain.
+
+R1 now uses the actual API session → resource-scope join for brand identity and
+the session's canonical call ID. Main consumes the same exported resolver as the
+composition regression. The worker compares like brand/call identifiers while
+retaining resource-scope UUID, session, route and lease coordinates. No UUID is
+treated as a brand and no original scope check is removed.
+
+R2 persists original verified admission and actual consumed attachment as distinct
+append-only V0125 domain events. The original grant's noncredential admission ID
+binds its principal/epoch/full recording scope across those events. Pending ACK
+precedes HTTP201; consumed-attachment ACK precedes handshake/composer/fork effects.
+Unknown commit/response loss requires exact original API readback, including the
+current admission. A cold finalize reads the latest admission across recording
+scopes plus its real consumed attachment, checks the current finalize token, and
+restores the original authority metadata only when it cannot replace pending or
+different RAM authority. Original operation, grant/TTL/one-use/revocation and
+epoch/scope checks remain. Finalized-event persistence rechecks the authoritative
+admission under the same original session lock, including a newer same-scope
+epoch racing sealing. No request body or token creates attachment history, and
+the journal never consumes control sequences/watermarks.
+
+The previous composition's class restart called `runtime.finalize()` directly;
+that was core replay evidence, not a cold HTTP endpoint pass. The new regression
+uses actual request/upgrade handlers (no listening socket), actual API client and
+controller/repository, actual grant consumption, sealed audio/object/checkpoint
+readback and the first-party adapter's actual finalize HTTP request against a
+fresh worker. Recording transport, SQL transport and external issuer/store are
+SIM locally. The original final manifest/object version is reused with one work
+item. The precise before/fixed logs are:
+
+- `f2-admission-http-d656-before.log`: genuine HTTP409 instead of201 with distinct
+  brand/scope identifiers.
+- `f2-r1-fixed-cold-real-before.log`: after genuine API binding admission/consume
+  and sealing succeed, the new worker rejects the same valid finalization with
+  HTTP403. This isolates the remaining actual cold consumer.
+- `f2-http-fences-final.log`: **exit 0, two files / 35 passed, zero skips**,
+  retaining all original recorder authorization cases. Added actual-handler cases
+  cover committed admission/attachment/finalized ACK loss, pending-only denial,
+  known journal refusal, unresolved attachment ACK/read outage, ACK-before-effect
+  ordering, later exact readback without invented bytes/closure, retry admission,
+  newer same/different-scope admission, stale journal versus newer RAM, and a seal
+  commit race. Both warm and cold refusal/positive paths are exercised.
+
+Early `f2-cold-http-d656-before.log` and intermediate binding-fixture logs contain
+test harness errors (missing binding/client), not business reproductions. They
+remain retained and have no before/pass credit.
+
+The original full-schema hosted suite now also calls this actual API binding /
+HTTP admission / consumed upgrade / sealed-byte+checkpoint producer chain against
+real PostgreSQL, loses each of three committed API acknowledgements, and runs the
+original queued runner/domain completion through a fresh worker. It asserts the
+same manifest, no new object, one completed work, sealed recording state and
+unchanged control/input watermarks. This case is authored and typechecked; it
+remains **unexecuted pending successor hosted CI**, never a local PG pass.
+
+Version qualification correction: automatic PR run39197226469 product jobs
+checked out merge `c79b7bbeb6b877994d15f0fab2e7724d49a52959` (d656 into a7ec),
+not literal d656. Its six full reports have12713passed/2failed/41pending; the
+callback16/dispatch13/operations9/commands11 PG successes are merge diagnostics
+only. No tree equality or literal-source credit is inferred. Dedicated browser
+39197272304 is literal d656; manual integration39197246720 and the successor's
+necessary exact-source CI remain separately recorded to terminal.
+
+The hosted browser successor also switches the actual locale cookie/storage to
+English and reads the same sealed original/replacement phone, revision, consent
+and history, with the same single creation. Original zh operations and all prior
+assertions remain. The English browser extension is pending hosted execution;
+d656's six passes establish its zh flow only. Main's stale all-tools-unavailable
+startup message is corrected to describe the actual configured internal path and
+the remaining explicit external provider/model/issuer/fork/storage boundaries.
+
+The successor complete socketfree selection is explicitly listed in
+`successor-complete-socketfree-fixed-command.json`. The first run retained two
+failures in `successor-complete-socketfree.log`/`.json`: an old capability
+fixture without a brand received an incomplete `recordingContext`, and the
+unchanged 10000-held/three-preview snapshot case exceeded default5000 while a
+root source typecheck ran concurrently. The controller now emits recording
+context only for a genuine canonical brand; the real resolver still rejects
+missing context. No old assertion or fixture was weakened. The same 61-file
+selection reran without competing typechecks: **exit0,1030passed,zero failed or
+skipped**, in `successor-complete-socketfree-fixed.log`/`.json`. Original snapshot
+rows, three previews,62 assertions and default5000 remain unchanged. A2 and R2
+add actual qualifier, admission/ACK/cold-consumer cases; the full source paths
+and every case status are recorded in the JSON rather than inferred from counts.
+
+Both old integration workflows are terminal failure, separately qualified:
+39197226487 (automatic PR merge) and39197246720 (manual immutable d656).
+Their complete raw records contain70611/71614lines and each has exactly two
+failed cases: UV002 schema expectation and UV023 unconfigured idle positive.
+The unit and final gates aggregate those failures; other recorded skips are
+not passes. `d656-terminal-full-verification.json` preserves every job status,
+all failures,20test summaries per run and raw hashes. The already committed
+336fixture repairs await successor hosted verification. Old d656 logs and all
+previous positive/negative evidence remain retained. No old pass is promoted
+to a successor SHA. All66scopes, four required keys, original ABCD17 clauses
+and F1–F8 remain in force; this source checkpoint is not reviewer approval,
+merge, deployment or completed acceptance.

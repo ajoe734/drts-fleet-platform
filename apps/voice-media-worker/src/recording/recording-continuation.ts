@@ -2,6 +2,8 @@ import { isDeepStrictEqual } from "node:util";
 import {
   voiceRecordingFinalizationSchema,
   voiceRecordingContinuationEventSchema,
+  voiceRecordingAdmissionSchema,
+  type VoiceRecordingAdmission,
   type VoiceRecordingContinuationEvent,
   type VoiceRecordingFinalization,
 } from "@drts/contracts";
@@ -27,7 +29,7 @@ export interface RecordingContinuationJournal {
   ): Promise<VoiceRecordingContinuationEvent>;
   read(
     voiceSessionId: string,
-    scope: RecordingScope,
+    scope?: RecordingScope,
   ): Promise<VoiceRecordingContinuationEvent[]>;
 }
 /** Upstream normalized fork/call-close provider. This is independent from the
@@ -56,6 +58,65 @@ export class RecordingContinuation {
     private readonly source: RecordingContinuationSource,
   ) {
     this.recorder = new SealedRecorder(source.ingress, store);
+  }
+  async recordAdmission(
+    voiceSessionId: string,
+    scope: RecordingScope,
+    raw: VoiceRecordingAdmission,
+    kind: "admission" | "attachment",
+  ): Promise<void> {
+    const payload = voiceRecordingAdmissionSchema.parse(raw);
+    const event = voiceRecordingContinuationEventSchema.parse({
+      kind,
+      eventKey: `${kind}:${payload.epoch}`,
+      scope: { ...scope },
+      payload,
+    });
+    try {
+      const saved = await this.journal.append(voiceSessionId, event);
+      if (!isDeepStrictEqual(saved, event))
+        throw new Error("voice_recording_admission_ack_mismatch");
+    } catch (error) {
+      // A rejected transport wait does not establish rollback. Only exact
+      // authoritative readback of this same immutable event resolves ACK loss.
+      const history = await this.journal.read(voiceSessionId);
+      if (!history.some((e) => isDeepStrictEqual(e, event))) throw error;
+    }
+    const latest = await this.latestAdmission(voiceSessionId);
+    if (
+      !latest ||
+      !isDeepStrictEqual(latest.payload, payload) ||
+      !isDeepStrictEqual(latest.scope, scope)
+    )
+      throw new Error("voice_recording_admission_superseded");
+    if (kind === "attachment")
+      await this.readAttachedAdmission(voiceSessionId, scope);
+  }
+  private async latestAdmission(voiceSessionId: string) {
+    return (await this.journal.read(voiceSessionId))
+      .filter((e) => e.kind === "admission")
+      .sort((a, b) => b.payload.epoch - a.payload.epoch)[0];
+  }
+  async readAttachedAdmission(
+    voiceSessionId: string,
+    scope: RecordingScope,
+  ): Promise<VoiceRecordingAdmission> {
+    const events = await this.journal.read(voiceSessionId);
+    const latest = events
+      .filter((e) => e.kind === "admission")
+      .sort((a, b) => b.payload.epoch - a.payload.epoch)[0];
+    if (
+      !latest ||
+      !isDeepStrictEqual(latest.scope, scope) ||
+      !events.some(
+        (e) =>
+          e.kind === "attachment" &&
+          isDeepStrictEqual(e.scope, scope) &&
+          isDeepStrictEqual(e.payload, latest.payload),
+      )
+    )
+      throw new Error("voice_recording_consumed_admission_unavailable");
+    return voiceRecordingAdmissionSchema.parse(latest.payload);
   }
   attach(voiceSessionId: string, scope: RecordingScope) {
     scope = Object.freeze({ ...scope });
@@ -173,8 +234,20 @@ export class RecordingContinuation {
   async finalize(
     voiceSessionId: string,
     scope: RecordingScope,
+    authority?: VoiceRecordingAdmission,
   ): Promise<VoiceRecordingFinalization> {
     scope = Object.freeze({ ...scope });
+    const assertAdmission = async () => {
+      if (
+        authority &&
+        !isDeepStrictEqual(
+          authority,
+          await this.readAttachedAdmission(voiceSessionId, scope),
+        )
+      )
+        throw new Error("voice_recording_admission_superseded");
+    };
+    await assertAdmission();
     const events = (await this.journal.read(voiceSessionId, scope)).map((e) =>
       voiceRecordingContinuationEventSchema.parse(e),
     );
@@ -187,6 +260,7 @@ export class RecordingContinuation {
     const saved = events.find((e) => e.kind === "finalized");
     if (saved?.kind === "finalized") {
       await adapter.readFinalRecording(scope, saved.payload.manifestRef);
+      await assertAdmission();
       return voiceRecordingFinalizationSchema.parse(saved.payload);
     }
     const segments = events
@@ -218,6 +292,7 @@ export class RecordingContinuation {
         eventKey: "finalized",
         scope: { ...scope },
         payload: final,
+        ...(authority ? { authority } : {}),
       });
     } catch (error) {
       const recovered = (await this.journal.read(voiceSessionId, scope)).find(
@@ -225,6 +300,7 @@ export class RecordingContinuation {
       );
       if (!recovered || recovered.kind !== "finalized") throw error;
       await adapter.readFinalRecording(scope, recovered.payload.manifestRef);
+      await assertAdmission();
       return voiceRecordingFinalizationSchema.parse(recovered.payload);
     }
     return final;

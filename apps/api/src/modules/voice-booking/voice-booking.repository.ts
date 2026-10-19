@@ -854,6 +854,44 @@ export class VoiceBookingRepository {
         undefined,
         tx,
       );
+      const admissions = history.filter((e) => e.kind === "admission");
+      const latestAdmission = admissions.sort(
+        (a, b) => b.payload.epoch - a.payload.epoch,
+      )[0];
+      if (event.kind === "admission") {
+        if (
+          event.eventKey !== `admission:${event.payload.epoch}` ||
+          (latestAdmission &&
+            (event.payload.epoch < latestAdmission.payload.epoch ||
+              (event.payload.epoch === latestAdmission.payload.epoch &&
+                (!isDeepStrictEqual(event.payload, latestAdmission.payload) ||
+                  !isDeepStrictEqual(event.scope, latestAdmission.scope)))))
+        )
+          throw new Error("voice_recording_admission_stale_or_conflicting");
+      }
+      if (
+        event.kind === "attachment" &&
+        (event.eventKey !== `attachment:${event.payload.epoch}` ||
+          !latestAdmission ||
+          !isDeepStrictEqual(event.payload, latestAdmission.payload) ||
+          !isDeepStrictEqual(event.scope, latestAdmission.scope))
+      )
+        throw new Error("voice_recording_attachment_not_current_admission");
+      if (event.kind === "finalized" && (latestAdmission || event.authority)) {
+        const attached = history.find(
+          (e) =>
+            e.kind === "attachment" &&
+            isDeepStrictEqual(e.payload, latestAdmission?.payload) &&
+            isDeepStrictEqual(e.scope, latestAdmission?.scope),
+        );
+        if (
+          !latestAdmission ||
+          !attached ||
+          !isDeepStrictEqual(event.authority, latestAdmission.payload) ||
+          !isDeepStrictEqual(event.scope, latestAdmission.scope)
+        )
+          throw new Error("voice_recording_finalize_admission_stale");
+      }
       if (
         history.some(
           (e) =>

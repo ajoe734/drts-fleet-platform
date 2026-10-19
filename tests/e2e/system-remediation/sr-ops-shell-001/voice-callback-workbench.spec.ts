@@ -490,6 +490,60 @@ test("voice callback workbench retains the real closed-call order through contac
       "Browser reload recovers one original replacement receipt with fresh consent and immutable original phone/history",
     );
     await screenshot("06-sealed-contact-correction-and-replacement");
+    await page.evaluate(() => localStorage.setItem("drts-locale-v2", "en"));
+    await page
+      .context()
+      .addCookies([{ name: "drts-locale-v2", value: "en", url: origin }]);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const englishWorkbench = page.getByRole("main", {
+      name: "Voice callback workbench",
+      exact: true,
+    });
+    await expect(englishWorkbench).toBeVisible();
+    await page
+      .getByLabel("Service scope", { exact: true })
+      .selectOption(seed.scopeId);
+    await page.getByRole("button", { name: new RegExp(lostReason) }).click();
+    await expect(
+      englishWorkbench.getByText("Contact and consent history", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      englishWorkbench.getByText("Contact revision", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      englishWorkbench.getByText(sealedOriginal.task.contact_phone, {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      englishWorkbench.locator("dl").getByText(replacementId, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      englishWorkbench.getByLabel("New consent reference", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      englishWorkbench.getByRole("button", {
+        name: "Create replacement / recover previous result",
+        exact: true,
+      }),
+    ).toBeEnabled();
+    const englishReadback = await data(
+      await page.request.get(bff(`/voice/callbacks/${lostTask}`)),
+    );
+    expect(englishReadback.task).toMatchObject({
+      contact_phone: originalAgain.task.contact_phone,
+      contact_revision_number: originalAgain.task.contact_revision_number,
+      consent_ref: originalAgain.task.consent_ref,
+      replacement_task_id: replacementId,
+      linked_order_id: orderId,
+    });
+    expect(replacements).toHaveLength(1);
+    stage(
+      "English workbench reads the same sealed original/replacement contact, consent and history without another create",
+    );
+    await screenshot("07-english-sealed-contact-history");
     await writeFile(
       resolve(directory, "contact-correction-browser-facts.json"),
       JSON.stringify(
@@ -501,6 +555,7 @@ test("voice callback workbench retains the real closed-call order through contac
           replacementRequests: replacements,
           externalConsentAndPhone: "SIM",
           internalRows: "actual API/PostgreSQL",
+          languages: ["zh", "en"],
           stages,
         },
         null,

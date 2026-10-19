@@ -69,6 +69,7 @@ export interface IssueCapabilityCommand {
 }
 
 export interface GetSessionResult {
+  recordingContext?: { brandId: string; callId: string };
   session: {
     voiceSessionId: string;
     resourceScopeId: string;

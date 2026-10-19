@@ -298,9 +298,35 @@ export const voiceRecordingFinalizationSchema = z
     verifiedAt: z.string().datetime(),
   })
   .strict();
+export const voiceRecordingAdmissionSchema = z
+  .object({
+    admissionId: label,
+    principalId: label,
+    epoch: z.number().int().nonnegative(),
+  })
+  .strict();
+export type VoiceRecordingAdmission = z.infer<
+  typeof voiceRecordingAdmissionSchema
+>;
 export const voiceRecordingContinuationEventSchema = z.discriminatedUnion(
   "kind",
   [
+    z
+      .object({
+        kind: z.literal("admission"),
+        eventKey: label,
+        scope: voiceRecordingScopeSchema,
+        payload: voiceRecordingAdmissionSchema,
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("attachment"),
+        eventKey: label,
+        scope: voiceRecordingScopeSchema,
+        payload: voiceRecordingAdmissionSchema,
+      })
+      .strict(),
     z
       .object({
         kind: z.literal("segment"),
@@ -331,6 +357,7 @@ export const voiceRecordingContinuationEventSchema = z.discriminatedUnion(
         eventKey: label,
         scope: voiceRecordingScopeSchema,
         payload: voiceRecordingFinalizationSchema,
+        authority: voiceRecordingAdmissionSchema.optional(),
       })
       .strict(),
   ],

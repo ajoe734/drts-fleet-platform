@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS voice.recording_continuation_event (
   recording_id text NOT NULL,
   leg_id text NOT NULL,
   event_key text NOT NULL,
-  event_kind text NOT NULL CHECK (event_kind IN ('segment','checkpoint','closure','finalized')),
+  event_kind text NOT NULL CHECK (event_kind IN ('admission','attachment','segment','checkpoint','closure','finalized')),
   payload jsonb NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (voice_session_id, recording_id, event_key),

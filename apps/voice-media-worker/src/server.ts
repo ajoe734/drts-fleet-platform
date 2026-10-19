@@ -14,6 +14,42 @@ import { createVoiceRecordingAdapter } from "./recording/recording-adapter-facto
 import { createVoiceApiClient } from "./server/voice-api-client-factory";
 import type { VoiceSessionBindingResolver } from "./dialogue/voice-session-binding";
 
+/** The same canonical resolver consumed by main and socket-free composition. */
+export function createVoiceSessionBindingResolver(
+  client: Pick<
+    import("./server/voice-api-client").VoiceApiClient,
+    "getSession"
+  >,
+): VoiceSessionBindingResolver {
+  return {
+    resolve: async (voiceSessionId, signal) => {
+      const { session, recordingContext } = await client.getSession(
+        voiceSessionId,
+        signal,
+      );
+      if (session.voiceSessionId !== voiceSessionId) {
+        throw new Error(
+          `voice session binding mismatch: requested '${voiceSessionId}' but apps/api returned session '${session.voiceSessionId}'`,
+        );
+      }
+      if (!recordingContext?.brandId || !recordingContext.callId) {
+        throw new Error(
+          "voice session canonical recording context unavailable",
+        );
+      }
+      return {
+        voiceSessionId: session.voiceSessionId,
+        resourceScopeId: session.resourceScopeId,
+        brandId: recordingContext.brandId,
+        callId: recordingContext.callId,
+        routeProfileVersion: session.routeProfileVersion,
+        leaseEpoch: session.leaseEpoch,
+        sessionVersion: session.sessionVersion,
+      };
+    },
+  };
+}
+
 async function main(
   options: {
     recordingSource?: RecordingContinuationSource;
@@ -34,38 +70,9 @@ async function main(
   // fails until apps/api has a durable `voice.session` row for the admitted
   // id -- the real, still-missing SD §4.1 provider webhook is the actual
   // remaining external gate, not this wiring.
-  const sessionBindingResolver: VoiceSessionBindingResolver | undefined =
-    voiceApiClient
-      ? {
-          resolve: async (voiceSessionId, signal) => {
-            const { session } = await voiceApiClient.getSession(
-              voiceSessionId,
-              signal,
-            );
-            // R4-entry (Codex reopen, canonical 2026-10-03T17:41:28Z): do
-            // not blindly project whatever `voiceSessionId` the API
-            // response body happens to carry -- verify it is actually the
-            // session this call asked for before trusting any of its
-            // other fields as this attachment's binding. A mismatched
-            // response (wrong route, stale cache, compromised/misrouted
-            // upstream) must fail this resolution closed, the same as a
-            // network error, rather than silently bind this attachment to
-            // someone else's session.
-            if (session.voiceSessionId !== voiceSessionId) {
-              throw new Error(
-                `voice session binding mismatch: requested '${voiceSessionId}' but apps/api returned session '${session.voiceSessionId}'`,
-              );
-            }
-            return {
-              voiceSessionId: session.voiceSessionId,
-              resourceScopeId: session.resourceScopeId,
-              routeProfileVersion: session.routeProfileVersion,
-              leaseEpoch: session.leaseEpoch,
-              sessionVersion: session.sessionVersion,
-            };
-          },
-        }
-      : undefined;
+  const sessionBindingResolver = voiceApiClient
+    ? createVoiceSessionBindingResolver(voiceApiClient)
+    : undefined;
   // The dialogue *provider* always stays fixture-mode here regardless of
   // `composition.productionCapable`: no live VoiceDialogueProvider
   // implementation exists at all yet (see
@@ -110,10 +117,8 @@ async function main(
                 AbortSignal.timeout(8000),
               )
             ).events.filter((event) =>
-              ["brandId", "callId", "recordingId", "legId"].every(
-                (key) =>
-                  event.scope[key as keyof typeof scope] ===
-                  scope[key as keyof typeof scope],
+              (["brandId", "callId", "recordingId", "legId"] as const).every(
+                (key) => !scope || event.scope[key] === scope[key],
               ),
             ),
         }
@@ -166,27 +171,13 @@ async function main(
         "(see ./dialogue/dialogue-provider-composition.ts).",
     );
   }
+  if (!options.callAuthorityVerifier)
+    console.warn(
+      "[voice-media-worker] No call-authority verifier is configured; admission and finalization remain unavailable until the external call/line authority is supplied.",
+    );
   console.warn(
-    "[voice-media-worker] No call-authority verifier is configured (apps/api/src/modules/cti-ivr, " +
-      "which would issue/verify these tokens from the real call/line authority, does not exist yet -- " +
-      "see docs/04-uat/audit-voice-runtime-20261002.md). POST /sessions and POST /recording/finalize " +
-      "will refuse every request (503) until one is wired.",
-  );
-  console.warn(
-    "[voice-media-worker] Dialogue turns run against the real VoiceDialogueEngine/VoiceDialogueState " +
-      "machinery; every tool proposal other than request_handoff still forces an honest 'unavailable' " +
-      "handoff (no reachable domain-execution channel for any other tool exists). Codex reopen round " +
-      "5/6 (R4) built the issuance route, the VoiceCapabilityGuard-guarded sessions/:id/input-resolutions " +
-      "and sessions/:id/handoffs routes, and this worker's own VoiceApiClient to call them -- an earlier " +
-      "version of this message claiming none of that existed is now obsolete and explicitly superseded. " +
-      "persist() uses that client for any attachment resolveSessionBinding (MediaWorkerServer's own " +
-      "POST /sessions admission, R4-entry) actually resolves a real VoiceSessionBinding for -- which " +
-      "still genuinely fails today, since apps/api has no durable voice.session row for any admitted id " +
-      "until the real, still-missing SD §4.1 provider webhook creates one -- and otherwise remains the " +
-      "original in-process-only no-op. recordAuthoritativeSpeechStart calls sessions/:id/events on a real " +
-      "speech-start, but Codex reopen round 15 (R4-control) found that is not yet the ordered, gap-" +
-      "recoverable control-event ingestion SD §5.4 requires. See " +
-      "docs/04-uat/audit-voice-application-wiring-20261003.md.",
+    "[voice-media-worker] Bound dialogue turns use the first-party API for durable snapshots, ordered control events, location, qualification and immutable readback. " +
+      "Provider/model/issuer/recording-fork/storage resources remain explicit configured or SIM boundaries; no playback completion or WebSocket close constitutes consent or recorder closure.",
   );
 
   let draining = false;

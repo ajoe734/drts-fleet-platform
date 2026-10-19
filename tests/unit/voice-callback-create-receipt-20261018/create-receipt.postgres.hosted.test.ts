@@ -1,5 +1,30 @@
 import { VoiceContactService } from "../../../apps/api/src/modules/voice-booking/voice-contact.service";
 import { randomUUID, randomBytes } from "node:crypto";
+import { once } from "node:events";
+import { Duplex, Readable } from "node:stream";
+import { Server as NetServer } from "node:net";
+import { VoiceBookingController } from "../../../apps/api/src/modules/voice-booking/voice-booking.controller";
+import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
+import { VoiceApiClient } from "../../../apps/voice-media-worker/src/server/voice-api-client";
+import { MediaWorkerServer } from "../../../apps/voice-media-worker/src/server/media-worker-server";
+import { createVoiceSessionBindingResolver } from "../../../apps/voice-media-worker/src/server";
+import { VoiceSessionComposer } from "../../../apps/voice-media-worker/src/server/session-composer";
+import {
+  SandboxSpeechToTextAdapter,
+  SandboxTextToSpeechAdapter,
+} from "../../../apps/voice-media-worker/src/media-provider";
+import {
+  RecordingContinuation,
+  type RecordingContinuationJournal,
+  type RecordingContinuationSource,
+} from "../../../apps/voice-media-worker/src/recording/recording-continuation";
+import { ObjectStoreRecorderObjectStore } from "../../../apps/voice-media-worker/src/recording/object-store-recorder";
+import {
+  ImmutableRecordingManifests,
+  type RecordingManifestRef,
+} from "../../../apps/voice-media-worker/src/recording/immutable-manifest";
+import { FirstPartyVoiceMediaRecordingAdapter } from "../../../apps/api/src/modules/voice-booking/voice-media-recording.adapter";
+import { FakeCallAuthority } from "../audit-voice-runtime-20261002/fake-call-authority";
 import {
   afterAll,
   beforeAll,
@@ -726,6 +751,362 @@ describe.skipIf(!hostedPaymentEnabled)(
       expect(
         await runner.runOnce({ supportedTypes: ["finalize_recording"] }),
       ).toBeNull();
+    });
+
+    it("original Voice B: actual API binding, consumed admission, sealed-byte journal and cold finalize survive committed ACK loss on formal PostgreSQL", async () => {
+      const noListener = vi
+        .spyOn(NetServer.prototype, "listen")
+        .mockImplementation(() => {
+          throw new Error("This test uses actual handlers without listening");
+        });
+      const fixture = await seedVoiceDispatchWorkFixture(h.pool!);
+      const sessionId = fixture.request.voiceSessionId;
+      const scope = {
+        brandId: fixture.authority.brandId,
+        callId: fixture.callId,
+        recordingId: `SIM-recording:${sessionId}`,
+        legId: `SIM-leg:${sessionId}`,
+      };
+      const repository = new VoiceBookingRepository(h.database);
+      const controller = new VoiceBookingController(
+        {} as never,
+        {} as never,
+        undefined,
+        undefined,
+        undefined,
+        new VoiceSessionService(new VoiceSessionRepository(h.database)),
+        repository,
+      );
+      const client = new VoiceApiClient(
+        {
+          baseUrl: "https://SIM-api.test",
+          fetchImpl: async (raw, init) => {
+            const path = String(raw).split("/sessions/")[1]!;
+            const response =
+              init?.method === "POST"
+                ? await controller.recordRecordingEvent(
+                    sessionId,
+                    JSON.parse(String(init.body)),
+                  )
+                : path.includes("/recording-events")
+                  ? await controller.getRecordingEvents(sessionId)
+                  : await controller.getSession(sessionId);
+            return Response.json(deepToSnakeCase(response));
+          },
+        },
+        { getToken: async () => "SIM-workload-identity" },
+      );
+      const lost = new Set<string>();
+      const journal: RecordingContinuationJournal = {
+        append: async (session, event) => {
+          const saved = (await client.appendRecordingEvent(session, event))
+            .event;
+          if (
+            ["admission", "attachment", "finalized"].includes(event.kind) &&
+            !lost.has(event.kind)
+          ) {
+            lost.add(event.kind);
+            throw new Error("SIM committed API response lost");
+          }
+          return saved;
+        },
+        read: async (session, requested) =>
+          (await client.getRecordingEvents(session)).events.filter(
+            (e) =>
+              !requested ||
+              JSON.stringify(e.scope) === JSON.stringify(requested),
+          ),
+      };
+      // Only external object storage/issuer/normalized fork are SIM. Every
+      // session, journal, original work item and domain write uses formal SQL.
+      const objects = new Map<
+        string,
+        {
+          body: Uint8Array;
+          versionId: string;
+          storedAt: string;
+          metadata: Readonly<Record<string, string>>;
+        }
+      >();
+      let puts = 0;
+      const store = new ObjectStoreRecorderObjectStore({
+        putObjectVersion: async (key, bytes, metadata) => {
+          const versionId = String(++puts),
+            storedAt = new Date().toISOString();
+          objects.set(`${key}:${versionId}`, {
+            body: Uint8Array.from(bytes),
+            versionId,
+            storedAt,
+            metadata,
+          });
+          return { versionId, storedAt };
+        },
+        getObjectVersion: async (key, version) => {
+          const object = objects.get(`${key}:${version}`);
+          if (!object) throw new Error("SIM object absent");
+          return object;
+        },
+      });
+      let callbacks:
+        | Parameters<RecordingContinuationSource["subscribe"]>[2]
+        | undefined;
+      let checkpointRefs: RecordingManifestRef[] = [];
+      const endedAt = new Date(Date.now() - 1000).toISOString(),
+        utcStart = new Date(Date.parse(endedAt) - 1000).toISOString();
+      const source: RecordingContinuationSource = {
+        subscribe: (_session, _scope, sink) => {
+          callbacks = sink;
+          return { close() {} };
+        },
+        ingress: {
+          authorize: async () => ({
+            source: "recording_fork",
+            channels: ["inbound", "outbound"],
+          }),
+        },
+        closure: {
+          resolve: async () => ({
+            closedEventId: "SIM-authoritative-close",
+            endedAt,
+            endMs: 1000,
+            checkpointRefs,
+          }),
+        },
+      };
+      const runtime = () => new RecordingContinuation(store, journal, source);
+      const composer = new VoiceSessionComposer(
+        {
+          createAdapters: () => ({
+            asrAdapter: new SandboxSpeechToTextAdapter(),
+            ttsAdapter: new SandboxTextToSpeechAdapter(),
+          }),
+        },
+        undefined,
+        runtime(),
+      );
+      const authority = new FakeCallAuthority();
+      const admission = authority.issue(sessionId, {
+        scope,
+        allowedOperations: ["admit"],
+      });
+      const finalToken = authority.issue(sessionId, {
+        scope,
+        epoch: admission.claims.epoch,
+        allowedOperations: ["finalize"],
+      }).token;
+      const warm = new MediaWorkerServer({
+        internalKey: "SIM-workload-key",
+        callAuthorityVerifier: authority,
+        sessionBindingResolver: createVoiceSessionBindingResolver(client),
+        sessionComposer: composer,
+        recordingContinuation: runtime(),
+        wsTimeoutMs: 0,
+      });
+      let cold: MediaWorkerServer | undefined,
+        active = warm;
+      class MemorySocket extends Duplex {
+        _read() {}
+        _write(
+          _data: Buffer,
+          _encoding: BufferEncoding,
+          done: (error?: Error | null) => void,
+        ) {
+          done();
+        }
+      }
+      const socket = new MemorySocket();
+      const post = (server: MediaWorkerServer, path: string, body: unknown) =>
+        new Promise<{ status: number; body: Record<string, unknown> }>(
+          (resolve) => {
+            server.httpServer.emit(
+              "request",
+              Object.assign(
+                Readable.from([Buffer.from(JSON.stringify(body))]),
+                {
+                  method: "POST",
+                  url: path,
+                  headers: { "x-drts-internal-key": "SIM-workload-key" },
+                },
+              ),
+              {
+                statusCode: 200,
+                setHeader() {},
+                end(raw: string) {
+                  resolve({ status: this.statusCode, body: JSON.parse(raw) });
+                },
+              },
+            );
+          },
+        );
+      try {
+        const before = await repository.findSessionById(sessionId);
+        const admitted = await post(warm, "/sessions", {
+          callAuthorityToken: admission.token,
+        });
+        expect(admitted.status, JSON.stringify(admitted.body)).toBe(201);
+        expect(
+          (await repository.readRecordingContinuation(sessionId)).map(
+            (e) => e.kind,
+          ),
+        ).toEqual(["admission"]);
+        expect(
+          (
+            await post(warm, "/recording/finalize", {
+              sessionId,
+              callAuthorityToken: finalToken,
+            })
+          ).status,
+        ).toBe(403);
+        const connected = once(warm, "session.connected");
+        warm.httpServer.emit(
+          "upgrade",
+          {
+            method: "GET",
+            url: `/ws?sessionId=${sessionId}&grant=${(admitted.body.grant as { token: string }).token}`,
+            headers: {
+              "x-drts-internal-key": "SIM-workload-key",
+              "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+            },
+          },
+          socket,
+          Buffer.alloc(0),
+        );
+        await connected;
+        for (const channel of ["inbound", "outbound"] as const)
+          await callbacks!.fork({
+            credential: "SIM-ingress",
+            input: {
+              ...scope,
+              channel,
+              startMs: 0,
+              endMs: 1000,
+              utcStart,
+              utcEnd: endedAt,
+              bytes: Uint8Array.from([1, 2, 3]),
+            },
+          });
+        const segments = (
+          await repository.readRecordingContinuation(sessionId, scope)
+        )
+          .filter((e) => e.kind === "segment")
+          .map((e) => e.payload);
+        const checkpoint = await new ImmutableRecordingManifests(store).seal({
+          schemaVersion: 1,
+          scope,
+          startMs: 0,
+          endMs: 1000,
+          segments,
+        });
+        checkpointRefs = [checkpoint];
+        await callbacks!.checkpoint(checkpoint);
+        await callbacks!.closed("SIM-call-close");
+        const adapter = new FirstPartyVoiceMediaRecordingAdapter(
+          repository,
+          {
+            resolve: async () => ({
+              sessionId,
+              callAuthorityToken: finalToken,
+            }),
+          },
+          {
+            baseUrl: "https://SIM-worker.test",
+            internalKey: "SIM-workload-key",
+            fetchImpl: async (raw, init) => {
+              const response = await post(
+                active,
+                new URL(String(raw)).pathname,
+                JSON.parse(String(init?.body)),
+              );
+              return Response.json(response.body, { status: response.status });
+            },
+          },
+        );
+        const first = await adapter.finalizeRecording({
+          voiceSessionId: sessionId,
+          scope,
+        });
+        const objectCount = puts;
+        warm.closeSession(sessionId);
+        socket.destroy();
+        await warm.stop();
+        cold = new MediaWorkerServer({
+          internalKey: "SIM-workload-key",
+          callAuthorityVerifier: authority,
+          recordingContinuation: runtime(),
+        });
+        active = cold;
+        const commands = new VoiceBookingCommandService(
+          repository,
+          fixture.makeEvidence(repository) as never,
+          fixture.products as never,
+          fixture.areas as never,
+          fixture.access,
+        );
+        const runner = new VoiceCommandRunnerService(
+          commands,
+          new OwnedMobilityRepository(h.database),
+          undefined,
+          undefined,
+          undefined,
+          adapter,
+        );
+        expect(await runner.runOnce()).toMatchObject({
+          workType: "finalize_recording",
+          success: true,
+        });
+        expect(puts).toBe(objectCount);
+        const events = await new VoiceBookingRepository(
+          h.peerDatabase(),
+        ).readRecordingContinuation(sessionId);
+        expect(events.map((e) => e.kind)).toEqual([
+          "admission",
+          "attachment",
+          "segment",
+          "segment",
+          "checkpoint",
+          "closure",
+          "finalized",
+        ]);
+        expect(events[1]!.payload).toEqual(events[0]!.payload);
+        expect(events.find((e) => e.kind === "finalized")?.payload).toEqual(
+          first,
+        );
+        expect([...lost].sort()).toEqual([
+          "admission",
+          "attachment",
+          "finalized",
+        ]);
+        const work = await h.pool!.query(
+          "SELECT work_type,status FROM voice.work_item WHERE voice_session_id=$1",
+          [sessionId],
+        );
+        expect(work.rows).toEqual([
+          { work_type: "finalize_recording", status: "completed" },
+        ]);
+        const after = await repository.findSessionById(sessionId);
+        expect(after?.recordingState).toBe("finalized");
+        expect(after?.inputEpoch).toBe(before?.inputEpoch);
+        expect(after?.lastAppliedControlSequence).toBe(
+          before?.lastAppliedControlSequence,
+        );
+        await expect(
+          repository.appendRecordingContinuation(sessionId, {
+            ...events[0]!,
+            payload: {
+              ...(events[0]!.payload as object),
+              admissionId: "SIM-other-attempt",
+            },
+          }),
+        ).rejects.toThrow("stale_or_conflicting");
+        expect(warm.httpServer.address()).toBeNull();
+        expect(cold.httpServer.address()).toBeNull();
+      } finally {
+        warm.closeSession(sessionId);
+        socket.destroy();
+        await warm.stop();
+        await cold?.stop();
+        noListener.mockRestore();
+      }
     });
 
     it("original Voice B V0125: real session-locked event replay/conflict and finalize work survive two instances without consuming control watermarks", async () => {
