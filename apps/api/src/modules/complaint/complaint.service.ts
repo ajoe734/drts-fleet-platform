@@ -1112,7 +1112,10 @@ export class ComplaintService implements OnModuleInit {
     // Legacy/definitely rejected commands can leave no retained identity.
     // Actual ordinary GET still reads this case's canonical full snapshot.
     if (!/^PAX-[0-9a-f-]{36}$/i.test(caseNo)) {
-      await this.reconcilePendingCase(caseNo, true);
+      const cached = this.complaintCases.find((item) => item.caseNo === caseNo);
+      // Settlement already uses its canonical transaction/wait/refresh path.
+      if (cached?.category !== "settlement_dispute")
+        await this.reconcilePendingCase(caseNo, true);
       this.ensureComplaintReadbackAvailable(caseNo);
       return this.getComplaintCase(caseNo);
     }
