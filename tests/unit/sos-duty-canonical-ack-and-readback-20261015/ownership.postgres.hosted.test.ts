@@ -6,6 +6,11 @@ import type { BootstrapRequestIdentity } from "../../../apps/api/src/common/auth
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { IncidentRepository } from "../../../apps/api/src/modules/incident/incident.repository";
 import { IncidentService } from "../../../apps/api/src/modules/incident/incident.service";
+import { IncidentController } from "../../../apps/api/src/modules/incident/incident.controller";
+import {
+  DriverSosController,
+  OpsDriverSosController,
+} from "../../../apps/api/src/modules/driver-sos/driver-sos.controller";
 import { DriverSosRepository } from "../../../apps/api/src/modules/driver-sos/driver-sos.repository";
 import { DriverSosService } from "../../../apps/api/src/modules/driver-sos/driver-sos.service";
 import { DriverSosVerificationRepository } from "../../../apps/api/src/modules/driver-sos/driver-sos-verification.repository";
@@ -363,6 +368,119 @@ describe.skipIf(!hosted)(
         expect(
           (await incidentRepository.loadIncident(incidentId))?.assignedTo,
         ).toBe(actor.actorId);
+      } finally {
+        if (eventId)
+          await database.query(
+            "DELETE FROM safety.driver_sos_events WHERE sos_event_id = $1",
+            [eventId],
+          );
+        if (incidentId) await cleanup(database, incidentId);
+        await database.onModuleDestroy();
+      }
+    }, 15000);
+
+    it("discovers a later submission on seven already-running replicas through the actual first GET and ACK controllers", async () => {
+      const database = new DatabaseService();
+      const incidentRepository = new IncidentRepository(database);
+      const repository = new DriverSosRepository(database);
+      const audit = new AuditNotificationService();
+      async function replica() {
+        const incident = new IncidentService(audit, incidentRepository);
+        const sos = new DriverSosService(
+          audit,
+          incident,
+          repository,
+          new DriverSosVerificationRepository(database),
+        );
+        await incident.onModuleInit();
+        await sos.onModuleInit();
+        return {
+          incident,
+          sos,
+          incidents: new IncidentController(incident, null as never),
+          ops: new OpsDriverSosController(sos),
+          driver: new DriverSosController(sos),
+        };
+      }
+      const driver = identity(`driver-warm-pg-${randomUUID()}`, "driver");
+      const actor = identity(`ops-warm-pg-${randomUUID()}`, "ops");
+      let eventId: string | undefined;
+      let incidentId: string | undefined;
+      try {
+        const a = await replica();
+        const warm = await Promise.all(
+          Array.from({ length: 7 }, () => replica()),
+        );
+        const submitted = await a.sos.submitSosEvent(
+          {
+            clientEventId: randomUUID(),
+            eventType: "traffic_accident",
+            severity: "major",
+            originalTriggeredAt: new Date().toISOString(),
+            offlineAtTrigger: false,
+          },
+          driver,
+        );
+        eventId = submitted.event.sosEventId;
+        incidentId = submitted.receipt.incidentId;
+        expect(
+          (await warm[0]!.incidents.listIncidents("warm-pg-list", actor)).data
+            .items,
+        ).toContainEqual(expect.objectContaining({ incidentId }));
+        expect(
+          (
+            await warm[1]!.incidents.getIncident(
+              incidentId,
+              "warm-pg-detail",
+              actor,
+            )
+          ).data.item.incidentId,
+        ).toBe(incidentId);
+        expect(
+          (await warm[2]!.incidents.getTimeline(incidentId, "warm-pg-timeline"))
+            .data.items,
+        ).toContainEqual(
+          expect.objectContaining({ incidentId, action: "incident_created" }),
+        );
+        expect(
+          (await warm[3]!.ops.getSosEvent(eventId, actor)).data.event
+            .sosEventId,
+        ).toBe(eventId);
+        expect(
+          (await warm[4]!.ops.getSosEventByIncidentId(incidentId, actor)).data
+            .event.sosEventId,
+        ).toBe(eventId);
+        expect(
+          (await warm[5]!.driver.getOwnSosEvent(eventId, driver)).data.event
+            .dutyAcknowledgement.acknowledgedByActorId,
+        ).toBeNull();
+        const ack = (await warm[6]!.ops.acknowledgeDuty(eventId, {}, actor))
+          .data;
+        expect(ack.wonAcknowledgement).toBe(true);
+        expect(ack.event.incidentId).toBe(incidentId);
+        const readback = (await warm[5]!.driver.getOwnSosEvent(eventId, driver))
+          .data;
+        expect(readback.event.dutyAcknowledgement.acknowledgedByActorId).toBe(
+          actor.actorId,
+        );
+        expect(
+          readback.timeline.filter(
+            (entry) => entry.eventType === "duty_acknowledged",
+          ),
+        ).toHaveLength(1);
+        expect(
+          (await warm[1]!.incidents.getIncident(incidentId, "after-ack", actor))
+            .data.item.assignedTo,
+        ).toBe(actor.actorId);
+        expect(
+          (await repository.reloadEventState(eventId))?.outbox?.status,
+        ).toBe("acknowledged");
+        await expect(
+          warm[0]!.driver.getOwnSosEvent(
+            eventId,
+            identity("wrong-warm-driver", "driver"),
+          ),
+        ).rejects.toMatchObject({ code: "DRIVER_SOS_EVENT_NOT_FOUND" });
       } finally {
         if (eventId)
           await database.query(

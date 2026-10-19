@@ -456,25 +456,127 @@ export class IncidentService implements OnModuleInit {
     return this.cloneIncident(decorated);
   }
 
-  /** Targeted authoritative read for SOS's existing current-owner/lifecycle
-   * handover. Generic synchronous Incident callers retain their interface. */
+  /** Authoritative HTTP read facades leave generic synchronous callers intact.
+   * Return durable snapshots, discovering only absent local rows. Never replace
+   * an existing cache entry with a read that may predate an in-flight mutation. */
+  listIncidentsForReadback(identity: BootstrapRequestIdentity | null = null) {
+    if (!this.incidentRepository?.isEnabled())
+      return this.listIncidents(identity);
+    return this.incidentRepository
+      .loadIncidents()
+      .then((incidents) =>
+        incidents.map((incident) =>
+          this.discoverPersistedIncident(incident, identity),
+        ),
+      );
+  }
+
+  getIncidentForReadback(
+    incidentId: string,
+    identity: BootstrapRequestIdentity | null = null,
+  ) {
+    if (!this.incidentRepository?.isEnabled())
+      return this.getIncident(incidentId, identity);
+    return this.incidentRepository.loadIncident(incidentId).then((incident) => {
+      if (!incident)
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "NOT_FOUND",
+          "Incident not found.",
+          { incidentId },
+        );
+      return this.discoverPersistedIncident(incident, identity);
+    });
+  }
+
+  getTimelineForReadback(incidentId: string) {
+    if (!this.incidentRepository?.isEnabled())
+      return this.getTimeline(incidentId);
+    const repository = this.incidentRepository;
+    return Promise.resolve(this.getIncidentForReadback(incidentId)).then(
+      async () => {
+        const entries = await repository.loadTimeline(incidentId);
+        // Merge only missing entry IDs; never replace pending local entries.
+        const local = this.timelines.get(incidentId) ?? [];
+        const seen = new Set(local.map((entry) => entry.entryId));
+        this.timelines.set(incidentId, [
+          ...local,
+          ...entries.filter((entry) => !seen.has(entry.entryId)),
+        ]);
+        return entries.map((entry) => ({ ...entry }));
+      },
+    );
+  }
+
+  private discoverPersistedIncident(
+    incident: IncidentRecord,
+    identity: BootstrapRequestIdentity | null,
+  ): IncidentRecord {
+    const suppression = incident.matchingSuppression;
+    // Same existing expiry rule, evaluated without mutating another command's
+    // suppression/recovery caches while an authoritative read is outstanding.
+    const matchingSuppression = suppression
+      ? {
+          ...suppression,
+          active:
+            suppression.active &&
+            suppression.liftedAt === null &&
+            new Date(suppression.expiresAt).getTime() > Date.now(),
+        }
+      : null;
+    const decorated = {
+      ...this.cloneIncident(incident),
+      matchingSuppression,
+      availableActions: this.buildAvailableActions(
+        matchingSuppression,
+        identity,
+      ),
+    };
+    if (
+      !this.incidents.some((item) => item.incidentId === incident.incidentId)
+    ) {
+      this.incidents = [decorated, ...this.incidents];
+      if (incident.matchingSuppression)
+        this.suppressions.set(incident.incidentId, {
+          ...incident.matchingSuppression,
+        });
+      this.recoveryActions.set(
+        incident.incidentId,
+        (incident.serviceRecoveryActions ?? []).map((action) => ({
+          ...action,
+        })),
+      );
+      this.incidentSequence = Math.max(
+        this.incidentSequence,
+        this.deriveNextSequence([incident]),
+      );
+    }
+    return this.cloneIncident(decorated);
+  }
+
+  /** Targeted authoritative SOS read, including rows created on another replica. */
   async getIncidentForSosReadback(
     incidentId: string,
     identity: BootstrapRequestIdentity | null,
   ): Promise<IncidentRecord> {
-    if (!this.incidentRepository?.isEnabled())
-      return this.getIncident(incidentId, identity);
-    const durable = await this.incidentRepository.loadIncident(incidentId);
-    if (!durable)
-      throw new ApiRequestError(
-        HttpStatus.SERVICE_UNAVAILABLE,
-        "INCIDENT_HANDOVER_UNAVAILABLE",
-        "The canonical Incident is unavailable; retry.",
-        { incidentId },
-        true,
-      );
-    this.replace(this.decorateIncident(durable, identity));
-    return this.getIncident(incidentId, identity);
+    try {
+      return await this.getIncidentForReadback(incidentId, identity);
+    } catch (error) {
+      if (
+        this.incidentRepository?.isEnabled() &&
+        error instanceof ApiRequestError &&
+        error.code === "NOT_FOUND"
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "INCIDENT_HANDOVER_UNAVAILABLE",
+          "The canonical Incident is unavailable; retry.",
+          { incidentId },
+          true,
+        );
+      }
+      throw error;
+    }
   }
 
   /** Consume the repository's actual owner decision, preserving unrelated

@@ -822,11 +822,26 @@ export class DriverSosService implements OnModuleInit {
     requestId?: string,
   ): Promise<AcknowledgeDriverSosDutyResult> {
     const actorId = this.requireOpsIdentity(identity);
-    this.requireEventForOps(sosEventId); // fail fast for an unknown event
     const note = this.normalizeNullable(command?.note ?? null);
 
     return this.withEventMutationLock(sosEventId, async () => {
-      const event = this.requireEventForOps(sosEventId);
+      // Keep the existing synchronous local claim ordering for known events.
+      // Only a genuinely absent event/Incident needs asynchronous discovery.
+      const event = this.eventById.has(sosEventId)
+        ? this.requireEventForOps(sosEventId)
+        : await this.hydrateFromAuthoritativeStoreIfPending(sosEventId);
+      if (event.incidentId) {
+        try {
+          this.incidentService.getIncident(event.incidentId, identity);
+        } catch (error) {
+          if (!(error instanceof ApiRequestError) || error.code !== "NOT_FOUND")
+            throw error;
+          await this.incidentService.getIncidentForSosReadback(
+            event.incidentId,
+            identity,
+          );
+        }
+      }
       const existingOwner = event.dutyAcknowledgement.acknowledgedByActorId;
       if (existingOwner) {
         // Idempotent replay still retries the Incident handover: a prior
@@ -1215,7 +1230,6 @@ export class DriverSosService implements OnModuleInit {
     identity: BootstrapRequestIdentity | null,
   ): Promise<DriverSosEventReadback> {
     this.requireOpsIdentity(identity);
-    this.requireEventForOps(sosEventId);
     const event = await this.hydrateAndReconcile(sosEventId, identity);
     return {
       event: this.cloneEvent(event),
@@ -1230,17 +1244,18 @@ export class DriverSosService implements OnModuleInit {
     identity: BootstrapRequestIdentity | null,
   ): Promise<DriverSosEventReadback> {
     this.requireOpsIdentity(identity);
-    const found = this.events.find(
-      (candidate) => candidate.incidentId === incidentId,
-    );
-    if (!found) {
+    const sosEventId =
+      this.events.find((candidate) => candidate.incidentId === incidentId)
+        ?.sosEventId ??
+      (await this.repository?.findEventIdByIncidentId(incidentId));
+    if (!sosEventId) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
         "DRIVER_SOS_EVENT_NOT_FOUND",
         `No driver SOS event correlates to incident ${incidentId}.`,
       );
     }
-    const event = await this.hydrateAndReconcile(found.sosEventId, identity);
+    const event = await this.hydrateAndReconcile(sosEventId, identity);
     return {
       event: this.cloneEvent(event),
       timeline: (this.timelines.get(event.sosEventId) ?? []).map((entry) =>
@@ -1254,8 +1269,11 @@ export class DriverSosService implements OnModuleInit {
     identity: BootstrapRequestIdentity | null,
   ): Promise<DriverSosEventReadback> {
     const driverId = this.requireDriverIdentity(identity);
-    this.requireDriverEvent(sosEventId, driverId);
-    const event = await this.hydrateAndReconcile(sosEventId, identity);
+    const event = await this.hydrateAndReconcile(
+      sosEventId,
+      identity,
+      driverId,
+    );
     return {
       event: this.cloneEvent(event),
       timeline: (this.timelines.get(sosEventId) ?? []).map((entry) =>
@@ -1274,10 +1292,12 @@ export class DriverSosService implements OnModuleInit {
   private hydrateAndReconcile(
     sosEventId: string,
     identity: BootstrapRequestIdentity | null,
+    driverId?: string,
   ): Promise<DriverSosEventRecord> {
     return this.withEventMutationLock(sosEventId, async () => {
       const hydrated =
         await this.hydrateFromAuthoritativeStoreIfPending(sosEventId);
+      if (driverId) this.requireDriverEvent(sosEventId, driverId);
       return this.reconcileWithIncidentLocked(hydrated.sosEventId, identity);
     });
   }
@@ -1297,8 +1317,18 @@ export class DriverSosService implements OnModuleInit {
   private replaceEvent(event: DriverSosEventRecord) {
     const cloned = this.cloneEvent(event);
     this.eventById.set(cloned.sosEventId, cloned);
-    this.events = this.events.map((candidate) =>
-      candidate.sosEventId === cloned.sosEventId ? cloned : candidate,
+    if (
+      this.events.some(
+        (candidate) => candidate.sosEventId === cloned.sosEventId,
+      )
+    ) {
+      this.events = this.events.map((candidate) =>
+        candidate.sosEventId === cloned.sosEventId ? cloned : candidate,
+      );
+    } else this.events = [cloned, ...this.events];
+    this.eventIdByDriverClientKey.set(
+      this.buildDriverClientKey(cloned.driverId, cloned.clientEventId),
+      cloned.sosEventId,
     );
   }
 
@@ -1318,20 +1348,17 @@ export class DriverSosService implements OnModuleInit {
   private async hydrateFromAuthoritativeStoreIfPending(
     sosEventId: string,
   ): Promise<DriverSosEventRecord> {
-    const cached = this.requireEventForOps(sosEventId);
-    if (!this.repository || cached.status === "false_alarm_dismissed") {
-      return cached;
+    const cached = this.eventById.get(sosEventId);
+    if (!this.repository || cached?.status === "false_alarm_dismissed") {
+      return cached ?? this.requireEventForOps(sosEventId);
     }
 
     const reloaded = await this.repository.reloadEventState(sosEventId);
-    if (!reloaded) {
-      return cached;
-    }
+    if (!reloaded) return cached ?? this.requireEventForOps(sosEventId);
 
-    const authoritative = DriverSosService.preferForwardProgress(
-      cached,
-      reloaded.event,
-    );
+    const authoritative = cached
+      ? DriverSosService.preferForwardProgress(cached, reloaded.event)
+      : reloaded.event;
     if (authoritative === cached) {
       return cached;
     }

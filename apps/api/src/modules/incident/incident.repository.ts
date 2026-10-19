@@ -545,6 +545,31 @@ export class IncidentRepository {
     return result.rows[0]?.was_still_owner === true;
   }
 
+  /** Read consumers discover rows committed after this replica initialized. */
+  async loadIncidents(): Promise<IncidentRecord[]> {
+    if (!this.isEnabled()) return [];
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      "SELECT record FROM ops.phase1_incidents ORDER BY updated_at DESC, created_at DESC",
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<IncidentRecord>(row.record, "ops.phase1_incidents"),
+    );
+  }
+
+  async loadTimeline(incidentId: string): Promise<IncidentTimelineEntry[]> {
+    if (!this.isEnabled()) return [];
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      "SELECT record FROM ops.phase1_incident_timelines WHERE incident_id = $1 ORDER BY created_at ASC",
+      [incidentId],
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<IncidentTimelineEntry>(
+        row.record,
+        "ops.phase1_incident_timelines",
+      ),
+    );
+  }
+
   async loadIncident(incidentId: string): Promise<IncidentRecord | null> {
     if (!this.isEnabled()) return null;
     const result = await this.databaseService!.query<JsonRecordRow>(

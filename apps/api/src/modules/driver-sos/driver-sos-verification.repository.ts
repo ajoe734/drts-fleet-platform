@@ -511,7 +511,7 @@ export class DriverSosVerificationRepository {
       if (event.incidentId) {
         await client.query(
           `UPDATE ops.phase1_incidents
-           SET assigned_to = $2, updated_at = GREATEST(updated_at, $3::timestamptz),
+           SET assigned_to = $2::text, updated_at = GREATEST(updated_at, $3::timestamptz),
                record = jsonb_set(jsonb_set(record, '{assignedTo}', to_jsonb($2::text), true),
                  '{updatedAt}', to_jsonb(GREATEST(updated_at, $3::timestamptz)::text), true)
            WHERE incident_id = $1`,

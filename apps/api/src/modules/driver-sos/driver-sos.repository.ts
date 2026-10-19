@@ -197,6 +197,15 @@ export class DriverSosRepository {
    * timeline and outbox instead of continuing to serve this process's own
    * stale copies.
    */
+  async findEventIdByIncidentId(incidentId: string): Promise<string | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<{ sos_event_id: string }>(
+      "SELECT sos_event_id FROM safety.driver_sos_events WHERE incident_id = $1 LIMIT 1",
+      [incidentId],
+    );
+    return result.rows[0]?.sos_event_id ?? null;
+  }
+
   async reloadEventState(sosEventId: string): Promise<{
     event: DriverSosEventRecord;
     timelines: DriverSosTimelineEntry[];
@@ -289,7 +298,9 @@ export class DriverSosRepository {
     return {
       event: this.mapEventRow(eventRow),
       timelines: timelinesResult.rows.map((row) => this.mapTimelineRow(row)),
-      outbox: outboxResult.rows[0] ? this.mapOutboxRow(outboxResult.rows[0]) : null,
+      outbox: outboxResult.rows[0]
+        ? this.mapOutboxRow(outboxResult.rows[0])
+        : null,
     };
   }
 

@@ -60,13 +60,16 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
-    return toApiSuccessEnvelope(
-      buildUiReadModelList(this.incidentService.listIncidents(identity), {
-        staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
-        emptyState: buildEmptyStateEnvelope("no_data", "incidents.empty"),
-      }),
-      requestId,
-    );
+    const respond = (items: ReturnType<IncidentService["listIncidents"]>) =>
+      toApiSuccessEnvelope(
+        buildUiReadModelList(items, {
+          staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
+          emptyState: buildEmptyStateEnvelope("no_data", "incidents.empty"),
+        }),
+        requestId,
+      );
+    const items = this.incidentService.listIncidentsForReadback(identity);
+    return items instanceof Promise ? items.then(respond) : respond(items);
   }
 
   @Get(":incidentId")
@@ -75,15 +78,18 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
-    return toApiSuccessEnvelope(
-      buildUiReadModelResource(
-        this.incidentService.getIncident(incidentId, identity),
-        {
+    const respond = (item: ReturnType<IncidentService["getIncident"]>) =>
+      toApiSuccessEnvelope(
+        buildUiReadModelResource(item, {
           staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
-        },
-      ),
-      requestId,
+        }),
+        requestId,
+      );
+    const item = this.incidentService.getIncidentForReadback(
+      incidentId,
+      identity,
     );
+    return item instanceof Promise ? item.then(respond) : respond(item);
   }
 
   @Patch(":incidentId")
@@ -109,16 +115,19 @@ export class IncidentController {
     @Param("incidentId") incidentId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      buildUiReadModelList(this.incidentService.getTimeline(incidentId), {
-        staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
-        emptyState: buildEmptyStateEnvelope(
-          "no_data",
-          "incidents.timeline.empty",
-        ),
-      }),
-      requestId,
-    );
+    const respond = (items: ReturnType<IncidentService["getTimeline"]>) =>
+      toApiSuccessEnvelope(
+        buildUiReadModelList(items, {
+          staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
+          emptyState: buildEmptyStateEnvelope(
+            "no_data",
+            "incidents.timeline.empty",
+          ),
+        }),
+        requestId,
+      );
+    const items = this.incidentService.getTimelineForReadback(incidentId);
+    return items instanceof Promise ? items.then(respond) : respond(items);
   }
 
   @Post("from-dispatch-exception")
