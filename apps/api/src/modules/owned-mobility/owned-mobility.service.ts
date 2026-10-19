@@ -37,6 +37,7 @@ import type {
   ApplyManualFareOverrideCommand,
   ApproveTenantBookingApprovalRequestCommand,
   AuditLogRecord,
+  IdentityContext,
   CallRecordingState,
   ComplianceGateRecord,
   ComplianceGateState,
@@ -172,6 +173,7 @@ import { resolveVoiceOrderFence } from "../voice-booking/voice-order-fence";
 import {
   TenantPartnerService,
   type TenantQuotaConsumptionCommitResult,
+  type TenantApprovalCommandContext,
 } from "../tenant-partner/tenant-partner.service";
 import {
   installTenantQuotaRelease,
@@ -3324,24 +3326,15 @@ export class OwnedMobilityService
     command: ApproveTenantBookingApprovalRequestCommand,
     requestId?: string,
   ) {
-    if (!this.tenantPartnerService) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_IMPLEMENTED,
-        "APPROVAL_WORKFLOW_NOT_AVAILABLE",
-        "Tenant approval workflow is not available.",
-      );
-    }
-
-    const request = await this.tenantPartnerService.approveApprovalRequest({
+    return this.executeTenantBookingApprovalCommand(
+      "approve",
       tenantId,
       approvalRequestId,
       actorUserId,
       actorRoleCode,
       command,
-      ...(requestId ? { requestId } : {}),
-    });
-    this.applyApprovalRequestResolutionToOrder(request, requestId);
-    return request;
+      requestId,
+    );
   }
 
   async rejectTenantBookingApprovalRequest(
@@ -3352,24 +3345,15 @@ export class OwnedMobilityService
     command: RejectTenantBookingApprovalRequestCommand,
     requestId?: string,
   ) {
-    if (!this.tenantPartnerService) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_IMPLEMENTED,
-        "APPROVAL_WORKFLOW_NOT_AVAILABLE",
-        "Tenant approval workflow is not available.",
-      );
-    }
-
-    const request = await this.tenantPartnerService.rejectApprovalRequest({
+    return this.executeTenantBookingApprovalCommand(
+      "reject",
       tenantId,
       approvalRequestId,
       actorUserId,
       actorRoleCode,
       command,
-      ...(requestId ? { requestId } : {}),
-    });
-    this.applyApprovalRequestResolutionToOrder(request, requestId);
-    return request;
+      requestId,
+    );
   }
 
   async escalateTenantBookingApprovalRequest(
@@ -3380,24 +3364,216 @@ export class OwnedMobilityService
     command: EscalateTenantBookingApprovalRequestCommand,
     requestId?: string,
   ) {
-    if (!this.tenantPartnerService) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_IMPLEMENTED,
-        "APPROVAL_WORKFLOW_NOT_AVAILABLE",
-        "Tenant approval workflow is not available.",
-      );
-    }
-
-    const request = await this.tenantPartnerService.escalateApprovalRequest({
+    return this.executeTenantBookingApprovalCommand(
+      "escalate",
       tenantId,
       approvalRequestId,
       actorUserId,
       actorRoleCode,
       command,
-      ...(requestId ? { requestId } : {}),
-    });
-    this.applyApprovalRequestResolutionToOrder(request, requestId);
-    return request;
+      requestId,
+    );
+  }
+
+  private async executeTenantBookingApprovalCommand(
+    action: "approve" | "reject" | "escalate",
+    tenantId: string,
+    approvalRequestId: string,
+    actorUserId: string,
+    actorRoleCode: string | null,
+    command:
+      | ApproveTenantBookingApprovalRequestCommand
+      | RejectTenantBookingApprovalRequestCommand
+      | EscalateTenantBookingApprovalRequestCommand,
+    requestId?: string,
+  ) {
+    const tenant = this.tenantPartnerService;
+    if (!tenant)
+      throw new ApiRequestError(
+        HttpStatus.NOT_IMPLEMENTED,
+        "APPROVAL_WORKFLOW_NOT_AVAILABLE",
+        "Tenant approval workflow is not available.",
+      );
+    const anchor = await tenant.resolveApprovalRequestForCommand(
+      tenantId,
+      approvalRequestId,
+    );
+    return this.executeBookingApprovalCommand(
+      anchor,
+      async (workflow) => {
+        const input = {
+          tenantId,
+          approvalRequestId,
+          actorUserId,
+          actorRoleCode,
+          ...(requestId ? { requestId } : {}),
+        };
+        return action === "approve"
+          ? tenant.approveApprovalRequest(
+              {
+                ...input,
+                command: command as ApproveTenantBookingApprovalRequestCommand,
+              },
+              workflow,
+            )
+          : action === "reject"
+            ? tenant.rejectApprovalRequest(
+                {
+                  ...input,
+                  command: command as RejectTenantBookingApprovalRequestCommand,
+                },
+                workflow,
+              )
+            : tenant.escalateApprovalRequest(
+                {
+                  ...input,
+                  command:
+                    command as EscalateTenantBookingApprovalRequestCommand,
+                },
+                workflow,
+              );
+      },
+      requestId,
+    );
+  }
+
+  async executeOpsBookingApprovalCommand(
+    action: "approve" | "reject" | "escalate",
+    approvalRequestId: string,
+    command:
+      | ApproveTenantBookingApprovalRequestCommand
+      | RejectTenantBookingApprovalRequestCommand
+      | EscalateTenantBookingApprovalRequestCommand,
+    identity: IdentityContext | null,
+    requestId?: string,
+  ) {
+    const tenant = this.tenantPartnerService;
+    if (!tenant)
+      throw new ApiRequestError(
+        HttpStatus.NOT_IMPLEMENTED,
+        "APPROVAL_WORKFLOW_NOT_AVAILABLE",
+        "Tenant approval workflow is not available.",
+      );
+    // Preserve the existing Ops actor authority before cross-tenant discovery.
+    const anchor = await tenant.resolveOpsApprovalRequestForCommand(
+      approvalRequestId,
+      identity,
+    );
+    return this.executeBookingApprovalCommand(
+      anchor,
+      async (workflow) =>
+        action === "approve"
+          ? tenant.approveOpsApprovalRequest(
+              approvalRequestId,
+              command as ApproveTenantBookingApprovalRequestCommand,
+              identity,
+              requestId,
+              workflow,
+            )
+          : action === "reject"
+            ? tenant.rejectOpsApprovalRequest(
+                approvalRequestId,
+                command as RejectTenantBookingApprovalRequestCommand,
+                identity,
+                requestId,
+                workflow,
+              )
+            : tenant.escalateOpsApprovalRequest(
+                approvalRequestId,
+                command as EscalateTenantBookingApprovalRequestCommand,
+                identity,
+                requestId,
+                workflow,
+              ),
+      requestId,
+    );
+  }
+
+  private async executeBookingApprovalCommand<
+    T extends TenantBookingApprovalRequestRecord,
+  >(
+    anchor: TenantBookingApprovalRequestRecord,
+    decide: (workflow: TenantApprovalCommandContext) => Promise<T>,
+    requestId?: string,
+  ) {
+    const tenant = this.tenantPartnerService!;
+    const { tenantId, approvalRequestId } = anchor;
+    const afterCommit: Array<() => void | Promise<void>> = [];
+    const repository = this.ownedMobilityRepository;
+    const apply = async (
+      order: OwnedOrderRecord,
+      tx: OwnedMobilityQueryExecutor | null,
+    ) => {
+      if (order.tenantId !== tenantId || order.bookingId !== anchor.bookingId)
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "BOOKING_NOT_FOUND",
+          "Booking was not found.",
+        );
+      if (order.status === "cancelled" || order.status === "completed")
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "ORDER_NOT_MODIFIABLE",
+          "The order can no longer be modified.",
+          { orderId: order.orderId },
+        );
+      const current = await tenant.resolveApprovalRequestForCommand(
+        tenantId,
+        approvalRequestId,
+        tx ?? undefined,
+      );
+      if (
+        current.orderId !== order.orderId ||
+        current.bookingId !== order.bookingId
+      )
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "APPROVAL_ORDER_MISMATCH",
+          "Approval request no longer belongs to this booking.",
+        );
+      const workflow = { tx, afterCommit, request: current };
+      const request = await decide(workflow);
+      const prepared = await this.applyApprovalRequestResolutionToOrder(
+        request,
+        order,
+        tx,
+      );
+      return { request, ...prepared };
+    };
+    const project = async (committed: Awaited<ReturnType<typeof apply>>) => {
+      this.applyAuthoritativeOrder(committed.order);
+      if (committed.quotaRelease)
+        tenant.applyCommittedQuotaRelease(committed.quotaRelease);
+      this.recordBookingApprovalStateChanged(
+        committed.order,
+        committed.previousApprovalState,
+        requestId,
+      );
+      for (const effect of afterCommit) await effect();
+      return committed.request;
+    };
+    if (repository?.isEnabled()) {
+      await Promise.all([...this.pendingWorkflowWrites]);
+      const committed = await repository.withTransaction(async (tx) => {
+        const locked = await repository.findOrderForUpdate(tx, anchor.orderId);
+        if (!locked)
+          throw new ApiRequestError(
+            HttpStatus.NOT_FOUND,
+            "BOOKING_NOT_FOUND",
+            "Booking was not found.",
+          );
+        return apply(this.cloneOrder(locked.order), tx);
+      });
+      return project(committed);
+    }
+    return tenant.runInMemoryApprovalCommand(approvalRequestId, async () =>
+      project(
+        await apply(
+          this.cloneOrder(this.requireBookingOrder(anchor.bookingId, tenantId)),
+          null,
+        ),
+      ),
+    );
   }
 
   async acknowledgePassengerDisclosure(
@@ -3518,11 +3694,132 @@ export class OwnedMobilityService
   ) {
     this.assertNonBlank(tenantId, "tenantId");
     this.assertTenantChannelCannotSetQuotedFare(command, identity);
-    const order = this.requireBookingOrder(bookingId, tenantId);
-    const originalOrder = this.cloneOrder(order);
-    const governanceSnapshot = this.captureTenantGovernanceSnapshot();
+    const repository = this.ownedMobilityRepository;
+    const afterCommit: Array<() => void | Promise<void>> = [];
+    const project = (prepared: {
+      order: OwnedOrderRecord;
+      traceLog: DispatchTraceLogRecord;
+      previousApprovalState: TenantBookingApprovalState;
+    }) => {
+      this.applyAuthoritativeOrder(prepared.order);
+      this.dispatchTraceLogs = [prepared.traceLog, ...this.dispatchTraceLogs];
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId,
+          moduleName: "order",
+          actionName: "update_booking",
+          resourceType: "booking",
+          resourceId: bookingId,
+          newValuesSummary: {
+            orderId: prepared.order.orderId,
+            status: prepared.order.status,
+            businessDispatchSubtype: prepared.order.businessDispatchSubtype,
+            approvalState: prepared.order.approvalState,
+            approvalRequestIds: prepared.order.approvalRequestIds,
+          },
+        },
+        requestId,
+      );
+      this.recordBookingApprovalStateChanged(
+        prepared.order,
+        prepared.previousApprovalState,
+        requestId,
+      );
+      return this.mapOrderToBooking(prepared.order);
+    };
+    if (repository?.isEnabled()) {
+      return (async () => {
+        await Promise.all([...this.pendingWorkflowWrites]);
+        const anchor = await repository.findOrderByBookingId(
+          bookingId,
+          tenantId,
+        );
+        if (!anchor)
+          throw new ApiRequestError(
+            HttpStatus.NOT_FOUND,
+            "BOOKING_NOT_FOUND",
+            "Booking was not found.",
+            { bookingId },
+          );
+        const prepared = await repository.withTransaction(async (tx) => {
+          const locked = await repository.findOrderForUpdate(
+            tx,
+            anchor.orderId,
+          );
+          if (
+            !locked ||
+            locked.order.tenantId !== tenantId ||
+            locked.order.bookingId !== bookingId
+          ) {
+            throw new ApiRequestError(
+              HttpStatus.NOT_FOUND,
+              "BOOKING_NOT_FOUND",
+              "Booking was not found.",
+              { bookingId },
+            );
+          }
+          // Refresh only this already committed row, never an attempted update.
+          this.applyAuthoritativeOrder(locked.order);
+          const result = await this.prepareTenantBookingUpdate(
+            this.cloneOrder(locked.order),
+            command,
+            requestId,
+            tx,
+            afterCommit,
+          );
+          result.order.aggregateVersion = await repository.updateOrderWithCas(
+            tx,
+            result.order,
+            locked.aggregateVersion,
+          );
+          await repository.persistOrderWorkflow(tx, {
+            dispatchTraceLogs: [result.traceLog],
+          });
+          return result;
+        });
+        // No shared order/trace/governance projection or success audit before COMMIT.
+        const result = project(prepared);
+        for (const effect of afterCommit) await effect();
+        return result;
+      })();
+    }
+    const snapshot = this.captureTenantGovernanceSnapshot();
+    return this.withRollback(
+      () =>
+        this.afterMaybePromise(
+          this.prepareTenantBookingUpdate(
+            this.cloneOrder(this.requireBookingOrder(bookingId, tenantId)),
+            command,
+            requestId,
+            null,
+            afterCommit,
+          ),
+          (prepared) => project(prepared),
+        ),
+      () => this.restoreTenantGovernanceSnapshot(snapshot),
+    );
+  }
+
+  private prepareTenantBookingUpdate(
+    order: OwnedOrderRecord,
+    command: UpdateTenantBookingCommand,
+    requestId: string | undefined,
+    tx: OwnedMobilityQueryExecutor | null,
+    afterCommit: Array<() => void | Promise<void>>,
+  ) {
+    const tenantId = order.tenantId!;
+    const bookingId = order.bookingId!;
     this.assertBookingModifiable(order);
+    const originalOrder = this.cloneOrder(order);
     const previousApprovalState = order.approvalState;
+    if (
+      command.reservationWindowStart !== undefined &&
+      command.reservationWindowStart !== order.reservationWindowStart
+    ) {
+      this.assertBookingLeadTime(command.reservationWindowStart);
+    }
     const previousApprovalSnapshot =
       this.buildTenantBookingApprovalInputSnapshot(order);
 
@@ -3680,59 +3977,22 @@ export class OwnedMobilityService
       ) ?? false;
 
     order.updatedAt = new Date().toISOString();
-    const traceLog = this.appendTrace(order.orderId, "booking.updated", {
+    const traceLog = this.buildTraceLog(order.orderId, "booking.updated", {
       bookingId,
       businessDispatchSubtype,
       reservationWindowStart: order.reservationWindowStart,
       reservationWindowEnd: order.reservationWindowEnd,
     });
-    const finalizeUpdate = (persistOrderWrite = true) => {
-      if (persistOrderWrite) {
-        this.persistChanges(
-          {
-            orders: [order],
-            dispatchTraceLogs: [traceLog],
-          },
-          "update_tenant_booking",
-        );
-      }
-      this.recordAudit(
-        {
-          actorId: null,
-          actorType: "tenant_admin",
-          tenantId: order.tenantId,
-          moduleName: "order",
-          actionName: "update_booking",
-          resourceType: "booking",
-          resourceId: bookingId,
-          newValuesSummary: {
-            orderId: order.orderId,
-            status: order.status,
-            businessDispatchSubtype,
-            approvalState: order.approvalState,
-            approvalRequestIds: order.approvalRequestIds,
-          },
-        },
-        requestId,
-      );
-      this.recordBookingApprovalStateChanged(
-        order,
-        previousApprovalState,
-        requestId,
-      );
-      return this.mapOrderToBooking(order);
-    };
-
-    if (!needsApprovalReevaluation) {
-      return finalizeUpdate();
-    }
-
+    const prepared = { order, traceLog, previousApprovalState };
+    if (!needsApprovalReevaluation) return prepared;
     const applyReevaluation = (tx?: OwnedMobilityQueryExecutor | null) =>
       this.afterMaybePromise(
         this.evaluateTenantBookingGovernance({
           tx: tx ?? null,
+          afterCommit,
           order,
           operation: "update",
+          previousOrder: originalOrder,
           ...(requestId ? { requestId } : {}),
         }),
         (evaluation) => {
@@ -3741,6 +4001,7 @@ export class OwnedMobilityService
           return this.afterMaybePromise(
             this.cancelApprovalRequestsForReevaluation({
               tx: tx ?? null,
+              afterCommit,
               order,
               ...(requestId ? { requestId } : {}),
             }),
@@ -3748,6 +4009,7 @@ export class OwnedMobilityService
               this.afterMaybePromise(
                 this.createApprovalRequestForOrder({
                   tx: tx ?? null,
+                  afterCommit,
                   order,
                   evaluation,
                   ...(requestId ? { requestId } : {}),
@@ -3763,35 +4025,7 @@ export class OwnedMobilityService
         },
       );
 
-    if (
-      this.ownedMobilityRepository?.isEnabled() &&
-      this.tenantPartnerService?.isPersistenceEnabled()
-    ) {
-      return this.withRollback(
-        () =>
-          this.ownedMobilityRepository!.withTransaction(async (tx) => {
-            await applyReevaluation(tx);
-            await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
-              orders: [this.cloneOrder(order)],
-              dispatchTraceLogs: [traceLog],
-            });
-            return finalizeUpdate(false);
-          }),
-        () => {
-          this.restoreTenantGovernanceSnapshot(governanceSnapshot);
-          this.restoreOrderSnapshot(originalOrder);
-        },
-      );
-    }
-
-    return this.withRollback(
-      () =>
-        this.afterMaybePromise(applyReevaluation(null), () => finalizeUpdate()),
-      () => {
-        this.restoreTenantGovernanceSnapshot(governanceSnapshot);
-        this.restoreOrderSnapshot(originalOrder);
-      },
-    );
+    return this.afterMaybePromise(applyReevaluation(tx), () => prepared);
   }
 
   async cancelTenantBooking(
@@ -9961,6 +10195,17 @@ export class OwnedMobilityService
   }
 
   private assertBookingModifiable(order: OwnedOrderRecord) {
+    if (order.status === "cancelled" || order.status === "completed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "ORDER_NOT_MODIFIABLE",
+        "The order can no longer be modified.",
+        {
+          orderId: order.orderId,
+          status: order.status,
+        },
+      );
+    }
     if (!order.modifiableUntil) {
       return;
     }
@@ -12102,11 +12347,11 @@ export class OwnedMobilityService
     });
   }
 
-  private applyApprovalRequestResolutionToOrder(
+  private async applyApprovalRequestResolutionToOrder(
     request: TenantBookingApprovalRequestRecord,
-    requestId?: string,
+    order: OwnedOrderRecord,
+    tx: OwnedMobilityQueryExecutor | null,
   ) {
-    const order = this.requireBookingOrder(request.bookingId, request.tenantId);
     const previousApprovalState = order.approvalState;
     const now = new Date().toISOString();
 
@@ -12128,24 +12373,42 @@ export class OwnedMobilityService
     }
 
     order.updatedAt = now;
-    this.persistChanges(
-      {
-        orders: [order],
-      },
-      "apply approval request resolution",
-    );
-    this.recordBookingApprovalStateChanged(
-      order,
-      previousApprovalState,
-      requestId,
-    );
+    let quotaRelease: Awaited<
+      ReturnType<TenantPartnerService["prepareTenantQuotaRelease"]>
+    > | null = null;
+    if (tx && this.ownedMobilityRepository?.isEnabled()) {
+      order.aggregateVersion =
+        await this.ownedMobilityRepository.updateOrderWithCas(
+          tx,
+          order,
+          order.aggregateVersion!,
+        );
+      if (
+        request.status === "rejected" &&
+        this.tenantPartnerService?.isPersistenceEnabled()
+      ) {
+        quotaRelease =
+          await this.tenantPartnerService.prepareTenantQuotaRelease(tx, {
+            tenantId: request.tenantId,
+            bookingId: request.bookingId,
+          });
+      }
+    } else if (request.status === "rejected" && this.tenantPartnerService) {
+      await this.tenantPartnerService.releaseTenantQuota({
+        tenantId: request.tenantId,
+        bookingId: request.bookingId,
+      });
+    }
+    return { order, previousApprovalState, quotaRelease };
   }
 
   private evaluateTenantBookingGovernance(params: {
     tx?: OwnedMobilityQueryExecutor | null;
     order: OwnedOrderRecord;
     operation: "create" | "update";
+    previousOrder?: OwnedOrderRecord;
     requestId?: string;
+    afterCommit?: Array<() => void | Promise<void>>;
   }): MaybePromise<TenantApprovalEvaluationResult | null> {
     if (
       !this.tenantPartnerService ||
@@ -12156,57 +12419,84 @@ export class OwnedMobilityService
       return null;
     }
 
+    const tenant = this.tenantPartnerService;
+    const tenantId = params.order.tenantId;
+    const bookingId = params.order.bookingId;
+    const reservationWindowStart = params.order.reservationWindowStart;
     const inputSnapshot = this.buildTenantBookingApprovalInputSnapshot(
       params.order,
     );
-    const quotaPreview = this.tenantPartnerService.previewBookingQuotaImpact(
-      params.order.tenantId,
-      {
-        bookingId: params.order.bookingId,
-        costCenterCode: params.order.costCenter,
-        estimatedAmountMinor: params.order.quotedFare?.amountMinor ?? null,
-        ...(params.order.quotedFare?.currency
-          ? { currency: params.order.quotedFare.currency }
-          : {}),
-        reservationWindowStart: params.order.reservationWindowStart,
-      },
-    );
-    const evaluation = this.tenantPartnerService.evaluateApprovalRules(
-      params.order.tenantId,
-      {
-        subject: {
-          subjectType: "booking",
-          bookingId: params.order.bookingId,
-          draftId: null,
-          operation: params.operation,
+    const createQuotaPreview = params.previousOrder
+      ? null
+      : tenant.previewBookingQuotaImpact(tenantId, {
+          bookingId: bookingId,
+          costCenterCode: params.order.costCenter,
+          estimatedAmountMinor: params.order.quotedFare?.amountMinor ?? null,
+          ...(params.order.quotedFare?.currency
+            ? { currency: params.order.quotedFare.currency }
+            : {}),
+          reservationWindowStart: reservationWindowStart,
+        });
+    const updateQuota = params.previousOrder
+      ? tenant.prepareBookingQuotaUpdate(
+          params.tx ?? null,
+          params.previousOrder,
+          params.order,
+          params.tx ? params.afterCommit : undefined,
+        )
+      : null;
+    return this.afterMaybePromise(updateQuota, (preparedUpdate) => {
+      const quotaPreview = preparedUpdate ?? createQuotaPreview!;
+      const evaluation = tenant.evaluateApprovalRules(
+        tenantId,
+        {
+          subject: {
+            subjectType: "booking",
+            bookingId: bookingId,
+            draftId: null,
+            operation: params.operation,
+          },
+          inputSnapshot,
+          quotaImpacts: quotaPreview.impacts,
         },
-        inputSnapshot,
-        quotaImpacts: quotaPreview.impacts,
-      },
-      params.requestId,
-    );
-    const matchedRules = evaluation.matchedRules ?? [];
-    const blockedByRule = matchedRules.some((rule) => rule.action === "block");
+        params.requestId,
+        params.tx ? params.afterCommit : undefined,
+      );
+      const matchedRules = evaluation.matchedRules ?? [];
+      const blockedByRule = matchedRules.some(
+        (rule) => rule.action === "block",
+      );
 
-    if (evaluation.outcome?.blocked && blockedByRule) {
-      return evaluation;
-    }
+      if (evaluation.outcome?.blocked && blockedByRule) {
+        return evaluation;
+      }
 
-    return this.afterMaybePromise(
-      this.tenantPartnerService.reserveTenantQuota(params.tx ?? null, {
-        tenantId: params.order.tenantId,
-        bookingId: params.order.bookingId,
-        evaluationId:
-          evaluation.evaluationId ?? `approval-eval-${randomUUID()}`,
-        reservationWindowStart: params.order.reservationWindowStart,
-        costCenterCode: params.order.costCenter,
-        estimatedAmountMinor: params.order.quotedFare?.amountMinor ?? null,
-        ...(params.order.quotedFare?.currency
-          ? { currency: params.order.quotedFare.currency }
-          : {}),
-      }),
-      () => evaluation,
-    );
+      return this.afterMaybePromise(
+        preparedUpdate
+          ? preparedUpdate.persist()
+          : this.afterMaybePromise(
+              tenant.reserveTenantQuota(
+                params.tx ?? null,
+                {
+                  tenantId: tenantId,
+                  bookingId: bookingId,
+                  evaluationId:
+                    evaluation.evaluationId ?? `approval-eval-${randomUUID()}`,
+                  reservationWindowStart: reservationWindowStart,
+                  costCenterCode: params.order.costCenter,
+                  estimatedAmountMinor:
+                    params.order.quotedFare?.amountMinor ?? null,
+                  ...(params.order.quotedFare?.currency
+                    ? { currency: params.order.quotedFare.currency }
+                    : {}),
+                },
+                params.tx ? params.afterCommit : undefined,
+              ),
+              () => {},
+            ),
+        () => evaluation,
+      );
+    });
   }
 
   private createApprovalRequestForOrder(params: {
@@ -12214,6 +12504,7 @@ export class OwnedMobilityService
     order: OwnedOrderRecord;
     evaluation: TenantApprovalEvaluationResult | null;
     requestId?: string;
+    afterCommit?: Array<() => void | Promise<void>>;
   }): MaybePromise<TenantBookingApprovalRequestRecord | null> {
     if (
       !this.tenantPartnerService ||
@@ -12226,6 +12517,9 @@ export class OwnedMobilityService
 
     return this.tenantPartnerService.createBookingApprovalRequest({
       tx: params.tx ?? null,
+      ...(params.tx && params.afterCommit
+        ? { afterCommit: params.afterCommit }
+        : {}),
       tenantId: params.order.tenantId,
       bookingId: params.order.bookingId,
       orderId: params.order.orderId,
@@ -12238,6 +12532,7 @@ export class OwnedMobilityService
     tx?: OwnedMobilityQueryExecutor | null;
     order: OwnedOrderRecord;
     requestId?: string;
+    afterCommit?: Array<() => void | Promise<void>>;
   }): MaybePromise<TenantBookingApprovalRequestRecord[]> {
     if (
       !this.tenantPartnerService ||
@@ -12249,8 +12544,12 @@ export class OwnedMobilityService
 
     return this.tenantPartnerService.cancelApprovalRequestsForReevaluation({
       tx: params.tx ?? null,
+      ...(params.tx && params.afterCommit
+        ? { afterCommit: params.afterCommit }
+        : {}),
       tenantId: params.order.tenantId,
       bookingId: params.order.bookingId,
+      approvalRequestIds: params.order.approvalRequestIds,
       ...(params.requestId ? { requestId: params.requestId } : {}),
     });
   }
