@@ -75,6 +75,13 @@ describe("original R3: all same-case prepared identities survive reconciliation"
       };
       entries: Entry[];
     };
+    definitePredecessorFailure: {
+      first: Outcome;
+      retry: Outcome;
+      finalCase: { assigneeId: string };
+      entries: Entry[];
+      unresolved: Command[];
+    };
   };
   beforeAll(() => {
     const output = execFileSync(
@@ -214,5 +221,21 @@ describe("original R3: all same-case prepared identities survive reconciliation"
       "sla_recalculated",
     ]);
     expect(new Set(row.entries.map((entry) => entry.entryId)).size).toBe(7);
+  });
+
+  it("refreshes and retries a new command definitely rejected before COMMIT", () => {
+    const row = observed.definitePredecessorFailure;
+    expect(row.first).toMatchObject({
+      ok: false,
+      code: "IDEMPOTENCY_IN_PROGRESS",
+    });
+    expect(row.retry.ok).toBe(true);
+    expect(row.finalCase.assigneeId).toBe("legacy-owner");
+    expect(row.entries.map((entry) => entry.action)).toEqual([
+      "case_created",
+      "case_assigned",
+      "case_note_added",
+    ]);
+    expect(row.unresolved).toHaveLength(0);
   });
 });

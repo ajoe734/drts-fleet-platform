@@ -77,6 +77,19 @@ export class ComplaintCommitOutcomeUnknownError extends Error {
   }
 }
 
+/** Only raised by the prepared predecessor check, before any business write. */
+export class ComplaintPreparedCaseChangedError extends ApiRequestError {
+  constructor(caseNo: string) {
+    super(
+      409,
+      "IDEMPOTENCY_IN_PROGRESS",
+      "The complaint changed after this command was prepared; canonical confirmation is required.",
+      { caseNo },
+      true,
+    );
+  }
+}
+
 @Injectable()
 export class ComplaintRepository {
   private readonly logger = new Logger(ComplaintRepository.name);
@@ -218,13 +231,7 @@ export class ComplaintRepository {
           ? current.rows[0]?.matches_prepared === true
           : current.rows.length === 0;
         if (!matches)
-          throw new ApiRequestError(
-            409,
-            "IDEMPOTENCY_IN_PROGRESS",
-            "The complaint changed after this command was prepared; canonical confirmation is required.",
-            { caseNo: original.case_no },
-            true,
-          );
+          throw new ComplaintPreparedCaseChangedError(original.case_no);
       }
       if (confirmed === changes.commandKeys.length) return;
       if (confirmed)

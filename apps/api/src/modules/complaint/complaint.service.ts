@@ -35,6 +35,7 @@ import type {
 import type { PassengerIntakeResult } from "./complaint.repository";
 import {
   ComplaintCommitOutcomeUnknownError,
+  ComplaintPreparedCaseChangedError,
   ComplaintRepository,
 } from "./complaint.repository";
 import {
@@ -221,11 +222,12 @@ export class ComplaintService implements OnModuleInit {
   private async reconcilePendingCases(): Promise<void> {
     await this.hydratePendingCommitsFromDurableStore();
     const caseNos = [
-      ...new Set(
-        [...this.complaintCommands.values()].map(
+      ...new Set([
+        ...[...this.complaintCommands.values()].map(
           (command) => command.complaintCase.caseNo,
         ),
-      ),
+        ...this.unavailableOrdinaryReadbacks,
+      ]),
     ];
     await Promise.all(
       caseNos.map((caseNo) => this.reconcilePendingCase(caseNo)),
@@ -391,7 +393,11 @@ export class ComplaintService implements OnModuleInit {
    * or the original committed entry IDs allow a successful replay. */
   private async reconcilePendingCase(caseNo: string): Promise<void> {
     const commands = this.complaintCommandsForCase(caseNo);
-    if (!commands.length || !this.canonicalDbEnabled()) return;
+    if (
+      !this.canonicalDbEnabled() ||
+      (!commands.length && !this.unavailableOrdinaryReadbacks.has(caseNo))
+    )
+      return;
     let durableCase: ComplaintCaseRecord | null;
     let durableTimeline: ComplaintTimelineEntry[] | undefined;
     try {
@@ -2106,7 +2112,7 @@ export class ComplaintService implements OnModuleInit {
               );
           }
         })
-        .catch((error: unknown) => {
+        .catch(async (error: unknown) => {
           this.complaintRepository!.reportPersistenceFailure(error, context);
           if (error instanceof ComplaintCommitOutcomeUnknownError) {
             if (rollback) {
@@ -2158,16 +2164,27 @@ export class ComplaintService implements OnModuleInit {
               }
             }
           } else {
+            const rejectedNewPreparation =
+              error instanceof ComplaintPreparedCaseChangedError;
+            const rejectedPreparationKeys: string[] = [];
             for (const caseNo of affectedCaseNos) {
-              this.unavailableOrdinaryReadbacks.delete(caseNo);
-              this.complaintCommands.delete(
+              if (rejectedNewPreparation)
+                this.unavailableOrdinaryReadbacks.add(caseNo);
+              else this.unavailableOrdinaryReadbacks.delete(caseNo);
+              const commandKey =
                 preparedCommandKey ??
-                  this.computeCommandKey(context, caseNo, matchCommand),
-              );
+                this.computeCommandKey(context, caseNo, matchCommand);
+              this.complaintCommands.delete(commandKey);
               // This attempt's own prepared durable marker (if any) never saw
               // a business commit at all, so it must not linger as if it
               // were still an unresolved cross-replica identity.
-              if (
+              // This branch is never reached for isRetry/unknown outcomes.
+              // The typed rejection is after our reservation's IDs matched
+              // and before any business write; another reservation's generic
+              // IN_PROGRESS error must never authorize clearing its identity.
+              if (rejectedNewPreparation)
+                rejectedPreparationKeys.push(commandKey);
+              else if (
                 !(
                   error instanceof ApiRequestError &&
                   (error.code === "IDEMPOTENCY_IN_PROGRESS" ||
@@ -2191,6 +2208,17 @@ export class ComplaintService implements OnModuleInit {
               }
             }
             if (rollback) rollback();
+            // Await this definite-failure cleanup. A failed DELETE stays an
+            // honest failed action; it cannot produce a success receipt.
+            if (
+              typeof this.complaintRepository!.clearPendingCommit === "function"
+            ) {
+              await Promise.all(
+                rejectedPreparationKeys.map((key) =>
+                  this.complaintRepository!.clearPendingCommit(key),
+                ),
+              );
+            }
           }
           throw error;
         });

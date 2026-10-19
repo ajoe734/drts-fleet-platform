@@ -266,6 +266,41 @@ async function canonicalLifecycle() {
   };
 }
 
+async function definitePredecessorFailure() {
+  const wire = new Wire();
+  const a = instance(wire);
+  const created = a.service.createComplaintCase(opsPayload);
+  await a.service.awaitSettlementPersistence(created.caseNo);
+  const b = await fresh(wire);
+  await assign(a, created.caseNo, "legacy-owner", undefined);
+  const command = { note: "A legitimate note after canonical refresh" };
+  const first = await outcome(() =>
+    b.ops.addComplaintCaseNote(
+      created.caseNo,
+      command,
+      "stale-note",
+      "stable-note",
+    ),
+  );
+  const retry = await outcome(() =>
+    b.ops.addComplaintCaseNote(
+      created.caseNo,
+      command,
+      "fresh-note",
+      "stable-note",
+    ),
+  );
+  return {
+    first,
+    retry,
+    finalCase: wire.cases.get(created.caseNo),
+    entries: [...wire.timelines.values()],
+    unresolved: [...wire.commands.values()].filter(
+      (row) => row.status === "pending",
+    ),
+  };
+}
+
 async function run() {
   const hidden = {};
   const multiple = {};
@@ -288,6 +323,7 @@ async function run() {
     },
     legacySla: await legacySla(),
     lifecycle: await canonicalLifecycle(),
+    definitePredecessorFailure: await definitePredecessorFailure(),
     forbiddenNetworkOrListenAttempts,
     scope:
       "Actual controllers/services/repository and SQL; external SQL rows/response timing only. No real PG/isolation/HTTP/browser acceptance.",
