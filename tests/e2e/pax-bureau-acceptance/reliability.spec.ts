@@ -107,23 +107,16 @@ test("original drafts, lost acknowledgement, payment methods and a second device
               .and(picker.locator(":not([aria-live])")),
           ).toBeVisible();
           const ambiguous = await search("交通局同名地址");
+          expect(ambiguous.status()).toBe(200);
           const candidates = camel(await ambiguous.json()).data.candidates;
           expect(candidates).toHaveLength(2);
           expect(candidates[0].candidateId).not.toBe(candidates[1].candidateId);
-          const resolved = pax.waitForResponse(
-            (r) =>
-              new URL(r.url()).pathname === "/api/passenger-app/geo/resolve",
-          );
+          // Search candidates already include coordinates. The actual picker
+          // applies the selection directly; it does not call /geo/resolve.
           await picker
             .getByRole("button", { name: /合成同名地址/ })
             .nth(1)
             .click();
-          expect(
-            camel(await (await resolved).json()).data.address,
-          ).toMatchObject({
-            lat: candidates[1].location.lat,
-            lng: candidates[1].location.lng,
-          });
           await expect(
             picker.getByRole("button", { name: "清除選點", exact: true }),
           ).toBeVisible();
@@ -152,6 +145,10 @@ test("original drafts, lost acknowledgement, payment methods and a second device
             .getByRole("button", { name: "試算車資", exact: true })
             .click();
           const quoted = await quote;
+          expect(camel(quoted.request().postDataJSON())).toMatchObject({
+            originLat: candidates[1].location.lat,
+            originLng: candidates[1].location.lng,
+          });
           expect(quoted.status()).toBe(201);
           expect(camel(await quoted.json()).data.serviceAreaResult).toBe(
             "serviceable",

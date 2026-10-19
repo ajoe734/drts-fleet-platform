@@ -121,6 +121,22 @@ GitHub 的 artifact workflow head 是 e3a；原 PR 預設 checkout 為 synthetic
 
 首輪 bureau 只有首次 consent 與新 ordinary90 matching 完整 pass；後者真 elapsed98532ms、reason=matching_timeout、manualTimeoutCalls=0，原 UUID 重派／Driver接受／正常取消。UC08 color 缺漏真409且 Passenger assignment null，以及外部 Google 斷線／timeout／零候選 API 到達只列部分結果。五次錯碼未完成，重寄／真正301000ms／回訪因原 serial 前案失敗而真 skip；on_trip409／65秒全斷線／正常完程／receipt與aftercare、lostACK／跨裝置均未走到。原五組與 UC01–16 全部保留，不能把這些列為通過；上方表格的待驗 Source 以本段逐案實際結果為準。
 
+## 第二輪 c338 自身 hosted 結果與後續修補
+
+候選 `c3382efd5d41da5f8a4f0fe01c27773ac703b7bc` 的完整候選仍為34檔／原18 scopes；最後 repair commit 只有4檔，兩者分開。自身主 CI `39198273287` 真成功（17 jobs success／3 scope skip）；quote `39198273309`、60秒 `39198273316`、decline `39198273334` 各自成功。主 CI 與 integration `39198273391` 的 native PostgreSQL 四案都實際執行，各4 passed／0 skip；原 artifacts `12163551408`、`12163782964` 的 ZIP SHA256 分別為 `4ff6d3df92531fd74c8bb875c14dea105151e06e451d92b870437af9910e960b`、`9019da8a42b265e43703574df008f25f719933021ff56e0145e1d2a242cb0653`。PR checkout 為 `b1cad8ad4403fa292de05688cedec2ec16d67802`，與候選 SHA 不同；兩者 tree 同為 `0faa346cc2a5de2956a91a2821e656ea680da013`，不是把 checkout SHA 冒稱為候選。
+
+自身 bureau job `117887749912` 真為 **5 passed／3 failed／0 skipped／0 retry**。原 artifact `12163897336` ZIP SHA256=`c14df08ffc936d0a95d63e6d09004815b9c81f423b5d97f8f407428694349275`。完整成功的是 ordinary90 matching（110680ms）、首次 consent、五次錯碼、真60秒重寄（61486ms）、真五分鐘過期（301622ms，原 `301_000` wait 不變）。UC08 缺車色409與UC07真 Driver B 原單亦有部分附件，但 on_trip UI／API409／不變量、65秒斷線／正常完程／receipt及申訴尚未走到完整成功；UC09停在選擇第二個同名地址後，lostACK／跨裝置分支未執行。回訪第二次 OTP 真429，沒有把前五項成功擴稱成回訪或全16案通過。原 JSON／各 error-context／safe-progress／raw logs 與 Source binding 留在 `source-checks/hosted-c338-watch/`。
+
+Root 正常 request_changes 後，沿原任務處理三個實證原因：
+
+- `P5-07` on_trip 專用 `RideContent` 漏掉既有 `Actions`；原 mapper 已回 `canCancel=false`、原 `Actions` 也已有 disabled 邏輯。Supervisor 正常精確加配此 product path（19 scopes），只在該分支重用原 `Actions`，不改授權、API、聯絡政策或其他畫面。新增真正 `RideContent`＋production mapper 的 socket-free DOM 回歸：原 c338 同2案為 arrived_pickup enabled PASS、on_trip missing-button FAIL（exit1）；六行修補後同2案 PASS（exit0），disabled click 不觸發 confirm／fetch。這不是 hosted API409 或共享瀏覽器通過；原真 UI disabled＋API409＋同 order/task/assignment/payment/charge 不變斷言全部保留。
+- 真 picker 選擇已有座標的搜尋候選時直接套用地址，不會呼叫 `/geo/resolve`。刪除不存在 caller 的等待，改從真正 quote POST body 核對所選第二候選座標，仍要求真201及 serviceable／可見選點，不改300秒 test budget。
+- OTP 演練端點實際送本地 `0…` target，helper cooldown lookup 用 `+886…`，造成同號登出重登入漏掉等待。issue 與 lookup 同用正規化 key，保留原真60000ms與 server limiter，沒有重設帳戶或縮短期限。
+
+必要現值 socket-free checks：受影響原 ride 元件／live screen／role runtime 與新回歸共5 suites、34 tests全 pass（原 deadlines、maxWorkers1）、Passenger app `tsc --noEmit` exit0、四檔 scoped ESLint exit0。未變動的 API／booking／root 大型 compiler 不重跑；它們原檢查時間與舊 head 保留，新 own full CI 尚待執行。第二輪 c338 integration 最終正常 failure（19 jobs success／4 scope skip／bureau及兩 aggregates共3 failure）；core／additional 原 job 成功，沒有取消仍在執行的舊旅程。這些各自不等於 shared-bureau 或新 Source 通過。
+
+safe-progress 的 `/rides` GET 亦可能是 review 導覽的 Next Link prefetch；未當成已證明的錯誤導航。新 Source 須重新產生完整 immutable candidate、自身 full CI、獨立 review 與正常 merge，舊 c338 的窄通過及真失敗各自保留，不借給新版本。全部五組、UC01–16 與下列兩 keys 的未解來源／shared 條件維持。
+
 ## 原兩個 acceptance keys
 
 - `pax-bureau-coverage_each-finding-real-evidence-and-applicability`

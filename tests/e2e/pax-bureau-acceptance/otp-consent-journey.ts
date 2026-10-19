@@ -38,7 +38,10 @@ export async function issueSimulatedOtp(
   await trigger();
   const response = await requested;
   expect(response.ok(), `Rehearsal SMS HTTP${response.status()}`).toBe(true);
-  issuedAtByPhone.set(response.request().postDataJSON().target, Date.now());
+  issuedAtByPhone.set(
+    reviewPhoneTarget(response.request().postDataJSON().target),
+    Date.now(),
+  );
   return camel(await response.json()).data;
 }
 
@@ -108,7 +111,9 @@ export function directOtpVerify(
 
 /** Mirrors canonicalOtpTarget's phone normalization for the 09xxxxxxxx rehearsal pool. */
 export function reviewPhoneTarget(localPhone: string): string {
-  return `+886${localPhone.slice(1)}`;
+  return localPhone.startsWith("+886")
+    ? localPhone
+    : `+886${localPhone.slice(1)}`;
 }
 
 /** Checks the real consent checkbox and clicks the real 繼續 button, taking the
