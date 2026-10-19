@@ -8,6 +8,12 @@ type Result = {
   result?: { data: { caseNo?: string; complaintCase?: { caseNo: string } } };
 };
 type Observations = {
+  confirmedTransactionReplay: {
+    canonical: { assigneeId: string };
+    caseWrites: number;
+    trace: string[];
+  };
+
   readbackFailure: {
     unavailable: Record<string, Result>;
     readback: Result;
@@ -255,5 +261,14 @@ describe("R1/R2/R3/R5: actual caller and repository command recovery", () => {
     });
     expect(row.retry.ok).toBe(true);
     expect(row.canonical.assigneeId).toBe("unconfirmed-assignee");
+  });
+  it("R2/R3 locks the command outcome before a queued retry can upsert an obsolete snapshot", () => {
+    expect(observed.confirmedTransactionReplay.trace).toContain(
+      "lock-confirmed",
+    );
+    expect(observed.confirmedTransactionReplay.caseWrites).toBe(0);
+    expect(observed.confirmedTransactionReplay.canonical.assigneeId).toBe(
+      "later-assignee",
+    );
   });
 });

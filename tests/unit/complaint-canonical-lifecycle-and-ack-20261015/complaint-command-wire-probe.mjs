@@ -146,6 +146,14 @@ class Wire {
           this.trace.push(sql);
           return { rows: [] };
         }
+        if (
+          sql.includes("FROM crm.phase1_complaint_pending_commits") &&
+          sql.includes("FOR UPDATE")
+        ) {
+          const reserved = this.commands.get(values[0]);
+          this.trace.push(`lock-${reserved?.status || "missing"}`);
+          return { rows: reserved ? [{ status: reserved.status }] : [] };
+        }
         if (sql.includes("INSERT INTO crm.phase1_complaint_cases")) {
           cases.push(JSON.parse(values[5]));
           this.trace.push("case-write");
@@ -662,6 +670,45 @@ async function run() {
       readback,
       retry,
       canonical: wire.cases.get(created.caseNo),
+    };
+  }
+  {
+    const wire = new Wire(),
+      a = instance(wire);
+    wire.nextCommit = "unknown-landed";
+    await outcome(() =>
+      a.service.createComplaintCase(opsPayload, "create-A", {
+        captureAudit: true,
+        commandIdentity: {
+          scope: "crm:complaint:case_create",
+          key: "locked-create",
+        },
+      }),
+    );
+    const original = clone([...wire.commands.values()][0]);
+    const b = instance(wire);
+    await b.service.onModuleInit();
+    await b.service.refreshSettlementCases();
+    await b.service.assignComplaintCase(
+      original.case_no,
+      { assigneeId: "later-assignee" },
+      "assign-B",
+      { captureAudit: true },
+    );
+    const writesBefore = wire.trace.filter(
+      (step) => step === "case-write",
+    ).length;
+    await new ComplaintRepository(wire).persistChanges({
+      complaintCases: [original.case_snapshot],
+      complaintTimelines: original.timeline_snapshot,
+      commandKeys: [original.command_key],
+    });
+    observations.confirmedTransactionReplay = {
+      canonical: wire.cases.get(original.case_no),
+      caseWrites:
+        wire.trace.filter((step) => step === "case-write").length -
+        writesBefore,
+      trace: wire.trace,
     };
   }
   return {

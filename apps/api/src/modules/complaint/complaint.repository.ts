@@ -171,6 +171,39 @@ export class ComplaintRepository {
       return;
     }
 
+    if (changes.commandKeys?.length) {
+      // Serialise retries of the same prepared command before touching its
+      // case row. A retry queued behind a successful COMMIT must replay the
+      // result, not upsert an old snapshot over a later legitimate mutation.
+      let confirmed = 0;
+      for (const commandKey of changes.commandKeys) {
+        const reserved = await transaction!.query<{
+          status: ComplaintPendingCommitStatus;
+        }>(
+          `SELECT status FROM crm.phase1_complaint_pending_commits WHERE command_key = $1 FOR UPDATE`,
+          [commandKey],
+        );
+        if (!reserved.rows[0])
+          throw new ApiRequestError(
+            409,
+            "IDEMPOTENCY_IN_PROGRESS",
+            "Complaint command reservation is unavailable; retry the same key.",
+            undefined,
+            true,
+          );
+        if (reserved.rows[0].status === "confirmed") confirmed++;
+      }
+      if (confirmed === changes.commandKeys.length) return;
+      if (confirmed)
+        throw new ApiRequestError(
+          409,
+          "IDEMPOTENCY_IN_PROGRESS",
+          "Complaint command outcomes require individual replay.",
+          undefined,
+          true,
+        );
+    }
+
     const queryable: {
       query(text: string, values: unknown[]): Promise<unknown>;
     } = transaction ?? this.databaseService!;
