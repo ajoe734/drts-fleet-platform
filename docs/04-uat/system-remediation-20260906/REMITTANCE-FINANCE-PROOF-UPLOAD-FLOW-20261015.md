@@ -174,3 +174,46 @@ reimbursement-readback.ts` / `reimbursement-workflow-client.ts` / `page.tsx` (th
      state (mirroring the existing card's own state machine); it does not add a re-upload path for an
      already-`clean`/`rejected` proof, which was out of this task's acceptance scope and is not implied by the
      actor-authority report's §5 UI guidance.
+
+## 2026-10-19 original full-task continuation
+
+Root formally reopened the same original task after reviewing immutable `aa129c50623ccd377f212016c78d105f0bd373d5` (PR2709, generation `fd9a0cc2c790438795ec0724a9eb0396`). The original full four clauses, four keys, seven scopes and both genuine DONE dependencies remain; spec SHA256 is `0426d1fcf0762b6e60863e611395e40292a8d7d642fda3407415bec1e65edf2c`. Current sole author is Codex2 and independent reviewer is Codex. Original Claude-authored source/history, original Claude2 review lane/evidence, all previous CI and the full NEXT/HOLD context remain preserved; this continuation does not rewrite their credit.
+
+The successor isolated branch starts from freshly verified accepted dev `729375e76b49827d5a752282b93371fe6aa3fd20` and normally merges the original aa129 history as `1e957e7c1` (two original parents; managed hooks/trailers succeeded). The old PR2709 remains untouched. The earlier readonly support packet and all20 evidence references remain frozen outside this new source evidence directory.
+
+The actual original mounted defect was: staging fileA commits, upload transport fails, selecting fileB and retrying reuses fileA's staging key, so the real backend correctly rejects `409 IDEMPOTENCY_KEY_REUSED`. The caller now retains the current attempt's exact content/MIME and separate stage/upload identities. An unchanged command, including reselecting an equivalent new File object or retrying after an uncertain ACK, retains the original keys. Different file bytes or MIME change the staging and upload keys; changing only batch/filename retains the unchanged staging identity and changes the upload identity. Complete success clears the attempt. The backend's idempotency decisions, canonical batch/driver/finance actor binding, storage ACK, scan/readback/download/payment gates and all roles remain unchanged. No key is regenerated simply because a retry button was clicked.
+
+### Full original keys and evidence
+
+| Original key                                                      | Continued source and verification                                                                                                                                                   |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| remittance-finance_actual-authorized-content-upload               | Original finance routes/OpenAPI/local client and real mounted FileReader→client→guard→Controller→service upload; normal and changed-file recovery succeed.                          |
+| remittance-finance_canonical-batch-and-uploader-attribution       | Original canonical driver/actual verified finance actor, content/hash/size/MIME and ACK assertions remain; actual mounted positive verifies them again.                             |
+| remittance-finance_original-proof-scan-download-gates-and-denials | Complete original proof, route, download, legacy gate, billing, proof-client/closure and C080/C081 regressions pass; scanner unconfigured/pending and denied paths remain truthful. |
+| remittance-finance_exact-candidate-validation                     | Ordinary preserved-history branch, original full task UAT and command/hash packet; new exact candidate CI, independent Root review/protected merge/four-key records remain pending. |
+
+### Meaningful before and fixed after
+
+The expanded original self-owned finance-upload file preserves every original statement/assertion in its18 original controller cases and adds seven actual mounted UI cases. Only those mounted cases install/clean up a JSDOM document inside the unit process; the original Node cases keep their environment. Existing `createUiModuleLoader` executes the actual page and local client. Presentation/Next/authenticated-client context are controlled boundaries; the actual file input, FileReader, page command decisions, ApiClient, route guard, Controller, service and idempotency code run. Only external credential verification, existing noDB/in-memory storage, scripted scanner and explicit HTTP faults are doubled. No product listener, browser/E2E server, PG or provider runs on the VM.
+
+At the preserved merged original caller `1e957e7c1`, the identical final25-case test set produced **23 pass / 2 fail / 0 skip**, reproducing changed-content recovery failure and unchanged upload identity after a filename change. After the caller correction, all25 pass. The broader affected regressions pass **130 / 130 across9 files, zero skips**, default5000ms test timeout and `--no-file-parallelism`:
+
+| Existing file                                |                                    Passed cases |
+| -------------------------------------------- | ----------------------------------------------: |
+| sr-proof-001-finance-upload-remittance-proof |                      25 (original18 + mounted7) |
+| sr-proof-001-remittance-proof                | 21 (original19 plus accepted later regressions) |
+| proof-route-auth                             |                                               8 |
+| proof-download-auth                          |                                              22 |
+| legacy-proof-gate                            |                                              13 |
+| billing-settlement                           |                                               8 |
+| audit-proof-closure                          |                                              18 |
+| audit-proof-client                           |                                               9 |
+| c080-c081-reimbursement-remittance-proof     |                                               6 |
+
+The new mounted cases cover normal uploaded bytes/attribution; stage failure before the command; stage ACK with a lost response; unchanged new File-object retry after upload failure; changed bytes with identical name/MIME/size; unchanged stage content with a renamed upload; and upload committed before its HTTP response was lost. Wrapping spies still execute the real producers and verify that unchanged retries replay once without duplicate proof IDs/timestamps.
+
+New evidence lives at `.local/goal-continuation-20261019T0200Z-accepted61fa7-full-CI-and-native-continuation-root/remittance-original-source-evidence/`: `merged-original-caller-final-before.{json,log,command.json}` and `fixed-complete-proof-and-context-regressions.{json,log,command.json}` preserve exact commands/exits/times and per-case results. Earlier new-fixture diagnostics using an overly exact error-message query are retained separately and are not meaningful product-before credit: the shared generic post method includes the error JSON in its message, so the final query matches the same visible error substring. The initial empty-worktree setup anomaly and subsequent single locked reattachment/materialization are also retained; no old source, branch or evidence was deleted/reset.
+
+Focused TypeScript checking of the actual page and self-owned tests passes (exit0), and focused ESLint passes with zero warnings. Exact command records are `focused-source-and-owned-tests-typecheck.command.json` and `focused-eslint.command.json`; the complete original controller-test statements/expectations are independently AST-equivalent to the preserved merge baseline. Normal managed hooks/full-range trailer results and final immutable candidate identity are recorded in the final delivery packet.
+
+Existing local unit/controlled-storage evidence does not establish live credential/provider/scanner/PG durability, actual financial issuance/payment, hosted intended-role acceptance, whole C081 or whole goal. New same-candidate mandatory CI and independent Root review/protected merge remain required. The author does not approve, record acceptance keys/DONE or deploy.

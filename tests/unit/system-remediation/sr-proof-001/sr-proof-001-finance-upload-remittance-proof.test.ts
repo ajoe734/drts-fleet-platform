@@ -21,6 +21,14 @@
  * (`proof-route-auth.test.ts`) are untouched by this file.
  */
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
+import { resolve } from "node:path";
+import * as React from "react";
+import * as jsxRuntime from "react/jsx-runtime";
+import { JSDOM } from "jsdom";
+import { cleanup, fireEvent, render } from "@testing-library/react/pure";
+import * as sdk from "@drts/api-client";
+import { createUiModuleLoader } from "../sr-wire-001/ui-module-loader";
 import { describe, it, expect, afterEach, vi } from "vitest";
 
 import type { BootstrapRequestIdentity } from "../../../../apps/api/src/common/auth";
@@ -616,5 +624,413 @@ describe("SR-PROOF-001 finance upload: unchanged scan lifecycle and pay-with-pro
         financeIdentity("finance-caller-unavailable"),
       ),
     ).rejects.toMatchObject({ code: "REMITTANCE_PROOF_SCANNER_UNAVAILABLE" });
+  });
+});
+
+// Only these mounted cases install a DOM. The original Node auth/proof cases
+// above retain their environment and all assertions; no product server runs.
+describe("finance proof actual mounted caller command identity", () => {
+  let dom: JSDOM | undefined;
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    dom?.window.close();
+    dom = undefined;
+  });
+
+  type Fault =
+    | "none"
+    | "stage-before"
+    | "stage-after"
+    | "upload-before"
+    | "upload-after";
+  type TransportCall = {
+    path: string;
+    method: string;
+    key: string | null;
+    body?: Record<string, unknown>;
+    status?: number;
+    committedProofId?: string;
+  };
+
+  async function mountFinanceUpload(fault: Fault = "none") {
+    dom = new JSDOM("<!doctype html><html><body></body></html>", {
+      url: "https://finance-unit.invalid",
+    });
+    for (const key of [
+      "window",
+      "document",
+      "navigator",
+      "HTMLElement",
+      "Node",
+      "File",
+      "FileReader",
+      "Event",
+      "MouseEvent",
+      "MutationObserver",
+    ] as const) {
+      vi.stubGlobal(key, key === "window" ? dom.window : dom.window[key]);
+    }
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const { billingSettlementService } = createService();
+    const batch = await createApprovedBatch(billingSettlementService);
+    const controller = new BillingSettlementController(
+      billingSettlementService,
+    );
+    // Wrapping spies execute the actual producers, including ACK/idempotency.
+    const stageProducer = vi.spyOn(
+      billingSettlementService,
+      "stageRemittanceProofContent",
+    );
+    const uploadProducer = vi.spyOn(
+      billingSettlementService,
+      "uploadRemittanceProof",
+    );
+    const principal: BootstrapRequestIdentity = {
+      ...financeGuardIdentity,
+      actorId: "mounted-finance-caller",
+    };
+    vi.stubEnv("APP_ENV", "staging");
+    vi.stubEnv("DRTS_ENV", "staging");
+    vi.stubEnv("JWT_SECRET", "offline-finance-proof-mounted-secret");
+    vi.stubEnv("JWT_ISSUER", "drts");
+    vi.stubEnv("JWT_AUDIENCE", "drts-api");
+    const jwt = new JwtAuthService();
+    // Only external credential verification is SIM. The route's real guard,
+    // Controller, command identity and original proof services execute.
+    vi.spyOn(jwt, "verifyAccessToken").mockResolvedValue({} as never);
+    vi.spyOn(jwt, "toRequestIdentity").mockReturnValue(principal);
+    const guard = new BootstrapAuthGuard(new Reflector(), jwt);
+    const calls: TransportCall[] = [];
+    let faultRemaining = fault !== "none";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+        const url = new URL(String(input), "https://finance-unit.invalid");
+        const path =
+          "/api" + url.pathname.replace(/^\/control-plane-proxy/, "");
+        const headers = new Headers(init.headers);
+        const body = init.body ? JSON.parse(String(init.body)) : undefined;
+        const request = {
+          method: init.method ?? "GET",
+          url: path,
+          headers: Object.fromEntries(headers),
+          identity: undefined as BootstrapRequestIdentity | undefined,
+        };
+        const call: TransportCall = {
+          path,
+          method: request.method,
+          key: headers.get("idempotency-key"),
+          body,
+        };
+        calls.push(call);
+        const stage = path.endsWith("/finance-staged-content");
+        const upload = path.endsWith("/finance-upload");
+        const handler = stage
+          ? controller.financeStageRemittanceProofContent
+          : upload
+            ? controller.financeUploadRemittanceProof
+            : path === "/api/reimbursements"
+              ? controller.listReimbursementBatches
+              : path === `/api/reimbursements/${batch.batchId}/proof`
+                ? controller.getReimbursementProof
+                : undefined;
+        if (!handler) throw new Error("Unexpected original API route: " + path);
+        const failTransport = () => {
+          call.status = 503;
+          return new Response(
+            JSON.stringify({
+              error: {
+                code: "SIM_TRANSPORT_FAILURE",
+                message: "SIM transport unavailable",
+                retryable: true,
+                traceId: "mounted-finance",
+              },
+            }),
+            { status: 503, headers: { "content-type": "application/json" } },
+          );
+        };
+        try {
+          await guard.canActivate({
+            switchToHttp: () => ({ getRequest: () => request }),
+            getHandler: () => handler,
+            getClass: () => BillingSettlementController,
+          } as never);
+          expect(request.identity?.actorId).toBe(principal.actorId);
+          if (
+            faultRemaining &&
+            ((stage && fault === "stage-before") ||
+              (upload && fault === "upload-before"))
+          )
+            return failTransport();
+          let data: unknown;
+          if (stage)
+            data = await controller.financeStageRemittanceProofContent(
+              body,
+              call.key ?? undefined,
+            );
+          else if (upload) {
+            const uploaded = await controller.financeUploadRemittanceProof(
+              body,
+              request.identity,
+              call.key ?? undefined,
+            );
+            call.committedProofId = uploaded.data.proofId;
+            data = uploaded;
+          } else if (path === "/api/reimbursements")
+            data = controller.listReimbursementBatches();
+          else data = await controller.getReimbursementProof(batch.batchId);
+          if (
+            faultRemaining &&
+            ((stage && fault === "stage-after") ||
+              (upload && fault === "upload-after"))
+          )
+            return failTransport();
+          call.status = 200;
+          return new Response(JSON.stringify(data), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        } catch (error) {
+          const apiError = error as {
+            getStatus(): number;
+            getResponse(): unknown;
+          };
+          call.status = apiError.getStatus();
+          return new Response(JSON.stringify(apiError.getResponse()), {
+            status: call.status,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }),
+    );
+    const client = new sdk.ApiClient({
+      baseUrl: "/control-plane-proxy",
+      defaultHeaders: { Authorization: "Bearer offline-finance-mounted-token" },
+      pathTransform: (path) => path.replace(/^\/api/, ""),
+    });
+    const Frame = ({
+      title,
+      body,
+      children,
+      actions,
+    }: {
+      title?: React.ReactNode;
+      body?: React.ReactNode;
+      children?: React.ReactNode;
+      actions?: React.ReactNode;
+    }) =>
+      React.createElement(
+        "section",
+        null,
+        React.createElement("h3", null, title),
+        React.createElement("div", null, body),
+        children,
+        actions,
+      );
+    const appRoot = resolve("apps/platform-admin-web");
+    const load = createUiModuleLoader(appRoot, {
+      react: React,
+      "react/jsx-runtime": jsxRuntime,
+      "@drts/api-client": sdk,
+      "next/navigation": { useParams: () => ({ batchId: batch.batchId }) },
+      "next/link": {
+        __esModule: true,
+        default: ({
+          href,
+          children,
+        }: {
+          href: string;
+          children?: React.ReactNode;
+        }) => React.createElement("a", { href }, children),
+      },
+      "@/lib/admin-client": {
+        usePlatformAdminClient: () => client,
+        formatDateTime: (value: string) => value,
+      },
+      "@/lib/i18n": {
+        useTranslation: () => ({ locale: "en", t: (key: string) => key }),
+      },
+      // Presentation only: real page input/handlers and disabled state remain.
+      "@drts/ui-web": {
+        CanvasBanner: Frame,
+        CanvasCard: Frame,
+        CanvasPageHeader: Frame,
+        CanvasBtn: ({
+          children,
+          disabled,
+          onClick,
+        }: {
+          children?: React.ReactNode;
+          disabled?: boolean;
+          onClick?: () => void;
+        }) => React.createElement("button", { disabled, onClick }, children),
+        CanvasPill: ({ children }: { children?: React.ReactNode }) =>
+          React.createElement("span", null, children),
+        CanvasDL: () => null,
+        CanvasTable: () => null,
+        buildCanvasTheme: () => ({}),
+      },
+    });
+    const Page = load<{ default: React.ComponentType }>(
+      resolve(appRoot, "app/payments/reimbursements/[batchId]/page.tsx"),
+    ).default;
+    const mounted = render(React.createElement(Page));
+    await mounted.findByRole("button", { name: "Upload remittance proof" });
+    return {
+      batch,
+      service: billingSettlementService,
+      calls,
+      stageProducer,
+      uploadProducer,
+      mounted,
+      recover() {
+        faultRemaining = false;
+      },
+      choose(bytes: Buffer, filename = "finance.pdf") {
+        const input = mounted.container.querySelector('input[type="file"]');
+        expect(input).not.toBeNull();
+        fireEvent.change(input!, {
+          target: {
+            files: [
+              new File([Uint8Array.from(bytes)], filename, {
+                type: "application/pdf",
+              }),
+            ],
+          },
+        });
+      },
+      click() {
+        fireEvent.click(
+          mounted.getByRole("button", { name: "Upload remittance proof" }),
+        );
+      },
+      async failed() {
+        await mounted.findByText(/SIM transport unavailable/);
+      },
+      async completed(filename = "finance.pdf") {
+        await mounted.findByText(filename);
+      },
+      stages() {
+        return calls.filter((call) =>
+          call.path.endsWith("/finance-staged-content"),
+        );
+      },
+      uploads() {
+        return calls.filter((call) => call.path.endsWith("/finance-upload"));
+      },
+    };
+  }
+
+  const fileA = Buffer.from([37, 80, 68, 70, 0, 255, 10, 65]);
+  const fileB = Buffer.from([37, 80, 68, 70, 0, 255, 10, 66]);
+
+  it("uploads actual selected bytes through the original local client/guard/Controller with canonical driver and finance attribution", async () => {
+    const h = await mountFinanceUpload();
+    h.choose(fileA);
+    h.click();
+    await h.completed();
+    const proof = await h.service.getReimbursementProof(h.batch.batchId);
+    expect(proof?.driverId).toBe(h.batch.driverId);
+    expect(proof?.uploadedByActorId).toBe("mounted-finance-caller");
+    expect(proof?.content).toMatchObject({
+      contentHash: createHash("sha256").update(fileA).digest("hex"),
+      sizeBytes: fileA.length,
+      contentType: "application/pdf",
+    });
+    expect(proof?.scanState).toBe("clean");
+    expect(h.stages().map((call) => call.status)).toEqual([200]);
+    expect(h.uploads().map((call) => call.status)).toEqual([200]);
+  });
+
+  it.each(["stage-before", "stage-after"] as const)(
+    "retries the unchanged selected content with its same command identity after %s failure",
+    async (fault) => {
+      const h = await mountFinanceUpload(fault);
+      h.choose(fileA);
+      h.click();
+      await h.failed();
+      h.recover();
+      h.click();
+      await h.completed();
+      expect(h.stages()).toHaveLength(2);
+      expect(h.stages()[1]!.key).toBe(h.stages()[0]!.key);
+      expect(h.stages()[1]!.body).toEqual(h.stages()[0]!.body);
+      expect(h.stageProducer).toHaveBeenCalledTimes(1);
+      expect(h.uploadProducer).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("reselects the same file bytes and name after upload failure without changing either command identity", async () => {
+    const h = await mountFinanceUpload("upload-before");
+    h.choose(fileA);
+    h.click();
+    await h.failed();
+    h.recover();
+    h.choose(fileA); // A new File object, but the identical command payload.
+    h.click();
+    await h.completed();
+    expect(h.stages()[1]!.key).toBe(h.stages()[0]!.key);
+    expect(h.uploads()[1]!.key).toBe(h.uploads()[0]!.key);
+    expect(h.stageProducer).toHaveBeenCalledTimes(1);
+    expect(h.uploadProducer).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers a changed file with identical name, MIME and size after completed stage/upload failure", async () => {
+    const h = await mountFinanceUpload("upload-before");
+    h.choose(fileA);
+    h.click();
+    await h.failed();
+    h.recover();
+    h.choose(fileB);
+    h.click();
+    await h.completed();
+    expect(h.stages().map((call) => call.status)).toEqual([200, 200]);
+    expect(h.stages()[1]!.key).not.toBe(h.stages()[0]!.key);
+    expect(h.stages()[1]!.body).not.toEqual(h.stages()[0]!.body);
+    expect(h.uploads()[1]!.key).not.toBe(h.uploads()[0]!.key);
+    const proof = await h.service.getReimbursementProof(h.batch.batchId);
+    expect(proof?.content.contentHash).toBe(
+      createHash("sha256").update(fileB).digest("hex"),
+    );
+    expect(proof?.originalFilename).toBe("finance.pdf");
+    expect(h.stageProducer).toHaveBeenCalledTimes(2);
+    expect(h.uploadProducer).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an acknowledged stage identity for unchanged bytes while a changed filename gets its own upload identity", async () => {
+    const h = await mountFinanceUpload("upload-before");
+    h.choose(fileA);
+    h.click();
+    await h.failed();
+    h.recover();
+    h.choose(fileA, "renamed.pdf");
+    h.click();
+    await h.completed("renamed.pdf");
+    expect(h.stages()[1]!.key).toBe(h.stages()[0]!.key);
+    expect(h.uploads()[1]!.key).not.toBe(h.uploads()[0]!.key);
+    expect(h.stageProducer).toHaveBeenCalledTimes(1);
+    expect(h.uploadProducer).toHaveBeenCalledTimes(1);
+  });
+
+  it("replays an unchanged command after upload committed but its HTTP response was lost, without a duplicate proof", async () => {
+    const h = await mountFinanceUpload("upload-after");
+    h.choose(fileA);
+    h.click();
+    await h.failed();
+    h.recover();
+    const committed = await h.service.getReimbursementProof(h.batch.batchId);
+    expect(committed).not.toBeNull();
+    h.click();
+    await h.completed();
+    const retried = await h.service.getReimbursementProof(h.batch.batchId);
+    expect(retried?.proofId).toBe(committed?.proofId);
+    expect(retried?.createdAt).toBe(committed?.createdAt);
+    expect(h.uploads().map((call) => call.status)).toEqual([503, 200]);
+    expect(h.uploads()[1]!.key).toBe(h.uploads()[0]!.key);
+    expect(h.stageProducer).toHaveBeenCalledTimes(1);
+    expect(h.uploadProducer).toHaveBeenCalledTimes(1);
   });
 });

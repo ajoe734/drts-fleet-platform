@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { createIdempotencyKey } from "@drts/api-client";
 import { useTranslation } from "@/lib/i18n";
@@ -487,12 +487,14 @@ export default function ReimbursementDetailPage() {
   const [financeUploadError, setFinanceUploadError] = useState<string | null>(
     null,
   );
-  const [financeStageKey, setFinanceStageKey] = useState(() =>
-    createIdempotencyKey("reimbursement-finance-stage"),
-  );
-  const [financeUploadKey, setFinanceUploadKey] = useState(() =>
-    createIdempotencyKey("reimbursement-finance-upload"),
-  );
+  const financeUploadAttempt = useRef<{
+    contentBase64: string;
+    contentType: string;
+    batchId: string;
+    originalFilename: string;
+    stageKey: string;
+    uploadKey: string;
+  } | null>(null);
 
   const loadBatch = useCallback(async () => {
     setLoading(true);
@@ -678,10 +680,33 @@ export default function ReimbursementDetailPage() {
     try {
       const contentBase64 = await fileToBase64(financeUploadFile);
       const contentType = financeUploadFile.type || "application/octet-stream";
+      const previous = financeUploadAttempt.current;
+      const sameStagedContent =
+        previous?.contentBase64 === contentBase64 &&
+        previous.contentType === contentType;
+      // A failed/unknown ACK keeps the same command identity. A newly selected
+      // payload must not reuse a key already bound to different file content.
+      if (
+        !sameStagedContent ||
+        previous.batchId !== batch.batchId ||
+        previous.originalFilename !== financeUploadFile.name
+      ) {
+        financeUploadAttempt.current = {
+          contentBase64,
+          contentType,
+          batchId: batch.batchId,
+          originalFilename: financeUploadFile.name,
+          stageKey: sameStagedContent
+            ? previous.stageKey
+            : createIdempotencyKey("reimbursement-finance-stage"),
+          uploadKey: createIdempotencyKey("reimbursement-finance-upload"),
+        };
+      }
+      const attempt = financeUploadAttempt.current!;
       const staged = await financeStageRemittanceProofContent(
         client,
         { contentBase64, contentType },
-        { idempotencyKey: financeStageKey },
+        { idempotencyKey: attempt.stageKey },
       );
       const uploaded = await financeUploadRemittanceProof(
         client,
@@ -692,12 +717,11 @@ export default function ReimbursementDetailPage() {
           sizeBytes: financeUploadFile.size,
           stagedContentRef: staged.stagedContentRef,
         },
-        { idempotencyKey: financeUploadKey },
+        { idempotencyKey: attempt.uploadKey },
       );
       setProof(uploaded);
       setFinanceUploadFile(null);
-      setFinanceStageKey(createIdempotencyKey("reimbursement-finance-stage"));
-      setFinanceUploadKey(createIdempotencyKey("reimbursement-finance-upload"));
+      financeUploadAttempt.current = null;
     } catch (nextError: any) {
       setFinanceUploadError(nextError?.message ?? String(nextError));
     } finally {
