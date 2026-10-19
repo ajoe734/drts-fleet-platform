@@ -686,6 +686,8 @@ export default function ReimbursementDetailPage() {
         previous.contentType === contentType;
       // A failed/unknown ACK keeps the same command identity. A newly selected
       // payload must not reuse a key already bound to different file content.
+      // A changed upload also needs a fresh stage: its previous reference may
+      // already have been consumed by an upload whose response was lost.
       if (
         !sameStagedContent ||
         previous.batchId !== batch.batchId ||
@@ -696,9 +698,7 @@ export default function ReimbursementDetailPage() {
           contentType,
           batchId: batch.batchId,
           originalFilename: financeUploadFile.name,
-          stageKey: sameStagedContent
-            ? previous.stageKey
-            : createIdempotencyKey("reimbursement-finance-stage"),
+          stageKey: createIdempotencyKey("reimbursement-finance-stage"),
           uploadKey: createIdempotencyKey("reimbursement-finance-upload"),
         };
       }

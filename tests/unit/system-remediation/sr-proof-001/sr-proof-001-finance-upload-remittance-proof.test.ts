@@ -831,6 +831,7 @@ describe("finance proof actual mounted caller command identity", () => {
         actions,
       );
     const appRoot = resolve("apps/platform-admin-web");
+    const translation = { locale: "en", t: (key: string) => key };
     const load = createUiModuleLoader(appRoot, {
       react: React,
       "react/jsx-runtime": jsxRuntime,
@@ -851,7 +852,7 @@ describe("finance proof actual mounted caller command identity", () => {
         formatDateTime: (value: string) => value,
       },
       "@/lib/i18n": {
-        useTranslation: () => ({ locale: "en", t: (key: string) => key }),
+        useTranslation: () => translation,
       },
       // Presentation only: real page input/handlers and disabled state remain.
       "@drts/ui-web": {
@@ -878,6 +879,9 @@ describe("finance proof actual mounted caller command identity", () => {
       resolve(appRoot, "app/payments/reimbursements/[batchId]/page.tsx"),
     ).default;
     const mounted = render(React.createElement(Page));
+    // Drain the actual initial batch/proof effects before interacting with
+    // the transient empty state that precedes proof-loading.
+    await React.act(async () => {});
     await mounted.findByRole("button", { name: "Upload remittance proof" });
     return {
       batch,
@@ -1000,7 +1004,7 @@ describe("finance proof actual mounted caller command identity", () => {
     expect(h.uploadProducer).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps an acknowledged stage identity for unchanged bytes while a changed filename gets its own upload identity", async () => {
+  it("uses a fresh consumable stage and upload identity when the selected filename changes", async () => {
     const h = await mountFinanceUpload("upload-before");
     h.choose(fileA);
     h.click();
@@ -1009,9 +1013,12 @@ describe("finance proof actual mounted caller command identity", () => {
     h.choose(fileA, "renamed.pdf");
     h.click();
     await h.completed("renamed.pdf");
-    expect(h.stages()[1]!.key).toBe(h.stages()[0]!.key);
+    expect(h.stages()[1]!.key).not.toBe(h.stages()[0]!.key);
     expect(h.uploads()[1]!.key).not.toBe(h.uploads()[0]!.key);
-    expect(h.stageProducer).toHaveBeenCalledTimes(1);
+    expect(h.stageProducer).toHaveBeenCalledTimes(2);
+    expect(h.uploads()[1]!.body?.stagedContentRef).not.toBe(
+      h.uploads()[0]!.body?.stagedContentRef,
+    );
     expect(h.uploadProducer).toHaveBeenCalledTimes(1);
   });
 
@@ -1032,5 +1039,41 @@ describe("finance proof actual mounted caller command identity", () => {
     expect(h.uploads()[1]!.key).toBe(h.uploads()[0]!.key);
     expect(h.stageProducer).toHaveBeenCalledTimes(1);
     expect(h.uploadProducer).toHaveBeenCalledTimes(1);
+  });
+
+  it("completes a renamed upload after the original upload committed but its HTTP ACK was lost, preserving the first proof", async () => {
+    const h = await mountFinanceUpload("upload-after");
+    h.choose(fileA);
+    h.click();
+    await h.failed();
+    const first = await h.service.getReimbursementProof(h.batch.batchId);
+    expect(first).not.toBeNull();
+    expect(first?.originalFilename).toBe("finance.pdf");
+    h.recover();
+    h.choose(fileA, "renamed-after-lost-ack.pdf");
+    h.click();
+    await h.completed("renamed-after-lost-ack.pdf");
+    const second = await h.service.getReimbursementProof(h.batch.batchId);
+    expect(second?.proofId).not.toBe(first?.proofId);
+    expect(second?.originalFilename).toBe("renamed-after-lost-ack.pdf");
+    expect(second?.driverId).toBe(h.batch.driverId);
+    expect(second?.uploadedByActorId).toBe("mounted-finance-caller");
+    expect(second?.content).toEqual(first?.content);
+    expect(second?.content.contentHash).toBe(
+      createHash("sha256").update(fileA).digest("hex"),
+    );
+    expect(second?.scanState).toBe("clean");
+    expect(
+      await h.service.remittanceProofServiceForTest.getProof(first!.proofId),
+    ).toEqual(first);
+    expect(h.stages().map((call) => call.status)).toEqual([200, 200]);
+    expect(h.uploads().map((call) => call.status)).toEqual([503, 200]);
+    expect(h.stages()[1]!.key).not.toBe(h.stages()[0]!.key);
+    expect(h.uploads()[1]!.key).not.toBe(h.uploads()[0]!.key);
+    expect(h.uploads()[1]!.body?.stagedContentRef).not.toBe(
+      h.uploads()[0]!.body?.stagedContentRef,
+    );
+    expect(h.stageProducer).toHaveBeenCalledTimes(2);
+    expect(h.uploadProducer).toHaveBeenCalledTimes(2);
   });
 });
