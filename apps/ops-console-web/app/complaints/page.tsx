@@ -52,11 +52,11 @@ import {
 } from "../../components/ops-assistant";
 import { useTranslation } from "../../lib/i18n";
 import { createIdempotencyKey } from "@drts/api-client";
-import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import { formatOpsCodeLabel, getOpsLabel } from "../../lib/localized-labels";
 import {
   crossAppHref,
   platformAdminAuditLink,
-} from "@/lib/ops-cross-app-links";
+} from "../../lib/ops-cross-app-links";
 
 // ── canvas theme + per-page operating context ──────────────────────────────
 const theme = buildCanvasTheme({

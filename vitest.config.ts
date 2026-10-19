@@ -41,18 +41,6 @@ export default defineConfig({
         __dirname,
         "apps/platform-admin-web/lib/i18n.tsx",
       ),
-      "@/lib/api-client.server": path.resolve(
-        __dirname,
-        "apps/ops-console-web/lib/api-client.server.ts",
-      ),
-      "@/lib/localized-labels": path.resolve(
-        __dirname,
-        "apps/ops-console-web/lib/localized-labels.ts",
-      ),
-      "@/lib/ops-cross-app-links": path.resolve(
-        __dirname,
-        "apps/ops-console-web/lib/ops-cross-app-links.ts",
-      ),
       "@": path.resolve(__dirname, "apps/tenant-console-web"),
     },
   },

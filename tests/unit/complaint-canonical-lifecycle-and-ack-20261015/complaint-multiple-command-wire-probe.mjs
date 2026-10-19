@@ -212,6 +212,60 @@ async function legacySla() {
   };
 }
 
+async function canonicalLifecycle() {
+  const wire = new Wire();
+  const { replica, caseNo } = await create(wire);
+  await assign(replica, caseNo, "lifecycle-owner", "lifecycle-assign");
+  await replica.ops.addComplaintCaseNote(
+    caseNo,
+    { note: "Canonical note" },
+    "lifecycle-note",
+  );
+  const resolution = {
+    resolutionCode:
+      replica.service.getValidResolutionCodes("driver_service")[0],
+    closingNote: "Original valid resolution",
+  };
+  await replica.ops.resolveComplaintCase(
+    caseNo,
+    resolution,
+    "lifecycle-resolve",
+    "lifecycle-resolve",
+  );
+  const resolvedReopen = await outcome(() =>
+    replica.ops.reopenComplaintCase(
+      caseNo,
+      { reason: "Still resolved" },
+      "resolved-reopen",
+    ),
+  );
+  await replica.ops.closeComplaintCase(
+    caseNo,
+    resolution,
+    "lifecycle-close",
+    "lifecycle-close",
+  );
+  const closedResolve = await outcome(() =>
+    replica.ops.resolveComplaintCase(caseNo, resolution, "closed-resolve"),
+  );
+  await replica.ops.reopenComplaintCase(
+    caseNo,
+    { reason: "Original formal reopen reason" },
+    "lifecycle-reopen",
+    "lifecycle-reopen",
+  );
+  const reader = await fresh(wire);
+  const readback = await reader.ops.getComplaintCase(caseNo);
+  const timeline = await reader.ops.getComplaintTimeline(caseNo);
+  return {
+    caseNo,
+    resolvedReopen,
+    closedResolve,
+    readback,
+    entries: timeline.data.items,
+  };
+}
+
 async function run() {
   const hidden = {};
   const multiple = {};
@@ -233,6 +287,7 @@ async function run() {
       warm: await acknowledgedSuccessor(true),
     },
     legacySla: await legacySla(),
+    lifecycle: await canonicalLifecycle(),
     forbiddenNetworkOrListenAttempts,
     scope:
       "Actual controllers/services/repository and SQL; external SQL rows/response timing only. No real PG/isolation/HTTP/browser acceptance.",

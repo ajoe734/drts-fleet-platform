@@ -61,6 +61,20 @@ describe("original R3: all same-case prepared identities survive reconciliation"
       entries: Entry[];
       unresolved: Command[];
     };
+    lifecycle: {
+      caseNo: string;
+      resolvedReopen: Outcome;
+      closedResolve: Outcome;
+      readback: {
+        data: {
+          caseNo: string;
+          status: string;
+          reopenCount: number;
+          assigneeId: string;
+        };
+      };
+      entries: Entry[];
+    };
   };
   beforeAll(() => {
     const output = execFileSync(
@@ -172,5 +186,33 @@ describe("original R3: all same-case prepared identities survive reconciliation"
     );
     expect(row.unresolved).toHaveLength(0);
     expect(row.note.ok).toBe(true);
+  });
+
+  it("preserves actual canonical create/assign/note/resolve/close/reopen and terminal denials", () => {
+    const row = observed.lifecycle;
+    expect(row.resolvedReopen).toMatchObject({
+      ok: false,
+      code: "COMPLAINT_NOT_CLOSED",
+    });
+    expect(row.closedResolve).toMatchObject({
+      ok: false,
+      code: "COMPLAINT_ALREADY_CLOSED",
+    });
+    expect(row.readback.data).toMatchObject({
+      caseNo: row.caseNo,
+      status: "reopened",
+      reopenCount: 1,
+      assigneeId: "lifecycle-owner",
+    });
+    expect(row.entries.map((entry) => entry.action)).toEqual([
+      "case_created",
+      "case_assigned",
+      "case_note_added",
+      "case_resolved",
+      "case_closed",
+      "case_reopened",
+      "sla_recalculated",
+    ]);
+    expect(new Set(row.entries.map((entry) => entry.entryId)).size).toBe(7);
   });
 });

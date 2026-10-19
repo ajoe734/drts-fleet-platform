@@ -10,7 +10,7 @@ import {
   complaintProgressStates,
   loadComplaintTimeline,
 } from "../../../lib/complaint-detail-state";
-import { getServerOpsClient } from "@/lib/api-client.server";
+import { getServerOpsClient } from "../../../lib/api-client.server";
 import {
   CanvasActivityFeed,
   CanvasSequenceRail,

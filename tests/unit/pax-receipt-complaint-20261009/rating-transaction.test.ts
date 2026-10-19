@@ -261,12 +261,16 @@ async function fixture() {
       return { rows: command ? [command] : [] };
     }
     if (text.includes("AS matches_prepared")) {
+      const complaintCase =
+        target.complaintCase?.caseNo === values[0]
+          ? target.complaintCase
+          : undefined;
       return {
-        rows: target.complaintCase
+        rows: complaintCase
           ? [
               {
                 matches_prepared: isDeepStrictEqual(
-                  target.complaintCase,
+                  complaintCase,
                   values[1] ? JSON.parse(values[1] as string) : null,
                 ),
               },
