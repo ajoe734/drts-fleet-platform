@@ -24,6 +24,7 @@ const { AppRouterContext } = appRequire(
 ) as typeof import("next/dist/shared/lib/app-router-context.shared-runtime");
 const push = vi.fn();
 const router = {
+  bfcacheId: "synthetic-booking-test-route",
   push,
   replace: vi.fn(),
   back: vi.fn(),
@@ -73,20 +74,18 @@ async function open() {
   return result;
 }
 function click(name: string) {
-  fireEvent.click(screen.getByRole("button", { name, exact: true }));
+  fireEvent.click(screen.getByRole("button", { name }));
 }
 async function selectAddress(index: number, name: string) {
   const input =
     screen.getAllByPlaceholderText("請輸入街道、地點或地標")[index]!;
   const picker = input.closest("[data-address-map-picker]") as HTMLElement;
   fireEvent.change(input, { target: { value: name } });
-  fireEvent.click(
-    within(picker).getByRole("button", { name: "搜尋", exact: true }),
-  );
+  fireEvent.click(within(picker).getByRole("button", { name: "搜尋" }));
   fireEvent.click(
     await within(picker).findByRole("button", { name: new RegExp(name) }),
   );
-  await within(picker).findByRole("button", { name: "清除選點", exact: true });
+  await within(picker).findByRole("button", { name: "清除選點" });
 }
 const reverseCalls = () =>
   f.calls.filter((c) => c.path.endsWith("/geo/reverse"));
