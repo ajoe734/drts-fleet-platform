@@ -477,3 +477,123 @@ remain byte-identical to the version included in the 61-pass check above, so
 those unchanged tests were not repeated for this config-only correction. A fresh
 immutable candidate's hosted UI must still prove the actual audit destination
 read and the complete shared-order journey; this static check is not that result.
+
+## 9. 2026-10-19 authenticated session-read classification (HTTP 429)
+
+This is a bounded continuation of the same original ENTRY task, owned by Codex2
+and independently reviewed by Codex. The original eleven allocated scopes, five
+acceptance keys and all IAP, canonical membership/role, strict-environment,
+tenant/partner and explicit dev-waiver requirements remain in force. The prior
+`4d241da90b67ac07112b79a5f3c7f2000825d156` / generation
+`b0801154eb1c41968de916a037e11020` / merge
+`daebd72eeef12229cb59d3750b7a288b1dab7448` acceptance is preserved as history;
+its five Source keys do not establish this continuation's acceptance.
+
+### Finding and minimal change
+
+The original shared deployment of
+`ee1c2149d6bc8ac84fee9a31c362125f037024ea`, run `39291308774`, produced
+**15 passed / 1 failed / 0 skipped / 0 retries** in the original sixteen-case
+operational suite. Fleet operations and Channel statement download passed.
+The remaining Admin setup received HTTP 429 while downloading a document through
+the BFF. Separate cloud metadata records an `auth/session` 429 at the same time,
+but different trace IDs and missing actor/body attribution do not prove that
+those records are one request or that the API document route itself throttled.
+Only **six of eight** required PDF lifecycle chains completed; this repair does
+not relabel that failed run or claim a new runtime result.
+
+At accepted base `c05c6e133d8066abea349b2285ac653eadef8015`, the relevant
+AuthController, auth/JWT guards, tracker, storage, rate constants and AppModule
+bytes equal failed-runtime `ee1c`. `getAuthSession` inherited the general
+60-requests-per-minute classification even though BFF callers perform this fresh,
+revocation-aware read for each request. A frozen-clock regression using one
+actual issued session reproduced **HTTP 429 on lawful request 61**.
+
+Only `AuthController.getAuthSession` now uses the existing
+`@Throttle(READ_HEAVY_RATE_LIMIT)` classification: 180 requests per minute.
+It keeps the same handler, verified identity/output, tracker, key-scoped storage
+and global **five-minute block**. Read-heavy does not specify a new block duration;
+the installed throttler inherits the existing global duration. The old unit-test
+comment saying “no sticky block” was incorrect and is corrected. No other route,
+global rate constant, issuer, auth policy, cache, retry, permission or principal
+mapping changes.
+
+### Meaningful before/fixed checks
+
+The existing API `throttling.test.ts` now constructs the real
+`IdentityRepository` with its explicit noDB unit adapter, normal canonical account
+and role records, `JwtAuthService` issuer and acknowledged session ID. Each new
+request starts without an identity and traverses real `BootstrapAuthGuard` →
+`BootstrapThrottlerGuard` / `KeyScopedThrottlerStorage` → `getAuthSession`, in
+AppModule order. Only the clock and HTTP `ExecutionContext`/response headers are
+synthetic; no auth, verification, scope, revocation or counter decision is mocked.
+No application/listener, browser, PostgreSQL or Docker starts.
+
+The **same test bytes** against untouched c05 production yielded **17 pass /
+2 semantic fail / 0 skip**. The main failure is explicitly “lawful session-read
+request 61: expected 429 to be 200”; the second also exhausts the same actor's
+old sixty-request bucket. After only the route-classification/import change,
+the same nineteen cases yielded **19 pass / 0 fail / 0 skip**, including:
+
+- Requests 1–180 each re-read the actual repository session and reach the real
+  controller; request 181 returns 429 with `Retry-After: 300`. It remains blocked
+  after the one-minute hit TTL and until the original five-minute boundary,
+  after which the same still-valid session can read again.
+- Normal issuer/repository revocation makes the very next call return 401 before
+  throttling or the controller. Missing, invalid-signature and expired bearers
+  likewise cannot reach the controller or create a throttle bucket.
+- Foreign query/header selectors do not change the signed caller or returned
+  session. Session read has no additional resource scope requirement; no new
+  deny rule is invented. A genuine caller lacking `foundation:read` still gets
+  403 on the actual Platform partner-entry read, even with a claimed scope header.
+- Two genuinely issued canonical callers at one IP have independent keys;
+  forged actor/IP headers cannot rotate the first signed caller's exhausted key.
+
+Raw before/fixed JSON and logs, the exact c05 production binding and the test
+bytes are preserved under the canonical repository's
+`.local/passenger-bureau-gap-correction-20261018/auth-session-read-429-correction-20261019/source-checks/`.
+The initial missing-zod loader failure ran zero tests and is not regression
+credit. A later existing production-loader dependency-resolution failure had
+183 passing assertions but two unloadable suites; it also remains a failed run,
+not a successful complete regression. Only ignored local links to already
+installed external packages were added; all workspace Source aliases resolve
+inside this isolated worktree. Nothing was installed or changed in shared
+workspace dependencies.
+
+### Original five-key evidence and limits
+
+| Original acceptance key                | Current continuation evidence                                                                                                                                                 |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| IAP assertion以Google公開輪替金鑰驗證  | IAP/JWKS implementation is unchanged; run the existing IAP regression on this candidate.                                                                                      |
+| 角色由已登錄帳號權限對應不依賴群組欄位 | Canonical issuer/repository and fresh verification remain intact; the new behavioral tests exercise issued sessions and current role/scope boundaries.                        |
+| 無IAP assertion時不再套用預設身分      | No bootstrap/default fallback change; existing strict/IAP and invalid-session regressions remain required.                                                                    |
+| 不偽造MFA宣告並依使用者決定處理dev MFA | Existing waiver/step-up code and environment configuration are unchanged; retain their original positive and negative regressions.                                            |
+| 同候選SHA CI通過且獨立reviewer審查     | New immutable owner candidate, own mandatory CI and independent exact-SHA review remain pending until recorded in the final handoff packet; old accepted keys are not reused. |
+
+The independent finite caller-graph design estimated a known conservative
+sixty-second load of 156 plus unmeasured prefetch/render work. Existing 180 is the
+authenticated-read classification, not a universal guarantee for arbitrary
+prefetch or concurrent users. The original authorized hosted sixteen cases and
+eight PDF chains must establish actual flow sufficiency after normal review and
+integration. This socket-free regression does not prove live PostgreSQL/IAP or a
+new shared deployment. Six deferred Passenger Phase2 tasks, frozen Fleet Source,
+and the separate exact-owned cleanup obligations are untouched.
+
+Current bounded final checks are recorded in `source-checks/`:
+
+| Check                                 | Actual result and qualification                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth-and-throttle-regression.json`   | Ten original auth/storage suites: 204 pass / 0 fail / 0 skip, including the nineteen API throttle cases, existing canonical dev exchange, IAP, step-up, startup, session supersession and cross-app consumers.                                                                                                                              |
+| `original-wrapper51.json`             | Unchanged genuine wrapper/Fleet authority composition: 51 pass / 0 fail / 0 skip. This is a separate retained Source regression, not evidence that the new throttle test includes the outer wrapper.                                                                                                                                        |
+| `original-Fleet-regression.json`      | Existing Fleet task configuration: 37 pass / 0 fail / 0 skip. This is not the historical full 263-case regression, and is not added to previous passing subset counts.                                                                                                                                                                      |
+| `final-auth-session.json`             | Final test file: 19 pass / 0 fail / 0 skip. After the byte-identical initial before/fixed pair, Prettier and removal of the pre-existing unused `seconds` import preserve all normalized test bodies/assertions; exact before/final hashes and the permitted import-only difference are recorded in `test-final-semantic-equivalence.json`. |
+| `api-and-newtest-noemit-receipt.json` | Full API production plus the new test's real import graph: exit 0, no emit/incremental output. Both workspace packages resolve to this worktree Source. This ran before only the unused named import was removed; the production graph and tested bodies are unchanged.                                                                     |
+| `final-local-command-receipts.json`   | Final scoped ESLint and whitespace/diff checks exit 0. The earlier lint failure for the existing unused import remains in the original log.                                                                                                                                                                                                 |
+
+Normal generated Husky wrappers are initialized from the installed package in
+this isolated worktree; the existing `.husky/_` hook path is unchanged. Normal
+staged generated-file, lint-staged and commit-trailer checks apply to the exact
+three task files. Their actual commit result, immutable SHA, remote/PR equality,
+new handoff generation, pending/current own CI and independent review are
+recorded in the candidate packet rather than guessed here. No owner approval,
+merge, deployment, or new hosted operational success is claimed.

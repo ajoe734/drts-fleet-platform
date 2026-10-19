@@ -62,7 +62,10 @@ import type {
   AuthRealm,
   AuthActorType,
 } from "../../common/auth/auth.types";
-import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import {
+  OPEN_ROUTE_RATE_LIMIT,
+  READ_HEAVY_RATE_LIMIT,
+} from "../../common/throttling/rate-limit.constants";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import {
   DEV_MFA_WAIVED_AMR,
@@ -363,6 +366,7 @@ export class AuthController {
   }
 
   @Get("session")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   getAuthSession(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
