@@ -435,18 +435,27 @@ export class BillingSettlementRepository {
         },
       });
     } finally {
-      try {
-        if (locked)
+      if (!locked) {
+        // The server may hold this session lock even if its ACK was lost.
+        // pg-pool plain release preserves session locks in the idle connection.
+        client.release(
+          new Error(
+            "Driver statement target lock acquisition was not acknowledged.",
+          ),
+        );
+      } else {
+        try {
           await client.query(
             "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
             [`${scope}:${key}`],
           );
-        client.release();
-      } catch (error) {
-        // Destroy an uncertain session instead of returning a held lock to pool.
-        client.release(
-          error instanceof Error ? error : new Error(String(error)),
-        );
+          client.release();
+        } catch (error) {
+          // Destroy an uncertain session instead of returning a held lock to pool.
+          client.release(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        }
       }
     }
   }

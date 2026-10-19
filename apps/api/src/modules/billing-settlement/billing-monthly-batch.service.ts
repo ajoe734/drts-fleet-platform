@@ -22,7 +22,11 @@ export type BillingMonthlyTargetReceipt = {
 export class BillingMonthlyBatchService {
   constructor(private readonly billing: BillingSettlementService) {}
 
-  async run(command: BillingMonthlyBatchCommand = {}, requestId?: string) {
+  async run(
+    command: BillingMonthlyBatchCommand = {},
+    requestId?: string,
+    idempotencyKey?: string,
+  ) {
     if (!command || typeof command !== "object" || Array.isArray(command)) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -56,7 +60,11 @@ export class BillingMonthlyBatchService {
         { periodMonth },
       );
     }
-    const operationId = command.operationId ?? `billing-monthly:${periodMonth}`;
+    // The actual HTTP command key uses the same durable operation/target rails.
+    // A failed partial run must resume targets rather than cache its response.
+    const operationId =
+      idempotencyKey?.trim() ||
+      (command.operationId ?? `billing-monthly:${periodMonth}`);
     if (typeof operationId !== "string" || !operationId.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,

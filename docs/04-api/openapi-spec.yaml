@@ -2003,6 +2003,11 @@ paths:
           name: x-request-id
           schema: { type: string }
           description: Correlation for this HTTP attempt; operationId identifies the period operation.
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema: { type: string }
+          description: Optional durable operation identity, taking precedence over body operationId. Reuse for another period returns409; partial target failures resume on retry.
       requestBody:
         required: false
         content:

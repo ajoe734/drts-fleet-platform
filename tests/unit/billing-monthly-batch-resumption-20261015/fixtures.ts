@@ -155,9 +155,11 @@ export function databaseSocket() {
         }
         return query(sql, values);
       },
-      release: () => {
+      release: (error?: Error) => {
         releasedSessions.push(clientId);
-        unlock?.();
+        // Like pg-pool, plain release keeps the session alive. Error release
+        // destroys it; only disconnect (or explicit unlock) drops its lock.
+        if (error) unlock?.();
       },
     };
   };

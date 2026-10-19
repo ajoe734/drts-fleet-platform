@@ -25,6 +25,7 @@ export class BillingMonthlyBatchController {
     @Body() command: BillingMonthlyBatchCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     if (
       !identity ||
@@ -38,7 +39,7 @@ export class BillingMonthlyBatchController {
         "Only the authorized system billing workload can run this batch.",
       );
     }
-    const result = await this.monthly.run(command, requestId);
+    const result = await this.monthly.run(command, requestId, idempotencyKey);
     if (result.status === "partial_failure") {
       // Non-2xx makes Scheduler retry; receipts still expose committed targets.
       throw new ApiRequestError(

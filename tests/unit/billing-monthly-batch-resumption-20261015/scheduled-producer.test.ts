@@ -82,6 +82,96 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("C089 R1 actual scheduled header identity", () => {
+  it("binds the actual Idempotency-Key to replay-stable results and rejects its reuse for another period", async () => {
+    const socket = databaseSocket();
+    liveTrip(socket, "driver-header", "order-header");
+    const actual = await setup(socket);
+    await publish(actual.service);
+    const controller = new BillingMonthlyBatchController(
+      new BillingMonthlyBatchService(actual.service),
+    );
+    const first = await controller.run(
+      { periodMonth: "2026-07" },
+      identity,
+      "header-attempt-1",
+      "header-operation",
+    );
+    expect(first.data.operationId).toBe("header-operation");
+    const statementId = first.data.targets[0]!.statementIds[0]!;
+    const artifact = await actual.store.get("report", statementId);
+    const replay = await controller.run(
+      { periodMonth: "2026-07" },
+      identity,
+      "header-attempt-2",
+      "header-operation",
+    );
+    expect(replay.data.targets).toEqual(first.data.targets);
+    expect(replay.data.requestId).toBe("header-attempt-2");
+    expect(await actual.store.get("report", statementId)).toEqual(artifact);
+    expect(
+      socket.query.mock.calls.filter(([sql]) =>
+        sql.includes("INSERT INTO billing.phase1_driver_statements"),
+      ),
+    ).toHaveLength(1);
+    await expect(
+      controller.run(
+        { periodMonth: "2026-06" },
+        identity,
+        "header-period-conflict",
+        "header-operation",
+      ),
+    ).rejects.toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED" });
+  });
+
+  it("retries a partial header-identified attempt through fresh canonical targets instead of replaying a stale partial response", async () => {
+    const socket = databaseSocket();
+    liveTrip(socket, "driver-header-a", "order-header-a");
+    liveTrip(socket, "driver-header-b", "order-header-b");
+    const actual = await setup(socket);
+    await publish(actual.service);
+    socket.reject("billing.phase1_driver_statements");
+    socket.rejectDriver("driver-header-b");
+    const controller = new BillingMonthlyBatchController(
+      new BillingMonthlyBatchService(actual.service),
+    );
+    await expect(
+      controller.run(
+        { periodMonth: "2026-07" },
+        identity,
+        "header-partial",
+        "header-resume",
+      ),
+    ).rejects.toMatchObject({ code: "BILLING_MONTHLY_PARTIAL_FAILURE" });
+    const committed = [
+      ...socket.tables.get("billing.phase1_driver_statements")!.values(),
+    ][0]!;
+    const artifact = await actual.store.get(
+      "report",
+      String(committed.statementId),
+    );
+    socket.reject(null);
+    const fresh = await setup(socket, actual.store);
+    const resumed = await new BillingMonthlyBatchController(
+      new BillingMonthlyBatchService(fresh.service),
+    ).run(
+      { periodMonth: "2026-07" },
+      identity,
+      "header-resumed",
+      "header-resume",
+    );
+    expect(resumed.data.operationId).toBe("header-resume");
+    expect(resumed.data.status).toBe("completed");
+    expect(resumed.data.targets).toHaveLength(2);
+    expect(resumed.data.targets[0]!.statementIds).toEqual([
+      committed.statementId,
+    ]);
+    expect(
+      await fresh.store.get("report", String(committed.statementId)),
+    ).toEqual(artifact);
+  });
+});
+
 describe("C089 actual scheduled producer", () => {
   it("real system Controller→batch→Billing→Repository uses canonical live targets and returns replay-stable receipts", async () => {
     const socket = databaseSocket();
