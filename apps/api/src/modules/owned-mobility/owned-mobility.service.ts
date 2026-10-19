@@ -1,3 +1,7 @@
+import {
+  InjectMaskedCallPort,
+  type MaskedCallPort,
+} from "../multi-taxi/masked-call.port";
 import { resolveOrderPartnerNotificationRoute } from "../tenant-partner/order-partner-notification-route";
 import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-user-identity-link.repository";
 import { PartnerNotificationNavigationRepository } from "../tenant-partner/partner-notification-navigation.repository";
@@ -31,6 +35,8 @@ import { EventEmitter2 } from "@nestjs/event-emitter";
 
 import type {
   ActualTripFareBreakdown,
+  PassengerRideContactOption,
+  PassengerContactUnavailableReason,
   DriverDeclaredSurnameSnapshot,
   DriverTaskStatus,
   AddressPayload,
@@ -612,6 +618,9 @@ export class OwnedMobilityService
     private readonly receiptRegistryRepository?: RegulatoryRegistryRepository,
     @Optional()
     private readonly receiptPaymentMethods?: PaymentMethodService,
+    @Optional()
+    @InjectMaskedCallPort()
+    private readonly tenantMaskedCallPort?: MaskedCallPort,
   ) {}
 
   private _fallbackIdempotencyService?: IdempotencyService;
@@ -3155,6 +3164,162 @@ export class OwnedMobilityService
     }
     await this.assertPartnerOrderIdentityAsync(identity, order);
     return this.mapOrderToBooking(order);
+  }
+
+  /** Existing tenant:read route; provider input stays identifier-only. */
+  async getTenantBookingDriverContact(
+    tenantId: string,
+    bookingId: string,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<
+    PassengerRideContactOption & {
+      bookingId: string;
+      orderId: string;
+      assignmentId: string;
+    }
+  > {
+    if (
+      !identity?.actorId ||
+      (identity.realm === "tenant" && identity.authMode !== "jwt_bearer")
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "AUTH_REQUIRED",
+        "Authenticated tenant identity is required.",
+      );
+    }
+    this.assertTenantAccessScope(tenantId, identity);
+    const initial = await this.resolveTenantDriverContactContext(
+      tenantId,
+      bookingId,
+      identity,
+    );
+    let reason: PassengerContactUnavailableReason =
+      "masked_call_provider_not_configured";
+    let session: { contactUri: string; expiresAt: string } | null = null;
+    if (this.tenantMaskedCallPort?.isAvailable()) {
+      reason = "masked_call_provider_error";
+      try {
+        const issued = await this.tenantMaskedCallPort.createSession(
+          {
+            orderId: initial.order.orderId,
+            assignmentId: initial.assignment.assignmentId,
+            driverId: initial.assignment.driverId,
+            passengerSubjectRef: `tenant:${tenantId}:${identity.actorId}`,
+          },
+          { requestId },
+        );
+        if (
+          issued.contactUri?.trim() &&
+          Date.parse(issued.expiresAt) > Date.now()
+        ) {
+          session = {
+            contactUri: issued.contactUri,
+            expiresAt: issued.expiresAt,
+          };
+        }
+      } catch {
+        // Provider payloads can contain the real driver leg. Do not log or
+        // return them; preserve the existing explicit provider-error state.
+      }
+    }
+    // A provider await can overlap a normal reassignment or trip completion.
+    // Discard the obsolete leg; the port has no instant-revocation contract.
+    const current = await this.resolveTenantDriverContactContext(
+      tenantId,
+      bookingId,
+      identity,
+    );
+    if (
+      current.order.orderId !== initial.order.orderId ||
+      current.assignment.assignmentId !== initial.assignment.assignmentId ||
+      current.assignment.driverId !== initial.assignment.driverId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TENANT_DRIVER_CONTACT_NOT_AVAILABLE",
+        "Driver assignment changed; refresh contact for the current booking.",
+        { bookingId },
+      );
+    }
+    const binding = {
+      bookingId,
+      orderId: current.order.orderId,
+      assignmentId: current.assignment.assignmentId,
+    };
+    if (session)
+      return {
+        ...binding,
+        mode: "masked_call",
+        ...session,
+        unavailableReason: null,
+      };
+    const supportUri = process.env.MULTI_TAXI_SUPPORT_TEL_URI?.trim() || null;
+    return supportUri?.startsWith("tel:")
+      ? {
+          ...binding,
+          mode: "support_fallback",
+          contactUri: supportUri,
+          expiresAt: null,
+          unavailableReason: reason,
+        }
+      : {
+          ...binding,
+          mode: "unavailable",
+          contactUri: null,
+          expiresAt: null,
+          unavailableReason: reason,
+        };
+  }
+
+  private async resolveTenantDriverContactContext(
+    tenantId: string,
+    bookingId: string,
+    identity: BootstrapRequestIdentity,
+  ) {
+    const booking = await this.resolvePersistedTenantBooking(
+      tenantId,
+      bookingId,
+      identity,
+    );
+    // Generic enterprise assignments do not have multi_taxi_direct passenger
+    // disclosure snapshots. Reuse the existing one-aggregate MVCC read instead.
+    const context = this.ownedMobilityRepository?.isEnabled()
+      ? await this.ownedMobilityRepository.loadOrderActionContext({
+          orderId: booking.orderId,
+        })
+      : null;
+    const order = this.ownedMobilityRepository?.isEnabled()
+      ? context?.orders.find(
+          (row) =>
+            row.orderId === booking.orderId &&
+            row.bookingId === bookingId &&
+            row.tenantId === tenantId,
+        )
+      : this.requireBookingOrder(bookingId, tenantId);
+    if (!order)
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "BOOKING_NOT_FOUND",
+        "Booking was not found.",
+      );
+    const assignment = this.ownedMobilityRepository?.isEnabled()
+      ? context?.dispatchAssignments.find(
+          (row) =>
+            row.orderId === order.orderId &&
+            ["assigned", "accepted"].includes(row.status),
+        )
+      : this.findLatestActiveAssignment(order.orderId);
+    if (!assignment || ["completed", "cancelled"].includes(order.status)) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TENANT_DRIVER_CONTACT_NOT_AVAILABLE",
+        "Driver contact is not available for the current booking state.",
+        { bookingId },
+      );
+    }
+    return { order, assignment };
   }
 
   /**
