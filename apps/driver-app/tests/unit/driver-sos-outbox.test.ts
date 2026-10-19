@@ -9,9 +9,11 @@ vi.mock("expo-secure-store", () => ({
 import {
   buildDriverSosSubmitCommand,
   applyDriverSosAttachmentSyncResult,
+  applyDriverSosDutyReadback,
   createDriverSosActiveCase,
   formatSosDescription,
   getSituationLabel,
+  isDriverSosStatusTerminal,
   mapSituationToDriverSosEventType,
   markDriverSosCaseFailed,
   markDriverSosCaseSubmitted,
@@ -256,7 +258,10 @@ describe("driver-sos-outbox", () => {
     });
 
     const submitted = markDriverSosCaseSubmitted(activeCase, {
-      event: {} as any,
+      event: {
+        status: "submitted",
+        dutyAcknowledgement: { acknowledgedAt: null, acknowledgedByActorId: null },
+      } as any,
       receipt: {
         sosEventId: "sos-1",
         incidentId: "INC-999",
@@ -283,5 +288,212 @@ describe("driver-sos-outbox", () => {
         expect(entry.detail.toLowerCase()).not.toContain(phrase);
       }
     }
+  });
+
+  describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015: honest duty-ack state", () => {
+    function buildSubmittedCase() {
+      const activeCase = createDriverSosActiveCase({
+        eventType: "traffic_accident",
+        description: "",
+        attachments: [],
+        originalTriggeredAt: "2026-07-20T09:00:00.000Z",
+        offlineAtTrigger: false,
+        location: null,
+        orderId: null,
+        taskId: null,
+      });
+
+      return markDriverSosCaseSubmitted(activeCase, {
+        event: {
+          sosEventId: "sos-event-duty-1",
+          clientEventId: activeCase.clientEventId,
+          eventNo: "SOS-20260720-001",
+          incidentId: "inc_0214",
+          driverId: "driver-1",
+          vehicleId: null,
+          plateNo: null,
+          orderId: null,
+          taskId: null,
+          status: "submitted",
+          eventType: "traffic_accident",
+          severity: "major",
+          description: null,
+          location: null,
+          originalTriggeredAt: "2026-07-20T09:00:00.000Z",
+          serverReceivedAt: "2026-07-20T09:00:05.000Z",
+          fleetReportConfirmedAt: "2026-07-20T09:00:05.000Z",
+          offlineAtTrigger: false,
+          falseAlarm: {
+            dismissed: false,
+            dismissedAt: null,
+            dismissedByDriverId: null,
+            note: null,
+          },
+          dutyAcknowledgement: {
+            acknowledgedAt: null,
+            acknowledgedByActorId: null,
+          },
+          createdAt: "2026-07-20T09:00:05.000Z",
+          updatedAt: "2026-07-20T09:00:05.000Z",
+        },
+        receipt: {
+          sosEventId: "sos-event-duty-1",
+          incidentId: "inc_0214",
+          clientEventId: activeCase.clientEventId,
+          eventNo: "SOS-20260720-001",
+          duplicate: false,
+          serverReceivedAt: "2026-07-20T09:00:05.000Z",
+          fleetReportConfirmedAt: "2026-07-20T09:00:05.000Z",
+        },
+      });
+    }
+
+    it("never claims a duty person has already been assigned at submission time", () => {
+      const submitted = buildSubmittedCase();
+
+      expect(submitted.dutyAcknowledgement.acknowledgedByActorId).toBeNull();
+      for (const entry of submitted.timeline) {
+        expect(entry.detail).not.toContain("指派");
+        expect(entry.detail).not.toContain("已認領");
+      }
+    });
+
+    it("applies an authoritative duty-ack readback exactly once, appending one timeline entry", () => {
+      const submitted = buildSubmittedCase();
+
+      const acknowledged = applyDriverSosDutyReadback(submitted, {
+        status: "acknowledged",
+        dutyAcknowledgement: {
+          acknowledgedAt: "2026-07-20T09:02:00.000Z",
+          acknowledgedByActorId: "ops-duty-01",
+        },
+      });
+
+      expect(acknowledged.dutyAcknowledgement.acknowledgedByActorId).toBe(
+        "ops-duty-01",
+      );
+      expect(
+        acknowledged.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
+      ).toHaveLength(1);
+
+      // Re-applying the same readback must stay idempotent (no duplicate entry).
+      const reapplied = applyDriverSosDutyReadback(acknowledged, {
+        status: "acknowledged",
+        dutyAcknowledgement: {
+          acknowledgedAt: "2026-07-20T09:02:00.000Z",
+          acknowledgedByActorId: "ops-duty-01",
+        },
+      });
+
+      expect(
+        reapplied.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
+      ).toHaveLength(1);
+    });
+
+    it("leaves the active case untouched while the readback still reports pending duty", () => {
+      const submitted = buildSubmittedCase();
+
+      const stillPending = applyDriverSosDutyReadback(submitted, {
+        status: "submitted",
+        dutyAcknowledgement: {
+          acknowledgedAt: null,
+          acknowledgedByActorId: null,
+        },
+      });
+
+      expect(stillPending.dutyAcknowledgement.acknowledgedByActorId).toBeNull();
+      expect(
+        stillPending.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
+      ).toHaveLength(0);
+    });
+
+    it("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 F3: does not treat resolved as terminal, so readback can still progress to closed", () => {
+      // "resolved" is not the end of the S-3 progression -- the backend
+      // explicitly supports resolved -> closed -- so native polling must not
+      // stop here. Only closed/false_alarm_dismissed are genuine dead ends.
+      expect(isDriverSosStatusTerminal("resolved")).toBe(false);
+      expect(isDriverSosStatusTerminal("closed")).toBe(true);
+      expect(isDriverSosStatusTerminal("false_alarm_dismissed")).toBe(true);
+      expect(isDriverSosStatusTerminal("acknowledged")).toBe(false);
+
+      const submitted = buildSubmittedCase();
+      const resolved = applyDriverSosDutyReadback(submitted, {
+        status: "resolved",
+        dutyAcknowledgement: {
+          acknowledgedAt: "2026-07-20T09:02:00.000Z",
+          acknowledgedByActorId: "ops-duty-01",
+        },
+      });
+      expect(resolved.status).toBe("resolved");
+      expect(isDriverSosStatusTerminal(resolved.status)).toBe(false);
+
+      // A later authoritative readback -- including one for a case that was
+      // restored from storage while already "resolved" -- must still be
+      // able to observe the subsequent closed transition.
+      const closed = applyDriverSosDutyReadback(resolved, {
+        status: "closed",
+        dutyAcknowledgement: resolved.dutyAcknowledgement,
+      });
+      expect(closed.status).toBe("closed");
+      expect(
+        closed.timeline.filter((entry) => entry.kind === "closed"),
+      ).toHaveLength(1);
+      expect(isDriverSosStatusTerminal(closed.status)).toBe(true);
+    });
+
+    it("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 N1: a delayed older readback resolving after a newer one does not regress status or erase a known duty owner", () => {
+      const submitted = buildSubmittedCase();
+
+      // Poll P2 (started later) resolves first: the server already shows
+      // duty acknowledgment by ops-duty-01.
+      const afterP2 = applyDriverSosDutyReadback(submitted, {
+        status: "acknowledged",
+        dutyAcknowledgement: {
+          acknowledgedAt: "2026-07-20T09:02:00.000Z",
+          acknowledgedByActorId: "ops-duty-01",
+        },
+      });
+      expect(afterP2.dutyAcknowledgement.acknowledgedByActorId).toBe(
+        "ops-duty-01",
+      );
+      expect(
+        afterP2.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
+      ).toHaveLength(1);
+
+      // Poll P1 (started earlier) only now resolves -- its in-flight
+      // response was delayed -- and still reports the pre-ACK snapshot it
+      // actually read from the server before P2 landed: submitted, no
+      // owner. Applying it naively would erase the just-applied ACK and
+      // regress status back to "submitted".
+      const afterP1 = applyDriverSosDutyReadback(afterP2, {
+        status: "submitted",
+        dutyAcknowledgement: {
+          acknowledgedAt: null,
+          acknowledgedByActorId: null,
+        },
+      });
+      expect(afterP1.status).toBe("acknowledged");
+      expect(afterP1.dutyAcknowledgement.acknowledgedByActorId).toBe(
+        "ops-duty-01",
+      );
+      expect(
+        afterP1.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
+      ).toHaveLength(1);
+
+      // A later poll P3 re-observing the same ACK must stay idempotent --
+      // not append a second duty_acknowledged entry just because the
+      // delayed P1 response had (if unguarded) reset the locally-known
+      // owner back to null in between.
+      const afterP3 = applyDriverSosDutyReadback(afterP1, {
+        status: "acknowledged",
+        dutyAcknowledgement: {
+          acknowledgedAt: "2026-07-20T09:02:00.000Z",
+          acknowledgedByActorId: "ops-duty-01",
+        },
+      });
+      expect(
+        afterP3.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
+      ).toHaveLength(1);
+    });
   });
 });

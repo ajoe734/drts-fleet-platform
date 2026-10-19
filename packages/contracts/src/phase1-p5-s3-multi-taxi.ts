@@ -1142,6 +1142,7 @@ export const DRIVER_SOS_URGENT_ALERT_OUTBOX_STATUSES = [
   "pending",
   "sending",
   "delivered",
+  "acknowledged",
   "failed",
 ] as const;
 export type DriverSosUrgentAlertOutboxStatus =

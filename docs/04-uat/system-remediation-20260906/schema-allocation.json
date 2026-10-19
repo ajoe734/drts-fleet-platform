@@ -149,6 +149,12 @@
       "amended_at": "2026-10-18",
       "scope": "Append V0121 to voice_callback_allocations; original allocation entries unchanged",
       "reason": "Extends the callback functionality on exact parent48bf70e, whose highest reserved migration is V0120. Existing allocation collectors already include voice_callback_allocations; no guard or assertion is changed."
+    },
+    {
+      "amended_by_task_id": "SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015",
+      "amended_at": "2026-10-19",
+      "scope": "Append sos_duty_allocations V0124 only; all previous entries and V0122/V0123 reservations remain owned by their original tasks.",
+      "reason": "Complete the original S-3 §24 outbox acknowledged semantics after normal Root exact scope/number coordination. Existing migration collision collector includes this new group; no existing assertion is weakened."
     }
   ],
   "voice_application_allocations": [
@@ -653,6 +659,18 @@
         "Schedule splits one covered published interval; historical published rows and immutable quote snapshots remain available.",
         "Tariff mutation, audit and command receipt commit or roll back together; receipt retry returns current row without replaying interval changes."
       ]
+    }
+  ],
+  "sos_duty_allocations": [
+    {
+      "task_id": "SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015",
+      "version": "V0124",
+      "migration_filename": "V0124__sos_urgent_outbox_acknowledged.sql",
+      "domain": "sos_duty_acknowledgment",
+      "target_schema": "safety",
+      "primary_tables": ["safety.driver_sos_urgent_alert_outbox"],
+      "referenced_tables": ["safety.driver_sos_events"],
+      "description": "Forward ALTER of the existing V0053 status check for the original S-3 §24 acknowledged state. No new tables/columns. Backfill only same-event non-null canonical duty actor/time; preserve delivery/render as distinct transitions. Root reserved V0124 after existing Voice V0122 and Complaint V0123 reservations."
     }
   ]
 }
