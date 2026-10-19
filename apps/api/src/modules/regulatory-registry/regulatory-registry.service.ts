@@ -5107,9 +5107,17 @@ export class RegulatoryRegistryService
             message === "notification_idempotency_conflict" ||
             message === "registry_expiry_receipt_link_conflict" ||
             message.startsWith("notification_invalid_");
+          // pg-pool emits these acquisition timeouts without an errno code.
+          const poolAcquisitionTimeout =
+            error instanceof Error &&
+            code === undefined &&
+            causeCode === undefined &&
+            (message === "timeout exceeded when trying to connect" ||
+              message === "Connection terminated due to connection timeout");
           const recoverable =
             !terminal &&
             (outboxDeliveryId !== undefined ||
+              poolAcquisitionTimeout ||
               storageCodes.includes(code ?? "") ||
               storageCodes.includes(causeCode ?? "") ||
               message === "notification_outbox_lock_timeout" ||
