@@ -644,9 +644,9 @@ describe("BillingSettlementService settlement matrix", () => {
 });
 
 describe("BillingSettlementService referral settlement (drts_pays_partner)", () => {
-  it("builds a referral statement with per-trip share, GMV, and active riders", () => {
+  it("builds a referral statement with per-trip share, GMV, and active riders", async () => {
     const service = createService();
-    const statement = service.getReferralStatement(
+    const statement = await service.getReferralStatement(
       "referral-demo-community",
       "2026-06",
     );
@@ -664,9 +664,9 @@ describe("BillingSettlementService referral settlement (drts_pays_partner)", () 
     expect(statement.lines[0].rateType).toBe("percent");
   });
 
-  it("resolves the active referral revenue-share rule for an attributed trip", () => {
+  it("resolves the active referral revenue-share rule for an attributed trip", async () => {
     const service = createService();
-    const rule = service.resolveReferralRevenueShareRule(
+    const rule = await service.resolveReferralRevenueShareRule(
       "referral-demo-community",
       "2026-06-10T00:00:00Z",
     );
@@ -674,7 +674,7 @@ describe("BillingSettlementService referral settlement (drts_pays_partner)", () 
     expect(rule?.rateType).toBe("percent");
     expect(rule?.value).toBe(15);
     expect(
-      service.resolveReferralRevenueShareRule(
+      await service.resolveReferralRevenueShareRule(
         "yuhe-residence",
         "2026-08-01T00:00:00Z",
       ),
@@ -689,7 +689,7 @@ describe("BillingSettlementService referral settlement (drts_pays_partner)", () 
       channelKey: "partner_referral",
     });
     expect(
-      service.resolveReferralRevenueShareRule(
+      await service.resolveReferralRevenueShareRule(
         "unknown-channel",
         "2026-06-10T00:00:00Z",
       ),

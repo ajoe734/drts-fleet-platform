@@ -1589,10 +1589,29 @@ export class RegulatoryRegistryRepository {
     return null;
   }
 
+  /** One finite keyset interval; no scheduler/checkpoint or source mutation. */
+  async getExpiryScanUpperBounds(): Promise<{
+    driverId: string | null;
+    policyId: string | null;
+  }> {
+    const result = await this.databaseService!.query<{
+      driver_id: string | null;
+      policy_id: string | null;
+    }>(
+      `SELECT (SELECT MAX(driver_id) FROM reg.phase1_registry_drivers) AS driver_id,
+              (SELECT MAX(policy_id) FROM reg.phase1_registry_policies) AS policy_id`,
+    );
+    return {
+      driverId: result.rows[0]?.driver_id ?? null,
+      policyId: result.rows[0]?.policy_id ?? null,
+    };
+  }
+
   async scanExpiredDrivers(
     asOf: Date | string,
     limit: number = 100,
     client?: PoolClient,
+    range?: { afterId?: string | undefined; throughId?: string | undefined },
   ): Promise<DriverRegistryRecord[]> {
     const asOfIso =
       asOf instanceof Date ? asOf.toISOString() : new Date(asOf).toISOString();
@@ -1603,14 +1622,16 @@ export class RegulatoryRegistryRepository {
           SELECT d.record
           FROM reg.phase1_registry_drivers d
           LEFT JOIN reg.driver_reg_profiles dp ON d.driver_id = dp.driver_id
-          WHERE (d.record->>'licenseExpiry' IS NOT NULL AND (d.record->>'licenseExpiry')::timestamptz <= $1)
+          WHERE ((d.record->>'licenseExpiry' IS NOT NULL AND (d.record->>'licenseExpiry')::timestamptz <= $1)
              OR (d.record->>'professionalDriverLicenseExpiry' IS NOT NULL AND (d.record->>'professionalDriverLicenseExpiry')::timestamptz <= $1)
              OR (d.record->>'taxiDriverRegistrationExpiry' IS NOT NULL AND (d.record->>'taxiDriverRegistrationExpiry')::timestamptz <= $1)
-             OR (dp.training_status = 'expired')
+             OR (dp.training_status = 'expired'))
+            AND ($3::varchar IS NULL OR d.driver_id > $3::varchar)
+            AND ($4::varchar IS NULL OR d.driver_id <= $4::varchar)
           ORDER BY d.driver_id ASC
           LIMIT $2
         `,
-        [asOfIso, limit],
+        [asOfIso, limit, range?.afterId ?? null, range?.throughId ?? null],
       );
       return result.rows.map((r) => r.record);
     }
@@ -1621,6 +1642,7 @@ export class RegulatoryRegistryRepository {
     asOf: Date | string,
     limit: number = 100,
     client?: PoolClient,
+    range?: { afterId?: string | undefined; throughId?: string | undefined },
   ): Promise<InsurancePolicyRecord[]> {
     const asOfIso =
       asOf instanceof Date ? asOf.toISOString() : new Date(asOf).toISOString();
@@ -1633,10 +1655,12 @@ export class RegulatoryRegistryRepository {
           WHERE status != 'cancelled'
             AND (record->>'startAt' IS NULL OR (record->>'startAt')::timestamptz <= $1)
             AND (record->>'endAt' IS NOT NULL AND (record->>'endAt')::timestamptz < $1)
+            AND ($3::varchar IS NULL OR policy_id > $3::varchar)
+            AND ($4::varchar IS NULL OR policy_id <= $4::varchar)
           ORDER BY policy_id ASC
           LIMIT $2
         `,
-        [asOfIso, limit],
+        [asOfIso, limit, range?.afterId ?? null, range?.throughId ?? null],
       );
       return result.rows.map((r) => r.record);
     }
@@ -1719,6 +1743,11 @@ export class RegulatoryRegistryRepository {
       return result.rows[0]!;
     }
 
+    const existing = Array.from(this.inMemoryExpiryEvents.values()).find(
+      (event) => event.source_fingerprint === params.sourceFingerprint,
+    );
+    if (existing) return existing;
+
     const row: RegistryExpiryEventRow = {
       event_id: eventId,
       scope: params.scope,
@@ -1767,7 +1796,7 @@ export class RegulatoryRegistryRepository {
           UPDATE reg.phase1_registry_expiry_delivery_intents
           SET delivery_status = 'superseded',
               updated_at = now()
-          WHERE event_id = ANY($1::uuid[]) AND delivery_status = 'pending'
+          WHERE event_id = ANY($1::uuid[]) AND delivery_status <> 'superseded'
         `,
         [eventIds],
       );
@@ -1784,7 +1813,7 @@ export class RegulatoryRegistryRepository {
         evt.updated_at = nowIso;
       }
       for (const intent of this.inMemoryDeliveryIntents.values()) {
-        if (intent.event_id === id && intent.delivery_status === "pending") {
+        if (intent.event_id === id && intent.delivery_status !== "superseded") {
           intent.delivery_status = "superseded";
           intent.updated_at = nowIso;
         }
@@ -1817,7 +1846,7 @@ export class RegulatoryRegistryRepository {
         for (const intent of this.inMemoryDeliveryIntents.values()) {
           if (
             intent.event_id === evt.event_id &&
-            intent.delivery_status === "pending"
+            intent.delivery_status !== "superseded"
           ) {
             intent.delivery_status = "superseded";
             intent.updated_at = nowIso;
@@ -1855,16 +1884,17 @@ export class RegulatoryRegistryRepository {
       await executor.query(
         `
           UPDATE reg.phase1_registry_expiry_events
-          SET status = $1,
+          SET status = $1::varchar,
               updated_at = now()
-          WHERE event_id = $2
+          WHERE event_id = $2::uuid
+            AND (status <> 'superseded' OR $1::varchar = 'superseded')
         `,
         [status, eventId],
       );
       return;
     }
     const evt = this.inMemoryExpiryEvents.get(eventId);
-    if (evt) {
+    if (evt && (evt.status !== "superseded" || status === "superseded")) {
       evt.status = status;
       evt.updated_at = new Date().toISOString();
     }
@@ -1900,6 +1930,11 @@ export class RegulatoryRegistryRepository {
       );
       return result.rows[0]!;
     }
+
+    const existing = Array.from(this.inMemoryDeliveryIntents.values()).find(
+      (intent) => intent.idempotency_key === params.idempotencyKey,
+    );
+    if (existing) return existing;
 
     const row: RegistryExpiryDeliveryIntentRow = {
       intent_id: intentId,
@@ -1950,42 +1985,117 @@ export class RegulatoryRegistryRepository {
     client?: PoolClient,
   ): Promise<RegistryExpiryDeliveryIntentRow | null> {
     if (this.isEnabled()) {
-      const executor = this.getExpiryExecutor(client);
-      const result = await executor.query<RegistryExpiryDeliveryIntentRow>(
-        `
-          UPDATE reg.phase1_registry_expiry_delivery_intents
-          SET delivery_status = $1,
-              outbox_delivery_id = COALESCE($2, outbox_delivery_id),
-              last_error = $3,
-              enqueued_at = CASE WHEN $1 = 'enqueued' THEN now() ELSE enqueued_at END,
-              updated_at = now()
-          WHERE intent_id = $4
-          RETURNING *
-        `,
+      const result = await this.getExpiryExecutor(
+        client,
+      ).query<RegistryExpiryDeliveryIntentRow>(
+        `UPDATE reg.phase1_registry_expiry_delivery_intents AS intent
+         SET delivery_status = CASE WHEN intent.delivery_status = 'superseded' OR EXISTS (
+               SELECT 1 FROM reg.phase1_registry_expiry_events event
+               WHERE event.event_id = intent.event_id AND event.status = 'superseded'
+             ) THEN 'superseded' ELSE $1::varchar END,
+             outbox_delivery_id = COALESCE(intent.outbox_delivery_id, $2::text),
+             last_error = CASE WHEN $5::boolean THEN $3::text ELSE intent.last_error END,
+             enqueued_at = CASE WHEN $1::varchar = 'enqueued' THEN COALESCE(intent.enqueued_at, now()) ELSE intent.enqueued_at END,
+             updated_at = now()
+         WHERE intent.intent_id = $4::uuid
+           AND ($2::text IS NULL OR intent.outbox_delivery_id IS NULL OR intent.outbox_delivery_id = $2::text)
+         RETURNING *`,
         [
           params.deliveryStatus,
           params.outboxDeliveryId ?? null,
           params.lastError ?? null,
           params.intentId,
+          params.lastError !== undefined,
         ],
       );
+      if (!result.rows[0] && params.outboxDeliveryId)
+        throw new Error("registry_expiry_receipt_link_conflict");
       return result.rows[0] ?? null;
     }
-
     const intent = this.inMemoryDeliveryIntents.get(params.intentId);
     if (!intent) return null;
-    intent.delivery_status = params.deliveryStatus;
-    if (params.outboxDeliveryId !== undefined) {
-      intent.outbox_delivery_id = params.outboxDeliveryId;
-    }
-    if (params.lastError !== undefined) {
-      intent.last_error = params.lastError;
-    }
-    if (params.deliveryStatus === "enqueued") {
-      intent.enqueued_at = new Date().toISOString();
-    }
+    if (
+      params.outboxDeliveryId &&
+      intent.outbox_delivery_id &&
+      params.outboxDeliveryId !== intent.outbox_delivery_id
+    )
+      throw new Error("registry_expiry_receipt_link_conflict");
+    const event = this.inMemoryExpiryEvents.get(intent.event_id);
+    intent.delivery_status =
+      intent.delivery_status === "superseded" || event?.status === "superseded"
+        ? "superseded"
+        : params.deliveryStatus;
+    intent.outbox_delivery_id ??= params.outboxDeliveryId ?? null;
+    if (params.lastError !== undefined) intent.last_error = params.lastError;
+    if (params.deliveryStatus === "enqueued")
+      intent.enqueued_at ??= new Date().toISOString();
     intent.updated_at = new Date().toISOString();
     return intent;
+  }
+
+  /** Link actual acceptance/error facts with the same source-before-event lock
+   * order as renewal. Supersession is terminal; receipts are retained either way. */
+  async recordExpiryDeliveryOutcome(
+    intent: RegistryExpiryDeliveryIntentRow,
+    update: Omit<UpdateDeliveryIntentParams, "intentId">,
+  ): Promise<RegistryExpiryDeliveryIntentRow | null> {
+    return this.withTransaction(async (client) => {
+      const snapshot = await this.getExpiryEventById(intent.event_id, client);
+      if (!snapshot) return null;
+      const sourceExpiryMs =
+        snapshot.source_expiry_at instanceof Date
+          ? snapshot.source_expiry_at.getTime()
+          : Date.parse(snapshot.source_expiry_at ?? "");
+      if (this.isEnabled()) {
+        let changed = false;
+        if (snapshot.entity_type === "driver") {
+          const source = await this.lockDriver(snapshot.entity_id, client);
+          const field = (
+            {
+              driver_license: "licenseExpiry",
+              professional_driver_license: "professionalDriverLicenseExpiry",
+              taxi_driver_registration: "taxiDriverRegistrationExpiry",
+            } as const
+          )[
+            snapshot.credential_type as
+              | "driver_license"
+              | "professional_driver_license"
+              | "taxi_driver_registration"
+          ];
+          if (field)
+            changed =
+              !source || Date.parse(source[field] ?? "") !== sourceExpiryMs;
+        } else {
+          const source = await this.lockPolicy(snapshot.entity_id, client);
+          changed =
+            !source ||
+            source.status === "cancelled" ||
+            Date.parse(source.endAt) !== sourceExpiryMs;
+        }
+        await client.query(
+          "SELECT event_id FROM reg.phase1_registry_expiry_events WHERE event_id = $1::uuid FOR UPDATE",
+          [intent.event_id],
+        );
+        const current = await this.getExpiryEventById(intent.event_id, client);
+        if (changed && current?.status !== "superseded")
+          await this.supersedeExpiryEvents(
+            [intent.event_id],
+            undefined,
+            client,
+          );
+      }
+      const result = await this.updateDeliveryIntent(
+        { ...update, intentId: intent.intent_id },
+        client,
+      );
+      if (update.deliveryStatus === "enqueued")
+        await this.updateExpiryEventStatus(
+          intent.event_id,
+          "completed",
+          client,
+        );
+      return result;
+    });
   }
 
   async listExpiryEvents(
