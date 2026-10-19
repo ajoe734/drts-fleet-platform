@@ -56,7 +56,7 @@ function authority(
       eta: {
         minutes: 30,
         calculatedAt: "2026-10-17T04:53:00Z",
-        locationFreshness: "missing",
+        locationFreshness: "fresh",
       },
       routeFare: {
         routeSnapshotId: "ETA-ROUTE",

@@ -540,7 +540,15 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
 }
 
 function EtaBlock({ fixture }: { fixture: PassengerRideFixture }) {
-  if (!fixture.etaMain) return null;
+  const { connectionState } = React.useContext(ConnectionContext);
+  const unavailable = connectionState === "disconnected" || !fixture.etaMain;
+  if (unavailable) {
+    return fixture.screenId === "P5-07" ? (
+      <div role="status" style={{ margin: "0 14px 12px", textAlign: "center" }}>
+        目前無法預估抵達時間與剩餘距離
+      </div>
+    ) : null;
+  }
   const tone =
     fixture.etaTone === "success"
       ? passengerChrome.success.fg
@@ -1371,7 +1379,7 @@ function RatingCard({
   const [submitting, setSubmitting] = useState(false);
   const [submittedScore, setSubmittedScore] = useState<number | null>(null);
   const [comment, setComment] = useState("");
-  const [contactRequested, setContactRequested] = useState(true);
+  const [contactRequested, setContactRequested] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   if (!fixture.ratingSummary) return null;
   if (submittedScore !== null) {
@@ -1636,6 +1644,7 @@ function RatingCard({
           >
             <input
               type="checkbox"
+              role="switch"
               checked={contactRequested}
               onChange={(e) => setContactRequested(e.target.checked)}
               style={{ width: 16, height: 16 }}

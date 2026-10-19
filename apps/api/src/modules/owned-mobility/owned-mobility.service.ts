@@ -97,6 +97,8 @@ import type {
   PartnerChannelEntryRecord,
   PassengerDispatchDisclosureSnapshot,
   PassengerRideTracking,
+  PassengerRideDropoffRouteEstimate,
+  DriverTrackingStatus,
   PassengerBookingFareDisclosure,
   PassengerProfile,
   QueueCheckInCommand,
@@ -146,6 +148,8 @@ import {
 } from "@drts/contracts";
 
 import { DRIVER_TASK_TRANSITIONS } from "@drts/contracts";
+
+import { GeoService } from "../geo/geo.service";
 
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
@@ -513,6 +517,17 @@ export class OwnedMobilityService
   private queueEntries: QueueEntryRecord[] = [];
   private readonly queueCommands = new Map<string, Promise<unknown>>();
 
+  // Per-observation route reads are shared by the existing 3-second SSE readers.
+  // Bound both cached promises and outstanding provider work, including timeouts.
+  private readonly passengerDropoffRoutes = new Map<
+    string,
+    {
+      expiresAt: number;
+      result: Promise<PassengerRideDropoffRouteEstimate | null>;
+    }
+  >();
+  private passengerDropoffProviderCalls = 0;
+
   private profileQueuePolicies: Map<
     RuntimeProfileCode,
     Set<DispatchQueueMode>
@@ -622,6 +637,9 @@ export class OwnedMobilityService
     @Optional()
     @InjectMaskedCallPort()
     private readonly tenantMaskedCallPort?: MaskedCallPort,
+    // Appended LAST: preserve all existing positional constructor consumers.
+    @Optional()
+    private readonly passengerRouteGeoService?: GeoService,
   ) {}
 
   private _fallbackIdempotencyService?: IdempotencyService;
@@ -2697,7 +2715,198 @@ export class OwnedMobilityService
       pickupEta: eta
         ? { minutes: eta.etaMinutes, calculatedAt: eta.calculatedAt }
         : null,
+      ...(order.status === "on_trip"
+        ? {
+            dropoffRoute: await this.resolvePassengerDropoffRoute(
+              order,
+              assignment,
+              current,
+            ),
+          }
+        : {}),
     };
+  }
+
+  private passengerDropoffObservationKey(
+    order: OwnedOrderRecord,
+    assignment: PassengerDispatchDisclosureSnapshot,
+    current: DriverTrackingStatus,
+    task: DriverTaskRecord | null,
+  ): string | null {
+    const location = current.currentLocation;
+    const finitePoint = (
+      point: { lat?: number | null; lng?: number | null } | null | undefined,
+    ) =>
+      point &&
+      typeof point.lat === "number" &&
+      Number.isFinite(point.lat) &&
+      Math.abs(point.lat) <= 90 &&
+      typeof point.lng === "number" &&
+      Number.isFinite(point.lng) &&
+      Math.abs(point.lng) <= 180;
+    const age = location ? Date.now() - Date.parse(location.recordedAt) : NaN;
+    if (
+      order.status !== "on_trip" ||
+      assignment.orderId !== order.orderId ||
+      assignment.supersededAt !== null ||
+      current.driverId !== assignment.driver.driverId ||
+      current.currentVehicleId !== assignment.vehicle.vehicleId ||
+      current.locationFreshness !== "fresh" ||
+      !location ||
+      location.driverId !== assignment.driver.driverId ||
+      !finitePoint(location) ||
+      !finitePoint(order.dropoff) ||
+      typeof location.accuracyM !== "number" ||
+      !Number.isFinite(location.accuracyM) ||
+      location.accuracyM < 0 ||
+      location.accuracyM > 100 ||
+      !isIso8601InstantWithTimezone(location.recordedAt) ||
+      !Number.isFinite(age) ||
+      age < -5_000 ||
+      age >= 60_000 ||
+      !task ||
+      current.currentTaskId !== task.taskId ||
+      task.status !== "on_trip" ||
+      task.orderId !== order.orderId ||
+      task.assignmentId !== assignment.assignmentId ||
+      task.driverId !== assignment.driver.driverId ||
+      task.vehicleId !== assignment.vehicle.vehicleId
+    )
+      return null;
+    return JSON.stringify([
+      order.orderId,
+      assignment.assignmentId,
+      assignment.assignmentVersion,
+      task.taskId,
+      task.driverId,
+      task.vehicleId,
+      location.recordedAt,
+      location.lat,
+      location.lng,
+      order.dropoff.lat,
+      order.dropoff.lng,
+    ]);
+  }
+
+  private async resolvePassengerDropoffRoute(
+    order: OwnedOrderRecord,
+    assignment: PassengerDispatchDisclosureSnapshot,
+    current: DriverTrackingStatus,
+  ): Promise<PassengerRideDropoffRouteEstimate | null> {
+    if (!this.passengerRouteGeoService || !current.currentTaskId) return null;
+    try {
+      const task = await this.findDriverTaskForRead(current.currentTaskId);
+      const key = this.passengerDropoffObservationKey(
+        order,
+        assignment,
+        current,
+        task,
+      );
+      if (!key || !task || !current.currentLocation) return null;
+      const now = Date.now();
+      for (const [cachedKey, entry] of this.passengerDropoffRoutes) {
+        if (entry.expiresAt <= now)
+          this.passengerDropoffRoutes.delete(cachedKey);
+      }
+      let cached = this.passengerDropoffRoutes.get(key);
+      if (!cached) {
+        if (this.passengerDropoffProviderCalls >= 8) return null;
+        if (this.passengerDropoffRoutes.size >= 128) {
+          this.passengerDropoffRoutes.delete(
+            this.passengerDropoffRoutes.keys().next().value!,
+          );
+        }
+        const location = current.currentLocation;
+        const origin = { lat: location.lat, lng: location.lng };
+        const destination = {
+          lat: order.dropoff.lat!,
+          lng: order.dropoff.lng!,
+        };
+        // Keep copies: neither mutable GPS nor a newer assignment can relabel a response.
+        const binding = {
+          leg: "dropoff" as const,
+          source: "geo_route" as const,
+          assignmentId: assignment.assignmentId,
+          assignmentVersion: assignment.assignmentVersion,
+          taskId: task.taskId,
+          origin,
+          destination,
+          locationRecordedAt: location.recordedAt,
+        };
+        this.passengerDropoffProviderCalls++;
+        const provider = Promise.resolve()
+          .then(() =>
+            this.passengerRouteGeoService!.route({
+              origin,
+              destination,
+              travelMode: "drive",
+              locale: "zh-TW",
+            }),
+          )
+          .then((route): PassengerRideDropoffRouteEstimate | null => {
+            const generatedAge = Date.now() - Date.parse(route.generatedAt);
+            if (
+              typeof route.provider !== "string" ||
+              !route.provider.trim() ||
+              !isIso8601InstantWithTimezone(route.generatedAt) ||
+              !Number.isFinite(route.distanceMeters) ||
+              route.distanceMeters < 0 ||
+              !Number.isFinite(route.durationSeconds) ||
+              route.durationSeconds < 0 ||
+              !Number.isFinite(generatedAge) ||
+              generatedAge < -5_000 ||
+              generatedAge >= 60_000
+            )
+              return null;
+            return {
+              ...binding,
+              provider: route.provider,
+              generatedAt: route.generatedAt,
+              remainingDistanceMeters: route.distanceMeters,
+              remainingDurationSeconds: route.durationSeconds,
+            };
+          })
+          .catch(() => null)
+          .finally(() => {
+            this.passengerDropoffProviderCalls--;
+          });
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        const deadline = new Promise<null>((resolve) => {
+          timeout = setTimeout(() => resolve(null), 2_500);
+        });
+        const result = Promise.race([provider, deadline]).finally(() =>
+          clearTimeout(timeout),
+        );
+        cached = { expiresAt: now + 30_000, result };
+        this.passengerDropoffRoutes.set(key, cached);
+      }
+      const route = await cached.result;
+      if (!route) return null;
+      // Re-read durable authority after provider/cache await. A completed trip,
+      // reassignment, or later GPS observation invalidates the old leg immediately.
+      const latestOrder = await this.resolvePersistedOrder(order.orderId);
+      const latestAssignment =
+        await this.resolvePersistedPassengerAssignmentDisclosure(order.orderId);
+      if (!latestAssignment) return null;
+      const latestCurrent =
+        await this.regulatoryRegistryService.getDriverTrackingStatus(
+          assignment.driver.driverId,
+        );
+      const latestTask = latestCurrent.currentTaskId
+        ? await this.findDriverTaskForRead(latestCurrent.currentTaskId)
+        : null;
+      return this.passengerDropoffObservationKey(
+        latestOrder,
+        latestAssignment,
+        latestCurrent,
+        latestTask,
+      ) === key
+        ? route
+        : null;
+    } catch {
+      // A route is advisory; provider/read failure must not obscure the real ride.
+      return null;
+    }
   }
 
   assertTenantAccessScope(

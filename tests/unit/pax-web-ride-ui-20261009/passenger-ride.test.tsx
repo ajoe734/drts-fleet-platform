@@ -165,6 +165,9 @@ describe("Passenger Ride UI Acceptance", () => {
 
     fireEvent.click(screen.getByLabelText("2 星"));
     fireEvent.click(screen.getByText("車內異味"));
+    fireEvent.click(
+      screen.getByRole("switch", { name: "需要客服與您聯繫嗎？" }),
+    );
     fireEvent.click(screen.getByText("送出評價"));
 
     await waitFor(() => {
