@@ -2,10 +2,15 @@ import { randomUUID, createHash } from "node:crypto";
 import { Injectable, Optional } from "@nestjs/common";
 import { ApiRequestError } from "../../common/api-envelope";
 import { DatabaseService } from "../../common/db";
-import { type ContactRole } from "./voice-contact.service";
+import { VoiceContactService, type ContactRole } from "./voice-contact.service";
 import { VoiceSessionRepository } from "./voice-session.repository";
 import type { VoiceQueryExecutor } from "./voice-booking.repository";
 import { readVoiceRecordingContext } from "./voice-recording-context";
+import type { VoiceCallbackTaskView } from "@drts/contracts";
+import {
+  encryptDialogueSnapshotContent,
+  resolveDialogueSnapshotEncryptionKey,
+} from "./voice-dialogue-snapshot-crypto";
 import { computePayloadHash } from "../../common/idempotency/canonical-json";
 
 export type CallbackTaskStatus =
@@ -61,6 +66,19 @@ export interface VoiceCallbackTaskRecord {
   cancellationReason?: string | null;
   dialReconcileRequired?: boolean;
   linkedOrderId?: string | null;
+  /**
+   * AUDIT-VOICE-APPLICATION-REGRESSION-20261018 review round 2 (F5/F8): the
+   * `voice.contact_role_revision.revision_number` this task's `contactName`/
+   * `consentRef` are sealed to (`voice.callback_task_contact_binding`), and
+   * when that binding was written. `null` when no contact state has ever
+   * been bound for this task (an honest gap, not a fabricated pointer) --
+   * only present for DB-backed reads.
+   */
+  contactRevisionNumber?: number | null;
+  contactRevisionBoundAt?: string | null;
+  replacesTaskId?: string | null;
+  replacementTaskId?: string | null;
+  contactHistory?: VoiceCallbackTaskView["contactHistory"];
 }
 
 export interface VoiceCallbackAttemptRecord {
@@ -110,11 +128,14 @@ export interface CreateVoiceCallbackInput {
 }
 
 export interface CreateVoiceCallbackDurableInput {
+  contactRevisionNumber?: number | undefined;
+  consentRef?: string | undefined;
+  replacesTaskId?: string | undefined;
   actionKey?: string | undefined;
   voiceSessionId: string;
-  contactPhoneEncrypted: string;
-  contactPhoneLookupToken: string;
-  consentSnapshotHash: string;
+  contactPhoneEncrypted?: string | undefined;
+  contactPhoneLookupToken?: string | undefined;
+  consentSnapshotHash?: string | undefined;
   reason?: string | undefined;
   resourceScopeId?: string | null | undefined;
   priority?: CallbackPriority | undefined;
@@ -279,6 +300,12 @@ export class VoiceCallbackService {
     // The runtime entry points below use PostgreSQL when configured. Legacy
     // synchronous methods remain available to memory-only component callers.
     @Optional() private readonly databaseService?: DatabaseService,
+    // AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C/D: resolves the
+    // durable, sealed callbackRecipient contact/consent for DB-backed task
+    // projection (`loadDbTask`). Optional so every pre-existing in-memory
+    // test construction of this service (`new VoiceCallbackService()`)
+    // keeps working unchanged -- those paths never call `loadDbTask`.
+    @Optional() private readonly contactService?: VoiceContactService,
   ) {}
 
   /**
@@ -1384,8 +1411,10 @@ export class VoiceCallbackService {
       brandId: "",
       callId: "",
       contactRole: "callbackRecipient",
+      // AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C/D: honest
+      // Legacy rows without a server revision have no usable phone projection.
       contactName: "",
-      contactPhone: row.contact_phone_encrypted,
+      contactPhone: "",
       consentRef: "",
       consentSnapshotHash: row.consent_snapshot_hash,
       reason: row.reason ?? "",
@@ -1439,11 +1468,72 @@ export class VoiceCallbackService {
         "VOICE_SESSION_NOT_FOUND",
         "Callback voice session was not found.",
       );
+    // Task-bound revision is immutable even when the session's effective
+    // contact changes. Every read uses this same transaction/executor.
+    const binding =
+      await this.sessionRepository?.getLatestCallbackTaskContactBinding(
+        row.task_id,
+        tx,
+      );
+    const boundContact = binding
+      ? await this.contactService?.getContactRevisionByNumber(
+          row.voice_session_id,
+          binding.revisionNumber,
+          tx,
+        )
+      : null;
+    const relations =
+      this.sessionRepository && this.contactService
+        ? await tx.query<{
+            task_id: string;
+            revision_number: number;
+            bound_at: string;
+            bind_reason: string;
+            replaces_task_id: string | null;
+          }>(
+            `SELECT b.task_id, b.revision_number, b.bound_at, b.bind_reason, b.replaces_task_id
+           FROM voice.callback_task_contact_binding b WHERE b.voice_session_id = $1 ORDER BY b.bound_at, b.task_id`,
+            [row.voice_session_id],
+          )
+        : { rows: [] };
+    const contactHistory: NonNullable<VoiceCallbackTaskView["contactHistory"]> =
+      [];
+    for (const item of relations.rows) {
+      const revision = await this.contactService!.getContactRevisionByNumber(
+        row.voice_session_id,
+        item.revision_number,
+        tx,
+      );
+      if (revision)
+        contactHistory.push({
+          taskId: item.task_id,
+          revisionNumber: item.revision_number,
+          role: revision.role,
+          name: revision.name,
+          consentRef: revision.consentRef,
+          boundAt: new Date(item.bound_at).toISOString(),
+          reason: item.bind_reason,
+          replacesTaskId: item.replaces_task_id,
+        });
+    }
     return {
       ...this.mapDbTaskRow(row),
       brandId: context.brandId,
       callId: context.callId,
       linkedOrderId: context.linkedOrderId,
+      contactName: boundContact?.name ?? "",
+      contactPhone: boundContact?.phone ?? "",
+      contactRole: boundContact?.role ?? "callbackRecipient",
+      consentRef: boundContact?.consentRef ?? "",
+      contactRevisionNumber: binding?.revisionNumber ?? null,
+      contactRevisionBoundAt: binding?.boundAt ?? null,
+      replacesTaskId:
+        contactHistory.find((item) => item.taskId === row.task_id)
+          ?.replacesTaskId ?? null,
+      replacementTaskId:
+        contactHistory.find((item) => item.replacesTaskId === row.task_id)
+          ?.taskId ?? null,
+      contactHistory,
     };
   }
 
@@ -1468,14 +1558,23 @@ export class VoiceCallbackService {
     return this.sha256(
       JSON.stringify({
         voiceSessionId: input.voiceSessionId,
-        contactPhoneEncrypted: input.contactPhoneEncrypted.trim(),
-        contactPhoneLookupToken: input.contactPhoneLookupToken,
-        consentSnapshotHash: input.consentSnapshotHash.trim(),
+        contactPhoneEncrypted: input.contactPhoneEncrypted?.trim() ?? null,
+        contactPhoneLookupToken: input.contactPhoneLookupToken ?? null,
+        consentSnapshotHash: input.consentSnapshotHash?.trim() ?? null,
         reason: input.reason ?? null,
         resourceScopeId: input.resourceScopeId ?? null,
         priority: input.priority ?? "normal",
         scheduledAt: time(input.scheduledAt),
         dueAt: time(input.dueAt),
+        ...(input.contactRevisionNumber === undefined
+          ? {}
+          : { contactRevisionNumber: input.contactRevisionNumber }),
+        ...(input.consentRef === undefined
+          ? {}
+          : { consentRef: input.consentRef }),
+        ...(input.replacesTaskId === undefined
+          ? {}
+          : { replacesTaskId: input.replacesTaskId }),
       }),
     );
   }
@@ -1536,7 +1635,7 @@ export class VoiceCallbackService {
       );
     }
     const consentSnapshotHash = input.consentSnapshotHash?.trim();
-    if (!consentSnapshotHash) {
+    if (!consentSnapshotHash && input.contactRevisionNumber === undefined) {
       throw new ApiRequestError(
         400,
         "CALLBACK_CONSENT_REQUIRED",
@@ -1544,7 +1643,7 @@ export class VoiceCallbackService {
       );
     }
     const contactPhoneEncrypted = input.contactPhoneEncrypted?.trim();
-    if (!contactPhoneEncrypted) {
+    if (!contactPhoneEncrypted && input.contactRevisionNumber === undefined) {
       throw new ApiRequestError(
         400,
         "INVALID_CONTACT_PHONE",
@@ -1558,8 +1657,95 @@ export class VoiceCallbackService {
     if (previous) return previous;
 
     const db = this.databaseService!;
+    const client = await db.connect();
     try {
-      const inserted = await db.query<CallbackDbTaskRow>(
+      await client.query("BEGIN");
+      // Serialize contact selection with role writers on the original session lock.
+      await this.sessionRepository?.findSessionById(
+        input.voiceSessionId,
+        client,
+        true,
+      );
+      const effective = await this.contactService?.getEffectiveContactsDurable(
+        input.voiceSessionId,
+        client,
+      );
+      let bindRevisionNumber: number | null = null;
+      let sealedPhone = contactPhoneEncrypted;
+      let lookupToken = input.contactPhoneLookupToken;
+      let sealedConsentHash = consentSnapshotHash;
+      if (this.contactService) {
+        if (
+          !effective ||
+          effective.callbackRecipientRevisionNumber == null ||
+          !effective.callbackRecipientConsentRef
+        ) {
+          throw new ApiRequestError(
+            409,
+            "CALLBACK_CONTACT_CONSENT_REQUIRED",
+            "Persist the callback recipient and explicit consent before creating a callback.",
+          );
+        }
+        bindRevisionNumber = effective.callbackRecipientRevisionNumber;
+        if (
+          input.contactRevisionNumber !== bindRevisionNumber ||
+          input.consentRef !== effective.callbackRecipientConsentRef
+        ) {
+          throw new ApiRequestError(
+            409,
+            "CALLBACK_CONTACT_REVISION_CHANGED",
+            "Confirm the current recipient revision and consent before creating a callback.",
+          );
+        }
+        const key = resolveDialogueSnapshotEncryptionKey();
+        if (!key)
+          throw new ApiRequestError(
+            503,
+            "VOICE_CONTACT_REVISION_ENCRYPTION_UNCONFIGURED",
+            "Contact encryption is unavailable.",
+          );
+        const encrypted = encryptDialogueSnapshotContent(
+          { phone: effective.callbackRecipient.phone },
+          key,
+          JSON.stringify([
+            "voice.callback.contact.v1",
+            input.voiceSessionId,
+            bindRevisionNumber,
+          ]),
+        );
+        sealedPhone = JSON.stringify({
+          keyVersion: encrypted.keyVersion,
+          nonce: encrypted.nonce.toString("base64"),
+          ciphertext: encrypted.ciphertext.toString("base64"),
+          authTag: encrypted.authTag.toString("base64"),
+        });
+        lookupToken = this.sha256(effective.callbackRecipient.phone);
+        sealedConsentHash = this.sha256(
+          JSON.stringify({
+            voiceSessionId: input.voiceSessionId,
+            revision: bindRevisionNumber,
+            role: effective.callbackRecipientRole,
+            phone: effective.callbackRecipient.phone,
+            consentRef: effective.callbackRecipientConsentRef,
+          }),
+        );
+      }
+      if (input.replacesTaskId) {
+        const original = await this.loadDbTask(input.replacesTaskId, client);
+        if (
+          original.voiceSessionId !== input.voiceSessionId ||
+          original.status !== "cancelled" ||
+          original.contactRevisionNumber === bindRevisionNumber ||
+          original.consentRef === input.consentRef
+        ) {
+          throw new ApiRequestError(
+            409,
+            "CALLBACK_REPLACEMENT_REQUIRES_NEW_CONSENT",
+            "Cancel the original callback and confirm the replacement recipient with fresh consent.",
+          );
+        }
+      }
+      const inserted = await client.query<CallbackDbTaskRow>(
         `INSERT INTO voice.callback_task (
           voice_session_id, contact_phone_encrypted, contact_phone_lookup_token,
           consent_snapshot_hash, reason, resource_scope_id, priority, scheduled_at, due_at,
@@ -1567,9 +1753,9 @@ export class VoiceCallbackService {
         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
         [
           input.voiceSessionId,
-          contactPhoneEncrypted,
-          input.contactPhoneLookupToken,
-          consentSnapshotHash,
+          sealedPhone,
+          lookupToken,
+          sealedConsentHash,
           input.reason ?? null,
           input.resourceScopeId ?? null,
           input.priority ?? null,
@@ -1581,13 +1767,25 @@ export class VoiceCallbackService {
         ],
       );
       const row = inserted.rows[0]!;
-      const task = await this.loadDbTask(row.task_id);
+      if (bindRevisionNumber != null) {
+        await this.sessionRepository!.insertCallbackTaskContactBinding(
+          row.task_id,
+          input.voiceSessionId,
+          bindRevisionNumber,
+          input.reason ?? "created_with_effective_contact",
+          client,
+          input.replacesTaskId,
+        );
+      }
+      const task = await this.loadDbTask(row.task_id, client);
+      await client.query("COMMIT");
       return {
         task,
         receipt: this.mapDbCreateReceipt(row, task),
         replayed: false,
       };
     } catch (error: unknown) {
+      await client.query("ROLLBACK").catch(() => {});
       if ((error as { code?: string }).code !== "23505") throw error;
       const replay = await this.replayDbCallbackCreate(actionKey, payloadHash);
       if (replay) return replay;
@@ -1631,6 +1829,8 @@ export class VoiceCallbackService {
         receipt: null,
         replayed: true,
       };
+    } finally {
+      client.release();
     }
   }
 

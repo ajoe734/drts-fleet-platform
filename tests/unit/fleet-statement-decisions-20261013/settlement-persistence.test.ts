@@ -404,18 +404,14 @@ describe("settlement complaint commit and refresh boundaries", () => {
     // ordinary case's canonical write outcome instead of resolving as if it
     // had already committed.
     const failure = new Error("ordinary persistence unavailable");
-    const awaited = context.service.awaitSettlementPersistence(
-      context.caseNo,
-    );
+    const awaited = context.service.awaitSettlementPersistence(context.caseNo);
     gate.reject(failure);
     await expect(awaited).rejects.toThrow("ordinary persistence unavailable");
     expect(context.reportPersistenceFailure).toHaveBeenCalledTimes(1);
     // A known (not "unknown-outcome") failure rolls the optimistic mutation
     // back rather than leaving it applied in memory, so readback and a
     // retry both see the real, uncommitted state.
-    expect(context.service.getComplaintCase(context.caseNo).status).toBe(
-      "new",
-    );
+    expect(context.service.getComplaintCase(context.caseNo).status).toBe("new");
   });
 
   it("keeps a Callcenter settlement transfer and its session link pending until commit", async () => {

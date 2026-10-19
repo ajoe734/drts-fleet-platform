@@ -1,5 +1,39 @@
-import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { VoiceContactService } from "../../../apps/api/src/modules/voice-booking/voice-contact.service";
+import { randomUUID, randomBytes } from "node:crypto";
+import { once } from "node:events";
+import { Duplex, Readable } from "node:stream";
+import { Server as NetServer } from "node:net";
+import { VoiceBookingController } from "../../../apps/api/src/modules/voice-booking/voice-booking.controller";
+import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
+import { VoiceApiClient } from "../../../apps/voice-media-worker/src/server/voice-api-client";
+import { MediaWorkerServer } from "../../../apps/voice-media-worker/src/server/media-worker-server";
+import { createVoiceSessionBindingResolver } from "../../../apps/voice-media-worker/src/server";
+import { VoiceSessionComposer } from "../../../apps/voice-media-worker/src/server/session-composer";
+import {
+  SandboxSpeechToTextAdapter,
+  SandboxTextToSpeechAdapter,
+} from "../../../apps/voice-media-worker/src/media-provider";
+import {
+  RecordingContinuation,
+  type RecordingContinuationJournal,
+  type RecordingContinuationSource,
+} from "../../../apps/voice-media-worker/src/recording/recording-continuation";
+import { ObjectStoreRecorderObjectStore } from "../../../apps/voice-media-worker/src/recording/object-store-recorder";
+import {
+  ImmutableRecordingManifests,
+  type RecordingManifestRef,
+} from "../../../apps/voice-media-worker/src/recording/immutable-manifest";
+import { FirstPartyVoiceMediaRecordingAdapter } from "../../../apps/api/src/modules/voice-booking/voice-media-recording.adapter";
+import { FakeCallAuthority } from "../audit-voice-runtime-20261002/fake-call-authority";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { VoiceCallbackService } from "../../../apps/api/src/modules/voice-booking/voice-callback.service";
 import { VoiceBookingRepository } from "../../../apps/api/src/modules/voice-booking/voice-booking.repository";
 import { VoiceBookingCommandService } from "../../../apps/api/src/modules/voice-booking/voice-booking-command.service";
@@ -11,6 +45,7 @@ import { seedVoiceDispatchWorkFixture } from "../../support/voice-dispatch-worki
 import {
   hostedPaymentEnabled,
   PaymentPostgresHarness,
+  type DiagnosedDatabaseService,
 } from "../pax-qa-20261009/payment-postgres-harness";
 
 // Only hosted full-migration PostgreSQL. Consent/contact/evidence ports are
@@ -336,6 +371,995 @@ describe.skipIf(!hostedPaymentEnabled)(
       expect(replay.replayed).toBe(true);
       expect(replay.task).toEqual(first.task);
       expect(replay.receipt).toEqual(first.receipt);
+    });
+
+    it("original Voice F4-F8: two real repositories serialize contact initialization/revisions and preserve sealed original/replacement callbacks after restart", async () => {
+      const previousKey = process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY,
+        previousVersion = process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION;
+      process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION =
+        "voice-contact-hosted-fixture";
+      process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY =
+        randomBytes(32).toString("base64");
+      try {
+        const fixture = await seedVoiceDispatchWorkFixture(h.pool!);
+        const session = fixture.request.voiceSessionId;
+        const repoA = new VoiceSessionRepository(h.database),
+          repoB = new VoiceSessionRepository(h.peerDatabase());
+        const a = new VoiceContactService(repoA),
+          b = new VoiceContactService(repoB);
+        const initial = {
+          voiceSessionId: session,
+          callerPhone: "0911000111",
+          bookerName: "A",
+          passengerName: "B",
+          passengerPhone: "0922000222",
+          isSelfBooking: false,
+          consentRef: "SIM-explicit-consent-A",
+        };
+        await Promise.all([
+          a.initializeContacts(initial),
+          b.initializeContacts(initial),
+        ]);
+        expect(
+          (
+            await h.pool!.query(
+              "SELECT revision_number FROM voice.contact_role_revision WHERE voice_session_id = $1 ORDER BY revision_number",
+              [session],
+            )
+          ).rows.map((row) => row.revision_number),
+        ).toEqual([1, 2, 3, 4, 5]);
+        await h.pool!.query(
+          `CREATE FUNCTION voice.contact_test_refusal() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.reason='SIM-failed-revision' THEN RAISE EXCEPTION 'SIM-contact-transaction-refusal'; END IF; RETURN NEW; END $$`,
+        );
+        await h.pool!.query(
+          `CREATE TRIGGER contact_test_refusal AFTER INSERT ON voice.contact_role_revision FOR EACH ROW EXECUTE FUNCTION voice.contact_test_refusal()`,
+        );
+        const correction = {
+          voiceSessionId: session,
+          role: "booker" as const,
+          name: "A",
+          phone: "0911000111",
+          consentRef: "SIM-explicit-consent-A",
+          reason: "SIM-failed-revision",
+        };
+        try {
+          await expect(a.updateContactRole(correction)).rejects.toThrow(
+            "SIM-contact-transaction-refusal",
+          );
+          expect(
+            (
+              await h.pool!.query(
+                "SELECT COUNT(*)::integer AS n FROM voice.contact_role_revision WHERE voice_session_id=$1",
+                [session],
+              )
+            ).rows[0].n,
+          ).toBe(5);
+          expect(a.getEffectiveContacts(session).bookerContact.name).toBe("A");
+        } finally {
+          await h.pool!.query(
+            "DROP TRIGGER contact_test_refusal ON voice.contact_role_revision",
+          );
+          await h.pool!.query("DROP FUNCTION voice.contact_test_refusal()");
+        }
+        expect(
+          (await a.updateContactRole(correction)).newRevision.revision,
+        ).toBe(6);
+        await b.getEffectiveContactsDurable(session);
+        await Promise.all([
+          a.updateContactRole({
+            voiceSessionId: session,
+            role: "booker",
+            name: "A corrected",
+            phone: "0933000333",
+            consentRef: "SIM-fresh-consent-A",
+            reason: "booker corrected",
+          }),
+          b.updateContactRole({
+            voiceSessionId: session,
+            role: "passenger",
+            name: "B corrected",
+            phone: "0944000444",
+            reason: "passenger corrected",
+          }),
+        ]);
+        const current = await b.getEffectiveContactsDurable(session);
+        expect(current?.bookerContact.phone).toBe("0933000333");
+        expect(current?.passengerContact.phone).toBe("0944000444");
+        const callbackA = new VoiceCallbackService(repoA, h.database, a),
+          callbackB = new VoiceCallbackService(
+            repoB,
+            h.peerDatabase(),
+            new VoiceContactService(repoB),
+          );
+        const input = {
+          voiceSessionId: session,
+          actionKey: "hosted-sealed-original",
+          contactRevisionNumber: current!.callbackRecipientRevisionNumber!,
+          consentRef: current!.callbackRecipientConsentRef!,
+        };
+        const original = await callbackA.createCallbackDurable(input);
+        await a.updateContactRole({
+          voiceSessionId: session,
+          role: "callbackRecipient",
+          name: "C",
+          phone: "0955000555",
+          consentRef: "SIM-fresh-consent-C",
+          reason: "default_role:passenger",
+        });
+        const cold = await new VoiceContactService(
+          repoB,
+        ).getEffectiveContactsDurable(session);
+        expect(cold?.callbackRecipient).toEqual({
+          name: "C",
+          phone: "0955000555",
+        });
+        const replay = await callbackB.createCallbackDurable(input);
+        expect(replay.receipt).toEqual(original.receipt);
+        expect(replay.replayed).toBe(true);
+        expect(replay.task).toMatchObject({
+          contactName: "A corrected",
+          contactPhone: "0933000333",
+          consentRef: "SIM-fresh-consent-A",
+          contactRevisionNumber: input.contactRevisionNumber,
+        });
+        expect(
+          (
+            await h.pool!.query(
+              "SELECT COUNT(*)::integer AS n FROM voice.callback_task_contact_binding WHERE task_id = $1",
+              [original.task.taskId],
+            )
+          ).rows[0].n,
+        ).toBe(1);
+        await callbackA.cancelCallbackDurable({
+          taskId: original.task.taskId,
+          operatorId: "SIM-operator",
+          expectedVersion: 1,
+          reason: "recipient replacement",
+        });
+        const replacement = await callbackB.createCallbackDurable({
+          voiceSessionId: session,
+          actionKey: "hosted-sealed-replacement",
+          contactRevisionNumber: cold!.callbackRecipientRevisionNumber!,
+          consentRef: "SIM-fresh-consent-C",
+          replacesTaskId: original.task.taskId,
+        });
+        expect(replacement.task).toMatchObject({
+          contactPhone: "0955000555",
+          replacesTaskId: original.task.taskId,
+        });
+        expect(
+          (await callbackA.getTaskForRead(original.task.taskId))?.contactPhone,
+        ).toBe("0933000333");
+        await expect(
+          h.pool!.query(
+            "UPDATE voice.contact_role_revision SET name = 'tamper' WHERE voice_session_id = $1",
+            [session],
+          ),
+        ).rejects.toThrow();
+        await expect(
+          h.pool!.query(
+            "DELETE FROM voice.callback_task_contact_binding WHERE task_id = $1",
+            [original.task.taskId],
+          ),
+        ).rejects.toThrow();
+      } finally {
+        if (previousKey === undefined)
+          delete process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY;
+        else process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY = previousKey;
+        if (previousVersion === undefined)
+          delete process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION;
+        else process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = previousVersion;
+      }
+    });
+
+    it("original C retention: finite session expiry, actual legal-hold-aware dry-run/apply and immutable receipt preservation on PostgreSQL", async () => {
+      const priorKey = process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY,
+        priorVersion = process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION;
+      process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = "SIM-retention-key";
+      process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY =
+        randomBytes(32).toString("base64");
+      const clock = Date.now;
+      try {
+        const f = await seedVoiceDispatchWorkFixture(h.pool!);
+        const session = f.request.voiceSessionId;
+        const old = new Date(clock() - 100 * 86400000).toISOString();
+        await h.pool!.query(
+          "UPDATE voice.session SET created_at=$2 WHERE voice_session_id=$1",
+          [session, old],
+        );
+        const repo = new VoiceSessionRepository(h.database),
+          contacts = new VoiceContactService(repo);
+        const historicalClock = vi
+          .spyOn(Date, "now")
+          .mockReturnValue(Date.parse(old));
+        try {
+          await contacts.initializeContacts({
+            voiceSessionId: session,
+            callerPhone: "0911000111",
+          });
+        } finally {
+          historicalClock.mockRestore();
+        }
+        expect(await contacts.getEffectiveContactsDurable(session)).toBeNull();
+        await expect(
+          contacts.initializeContacts({
+            voiceSessionId: session,
+            callerPhone: "0911000111",
+          }),
+        ).rejects.toMatchObject({ code: "VOICE_CONTACT_RETENTION_EXPIRED" });
+        const legacy = await new VoiceCallbackService(
+          undefined,
+          h.database,
+        ).createCallbackDurable({
+          voiceSessionId: session,
+          contactPhoneEncrypted: "SIM-existing-task-envelope",
+          contactPhoneLookupToken: "SIM-existing-task-lookup",
+          consentSnapshotHash: "SIM-explicit-consent",
+          reason: "SIM historical callback",
+        });
+        await repo.insertCallbackTaskContactBinding(
+          legacy.task.taskId,
+          session,
+          2,
+          "SIM-historical-binding",
+        );
+        const before = (
+          await h.pool!.query(
+            "SELECT * FROM voice.callback_task WHERE task_id=$1",
+            [legacy.task.taskId],
+          )
+        ).rows[0];
+        const original = await repo.findSessionById(session);
+        await new VoiceSessionService(repo).closeSession(
+          session,
+          original!.sessionVersion,
+        );
+        await h.pool!.query(
+          "INSERT INTO voice.legal_hold(case_number,evidence_family,subject_ref,reason_code,placed_by) VALUES ('SIM-retention-case','voice_booking_evidence',$1,'internal_investigation','SIM-operator')",
+          [session],
+        );
+        expect(
+          await contacts.purgeExpiredContactRevisions("SIM-operator", false),
+        ).toMatchObject({ deletedRevisions: 0, deletedBindings: 0 });
+        await h.pool!.query(
+          "UPDATE voice.legal_hold SET status='released' WHERE subject_ref=$1",
+          [session],
+        );
+        expect(
+          await contacts.purgeExpiredContactRevisions("SIM-operator", true),
+        ).toMatchObject({
+          examinedSessions: 1,
+          deletedRevisions: 0,
+          deletedBindings: 0,
+        });
+        expect(
+          await contacts.purgeExpiredContactRevisions("SIM-operator", false),
+        ).toMatchObject({ deletedRevisions: 5, deletedBindings: 1 });
+        expect(
+          (
+            await h.pool!.query(
+              "SELECT * FROM voice.callback_task WHERE task_id=$1",
+              [legacy.task.taskId],
+            )
+          ).rows[0],
+        ).toEqual(before);
+        expect(
+          (
+            await h.pool!.query(
+              "SELECT details FROM voice.retention_execution_log WHERE details->>'kind'='contact_role_revision'",
+            )
+          ).rows,
+        ).toHaveLength(3);
+        expect(await contacts.getEffectiveContactsDurable(session)).toBeNull();
+        await expect(
+          contacts.initializeContacts({
+            voiceSessionId: session,
+            callerPhone: "0911000111",
+          }),
+        ).rejects.toMatchObject({ code: "VOICE_CONTACT_RETENTION_EXPIRED" });
+      } finally {
+        if (priorKey === undefined)
+          delete process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY;
+        else process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY = priorKey;
+        if (priorVersion === undefined)
+          delete process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION;
+        else process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = priorVersion;
+      }
+    });
+
+    it("original F2: actual finalization before control close stays finalized with one original work item", async () => {
+      const fixture = await seedVoiceDispatchWorkFixture(h.pool!);
+      const repository = new VoiceBookingRepository(h.database),
+        session = fixture.request.voiceSessionId;
+      const scope = {
+        brandId: fixture.authority.brandId,
+        callId: fixture.callId,
+        recordingId: "SIM-late-close-recording",
+        legId: "SIM-late-close-leg",
+      };
+      const endedAt = new Date(Date.now() - 1000).toISOString();
+      await repository.appendRecordingContinuation(session, {
+        kind: "closure",
+        eventKey: "closure",
+        scope,
+        payload: {
+          endMs: 1000,
+          endedAt,
+          closedEventId: "SIM-late-close-event",
+          checkpointRefs: [],
+        },
+      });
+      const commands = new VoiceBookingCommandService(
+        repository,
+        fixture.makeEvidence(repository) as never,
+        fixture.products as never,
+        fixture.areas as never,
+        fixture.access,
+      );
+      const runner = new VoiceCommandRunnerService(
+        commands,
+        new OwnedMobilityRepository(h.database),
+        undefined,
+        undefined,
+        undefined,
+        {
+          async finalizeRecording(params) {
+            const durableAt = new Date().toISOString();
+            return {
+              recordingId: params.scope.recordingId,
+              scope: { ...params.scope, legId: params.scope.legId! },
+              manifestRef: {
+                objectKey: "SIM/late-close-manifest",
+                objectVersion: "SIM-late-close-version",
+                checksum: "a".repeat(64),
+                byteLength: 128,
+                durableAt,
+              },
+              coverage: {
+                startMs: 0,
+                endMs: 1000,
+                endedAt,
+                closedEventId: "SIM-late-close-event",
+                channels: ["inbound", "outbound"],
+              },
+              verifiedAt: durableAt,
+            };
+          },
+        },
+      );
+      expect(
+        await runner.runOnce({ supportedTypes: ["finalize_recording"] }),
+      ).toMatchObject({ success: true });
+      const sessions = new VoiceSessionRepository(h.peerDatabase()),
+        original = await sessions.findSessionById(session);
+      expect(original?.recordingState).toBe("finalized");
+      const closed = await new VoiceSessionService(sessions).closeSession(
+        session,
+        original!.sessionVersion,
+      );
+      expect(closed).toMatchObject({
+        dialogState: "closed",
+        recordingState: "finalized",
+      });
+      expect(
+        (
+          await h.pool!.query(
+            "SELECT status FROM voice.work_item WHERE voice_session_id=$1 AND work_type='finalize_recording'",
+            [session],
+          )
+        ).rows,
+      ).toEqual([{ status: "completed" }]);
+      expect(
+        await runner.runOnce({ supportedTypes: ["finalize_recording"] }),
+      ).toBeNull();
+    });
+
+    it("original Voice B: actual API binding, consumed admission, sealed-byte journal and cold finalize survive committed ACK loss on formal PostgreSQL", async () => {
+      const noListener = vi
+        .spyOn(NetServer.prototype, "listen")
+        .mockImplementation(() => {
+          throw new Error("This test uses actual handlers without listening");
+        });
+      const fixture = await seedVoiceDispatchWorkFixture(h.pool!);
+      const sessionId = fixture.request.voiceSessionId;
+      const scope = {
+        brandId: fixture.authority.brandId,
+        callId: fixture.callId,
+        recordingId: `SIM-recording:${sessionId}`,
+        legId: `SIM-leg:${sessionId}`,
+      };
+      const repository = new VoiceBookingRepository(h.database);
+      const controller = new VoiceBookingController(
+        {} as never,
+        {} as never,
+        undefined,
+        undefined,
+        undefined,
+        new VoiceSessionService(new VoiceSessionRepository(h.database)),
+        repository,
+      );
+      const client = new VoiceApiClient(
+        {
+          baseUrl: "https://SIM-api.test",
+          fetchImpl: async (raw, init) => {
+            const path = String(raw).split("/sessions/")[1]!;
+            const response =
+              init?.method === "POST"
+                ? await controller.recordRecordingEvent(
+                    sessionId,
+                    JSON.parse(String(init.body)),
+                  )
+                : path.includes("/recording-events")
+                  ? await controller.getRecordingEvents(sessionId)
+                  : await controller.getSession(sessionId);
+            return Response.json(deepToSnakeCase(response));
+          },
+        },
+        { getToken: async () => "SIM-workload-identity" },
+      );
+      const lost = new Set<string>();
+      const journal: RecordingContinuationJournal = {
+        append: async (session, event) => {
+          const saved = (await client.appendRecordingEvent(session, event))
+            .event;
+          if (
+            ["admission", "attachment", "finalized"].includes(event.kind) &&
+            !lost.has(event.kind)
+          ) {
+            lost.add(event.kind);
+            throw new Error("SIM committed API response lost");
+          }
+          return saved;
+        },
+        read: async (session, requested) =>
+          (await client.getRecordingEvents(session)).events.filter(
+            (e) =>
+              !requested ||
+              JSON.stringify(e.scope) === JSON.stringify(requested),
+          ),
+      };
+      // Only external object storage/issuer/normalized fork are SIM. Every
+      // session, journal, original work item and domain write uses formal SQL.
+      const objects = new Map<
+        string,
+        {
+          body: Uint8Array;
+          versionId: string;
+          storedAt: string;
+          metadata: Readonly<Record<string, string>>;
+        }
+      >();
+      let puts = 0;
+      const store = new ObjectStoreRecorderObjectStore({
+        putObjectVersion: async (key, bytes, metadata) => {
+          const versionId = String(++puts),
+            storedAt = new Date().toISOString();
+          objects.set(`${key}:${versionId}`, {
+            body: Uint8Array.from(bytes),
+            versionId,
+            storedAt,
+            metadata,
+          });
+          return { versionId, storedAt };
+        },
+        getObjectVersion: async (key, version) => {
+          const object = objects.get(`${key}:${version}`);
+          if (!object) throw new Error("SIM object absent");
+          return object;
+        },
+      });
+      let callbacks:
+        | Parameters<RecordingContinuationSource["subscribe"]>[2]
+        | undefined;
+      let checkpointRefs: RecordingManifestRef[] = [];
+      const endedAt = new Date(Date.now() - 1000).toISOString(),
+        utcStart = new Date(Date.parse(endedAt) - 1000).toISOString();
+      const source: RecordingContinuationSource = {
+        subscribe: (_session, _scope, sink) => {
+          callbacks = sink;
+          return { close() {} };
+        },
+        ingress: {
+          authorize: async () => ({
+            source: "recording_fork",
+            channels: ["inbound", "outbound"],
+          }),
+        },
+        closure: {
+          resolve: async () => ({
+            closedEventId: "SIM-authoritative-close",
+            endedAt,
+            endMs: 1000,
+            checkpointRefs,
+          }),
+        },
+      };
+      const runtime = () => new RecordingContinuation(store, journal, source);
+      const composer = new VoiceSessionComposer(
+        {
+          createAdapters: () => ({
+            asrAdapter: new SandboxSpeechToTextAdapter(),
+            ttsAdapter: new SandboxTextToSpeechAdapter(),
+          }),
+        },
+        undefined,
+        runtime(),
+      );
+      const authority = new FakeCallAuthority();
+      const admission = authority.issue(sessionId, {
+        scope,
+        allowedOperations: ["admit"],
+      });
+      const finalToken = authority.issue(sessionId, {
+        scope,
+        epoch: admission.claims.epoch,
+        allowedOperations: ["finalize"],
+      }).token;
+      const warm = new MediaWorkerServer({
+        internalKey: "SIM-workload-key",
+        callAuthorityVerifier: authority,
+        sessionBindingResolver: createVoiceSessionBindingResolver(client),
+        sessionComposer: composer,
+        recordingContinuation: runtime(),
+        wsTimeoutMs: 0,
+      });
+      let cold: MediaWorkerServer | undefined,
+        active = warm;
+      class MemorySocket extends Duplex {
+        _read() {}
+        _write(
+          _data: Buffer,
+          _encoding: BufferEncoding,
+          done: (error?: Error | null) => void,
+        ) {
+          done();
+        }
+      }
+      const socket = new MemorySocket();
+      const post = (server: MediaWorkerServer, path: string, body: unknown) =>
+        new Promise<{ status: number; body: Record<string, unknown> }>(
+          (resolve) => {
+            server.httpServer.emit(
+              "request",
+              Object.assign(
+                Readable.from([Buffer.from(JSON.stringify(body))]),
+                {
+                  method: "POST",
+                  url: path,
+                  headers: { "x-drts-internal-key": "SIM-workload-key" },
+                },
+              ),
+              {
+                statusCode: 200,
+                setHeader() {},
+                end(raw: string) {
+                  resolve({ status: this.statusCode, body: JSON.parse(raw) });
+                },
+              },
+            );
+          },
+        );
+      try {
+        const before = await repository.findSessionById(sessionId);
+        const admitted = await post(warm, "/sessions", {
+          callAuthorityToken: admission.token,
+        });
+        expect(admitted.status, JSON.stringify(admitted.body)).toBe(201);
+        expect(
+          (await repository.readRecordingContinuation(sessionId)).map(
+            (e) => e.kind,
+          ),
+        ).toEqual(["admission"]);
+        expect(
+          (
+            await post(warm, "/recording/finalize", {
+              sessionId,
+              callAuthorityToken: finalToken,
+            })
+          ).status,
+        ).toBe(403);
+        const connected = once(warm, "session.connected");
+        warm.httpServer.emit(
+          "upgrade",
+          {
+            method: "GET",
+            url: `/ws?sessionId=${sessionId}&grant=${(admitted.body.grant as { token: string }).token}`,
+            headers: {
+              "x-drts-internal-key": "SIM-workload-key",
+              "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+            },
+          },
+          socket,
+          Buffer.alloc(0),
+        );
+        await connected;
+        for (const channel of ["inbound", "outbound"] as const)
+          await callbacks!.fork({
+            credential: "SIM-ingress",
+            input: {
+              ...scope,
+              channel,
+              startMs: 0,
+              endMs: 1000,
+              utcStart,
+              utcEnd: endedAt,
+              bytes: Uint8Array.from([1, 2, 3]),
+            },
+          });
+        const segments = (
+          await repository.readRecordingContinuation(sessionId, scope)
+        )
+          .filter((e) => e.kind === "segment")
+          .map((e) => e.payload);
+        const checkpoint = await new ImmutableRecordingManifests(store).seal({
+          schemaVersion: 1,
+          scope,
+          startMs: 0,
+          endMs: 1000,
+          segments,
+        });
+        checkpointRefs = [checkpoint];
+        await callbacks!.checkpoint(checkpoint);
+        await callbacks!.closed("SIM-call-close");
+        const adapter = new FirstPartyVoiceMediaRecordingAdapter(
+          repository,
+          {
+            resolve: async () => ({
+              sessionId,
+              callAuthorityToken: finalToken,
+            }),
+          },
+          {
+            baseUrl: "https://SIM-worker.test",
+            internalKey: "SIM-workload-key",
+            fetchImpl: async (raw, init) => {
+              const response = await post(
+                active,
+                new URL(String(raw)).pathname,
+                JSON.parse(String(init?.body)),
+              );
+              return Response.json(response.body, { status: response.status });
+            },
+          },
+        );
+        const first = await adapter.finalizeRecording({
+          voiceSessionId: sessionId,
+          scope,
+        });
+        const objectCount = puts;
+        warm.closeSession(sessionId);
+        socket.destroy();
+        await warm.stop();
+        cold = new MediaWorkerServer({
+          internalKey: "SIM-workload-key",
+          callAuthorityVerifier: authority,
+          recordingContinuation: runtime(),
+        });
+        active = cold;
+        const commands = new VoiceBookingCommandService(
+          repository,
+          fixture.makeEvidence(repository) as never,
+          fixture.products as never,
+          fixture.areas as never,
+          fixture.access,
+        );
+        const runner = new VoiceCommandRunnerService(
+          commands,
+          new OwnedMobilityRepository(h.database),
+          undefined,
+          undefined,
+          undefined,
+          adapter,
+        );
+        expect(await runner.runOnce()).toMatchObject({
+          workType: "finalize_recording",
+          success: true,
+        });
+        expect(puts).toBe(objectCount);
+        const events = await new VoiceBookingRepository(
+          h.peerDatabase(),
+        ).readRecordingContinuation(sessionId);
+        expect(events.map((e) => e.kind)).toEqual([
+          "admission",
+          "attachment",
+          "segment",
+          "segment",
+          "checkpoint",
+          "closure",
+          "finalized",
+        ]);
+        expect(events[1]!.payload).toEqual(events[0]!.payload);
+        expect(events.find((e) => e.kind === "finalized")?.payload).toEqual(
+          first,
+        );
+        expect([...lost].sort()).toEqual([
+          "admission",
+          "attachment",
+          "finalized",
+        ]);
+        const work = await h.pool!.query(
+          "SELECT work_type,status FROM voice.work_item WHERE voice_session_id=$1",
+          [sessionId],
+        );
+        expect(work.rows).toEqual([
+          { work_type: "finalize_recording", status: "completed" },
+        ]);
+        const after = await repository.findSessionById(sessionId);
+        expect(after?.recordingState).toBe("finalized");
+        expect(after?.inputEpoch).toBe(before?.inputEpoch);
+        expect(after?.lastAppliedControlSequence).toBe(
+          before?.lastAppliedControlSequence,
+        );
+        await expect(
+          repository.appendRecordingContinuation(sessionId, {
+            ...events[0]!,
+            payload: {
+              ...(events[0]!.payload as object),
+              admissionId: "SIM-other-attempt",
+            },
+          }),
+        ).rejects.toThrow("stale_or_conflicting");
+        expect(warm.httpServer.address()).toBeNull();
+        expect(cold.httpServer.address()).toBeNull();
+      } finally {
+        warm.closeSession(sessionId);
+        socket.destroy();
+        await warm.stop();
+        await cold?.stop();
+        noListener.mockRestore();
+      }
+    });
+
+    it("original R2 formal PostgreSQL: a newer pending admission holds the real session lock and rejects an older seal commit", async () => {
+      const fixture = await seedVoiceDispatchWorkFixture(h.pool!);
+      const session = fixture.request.voiceSessionId;
+      const scope = {
+        brandId: fixture.authority.brandId,
+        callId: fixture.callId,
+        recordingId: "SIM-recording-CAS",
+        legId: "SIM-leg-CAS",
+      };
+      const initial = new VoiceBookingRepository(h.database);
+      const before = await initial.findSessionById(session);
+      const admission = {
+        kind: "admission" as const,
+        eventKey: "admission:1",
+        scope,
+        payload: {
+          admissionId: "SIM-consumed-CAS-1",
+          principalId: "SIM-principal",
+          epoch: 1,
+        },
+      };
+      const attachment = {
+        ...admission,
+        kind: "attachment" as const,
+        eventKey: "attachment:1",
+      };
+      await initial.appendRecordingContinuation(session, admission);
+      await initial.appendRecordingContinuation(session, attachment);
+      const nextAdmission = {
+        ...admission,
+        eventKey: "admission:2",
+        payload: {
+          ...admission.payload,
+          admissionId: "SIM-pending-CAS-2",
+          epoch: 2,
+        },
+      };
+      const utc = new Date().toISOString();
+      // A complete external SIM manifest isolates this repository CAS. The
+      // preceding actual HTTP/byte case proves sealed-object provenance.
+      const olderSeal = {
+        kind: "finalized" as const,
+        eventKey: "finalized",
+        scope,
+        authority: admission.payload,
+        payload: {
+          scope,
+          recordingId: scope.recordingId,
+          manifestRef: {
+            objectKey: "SIM/final-CAS.json",
+            objectVersion: "SIM-v1",
+            checksum: "a".repeat(64),
+            byteLength: 1,
+            durableAt: utc,
+          },
+          coverage: {
+            startMs: 0,
+            endMs: 1000,
+            channels: ["inbound", "outbound"],
+            closedEventId: "SIM-close-CAS",
+            endedAt: utc,
+          },
+          verifiedAt: utc,
+        },
+      };
+      const pendingDb = h.peerDatabase() as DiagnosedDatabaseService;
+      const sealingDb = h.peerDatabase() as DiagnosedDatabaseService;
+      const pendingRepo = new VoiceBookingRepository(pendingDb);
+      const sealingRepo = new VoiceBookingRepository(sealingDb);
+      const barrier = () => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((done) => {
+          resolve = done;
+        });
+        return { promise, resolve };
+      };
+      const pendingLocked = barrier(),
+        allowCommit = barrier(),
+        olderBegan = barrier();
+      let holderPid: number | undefined, waiterPid: number | undefined;
+      pendingDb.leaseObserver = async (sql, client) => {
+        if (
+          sql.includes("FROM voice.session") &&
+          sql.includes("FOR UPDATE") &&
+          holderPid === undefined
+        ) {
+          holderPid = (await client.query("SELECT pg_backend_pid() AS pid"))
+            .rows[0].pid as number;
+          pendingLocked.resolve();
+          await allowCommit.promise;
+        }
+      };
+      sealingDb.leaseObserver = async (sql, client) => {
+        if (sql === "BEGIN") {
+          waiterPid = (await client.query("SELECT pg_backend_pid() AS pid"))
+            .rows[0].pid as number;
+          olderBegan.resolve();
+        }
+      };
+      const next = pendingRepo.appendRecordingContinuation(
+        session,
+        nextAdmission,
+      );
+      let older:
+        | Promise<{ status: string; value?: unknown; error?: unknown }>
+        | undefined;
+      try {
+        await Promise.race([
+          pendingLocked.promise,
+          next.then(() => {
+            throw new Error("Expected the actual pending-admission row lock");
+          }),
+        ]);
+        older = sealingRepo
+          .appendRecordingContinuation(session, olderSeal)
+          .then(
+            (value) => ({ status: "fulfilled", value }),
+            (error: unknown) => ({ status: "rejected", error }),
+          );
+        await Promise.race([
+          olderBegan.promise,
+          older.then(() => {
+            throw new Error(
+              "Expected the older transaction to begin on its real peer connection",
+            );
+          }),
+        ]);
+        let blockers: number[] = [];
+        const until = Date.now() + 2000;
+        do {
+          blockers = (
+            await h.pool!.query("SELECT pg_blocking_pids($1) AS blockers", [
+              waiterPid,
+            ])
+          ).rows[0].blockers as number[];
+          if (blockers.includes(holderPid!)) break;
+          await new Promise<void>((resolve) => setTimeout(resolve, 5));
+        } while (Date.now() < until);
+        expect(holderPid).not.toBe(waiterPid);
+        expect(blockers).toContain(holderPid);
+        allowCommit.resolve();
+        expect(await next).toEqual(nextAdmission);
+        expect(await older).toMatchObject({
+          status: "rejected",
+          error: { message: "voice_recording_finalize_admission_stale" },
+        });
+        expect(await initial.readRecordingContinuation(session)).toEqual([
+          admission,
+          attachment,
+          nextAdmission,
+        ]);
+        expect(
+          await pendingRepo.appendRecordingContinuation(session, nextAdmission),
+        ).toEqual(nextAdmission);
+        await expect(
+          sealingRepo.appendRecordingContinuation(session, attachment),
+        ).rejects.toThrow("voice_recording_attachment_not_current_admission");
+        const after = await initial.findSessionById(session);
+        expect(after?.recordingState).toBe(before?.recordingState);
+        expect(after?.sessionVersion).toBe(before?.sessionVersion);
+        expect(after?.inputEpoch).toBe(before?.inputEpoch);
+        expect(after?.lastAppliedControlSequence).toBe(
+          before?.lastAppliedControlSequence,
+        );
+        expect(
+          (
+            await h.pool!.query(
+              "SELECT event_kind FROM voice.recording_continuation_event WHERE voice_session_id=$1 AND event_kind='finalized'",
+              [session],
+            )
+          ).rows,
+        ).toEqual([]);
+      } finally {
+        allowCommit.resolve();
+        delete pendingDb.leaseObserver;
+        delete sealingDb.leaseObserver;
+        await Promise.allSettled([next, ...(older ? [older] : [])]);
+      }
+    });
+
+    it("original Voice B V0125: real session-locked event replay/conflict and finalize work survive two instances without consuming control watermarks", async () => {
+      const fixture = await seedVoiceDispatchWorkFixture(h.pool!);
+      const session = fixture.request.voiceSessionId;
+      const a = new VoiceBookingRepository(h.database),
+        b = new VoiceBookingRepository(h.peerDatabase());
+      const before = await a.findSessionById(session);
+      const scope = {
+        brandId: fixture.authority.brandId,
+        callId: fixture.callId,
+        recordingId: "SIM-recording-1",
+        legId: "SIM-recording-leg-1",
+      };
+      const event = {
+        kind: "closure" as const,
+        eventKey: "closure",
+        scope,
+        payload: {
+          closedEventId: "SIM-authoritative-close",
+          endMs: 1000,
+          endedAt: new Date().toISOString(),
+          checkpointRefs: [],
+        },
+      };
+      const [first, replayed] = await Promise.all([
+        a.appendRecordingContinuation(session, event),
+        b.appendRecordingContinuation(session, event),
+      ]);
+      expect(first).toEqual(replayed);
+      expect(await b.readRecordingContinuation(session, scope)).toEqual([
+        event,
+      ]);
+      const tasks = await h.pool!.query(
+        "SELECT * FROM voice.work_item WHERE voice_session_id = $1 AND work_type = 'finalize_recording'",
+        [session],
+      );
+      expect(tasks.rows).toHaveLength(1);
+      await expect(
+        b.appendRecordingContinuation(session, {
+          ...event,
+          payload: { ...event.payload, endMs: 2000 },
+        }),
+      ).rejects.toThrow("voice_recording_event_payload_conflict");
+      expect(await a.readRecordingContinuation(session, scope)).toEqual([
+        event,
+      ]);
+      const after = await b.findSessionById(session);
+      expect(after?.lastAppliedControlSequence).toBe(
+        before?.lastAppliedControlSequence,
+      );
+      expect(after?.inputEpoch).toBe(before?.inputEpoch);
+      expect(after?.sessionVersion).toBe(before?.sessionVersion);
+      const sessionStore = new VoiceSessionRepository(h.database);
+      await new VoiceSessionService(sessionStore).closeSession(
+        session,
+        after!.sessionVersion,
+      );
+      expect(
+        (
+          await h.pool!.query(
+            "SELECT work_id FROM voice.work_item WHERE voice_session_id=$1 AND work_type='finalize_recording'",
+            [session],
+          )
+        ).rows,
+      ).toHaveLength(1);
+      await expect(
+        h.pool!.query(
+          "DELETE FROM voice.recording_continuation_event WHERE voice_session_id = $1",
+          [session],
+        ),
+      ).rejects.toThrow();
     });
   },
 );

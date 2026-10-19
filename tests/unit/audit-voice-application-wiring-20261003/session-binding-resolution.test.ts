@@ -76,6 +76,8 @@ function binding(): VoiceSessionBinding {
   return {
     voiceSessionId: "22222222-2222-2222-2222-222222222222",
     resourceScopeId: "33333333-3333-3333-3333-333333333333",
+    brandId: "SIM-binding-brand",
+    callId: "SIM-binding-call",
     routeProfileVersion: 1,
     leaseEpoch: 1,
     sessionVersion: 5,

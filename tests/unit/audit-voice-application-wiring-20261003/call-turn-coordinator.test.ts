@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { createHash } from "node:crypto";
 import {
   VoiceCallTurnCoordinator,
   type VoiceCallTurnSpeaker,
@@ -13,6 +14,9 @@ import {
   createFixtureDialoguePersistPort,
   type VoiceDialoguePersistPort,
 } from "../../../apps/voice-media-worker/src/dialogue/dialogue-persist-port";
+import type { VoiceSessionBinding } from "../../../apps/voice-media-worker/src/dialogue/voice-session-binding";
+import type { VoiceApiClient } from "../../../apps/voice-media-worker/src/server/voice-api-client";
+import type { VoiceDialogueOutput } from "@drts/contracts";
 
 /**
  * AUDIT-VOICE-APPLICATION-WIRING-20261003: `VoiceDialogueEngine` and its
@@ -479,7 +483,11 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
     expect(speakCalls).toBe(1);
 
     const secondSpeaker = trackingSpeaker();
-    coordinator.handle(attachment, finalSegment("", "seg-second"), secondSpeaker);
+    coordinator.handle(
+      attachment,
+      finalSegment("", "seg-second"),
+      secondSpeaker,
+    );
 
     await new Promise((resolve) => setTimeout(resolve, 90));
     await flush();
@@ -585,4 +593,302 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
     await flush();
     expect(rejectingSpeaker.calls).toHaveLength(0);
   });
+});
+
+/** Minimal bound `VoiceApiClient` double: every method a bound attachment's
+ * `attach()`/`createTrustedDialoguePersistPort`/`executeTools` can reach is
+ * covered with the same CAS-advancing response shapes
+ * `trusted-turn-composition.test.ts`'s real-`fetch` double uses, just at
+ * the method level instead of raw HTTP -- this file never doubles
+ * transport, only the single first-party client interface the coordinator
+ * actually depends on. */
+function fakeBoundApiClient(binding: VoiceSessionBinding): {
+  apiClient: VoiceApiClient;
+  issueCapability: ReturnType<typeof vi.fn>;
+  requestHandoff: ReturnType<typeof vi.fn>;
+} {
+  const issueCapability = vi.fn(
+    async (command: { scopes: readonly string[] }) => ({
+      token: `capability:${command.scopes.join(",")}`,
+      tokenType: "Bearer" as const,
+      expiresIn: 120,
+    }),
+  );
+  const requestHandoff = vi.fn(
+    async (
+      _sessionId: string,
+      _token: string,
+      command: { output: VoiceDialogueOutput },
+    ) => ({
+      results: command.output.tools.map(() => ({
+        status: "unavailable",
+        handoffId: null,
+      })),
+    }),
+  );
+  const apiClient = {
+    issueCapability,
+    requestHandoff,
+    getDialogueSnapshotRestoration: vi.fn(async () => ({
+      session: {
+        voiceSessionId: binding.voiceSessionId,
+        sessionVersion: binding.sessionVersion,
+        resourceScopeId: binding.resourceScopeId,
+        routeProfileVersion: binding.routeProfileVersion,
+        leaseEpoch: binding.leaseEpoch,
+        inputEpoch: 0,
+        pendingInput: false,
+        lastAppliedControlSequence: 0,
+      },
+      snapshot: null,
+    })),
+    recordControlEvent: vi.fn(
+      async (
+        _sessionId: string,
+        _token: string,
+        command: { sequence: number },
+      ) => {
+        binding.sessionVersion += 1;
+        return {
+          deduped: false,
+          applied: true,
+          gap: false,
+          appliedThroughSequence: command.sequence,
+          session: {
+            voiceSessionId: binding.voiceSessionId,
+            sessionVersion: binding.sessionVersion,
+            inputEpoch: 1,
+            pendingInput: true,
+          },
+        };
+      },
+    ),
+    resolveInput: vi.fn(
+      async (
+        _sessionId: string,
+        _token: string,
+        command: { expectedSessionVersion: number; inputEpoch: number },
+      ) => {
+        binding.sessionVersion = command.expectedSessionVersion + 1;
+        return {
+          session: {
+            voiceSessionId: binding.voiceSessionId,
+            sessionVersion: binding.sessionVersion,
+            resourceScopeId: binding.resourceScopeId,
+            routeProfileVersion: binding.routeProfileVersion,
+            leaseEpoch: binding.leaseEpoch,
+            inputEpoch: command.inputEpoch,
+            pendingInput: false,
+          },
+        };
+      },
+    ),
+    persistDialogueSnapshot: vi.fn(
+      async (
+        _sessionId: string,
+        _token: string,
+        command: {
+          expectedSessionVersion: number;
+          inputEpoch: number;
+          mediaEpoch: number;
+          turnId: string;
+          content: unknown;
+        },
+      ) => ({
+        snapshot: {
+          snapshotId: "s1",
+          voiceSessionId: binding.voiceSessionId,
+          sessionVersion: command.expectedSessionVersion,
+          inputEpoch: command.inputEpoch,
+          mediaEpoch: command.mediaEpoch,
+          turnId: command.turnId,
+          content: command.content,
+          createdAt: "2026-07-24T09:00:00.000Z",
+          retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+        },
+        deduped: false,
+      }),
+    ),
+    resolveDialogueSnapshotOutcome: vi.fn(),
+  } as unknown as VoiceApiClient;
+  return { apiClient, issueCapability, requestHandoff };
+}
+
+function boundProvider(output: VoiceDialogueOutput): VoiceDialogueProvider {
+  return {
+    mode: "live",
+    profileVersion: "bound-domain-tools-probe:1",
+    propose: async () => output,
+  };
+}
+
+/**
+ * AUDIT-VOICE-APPLICATION-REGRESSION-20261018: `resolve_location`/
+ * `check_booking_eligibility`/`get_bound_booking_status`/`request_handoff`
+ * now have real apps/api domain backing once an attachment has both a real
+ * `VoiceSessionBinding` and a real `apiClient` (see `VoiceDomainToolPorts`
+ * and `executeTools`'s own doc in call-turn-coordinator.ts) -- only
+ * `prepare_booking_readback` still forces the pre-existing honest
+ * unavailable/handoff outcome for the whole batch, pending this task's
+ * contact/consent unit. These tests exercise exactly that split at the
+ * coordinator's own `executeTools` boundary; apps/api's real gateway/port
+ * behavior for each tool has its own coverage under
+ * tests/unit/audit-voice-application-regression-20261018/.
+ */
+describe("AUDIT-VOICE-APPLICATION-REGRESSION-20261018: VoiceCallTurnCoordinator executeTools generalized tool routing", () => {
+  function binding(
+    overrides: Partial<VoiceSessionBinding> = {},
+  ): VoiceSessionBinding {
+    return {
+      voiceSessionId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      resourceScopeId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 1,
+      ...overrides,
+    };
+  }
+
+  const resolveLocationOutput: VoiceDialogueOutput = {
+    intent: "book",
+    text: "",
+    slots: [],
+    tools: [{ name: "resolve_location", args: { query: "台北車站" } }],
+    usage: { inputTokens: null, outputTokens: null },
+    terminal: "tool_required",
+  };
+
+  it("routes resolve_location through the real apiClient for a bound attachment, with the matching capability scope", async () => {
+    const sessionBinding = binding();
+    const { apiClient, issueCapability, requestHandoff } =
+      fakeBoundApiClient(sessionBinding);
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => boundProvider(resolveLocationOutput),
+      undefined,
+      undefined,
+      true,
+      apiClient,
+    );
+    const speaker = trackingSpeaker();
+    const attachment = coordinator.attach(
+      sessionBinding.voiceSessionId,
+      sessionBinding,
+    );
+
+    coordinator.handle(attachment, finalSegment("台北車站"), speaker);
+    await flush();
+
+    expect(requestHandoff).toHaveBeenCalledTimes(1);
+    const [, , command] = requestHandoff.mock.calls[0]!;
+    expect((command as { output: VoiceDialogueOutput }).output.tools).toEqual(
+      resolveLocationOutput.tools,
+    );
+    const scopedCall = issueCapability.mock.calls.find((call) =>
+      (call[0] as { scopes: readonly string[] }).scopes.includes(
+        "address_resolve",
+      ),
+    );
+    expect(scopedCall).toBeDefined();
+  });
+
+  it("forwards prepare_booking_readback to the configured API, preserving the no-API unavailable control", async () => {
+    const sessionBinding = binding({
+      voiceSessionId: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      resourceScopeId: "dddddddd-dddd-dddd-dddd-dddddddddddd",
+    });
+    const { apiClient, requestHandoff } = fakeBoundApiClient(sessionBinding);
+    const readbackOutput: VoiceDialogueOutput = {
+      intent: "book",
+      text: "",
+      slots: [],
+      tools: [{ name: "prepare_booking_readback", args: {} }],
+      usage: { inputTokens: null, outputTokens: null },
+      terminal: "tool_required",
+    };
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => boundProvider(readbackOutput),
+      undefined,
+      undefined,
+      true,
+      apiClient,
+    );
+    const speaker = trackingSpeaker();
+    const attachment = coordinator.attach(
+      sessionBinding.voiceSessionId,
+      sessionBinding,
+    );
+
+    coordinator.handle(attachment, finalSegment("確認叫車"), speaker);
+    await flush();
+
+    expect(requestHandoff).toHaveBeenCalledTimes(1);
+    expect(requestHandoff.mock.calls[0]?.[2].output).toEqual(readbackOutput);
+    expect(speaker.calls).toHaveLength(0);
+  });
+  it.each([false, true])(
+    "F1 controlled readback uses the complete server plan and denies a mismatched playback identity (mismatch=%s)",
+    async (mismatch) => {
+      const sessionBinding = binding({
+        voiceSessionId: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+        resourceScopeId: "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      });
+      const { apiClient, requestHandoff } = fakeBoundApiClient(sessionBinding);
+      const script =
+        "SIM server qualified readback: A books for B; press 1 to confirm.";
+      const plan = {
+        script,
+        playbackTaskId: mismatch ? "wrong-playback" : "server-playback",
+        draftVersion: 1,
+        confirmation: {
+          confirmationId: "server-confirmation",
+          readbackPlaybackId: "server-playback",
+          snapshotHash: "server-snapshot",
+          script,
+          readbackScriptHash: createHash("sha256").update(script).digest("hex"),
+          templateVersion: "zh-TW-booking-v1",
+          expectedDigit: "1",
+          expiresAt: new Date(Date.now() + 60000).toISOString(),
+        },
+      };
+      requestHandoff.mockImplementation(
+        async () => ({ results: [plan] }) as never,
+      );
+      const output: VoiceDialogueOutput = {
+        intent: "book",
+        text: "model diagnostic must not replace readback",
+        slots: [],
+        tools: [{ name: "prepare_booking_readback", args: {} }],
+        usage: { inputTokens: null, outputTokens: null },
+        terminal: "tool_required",
+      };
+      const coordinator = new VoiceCallTurnCoordinator(
+        () => boundProvider(output),
+        undefined,
+        undefined,
+        true,
+        apiClient,
+      );
+      const speak = vi.fn(async () => {});
+      const attachment = coordinator.attach(
+        sessionBinding.voiceSessionId,
+        sessionBinding,
+      );
+      coordinator.handle(attachment, finalSegment("確認叫車"), {
+        speak,
+        currentMediaEpoch: () => 1,
+      });
+      await flush();
+      expect(requestHandoff).toHaveBeenCalledTimes(1);
+      if (mismatch) expect(speak).not.toHaveBeenCalled();
+      else
+        expect(speak).toHaveBeenCalledWith(
+          script,
+          "cmn-TW",
+          expect.any(AbortSignal),
+          1,
+          "server-playback",
+        );
+      coordinator.release(attachment);
+    },
+  );
 });

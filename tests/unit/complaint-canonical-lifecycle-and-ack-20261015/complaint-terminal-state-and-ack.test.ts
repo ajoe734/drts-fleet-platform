@@ -106,13 +106,10 @@ describe("C045-F2: closed complaint cases cannot be resolved back to resolved", 
       resolutionCode: "resolved_other",
       closingNote: "First resolution",
     });
-    const replay = complaintService.resolveComplaintCase(
-      complaintCase.caseNo,
-      {
-        resolutionCode: "resolved_other",
-        closingNote: "Retried resolve request",
-      },
-    );
+    const replay = complaintService.resolveComplaintCase(complaintCase.caseNo, {
+      resolutionCode: "resolved_other",
+      closingNote: "Retried resolve request",
+    });
     expect(replay).toEqual(first);
     expect(replay.status).toBe("resolved");
   });
@@ -237,7 +234,9 @@ describe("C045-F3: ordinary (non-settlement) complaint controller endpoints hone
     const gate = context.pauseWrite();
     let completed = false;
     const request = context.controller
-      .addComplaintCaseNote(complaintCase.caseNo, { note: "Review in progress" })
+      .addComplaintCaseNote(complaintCase.caseNo, {
+        note: "Review in progress",
+      })
       .then((result) => {
         completed = true;
         return result;
@@ -404,7 +403,9 @@ describe("C045-F3: ordinary (non-settlement) complaint controller endpoints hone
 
     const logsAfterFailure = context.audit.listAuditLogs();
     expect(
-      logsAfterFailure.some((log) => log.actionName === "assign_complaint_case"),
+      logsAfterFailure.some(
+        (log) => log.actionName === "assign_complaint_case",
+      ),
     ).toBe(false);
 
     const retry = await context.controller.assignComplaintCase(
@@ -414,7 +415,9 @@ describe("C045-F3: ordinary (non-settlement) complaint controller endpoints hone
     expect(retry.data.assigneeId).toBe("AGENT-OPS-999");
     const logsAfterSuccess = context.audit.listAuditLogs();
     expect(
-      logsAfterSuccess.filter((log) => log.actionName === "assign_complaint_case"),
+      logsAfterSuccess.filter(
+        (log) => log.actionName === "assign_complaint_case",
+      ),
     ).toHaveLength(1);
   });
 });
@@ -436,9 +439,8 @@ describe("C045-F3: ordinary complaint case + timeline writes commit atomically",
       isEnabled: () => true,
       connect: vi.fn(async () => client),
     };
-    const { ComplaintRepository } = await import(
-      "../../../apps/api/src/modules/complaint/complaint.repository"
-    );
+    const { ComplaintRepository } =
+      await import("../../../apps/api/src/modules/complaint/complaint.repository");
     const repository = new ComplaintRepository(databaseService as never);
 
     const now = new Date().toISOString();
@@ -646,9 +648,7 @@ describe("Root ca237 follow-up: readback reconciliation, link/SLA/escalation ret
     return { promise, resolve, reject };
   }
 
-  function fixture(
-    repositoryOverrides: Record<string, unknown> = {},
-  ) {
+  function fixture(repositoryOverrides: Record<string, unknown> = {}) {
     const writeGates: ReturnType<typeof deferred>[] = [];
     const persistChanges = vi.fn(async () => {
       const gate = writeGates.shift();
@@ -702,8 +702,9 @@ describe("Root ca237 follow-up: readback reconciliation, link/SLA/escalation ret
     await context.complaintService.awaitSettlementPersistence(
       complaintCase.caseNo,
     );
-    const priorDurable =
-      context.complaintService.getComplaintCase(complaintCase.caseNo);
+    const priorDurable = context.complaintService.getComplaintCase(
+      complaintCase.caseNo,
+    );
 
     const gate = context.pauseWrite();
     const failure = new ComplaintCommitOutcomeUnknownError(
@@ -986,9 +987,7 @@ describe("Root ca237 follow-up: readback reconciliation, link/SLA/escalation ret
     const retry3 = context.complaintService.createComplaintCase(command);
     expect(retry3.caseNo).toBe(firstAttempt.caseNo);
     gate3.resolve();
-    await context.complaintService.awaitSettlementPersistence(
-      retry3.caseNo,
-    );
+    await context.complaintService.awaitSettlementPersistence(retry3.caseNo);
 
     expect(context.complaintService.listComplaintCases()).toHaveLength(1);
     expect(

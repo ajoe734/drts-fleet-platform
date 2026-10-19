@@ -406,9 +406,9 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
         fleetPartnerId,
         caseId,
       );
-      expect(
-        timelineAfterFailure.some((entry) => entry.body === content),
-      ).toBe(false);
+      expect(timelineAfterFailure.some((entry) => entry.body === content)).toBe(
+        false,
+      );
 
       // ... and must not leave a false deduplicated receipt behind for the
       // same idempotencyKey to find; the retry re-attempts the canonical
