@@ -23,6 +23,14 @@ import {
   assertCompletedFacts,
 } from "./pax-review-shared-order/additional-journey";
 
+const publicPassenger = process.env.PAX_REVIEW_PUBLIC_PASSENGER === "true";
+const privateDriverOrigin = process.env.PAX_REVIEW_DRIVER_ORIGIN?.replace(
+  /\/$/,
+  "",
+);
+if (sharedDev && !privateDriverOrigin)
+  throw new Error("Missing configured private Driver origin");
+
 test("additional real orders cover booking prerequisites, contact fallback, accepted and arrived cancellation, rating, standard geolocation and owned Driver rejection", async ({
   browser,
 }, info) => {
@@ -33,8 +41,12 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
     const token =
       name === "ops"
         ? process.env.PAX_REVIEW_OPS_ID_TOKEN
-        : process.env.PAX_REVIEW_PASSENGER_ID_TOKEN;
-    if (sharedDev && !token)
+        : name === "driver" && sharedDev
+          ? process.env.PAX_REVIEW_DRIVER_ID_TOKEN
+          : name === "pax" && publicPassenger
+            ? undefined
+            : process.env.PAX_REVIEW_PASSENGER_ID_TOKEN;
+    if (sharedDev && !(name === "pax" && publicPassenger) && !token)
       throw new Error(
         `Missing existing private-service credential for ${name}`,
       );
@@ -64,7 +76,7 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
   const pax = await step("Additional Passenger context", () => role("pax"));
   const ops = await step("Additional Ops context", () => role("ops"));
   const driver = await step("Additional Driver context", () => role("driver"));
-  const driverBase = `${PAX}/review-driver`;
+  const driverBase = `${sharedDev ? privateDriverOrigin : PAX}/review-driver`;
   const finalizeInterruptedOrders = trackInterruptedRehearsal(pax, info, PAX);
   let interrupted = false;
   try {

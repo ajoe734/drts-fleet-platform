@@ -16,6 +16,14 @@ import {
   readAssignedTripAndAccept,
 } from "./pax-review-shared-order/additional-journey";
 
+const publicPassenger = process.env.PAX_REVIEW_PUBLIC_PASSENGER === "true";
+const privateDriverOrigin = process.env.PAX_REVIEW_DRIVER_ORIGIN?.replace(
+  /\/$/,
+  "",
+);
+if (sharedDev && !privateDriverOrigin)
+  throw new Error("Missing configured private Driver origin");
+
 test("the real reservation acceptance deadline expires automatically, then recovers the original order", async ({
   browser,
 }, info) => {
@@ -26,8 +34,12 @@ test("the real reservation acceptance deadline expires automatically, then recov
     const token =
       name === "ops"
         ? process.env.PAX_REVIEW_OPS_ID_TOKEN
-        : process.env.PAX_REVIEW_PASSENGER_ID_TOKEN;
-    if (sharedDev && !token)
+        : name === "driver" && sharedDev
+          ? process.env.PAX_REVIEW_DRIVER_ID_TOKEN
+          : name === "pax" && publicPassenger
+            ? undefined
+            : process.env.PAX_REVIEW_PASSENGER_ID_TOKEN;
+    if (sharedDev && !(name === "pax" && publicPassenger) && !token)
       throw new Error(
         `Missing existing private-service credential for ${name}`,
       );
@@ -57,7 +69,7 @@ test("the real reservation acceptance deadline expires automatically, then recov
   const pax = await step("Timeout Passenger context", () => role("pax"));
   const ops = await step("Timeout Ops context", () => role("ops"));
   const driver = await step("Timeout Driver context", () => role("driver"));
-  const driverBase = `${PAX}/review-driver`;
+  const driverBase = `${sharedDev ? privateDriverOrigin : PAX}/review-driver`;
   const cleanup = new Set<string>();
   let manualTimeoutPOSTs = 0;
   for (const page of [pax, ops, driver])

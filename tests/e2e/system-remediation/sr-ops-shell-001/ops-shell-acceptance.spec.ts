@@ -198,7 +198,18 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
         const href = await auditLink.getAttribute("href");
         expect(href).toBeTruthy();
         expect(href).toMatch(/\/audit(?:\?|$)/);
-        expect(href).not.toContain("404");
+        const auditUrl = new URL(href!, OPS_CONSOLE_URL);
+        expect(auditUrl.origin).toBe(new URL(PLATFORM_ADMIN_URL).origin);
+        expect(auditUrl.pathname).toBe("/audit");
+        expect(["order", "forwarded_order"]).toContain(
+          auditUrl.searchParams.get("resourceType"),
+        );
+        expect(auditUrl.searchParams.get("resourceId")?.trim()).toBeTruthy();
+        const response = await page.goto(auditUrl.href, {
+          waitUntil: "domcontentloaded",
+        });
+        expect(response?.status()).toBe(200);
+        await expect(page).toHaveURL(auditUrl.href);
       } else {
         const board = page.locator('[data-testid="ops-shell-content"]');
         await expect(board).toBeVisible();

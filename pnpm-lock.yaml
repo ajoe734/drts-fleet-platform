@@ -620,6 +620,9 @@ importers:
       "@drts/contracts":
         specifier: workspace:*
         version: link:../../packages/contracts
+      "@drts/control-plane-auth":
+        specifier: workspace:*
+        version: link:../../packages/control-plane-auth
       "@drts/passenger-client":
         specifier: workspace:*
         version: link:../../packages/passenger-client
