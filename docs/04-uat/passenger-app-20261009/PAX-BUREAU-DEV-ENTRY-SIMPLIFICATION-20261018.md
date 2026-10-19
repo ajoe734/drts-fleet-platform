@@ -131,3 +131,28 @@ upstream transport，不替換被測共用 handler。
 這些結果不冒領之前整體 build 的 ENOSPC 失敗或尚未執行的雲端 browser。
 共用套件移動後，Passenger、Ops 的 Next route typegen／tsc 及根目錄
 `pnpm typecheck:root` 均重新實跑，三者底層 exit 0。
+
+8a8995ce2580f29ddb829d76035f5eda48319a91／gendc76 亦已由 owner
+正常撤回：own Ops Shell CI 39182064185／job117836731198 的實際
+Webpack build exit 1。Ops 原 tsconfig 直接 alias 共用套件的 TS source，
+既有 Webpack 不會把新 `./review-driver-web.js` 匯出解析成 `.ts`。
+先前套件 tsc／單元通過不能代替這個實際 bundling 檢查。
+
+同一原 25 scopes 只把既有 CommonJS 套件的這處匯出改成 extensionless，
+讓原 TS source bundling 與編譯後 Node require 共用，未另改各 App
+bundler 設定。以當前本機 Next CLI 驗明參數後，實跑：
+
+```bash
+pnpm --filter @drts/control-plane-auth build
+pnpm --filter @drts/ops-console-web exec next build --webpack --experimental-build-mode compile
+pnpm --filter @drts/passenger-app-web exec next build --webpack --experimental-build-mode compile
+```
+
+三者底層均 exit 0。Ops 產物包含原 approval actions／頁面與新 Driver
+routes；Passenger 包含原 App／bureau-review／Driver routes，且明列
+Proxy (Middleware)。這是實際 compile mode，沒有開 HTTP 或產品 server，
+亦不宣稱 default build 的所有 prerender／完整部署已驗。原 default
+wholebuild ENOSPC exit 1 仍保留。只清掉本 task 已完成 Ops build 的
+可重建 cache／standalone 以供後續編譯，原碼、server 產物、log 與資料保留。
+同一修正版再跑原 14 檔／157 項回歸，底層 exit 0。
+其後根目錄 typecheck 與修改的 index scoped lint 亦各 exit 0。

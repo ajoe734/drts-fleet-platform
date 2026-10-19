@@ -799,4 +799,4 @@ export {
   applyUpstreamAuth,
   forwardReviewDriver,
   serveReviewDriverPage,
-} from "./review-driver-web.js";
+} from "./review-driver-web";
