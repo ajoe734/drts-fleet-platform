@@ -208,7 +208,26 @@ test("original drafts, lost acknowledgement, payment methods and a second device
     await step(
       "UC03 requote clears the original fee confirmation",
       async () => {
+        const quoteResponse = () =>
+          pax.waitForResponse(
+            (response) =>
+              new URL(response.url()).pathname ===
+                "/api/passenger-app/quotes" &&
+              response.request().method() === "POST",
+          );
+        const initialQuote = quoteResponse();
         await prepareBooking(pax, method);
+        const initialResponse = await initialQuote;
+        expect(initialResponse.status()).toBe(201);
+        const originalCoordinates = camel(
+          initialResponse.request().postDataJSON(),
+        );
+        expect(originalCoordinates).toMatchObject({
+          originLat: expect.any(Number),
+          originLng: expect.any(Number),
+          destinationLat: expect.any(Number),
+          destinationLng: expect.any(Number),
+        });
         await pax
           .getByRole("button", { name: "返回修改", exact: true })
           .click();
@@ -241,14 +260,39 @@ test("original drafts, lost acknowledgement, payment methods and a second device
           nextMidnight,
         );
         await expect(
-          pax.getByRole("button", { name: "清除選點", exact: true }),
-        ).toHaveCount(2);
+          pax.getByLabel("演練選址方式", { exact: true }),
+        ).toHaveValue("fixed");
+        // prepareBooking selects the actual fixed-address UI, whose restored
+        // address IDs are shown by selects rather than standard picker buttons.
+        for (const [label, addressId] of [
+          ["示範上車地點", "review-banqiao"],
+          ["示範下車地點", "review-city-hall"],
+        ] as const)
+          await expect(pax.getByLabel(label, { exact: true })).toHaveValue(
+            addressId,
+          );
         await expect(
           pax.getByRole("checkbox", { name: "我已確認費用與優惠說明" }),
         ).toHaveCount(0);
+        const requoted = quoteResponse();
         await pax
           .getByRole("button", { name: "試算車資", exact: true })
           .click();
+        const recoveredQuote = await requoted;
+        expect(recoveredQuote.status()).toBe(201);
+        expect(camel(recoveredQuote.request().postDataJSON())).toMatchObject({
+          originLat: originalCoordinates.originLat,
+          originLng: originalCoordinates.originLng,
+          destinationLat: originalCoordinates.destinationLat,
+          destinationLng: originalCoordinates.destinationLng,
+          scheduledAt: await pax.evaluate(
+            (localTime) => new Date(localTime).toISOString(),
+            nextMidnight,
+          ),
+        });
+        expect(camel(await recoveredQuote.json()).data.serviceAreaResult).toBe(
+          "serviceable",
+        );
         await expect(
           pax.getByRole("checkbox", { name: "我已確認費用與優惠說明" }),
         ).not.toBeChecked();

@@ -139,6 +139,16 @@ safe-progress 的 `/rides` GET 亦可能是 review 導覽的 Next Link prefetch�
 
 凍結前普通合併最新 accepted dev `2460749f9a0d097973c71d91bedcc481466486dc`，peer Environment／SOS／Platform Source 保留原作者信用。第一次 merge commit 因 subject 漏 TASK-ID prefix，被正常 commit-msg hook 真拒絕（exit1，原記錄保留）；修正 subject 後正常 merge completion／hooks exit0，未 bypass／amend／rebase／force。原36個 Journey 路徑的程式保持 byte 相同，但正常 lint-staged 對43個 incoming accepted 檔案中的6檔產生精確 Prettier 重排；沒有宣稱43檔全 byte 相同。Root 獨立核6檔恰等於既有 installed formatter 輸出後，正常有限加配6個機械 hunk（25 scopes）；無 auth／SOS 語義修補或額外測試 gate。完整候選相對該 accepted base 是 **42 paths＝原36 Journey＋6機械格式**；格式中的兩處 JSX 只拆相鄰字串、可見文字相同。兩 keys／全部 acceptances／五組與 UC01–16 不變；accepted peer 祖先不列本 task 新功能信用。
 
+## 第三輪 4b16 自身結果與 receipt／fixed 草稿修補
+
+候選 `4b1696dd4118f397e3d781da5ef1445ccc029e5e` 自身五 runs 均正常終態，沒有取消或重派：主 CI `39202670906` 成功（17 success／3 scope skip），quote `39202670872`、60秒 `39202670981`、decline `39202670856` 均成功；原 core／additional 各1 passed（9.1／7.1分鐘）。Integration `39202670869` 最終 failure（19 success／4 scope skip／bureau與兩 aggregates共3 failure）。主 CI／integration 的 native PostgreSQL 各四案均真正4 passed／0 skip；新 RideContent 兩案也實際 hosted pass。實際 synthetic checkout `f60cb42b30bfecea2c5e209e55bf09b68e4b8f0b` 與 workflow head 不同，但 tree 同為 `27cc295bfe986f4663ef27a65ea9d6631960e299`，原 log／ZIP／JSON 與 enriched binding 各自保存。
+
+Bureau job `117900036203` 真為 **6 passed／2 failed／0 skipped／0 timeout／0 retry**。原 artifact `12165218714` ZIP SHA256=`5b1b57c06780e2330281a33e0379b508d3bd631423078c7c69b6bd0a3c60c553`。ordinary90（108414ms）及全部五 OTP 通過，含真五分鐘301674ms、回訪60580ms。on_trip 的實際 disabled 按鈕、同 session API409 `ORDER_NOT_CANCELABLE`、原 order/task/assignment/payment/charge 與前後 SQL rows不變已有原圖／facts；後續 receipt 頁初始 pending 缺失才使整案 fail。外部圖資故障／候選選擇／真201恢復報價及兩卡 default／放棄刪除已到；草稿重載午夜時間也通過，但錯用 standard picker selector 而 fail。65秒全斷線、正常完程與 aftercare，以及 lostACK／跨裝置／最後零 charge取消仍未走到，不能算這些已驗。完整記錄在 `source-checks/hosted-4b1696-watch/final-summary.json`（SHA256=`eebcdafa9e8c98d34c83b627c14888084e8d3e6129548a02ac8adcc552912ced`）。
+
+Root 正常 reopen，並精確加配原 Web mapper path（26 scopes）：receipt route 已選 P5-10、owned authority 也有 `canReadReceipt=true`，但 mapper 只為 completed／已有 receipt 建 certificate，未完成原單因而沒有 pending Card。只加 `kind === "receipt"`，保留原 capability 判斷與普通 on_trip ride 不顯示證明。真正 mapper＋RideContent 的原3案在4b16為2 semantic FAIL／1 PASS；補 condition後顯露同檔 account receipt wrapper 把真 `PassengerApiError(404, PASSENGER_RECEIPT_NOT_READY, English message)` 丟成500／message。Root 另正常核同檔第二窄 hunk，沿既有 authority reader pattern 保留原 status/code；未知網路錯誤仍是 error，不改 token route、API、授權或任何 E04 欄位。實際 client error adapter→Card 的同3案為1 FAIL／2 PASS→3 PASS，包含404 pending、斷線 error、重試404恢復 pending、denied無retry與普通畫面不變。新增直接 status/code 回歸與後續必要 checks另留實際結果，這些 socket-free 單元不是 hosted／shared通過。
+
+草稿 consumer 仍沿原 `prepareBooking` 的 fixed UI；重載後驗兩個真 select 的原 `review-banqiao`／`review-city-hall` address IDs，並以第一筆真 quote POST 的兩端座標對照重載後真201 quote及合法午夜ISO。原 sessionStorage 保存／時間還原、未報價前無費用勾選、重新報價後未勾／確認 disabled等斷言全保留，不延原300秒 budget、不換訂單／授權假資料。全部五組、UC01–16、兩 keys及所有外部／shared條件仍保留；此修補須產生新 immutable candidate及自己的完整 CI。
+
 ## 原兩個 acceptance keys
 
 - `pax-bureau-coverage_each-finding-real-evidence-and-applicability`
