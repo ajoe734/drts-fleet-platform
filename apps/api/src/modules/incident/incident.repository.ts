@@ -31,6 +31,22 @@ type PersistIncidentChanges = {
   suppressions?: readonly PersistIncidentSuppressionRecord[];
 };
 
+export type PersistIncidentOptions = {
+  /**
+   * incidentIds in this batch whose `assigned_to` / `record.assignedTo`
+   * this specific write is intentionally deciding (a fresh claim commit, an
+   * explicit ops reassignment, or a forced convergence) -- every other
+   * incidentId in `changes.incidents` always preserves whatever is durably
+   * current for ownership instead, no matter what that incident's own
+   * in-memory `assignedTo`/`updatedAt` say. Ownership intent, not wall-clock
+   * comparison, is what makes a same-millisecond compensation vs. deferred
+   * generic-writer race unambiguous: two independently generated
+   * `updatedAt` values can tie, but "did this call mean to change
+   * ownership" never does (F5 retained deferred carrying writer).
+   */
+  assignIntentIncidentIds?: ReadonlySet<string> | readonly string[];
+};
+
 @Injectable()
 export class IncidentRepository {
   private readonly logger = new Logger(IncidentRepository.name);
@@ -90,32 +106,43 @@ export class IncidentRepository {
     };
   }
 
-  async persistChanges(changes: PersistIncidentChanges) {
+  async persistChanges(
+    changes: PersistIncidentChanges,
+    options?: PersistIncidentOptions,
+  ) {
     if (!this.isEnabled()) {
       return;
     }
 
     const writes: Promise<unknown>[] = [];
+    const assignIntent = new Set(options?.assignIntentIncidentIds ?? []);
 
-    // `assigned_to`/`record.assignedTo` are guarded by the row's own
-    // `updated_at` instead of always taking EXCLUDED's value: an incident
-    // snapshot captured *before* `revertAssignedToIfStillOwner`'s
-    // column-scoped compensation ran (e.g. a concurrent generic
-    // status/suppression update that read the rejected owner while it was
-    // still exposed in memory) can still land here *after* that
-    // compensation, via this same unconditional full-record UPSERT. Without
-    // the guard, that stale snapshot's `assigned_to` would resurrect the
-    // already-rejected/compensated owner even though it is durably
-    // newer (F5 retained deferred carrying writer). The guard only
+    // `assigned_to`/`record.assignedTo` are guarded by explicit caller
+    // *intent* ($16, `preserveAssignment`), not by comparing `updated_at`
+    // timestamps: two independently generated `updatedAt` values (e.g. this
+    // incident's own compensation write and an unrelated, already-in-flight
+    // generic status/suppression write that captured the rejected owner
+    // while it was still exposed in memory) can tie at millisecond
+    // resolution, and a wall-clock fence cannot tell "stale carrying write"
+    // apart from "legitimate same-millisecond new claim" when they tie
+    // (F5 retained deferred carrying writer). Whether a write actually
+    // *means* to change ownership never ties: only `incidentId`s in
+    // `options.assignIntentIncidentIds` (a fresh claim commit, an explicit
+    // ops reassignment, or a forced convergence) ever take EXCLUDED's
+    // `assigned_to`; every other write preserves whatever is durably
+    // current, unconditionally, regardless of its own `updatedAt` -- so a
+    // late-landing stale snapshot can never resurrect a since-rejected or
+    // since-compensated owner, in either settle order. This guard only
     // protects ownership; every other column/JSON key still always takes
-    // the incoming write so legitimate status/suppression changes are
-    // never dropped. `updated_at` itself is kept monotonic via GREATEST so
-    // a stale write can never make a later write look stale by comparison.
+    // the incoming write so legitimate status/suppression changes are never
+    // dropped. `updated_at` itself is kept monotonic via GREATEST so a
+    // stale write can never regress the row's own last-modified marker.
     for (const incident of changes.incidents ?? []) {
       const closedAt =
         incident.status === "resolved" || incident.status === "closed"
           ? incident.updatedAt
           : null;
+      const preserveAssignment = !assignIntent.has(incident.incidentId);
       writes.push(
         this.databaseService!.query(
           `
@@ -134,15 +161,14 @@ export class IncidentRepository {
               related_vehicle_id = EXCLUDED.related_vehicle_id,
               related_complaint_no = EXCLUDED.related_complaint_no,
               assigned_to = CASE
-                WHEN ops.phase1_incidents.updated_at > EXCLUDED.updated_at
-                  THEN ops.phase1_incidents.assigned_to
+                WHEN $16::boolean THEN ops.phase1_incidents.assigned_to
                 ELSE EXCLUDED.assigned_to
               END,
               description = EXCLUDED.description,
               updated_at = GREATEST(ops.phase1_incidents.updated_at, EXCLUDED.updated_at),
               closed_at = EXCLUDED.closed_at,
               record = CASE
-                WHEN ops.phase1_incidents.updated_at > EXCLUDED.updated_at
+                WHEN $16::boolean
                   THEN jsonb_set(
                     EXCLUDED.record,
                     '{assignedTo}',
@@ -168,6 +194,7 @@ export class IncidentRepository {
             incident.updatedAt,
             closedAt,
             JSON.stringify(incident),
+            preserveAssignment,
           ],
         ),
       );
@@ -255,25 +282,34 @@ export class IncidentRepository {
    * jsonb)` converts that SQL NULL into the JSON `null` literal before it
    * reaches `jsonb_set` (F5 SQL-NULL compensation).
    *
-   * `updated_at` is bumped via `GREATEST(...)` on *every* call, even one
-   * whose condition does not hold (nothing to revert yet). This is
-   * deliberate: `persistChanges`'s full-record UPSERT fences a stale
-   * snapshot by comparing the row's durable `updated_at` against its own
-   * `EXCLUDED.updated_at`, but that fence only works if a compensation
-   * attempt is itself durably visible as "having happened" even when the
-   * rejected owner has not landed in the database yet. Without always
-   * advancing `updated_at` here, a generic status/suppression update that
-   * captured the rejected owner in its own full-record write *before*
-   * this call ran, but whose own write only *lands* (commits) *after*
-   * this call returns, would carry that rejected owner durably back in:
-   * this call's own `WHERE assigned_to = expectedCurrentOwner` would not
-   * yet match anything (the rejected owner was never actually durable),
-   * so a no-op compensation would leave `updated_at` unchanged and give
-   * the later, stale carrying write nothing to be fenced against (F5
-   * retained deferred carrying writer). A single `WITH current_row AS
-   * (...)` CTE snapshots the pre-update `assigned_to`/`updated_at` once so
-   * every reference below -- the CAS condition, the JSON mirror, and the
-   * `updated_at` bump -- agrees on the same pre-update row, atomically.
+   * `updated_at` is bumped via `GREATEST(...)` on every call, including one
+   * whose condition does not hold, so the row's own last-modified marker
+   * never regresses when a later, unrelated write reuses this helper.
+   * Ownership resurrection itself is no longer fenced by comparing
+   * `updated_at` values at all -- see `persistChanges`'s `preserveAssignment`
+   * intent guard, which is what actually prevents a deferred carrying
+   * writer from reviving a rejected/compensated owner regardless of
+   * timestamp ties (F5 retained deferred carrying writer).
+   *
+   * The `WITH current_row AS MATERIALIZED (SELECT ... FOR UPDATE)` CTE
+   * takes an explicit row lock before any value is read. Without
+   * `FOR UPDATE`, this SELECT would only see a plain Read-Committed
+   * statement-start snapshot: if a *different*, legitimate writer (e.g. a
+   * fresh claim for a new owner) is concurrently holding this row's lock
+   * and commits a newer owner/timestamp while this statement is blocked
+   * waiting for that lock, the CTE would still report the snapshot taken
+   * *before* that commit once the lock clears, not the row the UPDATE
+   * below actually targets. Every reference in this query -- the CAS
+   * condition, the JSON mirror, the `updated_at` bump, and `RETURNING` --
+   * would then agree with each other but disagree with the row's real
+   * current state: the CAS could wrongly report "still the expected
+   * owner" and clobber the newer owner it never actually observed (F5
+   * unlocked CTE compensation clobbers current owner). `FOR UPDATE`
+   * forces this SELECT to wait for any in-flight writer's lock and then
+   * re-fetch the row it actually committed, so `current_row` always
+   * reflects the exact row version this statement's own `UPDATE` (which
+   * targets the same row, in the same transaction, and therefore never
+   * itself waits on this lock) is about to modify.
    */
   async revertAssignedToIfStillOwner(
     incidentId: string,
@@ -289,10 +325,11 @@ export class IncidentRepository {
       was_still_owner: boolean | null;
     }>(
       `
-        WITH current_row AS (
+        WITH current_row AS MATERIALIZED (
           SELECT assigned_to, updated_at
           FROM ops.phase1_incidents
           WHERE incident_id = $1
+          FOR UPDATE
         )
         UPDATE ops.phase1_incidents
         SET assigned_to = CASE

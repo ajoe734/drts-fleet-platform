@@ -20,7 +20,10 @@ import type {
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
-import { IncidentRepository } from "./incident.repository";
+import {
+  IncidentRepository,
+  type PersistIncidentOptions,
+} from "./incident.repository";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 
 const DRIVER_MATCHING_SUPPRESSION_DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -425,6 +428,9 @@ export class IncidentService implements OnModuleInit {
         ...(suppressionWrite ? { suppressions: [suppressionWrite] } : {}),
       },
       "update_incident",
+      command.assignedTo !== undefined
+        ? { assignIntentIncidentIds: [incidentId] }
+        : undefined,
     );
     this.recordAudit(
       {
@@ -492,6 +498,10 @@ export class IncidentService implements OnModuleInit {
       // truthful conflict.
       if (this.incidentRepository) {
         try {
+          // No assignIntent here: this call only confirms whatever ownership
+          // is already durable, it never decides ownership itself, so a
+          // concurrent legitimate owner change must never be clobbered by
+          // this foreign-owner snapshot.
           await this.incidentRepository.persistChanges({
             incidents: [this.cloneIncident(incident)],
           });
@@ -517,9 +527,13 @@ export class IncidentService implements OnModuleInit {
       // call never reports a win the database did not actually accept (F1).
       if (this.incidentRepository) {
         try {
-          await this.incidentRepository.persistChanges({
-            incidents: [this.cloneIncident(incident)],
-          });
+          // This replay is itself the decision for `owner` on `incidentId`
+          // (an idempotent same-owner acknowledgment): carry assignIntent so
+          // a prior persist that never landed durably still gets confirmed.
+          await this.incidentRepository.persistChanges(
+            { incidents: [this.cloneIncident(incident)] },
+            { assignIntentIncidentIds: [incidentId] },
+          );
         } catch (error) {
           this.incidentRepository.reportPersistenceFailure(
             error,
@@ -556,10 +570,15 @@ export class IncidentService implements OnModuleInit {
 
     if (this.incidentRepository) {
       try {
-        await this.incidentRepository.persistChanges({
-          incidents: [this.cloneIncident(decorated)],
-          timelines: [{ ...timelineEntry }],
-        });
+        // This is the fresh-claim commit itself: assignIntent is required so
+        // the durable write actually lands the new owner.
+        await this.incidentRepository.persistChanges(
+          {
+            incidents: [this.cloneIncident(decorated)],
+            timelines: [{ ...timelineEntry }],
+          },
+          { assignIntentIncidentIds: [incidentId] },
+        );
       } catch (error) {
         this.incidentRepository.reportPersistenceFailure(
           error,
@@ -723,9 +742,13 @@ export class IncidentService implements OnModuleInit {
     const incident = this.require(incidentId);
     if (incident.assignedTo === owner) {
       if (this.incidentRepository) {
-        await this.incidentRepository.persistChanges({
-          incidents: [this.cloneIncident(incident)],
-        });
+        // Confirming an already-converged owner is itself a forced
+        // convergence decision for this incidentId: carry assignIntent so a
+        // prior convergence that never landed durably still gets confirmed.
+        await this.incidentRepository.persistChanges(
+          { incidents: [this.cloneIncident(incident)] },
+          { assignIntentIncidentIds: [incidentId] },
+        );
       }
       return;
     }
@@ -753,10 +776,15 @@ export class IncidentService implements OnModuleInit {
 
     if (this.incidentRepository) {
       try {
-        await this.incidentRepository.persistChanges({
-          incidents: [this.cloneIncident(decorated)],
-          timelines: [{ ...timelineEntry }],
-        });
+        // This is the forced-convergence commit itself: assignIntent is
+        // required so the durable write actually lands the converged owner.
+        await this.incidentRepository.persistChanges(
+          {
+            incidents: [this.cloneIncident(decorated)],
+            timelines: [{ ...timelineEntry }],
+          },
+          { assignIntentIncidentIds: [incidentId] },
+        );
       } catch (error) {
         // Roll back only the claim this call made, preserving any
         // unrelated concurrent mutation the same way
@@ -1543,31 +1571,35 @@ export class IncidentService implements OnModuleInit {
       suppressions?: readonly PersistSuppressionRecord[];
     },
     context: string,
+    options?: PersistIncidentOptions,
   ) {
     if (!this.incidentRepository) return;
     void this.incidentRepository
-      .persistChanges({
-        ...(changes.incidents
-          ? {
-              incidents: changes.incidents.map((incident) =>
-                this.cloneIncident(incident),
-              ),
-            }
-          : {}),
-        ...(changes.timelines
-          ? {
-              timelines: changes.timelines.map((entry) => ({ ...entry })),
-            }
-          : {}),
-        ...(changes.suppressions
-          ? {
-              suppressions: changes.suppressions.map((entry) => ({
-                ...entry,
-                suppression: { ...entry.suppression },
-              })),
-            }
-          : {}),
-      })
+      .persistChanges(
+        {
+          ...(changes.incidents
+            ? {
+                incidents: changes.incidents.map((incident) =>
+                  this.cloneIncident(incident),
+                ),
+              }
+            : {}),
+          ...(changes.timelines
+            ? {
+                timelines: changes.timelines.map((entry) => ({ ...entry })),
+              }
+            : {}),
+          ...(changes.suppressions
+            ? {
+                suppressions: changes.suppressions.map((entry) => ({
+                  ...entry,
+                  suppression: { ...entry.suppression },
+                })),
+              }
+            : {}),
+        },
+        options,
+      )
       .catch((error: unknown) => {
         this.incidentRepository!.reportPersistenceFailure(error, context);
       });
