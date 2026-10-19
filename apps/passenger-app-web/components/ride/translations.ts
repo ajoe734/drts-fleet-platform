@@ -41,7 +41,7 @@ export const t = {
   Requote: "重新取得報價",
   NoConfirmBeforeQuote: "正式報價完成前不會為您確認訂單",
   DispatchIncomplete: "派車資訊尚未完整",
-  CurrentRegulation: "本頁依主管機關備查之現行版本公告",
+  CurrentRegulation: "本頁依主管機關公告之現行運價揭露",
   ArrangingVehicle: "正在為您安排合適的車輛",
   ArrangingAnother: "正在為您安排另一輛車",
   Unassigned: "已取消指派",
@@ -61,8 +61,18 @@ export const t = {
   NoReviewsYet: "尚無乘車評價",
   CurrentFareTable: "現行計費表",
   AlreadyEffective: "已生效",
-  VersionInfo: (version: string, effectiveAt: string) =>
-    `版本 ${version} · 生效日 ${effectiveAt}`,
+  VersionInfo: (version: string, effectiveAt: string) => {
+    const parts = new Intl.DateTimeFormat("zh-TW-u-ca-roc", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date(effectiveAt));
+    const date = ["year", "month", "day"]
+      .map((type) => parts.find((part) => part.type === type)?.value)
+      .join("/");
+    return `依臺北市政府公告計程車運價（${date}起實施） · 版本 ${version} · 生效日 ${effectiveAt}`;
+  },
   FareChangeRuleTitle: "車資變更規則",
   Cancel: "取消",
   AppTitle: "智行叫車",

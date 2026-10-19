@@ -64,8 +64,8 @@ before log SHA256 `9796a2abbbefb430485d70228df67bb6245cb710c4bf62d10940eb54588fb
 - 相鄰舊候選：`0c02b25be1f7ea683d1db35a591c812be7a8342d`，generation `01e24789a4924d558bb60b577edc7277`；尚無獨立 review。正式 [PR CI i18n guard job](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38837839669/job/116771608012) exit 1，指出 `passenger-ride-page.tsx:881` 的「版本」與「· 生效日」兩項 `jsx-text`。
 - 呼叫路徑：A03 → `PublicFareCard` 的版本列。修正邊界限於該列及 `translations.ts` 的既有 `VersionInfo`：改成接受 API `version` / `effectiveAt` 的翻譯函式，取代未被引用的虛構版本常數；畫面、四列金額、API、夜間規則、取消、樣式及其他 lane 邏輯不變。
 
-| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、版本與證據位置 | 未驗項與具體限制 |
-| --- | --- | --- | --- | --- |
+| Finding／驗收項      | 原始碼依據與修改位置                                               | 舊版重現 → 修正版結果                                                                                                | 命令、退出碼、版本與證據位置                                                                                    | 未驗項與具體限制                                       |
+| -------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | CI inline JSX 版本列 | `PublicFareCard` → `t.VersionInfo(fare.version, fare.effectiveAt)` | 舊 candidate 本機重現兩項 `jsx-text`，exit 1；source anchor `4e8c31c7f8a6036f8d196bf26402879b6ea4699f` 修正版 exit 0 | `pnpm run i18n:guard`；本 worktree `.local/pax-fare-copy-20261015/ci-repair/i18n-before.log` / `i18n-after.log` | 新 SHA 需重新 hosted CI／Claude2 review；原 key 未記錄 |
 
 本輪 source anchor `4e8c31c7f8a6036f8d196bf26402879b6ea4699f` 的檢查均已等到結束並讀結果；以下 log 在同一 `ci-repair/` 目錄，環境仍為 Node v22.23.2 / pnpm 10.33.0 / Vitest 4.1.4：
@@ -82,3 +82,34 @@ before log SHA256 `9796a2abbbefb430485d70228df67bb6245cb710c4bf62d10940eb54588fb
 - `30b763a681c2387eee13192a32e70cc655abfb17` 為已推送 source/checkpoint，**不是 review candidate**。最終 candidate 為包含本 UAT 的最終 HEAD；owner 在 native handoff 以完整 `CANDIDATE_SHA`、`CANDIDATE_BRANCH`、`PR_URL` 鎖定，與遠端 PR head 比對後記錄。後續文件 closeout 不改上述已驗 source/test bytes。
 - 獨立 reviewer：Claude2。CI run/job、reviewed SHA、merge SHA 與唯一 acceptance key 在 native lifecycle 綁定同一 candidate；目前未宣告 CI、review、merge、key 或整個 Goal 完成。
 - Browser、真實 hosted fare API／畫面與部署未執行；此 VM 禁止產品環境。若需要這些觀察，走既有 hosted workflow，不以本機單元結果冒充。新測試位於 root Vitest include 的 `tests/unit/**`，現有 integration CI 的 `pnpm run test:unit` 會執行。
+
+## 2026-10-19 USER 三頁確認單：A03 公告文字續辦
+
+本輪採 Root 正常續辦完整原 `PAX-FARE-COPY-20261015`（四個 scope、原唯一 key 與兩項完整驗收），由 Codex2 實作、Codex 獨立審查；原 Codex／Claude2 作者與審查歷史如上保留。基底為已接受的 `daebd72eeef12229cb59d3750b7a288b1dab7448`，獨立分支 `codex2/pax-fare-copy-submission-announcement-20261019`，未混入尚未接受的 Shell footer 或其他候選。上方版本、舊 CI／skip／failure 及部署限制均是所列舊候選的歷史，不借為本輪通過。
+
+| 本輪位置                                 | 舊顯示                           | 本輪顯示／正式資料來源                                                                                                                                              |
+| ---------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `translations.ts` 的 `CurrentRegulation` | 本頁依主管機關備查之現行版本公告 | **本頁依主管機關公告之現行運價揭露**，逐字採最新 USER 確認單。                                                                                                      |
+| `VersionInfo(version, effectiveAt)`      | 僅 API 版本與原生效時間          | API 生效時間以 `Asia/Taipei`／民國曆顯示；本次版本為 **依臺北市政府公告計程車運價（112/04/01起實施）**，另保留 API 真實版本及原生效時間。不同日期不硬套 112/04/01。 |
+
+沒有改 `passenger-ride-page.tsx`、PublicFareCard API 請求／loading／error／invalid gates、四列實際金額、夜間 pickup／any_overlap 規則、取消權限、Journey ETA／評價／首頁、API 或計價引擎。現行四列仍由正式 `passengerClient.getFares()` 的 `currentVersion` 決定；原取消不收費、改派不收費及 on_trip disabled 行為保留。本輪未修改 E19a／E19b 或完整旅約；其新八項固定文案屬原 Booking task，舊契約版本的歷史資格仍保留。
+
+既有 A03 mounted integration unit 只 mock HTTP，保留正式 client snake_case 轉換與元件 render。原兩個版本案例新增公告／頁尾斷言，另增加原 API 將臺北 112/04/01 零時序列化為 UTC `2023-03-31T16:00:00.000Z` 的實際呈現案例，避免顯示成 112/03/31；原有四列、不同 API 數值、缺漏／錯誤、retry、離頁、免費取消及 on_trip disabled assertions 均保留。
+
+- 真 before：同三個公告案例對 accepted daeb 原 Source，exit 1、3 FAIL（缺公告文案）；`-t` 之外 28 個案例未執行，不能算全套結果。
+- 真 fixed：`pnpm exec vitest run tests/unit/pax-fare-copy-20261015/ --maxWorkers=1 --no-cache`，exit 0、31 PASS、0 skipped，含原完整 30 案與新增 UTC 日期案。
+- 其餘適用 scoped typecheck／lint／format／i18n／原全 App 舊字串 grep／diff 以本輪 immutable candidate packet 的實際命令、exit 與 raw log 為準；未跑 VM browser、PG、server 或產品 build。
+- 原 UAT 15616 bytes、SHA256 `0da068ba33acf540a2ab2396c40ea2c1ff5b89033b4a723d90495765a52b1323` 已逐 byte 保存。正常 mandatory Prettier 僅機械調整一處既有表格對齊，加上本段；不稱歷史 raw prefix byte equal，舊內容與結果語義不改。
+- 新 candidate 自身 mandatory CI、Codex 獨審、protected merge 與共享部署各自待真結果；local 31 PASS 不代表 hosted build、共享 A03 畫面、全產品／正式域名或法律旅約已採認。Writer 不填 key、不 merge／deploy。
+
+原始命令／log／formatter preview 與最終 Source manifest 保存在 canonical root `.local/passenger-bureau-gap-correction-20261018/fare-copy-submission-announcement-20261019/`。技術窗口蔡尚志 0988220716 不混為客服；客服仍為 02-2944-0985。本輪沒有依賴安裝、DNS／IAM／key／付款政策變動。
+
+## 2026-10-19：第一階段交付後正常恢復原 Fare
+
+Root 已依原同一任務正常 reviewer reopen，維持四個 scopes、原唯一 key、兩條完整驗收及 Codex2／Codex 角色；Source gate `7f237002fcedf96ebc3904d0bb455762ce2538f184a5ee788f9a2c7684a8b56c` 與完整 USER spec `d52256929cf39294ebc2517f2480792b1a32337331befe9e32688a020f0c2f9e` 不取代或刪除前述原始要求。正常 owner start exit 0，舊 daeb／原 Fare branch 的三檔 WIP 全部逐 byte 保存，沒有 reset、stash 或覆寫原 refs。Booking 雖共用實體 worktree，本輪沒有進入其 branch、Source 或文案範圍。
+
+本輪生產碼仍只有既有 `CurrentRegulation`／`VersionInfo` 兩個 translation hunks；不修改 RidePage、計費引擎、ETA、rating、Receipt、API、Booking、登入或取消授權。版本日期由 API 真正 `effectiveAt` 轉為臺北民國日期，並保留真 `version`／原 ISO。現有 API invalid gate、四列真數值、loading／retry／unmount、免費取消與 on_trip disabled 全保留。原 31 案不刪改，另增加一個正式 API→元件的未來日期案例：API 回 `2030-04-01T00:00:00+08:00`／其真版本時，公告應呈現 `119/04/01`，不可硬套 `112/04/01`。此案例只驗真日期傳遞，不宣稱新的費率已在共享環境生效。
+
+上節 3 FAIL／31 PASS 及舊 noEmit／lint 是原列版本的歷史，不能當本輪新候選結果。目前依 Root 序列安排，尚未取得健康本地依賴圖，因此沒有在 Fare 污染 graph 跑 Node、install、新增 symlink、hooks、test 或 compiler。取得 Root 正常圖 loan 後，才保留原 WIP 正常 checkpoint／merge 指定的 accepted607，保留 Journey 的 `LiveRouteEstimateUnavailable` 與其餘所有 peer Source，再執行必要 mounted unit、原全 App 舊字串 grep、i18n、scoped lint／noEmit 與正常候選流程。若 mandatory formatter 產生本 task 四 scope 外的 hunk，先交 Root 精確正常協調，不自行擴權。
+
+本輪檢查與新 immutable candidate／own CI／獨立 review 後續以實際原 log／退出碼補充；不借 ENTRY 或 Journey 綠燈、不錄 key、不自行 approve／merge／deploy。尚未觀察共享 A03 畫面、真外部費率公告或法律旅約整體採認。

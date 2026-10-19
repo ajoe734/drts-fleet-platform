@@ -78,6 +78,10 @@ describe("public fare copy through the mounted A03 production branch", () => {
     expect(screen.getByText(/版本 taipei-20230401/).textContent).toContain(
       currentVersion.effective_at,
     );
+    expect(screen.getByText(/版本 taipei-20230401/).textContent).toContain(
+      "依臺北市政府公告計程車運價（112/04/01起實施）",
+    );
+    expect(screen.getByText("本頁依主管機關公告之現行運價揭露")).toBeTruthy();
     expect(screen.getByText("夜間時段以上車時間為準")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/passenger-app/fares");
@@ -111,8 +115,42 @@ describe("public fare copy through the mounted A03 production branch", () => {
     expect(
       screen.getByText(/版本 synthetic-transport-test-v2/).textContent,
     ).toContain("2025-01-02");
+    expect(
+      screen.getByText(/版本 synthetic-transport-test-v2/).textContent,
+    ).toContain("依臺北市政府公告計程車運價（114/01/02起實施）");
+    expect(screen.queryByText(/112\/04\/01/)).toBeNull();
     expect(screen.getByText("行程與夜間時段重疊時適用")).toBeTruthy();
     expect(screen.queryByText("NT$ 85")).toBeNull();
+  });
+
+  it("uses the Taipei effective date when the API serializes the timestamp in UTC", async () => {
+    fetchMock.mockResolvedValue(
+      response({ ...currentVersion, effective_at: "2023-03-31T16:00:00.000Z" }),
+    );
+    mount();
+    const version = await screen.findByText(/版本 taipei-20230401/);
+    expect(version.textContent).toContain(
+      "依臺北市政府公告計程車運價（112/04/01起實施）",
+    );
+    expect(version.textContent).toContain("2023-03-31T16:00:00.000Z");
+    expect(screen.queryByText(/112\/03\/31/)).toBeNull();
+  });
+
+  it("retains a future API effective date rather than substituting 112/04/01", async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        ...currentVersion,
+        version: "synthetic-future-20300401",
+        effective_at: "2030-04-01T00:00:00+08:00",
+      }),
+    );
+    mount();
+    const version = await screen.findByText(/版本 synthetic-future-20300401/);
+    expect(version.textContent).toContain(
+      "依臺北市政府公告計程車運價（119/04/01起實施）",
+    );
+    expect(version.textContent).toContain("2030-04-01T00:00:00+08:00");
+    expect(screen.queryByText(/112\/04\/01/)).toBeNull();
   });
 
   it("shows loading without prices or an effective badge, then renders the response", async () => {
