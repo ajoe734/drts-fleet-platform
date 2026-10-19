@@ -53,6 +53,7 @@ export default function FaresPage() {
       ) : (
         <p>{T.publicLoading}</p>
       )}
+      <p>{T.currentRegulation}</p>
       <a href="/">{T.home}</a>
       <a href={`tel:${PASSENGER_SUPPORT_PHONE}`}>
         {T.supportPhone(PASSENGER_SUPPORT_PHONE)}

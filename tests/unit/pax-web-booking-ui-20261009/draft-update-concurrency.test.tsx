@@ -45,6 +45,7 @@ const { PathnameContext } = appRequire(
   "next/dist/shared/lib/hooks-client-context.shared-runtime",
 ) as typeof import("next/dist/shared/lib/hooks-client-context.shared-runtime");
 const router = {
+  bfcacheId: "synthetic-booking-test-route",
   push: vi.fn(),
   replace: vi.fn(),
   back: vi.fn(),
@@ -120,7 +121,7 @@ it("keeps both picker results and an overlapping time edit for the actual quote"
   expect((screen.getByLabelText("預約時間") as HTMLInputElement).value).toBe(
     "2099-10-11T12:00",
   );
-  const quote = screen.getByRole("button", { name: "試算車資", exact: true });
+  const quote = screen.getByRole("button", { name: "試算車資" });
   expect((quote as HTMLButtonElement).disabled).toBe(false);
   fireEvent.click(quote);
   await screen.findByLabelText("我已確認費用與優惠說明");
