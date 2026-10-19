@@ -40,7 +40,7 @@ const identity: IdentityContext = {
   supportedExecutionModes: ["discussion_planning"],
 };
 
-function services(fares?: number[]) {
+async function services(fares?: number[]) {
   const audit = new AuditNotificationService();
   const billing = new BillingSettlementService(audit);
   const partners = new TenantPartnerService(audit);
@@ -61,7 +61,7 @@ function services(fares?: number[]) {
       })),
     );
   }
-  const statement = partners.getPartnerReferralStatement(
+  const statement = await partners.getPartnerReferralStatement(
     identity,
     billing,
     period,
@@ -147,7 +147,7 @@ describe("canonical channel statement minor precision", () => {
   ])(
     "preserves fare %i and owed share %i through mapper and same-statement CSV",
     async (fare, share) => {
-      const { statement } = services([fare]);
+      const { statement } = await services([fare]);
       expect(statement.lines[0]).toMatchObject({
         rateType: "percent",
         rateValue: 15,
@@ -169,7 +169,7 @@ describe("canonical channel statement minor precision", () => {
   );
 
   it("renders real detail table cells and period totals with the same CSV amounts", async () => {
-    const { statement } = services([10100, 10001]);
+    const { statement } = await services([10100, 10001]);
     serve(statement);
     const document = await renderedDetail();
     const rows = [...document.querySelectorAll("tbody tr")];
@@ -197,7 +197,7 @@ describe("canonical channel statement minor precision", () => {
   });
 
   it("keeps statement-list and usage trip consumers precise, while dashboard remains explicitly estimated", async () => {
-    const { statement } = services([10100]);
+    const { statement } = await services([10100]);
     serve(statement);
     expect((await loadReferralStatements()).rows[0]!.share).toBe("NT$ 15.15");
     expect((await loadReferralUsage()).tripRows[0]!.share).toBe("NT$ 15.15");
@@ -207,7 +207,7 @@ describe("canonical channel statement minor precision", () => {
   });
 
   it("preserves original totals, partner/period isolation and null/unregistered rules", async () => {
-    const { billing, partners, statement } = services();
+    const { billing, partners, statement } = await services();
     expect(statement.totals).toMatchObject({
       tripCount: 2,
       activeRiderCount: 2,
@@ -223,37 +223,42 @@ describe("canonical channel statement minor precision", () => {
     ]);
     const csv = csvLines(statement);
     expect(csv.reduce((sum, row) => sum + minor(row[8]!), 0)).toBe(22500);
-    expect(billing.getReferralStatement(slug, "2026-07").lines).toEqual([]);
-    expect(billing.getReferralStatement("unregistered", period).lines).toEqual(
+    expect((await billing.getReferralStatement(slug, "2026-07")).lines).toEqual(
       [],
     );
     expect(
-      billing.resolveReferralRevenueShareRule(
+      (await billing.getReferralStatement("unregistered", period)).lines,
+    ).toEqual([]);
+    expect(
+      await billing.resolveReferralRevenueShareRule(
         "unregistered",
         "2026-06-15T00:00:00Z",
       ),
     ).toBeNull();
     expect(
-      billing.resolveReferralRevenueShareRule(slug, "2000-01-01T00:00:00Z"),
+      await billing.resolveReferralRevenueShareRule(
+        slug,
+        "2000-01-01T00:00:00Z",
+      ),
     ).toBeNull();
-    expect(() =>
+    await expect(
       partners.getPartnerReferralStatement(null, billing, period),
-    ).toThrow();
-    expect(() =>
+    ).rejects.toThrow();
+    await expect(
       partners.getPartnerReferralStatement(
         { ...identity, partnerEntrySlug: "other-partner" },
         billing,
         period,
       ),
-    ).toThrow();
-    expect(() =>
+    ).rejects.toThrow();
+    await expect(
       partners.getPartnerReferralStatement(identity, billing, "not-a-month"),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 
   it("keeps legitimate empty live statements and transport error fallback distinct", async () => {
-    const { billing } = services();
-    serve(billing.getReferralStatement(slug, "2026-07"));
+    const { billing } = await services();
+    serve(await billing.getReferralStatement(slug, "2026-07"));
     const empty = await loadReferralStatementDetail("2026-07");
     expect(empty.source).toBe("live");
     expect(empty.statement).toMatchObject({

@@ -108,6 +108,12 @@ fixtures, not live canonical-session, MFA, scanner, browser or Cloud Run proof:
   source hashes in `HARNESS-canonical-admin-checks/`; only completed exit-zero
   receipts can establish their own static-check credit.
 
+The source normally integrates fresh accepted `origin/dev`
+`72d88e2820bb0c5417051774fa25f5bab6ec79b2` (22 peer paths relative to G, no
+HARNESS overlap). Their source credit stays with their original tasks. Local
+pre-integration compiler receipts keep their G-based import-graph scope; the
+post-integration true-imports receipt, when complete, is separately source-bound.
+
 The corrected immutable candidate still needs its own mandatory hosted CI,
 independent full-eight-scope review and normal protected merge. Only the
 Operator may then run the original full 16-case, eight-PDF shared-dev acceptance

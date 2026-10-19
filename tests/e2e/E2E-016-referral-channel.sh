@@ -53,6 +53,14 @@ chain_set "referral" "entrySlug" "$ENTRY_SLUG"
 save_evidence "$SCENARIO" "platform_admin" "entrySlug" "$ENTRY_SLUG"
 save_evidence "$SCENARIO" "platform_admin" "partnerType" "$ENTRY_TYPE"
 
+# Configure this isolated scenario through the canonical rate command.
+log_step "1.1a — POST /platform-admin/referral-rates (scenario rate setup)"
+RATE_FIXTURE=$(mktemp /tmp/drts-e2e-016-rate-XXXXXX.json)
+jq -n --arg entrySlug "$ENTRY_SLUG" \
+  '{partnerEntrySlug:$entrySlug,rateType:"percent",value:15,currency:"TWD",effectiveFrom:"2026-06-01T00:00:00.000Z",effectiveUntil:null}' > "$RATE_FIXTURE"
+http_call POST "/platform-admin/referral-rates" "$RATE_FIXTURE"
+assert_status "200|201"
+
 log_step "1.2 — GET /platform-admin/referral-rates (active revenue-share rule)"
 http_call GET "/platform-admin/referral-rates?entrySlug=${ENTRY_SLUG}"
 assert_status "200"
