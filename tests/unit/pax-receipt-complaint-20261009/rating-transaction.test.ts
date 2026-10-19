@@ -1,4 +1,5 @@
 import { PassengerPushDevicesService } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.service";
+import { isDeepStrictEqual } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ComplaintCaseRecord,
@@ -253,10 +254,25 @@ async function fixture() {
       return { rows: [commands[key]] };
     }
     if (
-      text.startsWith("SELECT status FROM crm.phase1_complaint_pending_commits")
+      text.startsWith("SELECT status,") &&
+      text.includes("FROM crm.phase1_complaint_pending_commits")
     ) {
       const command = target.ordinaryCommands?.[String(values[0])];
-      return { rows: command ? [{ status: command.status }] : [] };
+      return { rows: command ? [command] : [] };
+    }
+    if (text.includes("AS matches_prepared")) {
+      return {
+        rows: target.complaintCase
+          ? [
+              {
+                matches_prepared: isDeepStrictEqual(
+                  target.complaintCase,
+                  values[1] ? JSON.parse(values[1] as string) : null,
+                ),
+              },
+            ]
+          : [],
+      };
     }
     if (text.startsWith("UPDATE crm.phase1_complaint_pending_commits")) {
       const command = target.ordinaryCommands?.[String(values[0])];

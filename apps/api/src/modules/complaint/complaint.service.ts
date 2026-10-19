@@ -117,6 +117,8 @@ const TIMELINE_ACTIONS = {
  * (same IDs) instead of either allocating a second case or being blocked by
  * the optimistic in-memory state that already looks "done". */
 type PendingUncertainComplaintCommit = {
+  /** Preserve the exact durable key, including legacy payloads stored as null. */
+  commandKey?: string;
   action: string;
   complaintCase: ComplaintCaseRecord;
   complaintTimelines: ComplaintTimelineEntry[];
@@ -150,18 +152,14 @@ export class ComplaintService implements OnModuleInit {
 
   private incidentLinkOperations = new Map<string, Promise<void>>();
 
-  /** Keyed by caseNo; see PendingUncertainComplaintCommit. */
-  private pendingUncertainCommits = new Map<
+  /** Every prepared identity is keyed by command, including legacy commands.
+   * A case can have several historical results and unresolved attempts. */
+  private complaintCommands = new Map<
     string,
     PendingUncertainComplaintCommit
   >();
 
   private unavailableOrdinaryReadbacks = new Set<string>();
-
-  private identifiedComplaintCommands = new Map<
-    string,
-    PendingUncertainComplaintCommit
-  >();
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
@@ -222,7 +220,13 @@ export class ComplaintService implements OnModuleInit {
    * repository that cannot answer right now, is left untouched. */
   private async reconcilePendingCases(): Promise<void> {
     await this.hydratePendingCommitsFromDurableStore();
-    const caseNos = [...this.pendingUncertainCommits.keys()];
+    const caseNos = [
+      ...new Set(
+        [...this.complaintCommands.values()].map(
+          (command) => command.complaintCase.caseNo,
+        ),
+      ),
+    ];
     await Promise.all(
       caseNos.map((caseNo) => this.reconcilePendingCase(caseNo)),
     );
@@ -244,6 +248,7 @@ export class ComplaintService implements OnModuleInit {
     );
     for (const row of durableRows) {
       const pending: PendingUncertainComplaintCommit = {
+        commandKey: row.commandKey,
         action: row.action,
         complaintCase: row.caseSnapshot,
         complaintTimelines: row.timelineSnapshot,
@@ -257,25 +262,28 @@ export class ComplaintService implements OnModuleInit {
             row.timelineSnapshot.map((entry) => entry.entryId),
           ),
       };
-      const existing = this.pendingUncertainCommits.get(row.caseNo);
-      const samePending =
-        existing &&
-        this.computeCommandKey(
-          existing.action,
-          row.caseNo,
-          existing.matchCommand,
-        ) === row.commandKey;
-      const current = samePending ? existing : pending;
+      const current = this.complaintCommands.get(row.commandKey) ?? pending;
       if (row.status === "confirmed") current.confirmed = true;
-      if (this.identifiedPayload(row.commandPayload)) {
-        this.identifiedComplaintCommands.set(row.commandKey, current);
-      }
-      // A confirmed result must still refresh a warm replica's canonical
-      // case and full timeline before another mutation can reuse its cache.
-      if (!this.pendingUncertainCommits.has(row.caseNo)) {
-        this.pendingUncertainCommits.set(row.caseNo, pending);
-      }
+      this.complaintCommands.set(row.commandKey, current);
     }
+  }
+
+  private complaintCommandsForCase(caseNo: string) {
+    return [...this.complaintCommands.values()].filter(
+      (command) => command.complaintCase.caseNo === caseNo,
+    );
+  }
+
+  private forgetComplaintCommand(pending: PendingUncertainComplaintCommit) {
+    const key =
+      pending.commandKey ??
+      this.computeCommandKey(
+        pending.action,
+        pending.complaintCase.caseNo,
+        pending.matchCommand,
+      );
+    if (this.complaintCommands.get(key) === pending)
+      this.complaintCommands.delete(key);
   }
 
   /** Caller scope/key identifies a logical intent independently of its
@@ -312,12 +320,15 @@ export class ComplaintService implements OnModuleInit {
     complaintTimelines: ComplaintTimelineEntry[],
     previousCaseSnapshot: ComplaintCaseRecord | null,
     matchCommand: unknown,
+    preparedCommandKey?: string,
   ): Promise<void> {
     if (!this.canonicalDbEnabled()) return;
     if (typeof this.complaintRepository?.recordPendingCommit !== "function")
       return;
     const reserved = await this.complaintRepository.recordPendingCommit({
-      commandKey: this.computeCommandKey(action, caseNo, matchCommand),
+      commandKey:
+        preparedCommandKey ??
+        this.computeCommandKey(action, caseNo, matchCommand),
       caseNo,
       action,
       commandPayload: matchCommand,
@@ -360,12 +371,16 @@ export class ComplaintService implements OnModuleInit {
     action: string,
     caseNo: string,
     matchCommand: unknown,
+    preparedCommandKey?: string,
   ): void {
     if (!this.canonicalDbEnabled()) return;
     if (typeof this.complaintRepository?.clearPendingCommit !== "function")
       return;
     void this.complaintRepository
-      .clearPendingCommit(this.computeCommandKey(action, caseNo, matchCommand))
+      .clearPendingCommit(
+        preparedCommandKey ??
+          this.computeCommandKey(action, caseNo, matchCommand),
+      )
       .catch(() => {
         // Best-effort only; a stale durable row is re-reconciled later.
       });
@@ -375,8 +390,8 @@ export class ComplaintService implements OnModuleInit {
    * or older observations preserve prepared identity; only confirmed outcome
    * or the original committed entry IDs allow a successful replay. */
   private async reconcilePendingCase(caseNo: string): Promise<void> {
-    const pending = this.pendingUncertainCommits.get(caseNo);
-    if (!pending || !this.canonicalDbEnabled()) return;
+    const commands = this.complaintCommandsForCase(caseNo);
+    if (!commands.length || !this.canonicalDbEnabled()) return;
     let durableCase: ComplaintCaseRecord | null;
     let durableTimeline: ComplaintTimelineEntry[] | undefined;
     try {
@@ -391,46 +406,51 @@ export class ComplaintService implements OnModuleInit {
       this.unavailableOrdinaryReadbacks.add(caseNo);
       return;
     }
-    if (this.pendingUncertainCommits.get(caseNo) !== pending) return;
+    // Do not replace a snapshot while a newer local write is still in flight.
+    if (this.settlementPersistence.has(caseNo)) return;
     // An old/missing observation does not prove an ambiguous COMMIT rolled
     // back. Preserve the original prepared IDs for a real same-command retry.
     if (!durableCase) {
       this.unavailableOrdinaryReadbacks.add(caseNo);
-      pending.rollback?.();
+      // Preserve every identity. A single optimistic create can be hidden
+      // locally, but a missing observation cannot choose among several writes.
+      if (commands.length === 1) commands[0]!.rollback?.();
       return;
     }
-    const committed =
-      pending.confirmed ||
-      (durableTimeline
-        ? pending.complaintTimelines.every((entry) =>
-            durableTimeline.some((saved) => saved.entryId === entry.entryId),
-          )
-        : this.stableStringify(durableCase) ===
-          this.stableStringify(pending.complaintCase));
     this.unavailableOrdinaryReadbacks.delete(caseNo);
     this.reconcileComplaintCaseIntoCache(durableCase);
     if (durableTimeline) this.complaintTimelines.set(caseNo, durableTimeline);
-    if (!committed) return;
-    if (!durableTimeline)
-      this.mergeTimelineEntriesIntoCache(caseNo, pending.complaintTimelines);
-    pending.confirmed = true;
-    if (this.identifiedPayload(pending.matchCommand)) {
-      this.identifiedComplaintCommands.set(
-        this.computeCommandKey(pending.action, caseNo, pending.matchCommand),
-        pending,
-      );
-      this.pendingUncertainCommits.delete(caseNo);
-    } else if (
-      !["create_complaint_case", "escalate_to_incident"].includes(
-        pending.action,
-      )
-    ) {
-      this.pendingUncertainCommits.delete(caseNo);
-      this.clearDurablePendingCommit(
-        pending.action,
-        caseNo,
-        pending.matchCommand,
-      );
+    for (const pending of commands) {
+      const key =
+        pending.commandKey ??
+        this.computeCommandKey(pending.action, caseNo, pending.matchCommand);
+      if (this.complaintCommands.get(key) !== pending) continue;
+      const committed =
+        pending.confirmed ||
+        (durableTimeline
+          ? pending.complaintTimelines.every((entry) =>
+              durableTimeline.some((saved) => saved.entryId === entry.entryId),
+            )
+          : this.stableStringify(durableCase) ===
+            this.stableStringify(pending.complaintCase));
+      if (!committed) continue;
+      if (!durableTimeline)
+        this.mergeTimelineEntriesIntoCache(caseNo, pending.complaintTimelines);
+      pending.confirmed = true;
+      if (
+        !this.identifiedPayload(pending.matchCommand) &&
+        !["create_complaint_case", "escalate_to_incident"].includes(
+          pending.action,
+        )
+      ) {
+        this.forgetComplaintCommand(pending);
+        this.clearDurablePendingCommit(
+          pending.action,
+          caseNo,
+          pending.matchCommand,
+          pending.commandKey,
+        );
+      }
     }
   }
 
@@ -529,24 +549,29 @@ export class ComplaintService implements OnModuleInit {
           options.commandPayload,
           options,
         )
-      : this.pendingUncertainCommits.get(caseNo);
+      : this.complaintCommandsForCase(caseNo).find(
+          (command) => command.action === "escalate_to_incident",
+        );
     return pending?.action === "escalate_to_incident"
       ? (pending.complaintCase.relatedIncidentId ?? undefined)
       : undefined;
   }
 
   completePreparedEscalation(caseNo: string): void {
-    const pending = this.pendingUncertainCommits.get(caseNo);
+    const pending = this.complaintCommandsForCase(caseNo).find(
+      (command) => command.action === "escalate_to_incident",
+    );
     if (
       pending?.action === "escalate_to_incident" &&
       pending.confirmed &&
       !this.identifiedPayload(pending.matchCommand)
     ) {
-      this.pendingUncertainCommits.delete(caseNo);
+      this.forgetComplaintCommand(pending);
       this.clearDurablePendingCommit(
         pending.action,
         caseNo,
         pending.matchCommand,
+        pending.commandKey,
       );
     }
   }
@@ -1950,6 +1975,7 @@ export class ComplaintService implements OnModuleInit {
     // durable pending-commit row can be recovered on another replica/after a
     // restart and its rollback rebuilt without a non-serializable closure.
     previousCaseSnapshot: ComplaintCaseRecord | null = null,
+    preparedCommandKey?: string,
   ): Promise<void> {
     if (!this.complaintRepository) {
       return Promise.resolve();
@@ -2026,11 +2052,13 @@ export class ComplaintService implements OnModuleInit {
                   timelineForCase,
                   previousCaseSnapshot,
                   matchCommand,
+                  preparedCommandKey,
                 ),
             ),
           ).then(() => {
             persistPayload.commandKeys = durablePrepareTargets.map(
               ({ caseNo }) =>
+                preparedCommandKey ??
                 this.computeCommandKey(context, caseNo, matchCommand),
             );
             return this.complaintRepository!.persistChanges(persistPayload);
@@ -2039,7 +2067,10 @@ export class ComplaintService implements OnModuleInit {
         .then(() => {
           for (const caseNo of affectedCaseNos) {
             this.unavailableOrdinaryReadbacks.delete(caseNo);
-            this.pendingUncertainCommits.delete(caseNo);
+            const commandKey =
+              preparedCommandKey ??
+              this.computeCommandKey(context, caseNo, matchCommand);
+            this.complaintCommands.delete(commandKey);
             const committedTarget = durablePrepareTargets.find(
               (item) => item.caseNo === caseNo,
             );
@@ -2057,19 +2088,22 @@ export class ComplaintService implements OnModuleInit {
                 (item) => item.caseNo === caseNo,
               );
               if (target)
-                this.identifiedComplaintCommands.set(
-                  this.computeCommandKey(context, caseNo, matchCommand),
-                  {
-                    action: context,
-                    complaintCase: target.complaintCase,
-                    complaintTimelines: target.timelineForCase,
-                    matchCommand,
-                    previousCaseSnapshot,
-                    confirmed: true,
-                  },
-                );
+                this.complaintCommands.set(commandKey, {
+                  commandKey,
+                  action: context,
+                  complaintCase: target.complaintCase,
+                  complaintTimelines: target.timelineForCase,
+                  matchCommand,
+                  previousCaseSnapshot,
+                  confirmed: true,
+                });
             } else
-              this.clearDurablePendingCommit(context, caseNo, matchCommand);
+              this.clearDurablePendingCommit(
+                context,
+                caseNo,
+                matchCommand,
+                preparedCommandKey,
+              );
           }
         })
         .catch((error: unknown) => {
@@ -2082,14 +2116,21 @@ export class ComplaintService implements OnModuleInit {
                 timelineForCase,
               } of durablePrepareTargets) {
                 this.unavailableOrdinaryReadbacks.add(caseNo);
-                this.pendingUncertainCommits.set(caseNo, {
-                  action: context,
-                  complaintCase,
-                  complaintTimelines: timelineForCase,
-                  rollback,
-                  matchCommand,
-                  previousCaseSnapshot,
-                });
+                this.complaintCommands.set(
+                  preparedCommandKey ??
+                    this.computeCommandKey(context, caseNo, matchCommand),
+                  {
+                    commandKey:
+                      preparedCommandKey ??
+                      this.computeCommandKey(context, caseNo, matchCommand),
+                    action: context,
+                    complaintCase,
+                    complaintTimelines: timelineForCase,
+                    rollback,
+                    matchCommand,
+                    previousCaseSnapshot,
+                  },
+                );
                 // Already durably registered above, before this ambiguous
                 // commit was even attempted; no further durable write needed.
               }
@@ -2119,7 +2160,10 @@ export class ComplaintService implements OnModuleInit {
           } else {
             for (const caseNo of affectedCaseNos) {
               this.unavailableOrdinaryReadbacks.delete(caseNo);
-              this.pendingUncertainCommits.delete(caseNo);
+              this.complaintCommands.delete(
+                preparedCommandKey ??
+                  this.computeCommandKey(context, caseNo, matchCommand),
+              );
               // This attempt's own prepared durable marker (if any) never saw
               // a business commit at all, so it must not linger as if it
               // were still an unresolved cross-replica identity.
@@ -2130,7 +2174,12 @@ export class ComplaintService implements OnModuleInit {
                     error.code === "IDEMPOTENCY_KEY_REUSED")
                 )
               ) {
-                this.clearDurablePendingCommit(context, caseNo, matchCommand);
+                this.clearDurablePendingCommit(
+                  context,
+                  caseNo,
+                  matchCommand,
+                  preparedCommandKey,
+                );
               }
               // A definite (non-uncertain) failure has already been rolled
               // back and surfaced to its own caller above; leaving this
@@ -2180,11 +2229,12 @@ export class ComplaintService implements OnModuleInit {
       this.identifiedPayload(pending.matchCommand)?.originalRequestId ??
       requestId;
     if (pending.confirmed && !this.identifiedPayload(pending.matchCommand)) {
-      this.pendingUncertainCommits.delete(pending.complaintCase.caseNo);
+      this.forgetComplaintCommand(pending);
       this.clearDurablePendingCommit(
         pending.action,
         pending.complaintCase.caseNo,
         pending.matchCommand,
+        pending.commandKey,
       );
     }
     const persistence = pending.confirmed
@@ -2199,6 +2249,7 @@ export class ComplaintService implements OnModuleInit {
           pending.matchCommand,
           true,
           pending.previousCaseSnapshot ?? null,
+          pending.commandKey,
         );
     return this.finishOrdinaryComplaintAction(
       this.cloneComplaintCase(pending.complaintCase),
@@ -2302,8 +2353,10 @@ export class ComplaintService implements OnModuleInit {
       );
     }
     this.ensureComplaintReadbackAvailable(caseNo);
-    const unresolved = this.pendingUncertainCommits.get(caseNo);
-    if (unresolved && !unresolved.confirmed && unresolved !== pending) {
+    const unresolved = this.complaintCommandsForCase(caseNo).some(
+      (command) => !command.confirmed,
+    );
+    if (unresolved) {
       throw new ApiRequestError(
         409,
         "IDEMPOTENCY_IN_PROGRESS",
@@ -2380,7 +2433,7 @@ export class ComplaintService implements OnModuleInit {
     command: unknown,
   ): PendingUncertainComplaintCommit | undefined {
     if (this.identifiedPayload(command)) {
-      const identified = this.identifiedComplaintCommands.get(
+      const identified = this.complaintCommands.get(
         this.computeCommandKey(action, caseNo ?? "", command),
       );
       if (identified) {
@@ -2397,7 +2450,7 @@ export class ComplaintService implements OnModuleInit {
         return identified;
       }
     }
-    for (const pending of this.pendingUncertainCommits.values()) {
+    for (const pending of this.complaintCommands.values()) {
       const legacyTerminalRetry =
         !this.identifiedPayload(command) &&
         !this.identifiedPayload(pending.matchCommand) &&
@@ -2422,7 +2475,7 @@ export class ComplaintService implements OnModuleInit {
             complaintCommandIdentity: identified.complaintCommandIdentity,
             payload: identified.payload,
           }
-        : value;
+        : (value ?? null);
     };
     return (
       this.stableStringify(normalize(left)) ===

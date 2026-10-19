@@ -179,8 +179,10 @@ export class ComplaintRepository {
       for (const commandKey of changes.commandKeys) {
         const reserved = await transaction!.query<{
           status: ComplaintPendingCommitStatus;
+          case_no: string;
+          previous_case_snapshot: unknown;
         }>(
-          `SELECT status FROM crm.phase1_complaint_pending_commits WHERE command_key = $1 FOR UPDATE`,
+          `SELECT status, case_no, previous_case_snapshot FROM crm.phase1_complaint_pending_commits WHERE command_key = $1 FOR UPDATE`,
           [commandKey],
         );
         if (!reserved.rows[0])
@@ -191,7 +193,38 @@ export class ComplaintRepository {
             undefined,
             true,
           );
-        if (reserved.rows[0].status === "confirmed") confirmed++;
+        if (reserved.rows[0].status === "confirmed") {
+          confirmed++;
+          continue;
+        }
+        // A pending command may have been prepared before a later command
+        // was acknowledged by another replica. Lock the actual case and
+        // compare its original prepared predecessor before any upsert. This
+        // also serialises distinct command keys that read the same old case.
+        const original = reserved.rows[0];
+        const current = await transaction!.query<{
+          matches_prepared: boolean | null;
+        }>(
+          `SELECT record = $2::jsonb AS matches_prepared
+           FROM crm.phase1_complaint_cases WHERE case_no = $1 FOR UPDATE`,
+          [
+            original.case_no,
+            original.previous_case_snapshot
+              ? JSON.stringify(original.previous_case_snapshot)
+              : null,
+          ],
+        );
+        const matches = original.previous_case_snapshot
+          ? current.rows[0]?.matches_prepared === true
+          : current.rows.length === 0;
+        if (!matches)
+          throw new ApiRequestError(
+            409,
+            "IDEMPOTENCY_IN_PROGRESS",
+            "The complaint changed after this command was prepared; canonical confirmation is required.",
+            { caseNo: original.case_no },
+            true,
+          );
       }
       if (confirmed === changes.commandKeys.length) return;
       if (confirmed)

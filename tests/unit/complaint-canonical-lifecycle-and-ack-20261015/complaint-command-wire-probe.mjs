@@ -7,6 +7,7 @@ import vm from "node:vm";
 import cp from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nodeRequire = createRequire(import.meta.url);
 const root = path.resolve(__dirname, "../../..");
@@ -132,6 +133,7 @@ class Wire {
     this.readFails = false;
     this.connectFails = false;
     this.identityReadFails = false;
+    this.rowOrder = "forward";
   }
   isEnabled() {
     return true;
@@ -157,7 +159,22 @@ class Wire {
         ) {
           const reserved = this.commands.get(values[0]);
           this.trace.push(`lock-${reserved?.status || "missing"}`);
-          return { rows: reserved ? [{ status: reserved.status }] : [] };
+          return { rows: reserved ? [clone(reserved)] : [] };
+        }
+        if (sql.includes("AS matches_prepared")) {
+          const current = this.cases.get(values[0]);
+          return {
+            rows: current
+              ? [
+                  {
+                    matches_prepared: isDeepStrictEqual(
+                      current,
+                      JSON.parse(values[1]),
+                    ),
+                  },
+                ]
+              : [],
+          };
         }
         if (sql.includes("INSERT INTO crm.phase1_complaint_cases")) {
           cases.push(JSON.parse(values[5]));
@@ -230,7 +247,16 @@ class Wire {
     if (sql.includes("FROM crm.phase1_complaint_pending_commits")) {
       if (this.identityReadFails)
         throw Error("Fixture: identity read rejected");
-      return { rows: [...this.commands.values()].map(clone) };
+      let rows = [...this.commands.values()].map(clone);
+      if (this.rowOrder === "reverse") rows.reverse();
+      if (this.rowOrder === "rotate" && rows.length) rows.push(rows.shift());
+      const gate = this.holdNextIdentityRead;
+      this.holdNextIdentityRead = undefined;
+      if (gate) {
+        gate.reached();
+        await gate.release;
+      }
+      return { rows };
     }
     if (sql.includes("WITH settlement_cases AS")) return { rows: [] };
     if (sql.includes("complaint_case_snapshot")) {
@@ -724,9 +750,19 @@ async function run() {
       "Actual production methods with scripted external database wire rows only; no real PG, HTTP, browser, listener or hosted acceptance.",
   };
 }
-run()
-  .then((result) => process.stdout.write(JSON.stringify(result) + "\n"))
-  .catch((error) => {
-    console.error(error.stack);
-    process.exitCode = 1;
-  });
+export {
+  Wire,
+  instance,
+  opsPayload,
+  outcome,
+  forbiddenNetworkOrListenAttempts,
+};
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  run()
+    .then((result) => process.stdout.write(JSON.stringify(result) + "\n"))
+    .catch((error) => {
+      console.error(error.stack);
+      process.exitCode = 1;
+    });
+}
