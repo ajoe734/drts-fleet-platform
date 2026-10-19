@@ -688,6 +688,30 @@ function objectValue(value: unknown): Record<string, unknown> {
     : {};
 }
 
+// Only these public error codes may leave the secret-bearing native issuer.
+const operationalAuthErrorCodes = new Set([
+  "AUTHENTICATION_REQUIRED",
+  "UNAUTHENTICATED",
+  "FORBIDDEN",
+  "MFA_REQUIRED",
+  "STEP_UP_REQUIRED",
+  "SESSION_REVOKED",
+  "SESSION_EXPIRED",
+  "TOKEN_INVALID",
+  "IDENTITY_REQUIRED",
+  "MEMBERSHIP_NOT_FOUND",
+  "WORKLOAD_SESSION_IDENTITY_UNAVAILABLE",
+  "DEV_WORKFORCE_SESSION_EXCHANGE_DENIED",
+  "AUTH_TOKEN_EXCHANGE_NOT_ALLOWED",
+]);
+class OperationalFleetSetupError extends Error {
+  constructor(stage: string, status?: number, code?: string) {
+    super(
+      `Fleet application setup ${stage} failed${status ? ` (HTTP ${status}${code ? ` code ${code}` : ""})` : ""}`,
+    );
+  }
+}
+
 /** Normal application onboarding, once per worker (workers may restart).
  * All secret-bearing requests use native fetch, never Playwright request/trace.
  * The optional Fleet reference is implemented by the independently reviewed
@@ -697,7 +721,7 @@ export async function prepareOperationalFleetSession(
   configuration: FleetApplicationSetup,
 ): Promise<PreparedOperationalFleetSession> {
   const requireValue = (condition: unknown, stage: string) => {
-    if (!condition) throw new Error(`Fleet application setup ${stage} failed`);
+    if (!condition) throw new OperationalFleetSetupError(stage);
   };
   requireValue(
     configuration?.fleetPartnerId?.trim() && configuration?.tenantId?.trim(),
@@ -717,7 +741,7 @@ export async function prepareOperationalFleetSession(
       );
       return url.origin;
     } catch {
-      throw new Error("Fleet application setup configured origin failed");
+      throw new OperationalFleetSetupError("configured origin");
     }
   };
   const apiOrigin = configuredOrigin("DRTS_OPERATIONAL_API_URL");
@@ -727,6 +751,9 @@ export async function prepareOperationalFleetSession(
   const deadline = Date.now() + 60_000;
   let adminOrigin: string | undefined;
   let adminInvocation: string | undefined;
+  let adminSessionToken: string | undefined;
+  let ownAdminSessionId: string | undefined;
+  let adminSessionRevoked = false;
   const requestId = `operational-fleet-${randomUUID()}`;
   const entrySlug = requestId;
   const programId = `${requestId}-program`;
@@ -748,9 +775,15 @@ export async function prepareOperationalFleetSession(
       method?: string;
       body?: unknown;
       token?: string;
+      stepUpReference?: string;
       until?: number;
+      acknowledge?: (data: Record<string, unknown>) => void;
     } = {},
   ): Promise<Record<string, unknown>> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    let abortListener: (() => void) | undefined;
     try {
       const origin = role === "admin" ? adminOrigin : apiOrigin;
       requireValue(origin, stage);
@@ -763,40 +796,144 @@ export async function prepareOperationalFleetSession(
           !url.search,
         stage,
       );
-      const remaining = (options.until ?? deadline) - Date.now();
+      const until = options.until ?? deadline;
+      const remaining = until - Date.now();
       requireValue(remaining > 0, `${stage} deadline`);
-      const token = role === "admin" ? adminInvocation : options.token;
-      const response = await fetch(url.toString(), {
-        method: options.method ?? "GET",
-        redirect: "manual",
-        signal: AbortSignal.timeout(Math.min(15_000, remaining)),
-        headers: {
-          "x-request-id": requestId,
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(options.body !== undefined
-            ? { "Content-Type": "application/json" }
-            : {}),
-        },
-        ...(options.body !== undefined
-          ? { body: JSON.stringify(options.body) }
-          : {}),
+      const aborted = new Promise<never>((_, reject) => {
+        abortListener = () => reject(new OperationalFleetSetupError(stage));
+        controller.signal.addEventListener("abort", abortListener, {
+          once: true,
+        });
       });
-      requireValue(response.status === 200 || response.status === 201, stage);
+      timer = setTimeout(() => controller.abort(), Math.min(15_000, remaining));
+      const token = role === "admin" ? adminInvocation : options.token;
+      const response = await Promise.race([
+        fetch(url.toString(), {
+          method: options.method ?? "GET",
+          redirect: "manual",
+          signal: controller.signal,
+          headers: {
+            "x-request-id": requestId,
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(role === "admin" && adminSessionToken
+              ? { "x-drts-authorization": `Bearer ${adminSessionToken}` }
+              : {}),
+            ...(options.stepUpReference
+              ? { "x-drts-step-up-reference": options.stepUpReference }
+              : {}),
+            ...(options.body !== undefined
+              ? { "Content-Type": "application/json" }
+              : {}),
+          },
+          ...(options.body !== undefined
+            ? { body: JSON.stringify(options.body) }
+            : {}),
+        }),
+        aborted,
+      ]);
+      reader = response.body?.getReader();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      if (reader) {
+        while (true) {
+          const chunk = await Promise.race([reader.read(), aborted]);
+          if (chunk.done) break;
+          size += chunk.value.byteLength;
+          requireValue(size <= 1024 * 1024, `${stage} response bound`);
+          chunks.push(chunk.value);
+        }
+      }
+      let payload: Record<string, unknown> = {};
+      try {
+        payload = objectValue(
+          normalizeApiResponse(
+            JSON.parse(Buffer.concat(chunks).toString("utf8")),
+          ),
+        );
+      } catch {
+        // An error response can be non-JSON; retain status, never its raw body.
+        requireValue(response.status !== 200 && response.status !== 201, stage);
+      }
+      if (response.status !== 200 && response.status !== 201) {
+        const code = objectValue(payload.error).code ?? payload.code;
+        throw new OperationalFleetSetupError(
+          stage,
+          response.status,
+          typeof code === "string" && operationalAuthErrorCodes.has(code)
+            ? code
+            : undefined,
+        );
+      }
       const candidate = process.env.DRTS_CANDIDATE_SHA?.trim();
       requireValue(
         !candidate ||
           response.headers.get("x-drts-candidate-sha") === candidate,
         `${stage} candidate`,
       );
-      // Admin BFF passes through the API's production SnakeCaseInterceptor.
-      // Normalize only issuer response keys, never tokens or opaque scalars.
-      return objectValue(
-        objectValue(normalizeApiResponse(await response.json())).data,
+      // auth/token keeps its established top-level token response. Other calls
+      // use the API envelope; normalize keys, never credential scalar values.
+      const data = objectValue(
+        pathname === "/control-plane-proxy/auth/token" ? payload : payload.data,
       );
-    } catch {
-      // Neither response bodies nor native transport errors may expose secrets.
-      throw new Error(`Fleet application setup ${stage} failed`);
+      // Capture only server-acknowledged exact ownership before rejecting a late
+      // ACK, so deadline failure still runs cleanup of the resource it created.
+      options.acknowledge?.(data);
+      requireValue(Date.now() < until, `${stage} deadline`);
+      return data;
+    } catch (error) {
+      // Neither native errors, response messages nor headers may expose secrets.
+      throw error instanceof OperationalFleetSetupError
+        ? error
+        : new OperationalFleetSetupError(stage);
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (abortListener)
+        controller.signal.removeEventListener("abort", abortListener);
+      if (reader) {
+        void reader.cancel().catch(() => {});
+        reader.releaseLock();
+      }
     }
+  }
+
+  async function adminMutation(
+    stage: string,
+    pathname: string,
+    actionId: string,
+    body: unknown,
+    until = deadline,
+    acknowledge?: (data: Record<string, unknown>) => void,
+  ) {
+    requireValue(adminSessionToken, `${stage} Admin session`);
+    const proof = await request(
+      `${stage} step up`,
+      "admin",
+      "/control-plane-proxy/identity/step-up-proofs",
+      {
+        method: "POST",
+        body: {
+          method: "POST",
+          path: pathname.replace(/^\/control-plane-proxy\//, "/api/"),
+        },
+        until,
+      },
+    );
+    if (typeof proof.stepUpReference === "string")
+      maskOperationalSecret(proof.stepUpReference);
+    requireValue(
+      proof.required === true &&
+        proof.actionId === actionId &&
+        typeof proof.stepUpReference === "string" &&
+        proof.stepUpReference.trim(),
+      `${stage} step up receipt`,
+    );
+    return request(stage, "admin", pathname, {
+      method: "POST",
+      body,
+      stepUpReference: proof.stepUpReference as string,
+      until,
+      ...(acknowledge ? { acknowledge } : {}),
+    });
   }
 
   const verifyIdentity = (
@@ -856,21 +993,22 @@ export async function prepareOperationalFleetSession(
             "own session revoke receipt",
           );
           sessionRevoked = true;
-        } catch {
-          failures.push("session");
+        } catch (error) {
+          failures.push(
+            error instanceof OperationalFleetSetupError
+              ? error.message
+              : "session",
+          );
         }
       }
       if (ownKeyId && !keyRevoked) {
         try {
-          const data = await request(
+          const data = await adminMutation(
             "own key revoke",
-            "admin",
             `${entryPath}/credentials/${encodeURIComponent(ownKeyId)}/revoke`,
-            {
-              method: "POST",
-              body: { revokeReason: "operational_worker_finished" },
-              until,
-            },
+            "platform:partner-credentials:revoke",
+            { revokeReason: "operational_worker_finished" },
+            until,
           );
           requireValue(
             data.keyId === ownKeyId &&
@@ -879,19 +1017,22 @@ export async function prepareOperationalFleetSession(
             "own key revoke receipt",
           );
           keyRevoked = true;
-        } catch {
-          failures.push("key");
+        } catch (error) {
+          failures.push(
+            error instanceof OperationalFleetSetupError ? error.message : "key",
+          );
         }
       }
       if (entryHasUnownedCredentials)
         failures.push("entry has unowned credentials; preserved");
       else if (!entryRevoked) {
         try {
-          const data = await request(
+          const data = await adminMutation(
             "own entry revoke",
-            "admin",
             `${entryPath}/revoke`,
-            { method: "POST", body: {}, until },
+            "platform:partner-entries:revoke",
+            {},
+            until,
           );
           requireValue(
             data.entrySlug === entrySlug &&
@@ -900,9 +1041,41 @@ export async function prepareOperationalFleetSession(
             "own entry revoke receipt",
           );
           entryRevoked = true;
-        } catch {
-          failures.push("entry");
+        } catch (error) {
+          failures.push(
+            error instanceof OperationalFleetSetupError
+              ? error.message
+              : "entry",
+          );
         }
+      }
+    }
+    // The Admin session is owned independently of the Entry ACK. Keep it alive
+    // until both action-specific revoke proofs have been consumed.
+    if (adminSessionToken && ownAdminSessionId && !adminSessionRevoked) {
+      try {
+        const data = await request(
+          "own Admin session revoke",
+          "api",
+          "/api/auth/sessions/revoke",
+          {
+            method: "POST",
+            token: adminSessionToken,
+            body: { sessionId: ownAdminSessionId },
+            until,
+          },
+        );
+        requireValue(
+          data.revoked === true && data.sessionId === ownAdminSessionId,
+          "own Admin session revoke receipt",
+        );
+        adminSessionRevoked = true;
+      } catch (error) {
+        failures.push(
+          error instanceof OperationalFleetSetupError
+            ? error.message
+            : "Admin session",
+        );
       }
     }
     if (verifiedFleetSessionToken === applicationToken)
@@ -940,33 +1113,89 @@ export async function prepareOperationalFleetSession(
       "DRTS_OPERATIONAL_PLATFORM_ADMIN_URL",
     )?.trim();
     requireValue(adminInvocation, "existing Admin invocation proof");
-    const entry = await request(
-      "create bound entry",
-      "admin",
-      "/control-plane-proxy/platform-admin/partner-entries",
-      {
-        method: "POST",
-        body: {
-          tenantId: configuration.tenantId,
-          partnerCode: requestId,
-          partnerType: "fleet_partner",
-          programId,
-          entrySlug,
-          displayName: "Synthetic operational Fleet caller",
-          businessDispatchSubtype: "enterprise_dispatch",
-          authMode: "partner_api_key",
-          eligibilityMode: "none",
-          fleetPartnerId: configuration.fleetPartnerId,
+    if (adminInvocation) maskOperationalSecret(adminInvocation);
+    const suppliedAdminToken =
+      process.env.DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_TOKEN?.trim();
+    let issuedAdminPrincipalId: string | undefined;
+    const acknowledgeAdminSession = (issued: Record<string, unknown>) => {
+      if (typeof issued.token === "string") maskOperationalSecret(issued.token);
+      requireValue(
+        typeof issued.token === "string" &&
+          issued.token.trim() &&
+          issued.realm === "platform" &&
+          issued.actorType === "platform_admin" &&
+          typeof issued.principalId === "string" &&
+          issued.principalId.trim() &&
+          typeof issued.sessionId === "string" &&
+          issued.sessionId.trim(),
+        "Admin token receipt",
+      );
+      adminSessionToken = issued.token as string;
+      ownAdminSessionId = issued.sessionId as string;
+      issuedAdminPrincipalId = issued.principalId as string;
+    };
+    if (suppliedAdminToken) {
+      maskOperationalSecret(suppliedAdminToken);
+      adminSessionToken = suppliedAdminToken;
+    } else {
+      await request(
+        "Admin token exchange",
+        "admin",
+        "/control-plane-proxy/auth/token",
+        {
+          method: "POST",
+          body: {},
+          acknowledge: acknowledgeAdminSession,
         },
+      );
+    }
+    const adminSession = await request(
+      "Admin session",
+      "admin",
+      "/control-plane-proxy/auth/session",
+    );
+    const adminIdentity = objectValue(adminSession.identity);
+    requireValue(
+      adminSession.active === true &&
+        adminIdentity.authMode === "jwt_bearer" &&
+        adminIdentity.realm === "platform" &&
+        adminIdentity.actorType === "platform_admin" &&
+        [
+          adminIdentity.actorId,
+          adminIdentity.principalId,
+          adminIdentity.membershipId,
+          adminIdentity.sessionId,
+        ].every((value) => typeof value === "string" && value.trim()) &&
+        (suppliedAdminToken ||
+          (adminIdentity.sessionId === ownAdminSessionId &&
+            adminIdentity.principalId === issuedAdminPrincipalId)),
+      "verified Admin session",
+    );
+    const entry = await adminMutation(
+      "create bound entry",
+      "/control-plane-proxy/platform-admin/partner-entries",
+      "platform:partner-entries:create",
+      {
+        tenantId: configuration.tenantId,
+        partnerCode: requestId,
+        partnerType: "fleet_partner",
+        programId,
+        entrySlug,
+        displayName: "Synthetic operational Fleet caller",
+        businessDispatchSubtype: "enterprise_dispatch",
+        authMode: "partner_api_key",
+        eligibilityMode: "none",
+        fleetPartnerId: configuration.fleetPartnerId,
+      },
+      deadline,
+      (ack) => {
+        ownEntry =
+          ack.entrySlug === entrySlug &&
+          objectValue(ack.auditMetadata).requestId === requestId &&
+          ack.tenantId === configuration.tenantId &&
+          ack.programId === programId;
       },
     );
-    // Acknowledged ownership precedes canonical-binding checks so an old server's
-    // newly created random-bound Entry is still cleaned up, never reused.
-    ownEntry =
-      entry.entrySlug === entrySlug &&
-      objectValue(entry.auditMetadata).requestId === requestId &&
-      entry.tenantId === configuration.tenantId &&
-      entry.programId === programId;
     requireValue(
       ownEntry &&
         entry.partnerId === configuration.fleetPartnerId &&
@@ -982,31 +1211,33 @@ export async function prepareOperationalFleetSession(
     entryHasUnownedCredentials =
       !Array.isArray(credentials.items) || credentials.items.length !== 0;
     requireValue(!entryHasUnownedCredentials, "no existing keys to rotate");
-    const issued = await request(
+    const issued = await adminMutation(
       "first key issue",
-      "admin",
       `${entryPath}/credentials/issue`,
+      "platform:partner-credentials:issue",
       {
-        method: "POST",
-        body: {
-          ownerRef: requestId,
-          ownerName: "Synthetic operational worker",
-          ownerType: "operational_acceptance",
-          purpose: "Original operational document lifecycle acceptance",
-          scopes: ["billing:read"],
-          expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
-        },
+        ownerRef: requestId,
+        ownerName: "Synthetic operational worker",
+        ownerType: "operational_acceptance",
+        purpose: "Original operational document lifecycle acceptance",
+        scopes: ["billing:read"],
+        expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+      },
+      deadline,
+      (ack) => {
+        if (typeof ack.plaintextKey === "string")
+          maskOperationalSecret(ack.plaintextKey);
+        const credential = objectValue(ack.credential);
+        if (
+          credential.entrySlug === entrySlug &&
+          typeof credential.keyId === "string" &&
+          credential.keyId
+        )
+          ownKeyId = credential.keyId;
       },
     );
     const plaintextKey = issued.plaintextKey;
-    if (typeof plaintextKey === "string") maskOperationalSecret(plaintextKey);
     const credential = objectValue(issued.credential);
-    if (
-      credential.entrySlug === entrySlug &&
-      typeof credential.keyId === "string" &&
-      credential.keyId
-    )
-      ownKeyId = credential.keyId;
     requireValue(
       ownKeyId &&
         typeof plaintextKey === "string" &&
@@ -1048,7 +1279,17 @@ export async function prepareOperationalFleetSession(
       "issued session",
       "api",
       "/api/auth/session",
-      { token: applicationToken },
+      {
+        token: applicationToken,
+        acknowledge: (ack) => {
+          const identity = verifyIdentity(ack, true);
+          requireValue(
+            typeof identity.sessionId === "string" && identity.sessionId,
+            "owned session receipt",
+          );
+          ownSessionId = identity.sessionId as string;
+        },
+      },
     );
     const identity = verifyIdentity(session, true);
     requireValue(
@@ -1072,12 +1313,11 @@ export async function prepareOperationalFleetSession(
       await cleanup();
     } catch (cleanupError) {
       throw new Error(
-        `Fleet application setup failed; ${cleanupError instanceof Error ? cleanupError.message : "own cleanup failed"}`,
+        `${error instanceof OperationalFleetSetupError ? error.message : "Fleet application setup failed"}; ${cleanupError instanceof Error ? cleanupError.message : "own cleanup failed"}`,
       );
     }
     const message =
-      error instanceof Error &&
-      /^Fleet application setup [a-z ]+ failed$/.test(error.message)
+      error instanceof OperationalFleetSetupError
         ? error.message
         : "Fleet application setup failed";
     throw new Error(
