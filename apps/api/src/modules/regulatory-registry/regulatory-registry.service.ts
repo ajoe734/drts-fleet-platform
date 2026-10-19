@@ -4650,139 +4650,257 @@ export class RegulatoryRegistryService
       };
     }
 
-    // 1. Scan PostgreSQL or in-memory sources for candidate expired records
-    let driverCandidates: DriverRegistryRecord[] = [];
-
-    if (repository.isEnabled()) {
-      driverCandidates = await repository.scanExpiredDrivers(asOf, limit);
-    } else {
-      driverCandidates = this.drivers
-        .filter((d) => {
-          const dates = [
-            d.licenseExpiry,
-            d.professionalDriverLicenseExpiry,
-            d.taxiDriverRegistrationExpiry,
-          ];
-          const datesExpired = dates.some((dt) => {
-            if (!dt) return false;
-            const ms = Date.parse(dt);
-            return !Number.isNaN(ms) && ms <= asOfMs;
-          });
-          if (datesExpired) return true;
-          if (this.academyService) return true;
-          return false;
-        })
-        .slice(0, limit);
-    }
-    scannedDrivers = driverCandidates.length;
-
-    let policyCandidates: InsurancePolicyRecord[] = [];
-
-    if (repository.isEnabled()) {
-      policyCandidates = await repository.scanExpiredPolicies(asOf, limit);
-    } else {
-      policyCandidates = this.policies
-        .filter((p) => {
-          if (p.status === "cancelled") return false;
-          const endAtMs = Date.parse(p.endAt);
-          const startAtMs = Date.parse(p.startAt);
-          return (
-            !Number.isNaN(endAtMs) &&
-            endAtMs < asOfMs &&
-            !Number.isNaN(startAtMs) &&
-            startAtMs <= asOfMs
+    // Fix the source interval once. Each SQL page keeps the original limit;
+    // subsequent invocations re-evaluate current sources/fingerprints from the start.
+    const enabled = repository.isEnabled();
+    const memoryDrivers = enabled
+      ? []
+      : this.drivers
+          .filter((d) => {
+            const dates = [
+              d.licenseExpiry,
+              d.professionalDriverLicenseExpiry,
+              d.taxiDriverRegistrationExpiry,
+            ];
+            const datesExpired = dates.some((dt) => {
+              if (!dt) return false;
+              const ms = Date.parse(dt);
+              return !Number.isNaN(ms) && ms <= asOfMs;
+            });
+            if (datesExpired) return true;
+            if (this.academyService) return true;
+            return false;
+          })
+          .sort((a, b) =>
+            a.driverId < b.driverId ? -1 : a.driverId > b.driverId ? 1 : 0,
           );
-        })
-        .slice(0, limit);
-    }
-    scannedPolicies = policyCandidates.length;
-
-    // Strict multi-row locking order: sorted by entity ID ASC
-    const sortedDriverIds = Array.from(
-      new Set(driverCandidates.map((d) => d.driverId)),
-    ).sort();
-    const sortedPolicyIds = Array.from(
-      new Set(policyCandidates.map((p) => p.policyId)),
-    ).sort();
-
-    // 2. Perform DB operations inside transaction
-    await repository.withTransaction(async (client) => {
-      // Process drivers
-      for (const driverId of sortedDriverIds) {
-        const locked = repository.isEnabled()
-          ? await repository.lockDriver(driverId, client)
-          : (this.drivers.find((d) => d.driverId === driverId) ?? null);
-        if (!locked) continue;
-
-        const checks: Array<{
-          fieldName: string;
-          expiry: string;
-          credentialType: string;
-        }> = [];
-
-        if (locked.licenseExpiry) {
-          const ms = Date.parse(locked.licenseExpiry);
-          if (!Number.isNaN(ms) && ms <= asOfMs) {
-            checks.push({
-              fieldName: "licenseExpiry",
-              expiry: locked.licenseExpiry,
-              credentialType: "driver_license",
-            });
-          }
-        }
-        if (locked.professionalDriverLicenseExpiry) {
-          const ms = Date.parse(locked.professionalDriverLicenseExpiry);
-          if (!Number.isNaN(ms) && ms <= asOfMs) {
-            checks.push({
-              fieldName: "professionalDriverLicenseExpiry",
-              expiry: locked.professionalDriverLicenseExpiry,
-              credentialType: "professional_driver_license",
-            });
-          }
-        }
-        if (locked.taxiDriverRegistrationExpiry) {
-          const ms = Date.parse(locked.taxiDriverRegistrationExpiry);
-          if (!Number.isNaN(ms) && ms <= asOfMs) {
-            checks.push({
-              fieldName: "taxiDriverRegistrationExpiry",
-              expiry: locked.taxiDriverRegistrationExpiry,
-              credentialType: "taxi_driver_registration",
-            });
-          }
-        }
-
-        // Academy qualification check
-        if (this.academyService) {
-          try {
-            const qual = await this.academyService.evaluateDriverQualification(
-              driverId,
-              new Date(asOf),
+    const memoryPolicies = enabled
+      ? []
+      : this.policies
+          .filter((p) => {
+            if (p.status === "cancelled") return false;
+            const endAtMs = Date.parse(p.endAt);
+            const startAtMs = Date.parse(p.startAt);
+            return (
+              !Number.isNaN(endAtMs) &&
+              endAtMs < asOfMs &&
+              !Number.isNaN(startAtMs) &&
+              startAtMs <= asOfMs
             );
-            if (qual.regulatoryStatus === "expired") {
-              const overdue = qual.records.find((r) => r.isOverdue);
-              const expiry = overdue?.expiresAt ?? locked.updatedAt ?? asOf;
+          })
+          .sort((a, b) =>
+            a.policyId < b.policyId ? -1 : a.policyId > b.policyId ? 1 : 0,
+          );
+    const upper = enabled
+      ? await repository.getExpiryScanUpperBounds()
+      : {
+          driverId: memoryDrivers.at(-1)?.driverId ?? null,
+          policyId: memoryPolicies.at(-1)?.policyId ?? null,
+        };
+    const processBatch = async (
+      driverCandidates: DriverRegistryRecord[],
+      policyCandidates: InsurancePolicyRecord[],
+    ) => {
+      // Strict multi-row locking order: sorted by entity ID ASC
+      const sortedDriverIds = Array.from(
+        new Set(driverCandidates.map((d) => d.driverId)),
+      ).sort();
+      const sortedPolicyIds = Array.from(
+        new Set(policyCandidates.map((p) => p.policyId)),
+      ).sort();
+
+      // 2. Perform DB operations inside transaction
+      await repository.withTransaction(async (client) => {
+        // Process drivers
+        for (const driverId of sortedDriverIds) {
+          const locked = repository.isEnabled()
+            ? await repository.lockDriver(driverId, client)
+            : (this.drivers.find((d) => d.driverId === driverId) ?? null);
+          if (!locked) continue;
+
+          const checks: Array<{
+            fieldName: string;
+            expiry: string;
+            credentialType: string;
+          }> = [];
+
+          if (locked.licenseExpiry) {
+            const ms = Date.parse(locked.licenseExpiry);
+            if (!Number.isNaN(ms) && ms <= asOfMs) {
               checks.push({
-                fieldName: "academyTraining",
-                expiry:
-                  typeof expiry === "string"
-                    ? expiry
-                    : new Date(expiry).toISOString(),
-                credentialType: "academy_qualification",
+                fieldName: "licenseExpiry",
+                expiry: locked.licenseExpiry,
+                credentialType: "driver_license",
               });
             }
-          } catch {
-            // ignore Academy evaluation errors during driver expiry check
+          }
+          if (locked.professionalDriverLicenseExpiry) {
+            const ms = Date.parse(locked.professionalDriverLicenseExpiry);
+            if (!Number.isNaN(ms) && ms <= asOfMs) {
+              checks.push({
+                fieldName: "professionalDriverLicenseExpiry",
+                expiry: locked.professionalDriverLicenseExpiry,
+                credentialType: "professional_driver_license",
+              });
+            }
+          }
+          if (locked.taxiDriverRegistrationExpiry) {
+            const ms = Date.parse(locked.taxiDriverRegistrationExpiry);
+            if (!Number.isNaN(ms) && ms <= asOfMs) {
+              checks.push({
+                fieldName: "taxiDriverRegistrationExpiry",
+                expiry: locked.taxiDriverRegistrationExpiry,
+                credentialType: "taxi_driver_registration",
+              });
+            }
+          }
+
+          // Academy qualification check
+          if (this.academyService) {
+            try {
+              const qual =
+                await this.academyService.evaluateDriverQualification(
+                  driverId,
+                  new Date(asOf),
+                );
+              if (qual.regulatoryStatus === "expired") {
+                const overdue = qual.records.find((r) => r.isOverdue);
+                const expiry = overdue?.expiresAt ?? locked.updatedAt ?? asOf;
+                checks.push({
+                  fieldName: "academyTraining",
+                  expiry:
+                    typeof expiry === "string"
+                      ? expiry
+                      : new Date(expiry).toISOString(),
+                  credentialType: "academy_qualification",
+                });
+              }
+            } catch {
+              // ignore Academy evaluation errors during driver expiry check
+            }
+          }
+
+          for (const check of checks) {
+            const fingerprintTuple = [
+              "credential-expiry/v1",
+              scope,
+              "driver",
+              driverId,
+              check.fieldName,
+              Date.parse(check.expiry),
+            ];
+            const fingerprint = createHash("sha256")
+              .update(JSON.stringify(fingerprintTuple))
+              .digest("hex");
+
+            const existingEvent = await repository.findExpiryEventByFingerprint(
+              fingerprint,
+              client,
+            );
+            let event: RegistryExpiryEventRow;
+
+            if (!existingEvent) {
+              const eventId = randomUUID();
+              event = await repository.insertExpiryEvent(
+                {
+                  eventId,
+                  scope,
+                  entityType: "driver",
+                  entityId: driverId,
+                  credentialType: check.credentialType,
+                  sourceFingerprint: fingerprint,
+                  sourceExpiryAt: check.expiry,
+                  status: "pending",
+                },
+                client,
+              );
+              if (event.event_id === eventId) expiredEventsCreated++;
+
+              const superseded =
+                await repository.supersedeActiveExpiryEventsForEntity(
+                  "driver",
+                  driverId,
+                  check.credentialType,
+                  event.event_id,
+                  client,
+                );
+              expiredEventsSuperseded += superseded;
+            } else {
+              event = existingEvent;
+            }
+
+            if (
+              event.status !== "superseded" &&
+              !(await repository.getExpiryEventById(event.event_id, client))
+                ?.intent
+            ) {
+              const recipientEmail =
+                process.env.REGULATORY_ALERT_RECIPIENT_EMAIL?.trim() ||
+                `driver-${driverId}@alerts.drts.local`;
+              const idempotencyKey = JSON.stringify([
+                "credential-alert/v1",
+                scope,
+                event.event_id,
+                recipientEmail,
+              ]);
+              const fromEmail =
+                process.env.NOTIFICATION_FROM_EMAIL?.trim() ||
+                "noreply@fleet.drts.local";
+              const subject = `[DRTS Alert] Credential Expired: ${check.credentialType} for driver ${driverId}`;
+              const body = `The credential ${check.credentialType} for driver ${driverId} expired at ${check.expiry}. Immediate renewal or suspension review required.`;
+
+              const intentId = randomUUID();
+              const intent = await repository.insertDeliveryIntent(
+                {
+                  intentId,
+                  eventId: event.event_id,
+                  scope,
+                  idempotencyKey,
+                  tenantId: scope,
+                  recipientEmail,
+                  fromEmail,
+                  subject,
+                  body,
+                },
+                client,
+              );
+              if (intent.intent_id === intentId) {
+                deliveryIntentsCreated++;
+              }
+            }
           }
         }
 
-        for (const check of checks) {
+        // Process policies
+        for (const policyId of sortedPolicyIds) {
+          const locked = repository.isEnabled()
+            ? await repository.lockPolicy(policyId, client)
+            : (this.policies.find((p) => p.policyId === policyId) ?? null);
+          if (!locked) continue;
+
+          const policyNo = locked.policyNo || policyId;
+          const insuranceType = locked.insuranceType || "commercial_liability";
+          const startAt = locked.startAt || locked.createdAt;
+          const endAt = locked.endAt;
+          const status = locked.status || "active";
+
+          if (status === "cancelled") continue;
+          const startAtMs = Date.parse(startAt);
+          const endAtMs = Date.parse(endAt);
+          if (Number.isNaN(endAtMs) || endAtMs >= asOfMs) continue;
+          if (!Number.isNaN(startAtMs) && startAtMs > asOfMs) continue;
+
           const fingerprintTuple = [
             "credential-expiry/v1",
             scope,
-            "driver",
-            driverId,
-            check.fieldName,
-            Date.parse(check.expiry),
+            "policy",
+            policyId,
+            locked.vehicleId,
+            policyNo,
+            insuranceType,
+            startAtMs,
+            endAtMs,
+            status,
           ];
           const fingerprint = createHash("sha256")
             .update(JSON.stringify(fingerprintTuple))
@@ -4795,25 +4913,27 @@ export class RegulatoryRegistryService
           let event: RegistryExpiryEventRow;
 
           if (!existingEvent) {
+            const eventId = randomUUID();
             event = await repository.insertExpiryEvent(
               {
+                eventId,
                 scope,
-                entityType: "driver",
-                entityId: driverId,
-                credentialType: check.credentialType,
+                entityType: "policy",
+                entityId: policyId,
+                credentialType: "insurance_policy",
                 sourceFingerprint: fingerprint,
-                sourceExpiryAt: check.expiry,
+                sourceExpiryAt: endAt,
                 status: "pending",
               },
               client,
             );
-            expiredEventsCreated++;
+            if (event.event_id === eventId) expiredEventsCreated++;
 
             const superseded =
               await repository.supersedeActiveExpiryEventsForEntity(
-                "driver",
-                driverId,
-                check.credentialType,
+                "policy",
+                policyId,
+                "insurance_policy",
                 event.event_id,
                 client,
               );
@@ -4822,10 +4942,14 @@ export class RegulatoryRegistryService
             event = existingEvent;
           }
 
-          if (event.status !== "superseded") {
+          if (
+            event.status !== "superseded" &&
+            !(await repository.getExpiryEventById(event.event_id, client))
+              ?.intent
+          ) {
             const recipientEmail =
               process.env.REGULATORY_ALERT_RECIPIENT_EMAIL?.trim() ||
-              `driver-${driverId}@alerts.drts.local`;
+              `policy-${policyId}@alerts.drts.local`;
             const idempotencyKey = JSON.stringify([
               "credential-alert/v1",
               scope,
@@ -4835,11 +4959,13 @@ export class RegulatoryRegistryService
             const fromEmail =
               process.env.NOTIFICATION_FROM_EMAIL?.trim() ||
               "noreply@fleet.drts.local";
-            const subject = `[DRTS Alert] Credential Expired: ${check.credentialType} for driver ${driverId}`;
-            const body = `The credential ${check.credentialType} for driver ${driverId} expired at ${check.expiry}. Immediate renewal or suspension review required.`;
+            const subject = `[DRTS Alert] Insurance Policy Expired: policy ${policyNo} for vehicle ${locked.vehicleId}`;
+            const body = `Insurance policy ${policyNo} (type: ${insuranceType}) for vehicle ${locked.vehicleId} expired at ${endAt}. Immediate renewal required.`;
 
+            const intentId = randomUUID();
             const intent = await repository.insertDeliveryIntent(
               {
+                intentId,
                 eventId: event.event_id,
                 scope,
                 idempotencyKey,
@@ -4851,117 +4977,55 @@ export class RegulatoryRegistryService
               },
               client,
             );
-            if (intent) {
+            if (intent.intent_id === intentId) {
               deliveryIntentsCreated++;
             }
           }
         }
-      }
-
-      // Process policies
-      for (const policyId of sortedPolicyIds) {
-        const locked = repository.isEnabled()
-          ? await repository.lockPolicy(policyId, client)
-          : (this.policies.find((p) => p.policyId === policyId) ?? null);
-        if (!locked) continue;
-
-        const policyNo = locked.policyNo || policyId;
-        const insuranceType = locked.insuranceType || "commercial_liability";
-        const startAt = locked.startAt || locked.createdAt;
-        const endAt = locked.endAt;
-        const status = locked.status || "active";
-
-        if (status === "cancelled") continue;
-        const startAtMs = Date.parse(startAt);
-        const endAtMs = Date.parse(endAt);
-        if (Number.isNaN(endAtMs) || endAtMs >= asOfMs) continue;
-        if (!Number.isNaN(startAtMs) && startAtMs > asOfMs) continue;
-
-        const fingerprintTuple = [
-          "credential-expiry/v1",
-          scope,
-          "policy",
-          policyId,
-          locked.vehicleId,
-          policyNo,
-          insuranceType,
-          startAtMs,
-          endAtMs,
-          status,
-        ];
-        const fingerprint = createHash("sha256")
-          .update(JSON.stringify(fingerprintTuple))
-          .digest("hex");
-
-        const existingEvent = await repository.findExpiryEventByFingerprint(
-          fingerprint,
-          client,
-        );
-        let event: RegistryExpiryEventRow;
-
-        if (!existingEvent) {
-          event = await repository.insertExpiryEvent(
-            {
-              scope,
-              entityType: "policy",
-              entityId: policyId,
-              credentialType: "insurance_policy",
-              sourceFingerprint: fingerprint,
-              sourceExpiryAt: endAt,
-              status: "pending",
-            },
-            client,
-          );
-          expiredEventsCreated++;
-
-          const superseded =
-            await repository.supersedeActiveExpiryEventsForEntity(
-              "policy",
-              policyId,
-              "insurance_policy",
-              event.event_id,
-              client,
-            );
-          expiredEventsSuperseded += superseded;
-        } else {
-          event = existingEvent;
-        }
-
-        if (event.status !== "superseded") {
-          const recipientEmail =
-            process.env.REGULATORY_ALERT_RECIPIENT_EMAIL?.trim() ||
-            `policy-${policyId}@alerts.drts.local`;
-          const idempotencyKey = JSON.stringify([
-            "credential-alert/v1",
-            scope,
-            event.event_id,
-            recipientEmail,
-          ]);
-          const fromEmail =
-            process.env.NOTIFICATION_FROM_EMAIL?.trim() ||
-            "noreply@fleet.drts.local";
-          const subject = `[DRTS Alert] Insurance Policy Expired: policy ${policyNo} for vehicle ${locked.vehicleId}`;
-          const body = `Insurance policy ${policyNo} (type: ${insuranceType}) for vehicle ${locked.vehicleId} expired at ${endAt}. Immediate renewal required.`;
-
-          const intent = await repository.insertDeliveryIntent(
-            {
-              eventId: event.event_id,
-              scope,
-              idempotencyKey,
-              tenantId: scope,
-              recipientEmail,
-              fromEmail,
-              subject,
-              body,
-            },
-            client,
-          );
-          if (intent) {
-            deliveryIntentsCreated++;
-          }
-        }
-      }
-    });
+      });
+    };
+    let afterDriver: string | undefined;
+    while (upper.driverId !== null) {
+      const page = enabled
+        ? await repository.scanExpiredDrivers(asOf, limit, undefined, {
+            afterId: afterDriver,
+            throughId: upper.driverId,
+          })
+        : memoryDrivers
+            .filter(
+              (d) => afterDriver === undefined || d.driverId > afterDriver,
+            )
+            .slice(0, limit);
+      if (page.length === 0) break;
+      scannedDrivers += page.length;
+      await processBatch(page, []);
+      const next = page.at(-1)!.driverId;
+      if (afterDriver !== undefined && next <= afterDriver)
+        throw new Error("registry_expiry_scan_did_not_advance");
+      afterDriver = next;
+      if (next === upper.driverId) break;
+    }
+    let afterPolicy: string | undefined;
+    while (upper.policyId !== null) {
+      const page = enabled
+        ? await repository.scanExpiredPolicies(asOf, limit, undefined, {
+            afterId: afterPolicy,
+            throughId: upper.policyId,
+          })
+        : memoryPolicies
+            .filter(
+              (p) => afterPolicy === undefined || p.policyId > afterPolicy,
+            )
+            .slice(0, limit);
+      if (page.length === 0) break;
+      scannedPolicies += page.length;
+      await processBatch([], page);
+      const next = page.at(-1)!.policyId;
+      if (afterPolicy !== undefined && next <= afterPolicy)
+        throw new Error("registry_expiry_scan_did_not_advance");
+      afterPolicy = next;
+      if (next === upper.policyId) break;
+    }
 
     // 3. Post-commit: delivery intent processing
     const pendingIntents = await repository.findPendingDeliveryIntents(limit);
@@ -4979,6 +5043,7 @@ export class RegulatoryRegistryService
       }
 
       if (this.notificationDeliveryService) {
+        let outboxDeliveryId: string | undefined;
         try {
           const receipt = await this.notificationDeliveryService.enqueue({
             tenantId: intent.tenant_id,
@@ -4988,33 +5053,73 @@ export class RegulatoryRegistryService
             subject: intent.subject,
             body: intent.body,
           });
+          outboxDeliveryId = receipt.deliveryId;
           deliveryIntentsEnqueued++;
-
-          if (this.notificationDeliveryService.availability() === "available") {
+          // Store the receipt before awaiting external send; lawful renewal can
+          // supersede state without losing a real accepted outbox identity.
+          const linked = await repository.recordExpiryDeliveryOutcome(intent, {
+            deliveryStatus: "enqueued",
+            outboxDeliveryId,
+          });
+          const current = await repository.getExpiryEventById(intent.event_id);
+          if (
+            linked &&
+            current &&
+            linked.delivery_status !== "superseded" &&
+            current.status !== "superseded" &&
+            this.notificationDeliveryService.availability() === "available"
+          ) {
             try {
               await this.notificationDeliveryService.dispatch(
                 intent.tenant_id,
                 receipt.deliveryId,
               );
             } catch {
-              // Dispatch transport error recorded in outbox attempt, doesn't abort enqueue
+              /* Actual attempts/uncertainty remain owned by the existing outbox. */
             }
           }
-
-          await repository.updateDeliveryIntent({
-            intentId: intent.intent_id,
-            deliveryStatus: "enqueued",
-            outboxDeliveryId: receipt.deliveryId,
-          });
-          await repository.updateExpiryEventStatus(
-            intent.event_id,
-            "completed",
-          );
-        } catch (err: any) {
-          await repository.updateDeliveryIntent({
-            intentId: intent.intent_id,
-            deliveryStatus: "failed",
-            lastError: err.message ?? String(err),
+        } catch (error: unknown) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          const code = (error as NodeJS.ErrnoException | null)?.code;
+          const causeCode = (error as { cause?: NodeJS.ErrnoException } | null)
+            ?.cause?.code;
+          const storageCodes = [
+            "EIO",
+            "EAGAIN",
+            "EACCES",
+            "EBUSY",
+            "EMFILE",
+            "ENFILE",
+            "ENOSPC",
+            "ECONNRESET",
+            "ECONNREFUSED",
+            "ETIMEDOUT",
+            "40001",
+            "40P01",
+            "55P03",
+            "08000",
+            "08003",
+            "08006",
+            "57P01",
+          ];
+          const terminal =
+            message === "notification_idempotency_conflict" ||
+            message === "registry_expiry_receipt_link_conflict" ||
+            message.startsWith("notification_invalid_");
+          const recoverable =
+            !terminal &&
+            (outboxDeliveryId !== undefined ||
+              storageCodes.includes(code ?? "") ||
+              storageCodes.includes(causeCode ?? "") ||
+              message === "notification_outbox_lock_timeout" ||
+              message === "notification_outbox_lock_unavailable");
+          // One bounded attempt per pending intent per invocation. Preserve the
+          // original frozen payload and error; no new timer or provider retry loop.
+          await repository.recordExpiryDeliveryOutcome(intent, {
+            deliveryStatus: recoverable ? "pending" : "failed",
+            lastError: message,
+            ...(outboxDeliveryId === undefined ? {} : { outboxDeliveryId }),
           });
         }
       }
