@@ -267,6 +267,9 @@ function createTestService(
   }>,
 ) {
   const regulatoryRegistryService = {
+    prepareMatchingSuppressions: () => undefined,
+    assertCurrentMatchingSuppressionClear: () => undefined,
+
     getEligibleCandidates: () => candidates,
     getVehicleDispatchability: () => true,
     getDriverAvailability: () => true,
