@@ -4,6 +4,7 @@ import {
   BUREAU_REVIEW_STAGE_GROUPS,
   BUREAU_REVIEW_TOTAL_STAGES,
 } from "./content";
+import { BUREAU_REVIEW_SHARED_RUN } from "./shared-run";
 import { t } from "./translations";
 
 // Read-only reference entry for the New Taipei transport bureau, served from
@@ -77,8 +78,56 @@ export function BureauReviewPage() {
         )}
       </section>
 
+      <section aria-labelledby="shared-run-heading">
+        <h2 id="shared-run-heading">{t.sharedRunHeading}</h2>
+        <p>{t.sharedRunScope}</p>
+        <p>
+          {t.sharedRunSourceLabel}
+          <code>{BUREAU_REVIEW_SHARED_RUN.evidenceSourceSha}</code>
+        </p>
+        <p>
+          {t.sharedRunCheckedAtLabel}
+          <time dateTime={BUREAU_REVIEW_SHARED_RUN.checkedAtUtc}>
+            {BUREAU_REVIEW_SHARED_RUN.checkedAtUtc}
+          </time>
+          {" · "}
+          {t.sharedRunBatchLabel}
+          <code>{BUREAU_REVIEW_SHARED_RUN.workflowRunId}</code>
+        </p>
+        <p>
+          {t.sharedRunSummary(
+            BUREAU_REVIEW_SHARED_RUN.orderCount,
+            BUREAU_REVIEW_SHARED_RUN.coreStages,
+            BUREAU_REVIEW_SHARED_RUN.additionalStages,
+            BUREAU_REVIEW_SHARED_RUN.testCount,
+            BUREAU_REVIEW_SHARED_RUN.testRetries,
+          )}
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>{t.sharedRunGroupHeader}</th>
+              <th>{t.sharedRunResultHeader}</th>
+              <th>{t.sharedRunLimitsHeader}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {t.sharedRunChecks.map((check) => (
+              <tr key={check.label}>
+                <th scope="row">{check.label}</th>
+                <td>{check.result}</td>
+                <td>{check.limits}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p>{t.sharedRunCancellationPolicy}</p>
+        <p>{t.sharedRunSimulationLimits}</p>
+      </section>
+
       <section>
         <h2>{t.verifiedCasesHeading}</h2>
+        <p>{t.historicalScopeNote}</p>
         <p>
           {t.sourceSnapshotLabel}
           <code>{BUREAU_REVIEW_SOURCE.release}</code>（

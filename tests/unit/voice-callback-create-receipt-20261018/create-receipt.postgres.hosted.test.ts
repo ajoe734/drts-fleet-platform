@@ -45,6 +45,7 @@ import { seedVoiceDispatchWorkFixture } from "../../support/voice-dispatch-worki
 import {
   hostedPaymentEnabled,
   PaymentPostgresHarness,
+  type DiagnosedDatabaseService,
 } from "../pax-qa-20261009/payment-postgres-harness";
 
 // Only hosted full-migration PostgreSQL. Consent/contact/evidence ports are
@@ -1106,6 +1107,186 @@ describe.skipIf(!hostedPaymentEnabled)(
         await warm.stop();
         await cold?.stop();
         noListener.mockRestore();
+      }
+    });
+
+    it("original R2 formal PostgreSQL: a newer pending admission holds the real session lock and rejects an older seal commit", async () => {
+      const fixture = await seedVoiceDispatchWorkFixture(h.pool!);
+      const session = fixture.request.voiceSessionId;
+      const scope = {
+        brandId: fixture.authority.brandId,
+        callId: fixture.callId,
+        recordingId: "SIM-recording-CAS",
+        legId: "SIM-leg-CAS",
+      };
+      const initial = new VoiceBookingRepository(h.database);
+      const before = await initial.findSessionById(session);
+      const admission = {
+        kind: "admission" as const,
+        eventKey: "admission:1",
+        scope,
+        payload: {
+          admissionId: "SIM-consumed-CAS-1",
+          principalId: "SIM-principal",
+          epoch: 1,
+        },
+      };
+      const attachment = {
+        ...admission,
+        kind: "attachment" as const,
+        eventKey: "attachment:1",
+      };
+      await initial.appendRecordingContinuation(session, admission);
+      await initial.appendRecordingContinuation(session, attachment);
+      const nextAdmission = {
+        ...admission,
+        eventKey: "admission:2",
+        payload: {
+          ...admission.payload,
+          admissionId: "SIM-pending-CAS-2",
+          epoch: 2,
+        },
+      };
+      const utc = new Date().toISOString();
+      // A complete external SIM manifest isolates this repository CAS. The
+      // preceding actual HTTP/byte case proves sealed-object provenance.
+      const olderSeal = {
+        kind: "finalized" as const,
+        eventKey: "finalized",
+        scope,
+        authority: admission.payload,
+        payload: {
+          scope,
+          recordingId: scope.recordingId,
+          manifestRef: {
+            objectKey: "SIM/final-CAS.json",
+            objectVersion: "SIM-v1",
+            checksum: "a".repeat(64),
+            byteLength: 1,
+            durableAt: utc,
+          },
+          coverage: {
+            startMs: 0,
+            endMs: 1000,
+            channels: ["inbound", "outbound"],
+            closedEventId: "SIM-close-CAS",
+            endedAt: utc,
+          },
+          verifiedAt: utc,
+        },
+      };
+      const pendingDb = h.peerDatabase() as DiagnosedDatabaseService;
+      const sealingDb = h.peerDatabase() as DiagnosedDatabaseService;
+      const pendingRepo = new VoiceBookingRepository(pendingDb);
+      const sealingRepo = new VoiceBookingRepository(sealingDb);
+      const barrier = () => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((done) => {
+          resolve = done;
+        });
+        return { promise, resolve };
+      };
+      const pendingLocked = barrier(),
+        allowCommit = barrier(),
+        olderBegan = barrier();
+      let holderPid: number | undefined, waiterPid: number | undefined;
+      pendingDb.leaseObserver = async (sql, client) => {
+        if (
+          sql.includes("FROM voice.session") &&
+          sql.includes("FOR UPDATE") &&
+          holderPid === undefined
+        ) {
+          holderPid = (await client.query("SELECT pg_backend_pid() AS pid"))
+            .rows[0].pid as number;
+          pendingLocked.resolve();
+          await allowCommit.promise;
+        }
+      };
+      sealingDb.leaseObserver = async (sql, client) => {
+        if (sql === "BEGIN") {
+          waiterPid = (await client.query("SELECT pg_backend_pid() AS pid"))
+            .rows[0].pid as number;
+          olderBegan.resolve();
+        }
+      };
+      const next = pendingRepo.appendRecordingContinuation(
+        session,
+        nextAdmission,
+      );
+      let older:
+        | Promise<{ status: string; value?: unknown; error?: unknown }>
+        | undefined;
+      try {
+        await Promise.race([
+          pendingLocked.promise,
+          next.then(() => {
+            throw new Error("Expected the actual pending-admission row lock");
+          }),
+        ]);
+        older = sealingRepo
+          .appendRecordingContinuation(session, olderSeal)
+          .then(
+            (value) => ({ status: "fulfilled", value }),
+            (error: unknown) => ({ status: "rejected", error }),
+          );
+        await Promise.race([
+          olderBegan.promise,
+          older.then(() => {
+            throw new Error(
+              "Expected the older transaction to begin on its real peer connection",
+            );
+          }),
+        ]);
+        let blockers: number[] = [];
+        const until = Date.now() + 2000;
+        do {
+          blockers = (
+            await h.pool!.query("SELECT pg_blocking_pids($1) AS blockers", [
+              waiterPid,
+            ])
+          ).rows[0].blockers as number[];
+          if (blockers.includes(holderPid!)) break;
+          await new Promise<void>((resolve) => setTimeout(resolve, 5));
+        } while (Date.now() < until);
+        expect(holderPid).not.toBe(waiterPid);
+        expect(blockers).toContain(holderPid);
+        allowCommit.resolve();
+        expect(await next).toEqual(nextAdmission);
+        expect(await older).toMatchObject({
+          status: "rejected",
+          error: { message: "voice_recording_finalize_admission_stale" },
+        });
+        expect(await initial.readRecordingContinuation(session)).toEqual([
+          admission,
+          attachment,
+          nextAdmission,
+        ]);
+        expect(
+          await pendingRepo.appendRecordingContinuation(session, nextAdmission),
+        ).toEqual(nextAdmission);
+        await expect(
+          sealingRepo.appendRecordingContinuation(session, attachment),
+        ).rejects.toThrow("voice_recording_attachment_not_current_admission");
+        const after = await initial.findSessionById(session);
+        expect(after?.recordingState).toBe(before?.recordingState);
+        expect(after?.sessionVersion).toBe(before?.sessionVersion);
+        expect(after?.inputEpoch).toBe(before?.inputEpoch);
+        expect(after?.lastAppliedControlSequence).toBe(
+          before?.lastAppliedControlSequence,
+        );
+        expect(
+          (
+            await h.pool!.query(
+              "SELECT event_kind FROM voice.recording_continuation_event WHERE voice_session_id=$1 AND event_kind='finalized'",
+              [session],
+            )
+          ).rows,
+        ).toEqual([]);
+      } finally {
+        allowCommit.resolve();
+        delete pendingDb.leaseObserver;
+        delete sealingDb.leaseObserver;
+        await Promise.allSettled([next, ...(older ? [older] : [])]);
       }
     });
 

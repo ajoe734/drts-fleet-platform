@@ -65,25 +65,28 @@ export class PlatformAdminController {
   }
 
   @Post("public-info")
-  createPublicInfoVersion(
+  async createPublicInfoVersion(
     @Body() command: CreatePublicInfoVersionCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.platformAdminService.createPublicInfoVersion(command, requestId),
+      await this.platformAdminService.createPublicInfoVersion(
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
 
   @Post("public-info/:versionId/publish")
-  publishPublicInfoVersion(
+  async publishPublicInfoVersion(
     @Param("versionId") versionId: string,
     @Body() command: PublishPublicInfoVersionCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.platformAdminService.publishPublicInfoVersion(
+      await this.platformAdminService.publishPublicInfoVersion(
         versionId,
         command,
         requestId,
@@ -94,13 +97,13 @@ export class PlatformAdminController {
   }
 
   @Delete("public-info/:versionId")
-  deleteDraftPublicInfoVersion(
+  async deleteDraftPublicInfoVersion(
     @Param("versionId") versionId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.platformAdminService.deleteDraftPublicInfoVersion(
+      await this.platformAdminService.deleteDraftPublicInfoVersion(
         versionId,
         requestId,
         this.requireActorId(identity),

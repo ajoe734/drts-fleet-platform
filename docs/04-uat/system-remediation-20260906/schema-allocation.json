@@ -155,6 +155,12 @@
       "amended_at": "2026-10-18",
       "scope": "Append V0122 to voice_application_allocations; original V0106 entry and all other groups/amendments unchanged",
       "reason": "Registers the durable contact-role revision ledger for VoiceContactService (SD §6.4), reserved by Root at exact parent 4db295df5129b57b66a27950348f6a1fbb2ae049 (.local/passenger-bureau-gap-correction-20261018/Voice-C-V0122-exact-root-allocation-20261018/result.json, sha256 b1c388065f8243ef63a4d65ee63031b3e768d9802f0c7799c12c8f0eeda9c86c). Existing allocation collectors already include voice_application_allocations; no guard or assertion beyond the group's own length is changed."
+    },
+    {
+      "amended_by_task_id": "SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015",
+      "amended_at": "2026-10-19",
+      "scope": "Append sos_duty_allocations V0124 only; all previous entries and V0122/V0123 reservations remain owned by their original tasks.",
+      "reason": "Complete the original S-3 §24 outbox acknowledged semantics after normal Root exact scope/number coordination. Existing migration collision collector includes this new group; no existing assertion is weakened."
     }
   ],
   "voice_application_allocations": [
@@ -696,6 +702,18 @@
         "Schedule splits one covered published interval; historical published rows and immutable quote snapshots remain available.",
         "Tariff mutation, audit and command receipt commit or roll back together; receipt retry returns current row without replaying interval changes."
       ]
+    }
+  ],
+  "sos_duty_allocations": [
+    {
+      "task_id": "SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015",
+      "version": "V0124",
+      "migration_filename": "V0124__sos_urgent_outbox_acknowledged.sql",
+      "domain": "sos_duty_acknowledgment",
+      "target_schema": "safety",
+      "primary_tables": ["safety.driver_sos_urgent_alert_outbox"],
+      "referenced_tables": ["safety.driver_sos_events"],
+      "description": "Forward ALTER of the existing V0053 status check for the original S-3 §24 acknowledged state. No new tables/columns. Backfill only same-event non-null canonical duty actor/time; preserve delivery/render as distinct transitions. Root reserved V0124 after existing Voice V0122 and Complaint V0123 reservations."
     }
   ]
 }

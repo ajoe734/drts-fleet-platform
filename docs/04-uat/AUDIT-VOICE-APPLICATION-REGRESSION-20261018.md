@@ -681,3 +681,61 @@ previous positive/negative evidence remain retained. No old pass is promoted
 to a successor SHA. All66scopes, four required keys, original ABCD17 clauses
 and F1–F8 remain in force; this source checkpoint is not reviewer approval,
 merge, deployment or completed acceptance.
+
+The immutable a1 continuation and subsequent accepted integration are kept
+separate. Literal browser39201733632 passed all6cases with zero skipped,
+unexpected or flaky results. Its17stages contain actual zh operations followed
+by one English sealed-history readback, not a full second English operations
+matrix. Original A/0900000016/revision6/consent stays immutable; one replacement
+C/0900000017/revision7/fresh SIM consent uses the same original order. Saved
+complete report, API/SQL facts, screenshot07 and raw identify exact a1. External
+issuer/fork/object storage/consent/PSTN and media/meaning extraction remain SIM.
+A fresh object instance is not claimed as an actual OS restart or live provider.
+
+Literal Product39201818161 completed failure: its unchanged manual dispatch
+compares to origin/main, failing canonical consistency53 and commit trailers325.
+No failing item belongs to this Voice diff/commits. All other18jobs succeeded,
+including fast checks and both smoke gates. Six complete unit reports contain
+12735passed/0failed/41skipped, individually retained without summing overlaps.
+Formal create-receipt17cases all passed, including actual API/binding/consume/
+sealed bytes/journal/three committed ACK losses/fresh HTTP/queued runner in566ms;
+contact two-instance/replacement, original retention/hold, late control close and
+V0125 replay/conflict cases also passed. Product root1 raw proves literal a1.
+The complete casewise and terminal packets in `.local/voice-evidence/` preserve
+both successful behavior and the two actual gate failures. No gate or historical
+commit is rewritten, and correct PR-dev CI remains required for the successor.
+
+Fixed-a1 independent full support (`Voice-a1-original-full-independent-support-review-20261019`,
+review SHA25697fe466d9a45432a7471e57776db8d46eff963089806376af6a1e7d37b7d2cb1)
+found no new reproducible Source counterexample across all17clauses/four keys/
+F1–F8 and independently passed30existing actual-chain cases. Those30overlap the
+owner's1030 and are not added. That support was observed before later terminal
+PG reports; no missing qualification is silently promoted. It is not a formal
+reviewer verdict. Empty local type/lint logs alone were not independent shell
+exit proof; successor checks preserve actual argv/Source/tree/return codes.
+
+Fresh accepted dev f87d373ea5db393d1ec0ab6a4fbdf9d138382914 is normally merged
+because the genuine shared schema amendment append conflicts. Both complete
+Voice V0122 and SOS V0124 amendment objects remain side by side. Every entry in
+both parent ledgers is preserved, including original V0106, Voice V0122/V0125,
+SOS V0124 and every other reservation/history. Root normally appended the same
+six necessary accepted SOS formatter paths (72ordered scopes total), restricted
+to exact formatter blobs already shared with Journey/Complaint/GPS. No auth/SOS
+behavior, assertion, identity policy or task requirement is changed. Portable
+hooks are generated from the installed original Husky9.1.7 prepare command;
+existing .husky scripts and hooksPath remain unchanged, with no bypass/install.
+
+The original R2 journal CAS now also has an authored narrow formal PostgreSQL
+race in the owned create-receipt suite. Two genuine peer connections execute the
+original repository SQL; the existing lease observer only holds an acquired
+session FOR UPDATE lock. Native pg_blocking_pids proves the older seal waits for
+the pending higher epoch; after commit it must reject with no finalized event
+or domain/control/input change. Exact pending replay remains positive and stale
+attachment is refused. Its complete external SIM manifest isolates journal CAS;
+the preceding actual byte/HTTP case establishes provenance. No VM PG is run.
+This added race is pending successor hosted execution, never a1 pass credit.
+The initial test cleanup had two exactOptionalPropertyTypes errors, fixed by
+removing the optional observer property; no product/harness policy was changed.
+Full original17clauses/four keys/F1–F8 and original5000/10000held/three previews/
+62snapshot cases remain required on the new candidate. Old a1 runs finish
+naturally before publishing the new SHA; no old success is borrowed.

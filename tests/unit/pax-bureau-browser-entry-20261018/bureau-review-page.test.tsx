@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { BureauReviewPage } from "../../../apps/passenger-app-web/components/bureau-review/BureauReviewPage";
 import {
@@ -58,10 +58,25 @@ describe("PAX-BUREAU-BROWSER-ENTRY-20261018: BureauReviewPage", () => {
 
     expect(BUREAU_REVIEW_CASES).toHaveLength(16);
     for (const entry of BUREAU_REVIEW_CASES) {
-      expect(screen.getByText(entry.id)).not.toBeNull();
+      const details = screen.getByText(entry.id).closest("details");
+      expect(details).not.toBeNull();
+      for (const text of [
+        entry.preconditions,
+        entry.expected,
+        entry.verified,
+        entry.missing,
+      ]) {
+        expect(details?.textContent).toContain(text);
+      }
+      expect(
+        within(details!)
+          .getAllByRole("listitem")
+          .map((item) => item.textContent),
+      ).toEqual(entry.steps);
     }
 
-    // UC01's first-time consent gap must not be rendered as already verified.
+    // Preserve UC01's historical first-time gap, even when later positive
+    // consent evidence is displayed separately. It is not a current-run verdict.
     const uc01 = BUREAU_REVIEW_CASES.find((c) => c.id === "UC01");
     expect(uc01?.missing).toContain("首次條款");
     expect(uc01?.status).not.toMatch(/^已驗$/);
@@ -70,6 +85,50 @@ describe("PAX-BUREAU-BROWSER-ENTRY-20261018: BureauReviewPage", () => {
     const uc16 = BUREAU_REVIEW_CASES.find((c) => c.id === "UC16");
     expect(uc16).toBeDefined();
     expect(uc16?.title).toContain("無障礙");
+  });
+
+  it("separates the checked 61fa run from the unchanged 48d94 historical cases", () => {
+    const { container } = render(<BureauReviewPage />);
+    const current = screen.getByRole("region", {
+      name: "最近已核對的共享實測",
+    });
+    expect(current.textContent).toContain(
+      "61fa7cf44fb25d8be36634357fa3549286b96b84",
+    );
+    expect(current.textContent).toContain("8 張演練新訂單");
+    expect(current.textContent).toContain("48 + 60 = 108 個階段");
+    expect(current.textContent).toContain("不是全部 16 案通過");
+    expect(current.textContent).not.toContain("163");
+
+    const historical = screen
+      .getByRole("heading", { name: "歷史已驗證案例摘要（48d94）" })
+      .closest("section");
+    expect(historical?.textContent).toContain("publish/v2026.10.18.4");
+    expect(historical?.textContent).toContain("163");
+    expect(historical?.textContent).not.toContain("108");
+    expect(container.querySelectorAll("details")).toHaveLength(16);
+  });
+
+  it("shows current positive evidence together with the unverified branches and policy limits", () => {
+    render(<BureauReviewPage />);
+    const current = screen.getByRole("region", {
+      name: "最近已核對的共享實測",
+    });
+    for (const required of [
+      "首次條款視窗確實出現",
+      "沒有條款視窗原圖",
+      "未勾選、拒絕、錯碼、過期、重寄",
+      "允許取消時不收取消費",
+      "實際已扣款",
+      "90 秒是尚未指派的媒合工作",
+      "60 秒是已指派任務的接單期限",
+      "上車後／待補憑證時的取消拒絕",
+      "福利／無障礙",
+      "追蹤卡不在原圖範圍",
+    ]) {
+      expect(current.textContent).toContain(required);
+    }
+    expect(current.textContent).not.toContain(".local/");
   });
 
   it("never renders an interactive booking/login control", () => {
