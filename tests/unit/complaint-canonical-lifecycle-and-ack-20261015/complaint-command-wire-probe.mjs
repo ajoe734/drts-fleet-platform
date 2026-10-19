@@ -614,6 +614,56 @@ async function run() {
       entryIds: [...wire.timelines.keys()],
     };
   }
+  {
+    const wire = new Wire(),
+      a = instance(wire);
+    const created = a.service.createComplaintCase(opsPayload);
+    await a.service.awaitSettlementPersistence(created.caseNo);
+    wire.nextCommit = "unknown-not-landed";
+    await outcome(() =>
+      a.ops.assignComplaintCase(
+        created.caseNo,
+        { assigneeId: "unconfirmed-assignee" },
+        "assign-A",
+        "A1",
+      ),
+    );
+    wire.readFails = true;
+    const unavailable = {
+      case: await outcome(() => a.ops.getComplaintCase(created.caseNo)),
+      list: await outcome(() => a.ops.listComplaintCases()),
+      timeline: await outcome(() => a.ops.getComplaintTimeline(created.caseNo)),
+      export: await outcome(() =>
+        a.ops.getComplaintExportView(created.caseNo, "export", "true"),
+      ),
+      unrelatedMutation: await outcome(() =>
+        a.ops.addComplaintCaseNote(
+          created.caseNo,
+          { note: "Cannot reuse unavailable cache" },
+          "note",
+          "different-note",
+        ),
+      ),
+    };
+    wire.readFails = false;
+    const readback = await outcome(() =>
+      a.ops.getComplaintCase(created.caseNo),
+    );
+    const retry = await outcome(() =>
+      a.ops.assignComplaintCase(
+        created.caseNo,
+        { assigneeId: "unconfirmed-assignee" },
+        "assign-B",
+        "A1",
+      ),
+    );
+    observations.readbackFailure = {
+      unavailable,
+      readback,
+      retry,
+      canonical: wire.cases.get(created.caseNo),
+    };
+  }
   return {
     source: reference || "working-tree",
     observations,

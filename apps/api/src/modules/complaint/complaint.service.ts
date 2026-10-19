@@ -156,6 +156,8 @@ export class ComplaintService implements OnModuleInit {
     PendingUncertainComplaintCommit
   >();
 
+  private unavailableOrdinaryReadbacks = new Set<string>();
+
   private identifiedComplaintCommands = new Map<
     string,
     PendingUncertainComplaintCommit
@@ -386,12 +388,14 @@ export class ComplaintService implements OnModuleInit {
         durableCase = await this.complaintRepository!.loadCaseByCaseNo(caseNo);
       }
     } catch {
+      this.unavailableOrdinaryReadbacks.add(caseNo);
       return;
     }
     if (this.pendingUncertainCommits.get(caseNo) !== pending) return;
     // An old/missing observation does not prove an ambiguous COMMIT rolled
     // back. Preserve the original prepared IDs for a real same-command retry.
     if (!durableCase) {
+      this.unavailableOrdinaryReadbacks.add(caseNo);
       pending.rollback?.();
       return;
     }
@@ -403,6 +407,7 @@ export class ComplaintService implements OnModuleInit {
           )
         : this.stableStringify(durableCase) ===
           this.stableStringify(pending.complaintCase));
+    this.unavailableOrdinaryReadbacks.delete(caseNo);
     this.reconcileComplaintCaseIntoCache(durableCase);
     if (durableTimeline) this.complaintTimelines.set(caseNo, durableTimeline);
     if (!committed) return;
@@ -933,7 +938,24 @@ export class ComplaintService implements OnModuleInit {
       this.replaceComplaintCase(record);
   }
 
+  private ensureComplaintReadbackAvailable(caseNo?: string): void {
+    if (
+      [...this.unavailableOrdinaryReadbacks].some(
+        (pending) => !caseNo || pending === caseNo,
+      )
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "IDEMPOTENCY_IN_PROGRESS",
+        "Complaint commit needs canonical confirmation before readback.",
+        caseNo ? { caseNo } : undefined,
+        true,
+      );
+    }
+  }
+
   async listComplaintCasesForOps() {
+    this.ensureComplaintReadbackAvailable();
     if (this.complaintRepository?.isEnabled()) {
       let cursor = "";
       while (true) {
@@ -947,6 +969,7 @@ export class ComplaintService implements OnModuleInit {
   }
 
   async getComplaintCaseForOps(caseNo: string) {
+    this.ensureComplaintReadbackAvailable(caseNo);
     // Passenger intake owns this UUID namespace; other CRM reads keep their original behavior.
     if (!/^PAX-[0-9a-f-]{36}$/i.test(caseNo))
       return this.getComplaintCase(caseNo);
@@ -958,6 +981,7 @@ export class ComplaintService implements OnModuleInit {
   }
 
   async getComplaintTimelineForOps(caseNo: string) {
+    this.ensureComplaintReadbackAvailable(caseNo);
     if (!/^PAX-[0-9a-f-]{36}$/i.test(caseNo))
       return this.getComplaintTimeline(caseNo);
     await this.getComplaintCaseForOps(caseNo);
@@ -1183,6 +1207,7 @@ export class ComplaintService implements OnModuleInit {
   }
 
   getComplaintExportView(caseNo: string): ComplaintExportViewRecord {
+    this.ensureComplaintReadbackAvailable(caseNo);
     const complaintCase = this.getComplaintCase(caseNo);
     const timeline = this.getComplaintTimeline(caseNo);
     return {
@@ -2013,6 +2038,7 @@ export class ComplaintService implements OnModuleInit {
         })
         .then(() => {
           for (const caseNo of affectedCaseNos) {
+            this.unavailableOrdinaryReadbacks.delete(caseNo);
             this.pendingUncertainCommits.delete(caseNo);
             const committedTarget = durablePrepareTargets.find(
               (item) => item.caseNo === caseNo,
@@ -2055,6 +2081,7 @@ export class ComplaintService implements OnModuleInit {
                 complaintCase,
                 timelineForCase,
               } of durablePrepareTargets) {
+                this.unavailableOrdinaryReadbacks.add(caseNo);
                 this.pendingUncertainCommits.set(caseNo, {
                   action: context,
                   complaintCase,
@@ -2091,6 +2118,7 @@ export class ComplaintService implements OnModuleInit {
             }
           } else {
             for (const caseNo of affectedCaseNos) {
+              this.unavailableOrdinaryReadbacks.delete(caseNo);
               this.pendingUncertainCommits.delete(caseNo);
               // This attempt's own prepared durable marker (if any) never saw
               // a business commit at all, so it must not linger as if it
@@ -2273,6 +2301,7 @@ export class ComplaintService implements OnModuleInit {
           : undefined,
       );
     }
+    this.ensureComplaintReadbackAvailable(caseNo);
     const unresolved = this.pendingUncertainCommits.get(caseNo);
     if (unresolved && !unresolved.confirmed && unresolved !== pending) {
       throw new ApiRequestError(

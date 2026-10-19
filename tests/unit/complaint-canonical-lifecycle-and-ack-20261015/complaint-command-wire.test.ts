@@ -8,6 +8,13 @@ type Result = {
   result?: { data: { caseNo?: string; complaintCase?: { caseNo: string } } };
 };
 type Observations = {
+  readbackFailure: {
+    unavailable: Record<string, Result>;
+    readback: Result;
+    retry: Result;
+    canonical: { assigneeId: string };
+  };
+
   "escalation-unknown-landed": Escalation;
   "escalation-unknown-not-landed": Escalation;
   distinctKeyReservation: {
@@ -233,5 +240,20 @@ describe("R1/R2/R3/R5: actual caller and repository command recovery", () => {
     expect(row.retry.ok).toBe(true);
     expect(new Set(row.caseNos).size).toBe(2);
     expect(row.entryIds).toHaveLength(2);
+  });
+  it("preserves honest actual Ops case/list/timeline/export failure while canonical readback is unavailable", () => {
+    const row = observed.readbackFailure;
+    for (const result of Object.values(row.unavailable))
+      expect(result).toMatchObject({
+        ok: false,
+        code: "IDEMPOTENCY_IN_PROGRESS",
+      });
+    expect(row.readback.ok).toBe(true);
+    expect(row.readback.result!.data).toMatchObject({
+      status: "new",
+      assigneeId: null,
+    });
+    expect(row.retry.ok).toBe(true);
+    expect(row.canonical.assigneeId).toBe("unconfirmed-assignee");
   });
 });
