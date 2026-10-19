@@ -17,9 +17,7 @@ export const camel = (value: any): any =>
 
 export async function openPhoneLogin(page: Page, phone: string) {
   await page.goto(`${PAX}/login`);
-  await page
-    .getByRole("button", { name: "手機號碼登入", exact: true })
-    .click();
+  await page.getByRole("button", { name: "手機號碼登入", exact: true }).click();
   await page.getByLabel("請輸入您的手機號碼", { exact: true }).fill(phone);
 }
 
@@ -49,9 +47,7 @@ export const requestSimulatedOtp = (page: Page) =>
 
 export const resendSimulatedOtp = (page: Page) =>
   issueSimulatedOtp(page, () =>
-    page
-      .getByRole("button", { name: "重新發送驗證碼", exact: true })
-      .click(),
+    page.getByRole("button", { name: "重新發送驗證碼", exact: true }).click(),
   );
 
 export async function fillOtpCode(page: Page, code: string) {
@@ -110,9 +106,7 @@ export function reviewPhoneTarget(localPhone: string): string {
  * navigation ConsentGate.onAccepted triggers. */
 export async function acceptConsent(page: Page) {
   await page.getByRole("checkbox").check();
-  await page
-    .getByRole("button", { name: "繼續", exact: true })
-    .click();
+  await page.getByRole("button", { name: "繼續", exact: true }).click();
   await page.waitForURL(`${PAX}/`);
 }
 
@@ -123,9 +117,7 @@ export async function acceptConsent(page: Page) {
 export async function logoutFromAccount(page: Page) {
   await page.goto(`${PAX}/account`);
   await page.getByRole("button", { name: "登出", exact: true }).click();
-  await expect(
-    page.getByText("確定要登出嗎？", { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText("確定要登出嗎？", { exact: true })).toBeVisible();
   const loggedOut = page.waitForResponse(
     (response) =>
       new URL(response.url()).pathname.endsWith("/auth/logout") &&
@@ -134,4 +126,22 @@ export async function logoutFromAccount(page: Page) {
   await page.getByRole("button", { name: "登出", exact: true }).click();
   await loggedOut;
   await page.waitForURL(`${PAX}/login`);
+}
+
+/** An ordinary browser login, with an observed first-consent precondition. */
+export async function loginPassenger(page: Page, phone: string) {
+  await openPhoneLogin(page, phone);
+  const { code } = await requestSimulatedOtp(page);
+  await fillOtpCode(page, code);
+  expect((await submitOtpVerify(page)).status()).toBe(201);
+  await expect(
+    page.getByText("歡迎加入，請同意服務條款", { exact: true }),
+  ).toBeVisible();
+  await acceptConsent(page);
+  const response = await page.request.get(`${PAX}/api/passenger-app/me`);
+  expect(response.status()).toBe(200);
+  const account = camel(await response.json()).data.account;
+  expect(account.termsVersion).toBe("review-terms-v1");
+  expect(account.privacyVersion).toBe("review-privacy-v1");
+  return account.drtsPassengerId as string;
 }

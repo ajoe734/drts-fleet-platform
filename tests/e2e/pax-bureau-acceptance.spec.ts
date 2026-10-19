@@ -12,6 +12,10 @@ import {
   submitOtpVerify,
   wrongCode,
 } from "./pax-bureau-acceptance/otp-consent-journey";
+import {
+  bureauPhone,
+  roleHeaders,
+} from "./pax-bureau-acceptance/review-runtime";
 
 /**
  * UC01 bureau gap coverage: the existing pax-review-shared-order-demo journey
@@ -20,21 +24,19 @@ import {
  * code, expiry/resend, consent refusal, the real five-minute code expiry and
  * a returning session's consent-already-current skip as still missing real
  * UI/BFF evidence. Each case below uses its own dedicated rehearsal phone
- * number; this job seeds a disposable database per run, so every number here
- * is genuinely unconsented at the start of the run, not an assumption
- * layered on a shared fixed number.
- *
- * Out of scope for this file (left as open gaps, see the UAT doc):
- * cross-device/multi-session account and payment-method recovery (UC02) and
- * the remaining UC03-16 browser branches, which belong to other product
- * surfaces/write_scopes than this OTP/consent-gate file.
+ * number. Hosted CI seeds a disposable database. Shared runs require explicit
+ * per-case rehearsal-pool allocation in PAX_BUREAU_PHONES and must still
+ * observe the actual first-consent prompt; no existing user is cleared.
+ * Other original UC01-16 branches continue in the sibling specs, under the
+ * same task and test-helper scope. Unexecuted cases remain unverified.
  */
 test.describe.configure({ mode: "serial" });
+test.use({ extraHTTPHeaders: roleHeaders("pax") });
 
 test("consent gate blocks continue until checked, and refusal revokes the session", async ({
   page,
 }, info) => {
-  const phone = "0900000010";
+  const phone = bureauPhone("consent");
   await openPhoneLogin(page, phone);
   const { code } = await requestSimulatedOtp(page);
   await fillOtpCode(page, code);
@@ -59,9 +61,7 @@ test("consent gate blocks continue until checked, and refusal revokes the sessio
   await consentCheckbox.uncheck();
   await expect(continueButton).toBeDisabled();
 
-  await page
-    .getByRole("button", { name: "不同意並登出", exact: true })
-    .click();
+  await page.getByRole("button", { name: "不同意並登出", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "手機號碼登入", exact: true }),
   ).toBeVisible();
@@ -84,7 +84,7 @@ test("consent gate blocks continue until checked, and refusal revokes the sessio
 test("wrong OTP codes count down remaining attempts and lock after five", async ({
   page,
 }, info) => {
-  const phone = "0900000011";
+  const phone = bureauPhone("wrong");
   await openPhoneLogin(page, phone);
   const { code } = await requestSimulatedOtp(page);
   const bad = wrongCode(code);
@@ -95,9 +95,7 @@ test("wrong OTP codes count down remaining attempts and lock after five", async 
     expect(response.status()).toBe(400);
     expect((await response.json()).error.code).toBe("invalid_code");
     if (attempt < 5) {
-      await expect(
-        page.getByText("驗證碼錯誤", { exact: true }),
-      ).toBeVisible();
+      await expect(page.getByText("驗證碼錯誤", { exact: true })).toBeVisible();
       const remaining = 5 - attempt;
       await expect(
         page.getByText(`本次操作剩餘嘗試次數: ${remaining}`, { exact: true }),
@@ -117,7 +115,8 @@ test("wrong OTP codes count down remaining attempts and lock after five", async 
       remainingAttemptsObservedPerTry: remainingObserved,
       lockedAfterFiveRealWrongAttempts: true,
       verifyDisabledWhenLocked: true,
-      scope: "every attempt is a real /auth/otp/verify round trip, not a UI-only counter",
+      scope:
+        "every attempt is a real /auth/otp/verify round trip, not a UI-only counter",
     }),
     contentType: "application/json",
   });
@@ -126,7 +125,7 @@ test("wrong OTP codes count down remaining attempts and lock after five", async 
 test("resend issues a new code; the superseded challenge is rejected server-side", async ({
   page,
 }, info) => {
-  const phone = "0900000012";
+  const phone = bureauPhone("resend");
   const target = reviewPhoneTarget(phone);
   await openPhoneLogin(page, phone);
   const first = await requestSimulatedOtp(page);
@@ -156,7 +155,8 @@ test("resend issues a new code; the superseded challenge is rejected server-side
       phone,
       firstChallengeRejectedAfterResend: true,
       secondChallengeVerified: true,
-      scope: "real sixty-second resend cooldown and direct API replay of the superseded challenge",
+      scope:
+        "real sixty-second resend cooldown and direct API replay of the superseded challenge",
     }),
     contentType: "application/json",
   });
@@ -171,7 +171,7 @@ test("the real five-minute code expiry locks the UI and the server rejects the s
   // minutes, not a fake clock. The whole-file serial job budget (see
   // ci-integ.yml's ui-bureau-acceptance-e2e timeout-minutes) accounts for it.
   test.setTimeout(8 * 60_000);
-  const phone = "0900000014";
+  const phone = bureauPhone("expiry");
   const target = reviewPhoneTarget(phone);
   await openPhoneLogin(page, phone);
   const { code, challenge } = await requestSimulatedOtp(page);
@@ -213,7 +213,8 @@ test("the real five-minute code expiry locks the UI and the server rejects the s
       codeInputsDisabledAfterRealFiveMinuteWait: true,
       expiredCodeRejectedServerSideAfterRealWait: true,
       accountRecoversViaRealResendAfterExpiry: true,
-      scope: "real elapsed five-minute wait against the server's hard-coded expiresAt; no fake clock",
+      scope:
+        "real elapsed five-minute wait against the server's hard-coded expiresAt; no fake clock",
     }),
     contentType: "application/json",
   });
@@ -222,7 +223,7 @@ test("the real five-minute code expiry locks the UI and the server rejects the s
 test("a returning session with current consent skips the consent gate on the next login", async ({
   page,
 }, info) => {
-  const phone = "0900000015";
+  const phone = bureauPhone("returning");
   await openPhoneLogin(page, phone);
   const { code } = await requestSimulatedOtp(page);
   await fillOtpCode(page, code);
@@ -250,7 +251,8 @@ test("a returning session with current consent skips the consent gate on the nex
       consentPersistedOnFirstLogin: true,
       loggedOutThenLoggedBackInWithSameAccount: true,
       consentGateSkippedOnReturningSessionWithCurrentConsent: true,
-      scope: "real ConsentGate.load() termsVersion/privacyVersion match against the real logged-out/logged-back-in account",
+      scope:
+        "real ConsentGate.load() termsVersion/privacyVersion match against the real logged-out/logged-back-in account",
     }),
     contentType: "application/json",
   });

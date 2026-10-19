@@ -338,6 +338,18 @@ export async function finish(
   await expect
     .poll(async () => (await authority(pax, orderId)).order.status)
     .toBe("on_trip");
+  await completeStartedTrip(driver, pax, orderId, ops, step, stale);
+}
+
+/** Continue an already started trip through the same original Driver UI. */
+export async function completeStartedTrip(
+  driver: Page,
+  pax: Page,
+  orderId: string,
+  ops: Page,
+  step: JourneyStep,
+  stale = false,
+) {
   // The producer takes 8 real-time steps; no direct completion facts or fake
   // tracking authority are injected into either page or API.
   await step("Driver receives live tracked distance", () =>

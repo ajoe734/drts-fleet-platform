@@ -1,16 +1,87 @@
 import { expect, type Page, type TestInfo } from "@playwright/test";
 import {
   authority,
+  camel,
   bind,
   book,
   createDispatch,
   assign,
   registerDriver,
   readAssignedTripAndAccept,
+  completeStartedTrip,
   OPS,
   PAX,
   type JourneyStep,
 } from "../pax-review-shared-order/additional-journey";
+import { recordOrderEvidence } from "../pax-review-shared-order/evidence";
+import { trackInterruptedRehearsal } from "../pax-review-shared-order/interrupted-rehearsal-finalizer";
+import { loginPassenger } from "./otp-consent-journey";
+import { bureauPhone } from "./review-runtime";
+
+async function cancellationSnapshot(
+  pax: Page,
+  ops: Page,
+  orderId: string,
+  taskId: string,
+) {
+  const readOps = async (path: string) => {
+    const response = await ops.request.get(
+      `${OPS}/control-plane-proxy/${path}`,
+    );
+    expect(response.status()).toBe(200);
+    return camel(await response.json()).data;
+  };
+  const [ride, order, task, recordResponse] = await Promise.all([
+    authority(pax, orderId),
+    readOps(`orders/${orderId}`),
+    readOps(`driver/tasks/${taskId}`),
+    pax.request.get(
+      `${PAX}/api/passenger-app/review-demo/rides/${orderId}/record`,
+    ),
+  ]);
+  expect(recordResponse.status()).toBe(200);
+  const record = camel(await recordResponse.json()).data;
+  expect(order.orderId).toBe(orderId);
+  expect(task.orderId).toBe(orderId);
+  expect(task.taskId).toBe(taskId);
+  expect(task.assignmentId).toBe(ride.assignment.assignmentId);
+  // Tracking telemetry may keep arriving. Compare durable business fields,
+  // excluding live GPS/ETA, which cancellation must not freeze.
+  return {
+    order: {
+      orderId: order.orderId,
+      status: order.status,
+      bookingId: order.bookingId,
+      runtimeProfileCode: order.runtimeProfileCode,
+      serviceProductCode: order.serviceProductCode,
+      reservationWindowStart: order.reservationWindowStart,
+      reservationWindowEnd: order.reservationWindowEnd,
+      benefitReference: order.benefitReference,
+    },
+    task: {
+      taskId: task.taskId,
+      orderId: task.orderId,
+      dispatchJobId: task.dispatchJobId,
+      assignmentId: task.assignmentId,
+      driverId: task.driverId,
+      vehicleId: task.vehicleId,
+      status: task.status,
+      acceptedAt: task.acceptedAt,
+      departedAt: task.departedAt,
+      arrivedPickupAt: task.arrivedPickupAt,
+      startedAt: task.startedAt,
+      completedAt: task.completedAt,
+      fare: task.fare,
+    },
+    assignment: {
+      assignmentId: ride.assignment.assignmentId,
+      driverId: ride.assignment.driver.driverId,
+      vehicleId: ride.assignment.vehicle.vehicleId,
+    },
+    payment: ride.payment,
+    charge: record.charge,
+  };
+}
 
 /**
  * UC05's post-arrival cancellation-rejection branch (review.md: "補同版原
@@ -33,119 +104,207 @@ export async function onTripCancellationRejectionJourney(
   step: JourneyStep,
   info: TestInfo,
 ) {
-  await step("Ops prepare real persisted rehearsal supply", async () => {
-    await ops.goto(`${OPS}/review`);
-    const preparing = ops.waitForResponse(
-      (r) =>
-        new URL(r.url()).pathname.endsWith("/ops/review-demo/prepare") &&
-        r.request().method() === "POST",
-    );
-    await ops.getByRole("button", { name: "準備虛構演練車司" }).click();
-    expect((await preparing).ok()).toBe(true);
-  });
-  await registerDriver(ops, driver, driverBase, step);
-
-  const paymentMethodId = await step(
-    "Passenger binds a real payment method",
-    () => bind(pax, "success"),
-  );
-  const orderId = await step("Passenger books a real order", () =>
-    book(pax, paymentMethodId),
-  );
-  await step("Ops dispatches and assigns the real driver", async () => {
-    await createDispatch(ops, orderId);
-    await assign(ops);
-  });
-  await step(
-    "Driver accepts, departs and arrives at the real pickup",
-    async () => {
-      await readAssignedTripAndAccept(driver, driverBase, orderId, step);
-      for (const [label, action] of [
-        ["前往接送點", "depart"],
-        ["抵達上車點", "arrived_pickup"],
-      ] as const) {
-        const response = driver.waitForResponse(
-          (r) =>
-            r.url().endsWith(`/${action}`) && r.request().method() === "POST",
-        );
-        await driver.getByRole("button", { name: label, exact: true }).click();
-        expect((await response).status()).toBeLessThan(300);
-      }
-    },
-  );
-  await step(
-    "Passenger can still cancel for free before the trip starts",
-    async () => {
-      const before = await authority(pax, orderId);
-      expect(before.order.status).toBe("arrived_pickup");
-      expect(before.actions.canCancel).toBe(true);
-      await expect(
-        pax.getByRole("button", { name: "取消行程", exact: true }).first(),
-      ).toBeEnabled();
-    },
-  );
-  await step("Driver starts the real trip", async () => {
-    const scheduledAt = Date.parse(
-      (await authority(pax, orderId)).order.requestedPickupAt,
-    );
-    await expect
-      .poll(() => Date.now(), { timeout: 180_000, intervals: [1000] })
-      .toBeGreaterThanOrEqual(scheduledAt);
-    const response = driver.waitForResponse(
-      (r) => r.url().endsWith("/start") && r.request().method() === "POST",
-    );
-    await driver.getByRole("button", { name: "開始行程", exact: true }).click();
-    expect((await response).status()).toBeLessThan(300);
-    await expect
-      .poll(async () => (await authority(pax, orderId)).order.status)
-      .toBe("on_trip");
-  });
-  await step(
-    "The real UI disables cancellation once on_trip, and the same session's direct cancel request is really rejected without changing the order",
-    async () => {
-      await expect
-        .poll(async () => (await authority(pax, orderId)).actions.canCancel)
-        .toBe(false);
-      await pax.reload();
-      const cancelButton = pax
-        .getByRole("button", { name: "取消行程", exact: true })
-        .first();
-      await expect(cancelButton).toBeVisible();
-      await expect(cancelButton).toBeDisabled();
-      const before = await authority(pax, orderId);
-      // The Next.js BFF's checkCSRF (app/api/passenger-app/[...path]/route.ts)
-      // requires a same-origin Origin header on every non-GET call, which a
-      // real browser fetch() sends automatically but page.request does not;
-      // set it explicitly rather than relying on an accidental pass.
-      const rejected = await pax.request.post(
-        `${PAX}/api/passenger-app/rides/${orderId}/cancel`,
-        {
-          data: { rideId: orderId },
-          headers: { "Content-Type": "application/json", Origin: PAX },
-        },
+  const finalizeInterrupted = trackInterruptedRehearsal(pax, info, PAX);
+  let orderId: string | undefined;
+  let handled = false;
+  try {
+    await step("Ops prepare real persisted rehearsal supply", async () => {
+      await ops.goto(`${OPS}/review`);
+      const preparing = ops.waitForResponse(
+        (r) =>
+          new URL(r.url()).pathname.endsWith("/ops/review-demo/prepare") &&
+          r.request().method() === "POST",
       );
-      expect(rejected.status()).toBe(409);
-      const body = await rejected.json();
-      expect(body.error.code).toBe("ORDER_NOT_CANCELABLE");
-      const after = await authority(pax, orderId);
-      expect(after.order.status).toBe("on_trip");
-      expect(after.order.status).toBe(before.order.status);
-      expect(after.payment).toBeNull();
-      await info.attach("UC05-on-trip-cancel-rejection-facts", {
-        body: JSON.stringify({
-          orderId,
-          beforeStatus: before.order.status,
-          afterStatus: after.order.status,
-          cancelRejectedHttpStatus: rejected.status(),
-          cancelRejectedErrorCode: body.error.code,
-          cancelButtonRealUIDisabled: true,
-          noOrderStatusOrPaymentChange: true,
-          scope:
-            "real browser session cookies via page.request against the real cancel endpoint; the UI's own button is disabled once on_trip so a genuine click could not reach the server at all",
-        }),
-        contentType: "application/json",
-      });
-    },
-  );
-  return orderId;
+      await ops.getByRole("button", { name: "準備虛構演練車司" }).click();
+      expect((await preparing).ok()).toBe(true);
+    });
+    await registerDriver(ops, driver, driverBase, step);
+    await step("Passenger ordinary OTP login and persisted first consent", () =>
+      loginPassenger(pax, bureauPhone("trip")),
+    );
+
+    const paymentMethodId = await step(
+      "Passenger binds a real payment method",
+      () => bind(pax, "success"),
+    );
+    const bookedOrderId = await step("Passenger books a real order", () =>
+      book(pax, paymentMethodId),
+    );
+    orderId = bookedOrderId;
+    const assigned = await step(
+      "Ops dispatches and assigns the real driver",
+      async () => {
+        await createDispatch(ops, bookedOrderId);
+        return assign(ops);
+      },
+    );
+    const taskId = assigned.taskId as string;
+    expect(taskId).toMatch(/^[0-9a-f-]{36}$/);
+    await step(
+      "Driver accepts, departs and arrives at the real pickup",
+      async () => {
+        await readAssignedTripAndAccept(
+          driver,
+          driverBase,
+          bookedOrderId,
+          step,
+          taskId,
+        );
+        for (const [label, action] of [
+          ["前往接送點", "depart"],
+          ["抵達上車點", "arrived_pickup"],
+        ] as const) {
+          const response = driver.waitForResponse(
+            (r) =>
+              r.url().endsWith(`/${action}`) && r.request().method() === "POST",
+          );
+          await driver
+            .getByRole("button", { name: label, exact: true })
+            .click();
+          expect((await response).status()).toBeLessThan(300);
+        }
+      },
+    );
+    await step(
+      "Passenger cancellation remains available before the trip starts",
+      async () => {
+        const before = await authority(pax, bookedOrderId);
+        expect(before.order.status).toBe("arrived_pickup");
+        expect(before.actions.canCancel).toBe(true);
+        await expect(
+          pax.getByRole("button", { name: "取消行程", exact: true }).first(),
+        ).toBeEnabled();
+      },
+    );
+    await step("Driver starts the real trip", async () => {
+      const scheduledAt = Date.parse(
+        (await authority(pax, bookedOrderId)).order.requestedPickupAt,
+      );
+      await expect
+        .poll(() => Date.now(), { timeout: 180_000, intervals: [1000] })
+        .toBeGreaterThanOrEqual(scheduledAt);
+      const response = driver.waitForResponse(
+        (r) => r.url().endsWith("/start") && r.request().method() === "POST",
+      );
+      await driver
+        .getByRole("button", { name: "開始行程", exact: true })
+        .click();
+      expect((await response).status()).toBeLessThan(300);
+      await expect
+        .poll(async () => (await authority(pax, bookedOrderId)).order.status)
+        .toBe("on_trip");
+    });
+    await step(
+      "The real UI disables cancellation once on_trip, and the same session's direct cancel request is really rejected without changing the order",
+      async () => {
+        await expect
+          .poll(
+            async () => (await authority(pax, bookedOrderId)).actions.canCancel,
+          )
+          .toBe(false);
+        await pax.reload();
+        const cancelButton = pax
+          .getByRole("button", { name: "取消行程", exact: true })
+          .first();
+        await expect(cancelButton).toBeVisible();
+        await expect(cancelButton).toBeDisabled();
+        const before = await cancellationSnapshot(
+          pax,
+          ops,
+          bookedOrderId,
+          taskId,
+        );
+        expect(before.order.status).toBe("on_trip");
+        expect(before.task.status).toBe("on_trip");
+        const beforeRows = await recordOrderEvidence(
+          bookedOrderId,
+          "UC05-before-refusal",
+          { pax, ops, driver },
+          info,
+        );
+        // The Next.js BFF's checkCSRF (app/api/passenger-app/[...path]/route.ts)
+        // requires a same-origin Origin header on every non-GET call, which a
+        // real browser fetch() sends automatically but page.request does not;
+        // set it explicitly rather than relying on an accidental pass.
+        const rejected = await pax.request.post(
+          `${PAX}/api/passenger-app/rides/${bookedOrderId}/cancel`,
+          {
+            data: { rideId: bookedOrderId },
+            headers: {
+              "Content-Type": "application/json",
+              Origin: PAX,
+              "x-request-id": crypto.randomUUID(),
+            },
+          },
+        );
+        expect(rejected.status()).toBe(409);
+        const body = await rejected.json();
+        expect(body.error.code).toBe("ORDER_NOT_CANCELABLE");
+        const after = await cancellationSnapshot(
+          pax,
+          ops,
+          bookedOrderId,
+          taskId,
+        );
+        expect(after.order.status).toBe("on_trip");
+        expect(after).toEqual(before);
+        const afterRows = await recordOrderEvidence(
+          bookedOrderId,
+          "UC05-after-refusal",
+          { pax, ops, driver },
+          info,
+        );
+        expect(afterRows).toEqual(beforeRows);
+        await info.attach("UC05-on-trip-cancel-rejection-facts", {
+          body: JSON.stringify({
+            orderId: bookedOrderId,
+            taskId,
+            beforeStatus: before.order.status,
+            afterStatus: after.order.status,
+            cancelRejectedHttpStatus: rejected.status(),
+            cancelRejectedErrorCode: body.error.code,
+            cancelButtonRealUIDisabled: true,
+            before,
+            after,
+            noOrderTaskAssignmentOrPaymentChange: true,
+            scope:
+              "real browser session cookies via page.request against the real cancel endpoint; the UI's own button is disabled once on_trip so a genuine click could not reach the server at all",
+          }),
+          contentType: "application/json",
+        });
+      },
+    );
+    await step("Driver completes this test's own started trip normally", () =>
+      completeStartedTrip(driver, pax, bookedOrderId, ops, step),
+    );
+    const completed = await cancellationSnapshot(
+      pax,
+      ops,
+      bookedOrderId,
+      taskId,
+    );
+    expect(completed.order.status).toBe("completed");
+    expect(completed.task.status).toBe("completed");
+    handled = true;
+    await recordOrderEvidence(
+      bookedOrderId,
+      "UC05-normal-completion",
+      { pax, ops, driver },
+      info,
+    );
+    return bookedOrderId;
+  } finally {
+    if (!handled) await finalizeInterrupted();
+    await info.attach("UC05-own-order-disposition", {
+      body: JSON.stringify({
+        orderId: orderId ?? null,
+        completedNormally: handled,
+        forcedCancellation: false,
+        note: handled
+          ? "Normal Driver completion after rejection evidence"
+          : "Original recovery records only this test's orders; on_trip/proof_pending remain preserved for normal handling",
+      }),
+      contentType: "application/json",
+    });
+  }
 }
