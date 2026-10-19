@@ -15,6 +15,7 @@ import { ApiClient } from "../../../packages/api-client/src/index";
 import { BootstrapAuthGuard } from "../../../apps/api/src/common/auth/bootstrap-auth.guard";
 import { JwtAuthService } from "../../../apps/api/src/common/auth/jwt-auth.service";
 import { fixture, actor, vid, did, deferred } from "./fixture";
+import { t as translate } from "../../../apps/platform-admin-web/lib/translations";
 const { Reflector } = createRequire(
   new URL("../../../apps/api/package.json", import.meta.url),
 )("@nestjs/core");
@@ -123,7 +124,11 @@ function mount(
     "react/jsx-runtime": jsxRuntime,
     "@/lib/admin-client": { usePlatformAdminClient: () => client },
     "@/lib/i18n": {
-      useTranslation: () => ({ locale: "en", t: (key: string) => key }),
+      useTranslation: () => ({
+        locale: "en",
+        t: (key: string, params?: Record<string, string | number>) =>
+          translate(key, "en", params),
+      }),
     },
     "@/lib/platform-admin-authority": {
       usePlatformAdminAuthority: () => ({ scopes }),
@@ -192,7 +197,7 @@ describe("real P5 mounted disclosure/corrections", () => {
         "/api/regulatory-registry/disclosure-reviews",
       ),
     );
-    await h.ui.findByLabelText("Review reason");
+    await h.ui.findByLabelText(translate("audit.page.reason", "en"));
     expect(h.ui.container.textContent).toContain("REAL-123");
   });
 
@@ -205,13 +210,15 @@ describe("real P5 mounted disclosure/corrections", () => {
       true,
     );
     await React.act(async () => {});
-    const reason = h.ui.queryByLabelText("Review reason");
+    const reason = h.ui.queryByLabelText(translate("audit.page.reason", "en"));
     if (reason)
       fireEvent.change(reason, {
         target: { value: "Original review decision" },
       });
     fireEvent.click(
-      h.ui.getAllByRole("button", { name: "p5.action.approve" })[0]!,
+      h.ui.getAllByRole("button", {
+        name: translate("p5.action.approve", "en"),
+      })[0]!,
     );
     await waitFor(() => expect(h.post).toHaveBeenCalledTimes(1));
     expect((await h.ui.findByRole("alert")).textContent).toContain(
@@ -352,7 +359,7 @@ function fillReason(
   ui: ReturnType<typeof render>,
   reason = "Original documents reviewed",
 ) {
-  fireEvent.change(ui.getByLabelText("Review reason"), {
+  fireEvent.change(ui.getByLabelText(translate("audit.page.reason", "en")), {
     target: { value: reason },
   });
 }
@@ -360,9 +367,11 @@ describe("mounted P5 actual SDK/guard/Controller/repository chain", () => {
   it("awaits real canonical approval and same-subject history/readback", async () => {
     const live = await liveTransport();
     const h = mount("disclosure", false, live.client);
-    await h.ui.findByLabelText("Review reason");
+    await h.ui.findByLabelText(translate("audit.page.reason", "en"));
     fillReason(h.ui);
-    const button = h.ui.getByRole("button", { name: "p5.action.approve" });
+    const button = h.ui.getByRole("button", {
+      name: translate("p5.action.approve", "en"),
+    });
     expect(button.hasAttribute("disabled")).toBe(false);
     fireEvent.click(button);
     await waitFor(() => expect(live.state().history).toHaveLength(1));
@@ -379,13 +388,17 @@ describe("mounted P5 actual SDK/guard/Controller/repository chain", () => {
     const live = await liveTransport();
     live.faults.lostResponse = true;
     const h = mount("queue", false, live.client);
-    await h.ui.findByLabelText("Review reason");
+    await h.ui.findByLabelText(translate("audit.page.reason", "en"));
     fillReason(h.ui);
-    fireEvent.click(h.ui.getByRole("button", { name: "p5.action.approve" }));
+    fireEvent.click(
+      h.ui.getByRole("button", { name: translate("p5.action.approve", "en") }),
+    );
     await h.ui.findByRole("alert");
     expect(live.state().history).toHaveLength(1);
     expect(h.ui.container.textContent).toContain("Version 4");
-    fireEvent.click(h.ui.getByRole("button", { name: "p5.action.approve" }));
+    fireEvent.click(
+      h.ui.getByRole("button", { name: translate("p5.action.approve", "en") }),
+    );
     await waitFor(() =>
       expect(h.ui.container.textContent).toContain("Version 5"),
     );
@@ -398,30 +411,41 @@ describe("mounted P5 actual SDK/guard/Controller/repository chain", () => {
   it("keeps actual reader-only actions disabled and distinguishes empty/denied reads", async () => {
     const live = await liveTransport();
     const h = mount("queue", false, live.client, ["regulatory:read"]);
-    await h.ui.findByLabelText("Review reason");
+    await h.ui.findByLabelText(translate("audit.page.reason", "en"));
     expect(
       h.ui
-        .getByRole("button", { name: "p5.action.approve" })
+        .getByRole("button", { name: translate("p5.action.approve", "en") })
         .hasAttribute("disabled"),
     ).toBe(true);
     expect(
       h.ui
-        .getByRole("button", { name: "p5.action.return" })
+        .getByRole("button", { name: translate("p5.action.return", "en") })
         .hasAttribute("disabled"),
     ).toBe(true);
     expect(live.state().history).toHaveLength(0);
   });
   it("returns the actual selected driver for correction and keeps its raw registration private", async () => {
     const live = await liveTransport();
+    live.state().credentials[0]!.masked_display = "  RE***76  ";
     const h = mount("queue", false, live.client);
-    await h.ui.findByLabelText("Review reason");
-    fireEvent.click(h.ui.getByRole("button", { name: new RegExp(did) }));
+    await h.ui.findByLabelText(translate("audit.page.reason", "en"));
+    const view = h.ui.getByRole("button", { name: new RegExp(did) });
+    expect(view.textContent).toContain(translate("p5.action.view", "en"));
+    fireEvent.click(view);
     await waitFor(() =>
       expect(h.ui.container.textContent).toContain("RE***76"),
     );
     expect(h.ui.container.textContent).not.toContain("REAL-REG-9876");
+    expect(h.ui.container.textContent).toContain(
+      `${translate("p5.field.registrationMasked", "en")}:RE***76`,
+    );
+    expect(h.ui.container.textContent).toContain(
+      translate("p5.disclosure.maskedNote", "en"),
+    );
     fillReason(h.ui, "Correct the original registration");
-    fireEvent.click(h.ui.getByRole("button", { name: "p5.action.return" }));
+    fireEvent.click(
+      h.ui.getByRole("button", { name: translate("p5.action.return", "en") }),
+    );
     await waitFor(() => expect(live.state().history).toHaveLength(1));
     await waitFor(() =>
       expect(h.ui.container.textContent).toContain("Version 3"),
@@ -439,13 +463,15 @@ describe("mounted P5 actual SDK/guard/Controller/repository chain", () => {
     const gate = deferred();
     live.control.gate = gate;
     const h = mount("disclosure", false, live.client);
-    await h.ui.findByLabelText("Review reason");
+    await h.ui.findByLabelText(translate("audit.page.reason", "en"));
     fillReason(h.ui);
-    fireEvent.click(h.ui.getByRole("button", { name: "p5.action.approve" }));
+    fireEvent.click(
+      h.ui.getByRole("button", { name: translate("p5.action.approve", "en") }),
+    );
     await waitFor(() =>
       expect(
         h.ui
-          .getByRole("button", { name: "p5.action.approve" })
+          .getByRole("button", { name: translate("p5.action.approve", "en") })
           .hasAttribute("disabled"),
       ).toBe(true),
     );
@@ -455,7 +481,9 @@ describe("mounted P5 actual SDK/guard/Controller/repository chain", () => {
     await h.ui.findByRole("alert");
     expect(h.ui.container.textContent).toContain("Version 4");
     live.control.gate = null;
-    fireEvent.click(h.ui.getByRole("button", { name: "p5.action.approve" }));
+    fireEvent.click(
+      h.ui.getByRole("button", { name: translate("p5.action.approve", "en") }),
+    );
     await waitFor(() =>
       expect(h.ui.container.textContent).toContain("Version 5"),
     );
@@ -470,9 +498,11 @@ describe("mounted P5 actual SDK/guard/Controller/repository chain", () => {
       scopes: ["regulatory:read"],
     });
     const h = mount("queue", false, live.client);
-    await h.ui.findByLabelText("Review reason");
+    await h.ui.findByLabelText(translate("audit.page.reason", "en"));
     fillReason(h.ui);
-    fireEvent.click(h.ui.getByRole("button", { name: "p5.action.approve" }));
+    fireEvent.click(
+      h.ui.getByRole("button", { name: translate("p5.action.approve", "en") }),
+    );
     const alert = await h.ui.findByRole("alert");
     expect(alert.getAttribute("data-kind")).toBe("denied");
     expect(live.state().history).toHaveLength(0);
@@ -484,13 +514,17 @@ describe("mounted P5 actual SDK/guard/Controller/repository chain", () => {
     const h = mount("disclosure", false, live.client);
     await h.ui.findByText("No disclosure subjects");
     expect(h.ui.container.textContent).not.toContain("verified_active");
-    expect(h.ui.queryByLabelText("Review reason")).toBeNull();
+    expect(
+      h.ui.queryByLabelText(translate("audit.page.reason", "en")),
+    ).toBeNull();
   });
   it("legacy display labels alone cannot confer actual read or review authority", async () => {
     const live = await liveTransport();
     const h = mount("queue", false, live.client, ["reg.read", "reg.review"]);
     await React.act(async () => {});
-    expect(h.ui.queryByLabelText("Review reason")).toBeNull();
+    expect(
+      h.ui.queryByLabelText(translate("audit.page.reason", "en")),
+    ).toBeNull();
     expect(live.calls).toHaveLength(0);
     await expect(
       live.service.reviewDisclosure(

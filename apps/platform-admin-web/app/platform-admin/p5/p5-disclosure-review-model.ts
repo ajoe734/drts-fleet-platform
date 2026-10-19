@@ -1,12 +1,49 @@
 import type { ApiClient } from "@drts/api-client";
-export type {
-  DisclosureReviewItem,
-  DisclosureReviewCommand,
-} from "../../../../api/src/modules/regulatory-registry/disclosure-review.types";
 import type {
-  DisclosureReviewItem,
-  DisclosureReviewCommand,
-} from "../../../../api/src/modules/regulatory-registry/disclosure-review.types";
+  AuditLogRecord,
+  DriverPublicRegistrationCredential,
+  VehiclePassengerDisclosureProfile,
+} from "@drts/contracts";
+
+// App-local wire DTOs use canonical shared record contracts. Web deployments
+// build independently of API app Source; runtime endpoints and fields are unchanged.
+type DisclosureSubjectType = "vehicle" | "driver";
+type DisclosureRecord =
+  | VehiclePassengerDisclosureProfile
+  | DriverPublicRegistrationCredential;
+export interface DisclosureReviewCommand {
+  expectedVersion: number;
+  sourceSubmissionId: string | null;
+  action: "approve" | "return";
+  reason: string;
+}
+interface DisclosureReviewDecision {
+  decisionId: string;
+  operationKey: string;
+  payloadHash: string;
+  actorId: string;
+  actorType: AuditLogRecord["actorType"];
+  subjectType: DisclosureSubjectType;
+  subjectId: string;
+  action: "approve" | "return";
+  reason: string;
+  sourceSubmissionId: string | null;
+  fromVersion: number;
+  toVersion: number;
+  decidedAt: string;
+  record: DisclosureRecord;
+  previousRecord: DisclosureRecord;
+}
+export interface DisclosureReviewItem {
+  subjectType: DisclosureSubjectType;
+  subjectId: string;
+  label: string;
+  sourceSubmissionId: string | null;
+  version: number;
+  record: DisclosureRecord;
+  missingFieldCodes: string[];
+  history: DisclosureReviewDecision[];
+}
 export const disclosureReviewKey = (item: DisclosureReviewItem) =>
   `${item.subjectType}:${item.subjectId}`;
 export function listDisclosureReviews(client: Pick<ApiClient, "get">) {

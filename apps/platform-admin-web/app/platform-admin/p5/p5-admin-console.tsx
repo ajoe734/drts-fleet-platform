@@ -10,7 +10,10 @@ import {
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { usePlatformAdminAuthority } from "@/lib/platform-admin-authority";
-import type { MultiTaxiTripOperationalAdminView } from "@drts/contracts";
+import type {
+  DriverPublicRegistrationCredential,
+  MultiTaxiTripOperationalAdminView,
+} from "@drts/contracts";
 import {
   CanvasBanner,
   CanvasBtn,
@@ -87,6 +90,13 @@ function formatCurrencyMinor(amountMinor: number, locale: string) {
 function formatMonthLabel(month: string, locale: string) {
   const [year, value] = month.split("-");
   return locale === "zh" ? `${year}-${value}` : `${year}-${value}`;
+}
+
+function getMaskedRegistrationDisplay(
+  credential: DriverPublicRegistrationCredential,
+) {
+  const masked = credential.maskedDisplay.trim();
+  return masked.length > 0 ? masked : "—";
 }
 
 export function P5AdminConsole({ view }: { view: P5View }) {
@@ -202,7 +212,14 @@ function P5DisclosureReview({ view }: { view: "disclosure" | "queue" }) {
       setBusy(false);
     }
   }
-  const record = detail?.record;
+  const record =
+    detail && "driverId" in detail.record
+      ? {
+          ...detail.record,
+          registrationNo: null,
+          maskedDisplay: getMaskedRegistrationDisplay(detail.record),
+        }
+      : detail?.record;
   return (
     <div style={pageBodyStyle}>
       <CanvasPageHeader
@@ -213,7 +230,11 @@ function P5DisclosureReview({ view }: { view: "disclosure" | "queue" }) {
         )}
       />
       {!canRead ? (
-        <CanvasBanner theme={theme} tone="info" body={t("p5.scope.denied")} />
+        <CanvasBanner
+          theme={theme}
+          tone="info"
+          body={t("p5.scope.locked.title")}
+        />
       ) : (
         <>
           {error ? (
@@ -256,7 +277,7 @@ function P5DisclosureReview({ view }: { view: "disclosure" | "queue" }) {
                       }
                     >
                       {candidate.label} · {candidate.subjectType} ·{" "}
-                      {candidate.record.status}
+                      {candidate.record.status} · {t("p5.action.view")}
                     </button>
                   </li>
                 ))}
@@ -292,28 +313,35 @@ function P5DisclosureReview({ view }: { view: "disclosure" | "queue" }) {
                       ]}
                     />
                   ) : (
-                    <CanvasDL
-                      theme={theme}
-                      cols={2}
-                      items={[
-                        {
-                          k: t("p5.field.registrationArea"),
-                          v: record.registrationArea ?? "—",
-                        },
-                        {
-                          k: t("p5.field.registrationNo"),
-                          v: record.maskedDisplay,
-                        },
-                        {
-                          k: t("p5.field.effectiveFrom"),
-                          v: record.effectiveFrom ?? "—",
-                        },
-                        {
-                          k: t("p5.field.effectiveUntil"),
-                          v: record.effectiveUntil ?? "—",
-                        },
-                      ]}
-                    />
+                    <>
+                      <CanvasDL
+                        theme={theme}
+                        cols={2}
+                        items={[
+                          {
+                            k: t("p5.field.registrationArea"),
+                            v: record.registrationArea ?? "—",
+                          },
+                          {
+                            k: t("p5.field.registrationMasked"),
+                            v: record.maskedDisplay,
+                          },
+                          {
+                            k: t("p5.fares.col.effectiveFrom"),
+                            v: record.effectiveFrom ?? "—",
+                          },
+                          {
+                            k: t("p5.field.registrationUntil"),
+                            v: record.effectiveUntil ?? "—",
+                          },
+                        ]}
+                      />
+                      <CanvasBanner
+                        theme={theme}
+                        tone="info"
+                        body={t("p5.disclosure.maskedNote")}
+                      />
+                    </>
                   )}
                   <div>
                     {zh ? "查核人員" : "Verified by"}:{" "}
@@ -327,9 +355,9 @@ function P5DisclosureReview({ view }: { view: "disclosure" | "queue" }) {
                     </div>
                   ) : null}
                   <label>
-                    {zh ? "審核原因" : "Review reason"}
+                    {t("audit.page.reason")}
                     <textarea
-                      aria-label="Review reason"
+                      aria-label={t("audit.page.reason")}
                       disabled={busy || !canReview}
                       value={reason}
                       onChange={(event) => setReason(event.target.value)}
