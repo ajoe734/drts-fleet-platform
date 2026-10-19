@@ -1,3 +1,19 @@
+// A public announcement needs a real ISO calendar day; Date parsing alone
+// normalizes impossible February dates and accepts non-ISO strings such as 0.
+export function parsePublicFareEffectiveDate(value: unknown): Date | null {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}(?:T.+)?$/.test(value))
+    return null;
+  const instant = new Date(value);
+  const calendarDate = new Date(`${value.slice(0, 10)}T00:00:00Z`);
+  if (
+    !Number.isFinite(instant.getTime()) ||
+    !Number.isFinite(calendarDate.getTime()) ||
+    calendarDate.toISOString().slice(0, 10) !== value.slice(0, 10)
+  )
+    return null;
+  return instant;
+}
+
 export const t = {
   FareChangeRule:
     "若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。固定報價行程以確認時之應付金額為準。",
@@ -41,7 +57,7 @@ export const t = {
   Requote: "重新取得報價",
   NoConfirmBeforeQuote: "正式報價完成前不會為您確認訂單",
   DispatchIncomplete: "派車資訊尚未完整",
-  CurrentRegulation: "本頁依主管機關備查之現行版本公告",
+  CurrentRegulation: "本頁依主管機關公告之現行運價揭露",
   ArrangingVehicle: "正在為您安排合適的車輛",
   ArrangingAnother: "正在為您安排另一輛車",
   Unassigned: "已取消指派",
@@ -62,8 +78,21 @@ export const t = {
   NoReviewsYet: "尚無乘車評價",
   CurrentFareTable: "現行計費表",
   AlreadyEffective: "已生效",
-  VersionInfo: (version: string, effectiveAt: string) =>
-    `版本 ${version} · 生效日 ${effectiveAt}`,
+  VersionInfo: (version: string, effectiveAt: string) => {
+    const versionStamp = `版本 ${version} · 生效日 ${effectiveAt}`;
+    const effectiveDate = parsePublicFareEffectiveDate(effectiveAt);
+    if (!effectiveDate) return versionStamp;
+    const parts = new Intl.DateTimeFormat("zh-TW-u-ca-roc", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(effectiveDate);
+    const date = ["year", "month", "day"]
+      .map((type) => parts.find((part) => part.type === type)?.value)
+      .join("/");
+    return `依臺北市政府公告計程車運價（${date}起實施） · ${versionStamp}`;
+  },
   FareChangeRuleTitle: "車資變更規則",
   Cancel: "取消",
   AppTitle: "智行叫車",

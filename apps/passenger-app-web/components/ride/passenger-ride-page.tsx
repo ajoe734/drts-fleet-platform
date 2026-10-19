@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { t } from "./translations";
+import { parsePublicFareEffectiveDate, t } from "./translations";
 import Link from "next/link";
 import {
   startTransition,
@@ -870,8 +870,7 @@ function isCurrentPublicFare(value: unknown): value is CurrentPublicFare {
   return (
     typeof fare.version === "string" &&
     fare.version.trim().length > 0 &&
-    typeof fare.effectiveAt === "string" &&
-    Number.isFinite(Date.parse(fare.effectiveAt)) &&
+    parsePublicFareEffectiveDate(fare.effectiveAt) !== null &&
     validNumbers(
       ["baseFare", "distanceRate", "delayRate", "nightSurcharge"],
       0,
