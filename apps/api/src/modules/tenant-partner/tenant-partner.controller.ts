@@ -1201,7 +1201,8 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.tenantPartnerService.approveOpsApprovalRequest(
+      await this.ownedMobilityService.executeOpsBookingApprovalCommand(
+        "approve",
         approvalRequestId,
         command,
         identity,
@@ -1220,7 +1221,8 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.tenantPartnerService.rejectOpsApprovalRequest(
+      await this.ownedMobilityService.executeOpsBookingApprovalCommand(
+        "reject",
         approvalRequestId,
         command,
         identity,
@@ -1239,7 +1241,8 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.tenantPartnerService.escalateOpsApprovalRequest(
+      await this.ownedMobilityService.executeOpsBookingApprovalCommand(
+        "escalate",
         approvalRequestId,
         command,
         identity,
