@@ -242,6 +242,7 @@ import {
   type OidcBoundTenantUser,
 } from "../identity/identity.repository";
 import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
+import { FleetPartnerRepository } from "../fleet-partner/fleet-partner.repository";
 import {
   ReferralEmbedHandoffRepository,
   type PersistReferralEmbedHandoffCommand,
@@ -1452,6 +1453,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(NotificationDeliveryService)
     private readonly notificationDeliveryService: NotificationDeliveryService | null = null,
+    @Optional()
+    @Inject(FleetPartnerRepository)
+    private readonly fleetPartnerRepository?: FleetPartnerRepository,
   ) {
     this.securityEventsService =
       securityEventsService instanceof SecurityEventsService
@@ -5463,8 +5467,53 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         );
       }
 
+      let canonicalFleetId: string | null = null;
+      if (command.fleetPartnerId !== undefined) {
+        if (
+          command.partnerType !== "fleet_partner" ||
+          typeof command.fleetPartnerId !== "string" ||
+          !command.fleetPartnerId.trim()
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "FLEET_PARTNER_REFERENCE_INVALID",
+            "An explicit Fleet reference requires fleet_partner type and a nonblank fleetPartnerId.",
+            { field: "fleetPartnerId" },
+          );
+        }
+        if (
+          !this.fleetPartnerRepository?.isEnabled() ||
+          !this.tenantPartnerRepository?.isEnabled()
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "FLEET_PARTNER_REFERENCE_UNAVAILABLE",
+            "Canonical Fleet and Entry storage are required for this reference.",
+            {},
+          );
+        }
+        const requestedFleetId = command.fleetPartnerId.trim();
+        const fleet =
+          await this.fleetPartnerRepository.findActiveFleetPartnerById(
+            requestedFleetId,
+          );
+        if (
+          !fleet ||
+          fleet.fleetPartnerId !== requestedFleetId ||
+          fleet.active !== true
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "FLEET_PARTNER_REFERENCE_INVALID",
+            "The reference must identify an existing active canonical Fleet master.",
+            { fleetPartnerId: requestedFleetId },
+          );
+        }
+        canonicalFleetId = fleet.fleetPartnerId;
+      }
+
       const record: PartnerChannelEntryRecord = {
-        partnerId: `partner_${randomUUID()}`,
+        partnerId: canonicalFleetId ?? `partner_${randomUUID()}`,
         partnerCode,
         partnerType: this.requireNonBlank(command.partnerType, "partnerType"),
         programId,
