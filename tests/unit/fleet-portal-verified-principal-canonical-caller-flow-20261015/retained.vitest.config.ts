@@ -3,6 +3,13 @@ import { defineConfig } from "vitest/config";
 import rootConfig from "../../../vitest.config";
 export default defineConfig({
   ...rootConfig,
+  resolve: {
+    ...rootConfig.resolve,
+    alias: {
+      ...rootConfig.resolve?.alias,
+      "server-only": resolve(__dirname, "server-only.ts"),
+    },
+  },
   test: {
     ...rootConfig.test,
     include: [

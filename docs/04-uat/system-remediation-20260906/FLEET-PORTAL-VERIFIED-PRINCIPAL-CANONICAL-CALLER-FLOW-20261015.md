@@ -1,8 +1,12 @@
 # Fleet portal verified principal and canonical caller flow
 
 Task: `FLEET-PORTAL-VERIFIED-PRINCIPAL-CANONICAL-CALLER-FLOW-20261015`  
-Owner: Codex · Reviewer: Codex2  
-Status: **Source checkpoint; incomplete, no candidate handoff or acceptance claim.**
+Current owner: Codex2 · Independent reviewer: Codex
+Status: **Full original Source continuation; see the 2026-10-19 closeout below.**
+
+Earlier sections preserve the original partial checkpoint and its unresolved
+findings as historical evidence; they do not describe the current routing or
+fixed caller behavior.
 
 Base: `6dfff99fcc8f54d10fc18c1f19c5bcfabeb57add`. Tested source checkpoint:
 `5e87cf5dd0eb0d7fb7f92708eb14d33c0d084053`. Branch:
@@ -229,3 +233,97 @@ whole C063-C067 or full-goal completion is claimed. Missing target authority is
 reported separately by `FLEET_PRINCIPAL_REQUIRED`,
 `FLEET_PARTNER_AUTHORITY_REQUIRED` or `FLEET_PARTNER_BINDING_REQUIRED`; it is not
 used to label the remaining CSRF/caller fixes external-only.
+
+## Full original continuation, 2026-10-19
+
+The Supervisor preserved the original task, four complete clauses/four keys
+and expanded exact fourteen scopes, then transferred the prepared worktree to
+Codex2 with Codex as independent reviewer. Original spec SHA256:
+`923a62dce49886d568980039c84dea11248b8e57df1bd23b0586d51b2a84b4fc`.
+The four original dependencies are DONE, including accepted Complaint
+`e4d962152e6b51ef72c2b5469d5e6dbdb38f347c`.
+Prepared baseline `8995f5bf2c18750747a411481acaa9ab611a54c6` preserves
+published `87573ac0729c4dc19aeebd19b8f77392e297e44c` and ordinarily merges that
+accepted dev. No prior published commit was amended or replaced.
+
+All machine-specific receipts and logs for this continuation are under:
+`.local/goal-continuation-20261019T0200Z-accepted61fa7-full-CI-and-native-continuation-root/fleet-portal-original-functional-evidence/`.
+The final immutable commit, branch, PR and handoff generation are in its
+`delivery-result.json` and normal handoff receipt; this document does not
+pretend its own commit can contain its eventual hash.
+
+### Actual repair and original full requirements
+
+`fleetMutationHeaders` in the already owned document helper reads the existing
+browser `drts_csrf` cookie when sending a mutation. Supply `apiRequest`, case
+`handleSubmit`, document request/confirm and raw PUT content now use that same
+existing cookie/header contract. Read requests and original file bytes, MIME,
+scan, checksum, revision, idempotency, canonical IDs, business commands and
+confirmation ordering are retained. Missing cookies still fail the unchanged
+middleware. The middleware, guards, backend route policies, identity issuer,
+shared SDK, reviewer identity and other product surfaces were not changed.
+
+| Original key                                                           | Actual production chain and fixed result                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Evidence and limits                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fleet-portal_existing-verified-principal-and-canonical-fleet-binding` | Retained `resolveFleetPrincipal` calls `/api/auth/session` with the existing application bearer. Actual signed-session/guard tests require the original partner realm, billing scope, active actor and canonical partnerId; configured/requested selectors must both match. Missing/expired/revoked/wrong-realm/wrong-scope/missing-binding/cross-fleet sessions reject.                                                                                                                     | `principal.test.ts`, `mounted-flow.test.ts`, server selector unit regressions. No email/env/IAM proof becomes authority, no Academy identity promotion. Lawful target issuer/credential delivery is still unavailable; test sessions are controlled, not a live provider claim.                                                                                                                |
+| `fleet-portal_strict-transport-and-actual-command-actor`               | Original app-local `ApiClient` and proxy carry real application bearer separately from invocation proof, strip bootstrap/browser actor hints and preserve no-store/same-origin/error details/streamed 206 content. Actual Nest metadata dispatch executes `CurrentIdentity`, guard and real Supply/Case command services; actor/readback equals the verified principal. Existing platform reviewer and maker/checker paths stay intact.                                                      | Original principal replay at `6dfff99fcc8f54d10fc18c1f19c5bcfabeb57add`: 5 FAIL / 1 legacy-factory trap PASS; fixed six principal tests PASS within final suite. Invocation token is a controlled metadata seam, not real IAM.                                                                                                                                                                 |
+| `fleet-portal_original-mounted-flow-and-denial-regressions`            | Real SDK dashboard/drivers/vehicles agree with real service data, true empty/error states stay honest. Actual React driver/vehicle creation passes middleware→proxy→signed-session→guard→Controller→real draft service and navigates to the returned same ID. Real document request→PUT bytes/scan→confirm uses that submission, then actual detail-view submit/withdraw handlers read back its state. Actual editable case composer writes the verified actor and same-case local timeline. | Immutable baseline8995 with the final caller regressions: 4 FAIL / 1 missing-CSRF denial PASS. Fixed caller tests: 5 PASS, included in final 263. Existing byte/scan/storage/revision, filter/paging/CSV/KPI/date, Training, statement and case suites also pass. Storage/scanner/HTTP are explicit socket-free fixtures; CRM noDB local readback does not claim hosted PostgreSQL durability. |
+| `fleet-portal_exact-candidate-validation`                              | Existing producer modules execute directly. Shared test adapter discovers actual Nest routes/arguments and invokes actual guard, session, controllers and services; it does not mock commands or return fake dashboard lists. Original direct-controller and retained actor assertions are preserved.                                                                                                                                                                                        | Final combined suite 26 files / 263 PASS / 0 FAIL / 0 SKIP. Final source-mapped task and Fleet-app typechecks plus affected lint are recorded separately with direct exits. Normal hooked commit/plain push/new PR and full immutable handoff follow; review/CI/protected merge remain independent.                                                                                            |
+
+### Before/fixed commands and regression preservation
+
+Commands run in the prepared worktree using existing dependency links only,
+Node 22.23.2 and Vitest 4.1.4. Each named check has a `.log` and
+`-receipt.json` containing argv, cwd, timestamps and direct exit.
+
+- `immutable-original-principal-before`: original production client/proxy/
+  controller replay via `before.vitest.config.ts`, exit 1, 5 FAIL / 1 PASS.
+- `immutable-current-original-callers-before`: final caller tests against the
+  literal three production caller blobs at baseline8995 via
+  `callers-before.vitest.config.ts`, exit 1, 4 FAIL / 1 PASS.
+- `final-distinct-functional-regressions`: `node node_modules/vitest/vitest.mjs
+run -c tests/unit/fleet-portal-verified-principal-canonical-caller-flow-20261015/full.vitest.config.ts
+--maxWorkers=1 --no-file-parallelism`, exit 0, 263 PASS / 0 SKIP.
+  JSON reporter output preserves every test and suite identity.
+- `final-affected-source-types`, `final-fleet-app-types`, `final-affected-lint`:
+  final commands and direct results are in the corresponding receipts.
+- `original-assertion-preservation.json`: original API Controller 46,
+  accepted shared case 92, Training 84, principal 19, mounted-flow 46 and
+  explicit middleware boundary 2 expect/matcher AST nodes are identical
+  (289 total). The Controller and principal test bytes are also identical.
+
+The four stale caller test leaves were adapted within their exact scopes.
+Server selector tests now bind to a controlled backend session response,
+with genuine signed-session proof in the production-chain suites. Binary
+proxy tests retain exact bytes/MIME and now verify application bearer and
+canonical fleet instead of synthetic bootstrap headers. Case controller's
+verified fixture actor is explicitly `陳家豪`, preserving its original expected
+receipt and all 92 assertions. Training case 1.1 explicitly uses the historical
+legacy billing-only factory fixture; all 84 original assertions and every
+actual Academy tenant/ops/denial scenario remain unchanged. This fixture is
+not the authenticated general partner client.
+
+All original failed/tool-preparation logs remain inspectable: missing package
+links and sparse read paths, jsdom server-only/import-URL adapter preparation,
+the two stale legacy caller failures and initial test-only type incompatibility.
+The broader original suite also exposed an upload Headers-vs-record shape
+regression; preserving the caller's original plain-record forwarding fixed it
+without changing that original test. Final passing checks supersede these
+intermediate failures; none are silently counted as a pass.
+
+### Unexecuted evidence and delivery boundary
+
+This VM ran no product, HTTP, browser/E2E, WebSocket, PostgreSQL, Compose or
+other project server. No packages were installed. Controlled socket-free
+in-memory repositories and storage/scanner fixtures exercise actual business
+logic and bytes but do not establish real PostgreSQL durability, cloud
+storage/scanner, deployed browser, physical device or live lawful partner
+issuer availability. Original CRM transactional ACK credit remains owned by
+the accepted Complaint task and is not reimplemented or newly claimed here.
+Mandatory exact-candidate hosted CI, independent review, protected merge and
+shared-dev deployment are separate lifecycle results, never implied by the
+local 263 tests or this UAT document.
+
+The final JSON contains 263 executed test instances and 261 unique
+file/full-name pairs: two original parameterized scenarios share their
+display titles. These are not added to prior 37/45 passing subset totals.

@@ -7,6 +7,7 @@ export default defineConfig({
     ...rootConfig.resolve,
     alias: {
       ...rootConfig.resolve?.alias,
+      "server-only": resolve(__dirname, "server-only.ts"),
       "@/lib/i18n": resolve(
         __dirname,
         "../../../apps/fleet-partner-portal-web/lib/i18n.tsx",

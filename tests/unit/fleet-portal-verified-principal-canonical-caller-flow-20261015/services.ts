@@ -1,7 +1,8 @@
 import { fleetStorageFixture } from "../helpers/fleet-document-fixture";
 import { createRequire } from "node:module";
+import { resolve } from "node:path";
 const { EventEmitter2 } = createRequire(
-  new URL("../../../apps/api/package.json", import.meta.url),
+  resolve(process.cwd(), "apps/api/package.json"),
 )("@nestjs/event-emitter");
 
 import { OpsDispatchEventsService } from "../../../apps/api/src/common/ops-dispatch-events.service";

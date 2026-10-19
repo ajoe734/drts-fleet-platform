@@ -62,7 +62,7 @@ import {
   loadFleetDriverQuizAttempt,
   loadFleetTraining,
 } from "../../../apps/fleet-partner-portal-web/lib/academy-data.server";
-import { getServerFleetPartnerClient } from "../../../apps/fleet-partner-portal-web/lib/api-client.server";
+import { createFleetPartnerPortalClient } from "@drts/api-client";
 
 const apiRequire = createRequire(
   new URL("../../../apps/api/package.json", import.meta.url),
@@ -372,7 +372,10 @@ describe("FLEET-TRAINING-AUTHORIZED-CALLER-20261015: C071 Authorized Training Ca
     // BootstrapAuthGuard + FleetPartnerTrainingController + AcademyService +
     // SnakeCaseInterceptor wire format.
     globalThis.fetch = vi.fn(
-      async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ): Promise<Response> => {
         const rawUrl =
           typeof input === "string"
             ? input
@@ -546,7 +549,12 @@ describe("FLEET-TRAINING-AUTHORIZED-CALLER-20261015: C071 Authorized Training Ca
       process.env.DRTS_FLEET_PARTNER_ID = FLEET_ALPHA;
       setRequestContext();
 
-      const { client } = await getServerFleetPartnerClient();
+      // Historical billing-only factory trap, not the authenticated mounted general client.
+      const client = createFleetPartnerPortalClient(
+        process.env.DRTS_API_URL!,
+        FLEET_ALPHA,
+        { "x-scopes": "billing:read" },
+      );
 
       await expect(client.getFleetTrainingSummary()).rejects.toMatchObject({
         statusCode: 403,
@@ -557,7 +565,10 @@ describe("FLEET-TRAINING-AUTHORIZED-CALLER-20261015: C071 Authorized Training Ca
     });
 
     it("1.2 reproduces F1 part 2: non-tenant caller invoking unparameterized SDK training methods without ?fleetPartnerId is rejected with 400 FLEET_PARTNER_ID_REQUIRED", async () => {
-      const opsToken = await mintAccessToken(jwtAuthService, opsAdminIdentity());
+      const opsToken = await mintAccessToken(
+        jwtAuthService,
+        opsAdminIdentity(),
+      );
       setRequestContext({
         authorization: `Bearer ${opsToken}`,
       });
@@ -754,9 +765,9 @@ describe("FLEET-TRAINING-AUTHORIZED-CALLER-20261015: C071 Authorized Training Ca
       const resolved = await getServerFleetTrainingClient();
       expect(resolved.principalSource).toBe("unauthenticated");
       expect(resolved.client.defaultHeaders.authorization).toBeUndefined();
-      expect(
-        resolved.client.defaultHeaders["x-serverless-authorization"],
-      ).toBe("Bearer mock-cloud-run-metadata-oidc-token");
+      expect(resolved.client.defaultHeaders["x-serverless-authorization"]).toBe(
+        "Bearer mock-cloud-run-metadata-oidc-token",
+      );
 
       const result = await loadFleetTraining();
       expect(result.source).toBe("fallback");

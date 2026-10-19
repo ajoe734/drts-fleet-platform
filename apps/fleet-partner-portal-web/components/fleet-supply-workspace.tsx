@@ -1,6 +1,9 @@
 "use client";
 
-import { putFleetDocument } from "../lib/fleet-document-upload";
+import {
+  fleetMutationHeaders,
+  putFleetDocument,
+} from "../lib/fleet-document-upload";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -204,12 +207,12 @@ function camelizeDeep<T>(value: unknown): T {
 }
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = fleetMutationHeaders(init ?? {});
+  if (!headers.has("content-type"))
+    headers.set("content-type", "application/json");
   const response = await fetch(`/control-plane-proxy/${path}`, {
     ...init,
-    headers: {
-      "content-type": "application/json",
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
   const payload = camelizeDeep<ApiEnvelope<T> | { error: { message: string } }>(
     await response.json(),

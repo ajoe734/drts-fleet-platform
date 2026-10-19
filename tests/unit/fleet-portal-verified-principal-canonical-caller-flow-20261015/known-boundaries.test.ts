@@ -2,8 +2,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { middleware } from "../../../apps/fleet-partner-portal-web/middleware";
 afterEach(() => vi.unstubAllEnvs());
-// This proves the existing guard contract, not completion of the browser
-// caller integration. The unmodified Supply/case callers omit this header.
+// Preserve the original middleware denial/accept contract independently of
+// the repaired browser callers exercised in caller-boundaries.test.ts.
 it.each([
   "fleet-partner/supply-submissions/drivers",
   "fleet-partner/cases/cmp_0908/reply",
