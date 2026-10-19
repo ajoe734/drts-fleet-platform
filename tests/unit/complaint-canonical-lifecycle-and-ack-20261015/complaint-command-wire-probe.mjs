@@ -33,9 +33,12 @@ global.fetch = async () => {
   throw Error("Socket-free probe");
 };
 const cache = new Map();
+const sourceTextCache = new Map();
 function source(relative) {
+  if (sourceTextCache.has(relative)) return sourceTextCache.get(relative);
+  let text = null;
   try {
-    return reference
+    text = reference
       ? cp
           .execFileSync("git", ["show", `${reference}:${relative}`], {
             cwd: root,
@@ -44,8 +47,10 @@ function source(relative) {
           .toString()
       : fs.readFileSync(path.join(root, relative), "utf8");
   } catch {
-    return null;
+    /* An absent extension candidate is cached along with real modules. */
   }
+  sourceTextCache.set(relative, text);
+  return text;
 }
 function load(relative) {
   if (cache.has(relative)) return cache.get(relative).exports;

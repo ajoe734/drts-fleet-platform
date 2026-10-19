@@ -41,12 +41,23 @@ type Fault =
   | "lost_commit_reply"
   | "connect"
   | "audit";
+type OrdinaryCommandWireRow = {
+  command_key: string;
+  case_no: unknown;
+  action: unknown;
+  command_payload: unknown;
+  case_snapshot: unknown;
+  timeline_snapshot: unknown;
+  previous_case_snapshot: unknown;
+  status: "pending" | "confirmed" | "failed";
+};
 type State = {
   rating?: Record<string, unknown>;
   complaintCase?: ComplaintCaseRecord;
   timeline?: ComplaintTimelineEntry;
   intake?: readonly unknown[];
   consent?: readonly unknown[];
+  ordinaryCommands?: Record<string, OrdinaryCommandWireRow>;
 };
 
 beforeEach(() => {
@@ -221,6 +232,45 @@ async function fixture() {
             ]
           : [],
       };
+    // Ordinary CRM commands now reserve IDs before their business transaction.
+    // These are external wire rows; all production persistence/locking decisions
+    // and every existing PAX/business/auth assertion remain unchanged.
+    if (text.startsWith("INSERT INTO crm.phase1_complaint_pending_commits")) {
+      const commands = (target.ordinaryCommands ??= {});
+      const key = String(values[0]);
+      commands[key] ??= {
+        command_key: key,
+        case_no: values[1],
+        action: values[2],
+        command_payload: JSON.parse(values[3] as string),
+        case_snapshot: JSON.parse(values[4] as string),
+        timeline_snapshot: JSON.parse(values[5] as string),
+        previous_case_snapshot: values[6]
+          ? JSON.parse(values[6] as string)
+          : null,
+        status: values[7] as OrdinaryCommandWireRow["status"],
+      };
+      return { rows: [commands[key]] };
+    }
+    if (
+      text.startsWith("SELECT status FROM crm.phase1_complaint_pending_commits")
+    ) {
+      const command = target.ordinaryCommands?.[String(values[0])];
+      return { rows: command ? [{ status: command.status }] : [] };
+    }
+    if (text.startsWith("UPDATE crm.phase1_complaint_pending_commits")) {
+      const command = target.ordinaryCommands?.[String(values[0])];
+      if (command) command.status = "confirmed";
+    }
+    if (text.startsWith("DELETE FROM crm.phase1_complaint_pending_commits")) {
+      delete target.ordinaryCommands?.[String(values[0])];
+    }
+    if (
+      text.startsWith("SELECT command_key") &&
+      text.includes("FROM crm.phase1_complaint_pending_commits")
+    ) {
+      return { rows: Object.values(target.ordinaryCommands ?? {}) };
+    }
     if (text.startsWith("INSERT INTO crm.phase1_complaint_cases")) {
       fail("case");
       target.complaintCase = JSON.parse(values[5] as string);
