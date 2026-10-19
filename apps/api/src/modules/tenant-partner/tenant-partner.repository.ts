@@ -1594,6 +1594,32 @@ export class TenantPartnerRepository {
     ]);
   }
 
+  /** Current request authority for lifecycle commands. Discovery is unlocked;
+   * callers that mutate lock the order first, then read this row on that tx.
+   * Decisions are embedded in the same canonical record by the existing writer.
+   */
+  async findApprovalRequest(
+    tenantId: string,
+    approvalRequestId: string,
+    executor?: TenantPartnerQueryExecutor,
+  ): Promise<TenantBookingApprovalRequestRecord | null> {
+    if (!this.isEnabled()) return null;
+    const result = await (
+      executor ?? this.databaseService!
+    ).query<JsonRecordRow>(
+      `SELECT record FROM core.phase1_tenant_approval_requests
+       WHERE tenant_id = $1 AND approval_request_id = $2
+       ${executor ? "FOR UPDATE" : ""}`,
+      [tenantId, approvalRequestId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<TenantBookingApprovalRequestRecord>(
+          result.rows[0].record,
+          "core.phase1_tenant_approval_requests",
+        )
+      : null;
+  }
+
   async persistApprovalWorkflow(
     executor: TenantPartnerQueryExecutor,
     changes: {
