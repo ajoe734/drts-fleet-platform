@@ -354,14 +354,18 @@
         {
           "kind": "request",
           "name": "approve",
-          "control": "[data-drt-operation='admin-approve']",
+          "control": "button:has-text(\"確認核可\"), button:has-text(\"Confirm approval\")",
           "before": [
             {
               "kind": "click",
               "control": "[data-drt-operation='admin-start-review']"
+            },
+            {
+              "kind": "click",
+              "control": "[data-drt-operation='admin-approve']"
             }
           ],
-          "requestUrlIncludes": "/control-plane-proxy/",
+          "requestUrlIncludes": "/control-plane-proxy/admin/supply-review/submissions/{{adminSubmissionId}}/approve",
           "requestMethod": "POST",
           "responseKind": "json",
           "resultIdPath": "data.submission_id",

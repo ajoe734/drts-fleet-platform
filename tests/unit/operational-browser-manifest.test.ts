@@ -196,7 +196,14 @@ describe("operational browser journeys manifest guard", () => {
         kind: "click",
         control: "[data-drt-operation='admin-start-review']",
       },
+      { kind: "click", control: "[data-drt-operation='admin-approve']" },
     ]);
+    expect(approveOp.control).toBe(
+      'button:has-text("確認核可"), button:has-text("Confirm approval")',
+    );
+    expect(approveOp.requestUrlIncludes).toBe(
+      "/control-plane-proxy/admin/supply-review/submissions/{{adminSubmissionId}}/approve",
+    );
     expect(approveOp.readback.url).toBe(
       "/control-plane-proxy/admin/supply-review/submissions/{resultId}",
     );

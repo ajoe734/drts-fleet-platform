@@ -1896,6 +1896,48 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
   };
   const plaintextKey = "pk_socket-free-key-dummy";
   const token = "backend_issued-session_dummy";
+  const adminToken = "backend_admin-session_dummy";
+  const adminSessionId = "own-admin-session-dummy";
+  let adminVerified: boolean;
+  let adminRevoked: boolean;
+  let proofs: Map<string, { method: string; path: string; actionId: string }>;
+  const adminIdentity = () => ({
+    realm: fault === "admin-wrong-realm" ? "partner" : "platform",
+    actorType: fault === "admin-wrong-role" ? "tenant_admin" : "platform_admin",
+    authMode:
+      fault === "admin-proxy-identity" ? "bootstrap_headers" : "jwt_bearer",
+    actorId: "canonical-admin-dummy",
+    principalId:
+      fault === "admin-foreign-principal"
+        ? "foreign-admin-dummy"
+        : "canonical-admin-dummy",
+    membershipId: "canonical-membership-dummy",
+    sessionId:
+      fault === "admin-missing-session"
+        ? null
+        : fault === "admin-foreign-session"
+          ? "foreign-admin-session-dummy"
+          : adminSessionId,
+  });
+  const businessCalls = () =>
+    calls.filter(
+      (call) =>
+        call.path !== "/control-plane-proxy/auth/token" &&
+        call.path !== "/control-plane-proxy/auth/session" &&
+        call.path !== "/control-plane-proxy/identity/step-up-proofs" &&
+        call.body.sessionId !== adminSessionId,
+    );
+  const actionFor = (path: string) => {
+    if (path === "/api/platform-admin/partner-entries")
+      return "platform:partner-entries:create";
+    if (/\/credentials\/issue$/.test(path))
+      return "platform:partner-credentials:issue";
+    if (/\/credentials\/[^/]+\/revoke$/.test(path))
+      return "platform:partner-credentials:revoke";
+    if (/\/partner-entries\/[^/]+\/revoke$/.test(path))
+      return "platform:partner-entries:revoke";
+    throw new Error("Unexpected unit policy path");
+  };
   let entry: Record<string, unknown>;
   let fault: string;
   let calls: {
@@ -1942,6 +1984,14 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
       },
     });
 
+  const authError = (code: string, status: number) =>
+    new Response(
+      JSON.stringify({
+        error: { code, message: `${adminToken} ${plaintextKey} ${token}` },
+      }),
+      { status, headers: { "x-drts-candidate-sha": "candidate-dummy" } },
+    );
+
   beforeEach(() => {
     entry = {};
     fault = "";
@@ -1950,6 +2000,10 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
     maskOutput = [];
     revokedKey = false;
     revokedEntry = false;
+    adminVerified = false;
+    adminRevoked = false;
+    proofs = new Map();
+    vi.stubEnv("DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_TOKEN", "");
     vi.stubEnv("DRTS_CANDIDATE_SHA", "candidate-dummy");
     vi.stubEnv("DRTS_OPERATIONAL_API_URL", api);
     vi.stubEnv("DRTS_OPERATIONAL_PLATFORM_ADMIN_URL", admin);
@@ -1992,12 +2046,115 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
         });
         expect(init.redirect).toBe("manual");
         expect(init.signal).toBeInstanceOf(AbortSignal);
-        expect(headers.has("x-drts-authorization")).toBe(false);
-        if (url.origin === admin)
+        if (url.origin === admin) {
           expect(headers.get("authorization")).toBe(
             "Bearer admin-invocation-dummy",
           );
-        else {
+          if (url.pathname === "/control-plane-proxy/auth/token") {
+            expect(headers.has("x-drts-authorization")).toBe(false);
+            if (fault === "admin-exchange-denied")
+              return authError("WORKLOAD_SESSION_IDENTITY_UNAVAILABLE", 403);
+            if (fault === "admin-exchange-typed-denied")
+              return authError("DEV_WORKFORCE_SESSION_EXCHANGE_DENIED", 403);
+            if (fault === "admin-exchange-oversized")
+              return new Response("x".repeat(1024 * 1024 + 1), { status: 201 });
+            if (fault === "admin-exchange-hanging")
+              return new Response(new ReadableStream({ start() {} }), {
+                status: 201,
+              });
+            if (fault === "admin-exchange-redirect")
+              return new Response("", {
+                status: 302,
+                headers: { location: "https://foreign.example.invalid" },
+              });
+            if (fault === "elapsed-admin-deadline")
+              vi.setSystemTime(Date.now() + 60_001);
+            return new Response(
+              JSON.stringify({
+                token: adminToken,
+                expires_in: "8h",
+                session_id:
+                  fault === "admin-exchange-missing-session"
+                    ? null
+                    : adminSessionId,
+                principal_id: "canonical-admin-dummy",
+                realm: "platform",
+                actor_type: "platform_admin",
+              }),
+              {
+                status: 201,
+                headers: { "x-drts-candidate-sha": "candidate-dummy" },
+              },
+            );
+          }
+          expect(headers.get("x-drts-authorization")).toBe(
+            `Bearer ${process.env.DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_TOKEN || adminToken}`,
+          );
+          if (url.pathname === "/control-plane-proxy/auth/session") {
+            if (fault === "admin-session-denied")
+              return authError("SESSION_REVOKED", 401);
+            adminVerified = true;
+            return reply({
+              active: fault !== "admin-inactive",
+              identity: adminIdentity(),
+            });
+          }
+          expect(adminVerified).toBe(true);
+          if (url.pathname === "/control-plane-proxy/identity/step-up-proofs") {
+            expect(method).toBe("POST");
+            expect(body.method).toBe("POST");
+            const actionId = actionFor(String(body.path));
+            if (fault === "proof-mfa-denied")
+              return authError("MFA_REQUIRED", 403);
+            if (fault === "proof-session-denied")
+              return authError("STEP_UP_REQUIRED", 403);
+            if (
+              fault === "proof-key-revoke-denied" &&
+              actionId === "platform:partner-credentials:revoke"
+            )
+              return authError("STEP_UP_REQUIRED", 403);
+            if (fault === "proof-unknown-code")
+              return authError(adminToken, 403);
+            const reference = `unit-proof-${proofs.size}-${calls.length}`;
+            proofs.set(reference, {
+              method: "POST",
+              path:
+                fault === "proof-foreign-path"
+                  ? "/api/platform-admin/partner-entries/foreign/revoke"
+                  : String(body.path),
+              actionId,
+            });
+            return reply(
+              {
+                required: fault !== "proof-not-required",
+                actionId:
+                  fault === "proof-wrong-action"
+                    ? "platform:unrelated"
+                    : actionId,
+                stepUpReference:
+                  fault === "proof-missing-reference" ? null : reference,
+              },
+              201,
+            );
+          }
+          if (method === "POST") {
+            const reference = headers.get("x-drts-step-up-reference");
+            const proof = proofs.get(reference || "");
+            if (
+              proof?.path !==
+              url.pathname.replace(/^\/control-plane-proxy/, "/api")
+            )
+              return authError("STEP_UP_REQUIRED", 403);
+            expect(proof).toEqual({
+              method,
+              path: url.pathname.replace(/^\/control-plane-proxy/, "/api"),
+              actionId: actionFor(
+                url.pathname.replace(/^\/control-plane-proxy/, "/api"),
+              ),
+            });
+            proofs.delete(reference!);
+          }
+        } else {
           expect(url.origin).toBe(api);
           expect(headers.get("authorization")).not.toBe(
             "Bearer admin-invocation-dummy",
@@ -2034,6 +2191,8 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
         if (url.pathname === `${path}/credentials/issue`) {
           if (fault === "issue-denied")
             return reply({ error: plaintextKey }, 403);
+          if (fault === "elapsed-key-deadline")
+            vi.setSystemTime(Date.now() + 60_001);
           return reply(
             {
               credential: credential(),
@@ -2069,6 +2228,16 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
           );
           if (fault === "session-denied") return reply({ error: token }, 401);
           return reply({ active: true, identity: identity() });
+        }
+        if (
+          url.pathname === "/api/auth/sessions/revoke" &&
+          body.sessionId === adminSessionId
+        ) {
+          expect(headers.get("authorization")).toBe(`Bearer ${adminToken}`);
+          if (fault === "admin-cleanup-denied")
+            return authError("FORBIDDEN", 403);
+          adminRevoked = true;
+          return reply({ revoked: true, sessionId: adminSessionId }, 201);
         }
         if (url.pathname === "/api/auth/sessions/revoke") {
           expect(body).toEqual({ sessionId: "own-session-dummy" });
@@ -2110,28 +2279,35 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
     prepared = await prepareOperationalFleetSession(configuration);
     expect(entry.entrySlug).toMatch(/^operational-fleet-[0-9a-f-]{36}$/);
     expect(entry.partnerId).toBe(configuration.fleetPartnerId);
-    expect(calls.map((c) => c.path.split("/").at(-1))).toEqual([
+    expect(businessCalls().map((c) => c.path.split("/").at(-1))).toEqual([
       "partner-entries",
       "credentials",
       "issue",
       "bootstrap-session",
       "session",
     ]);
-    expect(calls[2]?.body.scopes).toEqual(["billing:read"]);
+    expect(businessCalls()[2]?.body.scopes).toEqual(["billing:read"]);
     expect(
       operationalRequestHeaders(
         "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
         "https://fleet.example.invalid",
       )["x-drts-authorization"],
     ).toBe(`Bearer ${token}`);
-    expect(maskOutput).toEqual([
-      `::add-mask::${plaintextKey}\n`,
-      `::add-mask::${token}\n`,
-    ]);
+    expect(maskOutput).toEqual(
+      expect.arrayContaining([
+        `::add-mask::${adminToken}\n`,
+        `::add-mask::${plaintextKey}\n`,
+        `::add-mask::${token}\n`,
+      ]),
+    );
     expect(JSON.stringify(prepared.metadata)).not.toContain(plaintextKey);
     expect(JSON.stringify(prepared.metadata)).not.toContain(token);
     await prepared.cleanup();
-    expect(calls.slice(-3).map((c) => c.path)).toEqual([
+    expect(
+      businessCalls()
+        .slice(-3)
+        .map((c) => c.path),
+    ).toEqual([
       "/api/auth/sessions/revoke",
       `/control-plane-proxy/platform-admin/partner-entries/${String(entry.entrySlug)}/credentials/own-key-dummy/revoke`,
       `/control-plane-proxy/platform-admin/partner-entries/${String(entry.entrySlug)}/revoke`,
@@ -2140,6 +2316,253 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
     const count = calls.length;
     await prepared.cleanup();
     expect(calls).toHaveLength(count);
+  });
+
+  it("verifies one canonical Admin session before create and consumes distinct same-session action proofs before all four protected mutations", async () => {
+    prepared = await prepareOperationalFleetSession(configuration);
+    await prepared.cleanup();
+    expect(calls.slice(0, 4).map((c) => c.path)).toEqual([
+      "/control-plane-proxy/auth/token",
+      "/control-plane-proxy/auth/session",
+      "/control-plane-proxy/identity/step-up-proofs",
+      "/control-plane-proxy/platform-admin/partner-entries",
+    ]);
+    const proofCalls = calls.filter((c) =>
+      c.path.endsWith("/identity/step-up-proofs"),
+    );
+    expect(proofCalls.map((c) => actionFor(String(c.body.path)))).toEqual([
+      "platform:partner-entries:create",
+      "platform:partner-credentials:issue",
+      "platform:partner-credentials:revoke",
+      "platform:partner-entries:revoke",
+    ]);
+    expect(
+      proofCalls.every(
+        (c) => c.headers.get("x-drts-authorization") === `Bearer ${adminToken}`,
+      ),
+    ).toBe(true);
+    expect(calls.at(-1)?.body).toEqual({ sessionId: adminSessionId });
+    expect(adminRevoked).toBe(true);
+    expect(JSON.stringify(prepared.metadata)).not.toContain(adminToken);
+    expect(JSON.stringify(prepared.metadata)).not.toContain("unit-proof");
+  });
+
+  it("verifies a supplied canonical Admin session and preserves it without exchanging or revoking it", async () => {
+    vi.stubEnv("DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_TOKEN", adminToken);
+    prepared = await prepareOperationalFleetSession(configuration);
+    await prepared.cleanup();
+    expect(calls[0]?.path).toBe("/control-plane-proxy/auth/session");
+    expect(calls.some((c) => c.path.endsWith("/auth/token"))).toBe(false);
+    expect(calls.some((c) => c.body.sessionId === adminSessionId)).toBe(false);
+    expect(adminRevoked).toBe(false);
+  });
+
+  it("does not exchange or create after a supplied canonical Admin session is denied", async () => {
+    vi.stubEnv("DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_TOKEN", adminToken);
+    fault = "admin-session-denied";
+    await expect(prepareOperationalFleetSession(configuration)).rejects.toThrow(
+      /HTTP 401.*SESSION_REVOKED/,
+    );
+    expect(calls.map((c) => c.path)).toEqual([
+      "/control-plane-proxy/auth/session",
+    ]);
+  });
+
+  it.each([
+    "admin-wrong-role",
+    "admin-wrong-realm",
+    "admin-proxy-identity",
+    "admin-missing-session",
+    "admin-foreign-session",
+    "admin-foreign-principal",
+    "admin-inactive",
+  ])("rejects %s before proof or owned business mutation", async (failure) => {
+    fault = failure;
+    await expect(prepareOperationalFleetSession(configuration)).rejects.toThrow(
+      /verified Admin session/,
+    );
+    expect(
+      calls.some(
+        (c) =>
+          c.path.includes("partner-entries") ||
+          c.path.includes("step-up-proofs"),
+      ),
+    ).toBe(false);
+    expect(
+      calls
+        .filter((c) => c.path === "/api/auth/sessions/revoke")
+        .map((c) => c.body),
+    ).toEqual([{ sessionId: adminSessionId }]);
+    expect(
+      calls.some((c) => c.body.sessionId === "foreign-admin-session-dummy"),
+    ).toBe(false);
+    expect(adminRevoked).toBe(true);
+  });
+
+  it.each([
+    "proof-missing-reference",
+    "proof-wrong-action",
+    "proof-not-required",
+  ])("rejects %s without attempting protected create", async (failure) => {
+    fault = failure;
+    await expect(prepareOperationalFleetSession(configuration)).rejects.toThrow(
+      /step up.*receipt/,
+    );
+    expect(calls.some((c) => c.path.includes("partner-entries"))).toBe(false);
+    expect(adminRevoked).toBe(true);
+  });
+
+  it.each([
+    ["proof-mfa-denied", "MFA_REQUIRED"],
+    ["proof-session-denied", "STEP_UP_REQUIRED"],
+  ])(
+    "retains safe 403 code for %s without secrets, retries or later mutations",
+    async (failure, code) => {
+      fault = failure;
+      const error = await prepareOperationalFleetSession(configuration).catch(
+        (e: unknown) => e,
+      );
+      expect(String(error)).toContain(`HTTP 403 code ${code}`);
+      expect(String(error)).not.toContain(adminToken);
+      expect(String(error)).not.toContain(plaintextKey);
+      expect(
+        calls.filter((c) => c.path.endsWith("/step-up-proofs")),
+      ).toHaveLength(1);
+      expect(calls.some((c) => c.path.includes("partner-entries"))).toBe(false);
+      expect(adminRevoked).toBe(true);
+    },
+  );
+
+  it("cleans an exchange-acknowledged Admin session even when its authority readback fails before Entry creation", async () => {
+    fault = "admin-session-denied";
+    await expect(prepareOperationalFleetSession(configuration)).rejects.toThrow(
+      /HTTP 401 code SESSION_REVOKED/,
+    );
+    expect(calls.map((c) => c.path)).toEqual([
+      "/control-plane-proxy/auth/token",
+      "/control-plane-proxy/auth/session",
+      "/api/auth/sessions/revoke",
+    ]);
+    expect(adminRevoked).toBe(true);
+    expect(entry).toEqual({});
+  });
+
+  it("rejects an authority proof bound to another path and never continues to key issue", async () => {
+    fault = "proof-foreign-path";
+    await expect(prepareOperationalFleetSession(configuration)).rejects.toThrow(
+      /HTTP 403 code STEP_UP_REQUIRED/,
+    );
+    expect(calls.some((c) => c.path.endsWith("/credentials"))).toBe(false);
+    expect(adminRevoked).toBe(true);
+    expect(revokedEntry).toBe(false);
+  });
+
+  it("retains the exact dev-exchange denial code without exposing the otherwise identical secret-bearing error payload", async () => {
+    fault = "admin-exchange-typed-denied";
+    const error = await prepareOperationalFleetSession(configuration).catch(
+      (e: unknown) => e,
+    );
+    expect(String(error)).toContain(
+      "HTTP 403 code DEV_WORKFORCE_SESSION_EXCHANGE_DENIED",
+    );
+    for (const secret of [adminToken, token, plaintextKey])
+      expect(String(error)).not.toContain(secret);
+    expect(calls.map((c) => c.path)).toEqual([
+      "/control-plane-proxy/auth/token",
+    ]);
+  });
+
+  it("omits non-allowlisted response codes and all raw secret-bearing messages", async () => {
+    fault = "proof-unknown-code";
+    const error = await prepareOperationalFleetSession(configuration).catch(
+      (e: unknown) => e,
+    );
+    expect(String(error)).toContain("HTTP 403");
+    for (const secret of [adminToken, token, plaintextKey])
+      expect(String(error)).not.toContain(secret);
+    expect(String(error)).not.toContain("code ");
+    expect(adminRevoked).toBe(true);
+  });
+
+  it("propagates a cleanup proof denial and still attempts only its own later cleanup before Admin revocation", async () => {
+    prepared = await prepareOperationalFleetSession(configuration);
+    fault = "proof-key-revoke-denied";
+    const error = await prepared.cleanup().catch((e: unknown) => e);
+    expect(String(error)).toMatch(
+      /own cleanup failed.*HTTP 403 code STEP_UP_REQUIRED/,
+    );
+    expect(revokedKey).toBe(false);
+    expect(revokedEntry && adminRevoked).toBe(true);
+    expect(calls.at(-1)?.body.sessionId).toBe(adminSessionId);
+    expect(String(error)).not.toContain(adminToken);
+  });
+
+  it("reports owned Admin cleanup denial without leaking its session token", async () => {
+    prepared = await prepareOperationalFleetSession(configuration);
+    fault = "admin-cleanup-denied";
+    const error = await prepared.cleanup().catch((e: unknown) => e);
+    expect(String(error)).toMatch(
+      /own cleanup failed.*HTTP 403 code FORBIDDEN/,
+    );
+    expect(revokedKey && revokedEntry).toBe(true);
+    expect(adminRevoked).toBe(false);
+    expect(String(error)).not.toContain(adminToken);
+  });
+
+  it.each([
+    "admin-exchange-denied",
+    "admin-exchange-redirect",
+    "admin-exchange-oversized",
+    "admin-exchange-missing-session",
+  ])(
+    "rejects %s without any authority fallback or business mutation",
+    async (failure) => {
+      fault = failure;
+      await expect(
+        prepareOperationalFleetSession(configuration),
+      ).rejects.toThrow(/Admin token/);
+      expect(calls.map((c) => c.path)).toEqual([
+        "/control-plane-proxy/auth/token",
+      ]);
+      expect(entry).toEqual({});
+    },
+  );
+
+  it.each(["elapsed-admin-deadline", "elapsed-key-deadline"])(
+    "retains exact acknowledged ownership at %s and uses only the original separate cleanup budget",
+    async (failure) => {
+      vi.useFakeTimers();
+      fault = failure;
+      await expect(
+        prepareOperationalFleetSession(configuration),
+      ).rejects.toThrow(/deadline failed/);
+      expect(adminRevoked).toBe(true);
+      if (failure === "elapsed-admin-deadline") {
+        expect(calls.map((c) => c.path)).toEqual([
+          "/control-plane-proxy/auth/token",
+          "/api/auth/sessions/revoke",
+        ]);
+        expect(revokedEntry || revokedKey).toBe(false);
+      } else {
+        expect(revokedEntry && revokedKey).toBe(true);
+        expect(calls.some((c) => c.path.endsWith("/bootstrap-session"))).toBe(
+          false,
+        );
+      }
+    },
+  );
+
+  it("bounds an exchange response body read using its original request deadline", async () => {
+    vi.useFakeTimers();
+    fault = "admin-exchange-hanging";
+    const pending = prepareOperationalFleetSession(configuration);
+    const assertion = expect(pending).rejects.toThrow(
+      /Admin token exchange failed/,
+    );
+    await vi.advanceTimersByTimeAsync(15_001);
+    await assertion;
+    expect(calls).toHaveLength(1);
+    expect(entry).toEqual({});
   });
 
   it("verifies a provided session using the actual backend and never issues or revokes its owner's Entry/key", async () => {
@@ -2171,7 +2594,7 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
     await expect(prepareOperationalFleetSession(configuration)).rejects.toThrow(
       /unowned credentials; preserved/,
     );
-    expect(calls.map((c) => c.path.split("/").at(-1))).toEqual([
+    expect(businessCalls().map((c) => c.path.split("/").at(-1))).toEqual([
       "partner-entries",
       "credentials",
     ]);
@@ -2209,7 +2632,7 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
     await expect(prepareOperationalFleetSession(configuration)).rejects.toThrow(
       /ownership not acknowledged/,
     );
-    expect(calls).toHaveLength(1);
+    expect(businessCalls()).toHaveLength(1);
     expect(revokedEntry).toBe(false);
   });
 
@@ -2228,10 +2651,10 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
     vi.useFakeTimers();
     fault = "elapsed-deadline";
     await expect(prepareOperationalFleetSession(configuration)).rejects.toThrow(
-      /own empty credentials failed/,
+      /create bound entry deadline failed/,
     );
     expect(revokedEntry).toBe(true);
-    expect(calls.map((c) => c.path.split("/").at(-1))).toEqual([
+    expect(businessCalls().map((c) => c.path.split("/").at(-1))).toEqual([
       "partner-entries",
       "revoke",
     ]);
@@ -2244,7 +2667,7 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
     expect(revokedKey).toBe(true);
     expect(revokedEntry).toBe(false);
     expect(
-      calls
+      businessCalls()
         .slice(-3)
         .every(
           (c) => c.origin === api || c.path.includes(String(entry.entrySlug)),
