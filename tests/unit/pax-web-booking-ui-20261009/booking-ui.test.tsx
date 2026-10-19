@@ -590,7 +590,9 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
         .fn()
         .mockResolvedValue({ expiresAt: f.quoteExpires });
       const producer = new PassengerBookingService(
-        {} as PassengerBookingRepository,
+        {
+          findCompletedBooking: vi.fn().mockResolvedValue(null),
+        } as unknown as PassengerBookingRepository,
         {
           createTrustedPassengerRide: trustedCreate,
         } as unknown as MultiTaxiService,

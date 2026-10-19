@@ -2685,6 +2685,12 @@ function RideContent({
         <VehicleCard fixture={fixture} />
         <FareCard fixture={fixture} />
         <PaymentCard fixture={fixture} />
+        <Actions
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onFixtureUpdate={onFixtureUpdate}
+        />
       </>
     );
   }

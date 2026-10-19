@@ -4,6 +4,7 @@ import { t } from "./translations";
 import { useState } from "react";
 import Link from "next/link";
 import { useReviewDemo } from "./review-context";
+import { passengerPaymentDisplay } from "../../../../packages/passenger-client/src/payment/state";
 
 export function ReviewRideControls({ orderId }: { orderId: string }) {
   const review = useReviewDemo();
@@ -32,7 +33,13 @@ export function ReviewRideControls({ orderId }: { orderId: string }) {
               },
             );
             if (!response.ok) throw new Error("retry_failed");
-            setMessage(t.retryQueued);
+            const body = await response.json().catch(() => null);
+            const payment = (body?.data?.payment ?? null) as
+              | { status?: string }
+              | null;
+            // Show the authoritative same-order payment state the retry call
+            // just read back, not a stale "queued" message after it resolves.
+            setMessage(passengerPaymentDisplay(payment?.status).label);
           } catch {
             setMessage(t.retryFailed);
           } finally {

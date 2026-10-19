@@ -291,10 +291,11 @@ export async function fetchPassengerReceipt(
         ...(record ? { record } : {}),
       };
     } catch (e: unknown) {
-      throw new PassengerAuthorityError(
-        500,
-        e instanceof Error ? e.message : "PASSENGER_RECEIPT_FAILED",
-      );
+      const errCode =
+        (e as any)?.code ||
+        (e instanceof Error ? e.message : "PASSENGER_RECEIPT_FAILED");
+      const errStatus = (e as any)?.status || 500;
+      throw new PassengerAuthorityError(errStatus, errCode);
     }
   }
 }
@@ -336,7 +337,7 @@ export function mapPassengerRideAuthorityToFixture(
     null;
   const payment = mapPassengerPayment(view.payment);
   const certificate =
-    view.order?.status === "completed" || view.receipt
+    kind === "receipt" || view.order?.status === "completed" || view.receipt
       ? mapPassengerCertificate(
           view.receipt,
           view.actions?.canReadReceipt || Boolean(view.receipt),
