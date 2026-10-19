@@ -27,7 +27,7 @@ import * as React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import { JSDOM } from "jsdom";
 import { cleanup, fireEvent, render } from "@testing-library/react/pure";
-import * as sdk from "@drts/api-client";
+import * as sdk from "../../../../packages/api-client/src";
 import { createUiModuleLoader } from "../sr-wire-001/ui-module-loader";
 import { describe, it, expect, afterEach, vi } from "vitest";
 
