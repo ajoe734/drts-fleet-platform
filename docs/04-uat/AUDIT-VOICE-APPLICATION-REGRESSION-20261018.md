@@ -509,3 +509,41 @@ and `lint-delivery.log` each exit 0. These include the final HTTP wire, conditio
 qualification, late-close and hosted test source. Final source is submitted by a
 normal Codex2 commit/plain push; the exact SHA/PR/hosted results are frozen in the
 canonical handoff, and hosted failures remain implementation work until resolved.
+
+### Hosted d656 results and original-consumer fixture correction
+
+The immutable d6567ebaab2a8aa9da6d210bfde0e2d387ca477c candidate on new PR2818
+ran the real hosted Ops Shell browser (39197272304): **six passed, zero skipped,
+unexpected or flaky**. Full artifact evidence retains the original three tasks /
+eight receipts and verifies one replacement creation/binding after contact
+correction, fresh explicit SIM consent and lost-response/reload recovery. Original
+phone/revision 0900000016/6 remains sealed; replacement is 0900000017/7 on the same
+order. This result belongs to d656, not its successor.
+
+Three hosted d656 jobs failed and are retained in full under
+`.local/voice-evidence/failure-{117883087193,117882675875,117882675830}-full.log`.
+The two API/integration jobs expose the same UV002 expected-catalogue mistake:
+the real migrated database contains all 32 tables, while the expected list had a
+duplicate callback binding and misplaced recording journal. The correction
+preserves exact equality against all 32 unique, alphabetically ordered tables.
+No migration or product guard is weakened.
+
+The root unit shard's UV023 idle-runner positive lacked a configured recorder.
+Its real runner correctly refused missing-adapter completion. The original
+success assertion remains; its existing external-recorder fixture now explicitly
+configures a typed SIM adapter with the actual requested scope, leg, recording
+identity, immutable version/SHA/bytes and complete bidirectional closed coverage.
+The production runner and central manifest validation remain real. The precise
+socket-free idle case reproduces d656's failure in `uv023-d656-idle-before.log`
+and passes in `uv023-fixed-idle.log`; three unselected cases are not coverage.
+Missing-adapter and incomplete-manifest negative regressions remain unchanged.
+Formal migration and the entire UV023 file, including listener behavior, require
+the successor's hosted CI; d656 greens are not relabelled as successor results.
+
+VM verification correction: a full UV023 command was mistakenly started before
+the adjacent listener case was identified, then immediately interrupted (exit
+130, only the RUN banner, no test result). `uv023-d656-before.log` is retained as
+an aborted command and is never pass evidence. No process was left running.
+Subsequent VM commands select only the socket-free idle case. The final delivery
+packet records all started hosted runs to terminal with pass/fail/skip separated,
+binds them to the exact source and retains the full four-key/F1–F8/17-clause map.
