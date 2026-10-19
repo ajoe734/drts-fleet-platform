@@ -2627,10 +2627,7 @@ export class BillingSettlementService implements OnModuleInit {
       },
       "create_reconciliation_issue",
     );
-    this.reconciliationIssues = [
-      this.cloneReconciliationIssue(issue),
-      ...this.reconciliationIssues,
-    ];
+    this.publishReconciliationIssue(issue);
     this.recordAudit(
       {
         actorId: command.openedBy.trim(),
@@ -2691,25 +2688,25 @@ export class BillingSettlementService implements OnModuleInit {
         },
         "assign_reconciliation_issue",
       );
-      Object.assign(issue, draft);
+      const published = this.publishReconciliationIssue(draft);
       this.recordAudit(
         {
           actorId: command.actorId.trim(),
           actorType: "platform_admin",
-          tenantId: issue.tenantId,
+          tenantId: published.tenantId,
           moduleName: "billing-settlement",
           actionName: "assign_reconciliation_issue",
           resourceType: "reconciliation_issue",
-          resourceId: issue.issueId,
+          resourceId: published.issueId,
           newValuesSummary: {
-            ownerId: issue.ownerId,
-            status: issue.status,
+            ownerId: published.ownerId,
+            status: published.status,
           },
         },
         requestId,
       );
 
-      return this.cloneReconciliationIssue(issue);
+      return this.cloneReconciliationIssue(published);
     });
   }
 
@@ -2745,25 +2742,25 @@ export class BillingSettlementService implements OnModuleInit {
         },
         "add_reconciliation_issue_comment",
       );
-      Object.assign(issue, draft);
+      const published = this.publishReconciliationIssue(draft);
       this.recordAudit(
         {
           actorId: command.actorId.trim(),
           actorType: "platform_admin",
-          tenantId: issue.tenantId,
+          tenantId: published.tenantId,
           moduleName: "billing-settlement",
           actionName: "add_reconciliation_issue_comment",
           resourceType: "reconciliation_issue",
-          resourceId: issue.issueId,
+          resourceId: published.issueId,
           newValuesSummary: {
-            commentCount: issue.comments.length,
-            evidenceArtifactIds: issue.evidenceArtifactIds,
+            commentCount: published.comments.length,
+            evidenceArtifactIds: published.evidenceArtifactIds,
           },
         },
         requestId,
       );
 
-      return this.cloneReconciliationIssue(issue);
+      return this.cloneReconciliationIssue(published);
     });
   }
 
@@ -2803,26 +2800,26 @@ export class BillingSettlementService implements OnModuleInit {
         },
         "resolve_reconciliation_issue",
       );
-      Object.assign(issue, draft);
+      const published = this.publishReconciliationIssue(draft);
       this.recordAudit(
         {
           actorId: command.actorId.trim(),
           actorType: "platform_admin",
-          tenantId: issue.tenantId,
+          tenantId: published.tenantId,
           moduleName: "billing-settlement",
           actionName: "resolve_reconciliation_issue",
           resourceType: "reconciliation_issue",
-          resourceId: issue.issueId,
+          resourceId: published.issueId,
           newValuesSummary: {
-            status: issue.status,
-            resolutionCode: issue.resolutionCode,
-            resolvedAt: issue.resolvedAt,
+            status: published.status,
+            resolutionCode: published.resolutionCode,
+            resolvedAt: published.resolvedAt,
           },
         },
         requestId,
       );
 
-      return this.cloneReconciliationIssue(issue);
+      return this.cloneReconciliationIssue(published);
     });
   }
 
@@ -2872,25 +2869,25 @@ export class BillingSettlementService implements OnModuleInit {
         },
         "reopen_reconciliation_issue",
       );
-      Object.assign(issue, draft);
+      const published = this.publishReconciliationIssue(draft);
       this.recordAudit(
         {
           actorId: command.actorId.trim(),
           actorType: "platform_admin",
-          tenantId: issue.tenantId,
+          tenantId: published.tenantId,
           moduleName: "billing-settlement",
           actionName: "reopen_reconciliation_issue",
           resourceType: "reconciliation_issue",
-          resourceId: issue.issueId,
+          resourceId: published.issueId,
           newValuesSummary: {
-            status: issue.status,
-            reopenCount: issue.reopenCount,
+            status: published.status,
+            reopenCount: published.reopenCount,
           },
         },
         requestId,
       );
 
-      return this.cloneReconciliationIssue(issue);
+      return this.cloneReconciliationIssue(published);
     });
   }
 
@@ -4393,6 +4390,19 @@ export class BillingSettlementService implements OnModuleInit {
     }
   }
 
+  private publishReconciliationIssue(issue: ReconciliationIssueRecord) {
+    // A synchronous Forwarder refresh can replace the collection while SQL is
+    // pending. Publish the acknowledged row by identity in the current collection,
+    // rather than mutate a reference captured before that await.
+    const published = this.cloneReconciliationIssue(issue);
+    const index = this.reconciliationIssues.findIndex(
+      (current) => current.issueId === published.issueId,
+    );
+    if (index >= 0) this.reconciliationIssues[index] = published;
+    else this.reconciliationIssues.unshift(published);
+    return published;
+  }
+
   private requireReconciliationIssue(issueId: string) {
     this.syncDerivedForwarderIssues();
     const issue = this.reconciliationIssues.find(
@@ -4753,7 +4763,7 @@ export class BillingSettlementService implements OnModuleInit {
 
     const forwarderIssues = this.forwarderService.listReconciliationIssues();
     const nextIssues = [...this.reconciliationIssues];
-    let changed = false;
+    const changedIssues: ReconciliationIssueRecord[] = [];
 
     for (const forwarderIssue of forwarderIssues) {
       const existingIndex = nextIssues.findIndex(
@@ -4846,30 +4856,40 @@ export class BillingSettlementService implements OnModuleInit {
         const current = nextIssues[existingIndex]!;
         if (JSON.stringify(current) !== JSON.stringify(baseIssue)) {
           nextIssues[existingIndex] = baseIssue;
-          changed = true;
+          changedIssues.push(baseIssue);
         }
         continue;
       }
 
       nextIssues.unshift(baseIssue);
-      changed = true;
+      changedIssues.push(baseIssue);
     }
 
-    if (!changed) {
+    if (!changedIssues.length) {
       return;
     }
 
     this.reconciliationIssues = nextIssues.map((issue) =>
       this.cloneReconciliationIssue(issue),
     );
-    this.persistChanges(
-      {
-        reconciliationIssues: nextIssues.map((issue) =>
-          this.cloneReconciliationIssue(issue),
-        ),
-      },
-      "sync_forwarder_reconciliation_issues",
-    );
+    for (const changedIssue of changedIssues) {
+      // Never upsert unchanged manual rows from a pre-ACK snapshot. A derived
+      // write shares the existing per-issue queue with commands, and reads the
+      // current row when its turn begins so a delayed refresh cannot undo an ACK.
+      void this.serializeReconciliationIssueUpdate(
+        changedIssue.issueId,
+        async () => {
+          const current =
+            this.reconciliationIssues.find(
+              (issue) => issue.issueId === changedIssue.issueId,
+            ) ?? changedIssue;
+          await this.persistChanges(
+            { reconciliationIssues: [this.cloneReconciliationIssue(current)] },
+            "sync_forwarder_reconciliation_issues",
+          );
+        },
+      );
+    }
   }
 
   private cloneIssueComment(
