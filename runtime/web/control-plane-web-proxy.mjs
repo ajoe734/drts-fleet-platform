@@ -8,11 +8,16 @@ const METADATA_IDENTITY_TOKEN_URL =
 const RUN_APP_HOST_SUFFIX = ".a.run.app";
 const NEXT_CHILD_BOOT_RETRY_ATTEMPTS = 10;
 const NEXT_CHILD_BOOT_RETRY_DELAY_MS = 500;
+// Private provenance for the loopback-only Next child. Never accept a caller's
+// version of this header, including requests without a browser Origin.
+const RUNTIME_ORIGIN_HEADER = "x-drts-runtime-origin";
 const REQUEST_HEADER_BLOCKLIST = new Set([
   "connection",
   "content-length",
   "host",
   "transfer-encoding",
+  "forwarded",
+  RUNTIME_ORIGIN_HEADER,
   "x-forwarded-for",
   "x-forwarded-host",
   "x-forwarded-port",
@@ -20,6 +25,10 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
 ]);
 
 const [, , childEntry, internalPortArg] = process.argv;
+// Only this existing consumer understands the private provenance. Other
+// control-plane applications must not receive an unknown header to relay.
+const fleetOriginConsumer =
+  childEntry === "apps/fleet-partner-portal-web/server.js";
 
 if (!childEntry || !internalPortArg) {
   console.error(
@@ -30,6 +39,45 @@ if (!childEntry || !internalPortArg) {
 
 const publicPort = Number(process.env.PORT || 3000);
 const internalPort = Number(internalPortArg);
+
+function ingressOrigin(req) {
+  const authority = req.headers.host;
+  if (
+    typeof authority !== "string" ||
+    (req.rawHeaders &&
+      req.rawHeaders.filter(
+        (_, index) =>
+          index % 2 === 0 && req.rawHeaders[index].toLowerCase() === "host",
+      ).length !== 1)
+  ) {
+    throw new Error("Invalid request authority.");
+  }
+  const match = /^(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::([0-9]{1,5}))?$/i.exec(
+    authority,
+  );
+  if (!match) throw new Error("Invalid request authority.");
+  const [, hostname, port] = match;
+  if (
+    (port && (Number(port) < 1 || Number(port) > 65535)) ||
+    (!hostname.startsWith("[") &&
+      (hostname.length > 253 ||
+        hostname
+          .split(".")
+          .some(
+            (label) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label),
+          )))
+  ) {
+    throw new Error("Invalid request authority.");
+  }
+  // Cloud Run terminates HTTPS before this HTTP listener. K_SERVICE is its
+  // existing deployment identity; arbitrary forwarded headers are not proof.
+  const protocol =
+    process.env.K_SERVICE?.trim() || req.socket.encrypted ? "https:" : "http:";
+  const parsed = new URL(`${protocol}//${authority}`);
+  if (parsed.hostname !== hostname.toLowerCase())
+    throw new Error("Invalid request authority.");
+  return parsed.origin;
+}
 
 function resolveTargetOrigin() {
   return process.env.DRTS_API_URL || DEFAULT_API_BASE_URL;
@@ -176,6 +224,8 @@ async function forwardNextRequest(req, res, requestUrl) {
   const headers = copyRequestHeaders(req, targetUrl, {
     forwardAuthorization: true,
   });
+  if (fleetOriginConsumer)
+    headers.set(RUNTIME_ORIGIN_HEADER, requestUrl.origin);
   const body =
     method === "GET" || method === "HEAD"
       ? undefined
@@ -239,10 +289,21 @@ child.on("exit", (code, signal) => {
 });
 
 const server = http.createServer(async (req, res) => {
-  const requestUrl = new URL(
-    req.url || "/",
-    `http://${req.headers.host || "localhost"}`,
-  );
+  let requestUrl;
+  try {
+    const origin = ingressOrigin(req);
+    requestUrl = new URL(req.url || "/", origin);
+    if (requestUrl.origin !== origin)
+      throw new Error("Invalid request authority.");
+  } catch {
+    res.statusCode = 400;
+    res.setHeader("content-type", "application/json; charset=utf-8");
+    res.setHeader("cache-control", "no-store");
+    res.end(
+      JSON.stringify({ error: { code: "CONTROL_PLANE_ORIGIN_INVALID" } }),
+    );
+    return;
+  }
   console.info("[control-plane-proxy] inbound request", {
     host: req.headers.host || "localhost",
     path: requestUrl.pathname,
