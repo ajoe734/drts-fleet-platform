@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { parsePdf } from "../billing-pdf-chinese-printable-content-20261016/pdf-parser";
 
 import type { BootstrapRequestIdentity } from "../../../apps/api/src/common/auth";
 import type { DatabaseService } from "../../../apps/api/src/common/db";
@@ -262,8 +263,8 @@ describe("REIMBURSEMENT-BATCH-EXPORT-RECONCILIATION-20261015: signed export + ma
 
       expect(streamable.getHeaders().type).toBe("application/pdf");
       const bytes = await drain(streamable.getStream());
-      const text = bytes.toString("latin1");
-      expect(text.startsWith("%PDF-1.4")).toBe(true);
+      expect(bytes.toString("latin1").startsWith("%PDF-1.4")).toBe(true);
+      const { text } = await parsePdf(bytes);
       expect(text).toContain(batch.batchId);
       expect(text).toContain(batch.driverId);
       for (const item of batch.items) {
