@@ -129,7 +129,7 @@ function certificateRows(
           ],
         ] as Array<[string, string]>)
       : []),
-    ...(certificate.driverSurname
+    ...(certificate.driverSurname?.trim()
       ? ([
           [
             "駕駛自填姓氏（非身分核驗）",
@@ -202,6 +202,7 @@ function value(input: string | number | null) {
 /** Fixed-length public redaction; not a claim about the real surname length. */
 function formatMaskedSurname(surname: string): string {
   const trimmed = surname.trim();
+  if (!trimmed) return trimmed;
   return trimmed.endsWith("○○") ? trimmed : `${trimmed}○○`;
 }
 

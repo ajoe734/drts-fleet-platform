@@ -35,6 +35,42 @@ cannot start a duplicate share` 與
    `ignores a late share settlement after the receipt identity has already
 changed` 兩項測試。
 
+## 第二輪獨立審查退修：一項修復、一項以證據駁回
+
+獨立 reviewer 再送回兩項 finding；逐項核對實際原始碼與資料路徑後：
+
+1. **空白姓氏被渲染成憑空的 `○○`（已修復）**：`certificate-artifact.
+renderer.ts` 的 `formatMaskedSurname` 原先只檢查 `trimmed.endsWith
+("○○")`，對全空白輸入會回傳單純 `"○○"`，等於無姓氏卻生出遮名字串，
+   違反原 r2「trim 後空白／缺值維持不可用」規則。Web／native 兩個 mapper
+   的既有寫法本就會在 trim 後為空時回傳空字串（列直接省略），僅渲染器
+   有這個落差。修復：trim 後為空直接回傳空字串，並把「駕駛自填姓氏」列
+   的顯示條件由原始字串真值改為 trim 後真值（避免全空白字串仍判定為
+   有值而渲染該列）。新增兩項測試
+   （`tests/unit/pax-receipt-complaint-20261009/receipt-download.test.ts`）：
+   全空白 declared 姓氏整列省略、全空白 captured e04Snapshot 姓氏不產生
+   `○○`；修復前以同一輸入重現會得到含 `○○` 的錯誤輸出。
+2. **ASCII／全角星號遮罩（查無根據，不採納）**：對 repo 全文 grep
+   `driverSurname`／`e04Snapshot.driverSurname` 相關程式碼及既有
+   `maskName()`（`apps/api/src/common/sensitive-data-policy.ts`）
+   實際使用處，確認系統中沒有任何路徑會讓這個欄位出現 `**`／`＊＊`
+   遮罩；`maskName()` 只套用於 `fullName`／`displayName`／
+   `accountName`／`emergencyContact.name` 等完全不同欄位，原 r2
+   maskedNameContract 的「existing mask pattern」指的就是使用者截圖的
+   `○○`，不是這組星號慣例。對這個欄位硬塞一套「已知星號遮罩」判斷，
+   等於為不存在的資料形狀加功能，不處理。
+
+另一項「依 authMode／token/order 自行推導正確 PDF 目標、不信任既有
+pdfUrl」的要求未採納：實際讀取
+`apps/api/src/modules/passenger-app/receipt/passenger-receipt.controller.ts`
+確認每次請求都由伺服器依當時 `@CurrentIdentity()` 的真實 session／token
+與路徑中的 `orderId` 重新授權（`bookingService.getRide(passengerId,
+orderId)`），與用戶端持有哪個 URL 字串無關；用戶端「獨立推導」授權目標
+不會增加安全性，反而要求用戶端重建伺服器路由／授權邏輯，直接牴觸原 r2
+sharing contract 本身的「Do not add endpoint, principal, public URL or
+auth exception」。既有 origin 防護（見上節）已覆蓋唯一真實可行的客戶端
+防線；未進一步變更。
+
 ## 變更範圍（十個既有 write scope）
 
 - `apps/passenger-app-web/components/ride/receipt-share-actions.tsx`（新檔）
@@ -108,18 +144,26 @@ native-ride-presentation.test.ts` 更新既有斷言重現「修正前失敗、�
 ## 執行結果
 
 ```
-vitest run tests/unit/pax-bureau-receipt-share-masked-name-20261019/web-share.test.tsx           16 passed
-vitest run tests/unit/pax-native-app-20261009/native-ride-presentation.test.ts \
-           tests/unit/pax-receipt-complaint-20261009/receipt-download.test.ts                     80 passed
-vitest run tests/unit/pax-receipt-complaint-20261009/receipt-auth.test.ts \
-           tests/unit/pax-bureau-journey-coverage-20261018/receipt-pending-screen.test.tsx \
-           tests/unit/pax-native-app-20261009/native-stream-and-receipt-adapters.test.ts          62 passed
-(apps/passenger-app) vitest run tests/unit/native-p5-screen.test.ts --config vitest.config.ts     22 passed
-vitest run tests/unit/system-remediation/sr-qa-reports-001/c098-electronic-ride-certificate.test.ts 5 passed
+vitest run \
+  tests/unit/pax-bureau-receipt-share-masked-name-20261019/web-share.test.tsx \
+  tests/unit/pax-native-app-20261009/native-ride-presentation.test.ts \
+  tests/unit/pax-receipt-complaint-20261009/receipt-download.test.ts \
+  tests/unit/pax-receipt-complaint-20261009/receipt-auth.test.ts \
+  tests/unit/pax-bureau-journey-coverage-20261018/receipt-pending-screen.test.tsx \
+  tests/unit/pax-native-app-20261009/native-stream-and-receipt-adapters.test.ts \
+  tests/unit/system-remediation/sr-qa-reports-001/c098-electronic-ride-certificate.test.ts
+  → 7 files, 160 passed, EXIT:0 (2026-10-19T23:08:07Z, after the whitespace-surname fix)
+
+(apps/passenger-app) vitest run tests/unit/native-p5-screen.test.ts --config vitest.config.ts
+  → 1 file, 22 passed, EXIT:0 (separate vitest config/project; not part of the 160 above)
 ```
 
-合計 185 passed／0 failed／0 skipped（13 原案例 + 3 項退修新增案例，計 16，
-已併入上列總數）。
+Combined: 182 passed／0 failed／0 skipped across the eight regression files listed
+in the original r2 verification plan. `web-share.test.tsx` itself grew from the
+initial 13 cases to 16 (origin-rejection, duplicate-share-disabled,
+stale-settlement-ignored), and `receipt-download.test.ts` gained 2 more
+(whitespace-only surname, both call sites) in the second review round; both are
+included in the 160/182 above, not stacked on top of it.
 
 型別檢查（`tsc --noEmit --incremental false`，捕捉真實 compiler exit code，
 不透過 `tail` pipeline）：

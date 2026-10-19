@@ -914,4 +914,39 @@ describe("certificate artifact masked public surname matrix (real renderer, no D
     expect(html).not.toContain("駕駛（姓氏＋執登證號遮碼）");
     expect(html).not.toContain("駕駛自填姓氏（非身分核驗）");
   });
+
+  it("never invents a ○○ redaction from a whitespace-only declared surname", async () => {
+    const view = baseCertificateView({
+      driverSurname: "   ",
+      driverSurnameSource: "driver_profile_declared",
+      driverSurnameProfileUpdatedAt: "2026-10-19T00:00:00.000Z",
+    });
+    const html = (
+      await renderCertificateArtifact(view, "html")
+    ).buffer.toString("utf8");
+    expect(html).not.toContain("駕駛自填姓氏（非身分核驗）");
+    expect(html).not.toContain("○○");
+  });
+
+  it("never invents a ○○ redaction from a whitespace-only captured e04Snapshot surname", async () => {
+    const view = baseCertificateView({
+      e04Snapshot: {
+        fleetOperatorName: "unit-operator",
+        driverSurname: "   ",
+        driverRegistrationMasked: "••••1234",
+        paymentMethodDisplay: "unit-pay",
+        fareBreakdown: {
+          startMinor: 100,
+          distanceMinor: 200,
+          delayMinor: 0,
+          nightMinor: 0,
+        },
+      },
+    });
+    const html = (
+      await renderCertificateArtifact(view, "html")
+    ).buffer.toString("utf8");
+    expect(htmlRowValue(html, "駕駛（姓氏＋執登證號遮碼）")).toBe(" ••••1234");
+    expect(html).not.toContain("○○");
+  });
 });
