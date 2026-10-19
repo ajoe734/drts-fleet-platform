@@ -619,6 +619,8 @@ export class RegulatoryRegistryService
     this.cloneContract(contract),
   );
 
+  private readonly finalExitWrites = new Map<string, Promise<unknown>>();
+
   private policies = POLICY_SEED.map((policy) => this.clonePolicy(policy));
 
   private exclusivities = EXCLUSIVITY_SEED.map((exclusivity) =>
@@ -2265,127 +2267,150 @@ export class RegulatoryRegistryService
     vehicleId: string,
     command: InitiateVehicleOffboardingCommand,
   ): Promise<VehicleRegistryRecord> {
-    this.assertNonBlank(command.reason, "reason");
-    const vehicle = this.requireVehicle(vehicleId);
-    const occurredAt = new Date().toISOString();
-    const effectiveAt = this.normalizeNullableText(command.effectiveAt);
-    if (effectiveAt && Number.isNaN(new Date(effectiveAt).getTime())) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "INVALID_TIME_RANGE",
-        "effectiveAt must be a valid ISO timestamp.",
-        { field: "effectiveAt" },
-      );
-    }
+    return this.withFinalExitWrite(vehicleId, async () => {
+      this.assertNonBlank(command.reason, "reason");
+      const vehicle = this.cloneVehicle(this.requireVehicle(vehicleId));
+      const occurredAt = new Date().toISOString();
+      const effectiveAt = this.normalizeNullableText(command.effectiveAt);
+      if (effectiveAt && Number.isNaN(new Date(effectiveAt).getTime())) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_TIME_RANGE",
+          "effectiveAt must be a valid ISO timestamp.",
+          { field: "effectiveAt" },
+        );
+      }
 
-    const debrandingDueAt = this.normalizeNullableText(command.debrandingDueAt);
-    if (debrandingDueAt && Number.isNaN(new Date(debrandingDueAt).getTime())) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "INVALID_TIME_RANGE",
-        "debrandingDueAt must be a valid ISO timestamp.",
-        { field: "debrandingDueAt" },
+      const debrandingDueAt = this.normalizeNullableText(
+        command.debrandingDueAt,
       );
-    }
+      if (
+        debrandingDueAt &&
+        Number.isNaN(new Date(debrandingDueAt).getTime())
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_TIME_RANGE",
+          "debrandingDueAt must be a valid ISO timestamp.",
+          { field: "debrandingDueAt" },
+        );
+      }
 
-    const debrandingRequired = command.debrandingRequired ?? true;
-    vehicle.dispatchableFlag = false;
-    vehicle.supplyLifecycle = {
-      ...this.cloneSupplyLifecycle(vehicle.supplyLifecycle),
-      offboarding: {
-        status: debrandingRequired ? "debranding_required" : "completed",
-        reason: command.reason.trim(),
-        requestedAt: occurredAt,
-        effectiveAt,
-        completedAt: debrandingRequired ? null : occurredAt,
-        requestedBy: this.normalizeNullableText(command.requestedBy),
-        debrandingRequired,
-        debrandingStatus: debrandingRequired ? "pending" : "completed",
-        debrandingDueAt,
-        debrandingCompletedAt: debrandingRequired ? null : occurredAt,
-        debrandingTicketId: this.normalizeNullableText(
-          command.debrandingTicketId,
-        ),
-        notes: this.normalizeNullableText(command.notes),
-      },
-    };
-    const updated = this.reconcileVehicleLifecycle(vehicleId, {
-      entityType: "offboarding",
-      message: debrandingRequired
-        ? "Vehicle offboarding started and debranding work is now tracked."
-        : "Vehicle offboarding completed without debranding work.",
-      occurredAt,
-      relatedEntityId: vehicleId,
-      persistContext: null,
-      touchUpdatedAt: true,
+      const debrandingRequired = command.debrandingRequired ?? true;
+      vehicle.dispatchableFlag = false;
+      vehicle.supplyLifecycle = {
+        ...this.cloneSupplyLifecycle(vehicle.supplyLifecycle),
+        offboarding: {
+          status: debrandingRequired ? "debranding_required" : "completed",
+          reason: command.reason.trim(),
+          requestedAt: occurredAt,
+          effectiveAt,
+          completedAt: debrandingRequired ? null : occurredAt,
+          requestedBy: this.normalizeNullableText(command.requestedBy),
+          debrandingRequired,
+          debrandingStatus: debrandingRequired ? "pending" : "completed",
+          debrandingDueAt,
+          debrandingCompletedAt: debrandingRequired ? null : occurredAt,
+          debrandingTicketId: this.normalizeNullableText(
+            command.debrandingTicketId,
+          ),
+          notes: this.normalizeNullableText(command.notes),
+        },
+      };
+      const updated = this.reconcileVehicleLifecycle(
+        vehicleId,
+        {
+          entityType: "offboarding",
+          message: debrandingRequired
+            ? "Vehicle offboarding started and debranding work is now tracked."
+            : "Vehicle offboarding completed without debranding work.",
+          occurredAt,
+          relatedEntityId: vehicleId,
+          persistContext: null,
+          touchUpdatedAt: true,
+          emitEvent: false,
+        },
+        vehicle,
+      );
+      await this.persistFinalExitChangeOrThrow(
+        {
+          vehicles: [this.cloneVehicle(updated)],
+        },
+        "initiate_vehicle_offboarding",
+      );
+
+      return this.publishFinalExitChange(vehicleId, updated);
     });
-    await this.persistFinalExitChangeOrThrow(
-      {
-        vehicles: [this.cloneVehicle(updated)],
-      },
-      "initiate_vehicle_offboarding",
-    );
-
-    return this.cloneVehicle(updated);
   }
 
   async completeVehicleDebranding(
     vehicleId: string,
     command: CompleteVehicleDebrandingCommand,
   ): Promise<VehicleRegistryRecord> {
-    const vehicle = this.requireVehicle(vehicleId);
-    const current = this.normalizeOffboarding(
-      vehicle.supplyLifecycle.offboarding,
-    );
-    if (!current.debrandingRequired || current.debrandingStatus !== "pending") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "DEBRANDING_NOT_REQUIRED",
-        "There is no pending debranding work for this vehicle.",
-        { vehicleId },
+    return this.withFinalExitWrite(vehicleId, async () => {
+      const vehicle = this.cloneVehicle(this.requireVehicle(vehicleId));
+      const current = this.normalizeOffboarding(
+        vehicle.supplyLifecycle.offboarding,
       );
-    }
+      if (
+        !current.debrandingRequired ||
+        current.debrandingStatus !== "pending"
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "DEBRANDING_NOT_REQUIRED",
+          "There is no pending debranding work for this vehicle.",
+          { vehicleId },
+        );
+      }
 
-    const completedAt = command.completedAt ?? new Date().toISOString();
-    if (Number.isNaN(new Date(completedAt).getTime())) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "INVALID_TIME_RANGE",
-        "completedAt must be a valid ISO timestamp.",
-        { field: "completedAt" },
+      const completedAt = command.completedAt ?? new Date().toISOString();
+      if (Number.isNaN(new Date(completedAt).getTime())) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "INVALID_TIME_RANGE",
+          "completedAt must be a valid ISO timestamp.",
+          { field: "completedAt" },
+        );
+      }
+
+      vehicle.supplyLifecycle = {
+        ...this.cloneSupplyLifecycle(vehicle.supplyLifecycle),
+        offboarding: {
+          ...current,
+          status: "completed",
+          completedAt,
+          debrandingStatus: "completed",
+          debrandingCompletedAt: completedAt,
+          debrandingTicketId:
+            this.normalizeNullableText(command.debrandingTicketId) ??
+            current.debrandingTicketId,
+          notes: this.normalizeNullableText(command.notes) ?? current.notes,
+        },
+      };
+      const updated = this.reconcileVehicleLifecycle(
+        vehicleId,
+        {
+          entityType: "offboarding",
+          message:
+            "Vehicle debranding work completed and offboarding is closed.",
+          occurredAt: completedAt,
+          relatedEntityId: vehicleId,
+          persistContext: null,
+          touchUpdatedAt: true,
+          emitEvent: false,
+        },
+        vehicle,
       );
-    }
+      await this.persistFinalExitChangeOrThrow(
+        {
+          vehicles: [this.cloneVehicle(updated)],
+        },
+        "complete_vehicle_debranding",
+      );
 
-    vehicle.supplyLifecycle = {
-      ...this.cloneSupplyLifecycle(vehicle.supplyLifecycle),
-      offboarding: {
-        ...current,
-        status: "completed",
-        completedAt,
-        debrandingStatus: "completed",
-        debrandingCompletedAt: completedAt,
-        debrandingTicketId:
-          this.normalizeNullableText(command.debrandingTicketId) ??
-          current.debrandingTicketId,
-        notes: this.normalizeNullableText(command.notes) ?? current.notes,
-      },
-    };
-    const updated = this.reconcileVehicleLifecycle(vehicleId, {
-      entityType: "offboarding",
-      message: "Vehicle debranding work completed and offboarding is closed.",
-      occurredAt: completedAt,
-      relatedEntityId: vehicleId,
-      persistContext: null,
-      touchUpdatedAt: true,
+      return this.publishFinalExitChange(vehicleId, updated);
     });
-    await this.persistFinalExitChangeOrThrow(
-      {
-        vehicles: [this.cloneVehicle(updated)],
-      },
-      "complete_vehicle_debranding",
-    );
-
-    return this.cloneVehicle(updated);
   }
 
   updateVehicleCompliance(
@@ -2891,8 +2916,9 @@ export class RegulatoryRegistryService
       touchUpdatedAt?: boolean;
       manualDispatchHold?: boolean;
     },
+    stagedVehicle?: VehicleRegistryRecord,
   ): VehicleRegistryRecord {
-    const vehicle = this.requireVehicle(vehicleId);
+    const vehicle = stagedVehicle ?? this.requireVehicle(vehicleId);
     const occurredAt = options?.occurredAt ?? new Date().toISOString();
     const previousLifecycle = this.cloneSupplyLifecycle(
       vehicle.supplyLifecycle,
@@ -3894,6 +3920,56 @@ export class RegulatoryRegistryService
           context,
         );
       });
+  }
+
+  private withFinalExitWrite<T>(
+    vehicleId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.finalExitWrites.get(vehicleId) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(operation);
+    this.finalExitWrites.set(vehicleId, current);
+    const release = () => {
+      if (this.finalExitWrites.get(vehicleId) === current) {
+        this.finalExitWrites.delete(vehicleId);
+      }
+    };
+    void current.then(release, release);
+    return current;
+  }
+
+  /** Publish only this acknowledged command's delta onto the current row. */
+  private publishFinalExitChange(
+    vehicleId: string,
+    saved: VehicleRegistryRecord,
+  ): VehicleRegistryRecord {
+    const vehicle = this.requireVehicle(vehicleId);
+    const previous = this.cloneSupplyLifecycle(vehicle.supplyLifecycle);
+    // Do not replace the row with the pre-await snapshot: a legitimate peer
+    // may have changed compliance or a manual hold while storage was pending.
+    vehicle.supplyLifecycle = {
+      ...vehicle.supplyLifecycle,
+      offboarding: this.normalizeOffboarding(saved.supplyLifecycle.offboarding),
+    };
+    if (Date.parse(saved.updatedAt) > Date.parse(vehicle.updatedAt)) {
+      vehicle.updatedAt = saved.updatedAt;
+    }
+    const updated = this.reconcileVehicleLifecycle(vehicleId, {
+      entityType: "offboarding",
+      ...(saved.supplyLifecycle.lastTrace
+        ? { message: saved.supplyLifecycle.lastTrace.message }
+        : {}),
+      occurredAt: saved.updatedAt,
+      relatedEntityId: vehicleId,
+      emitEvent: false,
+      persistContext: null,
+    });
+    if (this.didLifecycleChange(previous, updated.supplyLifecycle)) {
+      this.opsDispatchEventsService.publishSupplyLifecycleUpdated(
+        this.cloneVehicle(updated),
+      );
+    }
+    return this.cloneVehicle(updated);
   }
 
   /**

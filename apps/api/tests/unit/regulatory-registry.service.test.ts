@@ -436,7 +436,9 @@ describe("RegulatoryRegistryService", () => {
   it("does not fabricate profile metadata for drivers without a stored profile", () => {
     const { service } = createService();
 
-    (service as { drivers: Array<Record<string, unknown>> }).drivers.unshift({
+    (
+      service as unknown as { drivers: Array<Record<string, unknown>> }
+    ).drivers.unshift({
       driverId: "drv-no-profile-001",
       name: "No Profile Driver",
       supportedServiceBuckets: ["standard_taxi"],
@@ -502,13 +504,10 @@ describe("RegulatoryRegistryService", () => {
       },
     });
 
-    const completed = await service.completeVehicleDebranding(
-      "veh-demo-001",
-      {
-        debrandingTicketId: "DEBRAND-001",
-        notes: "Branding removed at depot",
-      },
-    );
+    const completed = await service.completeVehicleDebranding("veh-demo-001", {
+      debrandingTicketId: "DEBRAND-001",
+      notes: "Branding removed at depot",
+    });
 
     expect(completed.supplyLifecycle.offboarding).toMatchObject({
       status: "completed",
@@ -550,11 +549,13 @@ describe("RegulatoryRegistryService", () => {
       regulatoryRegistryRepository.reportPersistenceFailure,
     ).toHaveBeenCalledWith(persistError, "initiate_vehicle_offboarding");
 
-    // A rejected final exit still happened against in-memory state (there is
-    // no distributed transaction to roll back), but the caller must not be
-    // told the canonical write succeeded: readback-after-write is what the
-    // acceptance calls "a record/envelope only after success," and this
-    // rejection is the honest alternative to a log-only catch.
+    // The rejected staged command must not replace the canonical read model.
+    expect(
+      service
+        .listVehicles()
+        .find((vehicle) => vehicle.vehicleId === "veh-demo-001")
+        ?.supplyLifecycle.offboarding.status,
+    ).toBe("none");
   });
 
   it("surfaces rejected exclusivity in vehicle lifecycle", () => {
