@@ -262,35 +262,36 @@ export class ComplaintService implements OnModuleInit {
       .digest("hex");
   }
 
-  /** Best-effort durable registration, called only after persistChanges
-   * catches ComplaintCommitOutcomeUnknownError. If this bookkeeping write
-   * itself fails, the retry falls back to the existing in-memory-only
-   * pendingUncertainCommits behavior rather than regressing below it. */
-  private recordDurablePendingCommit(
+  /** Durably persists the prepared caseNo/entryIds identity for this attempt
+   * BEFORE its potentially ambiguous business COMMIT is even issued (see the
+   * `affectedCaseNos.length && this.canonicalDbEnabled()` branch of
+   * persistChanges), so a marker failure here is an honest, definite failure
+   * of the whole attempt rather than a silently-swallowed gap that would
+   * leave cross-replica recovery of an actually-landed COMMIT to only this
+   * process's in-memory Map. A repository without recordPendingCommit (no
+   * durable identity support at all) is tolerated as a no-op, same as every
+   * other optional durable-recovery method on this repository. */
+  private async recordDurablePendingCommit(
     caseNo: string,
     action: string,
     complaintCase: ComplaintCaseRecord,
     complaintTimelines: ComplaintTimelineEntry[],
     previousCaseSnapshot: ComplaintCaseRecord | null,
     matchCommand: unknown,
-  ): void {
+  ): Promise<void> {
     if (!this.canonicalDbEnabled()) return;
     if (typeof this.complaintRepository?.recordPendingCommit !== "function")
       return;
-    void this.complaintRepository
-      .recordPendingCommit({
-        commandKey: this.computeCommandKey(action, caseNo, matchCommand),
-        caseNo,
-        action,
-        commandPayload: matchCommand,
-        caseSnapshot: complaintCase,
-        timelineSnapshot: complaintTimelines,
-        previousCaseSnapshot,
-        status: "pending",
-      })
-      .catch(() => {
-        // Best-effort only; see method doc.
-      });
+    await this.complaintRepository.recordPendingCommit({
+      commandKey: this.computeCommandKey(action, caseNo, matchCommand),
+      caseNo,
+      action,
+      commandPayload: matchCommand,
+      caseSnapshot: complaintCase,
+      timelineSnapshot: complaintTimelines,
+      previousCaseSnapshot,
+      status: "pending",
+    });
   }
 
   /** Best-effort durable clear once a pending commit is no longer uncertain
@@ -345,11 +346,60 @@ export class ComplaintService implements OnModuleInit {
     }
     const committed =
       JSON.stringify(durableCase) === JSON.stringify(pending.complaintCase);
-    if (!committed && pending.rollback) {
-      pending.rollback();
+    if (!committed) {
+      if (pending.rollback) pending.rollback();
+      this.pendingUncertainCommits.delete(caseNo);
+      this.clearDurablePendingCommit(pending.action, caseNo, pending.matchCommand);
+      return;
+    }
+    // The commit landed. Reconcile the canonical result into the live cache
+    // right now, before any other read or mutation on this case can see a
+    // stale snapshot and clobber a confirmed field (e.g. a warm replica's own
+    // outdated complaintCases entry overwriting a committed assignee with a
+    // later, unrelated note write).
+    this.reconcileComplaintCaseIntoCache(durableCase);
+    this.mergeTimelineEntriesIntoCache(caseNo, pending.complaintTimelines);
+    if (pending.action === "create_complaint_case") {
+      // Unlike resolve/close/... (which fall back to existingComplaintAction
+      // by reading the now-reconciled case state above), a create has no
+      // other idempotent-replay mechanism once its caseNo exists: keep this
+      // identity discoverable so the *same* logical create command's actual
+      // retry (this replica or another) still replays this exact case/
+      // timeline instead of allocating a new one. Only a real replay (via
+      // retryUncertainComplaintWrite's own successful persistChanges) clears
+      // pendingUncertainCommits/the durable marker.
+      return;
     }
     this.pendingUncertainCommits.delete(caseNo);
     this.clearDurablePendingCommit(pending.action, caseNo, pending.matchCommand);
+  }
+
+  /** Writes the canonical durable case into the live optimistic cache,
+   * inserting it if this process never had it (e.g. a create confirmed by
+   * reconciliation that originated on another replica). */
+  private reconcileComplaintCaseIntoCache(durableCase: ComplaintCaseRecord) {
+    if (this.complaintCases.some((item) => item.caseNo === durableCase.caseNo)) {
+      this.replaceComplaintCase(durableCase);
+    } else {
+      this.complaintCases = [durableCase, ...this.complaintCases];
+    }
+  }
+
+  /** Merges known-committed timeline entries into the live cache by entryId,
+   * without discarding any other entries already tracked there. */
+  private mergeTimelineEntriesIntoCache(
+    caseNo: string,
+    entries: readonly ComplaintTimelineEntry[],
+  ) {
+    const existing = this.complaintTimelines.get(caseNo) ?? [];
+    const byEntryId = new Map(existing.map((entry) => [entry.entryId, entry]));
+    for (const entry of entries) byEntryId.set(entry.entryId, entry);
+    this.complaintTimelines.set(
+      caseNo,
+      [...byEntryId.values()].sort((a, b) =>
+        a.createdAt.localeCompare(b.createdAt),
+      ),
+    );
   }
 
   /** Settlement endpoints must acknowledge only committed case and timeline
@@ -1981,7 +2031,43 @@ export class ComplaintService implements OnModuleInit {
         const persistence = this.settlementPersistence.get(caseNo);
         return persistence ? [persistence] : [];
       });
+      // Only ordinary (rollback-bearing) writes get durable cross-replica
+      // identity protection; settlement-dispute writes keep their existing,
+      // unaffected transaction/wait/refresh machinery (see isOrdinaryDbWrite).
+      const durablePrepareTargets = rollback
+        ? affectedCaseNos.flatMap((caseNo) => {
+            const complaintCase = (changes.complaintCases ?? []).find(
+              (item) => item.caseNo === caseNo,
+            );
+            if (!complaintCase) return [];
+            const timelineForCase = (changes.complaintTimelines ?? []).filter(
+              (entry) => entry.caseNo === caseNo,
+            );
+            return [{ caseNo, complaintCase, timelineForCase }];
+          })
+        : [];
       const persistence = Promise.all(previous)
+        // Durably persist the prepared caseNo/entryIds identity BEFORE the
+        // potentially ambiguous business COMMIT below, not after: a marker
+        // write that fails here throws (an honest, definite failure of this
+        // whole attempt, handled by the non-ComplaintCommitOutcomeUnknownError
+        // branch further down) instead of silently leaving cross-replica
+        // recovery to only this process's in-memory Map.
+        .then(() =>
+          Promise.all(
+            durablePrepareTargets.map(
+              ({ caseNo, complaintCase, timelineForCase }) =>
+                this.recordDurablePendingCommit(
+                  caseNo,
+                  context,
+                  complaintCase,
+                  timelineForCase,
+                  previousCaseSnapshot,
+                  matchCommand,
+                ),
+            ),
+          ),
+        )
         .then(() => this.complaintRepository!.persistChanges(persistPayload))
         .then(() => {
           for (const caseNo of affectedCaseNos) {
@@ -1993,14 +2079,9 @@ export class ComplaintService implements OnModuleInit {
           this.complaintRepository!.reportPersistenceFailure(error, context);
           if (error instanceof ComplaintCommitOutcomeUnknownError) {
             if (rollback) {
-              for (const caseNo of affectedCaseNos) {
-                const complaintCase = (changes.complaintCases ?? []).find(
-                  (item) => item.caseNo === caseNo,
-                );
-                if (!complaintCase) continue;
-                const timelineForCase = (
-                  changes.complaintTimelines ?? []
-                ).filter((entry) => entry.caseNo === caseNo);
+              for (const { caseNo, complaintCase, timelineForCase } of (
+                durablePrepareTargets
+              )) {
                 this.pendingUncertainCommits.set(caseNo, {
                   action: context,
                   complaintCase,
@@ -2009,14 +2090,8 @@ export class ComplaintService implements OnModuleInit {
                   matchCommand,
                   previousCaseSnapshot,
                 });
-                this.recordDurablePendingCommit(
-                  caseNo,
-                  context,
-                  complaintCase,
-                  timelineForCase,
-                  previousCaseSnapshot,
-                  matchCommand,
-                );
+                // Already durably registered above, before this ambiguous
+                // commit was even attempted; no further durable write needed.
               }
             }
             // The outcome is now tracked as a pending uncertain commit, not a
@@ -2044,6 +2119,10 @@ export class ComplaintService implements OnModuleInit {
           } else {
             for (const caseNo of affectedCaseNos) {
               this.pendingUncertainCommits.delete(caseNo);
+              // This attempt's own prepared durable marker (if any) never saw
+              // a business commit at all, so it must not linger as if it
+              // were still an unresolved cross-replica identity.
+              this.clearDurablePendingCommit(context, caseNo, matchCommand);
               // A definite (non-uncertain) failure has already been rolled
               // back and surfaced to its own caller above; leaving this
               // rejected promise keyed by caseNo would otherwise make a
